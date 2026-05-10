@@ -22,6 +22,7 @@ export { useStepExecutionChangeListener } from "./useStepExecutionChangeListener
 export { useSectionChangeListener } from "./useSectionChangeListener";
 export { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 export { useStepTransitionChangeListener } from "./useStepTransitionChangeListener";
+export { useLiveChatChangeListener } from "./useLiveChatChangeListener";
 export { useTheme } from "./useTheme";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useResizableColumns } from "./useResizableColumns";

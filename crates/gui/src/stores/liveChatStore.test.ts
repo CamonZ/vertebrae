@@ -9,7 +9,7 @@ vi.mock("../bindings", () => ({
 }));
 
 import { commands } from "../bindings";
-import { useLiveChatStore } from "./liveChatStore";
+import { useLiveChatStore, type LiveChatMessage } from "./liveChatStore";
 
 const mockedCreate = vi.mocked(commands.createChatSession);
 const mockedSend = vi.mocked(commands.sendChatMessage);
@@ -167,6 +167,37 @@ describe("liveChatStore", () => {
       expect(state.sending).toBe(false);
     });
 
+    it("only stamps the failing optimistic message when other messages already exist", async () => {
+      const session = makeSession();
+      const existing: LiveChatMessage = {
+        id: "msg-prev",
+        role: "assistant",
+        content: "previous reply",
+        content_format: "plain",
+        createdAt: "2026-05-10T11:59:00Z",
+        pending: false,
+        error: null,
+      };
+      useLiveChatStore.setState({
+        currentSession: session,
+        messages: [existing],
+      });
+
+      mockedSend.mockResolvedValueOnce({
+        status: "error",
+        error: { message: "boom" },
+      });
+
+      await useLiveChatStore.getState().sendMessage("nope");
+
+      const messages = useLiveChatStore.getState().messages;
+      expect(messages).toHaveLength(2);
+      expect(messages[0]).toEqual(existing);
+      expect(messages[0].error).toBeNull();
+      expect(messages[1].error).toBe("boom");
+      expect(messages[1].pending).toBe(false);
+    });
+
     it("ignores empty / whitespace-only content", async () => {
       const result = await useLiveChatStore.getState().sendMessage("   ");
       expect(result).toBeNull();
@@ -205,6 +236,139 @@ describe("liveChatStore", () => {
       expect(messages).toHaveLength(1);
       expect(messages[0].role).toBe("assistant");
       expect(messages[0].content).toBe("hi from server");
+    });
+  });
+
+  describe("applyRemoteMessage", () => {
+    it("appends a remote message when there's no matching local message", () => {
+      const incoming = makeMessage({
+        id: "msg-assistant-1",
+        role: "assistant",
+        content: "hello from server",
+      });
+
+      useLiveChatStore.getState().applyRemoteMessage(incoming);
+
+      const messages = useLiveChatStore.getState().messages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe("msg-assistant-1");
+      expect(messages[0].role).toBe("assistant");
+      expect(messages[0].pending).toBe(false);
+    });
+
+    it("replaces the optimistic message matched by client_message_id", () => {
+      useLiveChatStore.setState({
+        messages: [
+          {
+            id: "client-abc",
+            role: "user",
+            content: "hi",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: true,
+            error: null,
+          },
+        ],
+      });
+
+      const persisted = makeMessage({
+        id: "msg-server",
+        client_message_id: "client-abc",
+      });
+
+      useLiveChatStore.getState().applyRemoteMessage(persisted, "client-abc");
+
+      const messages = useLiveChatStore.getState().messages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe("msg-server");
+      expect(messages[0].pending).toBe(false);
+    });
+
+    it("falls back to the message.client_message_id when no override is given", () => {
+      useLiveChatStore.setState({
+        messages: [
+          {
+            id: "client-fallback",
+            role: "user",
+            content: "hi",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: true,
+            error: null,
+          },
+        ],
+      });
+
+      const persisted = makeMessage({
+        id: "msg-server-2",
+        client_message_id: "client-fallback",
+      });
+
+      useLiveChatStore.getState().applyRemoteMessage(persisted);
+
+      const messages = useLiveChatStore.getState().messages;
+      expect(messages).toHaveLength(1);
+      expect(messages[0].id).toBe("msg-server-2");
+    });
+
+    it("is idempotent against duplicate deliveries (same persisted id)", () => {
+      const msg = makeMessage({ id: "msg-dup" });
+      useLiveChatStore.getState().applyRemoteMessage(msg);
+      useLiveChatStore.getState().applyRemoteMessage(msg);
+
+      expect(useLiveChatStore.getState().messages).toHaveLength(1);
+    });
+
+    it("does not mutate the previous messages array when replacing in place", () => {
+      useLiveChatStore.setState({
+        messages: [
+          {
+            id: "client-ref",
+            role: "user",
+            content: "hi",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: true,
+            error: null,
+          },
+        ],
+      });
+      const before = useLiveChatStore.getState().messages;
+
+      const persisted = makeMessage({
+        id: "msg-server-ref",
+        client_message_id: "client-ref",
+      });
+      useLiveChatStore.getState().applyRemoteMessage(persisted, "client-ref");
+
+      const after = useLiveChatStore.getState().messages;
+      expect(after).not.toBe(before);
+      expect(before[0].id).toBe("client-ref");
+      expect(before[0].pending).toBe(true);
+    });
+  });
+
+  describe("upsertSession", () => {
+    it("sets the session when none exists", () => {
+      const session = makeSession({ id: "sess-x" });
+      useLiveChatStore.getState().upsertSession(session);
+      expect(useLiveChatStore.getState().currentSession).toEqual(session);
+    });
+
+    it("updates the session in place when ids match", () => {
+      const session = makeSession({ id: "sess-1", status: "active" });
+      useLiveChatStore.setState({ currentSession: session });
+      const updated = makeSession({ id: "sess-1", status: "ended" });
+      useLiveChatStore.getState().upsertSession(updated);
+      expect(useLiveChatStore.getState().currentSession?.status).toBe("ended");
+    });
+
+    it("does not overwrite a different current session", () => {
+      const current = makeSession({ id: "sess-current" });
+      useLiveChatStore.setState({ currentSession: current });
+      const other = makeSession({ id: "sess-other" });
+      useLiveChatStore.getState().upsertSession(other);
+      expect(useLiveChatStore.getState().currentSession).toEqual(current);
     });
   });
 
