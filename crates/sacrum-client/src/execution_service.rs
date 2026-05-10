@@ -226,6 +226,12 @@ impl ExecutionService for SacrumExecutionService {
         if let Some(duration_ms) = params.duration_ms {
             variables["duration_ms"] = json!(duration_ms);
         }
+        if let Some(model) = &params.model {
+            variables["model"] = json!(model);
+        }
+        if let Some(provider) = &params.model_provider {
+            variables["model_provider"] = json!(provider);
+        }
 
         self.client
             .execute_void(UPDATE_EXECUTION, variables)
@@ -1102,6 +1108,133 @@ mod tests {
         );
         let result = service.update_execution_status("nonexistent", params).await;
         assert!(result.is_err());
+    }
+
+    /// Capture the JSON body sent to the mock server for the most recent
+    /// request. Returns the parsed `variables` object so individual fields
+    /// can be asserted directly.
+    async fn captured_variables(server: &MockServer) -> serde_json::Value {
+        let received = server
+            .received_requests()
+            .await
+            .expect("received_requests must be enabled");
+        assert_eq!(
+            received.len(),
+            1,
+            "expected exactly one GraphQL request, got {}",
+            received.len()
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+        body.get("variables")
+            .cloned()
+            .expect("graphql request must include `variables`")
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_forwards_model_and_provider_when_set() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_step_execution": { "id": "exec-meta" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::InProgress,
+        )
+        .with_model("claude-sonnet-4-5")
+        .with_model_provider("anthropic");
+
+        service
+            .update_execution_status("exec-meta", params)
+            .await
+            .expect("mutation should succeed");
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["id"], "exec-meta");
+        assert_eq!(variables["status"], "in_progress");
+        assert_eq!(variables["model"], "claude-sonnet-4-5");
+        assert_eq!(variables["model_provider"], "anthropic");
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_omits_model_metadata_when_unset() {
+        // Absent metadata must omit the GraphQL keys entirely, not send `null`.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_step_execution": { "id": "exec-bare" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::InProgress,
+        );
+
+        service
+            .update_execution_status("exec-bare", params)
+            .await
+            .expect("mutation should succeed");
+
+        let variables = captured_variables(&server).await;
+        assert!(
+            variables.get("model").is_none(),
+            "model must be omitted when not set, got: {variables:?}"
+        );
+        assert!(
+            variables.get("model_provider").is_none(),
+            "model_provider must be omitted when not set, got: {variables:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_completion_preserves_claude_metrics_alongside_metadata() {
+        // Adding model/model_provider must not displace token/cost/duration.
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_step_execution": { "id": "exec-claude" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::Completed,
+        )
+        .with_input_tokens(1500)
+        .with_output_tokens(800)
+        .with_cost("0.0123")
+        .with_duration_ms(4321)
+        .with_output("done")
+        .with_model("claude-sonnet-4-5")
+        .with_model_provider("anthropic");
+
+        service
+            .update_execution_status("exec-claude", params)
+            .await
+            .expect("mutation should succeed");
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["status"], "completed");
+        assert_eq!(variables["output"], "done");
+        assert_eq!(variables["input_tokens"], 1500);
+        assert_eq!(variables["output_tokens"], 800);
+        assert_eq!(variables["cost"], "0.0123");
+        assert_eq!(variables["duration_ms"], 4321);
+        assert_eq!(variables["model"], "claude-sonnet-4-5");
+        assert_eq!(variables["model_provider"], "anthropic");
     }
 
     // =========================================================================

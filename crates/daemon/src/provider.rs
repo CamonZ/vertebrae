@@ -9,6 +9,7 @@
 use tokio::process::Command;
 use vertebrae_core::Provider;
 use vertebrae_core::model_catalog::validate_provider_model;
+use vertebrae_core::models::AgentConfig;
 
 use crate::actors::step_executor::{
     StepExecutorConfig, build_claude_command_with_settings, log_built_argv,
@@ -72,11 +73,13 @@ impl std::error::Error for ProviderResolutionError {}
 /// Resolve which built-in provider should run this step. `None` defaults to
 /// Anthropic to preserve pre-refactor behavior.
 pub fn resolve_provider(config: &StepExecutorConfig) -> Provider {
-    config
-        .step_config
-        .agent_config
-        .provider
-        .unwrap_or(Provider::Anthropic)
+    resolve_provider_from_agent_config(&config.step_config.agent_config)
+}
+
+/// Same as [`resolve_provider`] but takes the inner [`AgentConfig`] directly,
+/// for callers that don't have a full [`StepExecutorConfig`] in hand.
+pub fn resolve_provider_from_agent_config(agent_config: &AgentConfig) -> Provider {
+    agent_config.provider.unwrap_or(Provider::Anthropic)
 }
 
 /// Resolve the full provider invocation for a step. Must be called before

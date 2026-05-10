@@ -41,6 +41,10 @@ pub struct UpdateExecutionStatusParams {
     pub cost: Option<String>,
     /// Optional duration in milliseconds.
     pub duration_ms: Option<i64>,
+    /// Optional resolved model name (e.g., `claude-sonnet-4-5`, `gpt-5`).
+    pub model: Option<String>,
+    /// Optional resolved provider (e.g., `anthropic`, `openai`).
+    pub model_provider: Option<String>,
 }
 
 /// Target used when requesting a durable TaskRun stop.
@@ -62,6 +66,8 @@ impl UpdateExecutionStatusParams {
             output_tokens: None,
             cost: None,
             duration_ms: None,
+            model: None,
+            model_provider: None,
         }
     }
 
@@ -93,6 +99,27 @@ impl UpdateExecutionStatusParams {
     pub fn with_duration_ms(mut self, duration_ms: i64) -> Self {
         self.duration_ms = Some(duration_ms);
         self
+    }
+
+    /// Set the resolved model name. Blank/whitespace input is treated as unset.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = non_blank(model.into());
+        self
+    }
+
+    /// Set the resolved model provider (e.g., `anthropic`, `openai`).
+    /// Blank/whitespace input is treated as unset.
+    pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
+        self.model_provider = non_blank(provider.into());
+        self
+    }
+}
+
+fn non_blank(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
@@ -279,6 +306,8 @@ mod tests {
         assert!(params.output_tokens.is_none());
         assert!(params.cost.is_none());
         assert!(params.duration_ms.is_none());
+        assert!(params.model.is_none());
+        assert!(params.model_provider.is_none());
     }
 
     #[test]
@@ -323,7 +352,9 @@ mod tests {
             .with_input_tokens(2000)
             .with_output_tokens(1000)
             .with_cost("0.05")
-            .with_duration_ms(10000);
+            .with_duration_ms(10000)
+            .with_model("claude-sonnet-4-5")
+            .with_model_provider("anthropic");
 
         assert_eq!(params.status, ExecutionStatus::Completed);
         assert_eq!(params.output.as_deref(), Some("done"));
@@ -331,5 +362,16 @@ mod tests {
         assert_eq!(params.output_tokens, Some(1000));
         assert_eq!(params.cost.as_deref(), Some("0.05"));
         assert_eq!(params.duration_ms, Some(10000));
+        assert_eq!(params.model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn with_model_treats_blank_as_unset() {
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::InProgress)
+            .with_model("   ")
+            .with_model_provider("");
+        assert!(params.model.is_none());
+        assert!(params.model_provider.is_none());
     }
 }
