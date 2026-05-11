@@ -401,6 +401,22 @@ pub struct PipelineTaskCountsResponse {
     pub task: i32,
 }
 
+/// Canonical per-step pipeline counts grouped by hierarchy level plus active
+/// TaskRun-backed work.
+///
+/// Returned by `pipelineSummary.workflow_steps[].pipeline_counts`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PipelineStepCountsResponse {
+    #[serde(default)]
+    pub epic: i32,
+    #[serde(default)]
+    pub ticket: i32,
+    #[serde(default)]
+    pub task: i32,
+    #[serde(default)]
+    pub active: i32,
+}
+
 /// Inter-workflow transition as returned by `pipelineSummary` (preloaded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineWorkflowTransitionResponse {
@@ -425,8 +441,8 @@ pub struct PipelineStepTransitionResponse {
 }
 
 /// Workflow step entry in the `pipelineSummary` payload — includes the
-/// aggregates computed by the resolver (`task_counts`, `running_count`) and
-/// the preloaded list of intra-workflow transitions out of this step.
+/// aggregates computed by the resolver and the preloaded list of intra-workflow
+/// transitions out of this step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineStepResponse {
     pub id: String,
@@ -449,9 +465,44 @@ pub struct PipelineStepResponse {
     #[serde(default)]
     pub task_counts: PipelineTaskCountsResponse,
     #[serde(default)]
-    pub running_count: i32,
+    pub pipeline_counts: Option<PipelineStepCountsResponse>,
+    #[serde(default)]
+    pub active_count: Option<i32>,
+    #[serde(default)]
+    pub running_count: Option<i32>,
     #[serde(default)]
     pub transitions: Vec<PipelineStepTransitionResponse>,
+}
+
+impl PipelineStepResponse {
+    /// Canonical active count for the pipeline view.
+    ///
+    /// Prefer the new `pipeline_counts.active` contract, then the convenience
+    /// `active_count` alias. `running_count` is a deprecated compatibility
+    /// field whose backend semantics now match active TaskRun count.
+    pub fn effective_active_count(&self) -> i32 {
+        self.pipeline_counts
+            .as_ref()
+            .map(|counts| counts.active)
+            .or(self.active_count)
+            .or(self.running_count)
+            .unwrap_or_default()
+    }
+
+    /// Canonical per-level task counts for the pipeline view.
+    ///
+    /// New Sacrum payloads include these under `pipeline_counts`; older
+    /// compatibility payloads only include `task_counts`.
+    pub fn effective_task_counts(&self) -> PipelineTaskCountsResponse {
+        self.pipeline_counts
+            .as_ref()
+            .map(|counts| PipelineTaskCountsResponse {
+                epic: counts.epic,
+                ticket: counts.ticket,
+                task: counts.task,
+            })
+            .unwrap_or_else(|| self.task_counts.clone())
+    }
 }
 
 /// Workflow entry in the `pipelineSummary` payload. Carries preloaded
@@ -1124,7 +1175,9 @@ mod tests {
                         "inserted_at": null,
                         "updated_at": null,
                         "task_counts": { "epic": 1, "ticket": 4, "task": 9 },
-                        "running_count": 2,
+                        "pipeline_counts": { "epic": 2, "ticket": 5, "task": 10, "active": 3 },
+                        "active_count": 3,
+                        "running_count": 3,
                         "transitions": [
                             { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": "next" }
                         ]
@@ -1157,7 +1210,16 @@ mod tests {
         assert_eq!(step.task_counts.epic, 1);
         assert_eq!(step.task_counts.ticket, 4);
         assert_eq!(step.task_counts.task, 9);
-        assert_eq!(step.running_count, 2);
+        assert_eq!(step.pipeline_counts.as_ref().unwrap().epic, 2);
+        assert_eq!(step.pipeline_counts.as_ref().unwrap().ticket, 5);
+        assert_eq!(step.pipeline_counts.as_ref().unwrap().task, 10);
+        assert_eq!(step.pipeline_counts.as_ref().unwrap().active, 3);
+        assert_eq!(step.active_count, Some(3));
+        assert_eq!(step.running_count, Some(3));
+        assert_eq!(step.effective_task_counts().epic, 2);
+        assert_eq!(step.effective_task_counts().ticket, 5);
+        assert_eq!(step.effective_task_counts().task, 10);
+        assert_eq!(step.effective_active_count(), 3);
         assert_eq!(step.transitions.len(), 1);
         assert_eq!(step.transitions[0].from_step_id, "step-1");
         assert_eq!(step.transitions[0].to_step_id, "step-2");
@@ -1183,9 +1245,39 @@ mod tests {
         let step: PipelineStepResponse = serde_json::from_str(json).unwrap();
         assert_eq!(step.id, "step-empty");
         assert_eq!(step.task_counts, PipelineTaskCountsResponse::default());
+        assert_eq!(
+            step.effective_task_counts(),
+            PipelineTaskCountsResponse::default()
+        );
         assert_eq!(step.task_counts.epic, 0);
-        assert_eq!(step.running_count, 0);
+        assert_eq!(step.active_count, None);
+        assert_eq!(step.running_count, None);
+        assert_eq!(step.effective_active_count(), 0);
         assert!(step.transitions.is_empty());
+    }
+
+    #[test]
+    fn test_pipeline_summary_compat_running_count_deserialization() {
+        let json = r#"{
+            "id": "step-compat",
+            "name": "running alias",
+            "step_order": 1,
+            "is_final": false,
+            "workflow_id": "wf-1",
+            "task_counts": { "epic": 0, "ticket": 2, "task": 0 },
+            "running_count": 7
+        }"#;
+
+        let step: PipelineStepResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            step.effective_task_counts(),
+            PipelineTaskCountsResponse {
+                epic: 0,
+                ticket: 2,
+                task: 0,
+            }
+        );
+        assert_eq!(step.effective_active_count(), 7);
     }
 
     #[test]

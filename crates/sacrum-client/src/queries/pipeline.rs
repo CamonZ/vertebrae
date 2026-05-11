@@ -2,9 +2,9 @@
 //!
 //! Returns the full set of workflows for a project with their workflow steps,
 //! intra-workflow step transitions, inter-workflow transitions, plus per-step
-//! `task_counts` (epic/ticket/task) and `running_count` aggregates. The
-//! resolver computes all aggregates with a fixed number of SQL queries
-//! independent of workflow / step / task count, so the client just calls it.
+//! `pipeline_counts` (epic/ticket/task/active) aggregates. The resolver
+//! computes all aggregates with a fixed number of SQL queries independent of
+//! workflow / step / task count, so the client just calls it.
 
 /// Single GraphQL query returning all data needed by the All Workflows
 /// pipeline view.
@@ -38,6 +38,8 @@ pub const PIPELINE_SUMMARY: &str = r#"
                 inserted_at
                 updated_at
                 task_counts { epic ticket task }
+                pipeline_counts { epic ticket task active }
+                active_count
                 running_count
                 transitions {
                     id
