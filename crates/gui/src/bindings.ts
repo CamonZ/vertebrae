@@ -401,13 +401,13 @@ async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDe
  * Fetch the full pipeline summary in a single GraphQL round-trip.
  * 
  * Returns one entry per workflow with preloaded steps (each carrying
- * `task_counts` and `running_count` aggregates plus their outbound
+ * `pipeline_counts`/`active_count` aggregates plus their outbound
  * transitions) and inter-workflow transitions. The Sacrum resolver runs at
  * most 4 SQL queries regardless of project size.
  * 
- * The frontend keeps these aggregates fresh from WebSocket events; it does
- * NOT refetch on every change, and it does NOT issue a per-task execution
- * query on mount.
+ * The frontend keeps these aggregates fresh by refetching this authoritative
+ * summary after Sacrum websocket events that can change pipeline counts. It
+ * does NOT issue a per-task execution query on mount.
  */
 async getPipelineSummary() : Promise<Result<PipelineSummary, CommandError>> {
     try {
@@ -1022,7 +1022,7 @@ export type LiveChatSessionChangedEvent = { session_id: string; change_type: Liv
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
 /**
  * Workflow step entry in the pipeline summary payload, including the
- * resolver-computed `task_counts` and `running_count` aggregates and the
+ * resolver-computed `pipeline_counts`/`active_count` aggregates and the
  * preloaded list of intra-workflow `transitions_to` step IDs.
  */
 export type PipelineStep = { id: string; name: string; workflow_id: string; goal: string | null; step_order: number; step_type: string | null; is_final: boolean; 
@@ -1035,15 +1035,24 @@ transitions_to: string[];
  */
 task_counts: PipelineTaskCounts; 
 /**
- * Number of step executions in the `started` (running) state for this step.
+ * Canonical per-step counts from Sacrum, including active TaskRun count.
  */
-running_count: number }
+pipeline_counts: PipelineStepCounts;
+/**
+ * Number of active TaskRuns for tasks currently parked at this step.
+ */
+active_count: number }
+/**
+ * Per-step pipeline counts grouped by hierarchy level plus active TaskRun
+ * count.
+ */
+export type PipelineStepCounts = { epic: number; ticket: number; task: number; active: number }
 /**
  * Full pipeline summary payload returned by `get_pipeline_summary`.
  * 
  * One `PipelineWorkflow` per workflow in the project. There is intentionally
- * no top-level flat task index — the GUI builds one incrementally from
- * `taskChangedEvent` to drive count deltas.
+ * no top-level flat task index — the GUI refreshes this authoritative
+ * aggregate payload from Sacrum websocket events.
  */
 export type PipelineSummary = { workflows: PipelineWorkflow[] }
 /**

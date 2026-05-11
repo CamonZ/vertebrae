@@ -27,6 +27,9 @@ vi.mock("./bindings", () => ({
     taskChangedEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
+    taskRunChangedEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
     stepChangedEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
@@ -300,7 +303,8 @@ describe("Router Acceptance Tests", () => {
                   is_final: false,
                   transitions_to: [],
                   task_counts: { epic: 0, ticket: 0, task: 0 },
-                  running_count: 0,
+                  pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
+                  active_count: 0,
                 },
               ],
               transitions: [],
@@ -544,7 +548,8 @@ describe("Router Acceptance Tests", () => {
         is_final: isFinal,
         transitions_to: [] as string[],
         task_counts: { epic: 0, ticket: 0, task: 0 },
-        running_count: 0,
+        pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
+        active_count: 0,
       };
     }
 

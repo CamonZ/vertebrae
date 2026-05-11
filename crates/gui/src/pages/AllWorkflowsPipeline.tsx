@@ -169,18 +169,18 @@ function AllWorkflowsPipelineInner() {
       string,
       {
         taskCounts: { epic: number; ticket: number; task: number };
-        running: number;
+        active: number;
       }
     >();
     for (const wf of pipelineWorkflows) {
       for (const step of wf.workflow_steps) {
         map.set(step.id, {
           taskCounts: {
-            epic: step.task_counts.epic,
-            ticket: step.task_counts.ticket,
-            task: step.task_counts.task,
+            epic: step.pipeline_counts.epic,
+            ticket: step.pipeline_counts.ticket,
+            task: step.pipeline_counts.task,
           },
-          running: step.running_count,
+          active: step.pipeline_counts.active,
         });
       }
     }
@@ -193,9 +193,9 @@ function AllWorkflowsPipelineInner() {
       let total = 0;
       for (const step of wf.workflow_steps) {
         total +=
-          step.task_counts.epic +
-          step.task_counts.ticket +
-          step.task_counts.task;
+          step.pipeline_counts.epic +
+          step.pipeline_counts.ticket +
+          step.pipeline_counts.task;
       }
       map.set(wf.id, total);
     }
@@ -323,15 +323,6 @@ function AllWorkflowsPipelineInner() {
     },
     [addToast]
   );
-
-  useEffect(() => {
-    const unlistenPromise = events.workflowTransitionChangedEvent.listen(() => {
-      refetch();
-    });
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, [refetch]);
 
   const selectedTransitionRef = useRef(selectedTransition);
   selectedTransitionRef.current = selectedTransition;
@@ -611,7 +602,7 @@ function AllWorkflowsPipelineInner() {
           const isStepSelected = selectedStepId === step.id;
           const aggregates = (step.id && stepAggregates.get(step.id)) || {
             taskCounts: { epic: 0, ticket: 0, task: 0 },
-            running: 0,
+            active: 0,
           };
 
           nodes.push({
@@ -637,7 +628,7 @@ function AllWorkflowsPipelineInner() {
               isSelected: isStepSelected,
               taskCounts: aggregates.taskCounts,
               executionCounts: {
-                running: aggregates.running,
+                active: aggregates.active,
                 completed: 0,
                 failed: 0,
               },

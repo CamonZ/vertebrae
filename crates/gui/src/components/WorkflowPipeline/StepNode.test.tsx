@@ -328,20 +328,20 @@ describe("StepNode", () => {
   });
 
   describe("execution counts", () => {
-    it("renders execution activity bar when there are running tasks", () => {
+    it("renders execution activity bar when there are active runs", () => {
       const props = createStepNodeProps({
-        executionCounts: { running: 2, completed: 0, failed: 0 },
+        executionCounts: { active: 2, completed: 0, failed: 0 },
       });
 
       render(<StepNode {...props} />);
 
-      expect(screen.getByText("Exec")).toBeInTheDocument();
-      expect(screen.getByTitle("2 running")).toBeInTheDocument();
+      expect(screen.getByText("Run")).toBeInTheDocument();
+      expect(screen.getByTitle("2 active")).toBeInTheDocument();
     });
 
     it("renders execution activity bar with completed tasks", () => {
       const props = createStepNodeProps({
-        executionCounts: { running: 0, completed: 3, failed: 0 },
+        executionCounts: { active: 0, completed: 3, failed: 0 },
       });
 
       render(<StepNode {...props} />);
@@ -351,7 +351,7 @@ describe("StepNode", () => {
 
     it("renders execution activity bar with failed tasks", () => {
       const props = createStepNodeProps({
-        executionCounts: { running: 0, completed: 0, failed: 1 },
+        executionCounts: { active: 0, completed: 0, failed: 1 },
       });
 
       render(<StepNode {...props} />);
@@ -361,24 +361,24 @@ describe("StepNode", () => {
 
     it("renders all execution count types together", () => {
       const props = createStepNodeProps({
-        executionCounts: { running: 1, completed: 2, failed: 1 },
+        executionCounts: { active: 1, completed: 2, failed: 1 },
       });
 
       render(<StepNode {...props} />);
 
-      expect(screen.getByTitle("1 running")).toBeInTheDocument();
+      expect(screen.getByTitle("1 active")).toBeInTheDocument();
       expect(screen.getByTitle("2 completed")).toBeInTheDocument();
       expect(screen.getByTitle("1 failed")).toBeInTheDocument();
     });
 
     it("does not render execution bar when all counts are zero", () => {
       const props = createStepNodeProps({
-        executionCounts: { running: 0, completed: 0, failed: 0 },
+        executionCounts: { active: 0, completed: 0, failed: 0 },
       });
 
       render(<StepNode {...props} />);
 
-      expect(screen.queryByText("Exec")).not.toBeInTheDocument();
+      expect(screen.queryByText("Run")).not.toBeInTheDocument();
     });
 
     it("does not render execution bar when executionCounts not provided", () => {
@@ -386,7 +386,7 @@ describe("StepNode", () => {
 
       render(<StepNode {...props} />);
 
-      expect(screen.queryByText("Exec")).not.toBeInTheDocument();
+      expect(screen.queryByText("Run")).not.toBeInTheDocument();
     });
   });
 });

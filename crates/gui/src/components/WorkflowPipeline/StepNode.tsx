@@ -15,7 +15,7 @@ export type StepNodeData = {
   onStepClick?: (step: Step) => void;
   isSelected?: boolean;
   taskCounts?: { epic: number; ticket: number; task: number };
-  executionCounts?: { running: number; completed: number; failed: number };
+  executionCounts?: { active: number; completed: number; failed: number };
   isFlashing?: boolean;
 };
 
@@ -202,14 +202,14 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       </div>
 
       {/* Execution activity bar */}
-      {executionCounts && (executionCounts.running > 0 || executionCounts.completed > 0 || executionCounts.failed > 0) && (
+      {executionCounts && (executionCounts.active > 0 || executionCounts.completed > 0 || executionCounts.failed > 0) && (
         <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Exec</span>
+          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Run</span>
           <div className="flex items-center gap-1.5 ml-auto">
-            {executionCounts.running > 0 && (
-              <span className="flex items-center gap-1 text-[10px] text-warning" title={`${executionCounts.running} running`}>
+            {executionCounts.active > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-warning" title={`${executionCounts.active} active`}>
                 <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
-                {executionCounts.running}
+                {executionCounts.active}
               </span>
             )}
             {executionCounts.completed > 0 && (
