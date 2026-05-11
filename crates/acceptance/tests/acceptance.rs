@@ -198,6 +198,6 @@ async fn main() {
                 }
             })
         })
-        .run("tests/features")
+        .run_and_exit("tests/features")
         .await;
 }
