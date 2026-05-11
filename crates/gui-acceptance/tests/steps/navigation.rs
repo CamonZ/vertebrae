@@ -244,6 +244,61 @@ async fn gui_should_show_element_with_title_within(
         .await;
 }
 
+#[then(
+    expr = "the pipeline step {string} should show an element with title {string} within {int} seconds"
+)]
+async fn pipeline_step_should_show_element_with_title_within(
+    world: &mut GuiWorld,
+    step_name: String,
+    title: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let locator_xpath = format!(
+        "//button[.//h3[normalize-space()='{}']]//*[@title='{}']",
+        step_name, title
+    );
+
+    world
+        .screenshot(
+            &client,
+            &format!("before-assert-step-title-{step_name}-{title}"),
+        )
+        .await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(Locator::XPath(&locator_xpath))
+        .await;
+
+    if element.is_err() {
+        world
+            .screenshot(&client, &format!("fail-step-title-{step_name}-{title}"))
+            .await;
+    }
+
+    assert!(
+        element.is_ok(),
+        "expected pipeline step '{}' to show an element with title '{}' within {} seconds",
+        step_name,
+        title,
+        timeout
+    );
+
+    world
+        .screenshot(
+            &client,
+            &format!("after-assert-step-title-{step_name}-{title}"),
+        )
+        .await;
+}
+
 #[then(expr = "the GUI should show a disabled element with title {string} within {int} seconds")]
 async fn gui_should_show_disabled_element_with_title_within(
     world: &mut GuiWorld,
@@ -635,6 +690,66 @@ async fn gui_should_not_show_element_with_title_within(
             panic!(
                 "expected the GUI to NOT show an element with title '{}' within {} seconds, but it was still present",
                 absent_title, timeout
+            );
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
+#[then(
+    expr = "the pipeline step {string} should not show an element with title {string} within {int} seconds"
+)]
+async fn pipeline_step_should_not_show_element_with_title_within(
+    world: &mut GuiWorld,
+    step_name: String,
+    absent_title: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let locator_xpath = format!(
+        "//button[.//h3[normalize-space()='{}']]//*[@title='{}']",
+        step_name, absent_title
+    );
+
+    world
+        .screenshot(
+            &client,
+            &format!("before-assert-no-step-title-{step_name}-{absent_title}"),
+        )
+        .await;
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    let poll_interval = std::time::Duration::from_millis(250);
+
+    loop {
+        let found = client.find(Locator::XPath(&locator_xpath)).await;
+
+        if found.is_err() {
+            world
+                .screenshot(
+                    &client,
+                    &format!("after-assert-no-step-title-{step_name}-{absent_title}"),
+                )
+                .await;
+            return;
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(
+                    &client,
+                    &format!("fail-no-step-title-{step_name}-{absent_title}"),
+                )
+                .await;
+            panic!(
+                "expected pipeline step '{}' to NOT show an element with title '{}' within {} seconds, but it was still present",
+                step_name, absent_title, timeout
             );
         }
 

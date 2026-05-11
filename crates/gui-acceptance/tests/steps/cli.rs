@@ -225,6 +225,20 @@ async fn update_task_title_via_cli(world: &mut GuiWorld, new_title: String) {
     );
 }
 
+#[given(expr = "I transition the task to step {string} via the CLI")]
+#[when(expr = "I transition the task to step {string} via the CLI")]
+async fn transition_task_to_step_via_cli(world: &mut GuiWorld, step_name: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    world
+        .run_vtb(&["transition-to", &task_id, &step_name, "--skip-validation"])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb transition-to failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
 #[when("I delete the task via the CLI")]
 async fn delete_task_via_cli(world: &mut GuiWorld) {
     let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
