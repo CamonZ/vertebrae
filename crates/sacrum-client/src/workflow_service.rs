@@ -128,13 +128,13 @@ impl SacrumWorkflowService {
     ///
     /// The resolver runs at most 4 SQL queries regardless of workflow / step /
     /// task count. Returns workflows with preloaded `workflow_steps` (each
-    /// carrying `task_counts` and `running_count` aggregates plus their
-    /// outgoing intra-workflow transitions) and the inter-workflow
+    /// carrying `pipeline_counts`/`active_count` aggregates plus their outgoing
+    /// intra-workflow transitions) and the inter-workflow
     /// `transitions` list.
     ///
     /// This is the data backing the All Workflows pipeline view; the GUI is
-    /// expected to maintain incremental updates from WebSocket events instead
-    /// of refetching after the initial load.
+    /// expected to refresh from authoritative WebSocket events unless Sacrum
+    /// adds a dedicated aggregate-change payload.
     pub async fn get_pipeline_summary(&self) -> ServiceResult<Vec<PipelineWorkflowResponse>> {
         let variables = json!({ "project_id": self.client.project_id() });
         let workflows: Vec<PipelineWorkflowResponse> = self
@@ -1495,6 +1495,8 @@ mod tests {
                                     "is_final": false,
                                     "workflow_id": "wf-1",
                                     "task_counts": { "epic": 1, "ticket": 2, "task": 3 },
+                                    "pipeline_counts": { "epic": 1, "ticket": 2, "task": 3, "active": 4 },
+                                    "active_count": 4,
                                     "running_count": 4,
                                     "transitions": [
                                         { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": null }
@@ -1507,6 +1509,8 @@ mod tests {
                                     "is_final": true,
                                     "workflow_id": "wf-1",
                                     "task_counts": { "epic": 0, "ticket": 0, "task": 0 },
+                                    "pipeline_counts": { "epic": 0, "ticket": 0, "task": 0, "active": 0 },
+                                    "active_count": 0,
                                     "running_count": 0,
                                     "transitions": []
                                 }
@@ -1539,17 +1543,17 @@ mod tests {
 
         let step1 = &wf.workflow_steps[0];
         assert_eq!(step1.id, "step-1");
-        assert_eq!(step1.task_counts.epic, 1);
-        assert_eq!(step1.task_counts.ticket, 2);
-        assert_eq!(step1.task_counts.task, 3);
-        assert_eq!(step1.running_count, 4);
+        assert_eq!(step1.effective_task_counts().epic, 1);
+        assert_eq!(step1.effective_task_counts().ticket, 2);
+        assert_eq!(step1.effective_task_counts().task, 3);
+        assert_eq!(step1.effective_active_count(), 4);
         assert_eq!(step1.transitions.len(), 1);
         assert_eq!(step1.transitions[0].to_step_id, "step-2");
 
         let step2 = &wf.workflow_steps[1];
         assert_eq!(step2.id, "step-2");
-        assert_eq!(step2.task_counts.epic, 0);
-        assert_eq!(step2.running_count, 0);
+        assert_eq!(step2.effective_task_counts().epic, 0);
+        assert_eq!(step2.effective_active_count(), 0);
         assert!(step2.transitions.is_empty());
 
         assert_eq!(wf.transitions.len(), 1);

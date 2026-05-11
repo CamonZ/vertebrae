@@ -720,13 +720,13 @@ pub async fn get_workflow_with_task_details(
 /// Fetch the full pipeline summary in a single GraphQL round-trip.
 ///
 /// Returns one entry per workflow with preloaded steps (each carrying
-/// `task_counts` and `running_count` aggregates plus their outbound
+/// `pipeline_counts`/`active_count` aggregates plus their outbound
 /// transitions) and inter-workflow transitions. The Sacrum resolver runs at
 /// most 4 SQL queries regardless of project size.
 ///
-/// The frontend keeps these aggregates fresh from WebSocket events; it does
-/// NOT refetch on every change, and it does NOT issue a per-task execution
-/// query on mount.
+/// The frontend keeps these aggregates fresh by refetching this authoritative
+/// summary after Sacrum websocket events that can change pipeline counts. It
+/// does NOT issue a per-task execution query on mount.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_pipeline_summary(

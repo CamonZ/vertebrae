@@ -1047,8 +1047,18 @@ pub struct PipelineTaskCounts {
     pub task: i32,
 }
 
+/// Per-step pipeline counts grouped by hierarchy level plus active TaskRun
+/// count.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct PipelineStepCounts {
+    pub epic: i32,
+    pub ticket: i32,
+    pub task: i32,
+    pub active: i32,
+}
+
 /// Workflow step entry in the pipeline summary payload, including the
-/// resolver-computed `task_counts` and `running_count` aggregates and the
+/// resolver-computed `pipeline_counts`/`active_count` aggregates and the
 /// preloaded list of intra-workflow `transitions_to` step IDs.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PipelineStep {
@@ -1063,8 +1073,10 @@ pub struct PipelineStep {
     pub transitions_to: Vec<String>,
     /// Per-level task counts for tasks currently parked at this step.
     pub task_counts: PipelineTaskCounts,
-    /// Number of step executions in the `started` (running) state for this step.
-    pub running_count: i32,
+    /// Canonical per-step counts from Sacrum, including active TaskRun count.
+    pub pipeline_counts: PipelineStepCounts,
+    /// Number of active TaskRuns for tasks currently parked at this step.
+    pub active_count: i32,
 }
 
 /// Inter-workflow transition entry returned by `pipeline_summary`.
@@ -1096,8 +1108,8 @@ pub struct PipelineWorkflow {
 /// Full pipeline summary payload returned by `get_pipeline_summary`.
 ///
 /// One `PipelineWorkflow` per workflow in the project. There is intentionally
-/// no top-level flat task index — the GUI builds one incrementally from
-/// `taskChangedEvent` to drive count deltas.
+/// no top-level flat task index — the GUI refreshes this authoritative
+/// aggregate payload from Sacrum websocket events.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct PipelineSummary {
     pub workflows: Vec<PipelineWorkflow>,
@@ -1137,6 +1149,8 @@ impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
             .iter()
             .map(|t| t.to_step_id.clone())
             .collect();
+        let task_counts = step.effective_task_counts();
+        let active_count = step.effective_active_count();
         PipelineStep {
             id: step.id,
             name: step.name,
@@ -1147,11 +1161,17 @@ impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
             is_final: step.is_final,
             transitions_to,
             task_counts: PipelineTaskCounts {
-                epic: step.task_counts.epic,
-                ticket: step.task_counts.ticket,
-                task: step.task_counts.task,
+                epic: task_counts.epic,
+                ticket: task_counts.ticket,
+                task: task_counts.task,
             },
-            running_count: step.running_count,
+            pipeline_counts: PipelineStepCounts {
+                epic: task_counts.epic,
+                ticket: task_counts.ticket,
+                task: task_counts.task,
+                active: active_count,
+            },
+            active_count,
         }
     }
 }
