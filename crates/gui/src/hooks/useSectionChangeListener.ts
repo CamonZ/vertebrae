@@ -1,9 +1,20 @@
 import { useEffect, useCallback } from "react";
-import { events, type SectionChangedEvent, type SectionChangeType } from "../bindings";
+import {
+  events,
+  type SectionChangedEvent,
+  type SectionChangeType,
+} from "../bindings";
 import { useTaskStore, useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Get toast message for section change type */
-function getSectionChangeMessage(changeType: SectionChangeType, taskId: string): string {
+function getSectionChangeMessage(
+  changeType: SectionChangeType,
+  taskId: string
+): string {
   const shortId = taskId.slice(0, 6);
   switch (changeType) {
     case "Created":
@@ -33,23 +44,30 @@ export function useSectionChangeListener(
 ) {
   const { enabled = true } = options;
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleSectionChanged = useCallback(
     (event: { payload: SectionChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { task_id, change_type, section } = event.payload;
 
       console.debug(
         `[SectionChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
       );
 
-      const toastType = change_type === "Created" ? "success"
-        : change_type === "Deleted" ? "error"
-        : "info";
+      const toastType =
+        change_type === "Created"
+          ? "success"
+          : change_type === "Deleted"
+            ? "error"
+            : "info";
       addToast(getSectionChangeMessage(change_type, task_id), toastType);
 
       // Read current state inside the callback to avoid stale closures
       // and prevent listener churn from selectedTask changes
-      const { selectedTaskId, selectedTask, selectTask } = useTaskStore.getState();
+      const { selectedTaskId, selectedTask, selectTask } =
+        useTaskStore.getState();
 
       if (task_id !== selectedTaskId || !selectedTask) {
         return;
@@ -62,7 +80,10 @@ export function useSectionChangeListener(
           const updatedSections = existingSections.filter(
             (s) => !(s.type === section.type && s.order === section.order)
           );
-          selectTask(selectedTaskId, { ...selectedTask, sections: updatedSections });
+          selectTask(selectedTaskId, {
+            ...selectedTask,
+            sections: updatedSections,
+          });
         }
       } else if (section) {
         const index = existingSections.findIndex(
@@ -71,7 +92,10 @@ export function useSectionChangeListener(
         if (index >= 0) {
           const updatedSections = [...existingSections];
           updatedSections[index] = section;
-          selectTask(selectedTaskId, { ...selectedTask, sections: updatedSections });
+          selectTask(selectedTaskId, {
+            ...selectedTask,
+            sections: updatedSections,
+          });
         } else {
           selectTask(selectedTaskId, {
             ...selectedTask,
@@ -80,7 +104,7 @@ export function useSectionChangeListener(
         }
       }
     },
-    [addToast]
+    [addToast, projectScopeGeneration]
   );
 
   useEffect(() => {
@@ -88,7 +112,8 @@ export function useSectionChangeListener(
       return;
     }
 
-    const unlistenPromise = events.sectionChangedEvent.listen(handleSectionChanged);
+    const unlistenPromise =
+      events.sectionChangedEvent.listen(handleSectionChanged);
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());

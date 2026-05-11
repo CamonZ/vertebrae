@@ -6,6 +6,10 @@ import {
   type TaskRun,
   type TaskRunTrace,
 } from "../bindings";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 export interface UseTaskRunTraceResult {
   /** Recursive trace tree rooted at `rootTaskRunId`, or null when not loaded. */
@@ -50,11 +54,17 @@ export function useTaskRunTrace(
       return;
     }
     const seq = ++fetchSeqRef.current;
+    const projectScopeGeneration = getProjectScopeGeneration();
     setIsLoading(true);
     setError(null);
     try {
       const result = await commands.getTaskRunTrace(rootTaskRunId);
-      if (seq !== fetchSeqRef.current) return;
+      if (
+        seq !== fetchSeqRef.current ||
+        !isCurrentProjectScopeGeneration(projectScopeGeneration)
+      ) {
+        return;
+      }
       if (result.status === "ok") {
         setTrace(result.data);
       } else {
@@ -62,7 +72,10 @@ export function useTaskRunTrace(
         setTrace(null);
       }
     } catch (e) {
-      if (seq === fetchSeqRef.current) {
+      if (
+        seq === fetchSeqRef.current &&
+        isCurrentProjectScopeGeneration(projectScopeGeneration)
+      ) {
         setError(e instanceof Error ? e.message : String(e));
         setTrace(null);
       }

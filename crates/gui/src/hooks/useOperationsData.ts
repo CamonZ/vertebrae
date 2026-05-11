@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
 import { useTaskStore, useExecutionStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 import { useTasks } from "./useTasks";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
@@ -58,22 +62,28 @@ export function useOperationsData(): OperationsData {
 
   useEffect(() => {
     const newlyActive = activeTaskIds.filter(
-      (id) => !seededTaskIdsRef.current.has(id),
+      (id) => !seededTaskIdsRef.current.has(id)
     );
     if (newlyActive.length === 0) return;
 
     let cancelled = false;
+    const projectScopeGeneration = getProjectScopeGeneration();
     for (const id of newlyActive) seededTaskIdsRef.current.add(id);
 
     (async () => {
       const results = await Promise.all(
         newlyActive.map((id) =>
-          commands.getTaskExecutions(id).then((r) =>
-            r.status === "ok" ? r.data : [],
-          ),
-        ),
+          commands
+            .getTaskExecutions(id)
+            .then((r) => (r.status === "ok" ? r.data : []))
+        )
       );
-      if (cancelled) return;
+      if (
+        cancelled ||
+        !isCurrentProjectScopeGeneration(projectScopeGeneration)
+      ) {
+        return;
+      }
       for (const list of results) {
         for (const exec of list) upsertExecution(exec);
       }
@@ -120,7 +130,11 @@ export function useOperationsData(): OperationsData {
       const activeRun = task.run_controls?.active_run;
       if (!activeRun) continue;
       const status = activeRun.status;
-      if (status === "queued" || status === "executing" || status === "waiting") {
+      if (
+        status === "queued" ||
+        status === "executing" ||
+        status === "waiting"
+      ) {
         live.push({ task, taskRun: activeRun });
       }
     }
@@ -130,8 +144,10 @@ export function useOperationsData(): OperationsData {
   const completedItems = useMemo<CompletedItem[]>(() => {
     return executions
       .filter((e) => e.status === "completed" && e.completed_at)
-      .sort((a, b) =>
-        new Date(b.completed_at!).getTime() - new Date(a.completed_at!).getTime(),
+      .sort(
+        (a, b) =>
+          new Date(b.completed_at!).getTime() -
+          new Date(a.completed_at!).getTime()
       )
       .slice(0, 20)
       .map((exec) => {

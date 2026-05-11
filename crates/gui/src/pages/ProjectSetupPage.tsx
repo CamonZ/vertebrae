@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { commands, SavedProject } from "../bindings";
 import { open } from "@tauri-apps/plugin-dialog";
-import { useLiveChatStore } from "../stores/liveChatStore";
+import { resetProjectScopedStores } from "../stores";
 
 export function ProjectSetupPage() {
   const navigate = useNavigate();
@@ -40,9 +40,7 @@ export function ProjectSetupPage() {
     try {
       const result = await commands.setCurrentProject(project.slug);
       if (result.status === "ok") {
-        // Drop the previous project's chat transcript so the next open
-        // re-hydrates against the newly selected project's session cache.
-        useLiveChatStore.getState().reset();
+        resetProjectScopedStores();
         navigate("/");
       } else {
         setError(result.error.message);

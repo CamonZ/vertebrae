@@ -13,9 +13,15 @@ interface ExecutionActions {
   upsertExecution: (execution: StepExecution) => void;
   setExecutionsForTask: (taskId: string, executions: StepExecution[]) => void;
   clearExecutionsForTask: (taskId: string) => void;
+  reset: () => void;
 }
 
 export type ExecutionStore = ExecutionState & ExecutionActions;
+
+const initialState: ExecutionState = {
+  executions: [],
+  executionsByTaskId: {},
+};
 
 function upsertInList(
   list: StepExecution[],
@@ -31,8 +37,7 @@ function upsertInList(
 }
 
 export const useExecutionStore = create<ExecutionStore>((set) => ({
-  executions: [],
-  executionsByTaskId: {},
+  ...initialState,
 
   setExecutions: (executions) => set({ executions }),
 
@@ -68,4 +73,6 @@ export const useExecutionStore = create<ExecutionStore>((set) => ({
       delete next[taskId];
       return { executionsByTaskId: next };
     }),
+
+  reset: () => set(initialState),
 }));

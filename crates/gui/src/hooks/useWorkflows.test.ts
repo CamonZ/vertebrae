@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useWorkflowStore } from "../stores/workflowStore";
+import { resetProjectScopedStores } from "../stores/projectScopedStores";
 
 const mockListWorkflows = vi.fn();
 
@@ -17,7 +18,11 @@ import { createMockWorkflow } from "../test/test-utils";
 describe("useWorkflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useWorkflowStore.setState({ workflows: [], currentWorkflow: null, isLoading: false });
+    useWorkflowStore.setState({
+      workflows: [],
+      currentWorkflow: null,
+      isLoading: false,
+    });
   });
 
   it("returns workflows from the Zustand store, not a local copy", async () => {
@@ -56,8 +61,12 @@ describe("useWorkflows", () => {
     });
 
     expect(result.current.workflows).toHaveLength(2);
-    expect(result.current.workflows.map((w: Workflow) => w.id)).toContain("wf-2");
-    expect(result.current.workflows.find((w: Workflow) => w.id === "wf-2")?.name).toBe("WebSocket Workflow");
+    expect(result.current.workflows.map((w: Workflow) => w.id)).toContain(
+      "wf-2"
+    );
+    expect(
+      result.current.workflows.find((w: Workflow) => w.id === "wf-2")?.name
+    ).toBe("WebSocket Workflow");
   });
 
   it("reflects store removals (e.g. from WebSocket deletions)", async () => {
@@ -81,10 +90,16 @@ describe("useWorkflows", () => {
   });
 
   it("sets error state on fetch failure without corrupting the store", async () => {
-    const existing = createMockWorkflow({ id: "wf-existing", name: "Existing" });
+    const existing = createMockWorkflow({
+      id: "wf-existing",
+      name: "Existing",
+    });
     useWorkflowStore.setState({ workflows: [existing] });
 
-    mockListWorkflows.mockResolvedValue({ status: "error", error: { message: "Server error" } });
+    mockListWorkflows.mockResolvedValue({
+      status: "error",
+      error: { message: "Server error" },
+    });
 
     const { result } = renderHook(() => useWorkflows());
 
@@ -113,5 +128,74 @@ describe("useWorkflows", () => {
     expect(result.current.workflows).toHaveLength(1);
     expect(result.current.workflows[0].id).toBe("wf-fresh");
     expect(result.current.workflows[0].name).toBe("Fresh");
+  });
+
+  it("ignores stale fetch results after project-scoped stores reset", async () => {
+    let resolveFetch!: (value: { status: "ok"; data: Workflow[] }) => void;
+    mockListWorkflows.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useWorkflows());
+
+    await waitFor(() => {
+      expect(mockListWorkflows).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      resetProjectScopedStores();
+    });
+
+    const staleWorkflow = createMockWorkflow({
+      id: "old-project-workflow",
+      name: "Old Project Workflow",
+    });
+    await act(async () => {
+      resolveFetch({ status: "ok", data: [staleWorkflow] });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(useWorkflowStore.getState().workflows).toEqual([]);
+    expect(result.current.workflows).toEqual([]);
+  });
+
+  it("ignores stale fetch errors after project-scoped stores reset", async () => {
+    let resolveFetch!: (value: {
+      status: "error";
+      error: { message: string };
+    }) => void;
+    mockListWorkflows.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useWorkflows());
+
+    await waitFor(() => {
+      expect(mockListWorkflows).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      resetProjectScopedStores();
+    });
+
+    await act(async () => {
+      resolveFetch({
+        status: "error",
+        error: { message: "old project error" },
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBeNull();
   });
 });
