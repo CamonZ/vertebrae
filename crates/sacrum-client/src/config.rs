@@ -106,10 +106,7 @@ impl SacrumConfig {
     /// - `VTB_TOKEN` overrides `[sacrum].token`
     /// - `VTB_PROJECT_ID` overrides CWD-based project resolution entirely
     fn load_from_config(config: VertebraeConfigFile) -> SacrumClientResult<Self> {
-        let base_url = std::env::var("VTB_URL")
-            .ok()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| config.sacrum.url.clone());
+        let base_url = resolve_base_url(&config.sacrum.url);
 
         let api_token = std::env::var("VTB_TOKEN")
             .ok()
@@ -146,6 +143,18 @@ impl SacrumConfig {
     /// Used by the GUI which doesn't have a meaningful CWD.
     pub fn load_for_project(name: &str) -> SacrumClientResult<Self> {
         let config = load_config_file()?;
+        Self::load_for_project_from_config(config, name)
+    }
+
+    /// Build a SacrumConfig for a named project from a parsed config file.
+    ///
+    /// Applies the same `VTB_URL` env var precedence as [`Self::load_from_config`]
+    /// (env var, if set and non-empty, wins over `[sacrum].url`).
+    fn load_for_project_from_config(
+        config: VertebraeConfigFile,
+        name: &str,
+    ) -> SacrumClientResult<Self> {
+        let base_url = resolve_base_url(&config.sacrum.url);
 
         let api_token = config.sacrum.token.clone().ok_or_else(|| {
             SacrumClientError::ConfigError(
@@ -162,7 +171,7 @@ impl SacrumConfig {
         })?;
 
         Ok(SacrumConfig {
-            base_url: config.sacrum.url,
+            base_url,
             api_token,
             project_id: section.id.clone(),
         })
@@ -210,6 +219,17 @@ fn resolve_project_root_at(cwd: &Path) -> PathBuf {
         git_dir
     };
     root.canonicalize().unwrap_or(root)
+}
+
+/// Resolve the base URL using `VTB_URL` env var precedence.
+///
+/// When `VTB_URL` is set and non-empty it wins; otherwise the provided
+/// config-file value is returned.
+fn resolve_base_url(config_url: &str) -> String {
+    std::env::var("VTB_URL")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| config_url.to_string())
 }
 
 fn resolve_project_root() -> SacrumClientResult<PathBuf> {
@@ -814,6 +834,70 @@ path = "/Users/test/other"
         let dir = tmp.path().canonicalize().unwrap();
 
         assert_eq!(resolve_project_root_at(&dir), dir);
+    }
+
+    /// Helper: build a VertebraeConfigFile for `load_for_project` tests with a
+    /// named project entry. The project path is not used by `load_for_project`,
+    /// so we can hardcode it.
+    fn config_for_named_project() -> VertebraeConfigFile {
+        VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://file-url:4000".to_string(),
+                token: Some("file-token".to_string()),
+            },
+            projects: BTreeMap::from([(
+                "myproject".to_string(),
+                ProjectSection {
+                    id: "named-project-id".to_string(),
+                    path: "/some/path".to_string(),
+                },
+            )]),
+            daemon: None,
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_for_project_uses_config_url_when_env_unset() {
+        clear_vtb_env_vars();
+        let config = config_for_named_project();
+        let result = SacrumConfig::load_for_project_from_config(config, "myproject").unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "named-project-id");
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_for_project_vtb_url_env_var_overrides_config() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "http://env-override:7777");
+        }
+        let config = config_for_named_project();
+        let result = SacrumConfig::load_for_project_from_config(config, "myproject").unwrap();
+
+        assert_eq!(result.base_url, "http://env-override:7777");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "named-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_for_project_empty_vtb_url_falls_back_to_config() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "");
+        }
+        let config = config_for_named_project();
+        let result = SacrumConfig::load_for_project_from_config(config, "myproject").unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "named-project-id");
+        clear_vtb_env_vars();
     }
 
     #[test]

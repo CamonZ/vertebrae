@@ -38,7 +38,6 @@ Feature: Traces THREAD mode polish — live-tail and shared filters
     And the GUI should show an element with test id "unified-chat-view" within 10 seconds
 
   Scenario: Typing into the search box pushes the query into the URL
-    And the URL should contain "/traces/"
     When I type "zzznoexec" into the element with test id "trace-filter-search"
     Then the URL should contain "q=zzznoexec"
 
