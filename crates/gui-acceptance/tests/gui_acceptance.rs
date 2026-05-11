@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cucumber::World;
+use cucumber::writer::Stats;
 use fantoccini::Client;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
@@ -283,7 +284,7 @@ impl GuiWorld {
 
 #[tokio::main]
 async fn main() {
-    GuiWorld::cucumber()
+    let summary = GuiWorld::cucumber()
         .max_concurrent_scenarios(Some(1))
         .before(|feature, _rule, scenario, world| {
             let scenario_name = scenario.name.clone();
@@ -356,6 +357,10 @@ async fn main() {
         .await;
 
     gui_acceptance::close_webdriver().await;
+
+    if summary.execution_has_failed() {
+        std::process::exit(1);
+    }
 }
 
 fn slugify(input: &str) -> String {
