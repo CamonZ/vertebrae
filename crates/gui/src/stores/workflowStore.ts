@@ -23,15 +23,20 @@ interface WorkflowActions {
   setLoading: (isLoading: boolean) => void;
   /** Clear the current workflow selection */
   clearCurrentWorkflow: () => void;
+  /** Reset all project-scoped workflow state */
+  reset: () => void;
 }
 
 export type WorkflowStore = WorkflowState & WorkflowActions;
 
-export const useWorkflowStore = create<WorkflowStore>((set) => ({
-  // Initial state
+const initialState: WorkflowState = {
   workflows: [],
   currentWorkflow: null,
   isLoading: false,
+};
+
+export const useWorkflowStore = create<WorkflowStore>((set) => ({
+  ...initialState,
 
   // Actions
   setWorkflows: (workflows) => set({ workflows }),
@@ -66,4 +71,6 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
 
   clearCurrentWorkflow: () => set({ currentWorkflow: null }),
+
+  reset: () => set(initialState),
 }));

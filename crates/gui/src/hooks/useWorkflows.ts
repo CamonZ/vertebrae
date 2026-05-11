@@ -1,6 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { commands } from "../bindings";
 import { useWorkflowStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /**
  * Hook for fetching and managing the workflow list.
@@ -14,17 +18,25 @@ export function useWorkflows() {
   const { workflows, setWorkflows } = useWorkflowStore();
 
   const fetchWorkflows = useCallback(async () => {
+    const projectScopeGeneration = getProjectScopeGeneration();
+
     setIsLoading(true);
     setError(null);
     try {
       const result = await commands.listWorkflows();
       if (result.status === "ok") {
-        setWorkflows(result.data);
+        if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+          setWorkflows(result.data);
+        }
       } else {
-        setError(result.error.message);
+        if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+          setError(result.error.message);
+        }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setIsLoading(false);
     }

@@ -9,12 +9,17 @@ interface SessionLogActions {
   setLogs: (executionId: string, logs: SessionLog[]) => void;
   appendLog: (executionId: string, log: SessionLog) => void;
   clearLogs: (executionId: string) => void;
+  reset: () => void;
 }
 
 export type SessionLogStore = SessionLogState & SessionLogActions;
 
-export const useSessionLogStore = create<SessionLogStore>((set) => ({
+const initialState: SessionLogState = {
   logsByExecutionId: {},
+};
+
+export const useSessionLogStore = create<SessionLogStore>((set) => ({
+  ...initialState,
 
   setLogs: (executionId, logs) =>
     set((state) => ({
@@ -35,4 +40,6 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
       delete next[executionId];
       return { logsByExecutionId: next };
     }),
+
+  reset: () => set(initialState),
 }));

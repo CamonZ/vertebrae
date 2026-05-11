@@ -1,9 +1,20 @@
 import { useEffect, useCallback } from "react";
-import { events, type TaskChangedEvent, type TaskChangeType } from "../bindings";
+import {
+  events,
+  type TaskChangedEvent,
+  type TaskChangeType,
+} from "../bindings";
 import { useTaskStore, useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Get toast message for task change type */
-function getTaskChangeMessage(changeType: TaskChangeType, taskId: string): string {
+function getTaskChangeMessage(
+  changeType: TaskChangeType,
+  taskId: string
+): string {
   const shortId = taskId.slice(0, 6);
   switch (changeType) {
     case "Created":
@@ -30,23 +41,31 @@ interface UseTaskChangeListenerOptions {
  *
  * @param options - Configuration options for the listener
  */
-export function useTaskChangeListener(options: UseTaskChangeListenerOptions = {}) {
+export function useTaskChangeListener(
+  options: UseTaskChangeListenerOptions = {}
+) {
   const { enabled = true } = options;
   const upsertTask = useTaskStore((state) => state.upsertTask);
   const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleTaskChanged = useCallback(
     (event: { payload: TaskChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { task_id, change_type, task } = event.payload;
 
       console.debug(
         `[TaskChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
       );
 
-      const toastType = change_type === "Created" ? "success"
-        : change_type === "Deleted" ? "error"
-        : "info";
+      const toastType =
+        change_type === "Created"
+          ? "success"
+          : change_type === "Deleted"
+            ? "error"
+            : "info";
       addToast(getTaskChangeMessage(change_type, task_id), toastType);
 
       if (change_type === "Deleted") {
@@ -55,7 +74,7 @@ export function useTaskChangeListener(options: UseTaskChangeListenerOptions = {}
         upsertTask(task);
       }
     },
-    [addToast, upsertTask, removeTask]
+    [addToast, upsertTask, removeTask, projectScopeGeneration]
   );
 
   useEffect(() => {

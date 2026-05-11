@@ -1,6 +1,10 @@
 import { useEffect, useCallback, useRef } from "react";
 import { events, type TaskStepChangedEvent } from "../bindings";
 import { useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Options for the task step change listener hook */
 interface UseTaskStepChangeListenerOptions {
@@ -24,6 +28,7 @@ export function useTaskStepChangeListener(
 ) {
   const { onTaskStepChange, enabled = true } = options;
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   // Stable callback ref to avoid effect re-runs
   const onTaskStepChangeRef = useRef(onTaskStepChange);
@@ -31,6 +36,8 @@ export function useTaskStepChangeListener(
 
   const handleTaskStepChanged = useCallback(
     (event: { payload: TaskStepChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { task_id, step_id, step_name } = event.payload;
 
       console.debug(
@@ -43,7 +50,7 @@ export function useTaskStepChangeListener(
         onTaskStepChangeRef.current(task_id, step_id, step_name);
       }
     },
-    [addToast]
+    [addToast, projectScopeGeneration]
   );
 
   useEffect(() => {
@@ -51,7 +58,9 @@ export function useTaskStepChangeListener(
       return;
     }
 
-    const unlistenPromise = events.taskStepChangedEvent.listen(handleTaskStepChanged);
+    const unlistenPromise = events.taskStepChangedEvent.listen(
+      handleTaskStepChanged
+    );
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());

@@ -30,16 +30,21 @@ interface TaskActions {
   setLoading: (isLoading: boolean) => void;
   /** Clear the selected task */
   clearSelection: () => void;
+  /** Reset all project-scoped task state */
+  reset: () => void;
 }
 
 export type TaskStore = TaskState & TaskActions;
 
-export const useTaskStore = create<TaskStore>((set) => ({
-  // Initial state
+const initialState: TaskState = {
   tasks: [],
   selectedTaskId: null,
   selectedTask: null,
   isLoading: false,
+};
+
+export const useTaskStore = create<TaskStore>((set) => ({
+  ...initialState,
 
   // Actions
   setTasks: (tasks) => set({ tasks }),
@@ -118,4 +123,6 @@ export const useTaskStore = create<TaskStore>((set) => ({
       selectedTaskId: null,
       selectedTask: null,
     }),
+
+  reset: () => set(initialState),
 }));

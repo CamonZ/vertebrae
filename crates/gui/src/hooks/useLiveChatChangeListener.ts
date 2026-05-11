@@ -5,6 +5,10 @@ import {
   type LiveChatSessionChangedEvent,
 } from "../bindings";
 import { useLiveChatStore } from "../stores/liveChatStore";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 interface UseLiveChatChangeListenerOptions {
   enabled?: boolean;
@@ -20,9 +24,12 @@ export function useLiveChatChangeListener(
   const { enabled = true } = options;
   const applyRemoteMessage = useLiveChatStore((s) => s.applyRemoteMessage);
   const upsertSession = useLiveChatStore((s) => s.upsertSession);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleMessageCreated = useCallback(
     (event: { payload: LiveChatMessageCreatedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { chat_session_id, client_message_id, message } = event.payload;
 
       if (!message) {
@@ -39,27 +46,27 @@ export function useLiveChatChangeListener(
 
       applyRemoteMessage(message, client_message_id);
     },
-    [applyRemoteMessage]
+    [applyRemoteMessage, projectScopeGeneration]
   );
 
   const handleSessionChanged = useCallback(
     (event: { payload: LiveChatSessionChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { session } = event.payload;
       if (!session) return;
       upsertSession(session);
     },
-    [upsertSession]
+    [upsertSession, projectScopeGeneration]
   );
 
   useEffect(() => {
     if (!enabled) return;
 
-    const unlistenMessage = events.liveChatMessageCreatedEvent.listen(
-      handleMessageCreated
-    );
-    const unlistenSession = events.liveChatSessionChangedEvent.listen(
-      handleSessionChanged
-    );
+    const unlistenMessage =
+      events.liveChatMessageCreatedEvent.listen(handleMessageCreated);
+    const unlistenSession =
+      events.liveChatSessionChangedEvent.listen(handleSessionChanged);
 
     return () => {
       unlistenMessage.then((unlisten) => unlisten());
