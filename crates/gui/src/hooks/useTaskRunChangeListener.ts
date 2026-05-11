@@ -1,6 +1,10 @@
 import { useEffect, useCallback } from "react";
 import { events, type TaskRunChangedEvent } from "../bindings";
 import { useTaskRunStore, useTaskStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 interface UseTaskRunChangeListenerOptions {
   /** Whether the listener is enabled (default: true) */
@@ -19,9 +23,12 @@ export function useTaskRunChangeListener(
   const replaceTaskRunControls = useTaskStore(
     (state) => state.replaceTaskRunControls
   );
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleTaskRunChanged = useCallback(
     (event: { payload: TaskRunChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { task_id, task_run, run_controls } = event.payload;
 
       if (task_run) {
@@ -30,7 +37,7 @@ export function useTaskRunChangeListener(
 
       replaceTaskRunControls(task_id, run_controls);
     },
-    [replaceTaskRunControls, upsertTaskRun]
+    [replaceTaskRunControls, upsertTaskRun, projectScopeGeneration]
   );
 
   useEffect(() => {

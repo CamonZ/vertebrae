@@ -97,6 +97,7 @@ function mergeMessage(
 }
 
 let inflightHydrate: Promise<ChatSession | null> | null = null;
+let hydrateGeneration = 0;
 
 export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
   ...initialState,
@@ -118,7 +119,11 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
     set({ currentSession: session });
   },
 
-  reset: () => set({ ...initialState, messages: [] }),
+  reset: () => {
+    hydrateGeneration += 1;
+    inflightHydrate = null;
+    set({ ...initialState, messages: [] });
+  },
 
   createSession: async () => {
     if (get().currentSession) {
@@ -148,10 +153,14 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
     if (get().hydrated) return get().currentSession;
     if (inflightHydrate) return inflightHydrate;
 
-    inflightHydrate = (async () => {
+    const generation = hydrateGeneration;
+    const isStale = () => generation !== hydrateGeneration;
+
+    const hydratePromise = (async () => {
       set({ lastError: null });
 
       const cachedResult = await commands.getActiveChatSessionId();
+      if (isStale()) return null;
       if (cachedResult.status !== "ok" || !cachedResult.data) {
         set({ hydrated: true });
         return null;
@@ -159,6 +168,7 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
       const cachedSessionId = cachedResult.data;
 
       const sessionResult = await commands.getChatSession(cachedSessionId);
+      if (isStale()) return null;
       if (sessionResult.status !== "ok") {
         set({ hydrated: true, lastError: sessionResult.error.message });
         return null;
@@ -177,6 +187,7 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
         HYDRATE_MESSAGE_LIMIT,
         null
       );
+      if (isStale()) return null;
       if (messagesResult.status !== "ok") {
         set({
           hydrated: true,
@@ -202,11 +213,14 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
 
       return session;
     })();
+    inflightHydrate = hydratePromise;
 
     try {
-      return await inflightHydrate;
+      return await hydratePromise;
     } finally {
-      inflightHydrate = null;
+      if (inflightHydrate === hydratePromise) {
+        inflightHydrate = null;
+      }
     }
   },
 

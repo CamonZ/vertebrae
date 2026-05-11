@@ -1,6 +1,10 @@
 import { useEffect, useCallback } from "react";
 import { events, type SessionLogCreatedEvent } from "../bindings";
 import { useSessionLogStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Options for the session log change listener hook */
 interface UseSessionLogChangeListenerOptions {
@@ -20,9 +24,12 @@ export function useSessionLogChangeListener(
 ) {
   const { enabled = true } = options;
   const appendLog = useSessionLogStore((state) => state.appendLog);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleSessionLogCreated = useCallback(
     (event: { payload: SessionLogCreatedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { log_id, step_execution_id, session_log } = event.payload;
 
       console.debug(
@@ -37,7 +44,7 @@ export function useSessionLogChangeListener(
         );
       }
     },
-    [appendLog]
+    [appendLog, projectScopeGeneration]
   );
 
   useEffect(() => {

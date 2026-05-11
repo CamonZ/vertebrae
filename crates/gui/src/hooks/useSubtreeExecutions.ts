@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type StepExecution } from "../bindings";
 import { useExecutionStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 import { useSessionLogStore } from "../stores/sessionLogStore";
 import { useTaskStore } from "../stores/taskStore";
 import {
@@ -62,6 +66,7 @@ export function useSubtreeExecutions(
       return;
     }
     const seq = ++fetchSeqRef.current;
+    const projectScopeGeneration = getProjectScopeGeneration();
     setIsLoading(true);
     setError(null);
     try {
@@ -70,7 +75,12 @@ export function useSubtreeExecutions(
           commands.getTaskExecutions(id).then((r) => ({ id, r }))
         )
       );
-      if (seq !== fetchSeqRef.current) return;
+      if (
+        seq !== fetchSeqRef.current ||
+        !isCurrentProjectScopeGeneration(projectScopeGeneration)
+      ) {
+        return;
+      }
       let firstError: string | null = null;
       for (const { id, r } of results) {
         if (r.status === "ok") {
@@ -81,7 +91,10 @@ export function useSubtreeExecutions(
       }
       if (firstError) setError(firstError);
     } catch (e) {
-      if (seq === fetchSeqRef.current) {
+      if (
+        seq === fetchSeqRef.current &&
+        isCurrentProjectScopeGeneration(projectScopeGeneration)
+      ) {
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {

@@ -157,9 +157,17 @@ interface ChatStoreActions {
   detachSession: (sessionId: string) => Promise<void>;
   /** Reattach a previously detached session back into the main panel. */
   reattachSession: (sessionId: string) => void;
+  /** Reset project-scoped chat sessions */
+  reset: () => void;
 }
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
+
+const initialState: ChatStoreState = {
+  sessions: {},
+  activeSessionId: null,
+  panelOpen: false,
+};
 
 function generateSessionId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -173,10 +181,7 @@ export function getParentScope(scope: ChatScope): ChatScope | null {
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
-  // Initial state
-  sessions: {},
-  activeSessionId: null,
-  panelOpen: false,
+  ...initialState,
 
   // Actions
   openSession: (scope, entityId, label) => {
@@ -464,7 +469,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       const s = state.sessions[sessionId];
       if (!s) return state;
       const remainingIds = Object.keys(state.sessions).filter(
-        (id) => id !== sessionId && !state.sessions[id].isDetached,
+        (id) => id !== sessionId && !state.sessions[id].isDetached
       );
       return {
         sessions: {
@@ -473,7 +478,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         },
         activeSessionId:
           state.activeSessionId === sessionId
-            ? remainingIds[remainingIds.length - 1] ?? null
+            ? (remainingIds[remainingIds.length - 1] ?? null)
             : state.activeSessionId,
       };
     });
@@ -486,7 +491,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         title,
         width: 600,
         height: 800,
-      },
+      }
     );
 
     // Listen once for the pop-out window's close so we reattach the session
@@ -532,4 +537,6 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     }
     return null;
   },
+
+  reset: () => set(initialState),
 }));

@@ -1,6 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { commands } from "../bindings";
 import { useWorkflowStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /**
  * Hook for fetching a single workflow with its associated tasks.
@@ -21,10 +25,14 @@ export function useWorkflow(id: string | null | undefined) {
       return;
     }
 
+    const projectScopeGeneration = getProjectScopeGeneration();
+
     setIsLoading(true);
     setError(null);
     try {
       const result = await commands.getWorkflowWithTasks(id);
+      if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
+
       if (result.status === "ok") {
         setCurrentWorkflow(result.data);
       } else {
@@ -32,8 +40,10 @@ export function useWorkflow(id: string | null | undefined) {
         clearCurrentWorkflow();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      clearCurrentWorkflow();
+      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+        setError(e instanceof Error ? e.message : String(e));
+        clearCurrentWorkflow();
+      }
     } finally {
       setIsLoading(false);
     }

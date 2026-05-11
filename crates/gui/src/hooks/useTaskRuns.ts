@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { commands, type TaskRun } from "../bindings";
 import { useTaskRunStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 import { isActiveRunStatus } from "../utils/runState";
 
 /**
@@ -67,17 +71,23 @@ export function useTaskRuns(
       setError(null);
       return;
     }
+    const projectScopeGeneration = getProjectScopeGeneration();
+
     setIsLoading(true);
     setError(null);
     try {
       const result = await commands.getTaskRuns(taskId);
+      if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
+
       if (result.status === "ok") {
         setTaskRunsForTask(taskId, result.data);
       } else {
         setError(result.error.message);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setIsLoading(false);
     }

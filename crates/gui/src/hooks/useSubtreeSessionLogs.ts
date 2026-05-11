@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type SessionLog, type StepExecution } from "../bindings";
 import { useSessionLogStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 export interface UseSubtreeSessionLogsResult {
   /** Map: execution_id -> SessionLog[] */
@@ -33,10 +37,7 @@ export function useSubtreeSessionLogs(
     .filter((id): id is string => !!id)
     .sort()
     .join("|");
-  const ids = useMemo(
-    () => (idsKey ? idsKey.split("|") : []),
-    [idsKey]
-  );
+  const ids = useMemo(() => (idsKey ? idsKey.split("|") : []), [idsKey]);
 
   const fetchAll = useCallback(async () => {
     if (ids.length === 0) {
@@ -45,12 +46,18 @@ export function useSubtreeSessionLogs(
       return;
     }
     const seq = ++fetchSeqRef.current;
+    const projectScopeGeneration = getProjectScopeGeneration();
     setIsLoading(true);
     setError(null);
     const results = await Promise.all(
       ids.map((id) => commands.getExecutionLogs(id).then((r) => ({ id, r })))
     );
-    if (seq !== fetchSeqRef.current) return;
+    if (
+      seq !== fetchSeqRef.current ||
+      !isCurrentProjectScopeGeneration(projectScopeGeneration)
+    ) {
+      return;
+    }
     const next: Record<string, SessionLog[]> = {};
     let firstError: string | null = null;
     for (const { id, r } of results) {
@@ -63,7 +70,7 @@ export function useSubtreeSessionLogs(
     setLogsByExecutionId(next);
     if (firstError) setError(firstError);
     setIsLoading(false);
-  }, [idsKey]);
+  }, [ids]);
 
   useEffect(() => {
     fetchAll();
