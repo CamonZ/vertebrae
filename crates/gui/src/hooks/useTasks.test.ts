@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTaskStore } from "../stores/taskStore";
+import { resetProjectScopedStores } from "../stores/projectScopedStores";
 
 const mockListTasks = vi.fn();
 
@@ -17,7 +18,12 @@ import { createMockTask } from "../test/test-utils";
 describe("useTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTaskStore.setState({ tasks: [], selectedTaskId: null, selectedTask: null, isLoading: false });
+    useTaskStore.setState({
+      tasks: [],
+      selectedTaskId: null,
+      selectedTask: null,
+      isLoading: false,
+    });
   });
 
   it("returns tasks from the Zustand store, not a local copy", async () => {
@@ -62,7 +68,9 @@ describe("useTasks", () => {
     // The hook should immediately reflect the store change
     expect(result.current.tasks).toHaveLength(2);
     expect(result.current.tasks.map((t: Task) => t.id)).toContain("t-2");
-    expect(result.current.tasks.find((t: Task) => t.id === "t-2")?.title).toBe("WebSocket Task");
+    expect(result.current.tasks.find((t: Task) => t.id === "t-2")?.title).toBe(
+      "WebSocket Task"
+    );
   });
 
   it("preserves tasks upserted during fetch flight", async () => {
@@ -86,6 +94,75 @@ describe("useTasks", () => {
     const ids = result.current.tasks.map((t: Task) => t.id);
     expect(ids).toContain("t-1");
     expect(ids).toContain("t-2");
+  });
+
+  it("ignores stale fetch results after project-scoped stores reset", async () => {
+    let resolveFetch!: (value: { status: "ok"; data: Task[] }) => void;
+    mockListTasks.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useTasks());
+
+    await waitFor(() => {
+      expect(mockListTasks).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      resetProjectScopedStores();
+    });
+
+    const staleTask = createMockTask({
+      id: "old-project-task",
+      title: "Old Project Task",
+    });
+    await act(async () => {
+      resolveFetch({ status: "ok", data: [staleTask] });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(result.current.tasks).toEqual([]);
+  });
+
+  it("ignores stale fetch errors after project-scoped stores reset", async () => {
+    let resolveFetch!: (value: {
+      status: "error";
+      error: { message: string };
+    }) => void;
+    mockListTasks.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      })
+    );
+
+    const { result } = renderHook(() => useTasks());
+
+    await waitFor(() => {
+      expect(mockListTasks).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      resetProjectScopedStores();
+    });
+
+    await act(async () => {
+      resolveFetch({
+        status: "error",
+        error: { message: "old project error" },
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.error).toBeNull();
   });
 
   it("passes filter options to the listTasks command", async () => {
@@ -115,7 +192,10 @@ describe("useTasks", () => {
     const existing = createMockTask({ id: "t-existing", title: "Existing" });
     useTaskStore.setState({ tasks: [existing] });
 
-    mockListTasks.mockResolvedValue({ status: "error", error: { message: "Network error" } });
+    mockListTasks.mockResolvedValue({
+      status: "error",
+      error: { message: "Network error" },
+    });
 
     const { result } = renderHook(() => useTasks());
 
@@ -128,11 +208,7 @@ describe("useTasks", () => {
     expect(useTaskStore.getState().tasks[0].id).toBe("t-existing");
   });
 
-  it("includes both fresh fetch results and pre-existing store tasks", async () => {
-    // Pre-seed store with a task that is not in the fetch result.
-    // The hook preserves such tasks (they could be WebSocket upserts that
-    // arrived while the fetch was in flight). This is the expected
-    // conservative behavior -- the hook never silently drops store entries.
+  it("drops pre-existing store tasks that are absent from a fresh project fetch", async () => {
     const preExisting = createMockTask({ id: "t-pre", title: "Pre-existing" });
     useTaskStore.setState({ tasks: [preExisting] });
 
@@ -145,10 +221,9 @@ describe("useTasks", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    // Both the fresh fetch result and the pre-existing task are present
     const ids = result.current.tasks.map((t: Task) => t.id);
     expect(ids).toContain("t-fresh");
-    expect(ids).toContain("t-pre");
-    expect(result.current.tasks).toHaveLength(2);
+    expect(ids).not.toContain("t-pre");
+    expect(result.current.tasks).toHaveLength(1);
   });
 });

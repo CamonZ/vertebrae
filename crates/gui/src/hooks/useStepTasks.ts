@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands, events, type Task, type TaskChangeType } from "../bindings";
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 // Per-step task list maintained outside the global taskStore: the pipeline
 // view never bulk-fetches all project tasks, so reading from a partially
@@ -9,6 +14,7 @@ export function useStepTasks(stepId: string | null) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const stepIdRef = useRef<string | null>(stepId);
   useEffect(() => {
@@ -22,6 +28,7 @@ export function useStepTasks(stepId: string | null) {
       return;
     }
 
+    const fetchGeneration = getProjectScopeGeneration();
     setIsLoading(true);
     setError(null);
     try {
@@ -37,7 +44,12 @@ export function useStepTasks(stepId: string | null) {
         step_id: stepId,
       });
 
-      if (stepIdRef.current !== stepId) return;
+      if (
+        stepIdRef.current !== stepId ||
+        !isCurrentProjectScopeGeneration(fetchGeneration)
+      ) {
+        return;
+      }
 
       if (result.status === "ok") {
         setTasks(result.data);
@@ -45,7 +57,12 @@ export function useStepTasks(stepId: string | null) {
         setError(result.error.message);
       }
     } catch (e) {
-      if (stepIdRef.current !== stepId) return;
+      if (
+        stepIdRef.current !== stepId ||
+        !isCurrentProjectScopeGeneration(fetchGeneration)
+      ) {
+        return;
+      }
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (stepIdRef.current === stepId) {
@@ -60,6 +77,8 @@ export function useStepTasks(stepId: string | null) {
 
   useEffect(() => {
     const unlistenPromise = events.taskChangedEvent.listen((event) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { task_id, change_type, task } = event.payload;
       const currentStepId = stepIdRef.current;
       if (!currentStepId) return;
@@ -97,7 +116,7 @@ export function useStepTasks(stepId: string | null) {
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, []);
+  }, [projectScopeGeneration]);
 
   return { tasks, isLoading, error, refetch: fetchTasks };
 }

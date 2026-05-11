@@ -21,14 +21,20 @@ interface StepActions {
   selectStep: (id: string | null, step?: Step | null) => void;
   /** Clear the selected step */
   clearStepSelection: () => void;
+  /** Reset all project-scoped step state */
+  reset: () => void;
 }
 
 export type StepStore = StepState & StepActions;
 
-export const useStepStore = create<StepStore>((set) => ({
+const initialState: StepState = {
   steps: [],
   selectedStepId: null,
   selectedStep: null,
+};
+
+export const useStepStore = create<StepStore>((set) => ({
+  ...initialState,
 
   setSteps: (steps) => set({ steps }),
 
@@ -70,4 +76,6 @@ export const useStepStore = create<StepStore>((set) => ({
       selectedStepId: null,
       selectedStep: null,
     }),
+
+  reset: () => set(initialState),
 }));

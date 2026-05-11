@@ -11,9 +11,15 @@ interface TaskRunActions {
   upsertTaskRun: (taskRun: TaskRun) => void;
   setTaskRunsForTask: (taskId: string, taskRuns: TaskRun[]) => void;
   clearTaskRunsForTask: (taskId: string) => void;
+  reset: () => void;
 }
 
 export type TaskRunStore = TaskRunState & TaskRunActions;
+
+const initialState: TaskRunState = {
+  taskRuns: [],
+  taskRunsByTaskId: {},
+};
 
 function upsertInList(list: TaskRun[], taskRun: TaskRun): TaskRun[] {
   const idx = list.findIndex((run) => run.id === taskRun.id);
@@ -34,8 +40,7 @@ function removeFromList(
 }
 
 export const useTaskRunStore = create<TaskRunStore>((set) => ({
-  taskRuns: [],
-  taskRunsByTaskId: {},
+  ...initialState,
 
   setTaskRuns: (taskRuns) =>
     set({
@@ -116,4 +121,6 @@ export const useTaskRunStore = create<TaskRunStore>((set) => ({
       delete next[taskId];
       return { taskRuns, taskRunsByTaskId: next };
     }),
+
+  reset: () => set(initialState),
 }));

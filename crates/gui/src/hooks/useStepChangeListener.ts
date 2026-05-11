@@ -1,9 +1,21 @@
 import { useEffect, useCallback } from "react";
-import { events, type Step, type StepChangedEvent, type StepChangeType } from "../bindings";
+import {
+  events,
+  type Step,
+  type StepChangedEvent,
+  type StepChangeType,
+} from "../bindings";
 import { useStepStore, useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Get toast message for step change type */
-function getStepChangeMessage(changeType: StepChangeType, stepId: string): string {
+function getStepChangeMessage(
+  changeType: StepChangeType,
+  stepId: string
+): string {
   const shortId = stepId.slice(0, 6);
   switch (changeType) {
     case "Created":
@@ -44,18 +56,24 @@ export function useStepChangeListener(
   const upsertStep = useStepStore((state) => state.upsertStep);
   const removeStep = useStepStore((state) => state.removeStep);
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepChanged = useCallback(
     (event: { payload: StepChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { step_id, change_type, step } = event.payload;
 
       console.debug(
         `[StepChangeListener] Received ${change_type} event for step ${step_id.slice(0, 6)}`
       );
 
-      const toastType = change_type === "Created" ? "success"
-        : change_type === "Deleted" ? "error"
-        : "info";
+      const toastType =
+        change_type === "Created"
+          ? "success"
+          : change_type === "Deleted"
+            ? "error"
+            : "info";
       addToast(getStepChangeMessage(change_type, step_id), toastType);
 
       if (change_type === "Deleted") {
@@ -70,7 +88,15 @@ export function useStepChangeListener(
         }
       }
     },
-    [addToast, upsertStep, removeStep, onCreated, onUpdated, onDeleted]
+    [
+      addToast,
+      upsertStep,
+      removeStep,
+      onCreated,
+      onUpdated,
+      onDeleted,
+      projectScopeGeneration,
+    ]
   );
 
   useEffect(() => {

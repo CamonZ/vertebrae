@@ -561,6 +561,92 @@ describe("liveChatStore", () => {
       expect(mockedGetActive).toHaveBeenCalledTimes(2);
     });
 
+    it("stops hydrate before getChatSession when reset happens while reading the cached id", async () => {
+      let resolveActive!: (value: { status: "ok"; data: string }) => void;
+      mockedGetActive.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveActive = resolve;
+        }) as ReturnType<typeof commands.getActiveChatSessionId>
+      );
+
+      const hydratePromise = useLiveChatStore.getState().hydrate();
+      await vi.waitFor(() => {
+        expect(mockedGetActive).toHaveBeenCalledTimes(1);
+      });
+
+      useLiveChatStore.getState().reset();
+      resolveActive({ status: "ok", data: "sess-old-project" });
+
+      await expect(hydratePromise).resolves.toBeNull();
+      expect(mockedGetSession).not.toHaveBeenCalled();
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+      expect(useLiveChatStore.getState().hydrated).toBe(false);
+    });
+
+    it("stops hydrate before listChatMessages when reset happens while reading the session", async () => {
+      let resolveSession!: (value: { status: "ok"; data: ChatSession }) => void;
+      const oldSession = makeSession({ id: "sess-old-project" });
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: oldSession.id,
+      });
+      mockedGetSession.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSession = resolve;
+        }) as ReturnType<typeof commands.getChatSession>
+      );
+
+      const hydratePromise = useLiveChatStore.getState().hydrate();
+      await vi.waitFor(() => {
+        expect(mockedGetSession).toHaveBeenCalledTimes(1);
+      });
+
+      useLiveChatStore.getState().reset();
+      resolveSession({ status: "ok", data: oldSession });
+
+      await expect(hydratePromise).resolves.toBeNull();
+      expect(mockedListMessages).not.toHaveBeenCalled();
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+      expect(useLiveChatStore.getState().hydrated).toBe(false);
+    });
+
+    it("does not apply in-flight hydrate results after reset", async () => {
+      const oldSession = makeSession({ id: "sess-old-project" });
+      const oldMessage = makeMessage({
+        id: "msg-old-project",
+        chat_session_id: oldSession.id,
+        content: "old project message",
+      });
+      let resolveList!: (value: { status: "ok"; data: ChatMessage[] }) => void;
+
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: oldSession.id,
+      });
+      mockedGetSession.mockResolvedValueOnce({
+        status: "ok",
+        data: oldSession,
+      });
+      mockedListMessages.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }) as ReturnType<typeof commands.listChatMessages>
+      );
+
+      const hydratePromise = useLiveChatStore.getState().hydrate();
+      await vi.waitFor(() => {
+        expect(mockedListMessages).toHaveBeenCalledTimes(1);
+      });
+
+      useLiveChatStore.getState().reset();
+      resolveList({ status: "ok", data: [oldMessage] });
+
+      await expect(hydratePromise).resolves.toBeNull();
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+      expect(useLiveChatStore.getState().messages).toEqual([]);
+      expect(useLiveChatStore.getState().hydrated).toBe(false);
+    });
+
     it("records the error and still marks as hydrated when getChatSession fails", async () => {
       mockedGetActive.mockResolvedValueOnce({
         status: "ok",

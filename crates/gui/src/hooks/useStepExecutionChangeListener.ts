@@ -6,6 +6,10 @@ import {
   type StepExecutionChangeType,
 } from "../bindings";
 import { useExecutionStore, useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Get toast message for execution change */
 function getExecutionChangeMessage(
@@ -44,9 +48,12 @@ export function useStepExecutionChangeListener(
   const { enabled = true } = options;
   const upsertExecution = useExecutionStore((state) => state.upsertExecution);
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleExecutionChanged = useCallback(
     (event: { payload: StepExecutionChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { execution_id, step_name, status, change_type, execution } =
         event.payload;
 
@@ -55,14 +62,21 @@ export function useStepExecutionChangeListener(
       );
 
       const toastType =
-        status === "Completed" ? "success" : status === "Failed" ? "error" : "info";
-      addToast(getExecutionChangeMessage(change_type, step_name, status), toastType);
+        status === "Completed"
+          ? "success"
+          : status === "Failed"
+            ? "error"
+            : "info";
+      addToast(
+        getExecutionChangeMessage(change_type, step_name, status),
+        toastType
+      );
 
       if (execution) {
         upsertExecution(execution);
       }
     },
-    [addToast, upsertExecution]
+    [addToast, upsertExecution, projectScopeGeneration]
   );
 
   useEffect(() => {

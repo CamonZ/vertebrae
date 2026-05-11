@@ -36,3 +36,5 @@ export type {
 
 export { useLiveChatStore } from "./liveChatStore";
 export type { LiveChatStore, LiveChatMessage } from "./liveChatStore";
+
+export { resetProjectScopedStores } from "./projectScopedStores";
