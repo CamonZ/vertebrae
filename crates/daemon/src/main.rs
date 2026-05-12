@@ -13,7 +13,7 @@ use ractor::Actor;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
-use vertebrae_daemon::helpers::{find_provider_binary, resolve_shell_path};
+use vertebrae_daemon::helpers::{resolve_all_provider_binaries, resolve_shell_path};
 use vertebrae_daemon::{
     DaemonConfig, DaemonMessage, DaemonSupervisor, ProjectEntry, ResolvedConfig,
 };
@@ -46,34 +46,32 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         sacrum_url,
         api_token,
         projects,
-        provider,
     } = ResolvedConfig::load()?;
 
     tracing::info!(
         sacrum_url = %sacrum_url,
         project_count = projects.len(),
-        provider = %provider,
         "Starting vtb-daemon"
     );
 
     let shell_path = resolve_shell_path();
     tracing::info!(shell_path = %shell_path, "Resolved user shell PATH");
 
-    let provider_binary = find_provider_binary(provider, &shell_path)
-        .map_err(|e| format!("Cannot start daemon: {e}"))?;
-
+    // Best-effort: resolve binaries for every known provider so each step
+    // can pick the right one. A missing binary only fails the steps that
+    // request that provider; the daemon stays up for the others.
+    let provider_binaries = resolve_all_provider_binaries(&shell_path);
     tracing::info!(
-        provider = %provider,
-        binary = %provider_binary.display(),
-        "Resolved provider CLI binary"
+        anthropic_binary = ?provider_binaries.anthropic,
+        openai_binary = ?provider_binaries.openai,
+        "Resolved provider CLI binaries"
     );
 
     let daemon_config = DaemonConfig {
         base_url: sacrum_url,
         api_token,
-        claude_binary: provider_binary,
+        provider_binaries,
         shell_path,
-        provider,
     };
 
     let (actor_ref, actor_handle) = Actor::spawn(

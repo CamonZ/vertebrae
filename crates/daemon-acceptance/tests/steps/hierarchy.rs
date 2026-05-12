@@ -34,7 +34,7 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
             "add",
             &wf_name,
             "--step",
-            "run:default",
+            "run:claude-sonnet-4-6",
             "--auto-advance",
         ])
         .await;
@@ -253,20 +253,19 @@ pub async fn intermediate_waiting_status_is(world: &mut DaemonWorld, expected: S
 #[then("the parent task has a completed step execution for the work step")]
 pub async fn parent_has_work_completed(world: &mut DaemonWorld) {
     let parent_id = require(&world.parent_task_id, "parent task not set");
-    let execs = list_task_executions(world, &parent_id).await;
-    let work_completed = execs
-        .iter()
-        .any(|e| step_name(e) == Some("work") && status_eq(e, "completed"));
-    assert!(
-        work_completed,
-        "parent has no completed work execution: {execs:?}"
-    );
+    wait_for_completed_step_execution(world, &parent_id, "work", PARENT_WAIT_RESOLVED_TIMEOUT)
+        .await;
 }
 
 #[then("the parent task is done")]
 pub async fn parent_task_is_done(world: &mut DaemonWorld) {
     let parent_id = require(&world.parent_task_id, "parent task not set");
-    wait_for_tasks_completed(world, &[parent_id.clone()], PARENT_WAIT_RESOLVED_TIMEOUT).await;
+    wait_for_tasks_completed(
+        world,
+        std::slice::from_ref(&parent_id),
+        PARENT_WAIT_RESOLVED_TIMEOUT,
+    )
+    .await;
 }
 
 #[then("the daemon never dispatched a run_step for the parent wait_children step")]
@@ -380,9 +379,10 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             "add",
             &wf_name,
             "--step",
-            "wait_children:default",
+            "wait_children:claude-sonnet-4-6",
             "--step",
-            "work:default",
+            "work:claude-sonnet-4-6",
+            "--auto-advance",
         ])
         .await;
     world.assert_vtb_ok("workflow add (parent/intermediate)");
@@ -554,9 +554,27 @@ async fn child_run_start(world: &DaemonWorld, n: usize) -> (String, String) {
     (id, str_field(&run, "inserted_at").to_string())
 }
 
+/// Returns the child task's `completed_at` time. The step-execution
+/// `updated_at` is unreliable for cross-task ordering because Sacrum can
+/// flush the next child's dispatch before the prior child's execution row
+/// has been updated; the *task*-level `completed_at` is set only after the
+/// whole child workflow wraps up, making it monotonic with downstream
+/// dispatches.
 async fn child_run_end(world: &DaemonWorld, n: usize) -> (String, String) {
-    let (id, run) = child_run_execution(world, n).await;
-    (id, str_field(&run, "updated_at").to_string())
+    assert!(n >= 1, "child indices are 1-based");
+    let idx = n - 1;
+    let id = world
+        .child_task_ids
+        .get(idx)
+        .unwrap_or_else(|| panic!("child {n} out of range: {:?}", world.child_task_ids))
+        .clone();
+    let task = fetch_task(world, &id).await;
+    let completed_at = task_completed_at(&task).to_string();
+    assert!(
+        !completed_at.is_empty(),
+        "child {n} ({id}) task has no completed_at: {task}"
+    );
+    (id, completed_at)
 }
 
 async fn child_run_execution(world: &DaemonWorld, n: usize) -> (String, serde_json::Value) {
@@ -609,6 +627,35 @@ async fn wait_for_tasks_completed(world: &DaemonWorld, ids: &[String], timeout: 
             let id = pending.unwrap_or_default();
             panic!(
                 "timed out after {timeout:?} waiting for tasks {ids:?} to complete (task {id} has no completed_at yet)"
+            );
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+}
+
+/// Poll until a step execution with the given `step_name` reaches the
+/// `completed` status on the task. The work execution arrives after Sacrum
+/// has advanced past `wait_children` AND the daemon has finished the
+/// downstream dispatch, so we can't read it in a single shot right after
+/// the waiting execution flips.
+async fn wait_for_completed_step_execution(
+    world: &DaemonWorld,
+    task_id: &str,
+    step_name_expected: &str,
+    timeout: Duration,
+) {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let execs = list_task_executions(world, task_id).await;
+        let completed = execs
+            .iter()
+            .any(|e| step_name(e) == Some(step_name_expected) && status_eq(e, "completed"));
+        if completed {
+            return;
+        }
+        if Instant::now() >= deadline {
+            panic!(
+                "timed out after {timeout:?} waiting for completed {step_name_expected:?} execution on task {task_id}: {execs:?}"
             );
         }
         tokio::time::sleep(POLL_INTERVAL).await;

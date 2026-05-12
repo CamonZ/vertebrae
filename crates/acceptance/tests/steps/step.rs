@@ -166,7 +166,7 @@ async fn when_add_step_with_step_type_and_output_schema(
     step_type: String,
 ) {
     let schema = if step_type == "route" {
-        r#"{"type":"object","properties":{"transition_to":{"type":"string","format":"uuid"},"transition_type":{"type":"string","enum":["intra_workflow","inter_workflow"]}},"required":["transition_to","transition_type"],"additionalProperties":false}"#
+        r#"{"type":"object","properties":{"transition_to":{"type":"string"},"transition_type":{"type":"string","enum":["intra_workflow","inter_workflow"]}},"required":["transition_to","transition_type"],"additionalProperties":false}"#
     } else {
         r#"{"type":"object","properties":{"score":{"type":"number"}}}"#
     };
@@ -211,7 +211,7 @@ async fn when_add_route_step_with_invalid_output_schema(world: &mut SmokeWorld, 
 /// The canonical with-handoff routing contract schema (must match
 /// `StepType::routing_contract_schema()` and Sacrum's
 /// `routing_contract_schema/0`).
-const WITH_HANDOFF_ROUTING_SCHEMA: &str = r#"{"type":"object","properties":{"transition_to":{"type":"string","format":"uuid"},"transition_type":{"type":"string","enum":["intra_workflow","inter_workflow"]},"handoff":{"type":"object"}},"required":["transition_to","transition_type"],"additionalProperties":false}"#;
+const WITH_HANDOFF_ROUTING_SCHEMA: &str = r#"{"type":"object","properties":{"transition_to":{"type":"string"},"transition_type":{"type":"string","enum":["intra_workflow","inter_workflow"]},"handoff":{"type":"object"}},"required":["transition_to","transition_type"],"additionalProperties":false}"#;
 
 /// Create a route step with the with-handoff routing contract schema.
 #[when(expr = "I add a route step {string} to the workflow with the with-handoff schema")]

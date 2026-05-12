@@ -71,7 +71,7 @@ pub async fn script_codex_emits_turn_failed(world: &mut DaemonWorld) {
     // Upstream `TurnFailedEvent` shape: `{"type":"turn.failed","error":{"message":"..."}}`.
     // Distinct from the flat top-level `error` event -- this one nests the
     // message inside an `error` object. Both should mark the step failed.
-    let turn_failed = r#"{"type":"turn.failed","error":{"message":"codex-mock-turn-failure"}}"#;
+    let turn_failed = r#"{"type":"turn.failed","error":{"message":"codex-mock-turn-failure"} }"#;
     let builder = world
         .mock_response("codex-turn-failed")
         .with_exit_code(1)
@@ -107,10 +107,10 @@ async fn script_codex_agent_message_with_text(
     text: &str,
 ) {
     let agent_message = format!(
-        r#"{{"type":"item.completed","item":{{"id":"m1","type":"agent_message","text":"{text}"}}}}"#
+        r#"{{"type":"item.completed","item":{{"id":"m1","type":"agent_message","text":"{text}"}} }}"#
     );
     let thread_started = format!(r#"{{"type":"thread.started","thread_id":"{thread_id}"}}"#);
-    let turn_completed = r#"{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":0}}"#;
+    let turn_completed = r#"{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":0} }"#;
     let builder = world
         .mock_response(mock_name)
         .with_exit_code(0)

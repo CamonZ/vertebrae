@@ -29,26 +29,61 @@ Feature: List tasks
     Then the output should contain "<epic_id>"
     And the output should not contain "<ticket_id>"
 
-  Scenario Outline: Filter by each priority value
+  Scenario: Filter by priority low
     Given I create a task with:
-      | title    | Target task     |
-      | priority | <target>        |
+      | title    | Target task |
+      | priority | low         |
     And I store the task ID as "target_id"
     And I create a task with:
-      | title    | Other task      |
-      | priority | <other>         |
+      | title    | Other task |
+      | priority | critical   |
     And I store the task ID as "other_id"
     When I list tasks with:
-      | priority | <target> |
+      | priority | low |
     Then the output should contain "<target_id>"
     And the output should not contain "<other_id>"
 
-    Examples:
-      | target   | other    |
-      | low      | critical |
-      | medium   | low      |
-      | high     | medium   |
-      | critical | high     |
+  Scenario: Filter by priority medium
+    Given I create a task with:
+      | title    | Target task |
+      | priority | medium      |
+    And I store the task ID as "target_id"
+    And I create a task with:
+      | title    | Other task |
+      | priority | low        |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | priority | medium |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
+
+  Scenario: Filter by priority high
+    Given I create a task with:
+      | title    | Target task |
+      | priority | high        |
+    And I store the task ID as "target_id"
+    And I create a task with:
+      | title    | Other task |
+      | priority | medium     |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | priority | high |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
+
+  Scenario: Filter by priority critical
+    Given I create a task with:
+      | title    | Target task |
+      | priority | critical    |
+    And I store the task ID as "target_id"
+    And I create a task with:
+      | title    | Other task |
+      | priority | high       |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | priority | critical |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
 
   Scenario: Filter by tag
     Given I create a task with:

@@ -32,23 +32,6 @@ pub struct VertebraeConfigFile {
     /// Per-project configuration keyed by slug
     #[serde(default)]
     pub projects: BTreeMap<String, ProjectSection>,
-    /// Daemon-specific configuration (built-in provider selection, etc.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daemon: Option<DaemonSection>,
-}
-
-/// Daemon-specific configuration in `~/.config/vertebrae/config.toml`.
-///
-/// Currently used to select the built-in execution provider the daemon should
-/// resolve at startup. Harness-specific environment and config files
-/// (CLAUDE_CODE_PATH, CODEX_PATH, etc.) are owned by the underlying CLI
-/// tools and remain outside of this section.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DaemonSection {
-    /// Built-in provider name (`anthropic` or `openai`). When omitted the
-    /// daemon defaults to `anthropic` for backwards compatibility.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
 }
 
 /// Global sacrum settings
@@ -454,7 +437,6 @@ mod tests {
                     },
                 ),
             ]),
-            daemon: None,
         };
 
         // CWD inside child-project should match the child (longer prefix)
@@ -481,7 +463,6 @@ mod tests {
                     path: "/home/user/code/myproject".to_string(),
                 },
             )]),
-            daemon: None,
         };
 
         let cwd = std::path::Path::new("/tmp/unrelated");
@@ -506,7 +487,6 @@ mod tests {
                     path: "/home/user/code/myproject".to_string(),
                 },
             )]),
-            daemon: None,
         };
 
         let cwd = std::path::Path::new("/home/user/code/myproject");
@@ -545,7 +525,6 @@ mod tests {
                     path: "/Users/test/code/vertebrae".to_string(),
                 },
             )]),
-            daemon: None,
         };
 
         let serialized = toml::to_string_pretty(&config).unwrap();
@@ -617,7 +596,6 @@ path = "/Users/test/other"
                     path: cwd,
                 },
             )]),
-            daemon: None,
         }
     }
 
@@ -704,7 +682,6 @@ path = "/Users/test/other"
                 token: Some("some-token".to_string()),
             },
             projects: BTreeMap::new(),
-            daemon: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -728,7 +705,6 @@ path = "/Users/test/other"
                 token: None,
             },
             projects: BTreeMap::new(),
-            daemon: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
 
@@ -852,7 +828,6 @@ path = "/Users/test/other"
                     path: "/some/path".to_string(),
                 },
             )]),
-            daemon: None,
         }
     }
 
@@ -913,7 +888,6 @@ path = "/Users/test/other"
                 token: None,
             },
             projects: BTreeMap::new(),
-            daemon: None,
         };
         let result = SacrumConfig::load_from_config(config);
         assert!(result.is_err());
