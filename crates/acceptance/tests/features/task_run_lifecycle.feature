@@ -14,7 +14,7 @@ Feature: CLI TaskRun lifecycle
     And the output should match "Run: (queued|executing|waiting) taskRun=[0-9a-f-]{36} latestStep=([0-9a-f-]{36}|none)"
     When I list tasks
     Then the output should contain "Run"
-    And the output should match "<TASK_ID>\\s+task\\s+[^\\n]+\\s+(queued|executing|waiting)"
+    And the output should match "<TASK_ID> +task +[^ ]+ +(queued|executing|waiting)"
     When I show the task
     Then the output should match "Run: (queued|executing|waiting) taskRun=[0-9a-f-]{36} latestStep=([0-9a-f-]{36}|none)"
     And the output should contain "Controls:"

@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use vertebrae_core::error::ServiceResult;
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::{
@@ -132,16 +132,22 @@ impl SacrumExecutionService {
 #[async_trait]
 impl ExecutionService for SacrumExecutionService {
     async fn create_execution(&self, execution: StepExecution) -> ServiceResult<String> {
-        let variables = json!({
+        let mut variables = json!({
             "task_id": execution.task_id,
             "workflow_id": execution.workflow_id,
             "step_name": execution.step_name,
             "status": execution.status.as_str(),
-            "context": execution.context,
-            "prompt": execution.prompt,
             "model": execution.model_used,
-            "model_provider": serde_json::Value::Null,
+            "model_provider": Value::Null,
         });
+        // Absinthe's Json scalar rejects explicit null values, so only include
+        // `context` / `prompt` keys when the StepExecution carries them.
+        if let Some(context) = execution.context {
+            variables["context"] = Value::String(context);
+        }
+        if let Some(prompt) = execution.prompt {
+            variables["prompt"] = Value::String(prompt);
+        }
 
         let result: IdOnly = self
             .client

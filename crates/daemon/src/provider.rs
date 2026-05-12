@@ -55,6 +55,10 @@ pub enum ProviderResolutionError {
     /// Failed to materialize a provider-side artefact on disk -- e.g. the
     /// JSON schema file Codex requires for `--output-schema`.
     SchemaFileWrite(String),
+    /// The step requested a provider whose binary was not resolved at
+    /// daemon startup. The daemon doesn't crash for a missing provider --
+    /// only the step that needs it fails, with this hint.
+    MissingProviderBinary { provider: Provider, hint: String },
 }
 
 impl std::fmt::Display for ProviderResolutionError {
@@ -64,11 +68,35 @@ impl std::fmt::Display for ProviderResolutionError {
             ProviderResolutionError::SchemaFileWrite(msg) => {
                 write!(f, "failed to write Codex output_schema file: {msg}")
             }
+            ProviderResolutionError::MissingProviderBinary { provider, hint } => {
+                write!(
+                    f,
+                    "{provider} provider requested but its CLI binary was not resolved at daemon startup. {hint}"
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for ProviderResolutionError {}
+
+/// Build a `MissingProviderBinary` error for `provider`, pulling the
+/// hint string from the corresponding `find_*_binary` resolver so we
+/// don't duplicate the install-help copy.
+fn missing_provider_binary_error(provider: Provider) -> ProviderResolutionError {
+    // Re-run the lookup with an empty shell PATH so we get the canonical
+    // "not found" message from the resolver. The actual binary search
+    // happened at startup; we only need the help text here.
+    let hint = match provider {
+        Provider::Anthropic => crate::helpers::find_claude_binary("")
+            .err()
+            .unwrap_or_else(|| "Set CLAUDE_CODE_PATH or install claude in PATH.".to_string()),
+        Provider::Openai => crate::helpers::find_codex_binary("")
+            .err()
+            .unwrap_or_else(|| "Set CODEX_PATH or install codex in PATH.".to_string()),
+    };
+    ProviderResolutionError::MissingProviderBinary { provider, hint }
+}
 
 /// Resolve which built-in provider should run this step. `None` defaults to
 /// Anthropic to preserve pre-refactor behavior.
@@ -110,7 +138,7 @@ pub fn resolve_provider_command(
         Provider::Anthropic => {
             let settings_path = settings_bundle.map(|b| b.settings_path());
             (
-                build_claude_command_with_settings(config, settings_path.as_deref()),
+                build_claude_command_with_settings(config, settings_path.as_deref())?,
                 ParserKind::StreamJson,
             )
         }
@@ -141,7 +169,11 @@ fn build_codex_command(
     config: &StepExecutorConfig,
     settings_bundle: Option<&SyntheticSettings>,
 ) -> Result<Command, ProviderResolutionError> {
-    let mut cmd = Command::new(&config.claude_binary);
+    let binary = config
+        .provider_binaries
+        .get(Provider::Openai)
+        .ok_or_else(|| missing_provider_binary_error(Provider::Openai))?;
+    let mut cmd = Command::new(binary);
 
     let step = &config.step_config;
     let agent_config = &step.agent_config;
@@ -196,6 +228,7 @@ mod tests {
     use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SacrumExecutionService};
 
     use crate::actors::step_executor::{DEFAULT_MODEL, StepConfig, StepExecutorConfig};
+    use crate::helpers::ProviderBinaries;
 
     use super::*;
 
@@ -209,7 +242,13 @@ mod tests {
         Arc::new(SacrumExecutionService::new(client))
     }
 
-    fn make_config(agent_config: AgentConfig, prompt: &str, binary: &str) -> StepExecutorConfig {
+    fn make_config(agent_config: AgentConfig, prompt: &str, _binary: &str) -> StepExecutorConfig {
+        // Pre-refactor, this helper threaded a single `binary` PathBuf into
+        // `claude_binary` to control which mock binary the command builder
+        // picked up. The new `ProviderBinaries` struct holds both resolved
+        // binaries simultaneously, so we hardcode both well-known paths and
+        // let each test select the provider via `agent_config.provider` --
+        // matching how the daemon now behaves at runtime.
         StepExecutorConfig {
             execution_id: "exec-prov".to_string(),
             task_id: "task-prov".to_string(),
@@ -222,7 +261,33 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from(binary),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        }
+    }
+
+    fn make_config_with_binaries(
+        agent_config: AgentConfig,
+        prompt: &str,
+        provider_binaries: ProviderBinaries,
+    ) -> StepExecutorConfig {
+        StepExecutorConfig {
+            execution_id: "exec-prov".to_string(),
+            task_id: "task-prov".to_string(),
+            step_config: StepConfig {
+                prompt: prompt.to_string(),
+                agent_config,
+                agents: Vec::new(),
+                skills: Vec::new(),
+                verbose_daemon_logging: false,
+            },
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            provider_binaries,
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         }
@@ -280,7 +345,8 @@ mod tests {
         let resolved_argv = argv_strings(&resolved.command);
 
         // Same argv as the existing builder produces.
-        let baseline = build_claude_command_with_settings(&config, None);
+        let baseline = build_claude_command_with_settings(&config, None)
+            .expect("baseline anthropic builder must succeed");
         let baseline_argv = argv_strings(&baseline);
         assert_eq!(resolved_argv, baseline_argv);
 
@@ -303,7 +369,10 @@ mod tests {
         assert_eq!(resolved.parser_kind, ParserKind::StreamJson);
 
         let resolved_argv = argv_strings(&resolved.command);
-        let baseline_argv = argv_strings(&build_claude_command_with_settings(&config, None));
+        let baseline_argv = argv_strings(
+            &build_claude_command_with_settings(&config, None)
+                .expect("baseline anthropic builder must succeed"),
+        );
         assert_eq!(resolved_argv, baseline_argv);
     }
 
@@ -499,6 +568,53 @@ mod tests {
     }
 
     #[test]
+    fn missing_openai_binary_fails_with_clear_error() {
+        // When the daemon starts and codex isn't installed, OpenAI steps must
+        // fail with MissingProviderBinary -- not a panic, not a generic spawn
+        // error after the fact. The Anthropic binary is still resolved so the
+        // daemon stays up for other workflows.
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5");
+        let binaries = ProviderBinaries {
+            anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+            openai: None,
+        };
+        let config = make_config_with_binaries(agent_config, "p", binaries);
+        let err = resolve_provider_command(&config, None)
+            .expect_err("openai step must fail when codex binary is missing");
+        match err {
+            ProviderResolutionError::MissingProviderBinary { provider, hint } => {
+                assert_eq!(provider, Provider::Openai);
+                assert!(
+                    !hint.is_empty(),
+                    "MissingProviderBinary must carry a non-empty install hint"
+                );
+            }
+            other => panic!("expected MissingProviderBinary, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_anthropic_binary_fails_with_clear_error() {
+        let agent_config = AgentConfig::new().with_provider(Provider::Anthropic);
+        let binaries = ProviderBinaries {
+            anthropic: None,
+            openai: Some(PathBuf::from("/usr/local/bin/codex")),
+        };
+        let config = make_config_with_binaries(agent_config, "p", binaries);
+        let err = resolve_provider_command(&config, None)
+            .expect_err("anthropic step must fail when claude binary is missing");
+        assert!(matches!(
+            err,
+            ProviderResolutionError::MissingProviderBinary {
+                provider: Provider::Anthropic,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn provider_resolution_error_display() {
         let e = ProviderResolutionError::InvalidProviderModel("bad combo".to_string());
         assert_eq!(format!("{e}"), "bad combo");
@@ -512,6 +628,20 @@ mod tests {
         assert!(
             rendered.contains("disk full"),
             "should include cause: {rendered}"
+        );
+
+        let e = ProviderResolutionError::MissingProviderBinary {
+            provider: Provider::Openai,
+            hint: "Set CODEX_PATH or install codex in PATH.".to_string(),
+        };
+        let rendered = format!("{e}");
+        assert!(
+            rendered.contains("openai"),
+            "should mention provider name, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("CODEX_PATH"),
+            "should carry the install hint, got: {rendered}"
         );
     }
 }

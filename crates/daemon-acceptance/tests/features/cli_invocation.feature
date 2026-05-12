@@ -7,11 +7,11 @@ Feature: Daemon translates step config into Claude CLI invocation
     Given a configured daemon test environment
     And a workflow with one execute step
     And a task assigned to the workflow
-    And the step is configured with agent_config '{"model":"my-custom-model"}'
+    And the step is configured with agent_config '{"model":"claude-opus-4-5"}'
     When the mock is scripted to succeed with full metrics
     And run_step is invoked
     And I wait for the execution to reach status "completed"
-    Then the mock argv contains "--model" followed by "my-custom-model"
+    Then the mock argv contains "--model" followed by "claude-opus-4-5"
 
   Scenario: permission_mode plan is passed through and not overridden
     Given a configured daemon test environment
