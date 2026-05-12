@@ -80,6 +80,7 @@ services:
     volumes:
       - .:/app
       - cargo-cache:/cargo
+      - target-cache:/app/target
     working_dir: /app
     command: ["/bin/sh", "-c", "cargo build --bin vtb --quiet && cargo test -p acceptance --test acceptance"]
 
@@ -100,6 +101,7 @@ services:
     volumes:
       - .:/app
       - cargo-cache:/cargo
+      - target-cache:/app/target
       - ./crates/daemon-acceptance/mocks:/mocks
     working_dir: /app
     command: ["/app/docker/daemon-test-entrypoint.sh"]
@@ -122,6 +124,7 @@ services:
     volumes:
       - .:/app
       - cargo-cache:/cargo
+      - target-cache:/app/target
       - ./docker/gui-config.toml:/root/.config/vertebrae/config.toml.base:ro
     working_dir: /app
     command: ["/app/docker/gui-test-entrypoint.sh"]
@@ -129,3 +132,4 @@ services:
 volumes:
   pgdata:
   cargo-cache:
+  target-cache:

@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
-use vertebrae_core::Provider;
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::actors::project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
+use crate::helpers::ProviderBinaries;
 use crate::phoenix::{PhoenixMessage, PhoenixSocket};
 
 /// Result of classifying an incoming channel message.
@@ -86,15 +86,14 @@ pub struct DaemonConfig {
     /// impl below so accidental `tracing` of the config or its wrapping error
     /// chain cannot leak the token to logs.
     pub api_token: String,
-    /// Resolved absolute path to the configured provider's harness binary
-    /// (Claude Code CLI for [`Provider::Anthropic`], Codex CLI for
-    /// [`Provider::Openai`]).
-    pub claude_binary: std::path::PathBuf,
+    /// Provider CLI binaries resolved at daemon startup. Each entry is
+    /// `Some` when the binary was found; `None` when it was not. The daemon
+    /// starts even if one is missing -- only steps requesting that provider
+    /// fail (with `MissingProviderBinary`) before spawn.
+    pub provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH, resolved at startup.
     /// Passed to child processes so they can find tools like `mix`, `node`, `vtb`, etc.
     pub shell_path: String,
-    /// Built-in execution provider selected for this daemon process.
-    pub provider: Provider,
 }
 
 impl std::fmt::Debug for DaemonConfig {
@@ -102,9 +101,8 @@ impl std::fmt::Debug for DaemonConfig {
         f.debug_struct("DaemonConfig")
             .field("base_url", &self.base_url)
             .field("api_token", &"<redacted>")
-            .field("claude_binary", &self.claude_binary)
+            .field("provider_binaries", &self.provider_binaries)
             .field("shell_path", &self.shell_path)
-            .field("provider", &self.provider)
             .finish()
     }
 }
@@ -421,7 +419,7 @@ impl DaemonSupervisor {
             project_id: project_id.to_string(),
             services,
             project_root: project_root.to_path_buf(),
-            claude_binary: state.config.claude_binary.clone(),
+            provider_binaries: state.config.provider_binaries.clone(),
             shell_path: state.config.shell_path.clone(),
         };
 
@@ -788,19 +786,21 @@ mod tests {
 
     // ===== DaemonConfig tests =====
 
-    fn sample_daemon_config(provider: Provider) -> DaemonConfig {
+    fn sample_daemon_config() -> DaemonConfig {
         DaemonConfig {
             base_url: "http://localhost:4000".to_string(),
             api_token: "sac_super_secret_token".to_string(),
-            claude_binary: std::path::PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(std::path::PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(std::path::PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/bin:/bin".to_string(),
-            provider,
         }
     }
 
     #[test]
     fn daemon_config_debug_redacts_api_token() {
-        let cfg = sample_daemon_config(Provider::Anthropic);
+        let cfg = sample_daemon_config();
         let dbg = format!("{:?}", cfg);
         assert!(
             !dbg.contains("sac_super_secret_token"),
@@ -812,14 +812,15 @@ mod tests {
         );
         // Other useful fields are still visible for diagnostics.
         assert!(dbg.contains("http://localhost:4000"));
-        assert!(dbg.contains("Anthropic"));
+        // Both resolved binaries are reflected in the debug output.
+        assert!(dbg.contains("/usr/local/bin/claude"));
+        assert!(dbg.contains("/usr/local/bin/codex"));
     }
 
     #[test]
-    fn daemon_config_carries_selected_provider() {
-        let anthropic = sample_daemon_config(Provider::Anthropic);
-        let openai = sample_daemon_config(Provider::Openai);
-        assert_eq!(anthropic.provider, Provider::Anthropic);
-        assert_eq!(openai.provider, Provider::Openai);
+    fn daemon_config_carries_both_provider_binaries() {
+        let cfg = sample_daemon_config();
+        assert!(cfg.provider_binaries.anthropic.is_some());
+        assert!(cfg.provider_binaries.openai.is_some());
     }
 }

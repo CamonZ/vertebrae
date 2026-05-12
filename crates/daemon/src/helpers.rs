@@ -1,6 +1,61 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vertebrae_core::Provider;
+
+/// Resolved provider binaries (best-effort, per-startup).
+///
+/// Each entry is `Some` when the binary was found at daemon-startup PATH /
+/// env-override resolution, `None` otherwise. A missing binary does not
+/// prevent the daemon from starting — only steps that request that
+/// provider will fail with `MissingProviderBinary` before spawn.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderBinaries {
+    pub anthropic: Option<PathBuf>,
+    pub openai: Option<PathBuf>,
+}
+
+impl ProviderBinaries {
+    /// Return the resolved binary for `provider`, or `None` if it was not
+    /// found at daemon startup.
+    pub fn get(&self, provider: Provider) -> Option<&Path> {
+        match provider {
+            Provider::Anthropic => self.anthropic.as_deref(),
+            Provider::Openai => self.openai.as_deref(),
+        }
+    }
+}
+
+/// Resolve all known provider binaries from PATH / env overrides.
+///
+/// Missing binaries are represented as `None` — the daemon still starts so a
+/// single missing provider doesn't block other workflows. Each missing one
+/// is logged at WARN with the underlying resolution error so operators get
+/// a clear hint.
+pub fn resolve_all_provider_binaries(shell_path: &str) -> ProviderBinaries {
+    let anthropic = match find_claude_binary(shell_path) {
+        Ok(path) => Some(path),
+        Err(err) => {
+            tracing::warn!(
+                provider = %Provider::Anthropic,
+                error = %err,
+                "Anthropic provider binary not resolved at startup; steps requesting it will fail"
+            );
+            None
+        }
+    };
+    let openai = match find_codex_binary(shell_path) {
+        Ok(path) => Some(path),
+        Err(err) => {
+            tracing::warn!(
+                provider = %Provider::Openai,
+                error = %err,
+                "OpenAI provider binary not resolved at startup; steps requesting it will fail"
+            );
+            None
+        }
+    };
+    ProviderBinaries { anthropic, openai }
+}
 
 /// Resolve the user's login shell PATH.
 ///
