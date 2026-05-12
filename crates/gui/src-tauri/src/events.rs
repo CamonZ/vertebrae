@@ -7,11 +7,20 @@ use crate::types;
 /// Event payload for task changes.
 /// Emitted when a task is created, updated, deleted, or its status changes.
 /// For create/update events, `task` carries the full deserialized entity.
+///
+/// `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
+/// the Sacrum CDC payload so the reducer can act on `Deleted` events (which
+/// carry a before-image tombstone, not a full Task) without keeping a local
+/// task-position cache.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TaskChangedEvent {
     pub task_id: String,
     pub change_type: TaskChangeType,
     pub task: Option<types::Task>,
+    pub current_step_id: Option<String>,
+    pub workflow_id: Option<String>,
+    pub level: Option<types::TaskLevel>,
+    pub archived: Option<bool>,
 }
 
 /// The type of change that occurred on a task.
@@ -84,14 +93,42 @@ pub enum StepChangeType {
     Deleted,
 }
 
-/// Event payload for task current step changes.
-/// Emitted when a task's current_step_id is updated during workflow execution.
-/// Includes the new step info so frontend can update directly without refetching.
+/// Event payload for manual task workflow step changes (no TaskRun involved).
+///
+/// Mirrors Sacrum's `task_step_changed` wire event. Fires for manual moves
+/// (`assign_workflow`, `advance_to_step`, `move_to_step`) when no orchestrator
+/// run exists for the task. Only emitted when `from_step_id != to_step_id`.
+///
+/// `from_step_id` may be `null` on the first workflow assignment. `to_step_id`
+/// is always present on this event — run-end paths are reported through
+/// `TaskRunStepChangedEvent` instead.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TaskStepChangedEvent {
     pub task_id: String,
-    pub step_id: String,
-    pub step_name: String,
+    pub from_step_id: Option<String>,
+    pub to_step_id: Option<String>,
+    pub workflow_id: String,
+    pub level: types::TaskLevel,
+}
+
+/// Event payload for orchestrator-driven task workflow step changes.
+///
+/// Mirrors Sacrum's `task_run_step_changed` wire event. Fires whenever a
+/// task's `current_step_id` changes while a TaskRun exists, and at run-end
+/// paths (completion, retry exhaustion, stop) where `to_step_id` will be
+/// `null` because the run has left active statuses.
+///
+/// Disjoint with `TaskStepChangedEvent`: manual moves are blocked while an
+/// orchestrator is active, so clients never receive both for the same
+/// transition.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TaskRunStepChangedEvent {
+    pub task_run_id: String,
+    pub task_id: String,
+    pub from_step_id: Option<String>,
+    pub to_step_id: Option<String>,
+    pub status: types::TaskRunStatus,
+    pub level: types::TaskLevel,
 }
 
 /// Event payload for step execution changes.
@@ -126,9 +163,17 @@ pub enum StepExecutionChangeType {
 
 /// Event payload for step transition changes.
 /// Emitted when a step transition is created or deleted.
+///
+/// `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
+/// pipeline reducer can update each step's `transitions_to[]` without a
+/// refetch. Sacrum sends the full edge on both `Created` and `Deleted`
+/// (before-image tombstone), so these endpoints are always populated under
+/// the v1 CDC contract.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct StepTransitionChangedEvent {
     pub transition_id: String,
+    pub from_step_id: Option<String>,
+    pub to_step_id: Option<String>,
     pub change_type: StepTransitionChangeType,
 }
 
@@ -141,11 +186,17 @@ pub enum StepTransitionChangeType {
 
 /// Event payload for workflow transition changes.
 /// Emitted when a workflow-to-workflow transition is created or deleted.
+///
+/// `target_step_id` and `label` are hoisted from the Sacrum payload so the
+/// pipeline reducer can construct a complete `PipelineWorkflowTransition`
+/// on `Created` without a refetch.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct WorkflowTransitionChangedEvent {
     pub transition_id: String,
     pub from_workflow_id: Option<String>,
     pub to_workflow_id: Option<String>,
+    pub target_step_id: Option<String>,
+    pub label: Option<String>,
     pub change_type: WorkflowTransitionChangeType,
 }
 

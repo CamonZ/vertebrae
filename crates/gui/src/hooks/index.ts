@@ -12,7 +12,6 @@ export { useTaskRunTrace } from "./useTaskRunTrace";
 export type { UseTaskRunTraceResult } from "./useTaskRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
-export { useTaskStepChangeListener } from "./useTaskStepChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
 export { useWorkflowChangeListener } from "./useWorkflowChangeListener";

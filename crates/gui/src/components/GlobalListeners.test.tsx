@@ -9,7 +9,6 @@ const mockUseStepExecutionChangeListener = vi.fn();
 const mockUseSectionChangeListener = vi.fn();
 const mockUseSessionLogChangeListener = vi.fn();
 const mockUseStepTransitionChangeListener = vi.fn();
-const mockUseTaskStepChangeListener = vi.fn();
 const mockUseLiveChatChangeListener = vi.fn();
 
 vi.mock("../hooks", () => ({
@@ -29,8 +28,6 @@ vi.mock("../hooks", () => ({
     mockUseSessionLogChangeListener(...args),
   useStepTransitionChangeListener: (...args: unknown[]) =>
     mockUseStepTransitionChangeListener(...args),
-  useTaskStepChangeListener: (...args: unknown[]) =>
-    mockUseTaskStepChangeListener(...args),
   useLiveChatChangeListener: (...args: unknown[]) =>
     mockUseLiveChatChangeListener(...args),
 }));
@@ -54,7 +51,6 @@ describe("GlobalListeners", () => {
     expect(mockUseSectionChangeListener).toHaveBeenCalled();
     expect(mockUseSessionLogChangeListener).toHaveBeenCalled();
     expect(mockUseStepTransitionChangeListener).toHaveBeenCalled();
-    expect(mockUseTaskStepChangeListener).toHaveBeenCalled();
     expect(mockUseLiveChatChangeListener).toHaveBeenCalled();
   });
 
@@ -69,7 +65,6 @@ describe("GlobalListeners", () => {
     expect(mockUseSectionChangeListener).toHaveBeenCalledWith();
     expect(mockUseSessionLogChangeListener).toHaveBeenCalledWith();
     expect(mockUseStepTransitionChangeListener).toHaveBeenCalledWith();
-    expect(mockUseTaskStepChangeListener).toHaveBeenCalledWith();
     expect(mockUseLiveChatChangeListener).toHaveBeenCalledWith();
   });
 });

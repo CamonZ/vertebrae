@@ -65,6 +65,10 @@ describe("useTaskChangeListener project scope hygiene", () => {
           task_id: staleTask.id,
           change_type: "Created",
           task: staleTask,
+          current_step_id: null,
+          workflow_id: null,
+          level: null,
+          archived: null,
         },
       });
     });
@@ -81,6 +85,10 @@ describe("useTaskChangeListener project scope hygiene", () => {
           task_id: currentTask.id,
           change_type: "Created",
           task: currentTask,
+          current_step_id: null,
+          workflow_id: null,
+          level: null,
+          archived: null,
         },
       });
     });
