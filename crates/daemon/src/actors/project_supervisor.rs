@@ -19,6 +19,7 @@ use vertebrae_core::models::{AgentConfig, ExecutionStatus};
 use crate::actors::step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
 };
+use crate::helpers::ProviderBinaries;
 use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
 
@@ -48,8 +49,10 @@ pub struct ProjectConfig {
     pub services: Arc<VertebraeServices>,
     /// Project root directory (for running Claude Code CLI).
     pub project_root: PathBuf,
-    /// Resolved absolute path to the Claude Code CLI binary.
-    pub claude_binary: PathBuf,
+    /// Provider CLI binaries resolved at daemon startup. Threaded through
+    /// to each spawned `StepExecutor` so per-step provider resolution can
+    /// pick the right binary.
+    pub provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH for child processes.
     pub shell_path: String,
 }
@@ -59,7 +62,7 @@ impl std::fmt::Debug for ProjectConfig {
         f.debug_struct("ProjectConfig")
             .field("project_id", &self.project_id)
             .field("project_root", &self.project_root)
-            .field("claude_binary", &self.claude_binary)
+            .field("provider_binaries", &self.provider_binaries)
             .field("shell_path", &"<...>")
             .field("services", &"<VertebraeServices>")
             .finish()
@@ -312,8 +315,10 @@ pub struct ProjectState {
     services: Arc<VertebraeServices>,
     /// Project root directory (for running Claude Code CLI).
     project_root: PathBuf,
-    /// Resolved absolute path to the Claude Code CLI binary.
-    claude_binary: PathBuf,
+    /// Provider CLI binaries resolved at daemon startup. Cloned into each
+    /// spawned `StepExecutorConfig` so the per-step resolver can pick the
+    /// right binary.
+    provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH for child processes.
     shell_path: String,
     /// Map from execution_id to the running StepExecutor actor ref.
@@ -351,7 +356,7 @@ impl Actor for ProjectSupervisor {
             project_id: args.project_id,
             services: args.services,
             project_root: args.project_root,
-            claude_binary: args.claude_binary,
+            provider_binaries: args.provider_binaries,
             shell_path: args.shell_path,
             running_executors: HashMap::new(),
             pending_metadata: HashMap::new(),
@@ -670,7 +675,7 @@ impl ProjectSupervisor {
             step_config,
             project_root: state.project_root.clone(),
             worktree,
-            claude_binary: state.claude_binary.clone(),
+            provider_binaries: state.provider_binaries.clone(),
             shell_path: state.shell_path.clone(),
             execution_service: state.services.executions_arc(),
         };
@@ -1033,7 +1038,10 @@ mod tests {
             project_id: "proj-123".to_string(),
             services: test_services(),
             project_root: PathBuf::from("/home/user/project"),
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
         };
         let debug = format!("{:?}", config);

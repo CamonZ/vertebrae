@@ -182,7 +182,7 @@ impl StepType {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_to": {"type": "string"},
                 "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
             },
             "required": ["transition_to", "transition_type"],
@@ -2607,7 +2607,7 @@ mod tests {
         let expected = serde_json::json!({
             "type": "object",
             "properties": {
-                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_to": {"type": "string"},
                 "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]},
                 "handoff": {"type": "object"}
             },
@@ -2623,7 +2623,7 @@ mod tests {
         let expected = serde_json::json!({
             "type": "object",
             "properties": {
-                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_to": {"type": "string"},
                 "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
             },
             "required": ["transition_to", "transition_type"],

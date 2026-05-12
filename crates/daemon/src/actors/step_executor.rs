@@ -23,8 +23,9 @@ use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
+use crate::helpers::ProviderBinaries;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
-use crate::provider::{ParserKind, resolve_provider_command};
+use crate::provider::{ParserKind, ProviderResolutionError, resolve_provider_command};
 use crate::settings_synthesis::SyntheticSettings;
 
 /// Default model used when agent_config does not specify one.
@@ -96,8 +97,11 @@ pub struct StepExecutorConfig {
     pub project_root: PathBuf,
     /// Optional worktree path override. When set, used as current_dir instead of project_root.
     pub worktree: Option<PathBuf>,
-    /// Resolved absolute path to the Claude Code CLI binary.
-    pub claude_binary: PathBuf,
+    /// Provider CLI binaries resolved at daemon startup. Each entry is
+    /// `Some` when the binary was found; `None` when it was not. Per-step
+    /// resolution looks up the binary for the step's resolved provider and
+    /// fails the step with `MissingProviderBinary` if it's absent.
+    pub provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH for the child process.
     pub shell_path: String,
     pub execution_service: Arc<dyn ExecutionService>,
@@ -118,6 +122,7 @@ impl std::fmt::Debug for StepExecutorConfig {
             .field("step_config", &self.step_config)
             .field("project_root", &self.project_root)
             .field("worktree", &self.worktree)
+            .field("provider_binaries", &self.provider_binaries)
             .field("execution_service", &"<ExecutionService>")
             .finish()
     }
@@ -141,11 +146,29 @@ impl std::fmt::Debug for StepExecutorMessage {
 
 /// Build the `claude` invocation. When `settings_path` is `Some`, emits
 /// `--settings <path>` before `agent_config` flags so CLI overrides win.
+///
+/// Returns an error when the Anthropic provider binary wasn't resolved at
+/// daemon startup -- the daemon stays up for other workflows, but this step
+/// fails before spawn.
 pub fn build_claude_command_with_settings(
     config: &StepExecutorConfig,
     settings_path: Option<&Path>,
-) -> Command {
-    let mut cmd = Command::new(&config.claude_binary);
+) -> Result<Command, ProviderResolutionError> {
+    let binary = config
+        .provider_binaries
+        .get(Provider::Anthropic)
+        .ok_or_else(|| {
+            // Pull the hint from the canonical resolver so we don't drift
+            // from the install-help text used elsewhere.
+            let hint = crate::helpers::find_claude_binary("")
+                .err()
+                .unwrap_or_else(|| "Set CLAUDE_CODE_PATH or install claude in PATH.".to_string());
+            ProviderResolutionError::MissingProviderBinary {
+                provider: Provider::Anthropic,
+                hint,
+            }
+        })?;
+    let mut cmd = Command::new(binary);
 
     let step = &config.step_config;
 
@@ -210,7 +233,7 @@ pub fn build_claude_command_with_settings(
         );
     }
 
-    cmd
+    Ok(cmd)
 }
 
 /// Emit the verbose `claude_argv` checkpoint with the resolved program/argv
@@ -821,7 +844,10 @@ mod tests {
             step_config: make_step_config("test"),
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         }
@@ -869,7 +895,10 @@ mod tests {
             step_config: make_step_config("test prompt"),
             project_root: PathBuf::from("/home/user/project"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
@@ -1022,12 +1051,16 @@ mod tests {
             step_config: make_step_config("Write tests"),
             project_root: PathBuf::from("/home/user/myproject"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let program = cmd.as_std().get_program();
         assert_eq!(program, "/usr/local/bin/claude");
     }
@@ -1040,12 +1073,16 @@ mod tests {
             step_config: make_step_config("Implement feature Y"),
             project_root: PathBuf::from("/projects/test"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1081,12 +1118,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1111,12 +1152,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1148,12 +1193,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1180,12 +1229,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1219,12 +1272,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1254,12 +1311,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1278,12 +1339,16 @@ mod tests {
             step_config: make_step_config("Do work"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(cwd, PathBuf::from("/home/user/code"));
     }
@@ -1302,12 +1367,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1342,12 +1411,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1376,7 +1449,8 @@ mod tests {
 
     #[test]
     fn build_command_no_json_schema_flag_when_output_schema_absent() {
-        let cmd = build_claude_command_with_settings(&test_config("exec-no-os"), None);
+        let cmd = build_claude_command_with_settings(&test_config("exec-no-os"), None)
+            .expect("anthropic builder must succeed in tests");
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1770,12 +1844,16 @@ mod tests {
             step_config: make_step_config("Do work in worktree"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: Some(PathBuf::from("/home/user/code-worktree-abc")),
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(
             cwd,
@@ -1792,12 +1870,16 @@ mod tests {
             step_config: make_step_config("Do work without worktree"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(
             cwd,
@@ -1814,7 +1896,10 @@ mod tests {
             step_config: make_step_config("test"),
             project_root: PathBuf::from("/home/user/project"),
             worktree: Some(PathBuf::from("/home/user/project-wt-abc")),
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
@@ -1869,7 +1954,10 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
@@ -2033,7 +2121,8 @@ mod tests {
     fn build_command_with_settings_injects_flag_before_agent_config() {
         let config = test_config("exec-settings");
         let settings = PathBuf::from("/tmp/vtb-daemon-fake/settings.json");
-        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let cmd = build_claude_command_with_settings(&config, Some(&settings))
+            .expect("anthropic builder must succeed in tests");
         let args = collect_args(&cmd);
 
         let settings_idx = args
@@ -2063,7 +2152,8 @@ mod tests {
     #[test]
     fn build_command_without_settings_does_not_emit_flag() {
         let config = test_config("exec-no-settings");
-        let cmd = build_claude_command_with_settings(&config, None);
+        let cmd = build_claude_command_with_settings(&config, None)
+            .expect("anthropic builder must succeed in tests");
         let args = collect_args(&cmd);
         assert!(
             !args.contains(&"--settings".to_string()),
@@ -2087,12 +2177,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
         let settings = PathBuf::from("/tmp/vtb-daemon-compose/settings.json");
-        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let cmd = build_claude_command_with_settings(&config, Some(&settings))
+            .expect("anthropic builder must succeed in tests");
         let args = collect_args(&cmd);
 
         // Settings flag present.
@@ -2124,12 +2218,16 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
         let settings = PathBuf::from("/tmp/vtb-daemon-deny/settings.json");
-        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let cmd = build_claude_command_with_settings(&config, Some(&settings))
+            .expect("anthropic builder must succeed in tests");
         let args = collect_args(&cmd);
 
         assert!(args.contains(&"--settings".to_string()));
@@ -2168,7 +2266,10 @@ mod tests {
             step_config: verbose_step_config(verbose),
             project_root: PathBuf::from("/tmp"),
             worktree: None,
-            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            provider_binaries: ProviderBinaries {
+                anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
+                openai: Some(PathBuf::from("/usr/local/bin/codex")),
+            },
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         }
@@ -2179,8 +2280,10 @@ mod tests {
         // Constraint #1: when the flag is absent or false, the non-verbose path
         // must remain byte-identical. Toggling the flag may emit a log line but
         // must not alter the resolved argv passed to the child process.
-        let off = build_claude_command_with_settings(&verbose_test_config(false), None);
-        let on = build_claude_command_with_settings(&verbose_test_config(true), None);
+        let off = build_claude_command_with_settings(&verbose_test_config(false), None)
+            .expect("anthropic builder must succeed in tests");
+        let on = build_claude_command_with_settings(&verbose_test_config(true), None)
+            .expect("anthropic builder must succeed in tests");
         assert_eq!(
             argv_of(&off),
             argv_of(&on),
@@ -2192,7 +2295,8 @@ mod tests {
     fn build_command_with_verbose_includes_full_json_schema_in_argv() {
         // Sanity: the argv we promise to log under verbose actually contains
         // --json-schema with the full schema JSON.
-        let cmd = build_claude_command_with_settings(&verbose_test_config(true), None);
+        let cmd = build_claude_command_with_settings(&verbose_test_config(true), None)
+            .expect("anthropic builder must succeed in tests");
         let args = argv_of(&cmd);
         let idx = args
             .iter()
@@ -2215,7 +2319,8 @@ mod tests {
     #[test]
     fn log_built_argv_returns_resolved_argv_for_anthropic() {
         let cfg = test_config("exec-log-anthropic");
-        let cmd = build_claude_command_with_settings(&cfg, None);
+        let cmd = build_claude_command_with_settings(&cfg, None)
+            .expect("anthropic builder must succeed in tests");
         let argv = log_built_argv(&cmd, &cfg, Provider::Anthropic, "test");
         assert!(!argv.is_empty(), "argv must not be empty");
         assert!(argv.contains(&"-p".to_string()));
@@ -2227,7 +2332,8 @@ mod tests {
     fn log_built_argv_mirrors_command_args_in_order() {
         // The returned argv must match the Command's argv exactly, in order.
         let cfg = test_config("exec-log-mirror");
-        let cmd = build_claude_command_with_settings(&cfg, None);
+        let cmd = build_claude_command_with_settings(&cfg, None)
+            .expect("anthropic builder must succeed in tests");
         let baseline = argv_of(&cmd);
         let returned = log_built_argv(&cmd, &cfg, Provider::Anthropic, "test");
         assert_eq!(returned, baseline);

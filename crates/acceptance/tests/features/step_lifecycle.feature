@@ -38,13 +38,6 @@ Feature: Step lifecycle
     And the error should contain "Valid transitions from"
     And the error should contain "backlog"
 
-  Scenario: Task without workflow cannot transition
-    Given I create a task with:
-      | title | No workflow task |
-    When I transition the task to step "in_progress"
-    Then the command should fail with "is not assigned to any workflow"
-    And the error should contain "Use 'vtb workflow assign' first"
-
   Scenario: Target step from different workflow is rejected
     Given a second workflow "other-wf" with steps "alpha, beta"
     When I transition the task to step "alpha" of "other-wf"

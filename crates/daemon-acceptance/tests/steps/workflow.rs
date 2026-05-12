@@ -12,7 +12,15 @@ pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
     let step_id = world.step_id.as_ref().expect("step not created").clone();
     world
-        .run_vtb(&["step", "update", &step_id, "--provider", "openai"])
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+        ])
         .await;
     world.assert_vtb_ok("step update --provider openai");
 }
@@ -50,7 +58,15 @@ pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, Some(schema.to_string())).await;
     let step_id = world.step_id.as_ref().expect("step not created").clone();
     world
-        .run_vtb(&["step", "update", &step_id, "--provider", "openai"])
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5",
+        ])
         .await;
     world.assert_vtb_ok("step update --provider openai");
 }
@@ -76,7 +92,13 @@ pub async fn task_has_worktree(world: &mut DaemonWorld, path: String) {
 async fn create_workflow_and_step(world: &mut DaemonWorld, output_schema: Option<String>) {
     let wf_name = format!("daemon-acc-wf-{}", uuid::Uuid::new_v4().simple());
     world
-        .run_vtb(&["workflow", "add", &wf_name, "--step", "run:default"])
+        .run_vtb(&[
+            "workflow",
+            "add",
+            &wf_name,
+            "--step",
+            "run:claude-sonnet-4-6",
+        ])
         .await;
     world.assert_vtb_ok("workflow add");
     let wf_id = world
