@@ -25,7 +25,13 @@ const { mockEvents, eventListeners, emitEvent } = vi.hoisted(() => {
     mockEvents: {
       taskChangedEvent: createEventListener("taskChanged"),
       taskRunChangedEvent: createEventListener("taskRunChanged"),
+      taskStepChangedEvent: createEventListener("taskStepChanged"),
+      taskRunStepChangedEvent: createEventListener("taskRunStepChanged"),
       stepChangedEvent: createEventListener("stepChanged"),
+      stepTransitionChangedEvent: createEventListener(
+        "stepTransitionChanged",
+      ),
+      workflowChangedEvent: createEventListener("workflowChanged"),
       workflowTransitionChangedEvent: createEventListener(
         "workflowTransitionChanged",
       ),
@@ -171,7 +177,7 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
     expect(screen.queryByTitle("2 running")).not.toBeInTheDocument();
   });
 
-  it("refetches authoritative pipeline aggregates after task and TaskRun events", async () => {
+  it("applies task_run_step_changed deltas incrementally without refetching", async () => {
     const initialSummary = {
       workflows: [
         {
@@ -183,44 +189,26 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
           is_default: true,
           is_final: false,
           display_order: 0,
-          workflow_steps: [makeStep("s1", "wf-1", "todo", 0)],
+          workflow_steps: [
+            makeStep(
+              "s1",
+              "wf-1",
+              "todo",
+              0,
+              { epic: 0, ticket: 1, task: 0 },
+              1,
+            ),
+            makeStep("s2", "wf-1", "in_progress", 1),
+          ],
           transitions: [],
         },
       ],
     };
-    const taskUpdatedSummary = {
-      workflows: [
-        {
-          ...initialSummary.workflows[0],
-          workflow_steps: [
-            makeStep("s1", "wf-1", "todo", 0, {
-              epic: 0,
-              ticket: 0,
-              task: 1,
-            }),
-          ],
-        },
-      ],
-    };
-    const runUpdatedSummary = {
-      workflows: [
-        {
-          ...initialSummary.workflows[0],
-          workflow_steps: [
-            makeStep("s1", "wf-1", "todo", 0, {
-              epic: 0,
-              ticket: 0,
-              task: 1,
-            }, 1),
-          ],
-        },
-      ],
-    };
 
-    vi.mocked(commands.getPipelineSummary)
-      .mockResolvedValueOnce({ status: "ok", data: initialSummary })
-      .mockResolvedValueOnce({ status: "ok", data: taskUpdatedSummary })
-      .mockResolvedValue({ status: "ok", data: runUpdatedSummary });
+    vi.mocked(commands.getPipelineSummary).mockResolvedValue({
+      status: "ok",
+      data: initialSummary,
+    });
 
     render(<AllWorkflowsPipeline />);
 
@@ -230,34 +218,23 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
     const initialCallCount = vi.mocked(commands.getPipelineSummary).mock.calls
       .length;
 
-    emitEvent("taskChanged", {
-      task_id: "task-1",
-      change_type: "Updated",
-      task: null,
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTitle("1 task(s)")).toBeInTheDocument();
-    });
-    const afterTaskEventCallCount = vi.mocked(commands.getPipelineSummary).mock
-      .calls.length;
-    expect(afterTaskEventCallCount).toBeGreaterThan(initialCallCount);
-
-    emitEvent("taskRunChanged", {
+    emitEvent("taskRunStepChanged", {
       task_run_id: "run-1",
       task_id: "task-1",
+      from_step_id: "s1",
+      to_step_id: "s2",
       status: "executing",
-      change_type: "Updated",
-      task_run: null,
-      run_controls: null,
+      level: "ticket",
     });
 
+    // s2 should now show 1 ticket and 1 active without any extra refetch.
     await waitFor(() => {
-      expect(screen.getByTitle("1 active")).toBeInTheDocument();
+      const activeBadges = screen.getAllByTitle("1 active");
+      expect(activeBadges.length).toBeGreaterThan(0);
     });
-    expect(
-      vi.mocked(commands.getPipelineSummary).mock.calls.length,
-    ).toBeGreaterThan(afterTaskEventCallCount);
+    expect(vi.mocked(commands.getPipelineSummary).mock.calls.length).toBe(
+      initialCallCount,
+    );
   });
 
   it("shows empty state when no workflows are returned", async () => {

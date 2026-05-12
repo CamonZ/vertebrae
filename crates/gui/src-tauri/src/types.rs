@@ -510,8 +510,8 @@ pub struct Step {
     /// List of step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
-    /// Ordering index for sequential fallback (0-based)
-    #[serde(default)]
+    /// Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
+    #[serde(default, alias = "step_order")]
     pub order: i32,
     /// Creation timestamp (ISO 8601 string)
     #[serde(alias = "inserted_at")]
@@ -552,6 +552,7 @@ pub struct Workflow {
     /// Optional description of the workflow
     pub description: Option<String>,
     /// Reference to the initial step in the workflow
+    #[serde(alias = "initial_step_id")]
     pub initial_step: Option<String>,
     /// Optional kanban column
     pub kanban_column: Option<String>,
@@ -561,6 +562,9 @@ pub struct Workflow {
     /// Whether this is a terminal workflow (cannot transition out)
     #[serde(default)]
     pub is_final: bool,
+    /// Sort order for displaying workflows (Sacrum: `display_order`).
+    #[serde(default, alias = "order")]
+    pub display_order: i32,
     /// Additional metadata as key-value pairs
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
@@ -581,6 +585,7 @@ impl From<vertebrae_core::Workflow> for Workflow {
             kanban_column: workflow.kanban_column,
             is_default: workflow.is_default,
             is_final: workflow.is_final,
+            display_order: workflow.order,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
