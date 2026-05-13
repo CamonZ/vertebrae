@@ -16,7 +16,7 @@ Feature: Stop a running workflow from the GUI
       | title    | Stop GUI Task     |
       | workflow | Stop GUI Workflow |
     Then the GUI should show an element with title "1 task(s)" within 10 seconds
-    When I click on the element containing text "run"
+    When I click on the element with test id "step-node-run"
     Then the GUI should show "Tasks" within 5 seconds
     When I click on the element containing text "Tasks"
     And I click on the element containing text "Stop GUI Task"

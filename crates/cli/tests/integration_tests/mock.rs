@@ -92,7 +92,7 @@ impl TaskService for MockTaskService {
             review_comment: None,
             revision_feedback: None,
             rejection_reason: None,
-            workflow_id: None,
+            workflow_id: options.workflow_id.clone(),
             current_step_id: None,
             workflow_name: None,
             step_name: None,

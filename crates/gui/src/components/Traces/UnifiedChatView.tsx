@@ -402,10 +402,17 @@ export function UnifiedChatView({
     }
     return (
       <div
-        data-testid="unified-chat-empty"
-        className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-text-muted"
+        ref={setScrollEl}
+        data-testid="unified-chat-view"
+        data-auto-scroll={autoScroll ? "1" : "0"}
+        className="relative flex h-full flex-col bg-bg-primary"
       >
-        No conversation yet across this subtree.
+        <div
+          data-testid="unified-chat-empty"
+          className="flex flex-1 flex-col items-center justify-center p-8 text-center text-sm text-text-muted"
+        >
+          No conversation yet across this subtree.
+        </div>
       </div>
     );
   }

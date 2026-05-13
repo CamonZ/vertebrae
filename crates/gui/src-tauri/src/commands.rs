@@ -1673,6 +1673,10 @@ pub async fn update_task(
             task_id: task_id.clone(),
             change_type: crate::events::TaskChangeType::Updated,
             task: None,
+            current_step_id: None,
+            workflow_id: None,
+            level: None,
+            archived: None,
         },
     );
 

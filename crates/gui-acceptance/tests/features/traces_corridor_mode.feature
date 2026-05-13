@@ -17,7 +17,7 @@ Feature: Traces CORRIDOR mode renders the subtree as a DAG
     When I click on the element containing text "Tasks"
     And I click on the element containing text "Corridor Mode Root Task"
     Then the GUI should show "Corridor Mode Root Task" within 5 seconds
-    When I click on the element containing text "Explore traces"
+    When I click on the element with test id "trace-mini-explore"
     Then the GUI should show "Σ Runs" within 10 seconds
     When I click on the element with test id "trace-mode-option-corridor"
     Then the GUI should show an element with test id "corridor-view" within 10 seconds

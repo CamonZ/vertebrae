@@ -37,6 +37,7 @@ async fn test_execution_create_success() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -122,6 +123,7 @@ async fn test_execution_create_with_context_and_prompt() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -198,6 +200,7 @@ async fn test_execution_create_invalid_context_json_fails() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -273,6 +276,7 @@ async fn test_execution_list_empty() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -305,6 +309,7 @@ async fn test_execution_list_ignores_legacy_executions_without_task_run() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -361,6 +366,7 @@ async fn test_execution_list_chronological_order() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -432,6 +438,7 @@ async fn test_execution_list_task_short_id_groups_task_run_backed_executions() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -533,6 +540,7 @@ async fn test_execution_list_task_run_full_uuid_filters_exact_run() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -548,6 +556,7 @@ async fn test_execution_list_task_run_full_uuid_filters_exact_run() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -658,6 +667,7 @@ async fn test_execution_show_basic() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -703,6 +713,7 @@ async fn test_execution_show_with_context_prompt_output() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -754,6 +765,7 @@ async fn test_execution_show_with_logs() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -803,6 +815,7 @@ async fn test_execution_show_with_transition_result() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -857,6 +870,7 @@ async fn test_execution_update_output() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -903,6 +917,7 @@ async fn test_execution_update_transition_result() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -948,6 +963,7 @@ async fn test_execution_update_both_fields() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -1012,6 +1028,7 @@ async fn test_execution_log_success() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -1062,6 +1079,7 @@ async fn test_execution_log_multiline() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -1106,6 +1124,7 @@ async fn test_execution_log_long_content_truncated_in_output() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -1173,6 +1192,7 @@ async fn test_execution_workflow_create_list_show() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })
@@ -1247,6 +1267,7 @@ async fn test_execution_with_logs_complete_flow() {
             priority: None,
             tags: vec![],
             parent_id: None,
+            workflow_id: None,
             depends_on: vec![],
             needs_review: false,
         })

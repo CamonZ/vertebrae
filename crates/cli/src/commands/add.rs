@@ -138,17 +138,14 @@ impl AddCommand {
             options = options.with_needs_review(true);
         }
 
-        // Create the task using the service layer
-        // This will automatically fire MutationCallback events
-        let id = services.tasks().create_task(options).await?;
-
-        // Assign to custom workflow if specified
+        // Assign to custom workflow if specified — done in the same mutation
+        // so the server seeds current_step_id from the target workflow's
+        // initial step and emits a single task_created broadcast.
         if let Some(workflow_id) = &self.workflow {
-            services
-                .workflows()
-                .assign_workflow(&id, workflow_id)
-                .await?;
+            options = options.with_workflow(workflow_id);
         }
+
+        let id = services.tasks().create_task(options).await?;
 
         Ok(id)
     }
