@@ -155,6 +155,7 @@ pub const CREATE_TASK: &str = r#"
         $priority: String,
         $tags: [String!],
         $parent_id: Uuid4,
+        $workflow_id: Uuid4,
         $sections: [TaskSectionInput!]
     ) {
         create_task(
@@ -165,6 +166,7 @@ pub const CREATE_TASK: &str = r#"
             priority: $priority,
             tags: $tags,
             parent_id: $parent_id,
+            workflow_id: $workflow_id,
             sections: $sections
         ) {
             id

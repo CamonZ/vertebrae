@@ -86,7 +86,7 @@ describe("UnifiedChatView", () => {
       />
     );
     expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
-    expect(screen.queryByTestId("unified-chat-view")).not.toBeInTheDocument();
+    expect(screen.getByTestId("unified-chat-view")).toBeInTheDocument();
   });
 
   it("renders loading state when isLoading and no segments yet", () => {
