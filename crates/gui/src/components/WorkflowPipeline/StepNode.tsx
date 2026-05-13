@@ -45,6 +45,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
     <button
       type="button"
       onClick={handleClick}
+      data-testid={`step-node-${step.name}`}
       className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
         isFlashing ? 'animate-flash-border' : ''
       } ${
