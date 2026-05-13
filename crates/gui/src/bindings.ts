@@ -804,6 +804,7 @@ stepExecutionChangedEvent: StepExecutionChangedEvent,
 stepTransitionChangedEvent: StepTransitionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
 taskRunChangedEvent: TaskRunChangedEvent,
+taskRunStepChangedEvent: TaskRunStepChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
@@ -826,6 +827,7 @@ stepExecutionChangedEvent: "step-execution-changed-event",
 stepTransitionChangedEvent: "step-transition-changed-event",
 taskChangedEvent: "task-changed-event",
 taskRunChangedEvent: "task-run-changed-event",
+taskRunStepChangedEvent: "task-run-step-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowTransitionChangedEvent: "workflow-transition-changed-event"
@@ -1037,7 +1039,7 @@ task_counts: PipelineTaskCounts;
 /**
  * Canonical per-step counts from Sacrum, including active TaskRun count.
  */
-pipeline_counts: PipelineStepCounts;
+pipeline_counts: PipelineStepCounts; 
 /**
  * Number of active TaskRuns for tasks currently parked at this step.
  */
@@ -1206,7 +1208,7 @@ is_final?: boolean;
  */
 transitions_to?: string[]; 
 /**
- * Ordering index for sequential fallback (0-based)
+ * Ordering index for sequential fallback (0-based, Sacrum: `step_order`).
  */
 order?: number; 
 /**
@@ -1338,8 +1340,14 @@ export type StepTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for step transition changes.
  * Emitted when a step transition is created or deleted.
+ * 
+ * `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
+ * pipeline reducer can update each step's `transitions_to[]` without a
+ * refetch. Sacrum sends the full edge on both `Created` and `Deleted`
+ * (before-image tombstone), so these endpoints are always populated under
+ * the v1 CDC contract.
  */
-export type StepTransitionChangedEvent = { transition_id: string; change_type: StepTransitionChangeType }
+export type StepTransitionChangedEvent = { transition_id: string; from_step_id: string | null; to_step_id: string | null; change_type: StepTransitionChangeType }
 /**
  * Step type - mirrors core::StepType
  */
@@ -1460,8 +1468,13 @@ export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
  * For create/update events, `task` carries the full deserialized entity.
+ * 
+ * `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
+ * the Sacrum CDC payload so the reducer can act on `Deleted` events (which
+ * carry a before-image tombstone, not a full Task) without keeping a local
+ * task-position cache.
  */
-export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null }
+export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null; current_step_id: string | null; workflow_id: string | null; level: TaskLevel | null; archived: boolean | null }
 /**
  * Filter options for listing tasks
  */
@@ -1597,15 +1610,34 @@ export type TaskRunControls = { runnable?: boolean; stoppable?: boolean; disable
  */
 export type TaskRunStatus = "queued" | "executing" | "waiting" | "stopping" | "stopped" | "completed" | "failed"
 /**
+ * Event payload for orchestrator-driven task workflow step changes.
+ * 
+ * Mirrors Sacrum's `task_run_step_changed` wire event. Fires whenever a
+ * task's `current_step_id` changes while a TaskRun exists, and at run-end
+ * paths (completion, retry exhaustion, stop) where `to_step_id` will be
+ * `null` because the run has left active statuses.
+ * 
+ * Disjoint with `TaskStepChangedEvent`: manual moves are blocked while an
+ * orchestrator is active, so clients never receive both for the same
+ * transition.
+ */
+export type TaskRunStepChangedEvent = { task_run_id: string; task_id: string; from_step_id: string | null; to_step_id: string | null; status: TaskRunStatus; level: TaskLevel }
+/**
  * Trace tree rooted at a TaskRun.
  */
 export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; step_executions?: StepExecution[]; session_logs?: SessionLog[] }
 /**
- * Event payload for task current step changes.
- * Emitted when a task's current_step_id is updated during workflow execution.
- * Includes the new step info so frontend can update directly without refetching.
+ * Event payload for manual task workflow step changes (no TaskRun involved).
+ * 
+ * Mirrors Sacrum's `task_step_changed` wire event. Fires for manual moves
+ * (`assign_workflow`, `advance_to_step`, `move_to_step`) when no orchestrator
+ * run exists for the task. Only emitted when `from_step_id != to_step_id`.
+ * 
+ * `from_step_id` may be `null` on the first workflow assignment. `to_step_id`
+ * is always present on this event — run-end paths are reported through
+ * `TaskRunStepChangedEvent` instead.
  */
-export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name: string }
+export type TaskStepChangedEvent = { task_id: string; from_step_id: string | null; to_step_id: string | null; workflow_id: string; level: TaskLevel }
 /**
  * Options for updating a workflow step.
  * Only fields that are Some will be updated.
@@ -1695,6 +1727,10 @@ is_default?: boolean;
  */
 is_final?: boolean; 
 /**
+ * Sort order for displaying workflows (Sacrum: `display_order`).
+ */
+display_order?: number; 
+/**
  * Additional metadata as key-value pairs
  */
 metadata?: Partial<{ [key in string]: string }>; 
@@ -1763,8 +1799,12 @@ export type WorkflowTransitionChangeType = "Created" | "Deleted"
 /**
  * Event payload for workflow transition changes.
  * Emitted when a workflow-to-workflow transition is created or deleted.
+ * 
+ * `target_step_id` and `label` are hoisted from the Sacrum payload so the
+ * pipeline reducer can construct a complete `PipelineWorkflowTransition`
+ * on `Created` without a refetch.
  */
-export type WorkflowTransitionChangedEvent = { transition_id: string; from_workflow_id: string | null; to_workflow_id: string | null; change_type: WorkflowTransitionChangeType }
+export type WorkflowTransitionChangedEvent = { transition_id: string; from_workflow_id: string | null; to_workflow_id: string | null; target_step_id: string | null; label: string | null; change_type: WorkflowTransitionChangeType }
 /**
  * Workflow with its associated tasks including full details
  */

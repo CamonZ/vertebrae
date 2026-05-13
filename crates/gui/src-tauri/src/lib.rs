@@ -30,8 +30,8 @@ use commands::AppState;
 use events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
-    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskStepChangedEvent,
-    WorkflowChangedEvent, WorkflowTransitionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -139,6 +139,7 @@ fn create_builder() -> Builder {
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,
+            TaskRunStepChangedEvent,
             WorkflowChangedEvent,
             StepChangedEvent,
             StepExecutionChangedEvent,

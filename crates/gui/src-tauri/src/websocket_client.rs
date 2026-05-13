@@ -17,8 +17,9 @@ use crate::events::{
     LiveChatSessionChangedEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
     StepChangeType, StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent,
     StepExecutionStatus, StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType,
-    TaskChangedEvent, TaskRunChangeType, TaskRunChangedEvent, WorkflowChangeType,
-    WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
+    TaskChangedEvent, TaskRunChangeType, TaskRunChangedEvent, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -372,6 +373,12 @@ impl SacrumSocket {
                 "task_run_created" | "task_run_updated" => {
                     Self::handle_task_run_event(event, payload, app_handle)?;
                 }
+                "task_run_step_changed" => {
+                    Self::handle_task_run_step_changed(payload, app_handle)?;
+                }
+                "task_step_changed" => {
+                    Self::handle_task_step_changed(payload, app_handle)?;
+                }
                 "session_log_created" => {
                     Self::handle_session_log_event(payload, app_handle)?;
                 }
@@ -460,10 +467,27 @@ impl SacrumSocket {
             None
         };
 
+        let current_step_id = payload
+            .get("current_step_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let workflow_id = payload
+            .get("workflow_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let level = payload
+            .get("level")
+            .and_then(|v| serde_json::from_value::<types::TaskLevel>(v.clone()).ok());
+        let archived = payload.get("archived").and_then(|v| v.as_bool());
+
         let event = TaskChangedEvent {
             task_id,
             change_type,
             task,
+            current_step_id,
+            workflow_id,
+            level,
+            archived,
         };
 
         Self::trace_event(&format!(
@@ -664,6 +688,15 @@ impl SacrumSocket {
             .ok_or("Missing id in step transition payload")?
             .to_string();
 
+        let from_step_id = payload
+            .get("from_step_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let to_step_id = payload
+            .get("to_step_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         let change_type = match event {
             "step_transition_created" => StepTransitionChangeType::Created,
             "step_transition_deleted" => StepTransitionChangeType::Deleted,
@@ -672,6 +705,8 @@ impl SacrumSocket {
 
         let event = StepTransitionChangedEvent {
             transition_id,
+            from_step_id,
+            to_step_id,
             change_type,
         };
 
@@ -707,6 +742,14 @@ impl SacrumSocket {
             .get("to_workflow_id")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let target_step_id = payload
+            .get("target_step_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let label = payload
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let change_type = match event {
             "workflow_transition_created" => WorkflowTransitionChangeType::Created,
@@ -718,6 +761,8 @@ impl SacrumSocket {
             transition_id,
             from_workflow_id,
             to_workflow_id,
+            target_step_id,
+            label,
             change_type,
         };
 
@@ -866,6 +911,141 @@ impl SacrumSocket {
 
         app_handle
             .emit("task-run-changed-event", &event_payload)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle `task_run_step_changed` events from Sacrum and emit a typed
+    /// `TaskRunStepChangedEvent` to the frontend.
+    ///
+    /// Payload contract (`/sacrum/docs/client-taskrun-contract.md`):
+    /// ```text
+    /// {
+    ///   task_run_id, task_id,
+    ///   from_step_id: string | null,
+    ///   to_step_id:   string | null,
+    ///   status:       TaskRunStatus,
+    ///   level:        "epic" | "ticket" | "task"
+    /// }
+    /// ```
+    fn handle_task_run_step_changed<R: Runtime>(
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let task_run_id = payload
+            .get("task_run_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing task_run_id in task_run_step_changed payload")?
+            .to_string();
+
+        let task_id = payload
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing task_id in task_run_step_changed payload")?
+            .to_string();
+
+        let from_step_id = payload
+            .get("from_step_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let to_step_id = payload
+            .get("to_step_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let status_value = payload
+            .get("status")
+            .cloned()
+            .ok_or("Missing status in task_run_step_changed payload")?;
+        let status: types::TaskRunStatus = serde_json::from_value(status_value)
+            .map_err(|e| format!("Failed to parse task run status: {}", e))?;
+
+        let level_value = payload
+            .get("level")
+            .cloned()
+            .ok_or("Missing level in task_run_step_changed payload")?;
+        let level: types::TaskLevel = serde_json::from_value(level_value)
+            .map_err(|e| format!("Failed to parse level: {}", e))?;
+
+        let event = TaskRunStepChangedEvent {
+            task_run_id,
+            task_id,
+            from_step_id,
+            to_step_id,
+            status,
+            level,
+        };
+
+        log::debug!("[WebSocket] Emitting TaskRunStepChangedEvent: {:?}", event);
+
+        app_handle
+            .emit("task-run-step-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle `task_step_changed` events from Sacrum and emit a typed
+    /// `TaskStepChangedEvent` to the frontend.
+    ///
+    /// Payload contract (`/sacrum/docs/client-taskrun-contract.md`):
+    /// ```text
+    /// {
+    ///   task_id,
+    ///   from_step_id: string | null,
+    ///   to_step_id:   string | null,
+    ///   workflow_id:  string,
+    ///   level:        "epic" | "ticket" | "task"
+    /// }
+    /// ```
+    ///
+    /// Disjoint with `task_run_step_changed` — only fires for manual moves
+    /// when no orchestrator run exists.
+    fn handle_task_step_changed<R: Runtime>(
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let task_id = payload
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing task_id in task_step_changed payload")?
+            .to_string();
+
+        let from_step_id = payload
+            .get("from_step_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let to_step_id = payload
+            .get("to_step_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        let workflow_id = payload
+            .get("workflow_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing workflow_id in task_step_changed payload")?
+            .to_string();
+
+        let level_value = payload
+            .get("level")
+            .cloned()
+            .ok_or("Missing level in task_step_changed payload")?;
+        let level: types::TaskLevel = serde_json::from_value(level_value)
+            .map_err(|e| format!("Failed to parse level: {}", e))?;
+
+        let event = TaskStepChangedEvent {
+            task_id,
+            from_step_id,
+            to_step_id,
+            workflow_id,
+            level,
+        };
+
+        log::debug!("[WebSocket] Emitting TaskStepChangedEvent: {:?}", event);
+
+        app_handle
+            .emit("task-step-changed-event", &event)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
 
         Ok(())

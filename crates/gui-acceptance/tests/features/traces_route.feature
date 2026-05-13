@@ -17,6 +17,6 @@ Feature: Traces route navigation
     When I click on the element containing text "Tasks"
     And I click on the element containing text "Traces Route Root Task"
     Then the GUI should show "Traces Route Root Task" within 5 seconds
-    When I click on the element containing text "Explore traces"
+    When I click on the element with test id "trace-mini-explore"
     Then the GUI should show "Σ Runs" within 10 seconds
     And the GUI should show "Traces Route Root Task" within 5 seconds

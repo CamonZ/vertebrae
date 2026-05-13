@@ -3,7 +3,7 @@ use fantoccini::Locator;
 
 use crate::GuiWorld;
 
-async fn navigate_to(world: &mut GuiWorld, path: &str, label: &str) {
+pub async fn navigate_to(world: &mut GuiWorld, path: &str, label: &str) {
     let wd = world
         .webdriver
         .as_ref()
@@ -32,6 +32,7 @@ async fn gui_on_kanban_board(world: &mut GuiWorld) {
 }
 
 #[given("the GUI is on the pipeline view")]
+#[when("the GUI is on the pipeline view")]
 async fn gui_on_pipeline_view(world: &mut GuiWorld) {
     navigate_to(world, "/design", "nav-pipeline").await;
 }
@@ -438,6 +439,17 @@ async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
                 test_id
             )
         });
+
+    // Scroll the element into the viewport before clicking. Targets inside
+    // scrollable panels (TaskDetailPanel, react-flow canvas) are otherwise
+    // reported as found but get intercepted on click when off-screen.
+    let element_json = serde_json::to_value(&element).expect("serialize element");
+    let _ = client
+        .execute(
+            "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",
+            vec![element_json],
+        )
+        .await;
 
     element
         .click()

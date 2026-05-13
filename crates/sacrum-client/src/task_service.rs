@@ -341,6 +341,9 @@ impl TaskService for SacrumTaskService {
         if let Some(ref parent_id) = options.parent_id {
             variables["parent_id"] = json!(parent_id);
         }
+        if let Some(ref workflow_id) = options.workflow_id {
+            variables["workflow_id"] = json!(workflow_id);
+        }
 
         #[derive(serde::Deserialize)]
         struct IdResponse {

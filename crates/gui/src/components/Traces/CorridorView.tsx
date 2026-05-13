@@ -183,10 +183,18 @@ export function CorridorView({
   if (layout.nodes.length === 0) {
     return (
       <div
-        data-testid="corridor-empty"
-        className="flex h-full items-center justify-center text-xs text-text-muted"
+        data-testid="corridor-view"
+        data-pan-x="0.00"
+        data-pan-y="0.00"
+        data-scale="1.000"
+        className="relative flex h-full w-full items-center justify-center bg-bg-secondary"
       >
-        No executions to graph yet.
+        <div
+          data-testid="corridor-empty"
+          className="text-xs text-text-muted"
+        >
+          No executions to graph yet.
+        </div>
       </div>
     );
   }

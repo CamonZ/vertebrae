@@ -44,6 +44,8 @@ pub struct CreateTaskOptions {
     pub tags: Vec<String>,
     /// Parent task ID
     pub parent_id: Option<String>,
+    /// Workflow ID to assign at creation time (skips the project default)
+    pub workflow_id: Option<String>,
     /// IDs of tasks this task depends on
     pub depends_on: Vec<String>,
     /// Whether task needs human review
@@ -88,6 +90,12 @@ impl CreateTaskOptions {
     /// Set the parent task ID
     pub fn with_parent(mut self, parent_id: impl Into<String>) -> Self {
         self.parent_id = Some(parent_id.into());
+        self
+    }
+
+    /// Set the workflow ID to assign at creation time
+    pub fn with_workflow(mut self, workflow_id: impl Into<String>) -> Self {
+        self.workflow_id = Some(workflow_id.into());
         self
     }
 

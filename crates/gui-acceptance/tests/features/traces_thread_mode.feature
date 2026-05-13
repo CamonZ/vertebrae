@@ -19,6 +19,6 @@ Feature: Traces THREAD mode renders a unified chat across the subtree
     When I click on the element containing text "Tasks"
     And I click on the element containing text "Thread Mode Root Task"
     Then the GUI should show "Thread Mode Root Task" within 5 seconds
-    When I click on the element containing text "Explore traces"
+    When I click on the element with test id "trace-mini-explore"
     Then the GUI should show "Σ Runs" within 10 seconds
     And the GUI should show an element with test id "unified-chat-view" within 10 seconds
