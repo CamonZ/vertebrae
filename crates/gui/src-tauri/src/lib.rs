@@ -129,6 +129,8 @@ fn create_builder() -> Builder {
             commands::create_chat_session,
             commands::send_chat_message,
             commands::get_chat_session,
+            commands::list_chat_sessions,
+            commands::delete_chat_session,
             commands::list_chat_messages,
             commands::get_active_chat_session_id,
             commands::set_active_chat_session_id,

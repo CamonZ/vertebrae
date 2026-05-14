@@ -5,8 +5,8 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    ChatMessage, ChatSession, SessionLog, Step, StepExecution, StopRunRequest, Task,
-    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    ChatMessage, ChatSession, DeleteChatSessionResult, SessionLog, Step, StepExecution,
+    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -1418,6 +1418,36 @@ pub async fn get_chat_session(
 
 #[tauri::command]
 #[specta::specta]
+pub async fn list_chat_sessions(
+    state: State<'_, AppState>,
+    limit: Option<i32>,
+) -> Result<Vec<ChatSession>, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let sessions = chat.list_sessions(limit).await?;
+    Ok(sessions.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_chat_session(
+    state: State<'_, AppState>,
+    chat_session_id: String,
+) -> Result<DeleteChatSessionResult, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let result = chat.delete_session(&chat_session_id).await?;
+    Ok(result.into())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn list_chat_messages(
     state: State<'_, AppState>,
     chat_session_id: String,
@@ -2320,6 +2350,22 @@ mod tests {
         let state: tauri::State<'_, AppState> = app.state();
         let result = create_task(state, "Test".to_string(), None, None, None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_chat_sessions_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = list_chat_sessions(state, Some(10)).await;
+        assert_no_project_error(result);
+    }
+
+    #[tokio::test]
+    async fn delete_chat_session_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = delete_chat_session(state, "sess-missing".to_string()).await;
+        assert_no_project_error(result);
     }
 
     #[tokio::test]

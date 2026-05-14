@@ -30,17 +30,10 @@ export function useLiveChatChangeListener(
     (event: { payload: LiveChatMessageCreatedEvent }) => {
       if (projectScopeGeneration !== getProjectScopeGeneration()) return;
 
-      const { chat_session_id, client_message_id, message } = event.payload;
+      const { client_message_id, message } = event.payload;
 
       if (!message) {
         // Payload failed to deserialize on the backend; nothing to apply.
-        return;
-      }
-
-      // Only apply messages for the active session. The channel is per-project
-      // so we may receive messages for other sessions in the same project.
-      const currentSession = useLiveChatStore.getState().currentSession;
-      if (currentSession && currentSession.id !== chat_session_id) {
         return;
       }
 

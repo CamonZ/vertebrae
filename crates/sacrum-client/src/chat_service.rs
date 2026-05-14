@@ -4,11 +4,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use vertebrae_core::chat_service::{
-    ChatMessage, ChatService, ChatSession, ListMessagesOptions, SendMessageOptions,
+    ChatMessage, ChatService, ChatSession, DeleteChatSessionResult, ListMessagesOptions,
+    SendMessageOptions,
 };
 use vertebrae_core::error::ServiceResult;
 
-use crate::api_types::{ChatMessageResponse, ChatSessionResponse};
+use crate::api_types::{ChatMessageResponse, ChatSessionResponse, DeleteChatSessionResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::chat;
 
@@ -58,6 +59,13 @@ fn message_response_to_model(r: ChatMessageResponse) -> ChatMessage {
         client_message_id: r.client_message_id,
         inserted_at: parse_dt(&r.inserted_at),
         updated_at: parse_dt(&r.updated_at),
+    }
+}
+
+fn delete_response_to_model(r: DeleteChatSessionResponse) -> DeleteChatSessionResult {
+    DeleteChatSessionResult {
+        deleted_session_id: r.deleted_session_id,
+        success: r.success,
     }
 }
 
@@ -118,6 +126,44 @@ impl ChatService for SacrumChatService {
             .await?;
 
         Ok(response.map(session_response_to_model))
+    }
+
+    async fn list_sessions(&self, limit: Option<i32>) -> ServiceResult<Vec<ChatSession>> {
+        let query = with_fragments(chat::LIST_CHAT_SESSIONS, &[chat::CHAT_SESSION_FIELDS]);
+        let mut variables = json!({
+            "project_id": self.project_id(),
+        });
+
+        if let Some(limit) = limit {
+            variables["limit"] = Value::from(limit);
+        }
+
+        let response: Vec<ChatSessionResponse> = self
+            .client
+            .execute(&query, variables, "chat_sessions")
+            .await?;
+
+        Ok(response
+            .into_iter()
+            .map(session_response_to_model)
+            .collect())
+    }
+
+    async fn delete_session(
+        &self,
+        chat_session_id: &str,
+    ) -> ServiceResult<DeleteChatSessionResult> {
+        let variables = json!({
+            "project_id": self.project_id(),
+            "chat_session_id": chat_session_id,
+        });
+
+        let response: DeleteChatSessionResponse = self
+            .client
+            .execute(chat::DELETE_CHAT_SESSION, variables, "delete_chat_session")
+            .await?;
+
+        Ok(delete_response_to_model(response))
     }
 
     async fn list_messages(
@@ -337,6 +383,61 @@ mod tests {
         let service = create_service(&server.uri());
         let session = service.get_session("sess-missing").await.unwrap();
         assert!(session.is_none(), "expected None, got {session:?}");
+    }
+
+    #[tokio::test]
+    async fn list_sessions_passes_limit_and_preserves_newest_first_response_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListChatSessions"))
+            .and(body_string_contains("\"limit\":2"))
+            .and(body_string_contains("test-project"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "chat_sessions": [
+                        session_payload("sess-newer"),
+                        session_payload("sess-older"),
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let sessions = service.list_sessions(Some(2)).await.unwrap();
+
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, "sess-newer");
+        assert_eq!(sessions[1].id, "sess-older");
+    }
+
+    #[tokio::test]
+    async fn delete_session_returns_success_payload() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteChatSession"))
+            .and(body_string_contains("sess-delete"))
+            .and(body_string_contains("test-project"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "delete_chat_session": {
+                        "deleted_session_id": "sess-delete",
+                        "success": true
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let result = service.delete_session("sess-delete").await.unwrap();
+
+        assert!(result.success);
+        assert_eq!(result.deleted_session_id, "sess-delete");
     }
 
     #[tokio::test]
