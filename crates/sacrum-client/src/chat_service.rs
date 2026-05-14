@@ -378,6 +378,7 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("ListChatMessages"))
+            .and(body_string_contains("$after: Datetime"))
             .and(body_string_contains("\"limit\":50"))
             .and(body_string_contains("2026-05-10T11:00:00Z"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
