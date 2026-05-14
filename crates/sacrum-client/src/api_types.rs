@@ -561,6 +561,13 @@ pub struct ChatSessionResponse {
     pub updated_at: Option<String>,
 }
 
+/// Delete chat session response (matches the `DeleteChatSessionPayload` Absinthe type).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteChatSessionResponse {
+    pub deleted_session_id: String,
+    pub success: bool,
+}
+
 /// Chat message response (matches the `ChatMessage` Absinthe type).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessageResponse {

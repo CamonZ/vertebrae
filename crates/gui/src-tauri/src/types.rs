@@ -1011,6 +1011,21 @@ impl From<vertebrae_core::ChatSession> for ChatSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct DeleteChatSessionResult {
+    pub deleted_session_id: String,
+    pub success: bool,
+}
+
+impl From<vertebrae_core::DeleteChatSessionResult> for DeleteChatSessionResult {
+    fn from(result: vertebrae_core::DeleteChatSessionResult) -> Self {
+        DeleteChatSessionResult {
+            deleted_session_id: result.deleted_session_id,
+            success: result.success,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatMessage {
     pub id: String,
     pub project_id: String,

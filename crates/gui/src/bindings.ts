@@ -737,6 +737,22 @@ async getChatSession(chatSessionId: string) : Promise<Result<ChatSession | null,
     else return { status: "error", error: e  as any };
 }
 },
+async listChatSessions(limit: number | null) : Promise<Result<ChatSession[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_chat_sessions", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async deleteChatSession(chatSessionId: string) : Promise<Result<DeleteChatSessionResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_chat_session", { chatSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listChatMessages(chatSessionId: string, limit: number | null, after: string | null) : Promise<Result<ChatMessage[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_chat_messages", { chatSessionId, limit, after }) };
@@ -998,6 +1014,7 @@ export type CommandError = { message: string }
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; agents: string[]; skills: string[]; order: number; is_final: boolean; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null }
+export type DeleteChatSessionResult = { deleted_session_id: string; success: boolean }
 /**
  * Execution status - mirrors db::ExecutionStatus
  */

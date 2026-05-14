@@ -213,6 +213,26 @@ describe("useLiveChatChangeListener", () => {
     expect(useLiveChatStore.getState().messages).toHaveLength(0);
   });
 
+  it("ignores messages when no session is selected", async () => {
+    renderHook(() => useLiveChatChangeListener());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const msg = makeMessage({ id: "msg-no-selection" });
+
+    act(() => {
+      emitEvent("liveChatMessageCreated", {
+        message_id: msg.id,
+        chat_session_id: msg.chat_session_id,
+        client_message_id: null,
+        message: msg,
+      });
+    });
+
+    expect(useLiveChatStore.getState().messages).toHaveLength(0);
+  });
+
   it("ignores the event entirely if message deserialization failed (null message)", async () => {
     useLiveChatStore.setState({ currentSession: makeSession() });
     renderHook(() => useLiveChatChangeListener());
@@ -232,7 +252,7 @@ describe("useLiveChatChangeListener", () => {
     expect(useLiveChatStore.getState().messages).toHaveLength(0);
   });
 
-  it("upserts the session on chat_session_changed when there is no current session", async () => {
+  it("adds the session to history on chat_session_changed when there is no current session", async () => {
     renderHook(() => useLiveChatChangeListener());
     await act(async () => {
       await Promise.resolve();
@@ -248,7 +268,8 @@ describe("useLiveChatChangeListener", () => {
       });
     });
 
-    expect(useLiveChatStore.getState().currentSession).toEqual(session);
+    expect(useLiveChatStore.getState().currentSession).toBeNull();
+    expect(useLiveChatStore.getState().sessions).toEqual([session]);
   });
 
   it("updates the current session in place when ids match", async () => {
