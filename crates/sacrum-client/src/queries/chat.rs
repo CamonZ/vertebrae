@@ -61,7 +61,7 @@ pub const LIST_CHAT_MESSAGES: &str = r#"
         $project_id: Uuid4!,
         $chat_session_id: Uuid4!,
         $limit: Int,
-        $after: DateTime
+        $after: Datetime
     ) {
         chat_messages(
             project_id: $project_id,
