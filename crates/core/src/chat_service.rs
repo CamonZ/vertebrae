@@ -19,6 +19,12 @@ pub struct ChatSession {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeleteChatSessionResult {
+    pub deleted_session_id: String,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub id: String,
     pub project_id: String,
@@ -70,6 +76,13 @@ pub trait ChatService: Send + Sync {
     /// `Ok(None)` if the session does not exist (or is not visible to the
     /// caller).
     async fn get_session(&self, chat_session_id: &str) -> ServiceResult<Option<ChatSession>>;
+
+    /// List project-scoped chat sessions newest-first.
+    async fn list_sessions(&self, limit: Option<i32>) -> ServiceResult<Vec<ChatSession>>;
+
+    /// Delete a project-scoped chat session and its transcript.
+    async fn delete_session(&self, chat_session_id: &str)
+    -> ServiceResult<DeleteChatSessionResult>;
 
     /// List chat messages for a session in chronological order.
     async fn list_messages(
