@@ -863,6 +863,152 @@ describe("liveChatStore", () => {
     });
   });
 
+  describe("newChat", () => {
+    it("clears current session, messages, and persists null without bumping hydrate for stale results", () => {
+      const session = makeSession({ id: "sess-leave" });
+      useLiveChatStore.setState({
+        currentSession: session,
+        sessions: [session],
+        messages: [
+          {
+            id: "msg-leave",
+            role: "user",
+            content: "leaving this behind",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: false,
+            error: null,
+          },
+        ],
+        hydrated: true,
+      });
+
+      useLiveChatStore.getState().newChat();
+
+      expect(mockedSetActive).toHaveBeenCalledWith(null);
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toBeNull();
+      expect(state.messages).toEqual([]);
+      expect(state.hydrated).toBe(true);
+      expect(state.lastError).toBeNull();
+      // sessions list is left alone — history still shows the past entry.
+      expect(state.sessions).toEqual([session]);
+    });
+
+    it("discards an in-flight selectSession result that lands after newChat", async () => {
+      const session = makeSession({ id: "sess-stale" });
+      useLiveChatStore.setState({ sessions: [session] });
+
+      let resolveList!: (value: { status: "ok"; data: ChatMessage[] }) => void;
+      mockedListMessages.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }) as ReturnType<typeof commands.listChatMessages>
+      );
+
+      const selectPromise = useLiveChatStore
+        .getState()
+        .selectSession("sess-stale");
+
+      await vi.waitFor(() => {
+        expect(mockedListMessages).toHaveBeenCalledTimes(1);
+        expect(useLiveChatStore.getState().currentSession?.id).toBe(
+          "sess-stale"
+        );
+      });
+
+      useLiveChatStore.getState().newChat();
+
+      resolveList({
+        status: "ok",
+        data: [
+          makeMessage({
+            id: "msg-stale",
+            chat_session_id: "sess-stale",
+            content: "should not appear",
+          }),
+        ],
+      });
+
+      await selectPromise;
+
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toBeNull();
+      expect(state.messages).toEqual([]);
+    });
+  });
+
+  describe("loadResumableSessionId / resumeLastSession", () => {
+    it("loadResumableSessionId stores the cached id without selecting anything", async () => {
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-cached",
+      });
+
+      const id = await useLiveChatStore.getState().loadResumableSessionId();
+
+      expect(id).toBe("sess-cached");
+      expect(useLiveChatStore.getState().resumableSessionId).toBe(
+        "sess-cached"
+      );
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+      expect(mockedGetSession).not.toHaveBeenCalled();
+      expect(mockedListMessages).not.toHaveBeenCalled();
+    });
+
+    it("loadResumableSessionId stores null when nothing is cached", async () => {
+      mockedGetActive.mockResolvedValueOnce({ status: "ok", data: null });
+
+      const id = await useLiveChatStore.getState().loadResumableSessionId();
+
+      expect(id).toBeNull();
+      expect(useLiveChatStore.getState().resumableSessionId).toBeNull();
+    });
+
+    it("resumeLastSession selects the cached session and clears resumableSessionId", async () => {
+      const session = makeSession({ id: "sess-resume" });
+      useLiveChatStore.setState({ resumableSessionId: "sess-resume" });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+      mockedListMessages.mockResolvedValueOnce({
+        status: "ok",
+        data: [
+          makeMessage({
+            id: "msg-resume",
+            chat_session_id: "sess-resume",
+            content: "welcome back",
+          }),
+        ],
+      });
+
+      const result = await useLiveChatStore.getState().resumeLastSession();
+
+      expect(result?.id).toBe("sess-resume");
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession?.id).toBe("sess-resume");
+      expect(state.messages.map((m) => m.id)).toEqual(["msg-resume"]);
+      expect(state.resumableSessionId).toBeNull();
+    });
+
+    it("resumeLastSession clears stale cache when the session no longer exists", async () => {
+      useLiveChatStore.setState({ resumableSessionId: "sess-stale" });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: null });
+
+      const result = await useLiveChatStore.getState().resumeLastSession();
+
+      expect(result).toBeNull();
+      expect(mockedSetActive).toHaveBeenCalledWith(null);
+      const state = useLiveChatStore.getState();
+      expect(state.resumableSessionId).toBeNull();
+      expect(state.currentSession).toBeNull();
+    });
+
+    it("resumeLastSession is a no-op when no cached id is known", async () => {
+      const result = await useLiveChatStore.getState().resumeLastSession();
+      expect(result).toBeNull();
+      expect(mockedGetSession).not.toHaveBeenCalled();
+    });
+  });
+
   describe("createSession + persistence", () => {
     it("persists the new session id via setActiveChatSessionId", async () => {
       const session = makeSession({ id: "sess-persist" });

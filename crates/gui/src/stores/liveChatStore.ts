@@ -23,6 +23,7 @@ interface LiveChatStoreState {
   panelOpen: boolean;
   hydrated: boolean;
   lastError: string | null;
+  resumableSessionId: string | null;
 }
 
 interface LiveChatStoreActions {
@@ -40,6 +41,9 @@ interface LiveChatStoreActions {
   ) => void;
   upsertSession: (session: ChatSession) => void;
   hydrate: () => Promise<ChatSession | null>;
+  newChat: () => void;
+  loadResumableSessionId: () => Promise<string | null>;
+  resumeLastSession: () => Promise<ChatSession | null>;
   reset: () => void;
 }
 
@@ -59,6 +63,7 @@ const initialState: LiveChatStoreState = {
   panelOpen: false,
   hydrated: false,
   lastError: null,
+  resumableSessionId: null,
 };
 
 function nowIso(): string {
@@ -402,6 +407,46 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
         inflightHydrate = null;
       }
     }
+  },
+
+  newChat: () => {
+    // Mirror the deleteSession active-session branch: invalidate any in-flight
+    // hydrate so its result cannot land on top of the fresh state, then clear
+    // the local cache + transcript and mark hydrated so consumers know there
+    // is nothing to wait for.
+    hydrateGeneration += 1;
+    inflightHydrate = null;
+    persistActiveSessionId(null);
+    set({
+      currentSession: null,
+      messages: [],
+      hydrated: true,
+      lastError: null,
+    });
+  },
+
+  loadResumableSessionId: async () => {
+    const result = await commands.getActiveChatSessionId();
+    if (result.status !== "ok") {
+      return null;
+    }
+    const id = result.data ?? null;
+    set({ resumableSessionId: id });
+    return id;
+  },
+
+  resumeLastSession: async () => {
+    const cachedId = get().resumableSessionId;
+    if (!cachedId) return null;
+    const session = await get().selectSession(cachedId);
+    if (!session) {
+      // The cached id is stale — clear it so the empty-state link disappears.
+      persistActiveSessionId(null);
+      set({ resumableSessionId: null });
+      return null;
+    }
+    set({ resumableSessionId: null });
+    return session;
   },
 
   sendMessage: async (content) => {
