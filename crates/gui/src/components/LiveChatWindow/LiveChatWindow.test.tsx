@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ChatMessage, ChatSession } from "../../bindings";
 
@@ -16,6 +16,11 @@ vi.mock("../../bindings", () => ({
     getActiveChatSessionId: vi.fn(),
     setActiveChatSessionId: vi.fn(),
   },
+}));
+
+const mockDetachLiveChat = vi.fn();
+vi.mock("../../utils/detachLiveChat", () => ({
+  detachLiveChat: () => mockDetachLiveChat(),
 }));
 
 import { commands } from "../../bindings";
@@ -72,7 +77,8 @@ describe("LiveChatWindow", () => {
     mockedListMessages.mockReset();
     mockedGetActive.mockReset();
     mockedSetActive.mockReset();
-    // Default: no cached session — hydrate is a no-op for the existing tests.
+    mockDetachLiveChat.mockReset();
+    // Default: no cached session — empty resumable + empty history.
     mockedGetActive.mockResolvedValue({ status: "ok", data: null });
     mockedListSessions.mockResolvedValue({ status: "ok", data: [] });
     mockedDeleteSession.mockResolvedValue({
@@ -82,12 +88,27 @@ describe("LiveChatWindow", () => {
     mockedSetActive.mockResolvedValue({ status: "ok", data: null });
   });
 
-  it("renders an empty-state hint when no messages exist", async () => {
+  it("renders an empty-state hint when no messages exist", () => {
     render(<LiveChatWindow />);
     expect(
-      screen.getByText("Start a sacrum live chat for this project")
+      screen.getByText("Start a live chat")
     ).toBeInTheDocument();
-    expect(await screen.findByText("No session yet")).toBeInTheDocument();
+  });
+
+  it("renders the new header buttons: History, New chat, Detach, Close", () => {
+    render(<LiveChatWindow />);
+    expect(screen.getByLabelText("Toggle chat history")).toBeInTheDocument();
+    expect(screen.getByLabelText("Start new chat")).toBeInTheDocument();
+    expect(screen.getByLabelText("Detach live chat")).toBeInTheDocument();
+    expect(screen.getByLabelText("Close live chat")).toBeInTheDocument();
+  });
+
+  it("standalone mode hides Detach and Close buttons", () => {
+    render(<LiveChatWindow standalone />);
+    expect(screen.getByLabelText("Toggle chat history")).toBeInTheDocument();
+    expect(screen.getByLabelText("Start new chat")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Detach live chat")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Close live chat")).not.toBeInTheDocument();
   });
 
   it("creates a session and sends the first message end-to-end", async () => {
@@ -114,7 +135,8 @@ describe("LiveChatWindow", () => {
     expect(contentFormat).toBeNull();
     expect(typeof clientId).toBe("string");
 
-    expect(screen.getByText("hello there")).toBeInTheDocument();
+    const userMsg = screen.getByTestId("live-chat-message-user");
+    expect(within(userMsg).getByText("hello there")).toBeInTheDocument();
     await waitFor(() =>
       expect(useLiveChatStore.getState().currentSession?.id).toBe(session.id)
     );
@@ -172,11 +194,10 @@ describe("LiveChatWindow", () => {
     });
   });
 
-  it("disables the send button until the user types something", async () => {
+  it("disables the send button until the user types something", () => {
     render(<LiveChatWindow />);
     const sendButton = screen.getByLabelText("Send message") as HTMLButtonElement;
     expect(sendButton.disabled).toBe(true);
-    expect(await screen.findByText("No session yet")).toBeInTheDocument();
   });
 
   it("submits via Enter (without shift)", async () => {
@@ -196,46 +217,69 @@ describe("LiveChatWindow", () => {
     expect(content).toBe("via enter");
   });
 
-  it("hydrates the cached session and renders prior messages on mount", async () => {
-    const session = makeSession({ id: "sess-restored" });
-    const persisted = makeMessage({
-      id: "msg-restored-1",
-      chat_session_id: "sess-restored",
-      role: "user",
-      content: "previous user message",
-    });
-    const persistedAssistant = makeMessage({
-      id: "msg-restored-2",
-      chat_session_id: "sess-restored",
-      role: "assistant",
-      content: "previous assistant reply",
-    });
-
-    mockedGetActive.mockReset();
-    mockedGetActive.mockResolvedValue({ status: "ok", data: "sess-restored" });
-    mockedGetSession.mockResolvedValue({ status: "ok", data: session });
-    mockedListMessages.mockResolvedValue({
-      status: "ok",
-      data: [persisted, persistedAssistant],
+  it("New chat clears current session, messages, and persists null", async () => {
+    const user = userEvent.setup();
+    const session = makeSession({ id: "sess-clear" });
+    useLiveChatStore.setState({
+      currentSession: session,
+      sessions: [session],
+      messages: [
+        {
+          id: "msg-clear",
+          role: "user",
+          content: "leftover",
+          content_format: "plain",
+          createdAt: "2026-05-10T12:00:00Z",
+          pending: false,
+          error: null,
+        },
+      ],
     });
 
     render(<LiveChatWindow />);
 
-    await waitFor(() => {
-      expect(screen.getByText("previous user message")).toBeInTheDocument();
-      expect(screen.getByText("previous assistant reply")).toBeInTheDocument();
-    });
-    expect(mockedListMessages).toHaveBeenCalledWith(
-      "sess-restored",
-      200,
-      null
-    );
-    expect(useLiveChatStore.getState().currentSession?.id).toBe(
-      "sess-restored"
-    );
+    const userMsg = screen.getByTestId("live-chat-message-user");
+    expect(within(userMsg).getByText("leftover")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Start new chat"));
+
+    expect(useLiveChatStore.getState().currentSession).toBeNull();
+    expect(useLiveChatStore.getState().messages).toEqual([]);
+    expect(mockedSetActive).toHaveBeenCalledWith(null);
+    expect(screen.queryByTestId("live-chat-message-user")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Start a live chat")
+    ).toBeInTheDocument();
   });
 
-  it("renders the history control with prior sessions", async () => {
+  it("New chat is disabled when there's nothing to leave", () => {
+    render(<LiveChatWindow />);
+    const btn = screen.getByLabelText("Start new chat") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("opens and closes the history drawer", async () => {
+    const user = userEvent.setup();
+    const session = makeSession({ id: "sess-1" });
+    mockedListSessions.mockResolvedValueOnce({
+      status: "ok",
+      data: [session],
+    });
+
+    render(<LiveChatWindow />);
+
+    const drawer = screen.getByTestId("live-chat-history-drawer");
+    expect(drawer.getAttribute("aria-hidden")).toBe("true");
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    expect(drawer.getAttribute("aria-hidden")).toBe("false");
+
+    await user.click(screen.getByLabelText("Close chat history"));
+    expect(drawer.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("drawer renders session rows", async () => {
+    const user = userEvent.setup();
     const newer = makeSession({
       id: "sess-newer",
       updated_at: "2026-05-10T13:00:00Z",
@@ -250,14 +294,17 @@ describe("LiveChatWindow", () => {
     });
 
     render(<LiveChatWindow />);
+    await waitFor(() => {
+      expect(useLiveChatStore.getState().sessions).toHaveLength(2);
+    });
 
-    const picker = await screen.findByLabelText("Chat history");
-    expect(picker).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /sess-new/ })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /sess-old/ })).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Toggle chat history"));
+
+    expect(screen.getByTestId("history-row-sess-newer")).toBeInTheDocument();
+    expect(screen.getByTestId("history-row-sess-older")).toBeInTheDocument();
   });
 
-  it("opens a past session from the history picker", async () => {
+  it("clicking a non-active row selects that session and closes the drawer", async () => {
     const user = userEvent.setup();
     const pastSession = makeSession({ id: "sess-past" });
     const pastMessage = makeMessage({
@@ -275,20 +322,33 @@ describe("LiveChatWindow", () => {
     });
 
     render(<LiveChatWindow />);
+    await waitFor(() => {
+      expect(useLiveChatStore.getState().sessions).toHaveLength(1);
+    });
 
-    await user.selectOptions(
-      await screen.findByLabelText("Chat history"),
-      "sess-past"
-    );
+    await user.click(screen.getByLabelText("Toggle chat history"));
+
+    const row = screen.getByTestId("history-row-sess-past");
+    const open = row.querySelector("button");
+    expect(open).not.toBeNull();
+    await user.click(open!);
 
     await waitFor(() => {
-      expect(screen.getByText("past transcript")).toBeInTheDocument();
+      expect(mockedListMessages).toHaveBeenCalledWith("sess-past", 200, null);
     });
-    expect(mockedListMessages).toHaveBeenCalledWith("sess-past", 200, null);
     expect(mockedSetActive).toHaveBeenCalledWith("sess-past");
+    await waitFor(() => {
+      const userMsg = screen.getByTestId("live-chat-message-user");
+      expect(within(userMsg).getByText("past transcript")).toBeInTheDocument();
+    });
+
+    const drawer = screen.getByTestId("live-chat-history-drawer");
+    await waitFor(() => {
+      expect(drawer.getAttribute("aria-hidden")).toBe("true");
+    });
   });
 
-  it("cancels and confirms deleting the selected session", async () => {
+  it("trash on a row swaps it to inline confirm; confirm deletes; cancel restores", async () => {
     const user = userEvent.setup();
     const session = makeSession({ id: "sess-delete" });
     useLiveChatStore.setState({
@@ -314,17 +374,24 @@ describe("LiveChatWindow", () => {
 
     render(<LiveChatWindow />);
 
-    await user.click(screen.getByLabelText("Delete chat session"));
+    await user.click(screen.getByLabelText("Toggle chat history"));
+
+    await user.click(screen.getByLabelText("Delete chat sess-delete"));
+    expect(screen.getByText("Delete this chat?")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByLabelText("Cancel delete chat sess-delete")
+    );
+    expect(mockedDeleteSession).not.toHaveBeenCalled();
+    expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument();
     expect(
-      screen.getByLabelText("Confirm delete chat session")
+      screen.getByTestId("history-row-sess-delete")
     ).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText("Cancel delete chat session"));
-    expect(mockedDeleteSession).not.toHaveBeenCalled();
-    expect(screen.getByText("remove transcript")).toBeInTheDocument();
-
-    await user.click(screen.getByLabelText("Delete chat session"));
-    await user.click(screen.getByLabelText("Confirm delete chat session"));
+    await user.click(screen.getByLabelText("Delete chat sess-delete"));
+    await user.click(
+      screen.getByLabelText("Confirm delete chat sess-delete")
+    );
 
     await waitFor(() => {
       expect(mockedDeleteSession).toHaveBeenCalledWith("sess-delete");
@@ -332,5 +399,48 @@ describe("LiveChatWindow", () => {
     });
     expect(useLiveChatStore.getState().sessions).toEqual([]);
     expect(screen.queryByText("remove transcript")).not.toBeInTheDocument();
+  });
+
+  it("Resume last session link appears when resumableSessionId is set and triggers resume", async () => {
+    const user = userEvent.setup();
+    const session = makeSession({ id: "sess-resume" });
+    mockedGetActive.mockReset();
+    mockedGetActive.mockResolvedValue({ status: "ok", data: "sess-resume" });
+    mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+    mockedListMessages.mockResolvedValueOnce({
+      status: "ok",
+      data: [
+        makeMessage({
+          id: "msg-resumed",
+          chat_session_id: "sess-resume",
+          content: "resumed transcript",
+        }),
+      ],
+    });
+
+    render(<LiveChatWindow />);
+
+    const link = await screen.findByLabelText("Resume last session");
+    expect(link).toBeInTheDocument();
+
+    await user.click(link);
+
+    await waitFor(() => {
+      expect(mockedGetSession).toHaveBeenCalledWith("sess-resume");
+    });
+    await waitFor(() => {
+      const userMsg = screen.getByTestId("live-chat-message-user");
+      expect(within(userMsg).getByText("resumed transcript")).toBeInTheDocument();
+    });
+  });
+
+  it("Detach button calls detachLiveChat()", async () => {
+    const user = userEvent.setup();
+    mockDetachLiveChat.mockResolvedValue(undefined);
+
+    render(<LiveChatWindow />);
+
+    await user.click(screen.getByLabelText("Detach live chat"));
+    expect(mockDetachLiveChat).toHaveBeenCalledTimes(1);
   });
 });
