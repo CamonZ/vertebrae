@@ -56,6 +56,23 @@ pub const GET_CHAT_SESSION: &str = r#"
     }
 "#;
 
+pub const LIST_CHAT_SESSIONS: &str = r#"
+    query ListChatSessions($project_id: Uuid4!, $limit: Int) {
+        chat_sessions(project_id: $project_id, limit: $limit) {
+            ...ChatSessionFields
+        }
+    }
+"#;
+
+pub const DELETE_CHAT_SESSION: &str = r#"
+    mutation DeleteChatSession($project_id: Uuid4!, $chat_session_id: Uuid4!) {
+        delete_chat_session(project_id: $project_id, chat_session_id: $chat_session_id) {
+            deleted_session_id
+            success
+        }
+    }
+"#;
+
 pub const LIST_CHAT_MESSAGES: &str = r#"
     query ListChatMessages(
         $project_id: Uuid4!,

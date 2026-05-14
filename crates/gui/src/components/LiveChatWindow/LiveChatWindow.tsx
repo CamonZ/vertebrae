@@ -2,24 +2,44 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLiveChatStore } from "../../stores/liveChatStore";
 import { MarkdownContent } from "../shared/MarkdownContent";
 
+function sessionOptionLabel(sessionId: string, timestamp: string | null): string {
+  const shortId = sessionId.slice(0, 8);
+  if (!timestamp) return `Session ${shortId}`;
+
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return `Session ${shortId}`;
+
+  return `${shortId} - ${parsed.toLocaleString()}`;
+}
+
 export function LiveChatWindow() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastMessageCountRef = useRef(0);
   const [inputValue, setInputValue] = useState("");
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<
+    string | null
+  >(null);
 
   const session = useLiveChatStore((s) => s.currentSession);
+  const sessions = useLiveChatStore((s) => s.sessions);
   const messages = useLiveChatStore((s) => s.messages);
   const sending = useLiveChatStore((s) => s.sending);
   const creatingSession = useLiveChatStore((s) => s.creatingSession);
+  const loadingSessions = useLiveChatStore((s) => s.loadingSessions);
+  const deletingSessionId = useLiveChatStore((s) => s.deletingSessionId);
   const lastError = useLiveChatStore((s) => s.lastError);
   const sendMessage = useLiveChatStore((s) => s.sendMessage);
   const togglePanel = useLiveChatStore((s) => s.togglePanel);
   const hydrate = useLiveChatStore((s) => s.hydrate);
+  const loadSessions = useLiveChatStore((s) => s.loadSessions);
+  const selectSession = useLiveChatStore((s) => s.selectSession);
+  const deleteSession = useLiveChatStore((s) => s.deleteSession);
 
   useEffect(() => {
     void hydrate();
-  }, [hydrate]);
+    void loadSessions();
+  }, [hydrate, loadSessions]);
 
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current) {
@@ -34,6 +54,11 @@ export function LiveChatWindow() {
 
   const sendDisabled =
     !inputValue.trim() || sending || creatingSession;
+
+  const selectedSessionId = session?.id ?? "";
+  const deletePending = Boolean(
+    selectedSessionId && deletingSessionId === selectedSessionId
+  );
 
   const handleSend = useCallback(async () => {
     if (sendDisabled) return;
@@ -52,6 +77,22 @@ export function LiveChatWindow() {
     [handleSend]
   );
 
+  const handleSelectSession = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const nextSessionId = e.target.value;
+      setConfirmDeleteSessionId(null);
+      if (!nextSessionId) return;
+      void selectSession(nextSessionId);
+    },
+    [selectSession]
+  );
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!confirmDeleteSessionId) return;
+    const deleted = await deleteSession(confirmDeleteSessionId);
+    if (deleted) setConfirmDeleteSessionId(null);
+  }, [confirmDeleteSessionId, deleteSession]);
+
   return (
     <div
       data-testid="live-chat-window"
@@ -59,13 +100,75 @@ export function LiveChatWindow() {
       aria-label="Sacrum live chat"
     >
       <div className="flex items-center justify-between border-b border-border bg-bg-primary px-3 py-2">
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-xs">
+          <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
             Live
           </span>
-          <span className="text-text-secondary">
-            {session ? `Session ${session.id.slice(0, 8)}` : "No session yet"}
-          </span>
+          <select
+            aria-label="Chat history"
+            value={selectedSessionId}
+            onChange={handleSelectSession}
+            disabled={loadingSessions || sessions.length === 0}
+            className="min-w-0 max-w-[14rem] rounded border border-border bg-bg-secondary px-2 py-1 text-xs text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <option value="">
+              {loadingSessions ? "Loading sessions" : "No session yet"}
+            </option>
+            {sessions.map((item) => (
+              <option key={item.id} value={item.id}>
+                {sessionOptionLabel(
+                  item.id,
+                  item.updated_at ?? item.inserted_at ?? item.started_at
+                )}
+              </option>
+            ))}
+          </select>
+          {session && confirmDeleteSessionId !== session.id && (
+            <button
+              type="button"
+              onClick={() => setConfirmDeleteSessionId(session.id)}
+              disabled={deletePending}
+              className="shrink-0 rounded p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-error disabled:cursor-not-allowed disabled:opacity-50"
+              title="Delete chat session"
+              aria-label="Delete chat session"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4h6v3m-8 0h10"
+                />
+              </svg>
+            </button>
+          )}
+          {session && confirmDeleteSessionId === session.id && (
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => void handleConfirmDelete()}
+                disabled={deletePending}
+                className="rounded border border-error/50 px-2 py-1 text-[11px] text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Confirm delete chat session"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteSessionId(null)}
+                disabled={deletePending}
+                className="rounded border border-border px-2 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Cancel delete chat session"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
         <button
           onClick={togglePanel}

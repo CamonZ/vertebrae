@@ -6,6 +6,8 @@ vi.mock("../bindings", () => ({
     createChatSession: vi.fn(),
     sendChatMessage: vi.fn(),
     getChatSession: vi.fn(),
+    listChatSessions: vi.fn(),
+    deleteChatSession: vi.fn(),
     listChatMessages: vi.fn(),
     getActiveChatSessionId: vi.fn(),
     setActiveChatSessionId: vi.fn(),
@@ -18,6 +20,8 @@ import { useLiveChatStore, type LiveChatMessage } from "./liveChatStore";
 const mockedCreate = vi.mocked(commands.createChatSession);
 const mockedSend = vi.mocked(commands.sendChatMessage);
 const mockedGetSession = vi.mocked(commands.getChatSession);
+const mockedListSessions = vi.mocked(commands.listChatSessions);
+const mockedDeleteSession = vi.mocked(commands.deleteChatSession);
 const mockedListMessages = vi.mocked(commands.listChatMessages);
 const mockedGetActive = vi.mocked(commands.getActiveChatSessionId);
 const mockedSetActive = vi.mocked(commands.setActiveChatSessionId);
@@ -58,6 +62,8 @@ describe("liveChatStore", () => {
     mockedCreate.mockReset();
     mockedSend.mockReset();
     mockedGetSession.mockReset();
+    mockedListSessions.mockReset();
+    mockedDeleteSession.mockReset();
     mockedListMessages.mockReset();
     mockedGetActive.mockReset();
     mockedSetActive.mockReset();
@@ -74,6 +80,7 @@ describe("liveChatStore", () => {
       expect(result).toEqual(session);
       expect(mockedCreate).toHaveBeenCalledTimes(1);
       expect(useLiveChatStore.getState().currentSession).toEqual(session);
+      expect(useLiveChatStore.getState().sessions).toEqual([session]);
       expect(useLiveChatStore.getState().creatingSession).toBe(false);
       expect(useLiveChatStore.getState().lastError).toBeNull();
     });
@@ -254,6 +261,7 @@ describe("liveChatStore", () => {
 
   describe("applyRemoteMessage", () => {
     it("appends a remote message when there's no matching local message", () => {
+      useLiveChatStore.setState({ currentSession: makeSession() });
       const incoming = makeMessage({
         id: "msg-assistant-1",
         role: "assistant",
@@ -271,6 +279,7 @@ describe("liveChatStore", () => {
 
     it("replaces the optimistic message matched by client_message_id", () => {
       useLiveChatStore.setState({
+        currentSession: makeSession(),
         messages: [
           {
             id: "client-abc",
@@ -299,6 +308,7 @@ describe("liveChatStore", () => {
 
     it("falls back to the message.client_message_id when no override is given", () => {
       useLiveChatStore.setState({
+        currentSession: makeSession(),
         messages: [
           {
             id: "client-fallback",
@@ -325,6 +335,7 @@ describe("liveChatStore", () => {
     });
 
     it("is idempotent against duplicate deliveries (same persisted id)", () => {
+      useLiveChatStore.setState({ currentSession: makeSession() });
       const msg = makeMessage({ id: "msg-dup" });
       useLiveChatStore.getState().applyRemoteMessage(msg);
       useLiveChatStore.getState().applyRemoteMessage(msg);
@@ -334,6 +345,7 @@ describe("liveChatStore", () => {
 
     it("does not mutate the previous messages array when replacing in place", () => {
       useLiveChatStore.setState({
+        currentSession: makeSession(),
         messages: [
           {
             id: "client-ref",
@@ -359,21 +371,38 @@ describe("liveChatStore", () => {
       expect(before[0].id).toBe("client-ref");
       expect(before[0].pending).toBe(true);
     });
+
+    it("ignores remote messages for non-selected sessions", () => {
+      useLiveChatStore.setState({
+        currentSession: makeSession({ id: "sess-current" }),
+      });
+
+      useLiveChatStore.getState().applyRemoteMessage(
+        makeMessage({
+          id: "msg-other",
+          chat_session_id: "sess-other",
+        })
+      );
+
+      expect(useLiveChatStore.getState().messages).toEqual([]);
+    });
   });
 
   describe("upsertSession", () => {
-    it("sets the session when none exists", () => {
+    it("adds the session to history when none is selected", () => {
       const session = makeSession({ id: "sess-x" });
       useLiveChatStore.getState().upsertSession(session);
-      expect(useLiveChatStore.getState().currentSession).toEqual(session);
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+      expect(useLiveChatStore.getState().sessions).toEqual([session]);
     });
 
     it("updates the session in place when ids match", () => {
       const session = makeSession({ id: "sess-1", status: "active" });
-      useLiveChatStore.setState({ currentSession: session });
+      useLiveChatStore.setState({ currentSession: session, sessions: [session] });
       const updated = makeSession({ id: "sess-1", status: "ended" });
       useLiveChatStore.getState().upsertSession(updated);
       expect(useLiveChatStore.getState().currentSession?.status).toBe("ended");
+      expect(useLiveChatStore.getState().sessions[0].status).toBe("ended");
     });
 
     it("does not overwrite a different current session", () => {
@@ -382,6 +411,170 @@ describe("liveChatStore", () => {
       const other = makeSession({ id: "sess-other" });
       useLiveChatStore.getState().upsertSession(other);
       expect(useLiveChatStore.getState().currentSession).toEqual(current);
+    });
+  });
+
+  describe("session history", () => {
+    it("loads history and keeps newest sessions first", async () => {
+      const older = makeSession({
+        id: "sess-older",
+        inserted_at: "2026-05-10T12:00:00Z",
+        updated_at: "2026-05-10T12:00:00Z",
+      });
+      const newer = makeSession({
+        id: "sess-newer",
+        inserted_at: "2026-05-10T13:00:00Z",
+        updated_at: "2026-05-10T13:00:00Z",
+      });
+      mockedListSessions.mockResolvedValueOnce({
+        status: "ok",
+        data: [older, newer],
+      });
+
+      const result = await useLiveChatStore.getState().loadSessions(10);
+
+      expect(mockedListSessions).toHaveBeenCalledWith(10);
+      expect(result?.map((s) => s.id)).toEqual(["sess-newer", "sess-older"]);
+      expect(useLiveChatStore.getState().sessions.map((s) => s.id)).toEqual([
+        "sess-newer",
+        "sess-older",
+      ]);
+      expect(useLiveChatStore.getState().loadingSessions).toBe(false);
+    });
+
+    it("selects an older session and hydrates only that transcript", async () => {
+      const active = makeSession({ id: "sess-active" });
+      const older = makeSession({ id: "sess-older" });
+      const olderMessage = makeMessage({
+        id: "msg-older",
+        chat_session_id: "sess-older",
+        content: "older transcript",
+      });
+      useLiveChatStore.setState({
+        currentSession: active,
+        sessions: [active, older],
+        messages: [
+          {
+            id: "msg-active",
+            role: "assistant",
+            content: "active transcript",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: false,
+            error: null,
+          },
+        ],
+      });
+      mockedListMessages.mockResolvedValueOnce({
+        status: "ok",
+        data: [olderMessage],
+      });
+
+      const result = await useLiveChatStore.getState().selectSession("sess-older");
+
+      expect(result).toEqual(older);
+      expect(mockedListMessages).toHaveBeenCalledWith("sess-older", 200, null);
+      expect(mockedSetActive).toHaveBeenCalledWith("sess-older");
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession?.id).toBe("sess-older");
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0].id).toBe("msg-older");
+      expect(state.messages[0].content).toBe("older transcript");
+      expect(state.messages.some((m) => m.id === "msg-active")).toBe(false);
+    });
+
+    it("deletes the active session and clears the active cache and transcript", async () => {
+      const active = makeSession({ id: "sess-active" });
+      const other = makeSession({ id: "sess-other" });
+      useLiveChatStore.setState({
+        currentSession: active,
+        sessions: [active, other],
+        messages: [
+          {
+            id: "msg-active",
+            role: "user",
+            content: "delete me",
+            content_format: "plain",
+            createdAt: "2026-05-10T12:00:00Z",
+            pending: false,
+            error: null,
+          },
+        ],
+      });
+      mockedDeleteSession.mockResolvedValueOnce({
+        status: "ok",
+        data: { deleted_session_id: "sess-active", success: true },
+      });
+
+      const deleted = await useLiveChatStore
+        .getState()
+        .deleteSession("sess-active");
+
+      expect(deleted).toBe(true);
+      expect(mockedDeleteSession).toHaveBeenCalledWith("sess-active");
+      expect(mockedSetActive).toHaveBeenCalledWith(null);
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toBeNull();
+      expect(state.messages).toEqual([]);
+      expect(state.sessions.map((s) => s.id)).toEqual(["sess-other"]);
+      expect(state.deletingSessionId).toBeNull();
+    });
+
+    it("deletes a non-active session without disturbing the current transcript", async () => {
+      const active = makeSession({ id: "sess-active" });
+      const other = makeSession({ id: "sess-other" });
+      const activeMessage: LiveChatMessage = {
+        id: "msg-active",
+        role: "assistant",
+        content: "keep me",
+        content_format: "plain",
+        createdAt: "2026-05-10T12:00:00Z",
+        pending: false,
+        error: null,
+      };
+      useLiveChatStore.setState({
+        currentSession: active,
+        sessions: [active, other],
+        messages: [activeMessage],
+      });
+      mockedDeleteSession.mockResolvedValueOnce({
+        status: "ok",
+        data: { deleted_session_id: "sess-other", success: true },
+      });
+
+      const deleted = await useLiveChatStore
+        .getState()
+        .deleteSession("sess-other");
+
+      expect(deleted).toBe(true);
+      expect(mockedSetActive).not.toHaveBeenCalled();
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toEqual(active);
+      expect(state.messages).toEqual([activeMessage]);
+      expect(state.sessions.map((s) => s.id)).toEqual(["sess-active"]);
+    });
+
+    it("does not remove a session when the delete payload reports failure", async () => {
+      const active = makeSession({ id: "sess-active" });
+      useLiveChatStore.setState({
+        currentSession: active,
+        sessions: [active],
+      });
+      mockedDeleteSession.mockResolvedValueOnce({
+        status: "ok",
+        data: { deleted_session_id: "sess-active", success: false },
+      });
+
+      const deleted = await useLiveChatStore
+        .getState()
+        .deleteSession("sess-active");
+
+      expect(deleted).toBe(false);
+      expect(mockedSetActive).not.toHaveBeenCalled();
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toEqual(active);
+      expect(state.sessions).toEqual([active]);
+      expect(state.lastError).toBe("Failed to delete chat session");
     });
   });
 
@@ -493,6 +686,11 @@ describe("liveChatStore", () => {
       );
 
       const hydratePromise = useLiveChatStore.getState().hydrate();
+
+      await vi.waitFor(() => {
+        expect(mockedListMessages).toHaveBeenCalledTimes(1);
+        expect(useLiveChatStore.getState().currentSession?.id).toBe("sess-race");
+      });
 
       // Simulate a WebSocket event for the same message arriving while
       // list_chat_messages is still in flight.

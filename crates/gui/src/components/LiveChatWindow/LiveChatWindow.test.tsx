@@ -10,6 +10,8 @@ vi.mock("../../bindings", () => ({
     createChatSession: vi.fn(),
     sendChatMessage: vi.fn(),
     getChatSession: vi.fn(),
+    listChatSessions: vi.fn(),
+    deleteChatSession: vi.fn(),
     listChatMessages: vi.fn(),
     getActiveChatSessionId: vi.fn(),
     setActiveChatSessionId: vi.fn(),
@@ -23,6 +25,8 @@ import { LiveChatWindow } from "./LiveChatWindow";
 const mockedCreate = vi.mocked(commands.createChatSession);
 const mockedSend = vi.mocked(commands.sendChatMessage);
 const mockedGetSession = vi.mocked(commands.getChatSession);
+const mockedListSessions = vi.mocked(commands.listChatSessions);
+const mockedDeleteSession = vi.mocked(commands.deleteChatSession);
 const mockedListMessages = vi.mocked(commands.listChatMessages);
 const mockedGetActive = vi.mocked(commands.getActiveChatSessionId);
 const mockedSetActive = vi.mocked(commands.setActiveChatSessionId);
@@ -63,20 +67,27 @@ describe("LiveChatWindow", () => {
     mockedCreate.mockReset();
     mockedSend.mockReset();
     mockedGetSession.mockReset();
+    mockedListSessions.mockReset();
+    mockedDeleteSession.mockReset();
     mockedListMessages.mockReset();
     mockedGetActive.mockReset();
     mockedSetActive.mockReset();
     // Default: no cached session — hydrate is a no-op for the existing tests.
     mockedGetActive.mockResolvedValue({ status: "ok", data: null });
+    mockedListSessions.mockResolvedValue({ status: "ok", data: [] });
+    mockedDeleteSession.mockResolvedValue({
+      status: "ok",
+      data: { deleted_session_id: "sess-abc12345", success: true },
+    });
     mockedSetActive.mockResolvedValue({ status: "ok", data: null });
   });
 
-  it("renders an empty-state hint when no messages exist", () => {
+  it("renders an empty-state hint when no messages exist", async () => {
     render(<LiveChatWindow />);
     expect(
       screen.getByText("Start a sacrum live chat for this project")
     ).toBeInTheDocument();
-    expect(screen.getByText("No session yet")).toBeInTheDocument();
+    expect(await screen.findByText("No session yet")).toBeInTheDocument();
   });
 
   it("creates a session and sends the first message end-to-end", async () => {
@@ -161,10 +172,11 @@ describe("LiveChatWindow", () => {
     });
   });
 
-  it("disables the send button until the user types something", () => {
+  it("disables the send button until the user types something", async () => {
     render(<LiveChatWindow />);
     const sendButton = screen.getByLabelText("Send message") as HTMLButtonElement;
     expect(sendButton.disabled).toBe(true);
+    expect(await screen.findByText("No session yet")).toBeInTheDocument();
   });
 
   it("submits via Enter (without shift)", async () => {
@@ -221,5 +233,104 @@ describe("LiveChatWindow", () => {
     expect(useLiveChatStore.getState().currentSession?.id).toBe(
       "sess-restored"
     );
+  });
+
+  it("renders the history control with prior sessions", async () => {
+    const newer = makeSession({
+      id: "sess-newer",
+      updated_at: "2026-05-10T13:00:00Z",
+    });
+    const older = makeSession({
+      id: "sess-older",
+      updated_at: "2026-05-10T12:00:00Z",
+    });
+    mockedListSessions.mockResolvedValueOnce({
+      status: "ok",
+      data: [newer, older],
+    });
+
+    render(<LiveChatWindow />);
+
+    const picker = await screen.findByLabelText("Chat history");
+    expect(picker).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /sess-new/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /sess-old/ })).toBeInTheDocument();
+  });
+
+  it("opens a past session from the history picker", async () => {
+    const user = userEvent.setup();
+    const pastSession = makeSession({ id: "sess-past" });
+    const pastMessage = makeMessage({
+      id: "msg-past",
+      chat_session_id: "sess-past",
+      content: "past transcript",
+    });
+    mockedListSessions.mockResolvedValueOnce({
+      status: "ok",
+      data: [pastSession],
+    });
+    mockedListMessages.mockResolvedValueOnce({
+      status: "ok",
+      data: [pastMessage],
+    });
+
+    render(<LiveChatWindow />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Chat history"),
+      "sess-past"
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("past transcript")).toBeInTheDocument();
+    });
+    expect(mockedListMessages).toHaveBeenCalledWith("sess-past", 200, null);
+    expect(mockedSetActive).toHaveBeenCalledWith("sess-past");
+  });
+
+  it("cancels and confirms deleting the selected session", async () => {
+    const user = userEvent.setup();
+    const session = makeSession({ id: "sess-delete" });
+    useLiveChatStore.setState({
+      currentSession: session,
+      sessions: [session],
+      messages: [
+        {
+          id: "msg-delete",
+          role: "user",
+          content: "remove transcript",
+          content_format: "plain",
+          createdAt: "2026-05-10T12:00:00Z",
+          pending: false,
+          error: null,
+        },
+      ],
+    });
+    mockedListSessions.mockResolvedValue({ status: "ok", data: [session] });
+    mockedDeleteSession.mockResolvedValueOnce({
+      status: "ok",
+      data: { deleted_session_id: "sess-delete", success: true },
+    });
+
+    render(<LiveChatWindow />);
+
+    await user.click(screen.getByLabelText("Delete chat session"));
+    expect(
+      screen.getByLabelText("Confirm delete chat session")
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Cancel delete chat session"));
+    expect(mockedDeleteSession).not.toHaveBeenCalled();
+    expect(screen.getByText("remove transcript")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Delete chat session"));
+    await user.click(screen.getByLabelText("Confirm delete chat session"));
+
+    await waitFor(() => {
+      expect(mockedDeleteSession).toHaveBeenCalledWith("sess-delete");
+      expect(useLiveChatStore.getState().currentSession).toBeNull();
+    });
+    expect(useLiveChatStore.getState().sessions).toEqual([]);
+    expect(screen.queryByText("remove transcript")).not.toBeInTheDocument();
   });
 });
