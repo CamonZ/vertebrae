@@ -645,6 +645,8 @@ pub struct AgentConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
@@ -682,6 +684,11 @@ impl AgentConfig {
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into().trim().to_ascii_lowercase());
         self
     }
 
@@ -809,6 +816,7 @@ impl AgentConfig {
     pub fn is_empty(&self) -> bool {
         self.provider.is_none()
             && self.model.is_none()
+            && self.reasoning_effort.is_none()
             && self.fallback_model.is_none()
             && self.system_prompt.is_none()
             && self.append_system_prompt.is_none()
@@ -829,6 +837,9 @@ impl AgentConfig {
         }
         if other.model.is_some() {
             self.model = other.model;
+        }
+        if other.reasoning_effort.is_some() {
+            self.reasoning_effort = other.reasoning_effort;
         }
         if other.fallback_model.is_some() {
             self.fallback_model = other.fallback_model;
@@ -874,6 +885,7 @@ impl PartialEq for AgentConfig {
     fn eq(&self, other: &Self) -> bool {
         self.provider == other.provider
             && self.model == other.model
+            && self.reasoning_effort == other.reasoning_effort
             && self.fallback_model == other.fallback_model
             && self.system_prompt == other.system_prompt
             && self.append_system_prompt == other.append_system_prompt
@@ -3218,6 +3230,38 @@ mod tests {
     }
 
     #[test]
+    fn agent_config_with_reasoning_effort() {
+        let config = AgentConfig::new().with_reasoning_effort(" HIGH ");
+        assert_eq!(config.reasoning_effort, Some("high".to_string()));
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn agent_config_reasoning_effort_round_trips_json() {
+        let config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5.5")
+            .with_reasoning_effort("xhigh");
+        let json = serde_json::to_string(&config).expect("serialize agent config");
+        assert!(json.contains(r#""reasoning_effort":"xhigh""#));
+
+        let parsed: AgentConfig = serde_json::from_str(&json).expect("deserialize agent config");
+        assert_eq!(parsed, config);
+        assert_eq!(parsed.reasoning_effort.as_deref(), Some("xhigh"));
+    }
+
+    #[test]
+    fn agent_config_omits_absent_reasoning_effort() {
+        let config = AgentConfig::new().with_model("gpt-5.5");
+        let json = serde_json::to_value(&config).expect("serialize agent config");
+        assert_eq!(json.get("model").and_then(|v| v.as_str()), Some("gpt-5.5"));
+        assert!(
+            json.get("reasoning_effort").is_none(),
+            "reasoning_effort should be omitted when None, got {json}"
+        );
+    }
+
+    #[test]
     fn agent_config_with_fallback_model() {
         let config = AgentConfig::new().with_fallback_model("claude-sonnet");
         assert_eq!(config.fallback_model, Some("claude-sonnet".to_string()));
@@ -3337,9 +3381,22 @@ mod tests {
 
         let merged = config1.merge(config2);
         assert_eq!(merged.model, Some("claude-sonnet".to_string()));
+        assert_eq!(merged.reasoning_effort, None);
         assert_eq!(merged.system_prompt, Some("Original".to_string()));
         assert_eq!(merged.fallback_model, Some("claude-haiku".to_string()));
         assert_eq!(merged.permission_mode, Some(PermissionMode::Delegate));
+    }
+
+    #[test]
+    fn agent_config_merge_overlays_reasoning_effort() {
+        let config1 = AgentConfig::new()
+            .with_model("gpt-5.5")
+            .with_reasoning_effort("medium");
+        let config2 = AgentConfig::new().with_reasoning_effort("high");
+
+        let merged = config1.merge(config2);
+        assert_eq!(merged.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(merged.reasoning_effort.as_deref(), Some("high"));
     }
 
     #[test]
@@ -3356,6 +3413,12 @@ mod tests {
             .with_model("claude")
             .with_max_budget_usd(20.0);
         assert_ne!(config1, config3);
+
+        let config4 = AgentConfig::new()
+            .with_model("claude")
+            .with_reasoning_effort("high")
+            .with_max_budget_usd(10.5);
+        assert_ne!(config1, config4);
     }
 
     #[test]

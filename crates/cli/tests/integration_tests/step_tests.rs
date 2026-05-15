@@ -38,6 +38,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -74,6 +75,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -120,6 +122,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -166,6 +169,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 5,
             r#final: false,
             transitions_to: vec![],
@@ -204,6 +208,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: true,
             transitions_to: vec![],
@@ -250,6 +255,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -301,6 +307,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -341,6 +348,7 @@ mod step_create_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![
@@ -391,6 +399,7 @@ mod step_create_tests {
             agent_config: None,
             model: Some("sonnet".to_string()),
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -444,6 +453,7 @@ mod step_list_tests {
                 agent_config: None,
                 model: None,
                 provider: None,
+                reasoning_effort: None,
                 order: i,
                 r#final: i == 2,
                 transitions_to: vec![],
@@ -513,6 +523,7 @@ mod step_list_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -563,6 +574,7 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 1,
             r#final: false,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
@@ -609,6 +621,7 @@ mod step_show_tests {
             agent_config: None,
             model: Some("opus".to_string()),
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -652,6 +665,7 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 10,
             r#final: true,
             transitions_to: vec![],
@@ -705,6 +719,7 @@ mod step_show_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -754,6 +769,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -775,6 +791,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -812,6 +829,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -833,6 +851,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -870,6 +889,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -891,6 +911,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: Some(5),
             r#final: Some(true),
             transitions_to: vec![],
@@ -928,6 +949,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -949,6 +971,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -994,6 +1017,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1015,6 +1039,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1052,6 +1077,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1073,6 +1099,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
@@ -1123,6 +1150,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec!["old".to_string()],
@@ -1144,6 +1172,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1180,6 +1209,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1200,6 +1230,7 @@ mod step_update_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1258,6 +1289,7 @@ mod step_dispatcher_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1306,6 +1338,7 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1368,6 +1401,7 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1409,6 +1443,7 @@ mod step_delete_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1459,6 +1494,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1497,6 +1533,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string()),
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1534,6 +1571,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":10.0}"#.to_string()),
             model: Some("opus".to_string()),
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1583,6 +1621,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some("not valid json".to_string()),
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1622,6 +1661,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: Some("sonnet".to_string()),
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1642,6 +1682,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"haiku","max_budget_usd":2.5}"#.to_string()),
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1677,6 +1718,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1698,6 +1740,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":3.0}"#.to_string()),
             model: Some("opus".to_string()),
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1733,6 +1776,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1753,6 +1797,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some("{bad json}".to_string()),
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1794,6 +1839,7 @@ mod step_prompt_and_agent_config_tests {
             agent_config: Some(r#"{"model":"opus","max_budget_usd":15.0}"#.to_string()),
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 2,
             r#final: false,
             transitions_to: vec![],
@@ -1842,6 +1888,7 @@ mod route_step_schema_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1863,6 +1910,7 @@ mod route_step_schema_tests {
             agent_config: None,
             model: None,
             provider: None,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -2073,6 +2121,7 @@ mod provider_tests {
             agent_config,
             model,
             provider,
+            reasoning_effort: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -2099,6 +2148,7 @@ mod provider_tests {
             agent_config,
             model,
             provider,
+            reasoning_effort: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -2157,6 +2207,89 @@ mod provider_tests {
     }
 
     #[tokio::test]
+    async fn add_persists_openai_reasoning_effort() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Codex",
+            workflow_id,
+            "reason-1",
+            None,
+            Some("gpt-5.5".to_string()),
+            Some(Provider::Openai),
+        );
+        cmd.reasoning_effort = Some(" HIGH ".to_string());
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("reason-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
+        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_invalid_reasoning_effort_before_persistence() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-reason-1",
+            None,
+            Some("gpt-5.5".to_string()),
+            Some(Provider::Openai),
+        );
+        cmd.reasoning_effort = Some("minimal".to_string());
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("minimal"), "got: {msg}");
+        assert!(msg.contains("low"), "got: {msg}");
+        assert!(
+            services
+                .steps()
+                .get_step("bad-reason-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn add_rejects_anthropic_reasoning_effort() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-reason-2",
+            None,
+            Some("opus".to_string()),
+            Some(Provider::Anthropic),
+        );
+        cmd.reasoning_effort = Some("high".to_string());
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("openai"), "got: {msg}");
+        assert!(msg.contains("anthropic"), "got: {msg}");
+        assert!(
+            services
+                .steps()
+                .get_step("bad-reason-2")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
     async fn update_provider_only_preserves_existing_agent_config() {
         let (services, workflow_id) = mk_workflow().await;
 
@@ -2193,6 +2326,105 @@ mod provider_tests {
         assert_eq!(cfg.permission_mode, Some(PermissionMode::Delegate));
         assert_eq!(cfg.max_budget_usd, Some(12.0));
         assert_eq!(cfg.allowed_tools, vec!["bash".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn update_reasoning_effort_preserves_existing_provider_and_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "Codex",
+            workflow_id,
+            "reason-upd-1",
+            Some(r#"{"provider":"openai","model":"gpt-5.5"}"#.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let mut cmd = update_cmd_with("reason-upd-1", None, None, None);
+        cmd.reasoning_effort = Some("xhigh".to_string());
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("reason-upd-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
+        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("xhigh"));
+    }
+
+    #[tokio::test]
+    async fn update_normalizes_reasoning_effort() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "Codex",
+            workflow_id,
+            "reason-upd-2",
+            Some(r#"{"provider":"openai","model":"gpt-5.5"}"#.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let mut cmd = update_cmd_with("reason-upd-2", None, None, None);
+        cmd.reasoning_effort = Some(" HIGH ".to_string());
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("reason-upd-2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[tokio::test]
+    async fn update_to_anthropic_clears_stale_reasoning_effort() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "Codex",
+            workflow_id,
+            "reason-upd-3",
+            Some(
+                r#"{"provider":"openai","model":"gpt-5.5","reasoning_effort":"high"}"#.to_string(),
+            ),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        update_cmd_with(
+            "reason-upd-3",
+            None,
+            Some("opus".to_string()),
+            Some(Provider::Anthropic),
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let step = services
+            .steps()
+            .get_step("reason-upd-3")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Anthropic));
+        assert_eq!(step.agent_config.model.as_deref(), Some("opus"));
+        assert_eq!(step.agent_config.reasoning_effort, None);
     }
 
     #[tokio::test]
@@ -2286,8 +2518,8 @@ mod provider_tests {
             msg
         );
         assert!(
-            msg.contains("--agent-config"),
-            "error should point at the JSON escape hatch: {}",
+            msg.contains("catalog"),
+            "error should mention catalog: {}",
             msg
         );
 

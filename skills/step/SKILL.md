@@ -34,6 +34,12 @@ vtb step add "Review" -w <workflow-id>
 # With goal and model
 vtb step add "Coding" -w <workflow-id> --goal "Implement the feature" --model sonnet
 
+# Codex/OpenAI with per-step reasoning effort
+vtb step add "Coding" -w <workflow-id> \
+  --provider openai \
+  --model gpt-5.5 \
+  --reasoning-effort high
+
 # With agents and skills
 vtb step add "Testing" -w <workflow-id> \
   --agent .claude/agents/test-runner.md \
@@ -54,9 +60,15 @@ vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 | `--agent` | `-a` | Path to agent file (repeatable) |
 | `--skill` | `-s` | Skill name (repeatable) |
 | `--model` | `-m` | Model to use |
+| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex` |
+| `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
 | `--order` | `-o` | Step order (default: 0) |
 | `--final` | | Mark as a final step |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
+
+`--reasoning-effort` is only valid with the OpenAI/Codex provider. Supported
+values are `low`, `medium`, `high`, and `xhigh`; Claude/Anthropic steps reject
+the field.
 
 ---
 
@@ -100,6 +112,9 @@ vtb step update <step-id> --goal "New goal description"
 
 # Change model
 vtb step update <step-id> --model opus
+
+# Move a step to Codex and set reasoning effort
+vtb step update <step-id> --provider openai --model gpt-5.5 --reasoning-effort high
 
 # Replace agents list (replaces entire list, not additive)
 vtb step update <step-id> --agent .claude/agents/reviewer.md

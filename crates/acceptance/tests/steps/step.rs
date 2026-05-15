@@ -120,6 +120,35 @@ async fn when_add_step_with_agent_config_and_model_override(
     store_step_id_if_created(world, &name);
 }
 
+#[when(
+    expr = "I add a step {string} to the workflow with provider {string}, model {string}, and reasoning effort {string}"
+)]
+async fn when_add_step_with_provider_model_reasoning_effort(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    model: String,
+    reasoning_effort: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--model",
+            &model,
+            "--reasoning-effort",
+            &reasoning_effort,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
 /// Tests that invalid JSON produces a clear error message.
 #[when(expr = "I add a step {string} to the workflow with invalid --agent-config JSON")]
 async fn when_add_step_with_invalid_agent_config(world: &mut SmokeWorld, name: String) {
@@ -288,6 +317,26 @@ async fn then_step_should_have_prompt(world: &mut SmokeWorld, step_name: String,
         actual, expected,
         "step '{}' prompt mismatch: expected '{}', got '{}'\nJSON: {}",
         step_name, expected, actual, json
+    );
+}
+
+#[then(
+    expr = "the step {string} in the workflow should have agent_config field {string} equal to {string}"
+)]
+async fn then_step_should_have_agent_config_field(
+    world: &mut SmokeWorld,
+    step_name: String,
+    field: String,
+    expected: String,
+) {
+    let json = get_step_json(world, &step_name)
+        .await
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
+    let actual = json["agent_config"][&field].as_str().unwrap_or("");
+    assert_eq!(
+        actual, expected,
+        "step '{}' agent_config.{} mismatch: expected '{}', got '{}'\nJSON: {}",
+        step_name, field, expected, actual, json
     );
 }
 
