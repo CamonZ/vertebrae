@@ -392,6 +392,151 @@ async fn gui_should_show_element_with_test_id_within(
         .await;
 }
 
+#[then(expr = "the workflow final toggle should be {word} within {int} seconds")]
+async fn workflow_final_toggle_should_be_state(
+    world: &mut GuiWorld,
+    expected_state: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let expected_checked = match expected_state.as_str() {
+        "enabled" => "true",
+        "disabled" => "false",
+        other => panic!("unsupported workflow final toggle state '{}'", other),
+    };
+    let label = format!("Final workflow: {expected_state}");
+    let locator = Locator::XPath(&format!(
+        "//*[@role='switch' and @aria-label='{}' and @aria-checked='{}']",
+        label, expected_checked
+    ));
+
+    world
+        .screenshot(
+            &client,
+            &format!("before-assert-workflow-final-toggle-{expected_state}"),
+        )
+        .await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(locator)
+        .await;
+
+    if element.is_err() {
+        world
+            .screenshot(
+                &client,
+                &format!("fail-workflow-final-toggle-{expected_state}"),
+            )
+            .await;
+    }
+
+    assert!(
+        element.is_ok(),
+        "expected workflow final toggle to be '{}' within {} seconds",
+        expected_state,
+        timeout
+    );
+
+    world
+        .screenshot(
+            &client,
+            &format!("after-assert-workflow-final-toggle-{expected_state}"),
+        )
+        .await;
+}
+
+#[when("I toggle the workflow final setting")]
+async fn toggle_workflow_final_setting(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::XPath(
+            "//*[@role='switch' and starts-with(@aria-label, 'Final workflow: ')]",
+        ))
+        .await
+        .expect("workflow final toggle not found within 5 seconds");
+
+    element
+        .click()
+        .await
+        .expect("failed to click workflow final toggle");
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, "after-toggle-workflow-final")
+        .await;
+}
+
+#[then(expr = "the pipeline workflow {string} should show the final badge within {int} seconds")]
+async fn pipeline_workflow_should_show_final_badge(
+    world: &mut GuiWorld,
+    workflow_name: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let locator = Locator::XPath(&format!(
+        "//button[normalize-space()='{}']/following-sibling::span[normalize-space()='Final']",
+        workflow_name
+    ));
+
+    world
+        .screenshot(
+            &client,
+            &format!("before-assert-workflow-final-badge-{workflow_name}"),
+        )
+        .await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(locator)
+        .await;
+
+    if element.is_err() {
+        world
+            .screenshot(
+                &client,
+                &format!("fail-workflow-final-badge-{workflow_name}"),
+            )
+            .await;
+    }
+
+    assert!(
+        element.is_ok(),
+        "expected pipeline workflow '{}' to show the Final badge within {} seconds",
+        workflow_name,
+        timeout
+    );
+
+    world
+        .screenshot(
+            &client,
+            &format!("after-assert-workflow-final-badge-{workflow_name}"),
+        )
+        .await;
+}
+
 #[when(expr = "I click on the element with title {string}")]
 async fn click_element_with_title(world: &mut GuiWorld, title: String) {
     let wd = world
