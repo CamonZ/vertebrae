@@ -5,7 +5,7 @@
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, Provider, ServiceError, Step, StepService, StepType, StepUpdate,
-    VertebraeServices, validate_provider_model,
+    VertebraeServices, normalize_provider_reasoning_effort, validate_provider_model,
 };
 
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
@@ -105,6 +105,13 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// OpenAI/Codex reasoning effort (low, medium, high, xhigh).
+    ///
+    /// Convenience shortcut for `agent_config.reasoning_effort`. Only valid
+    /// with `--provider openai`.
+    #[arg(long, value_name = "EFFORT")]
+    pub reasoning_effort: Option<String>,
+
     /// Built-in execution provider for this step (anthropic, openai).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
@@ -142,6 +149,7 @@ fn build_overlayed_agent_config(
     json: Option<&str>,
     provider: Option<Provider>,
     model: Option<&str>,
+    reasoning_effort: Option<&str>,
 ) -> Result<AgentConfig, ServiceError> {
     let mut config = match json {
         Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
@@ -151,13 +159,25 @@ fn build_overlayed_agent_config(
     };
     if let Some(provider) = provider {
         config = config.with_provider(provider);
+        if provider != Provider::Openai && reasoning_effort.is_none() {
+            config.reasoning_effort = None;
+        }
     }
     if let Some(model) = model {
         config = config.with_model(model);
     }
+    if let Some(reasoning_effort) = reasoning_effort {
+        config = config.with_reasoning_effort(reasoning_effort);
+    }
     if let Some(provider) = config.provider {
         validate_provider_model(provider, config.model.as_deref())
             .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+    }
+    if config.reasoning_effort.is_some() {
+        let provider = config.provider.unwrap_or(Provider::Anthropic);
+        config.reasoning_effort =
+            normalize_provider_reasoning_effort(provider, config.reasoning_effort.as_deref())
+                .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
     Ok(config)
 }
@@ -200,6 +220,7 @@ impl StepAddCommand {
             self.agent_config.as_deref(),
             self.provider,
             self.model.as_deref(),
+            self.reasoning_effort.as_deref(),
         )?;
 
         let transitions_to: Vec<String> = self
@@ -480,6 +501,13 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// New OpenAI/Codex reasoning effort (low, medium, high, xhigh).
+    ///
+    /// Convenience shortcut for `agent_config.reasoning_effort`. Only valid
+    /// with `--provider openai`.
+    #[arg(long, value_name = "EFFORT")]
+    pub reasoning_effort: Option<String>,
+
     /// New built-in execution provider for this step (anthropic, openai).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
@@ -584,12 +612,17 @@ impl StepUpdateCommand {
             updates = updates.with_is_final(is_final);
         }
 
-        if self.agent_config.is_some() || self.model.is_some() || self.provider.is_some() {
+        if self.agent_config.is_some()
+            || self.model.is_some()
+            || self.provider.is_some()
+            || self.reasoning_effort.is_some()
+        {
             let agent_config = build_overlayed_agent_config(
                 existing.as_ref().unwrap().agent_config.clone(),
                 self.agent_config.as_deref(),
                 self.provider,
                 self.model.as_deref(),
+                self.reasoning_effort.as_deref(),
             )?;
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid agent config: {}", e))
@@ -747,6 +780,32 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_reasoning_effort_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Coding",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-5.5",
+            "--reasoning-effort",
+            "high",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.model.as_deref(), Some("gpt-5.5"));
+                assert_eq!(cmd.reasoning_effort.as_deref(), Some("high"));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_with_orchestration_fields() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -879,6 +938,24 @@ mod tests {
                     cmd.transitions_to,
                     vec!["a1b2c3d4-0000-4000-8000-00000000000c"]
                 );
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_reasoning_effort_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--reasoning-effort",
+            "xhigh",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.reasoning_effort.as_deref(), Some("xhigh"));
             }
             _ => panic!("Expected Update command"),
         }

@@ -448,8 +448,8 @@ checking the provider-specific env var first, then the user's login-shell
 #### Setting the provider on a step
 
 `vtb step add` and `vtb step update` accept `--provider` (alias:
-`--model-provider`) and `--model` as convenience shortcuts that overlay the
-step's `agent_config`:
+`--model-provider`), `--model`, and `--reasoning-effort` as convenience
+shortcuts that overlay the step's `agent_config`:
 
 ```bash
 # Default behavior — provider unset, daemon uses Anthropic / Claude Code
@@ -463,10 +463,11 @@ vtb step add "Coding" -w <wf-id> \
 # OpenAI / Codex with a GPT model (alias --model-provider also works)
 vtb step add "Coding" -w <wf-id> \
   --model-provider openai \
-  --model gpt-4o
+  --model gpt-5.5 \
+  --reasoning-effort high
 
 # Switch an existing step over to Codex
-vtb step update <step-id> --provider openai --model o3-mini
+vtb step update <step-id> --provider openai --model o3-mini --reasoning-effort high
 
 # Drop back to Anthropic
 vtb step update <step-id> --provider anthropic --model opus
@@ -474,6 +475,11 @@ vtb step update <step-id> --provider anthropic --model opus
 
 Accepted provider names (case-insensitive): `anthropic` / `claude`,
 `openai` / `codex`.
+
+Reasoning effort is OpenAI/Codex-only. Valid values are `low`, `medium`,
+`high`, and `xhigh`; unsupported values such as `minimal` are rejected. A step
+with `--provider anthropic` / Claude plus `--reasoning-effort` is rejected
+before persistence or execution.
 
 #### Recognized model aliases
 
@@ -488,11 +494,12 @@ catalog before persisting the step:
 Mismatched pairs (e.g. `--provider openai --model claude-opus-4-5`) are
 rejected at the CLI with an actionable error. Unknown model names are also
 rejected; if you genuinely need a model name the catalog doesn't recognize,
-fall back to the full JSON via `--agent-config`:
+add catalog support before using it. `--agent-config` is still useful when you
+need to set provider/model together with lower-level config fields:
 
 ```bash
 vtb step update <step-id> \
-  --agent-config '{"provider":"openai","model":"some-new-codex-model"}'
+  --agent-config '{"provider":"openai","model":"gpt-5.5","reasoning_effort":"high","max_budget_usd":5.0}'
 ```
 
 #### Local smoke test
@@ -516,11 +523,12 @@ vtb run <task-id>
 vtb execution list <task-id>          # confirm a run was recorded
 
 # 2. OpenAI / Codex provider selection.
-#    Separate workflow whose single step targets Codex/gpt-4o.
+#    Separate workflow whose single step targets Codex/gpt-5.5.
 vtb workflow add "Smoke-Codex"
 vtb step add "Hello" -w <smoke-codex-wf-id> \
   --provider openai \
-  --model gpt-4o \
+  --model gpt-5.5 \
+  --reasoning-effort high \
   --prompt "Reply with the single word: ok"
 vtb add "Smoke: Codex" -d "say hi"
 vtb workflow assign <task-id-2> <smoke-codex-wf-id>

@@ -95,6 +95,45 @@ pub async fn argv_contains_pair(world: &mut DaemonWorld, first: String, second: 
     );
 }
 
+#[then(expr = "the Codex mock argv contains model {string} and reasoning effort {string}")]
+pub async fn codex_argv_contains_model_and_reasoning_effort(
+    world: &mut DaemonWorld,
+    model: String,
+    reasoning_effort: String,
+) {
+    let argv = world.captured_argv();
+
+    let model_idx = argv
+        .iter()
+        .position(|a| a == "--model")
+        .unwrap_or_else(|| panic!("--model not in argv: {argv:?}"));
+    assert_eq!(
+        argv.get(model_idx + 1),
+        Some(&model),
+        "expected model {model:?} after --model in argv: {argv:?}"
+    );
+
+    let config_value = format!("model_reasoning_effort=\"{reasoning_effort}\"");
+    let config_idx = argv
+        .iter()
+        .position(|a| a == "-c")
+        .unwrap_or_else(|| panic!("-c not in argv: {argv:?}"));
+    assert_eq!(
+        argv.get(config_idx + 1),
+        Some(&config_value),
+        "expected {config_value:?} after -c in argv: {argv:?}"
+    );
+
+    let prompt_idx = argv
+        .len()
+        .checked_sub(1)
+        .expect("mock argv should include program name and prompt");
+    assert!(
+        config_idx + 1 < prompt_idx,
+        "expected {config_value:?} before trailing prompt, got config_idx={config_idx}, prompt_idx={prompt_idx}, argv={argv:?}"
+    );
+}
+
 #[then(expr = "the mock argv contains {string} exactly {int} time(s)")]
 pub async fn argv_contains_n(world: &mut DaemonWorld, needle: String, expected: usize) {
     let argv = world.captured_argv();

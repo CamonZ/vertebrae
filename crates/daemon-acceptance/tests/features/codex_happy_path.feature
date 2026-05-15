@@ -15,6 +15,16 @@ Feature: Codex JSONL step execution
     And the execution output contains "codex-final-answer"
     And the execution records input_tokens 1700 and output_tokens 800
 
+  Scenario: Codex reasoning effort reaches the CLI before the prompt
+    Given a configured daemon test environment
+    And a workflow with one execute step using openai and reasoning effort "high"
+    And a task assigned to the workflow
+    When the codex mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the execution status is "completed"
+    And the Codex mock argv contains model "gpt-5.5" and reasoning effort "high"
+
   Scenario: Codex completed without an agent_message
     Given a configured daemon test environment
     And a workflow with one execute step using openai
