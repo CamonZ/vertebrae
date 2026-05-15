@@ -19,6 +19,29 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Build" in the workflow should have agent model "claude-opus-4-6"
 
+  Scenario: Create a Codex step with reasoning effort
+    When I add a step "Codex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "high"
+    Then the command should succeed
+    And the step "Codex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "Codex" in the workflow should have agent model "gpt-5.5"
+    And the step "Codex" in the workflow should have agent_config field "reasoning_effort" equal to "high"
+
+  Scenario: Update a Codex step with reasoning effort preserves provider and model
+    When I add a step "TunedCodex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "medium"
+    And I update the step "TunedCodex" in the workflow with flag "--reasoning-effort" and value "xhigh"
+    Then the command should succeed
+    And the step "TunedCodex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "TunedCodex" in the workflow should have agent model "gpt-5.5"
+    And the step "TunedCodex" in the workflow should have agent_config field "reasoning_effort" equal to "xhigh"
+
+  Scenario: Invalid reasoning effort is rejected
+    When I add a step "BadCodex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "minimal"
+    Then the command should fail with "minimal"
+
+  Scenario: Anthropic step with reasoning effort is rejected
+    When I add a step "BadClaude" to the workflow with provider "anthropic", model "opus", and reasoning effort "high"
+    Then the command should fail with "only supported with --provider openai"
+
   Scenario: Invalid --agent-config JSON fails with clear error
     When I add a step "Bad" to the workflow with invalid --agent-config JSON
     Then the command should fail with "--agent-config JSON"
@@ -89,4 +112,3 @@ Feature: Step fields: prompt and agent-config
     And I show the step "Visible"
     Then the output should contain "Step Type:     route"
     And the output should contain "Output Schema:"
-

@@ -5,8 +5,8 @@
 //! `vtb step update`. It is intentionally not an exhaustive list of every
 //! model name a vendor publishes -- vendor catalogs change frequently. We only
 //! recognize the aliases and prefixes Vertebrae intentionally supports today,
-//! and we reject everything else with a clear error so users either update the
-//! catalog or fall back to the `--agent-config` JSON escape hatch.
+//! and we reject everything else with a clear error so users update the catalog
+//! before depending on a new model name.
 //!
 //! MVP providers:
 //! - `anthropic` (Claude Code): `claude-*` prefix and the bare aliases
@@ -16,6 +16,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+
+/// Codex reasoning efforts currently accepted by the OpenAI provider path.
+pub const SUPPORTED_OPENAI_REASONING_EFFORTS: &[&str] = &["low", "medium", "high", "xhigh"];
 
 /// Built-in execution providers recognized by Vertebrae.
 ///
@@ -118,7 +121,7 @@ fn is_openai_reasoning_alias(normalized: &str) -> bool {
 /// - If the model is recognized and maps to a different provider, reject with
 ///   an actionable error.
 /// - If the model is not recognized at all, reject with an error pointing to
-///   the `--agent-config` JSON escape hatch.
+///   catalog support.
 /// - If the model is `None`, any provider is fine -- the provider can be
 ///   stored on the agent_config without a model.
 pub fn validate_provider_model(
@@ -144,6 +147,42 @@ pub fn validate_provider_model(
             model: trimmed.to_string(),
         }),
     }
+}
+
+/// Validate that a reasoning effort is supported by the provider.
+///
+/// Reasoning effort is an OpenAI/Codex-only setting. Anthropic/Claude steps
+/// reject it before persistence or spawn so it never leaks into Claude argv.
+pub fn normalize_provider_reasoning_effort(
+    provider: Provider,
+    reasoning_effort: Option<&str>,
+) -> Result<Option<String>, ProviderReasoningEffortMismatch> {
+    let Some(reasoning_effort) = reasoning_effort else {
+        return Ok(None);
+    };
+    let normalized = reasoning_effort.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Err(ProviderReasoningEffortMismatch::UnsupportedEffort {
+            effort: reasoning_effort.to_string(),
+        });
+    }
+    if provider != Provider::Openai {
+        return Err(ProviderReasoningEffortMismatch::UnsupportedProvider {
+            provider,
+            effort: normalized,
+        });
+    }
+    if SUPPORTED_OPENAI_REASONING_EFFORTS.contains(&normalized.as_str()) {
+        return Ok(Some(normalized));
+    }
+    Err(ProviderReasoningEffortMismatch::UnsupportedEffort { effort: normalized })
+}
+
+pub fn validate_provider_reasoning_effort(
+    provider: Provider,
+    reasoning_effort: Option<&str>,
+) -> Result<(), ProviderReasoningEffortMismatch> {
+    normalize_provider_reasoning_effort(provider, reasoning_effort).map(|_| ())
 }
 
 /// Reasons a `(provider, model)` pair can fail validation.
@@ -174,15 +213,43 @@ impl fmt::Display for ProviderModelMismatch {
             ProviderModelMismatch::UnknownModel { requested, model } => write!(
                 f,
                 "Model '{}' is not recognized by the built-in {} catalog. \
-                 If this is a valid {} model, pass the full agent config JSON via --agent-config \
-                 (e.g. --agent-config '{{\"provider\":\"{}\",\"model\":\"{}\"}}') as the escape hatch.",
-                model, requested, requested, requested, model
+                 If this is a valid {} model, update the model catalog before using it.",
+                model, requested, requested
             ),
         }
     }
 }
 
 impl std::error::Error for ProviderModelMismatch {}
+
+/// Reasons a provider/reasoning-effort pair can fail validation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderReasoningEffortMismatch {
+    /// The effort value is not in Codex's supported allowlist.
+    UnsupportedEffort { effort: String },
+    /// The effort is valid for Codex but was attached to another provider.
+    UnsupportedProvider { provider: Provider, effort: String },
+}
+
+impl fmt::Display for ProviderReasoningEffortMismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProviderReasoningEffortMismatch::UnsupportedEffort { effort } => write!(
+                f,
+                "Reasoning effort '{}' is not supported. Supported OpenAI/Codex reasoning efforts: {}.",
+                effort,
+                SUPPORTED_OPENAI_REASONING_EFFORTS.join(", ")
+            ),
+            ProviderReasoningEffortMismatch::UnsupportedProvider { provider, effort } => write!(
+                f,
+                "Reasoning effort '{}' is only supported with --provider openai / Codex. Current provider is {}.",
+                effort, provider
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ProviderReasoningEffortMismatch {}
 
 #[cfg(test)]
 mod tests {
@@ -323,7 +390,7 @@ mod tests {
         }
         let msg = format!("{}", err);
         assert!(msg.contains("kimi2.6"));
-        assert!(msg.contains("--agent-config"));
+        assert!(msg.contains("catalog"));
     }
 
     #[test]
@@ -337,6 +404,56 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn validate_reasoning_effort_accepts_openai_allowlist() {
+        for effort in SUPPORTED_OPENAI_REASONING_EFFORTS {
+            assert!(
+                validate_provider_reasoning_effort(Provider::Openai, Some(effort)).is_ok(),
+                "{effort} should be accepted"
+            );
+        }
+        assert!(validate_provider_reasoning_effort(Provider::Openai, None).is_ok());
+    }
+
+    #[test]
+    fn normalize_reasoning_effort_trims_and_lowercases() {
+        assert_eq!(
+            normalize_provider_reasoning_effort(Provider::Openai, Some(" HIGH ")).unwrap(),
+            Some("high".to_string())
+        );
+    }
+
+    #[test]
+    fn validate_reasoning_effort_rejects_unknown_values() {
+        let err = validate_provider_reasoning_effort(Provider::Openai, Some("minimal"))
+            .expect_err("unsupported effort must fail");
+        assert!(matches!(
+            err,
+            ProviderReasoningEffortMismatch::UnsupportedEffort { .. }
+        ));
+        let msg = err.to_string();
+        assert!(msg.contains("minimal"));
+        assert!(msg.contains("low"));
+        assert!(msg.contains("xhigh"));
+    }
+
+    #[test]
+    fn validate_reasoning_effort_rejects_anthropic_provider() {
+        let err = validate_provider_reasoning_effort(Provider::Anthropic, Some("high"))
+            .expect_err("anthropic reasoning effort must fail");
+        assert!(matches!(
+            err,
+            ProviderReasoningEffortMismatch::UnsupportedProvider {
+                provider: Provider::Anthropic,
+                ..
+            }
+        ));
+        let msg = err.to_string();
+        assert!(msg.contains("high"));
+        assert!(msg.contains("openai"));
+        assert!(msg.contains("anthropic"));
     }
 
     #[test]

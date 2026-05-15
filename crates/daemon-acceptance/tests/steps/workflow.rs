@@ -10,19 +10,18 @@ pub async fn given_workflow_with_one_execute_step(world: &mut DaemonWorld) {
 #[given("a workflow with one execute step using openai")]
 pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
-    let step_id = world.step_id.as_ref().expect("step not created").clone();
-    world
-        .run_vtb(&[
-            "step",
-            "update",
-            &step_id,
-            "--provider",
-            "openai",
-            "--model",
-            "gpt-5",
-        ])
-        .await;
+    update_current_step_openai(world, "gpt-5", None).await;
     world.assert_vtb_ok("step update --provider openai");
+}
+
+#[given(expr = "a workflow with one execute step using openai and reasoning effort {string}")]
+pub async fn given_workflow_with_codex_step_and_reasoning_effort(
+    world: &mut DaemonWorld,
+    reasoning_effort: String,
+) {
+    create_workflow_and_step(world, None).await;
+    update_current_step_openai(world, "gpt-5.5", Some(&reasoning_effort)).await;
+    world.assert_vtb_ok("step update --provider openai --reasoning-effort");
 }
 
 #[given("a workflow with one execute step and an output schema")]
@@ -56,19 +55,30 @@ pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
         "additionalProperties": false
     });
     create_workflow_and_step(world, Some(schema.to_string())).await;
-    let step_id = world.step_id.as_ref().expect("step not created").clone();
-    world
-        .run_vtb(&[
-            "step",
-            "update",
-            &step_id,
-            "--provider",
-            "openai",
-            "--model",
-            "gpt-5",
-        ])
-        .await;
+    update_current_step_openai(world, "gpt-5", None).await;
     world.assert_vtb_ok("step update --provider openai");
+}
+
+async fn update_current_step_openai(
+    world: &mut DaemonWorld,
+    model: &str,
+    reasoning_effort: Option<&str>,
+) {
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    let mut args = vec![
+        "step",
+        "update",
+        step_id.as_str(),
+        "--provider",
+        "openai",
+        "--model",
+        model,
+    ];
+    if let Some(reasoning_effort) = reasoning_effort {
+        args.push("--reasoning-effort");
+        args.push(reasoning_effort);
+    }
+    world.run_vtb(&args).await;
 }
 
 #[given(expr = "the step is configured with agent_config {string}")]
