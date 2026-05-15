@@ -8,7 +8,7 @@
 
 use tokio::process::Command;
 use vertebrae_core::Provider;
-use vertebrae_core::model_catalog::validate_provider_model;
+use vertebrae_core::model_catalog::{normalize_provider_reasoning_effort, validate_provider_model};
 use vertebrae_core::models::AgentConfig;
 
 use crate::actors::step_executor::{
@@ -52,6 +52,9 @@ pub enum ProviderResolutionError {
     /// The persisted `agent_config.provider`/`model` pair is internally
     /// inconsistent (e.g. provider=openai with a `claude-*` model).
     InvalidProviderModel(String),
+    /// The persisted `agent_config.reasoning_effort` is invalid for the
+    /// resolved provider or unsupported by the OpenAI/Codex allowlist.
+    InvalidReasoningEffort(String),
     /// Failed to materialize a provider-side artefact on disk -- e.g. the
     /// JSON schema file Codex requires for `--output-schema`.
     SchemaFileWrite(String),
@@ -65,6 +68,7 @@ impl std::fmt::Display for ProviderResolutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProviderResolutionError::InvalidProviderModel(msg) => f.write_str(msg),
+            ProviderResolutionError::InvalidReasoningEffort(msg) => f.write_str(msg),
             ProviderResolutionError::SchemaFileWrite(msg) => {
                 write!(f, "failed to write Codex output_schema file: {msg}")
             }
@@ -133,6 +137,11 @@ pub fn resolve_provider_command(
             mismatch.to_string(),
         ));
     }
+    let reasoning_effort = normalize_provider_reasoning_effort(
+        provider,
+        config.step_config.agent_config.reasoning_effort.as_deref(),
+    )
+    .map_err(|mismatch| ProviderResolutionError::InvalidReasoningEffort(mismatch.to_string()))?;
 
     let (command, parser_kind) = match provider {
         Provider::Anthropic => {
@@ -143,7 +152,7 @@ pub fn resolve_provider_command(
             )
         }
         Provider::Openai => (
-            build_codex_command(config, settings_bundle)?,
+            build_codex_command(config, settings_bundle, reasoning_effort.as_deref())?,
             ParserKind::CodexJsonl,
         ),
     };
@@ -168,6 +177,7 @@ pub fn resolve_provider_command(
 fn build_codex_command(
     config: &StepExecutorConfig,
     settings_bundle: Option<&SyntheticSettings>,
+    reasoning_effort: Option<&str>,
 ) -> Result<Command, ProviderResolutionError> {
     let binary = config
         .provider_binaries
@@ -186,6 +196,11 @@ fn build_codex_command(
         .filter(|m| !m.trim().is_empty())
     {
         cmd.arg("--model").arg(model);
+    }
+
+    if let Some(reasoning_effort) = reasoning_effort {
+        cmd.arg("-c")
+            .arg(format!("model_reasoning_effort=\"{reasoning_effort}\""));
     }
 
     if let Some(schema) = agent_config.json_schema.as_ref()
@@ -410,6 +425,58 @@ mod tests {
         assert!(!argv.contains(&"--output-format".to_string()));
         assert!(!argv.contains(&"stream-json".to_string()));
         assert!(!argv.contains(&"--permission-mode".to_string()));
+        assert!(
+            !argv
+                .iter()
+                .any(|arg| arg.contains("model_reasoning_effort"))
+        );
+    }
+
+    #[test]
+    fn openai_provider_includes_reasoning_effort_config_before_prompt() {
+        let schema = serde_json::json!({"type": "object"});
+        let mut agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5.5")
+            .with_reasoning_effort("high")
+            .with_json_schema(schema);
+        agent_config.reasoning_effort = Some(" HIGH ".to_string());
+        let config = make_config(agent_config, "Reason deeply", "/usr/local/bin/codex");
+        let bundle = SyntheticSettings::create("reasoning-effort-test").expect("bundle creates");
+
+        let resolved =
+            resolve_provider_command(&config, Some(&bundle)).expect("openai resolution succeeds");
+        let argv = argv_strings(&resolved.command);
+
+        let model_idx = argv
+            .iter()
+            .position(|a| a == "--model")
+            .expect("--model must be present");
+        let config_idx = argv
+            .iter()
+            .position(|a| a == "-c")
+            .expect("-c must be present");
+        let schema_idx = argv
+            .iter()
+            .position(|a| a == "--output-schema")
+            .expect("--output-schema must be present");
+        let prompt_idx = argv
+            .iter()
+            .position(|a| a == "Reason deeply")
+            .expect("prompt must be present");
+
+        assert_eq!(argv[model_idx + 1], "gpt-5.5");
+        assert_eq!(argv[config_idx + 1], "model_reasoning_effort=\"high\"");
+        assert!(
+            model_idx < config_idx,
+            "--model should remain before Codex config override"
+        );
+        assert!(config_idx < prompt_idx, "-c must appear before prompt");
+        assert!(
+            schema_idx < prompt_idx,
+            "--output-schema must remain before prompt"
+        );
+        assert_eq!(argv.last().map(String::as_str), Some("Reason deeply"));
     }
 
     #[test]
@@ -500,6 +567,43 @@ mod tests {
                 );
             }
             other => panic!("expected InvalidProviderModel, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_reasoning_effort_fails_before_spawn() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5.5")
+            .with_reasoning_effort("minimal");
+        let config = make_config(agent_config, "p", "/usr/local/bin/codex");
+        let err = resolve_provider_command(&config, None)
+            .expect_err("unsupported reasoning effort must be rejected");
+        match err {
+            ProviderResolutionError::InvalidReasoningEffort(msg) => {
+                assert!(msg.contains("minimal"), "got: {msg}");
+                assert!(msg.contains("xhigh"), "got: {msg}");
+            }
+            other => panic!("expected InvalidReasoningEffort, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn anthropic_reasoning_effort_fails_before_spawn() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Anthropic)
+            .with_model("opus")
+            .with_reasoning_effort("high");
+        let config = make_config(agent_config, "p", "/usr/local/bin/claude");
+        let err = resolve_provider_command(&config, None)
+            .expect_err("anthropic reasoning effort must be rejected");
+        match err {
+            ProviderResolutionError::InvalidReasoningEffort(msg) => {
+                assert!(msg.contains("high"), "got: {msg}");
+                assert!(msg.contains("openai"), "got: {msg}");
+                assert!(msg.contains("anthropic"), "got: {msg}");
+            }
+            other => panic!("expected InvalidReasoningEffort, got: {other:?}"),
         }
     }
 
@@ -618,6 +722,9 @@ mod tests {
     fn provider_resolution_error_display() {
         let e = ProviderResolutionError::InvalidProviderModel("bad combo".to_string());
         assert_eq!(format!("{e}"), "bad combo");
+
+        let e = ProviderResolutionError::InvalidReasoningEffort("bad effort".to_string());
+        assert_eq!(format!("{e}"), "bad effort");
 
         let e = ProviderResolutionError::SchemaFileWrite("disk full".to_string());
         let rendered = format!("{e}");

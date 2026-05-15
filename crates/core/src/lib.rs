@@ -54,7 +54,11 @@ pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
     UpdateExecutionStatusParams,
 };
-pub use model_catalog::{Provider, ProviderModelMismatch, classify_model, validate_provider_model};
+pub use model_catalog::{
+    Provider, ProviderModelMismatch, ProviderReasoningEffortMismatch,
+    SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_provider_reasoning_effort,
+    validate_provider_model, validate_provider_reasoning_effort,
+};
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
