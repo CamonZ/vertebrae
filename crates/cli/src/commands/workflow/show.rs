@@ -51,6 +51,7 @@ impl WorkflowShowCommand {
             first_class_steps
                 .into_iter()
                 .map(|s| StepDisplayInfo {
+                    id: s.id,
                     name: s.name,
                     model: s.agent_config.model,
                     order: s.order,
@@ -67,6 +68,7 @@ impl WorkflowShowCommand {
             description: workflow.description,
             auto_advance: workflow.auto_advance,
             is_default: workflow.is_default,
+            is_final: workflow.is_final,
             kanban_column: workflow.kanban_column,
             steps,
             metadata: workflow.metadata,
