@@ -112,6 +112,7 @@ function pipelineWorkflowToWorkflow(wf: PipelineWorkflow): Workflow {
     initial_step: wf.initial_step_id,
     kanban_column: wf.kanban_column,
     is_default: wf.is_default,
+    is_final: wf.is_final,
     metadata: {},
     created_at: null,
     updated_at: null,
