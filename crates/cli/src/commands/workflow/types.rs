@@ -34,6 +34,8 @@ impl std::fmt::Display for WorkflowSummary {
 /// Display information for a workflow step
 #[derive(Debug, Clone, Serialize)]
 pub struct StepDisplayInfo {
+    /// Step ID
+    pub id: Option<String>,
     /// Step name
     pub name: String,
     /// Agent model
@@ -57,6 +59,8 @@ pub struct WorkflowDetail {
     pub auto_advance: bool,
     /// Whether this is the default workflow for new tasks
     pub is_default: bool,
+    /// Whether this workflow is terminal/final
+    pub is_final: bool,
     /// Optional kanban column
     pub kanban_column: Option<String>,
     /// Ordered list of workflow steps
@@ -93,6 +97,9 @@ impl std::fmt::Display for WorkflowDetail {
 
         // Default workflow setting
         writeln!(f, "Default: {}", if self.is_default { "Yes" } else { "No" })?;
+
+        // Final workflow setting
+        writeln!(f, "Final: {}", if self.is_final { "Yes" } else { "No" })?;
 
         // Kanban column (if present)
         if let Some(ref kanban_column) = self.kanban_column {
@@ -207,15 +214,18 @@ mod tests {
             description: Some("A detailed workflow".to_string()),
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
+                    id: Some("step-id".to_string()),
                     name: "step1".to_string(),
                     model: Some("model1".to_string()),
                     order: 0,
                     prompt: None,
                 },
                 StepDisplayInfo {
+                    id: Some("step-id".to_string()),
                     name: "step2".to_string(),
                     model: Some("model2".to_string()),
                     order: 1,
@@ -231,6 +241,7 @@ mod tests {
         assert!(output.contains("Workflow: wf1 - Test Workflow"));
         assert!(output.contains("A detailed workflow"));
         assert!(output.contains("Auto Advance: No"));
+        assert!(output.contains("Final: No"));
         assert!(output.contains("1. step1 (model: model1)"));
         assert!(output.contains("2. step2 (model: model2)"));
     }
@@ -246,6 +257,7 @@ mod tests {
             description: None,
             auto_advance: true,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -304,6 +316,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -324,6 +337,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -343,6 +357,7 @@ mod tests {
             description: None,
             auto_advance: true,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -361,6 +376,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: true,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -379,6 +395,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -390,6 +407,25 @@ mod tests {
     }
 
     #[test]
+    fn test_workflow_detail_display_final_yes() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Final".to_string(),
+            description: None,
+            auto_advance: false,
+            is_default: false,
+            is_final: true,
+            kanban_column: None,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Final: Yes"));
+    }
+
+    #[test]
     fn test_workflow_detail_display_with_timestamps() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
@@ -397,6 +433,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -417,6 +454,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -437,6 +475,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -457,6 +496,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -475,8 +515,10 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
+                id: Some("step-id".to_string()),
                 name: "review".to_string(),
                 model: None,
                 order: 0,
@@ -498,21 +540,25 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
+                    id: Some("step-id".to_string()),
                     name: "deploy".to_string(),
                     model: Some("m3".to_string()),
                     order: 2,
                     prompt: None,
                 },
                 StepDisplayInfo {
+                    id: Some("step-id".to_string()),
                     name: "code".to_string(),
                     model: Some("m1".to_string()),
                     order: 0,
                     prompt: None,
                 },
                 StepDisplayInfo {
+                    id: Some("step-id".to_string()),
                     name: "review".to_string(),
                     model: Some("m2".to_string()),
                     order: 1,
@@ -540,6 +586,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -563,6 +610,7 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -619,12 +667,14 @@ mod tests {
     #[test]
     fn test_step_display_info_clone() {
         let step = StepDisplayInfo {
+            id: Some("step-id".to_string()),
             name: "review".to_string(),
             model: Some("sonnet".to_string()),
             order: 1,
             prompt: Some("Review carefully".to_string()),
         };
         let cloned = step.clone();
+        assert_eq!(step.id, cloned.id);
         assert_eq!(step.name, cloned.name);
         assert_eq!(step.model, cloned.model);
         assert_eq!(step.order, cloned.order);
@@ -632,8 +682,38 @@ mod tests {
     }
 
     #[test]
+    fn test_workflow_detail_serializes_final_flag_and_step_ids() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Serializable".to_string(),
+            description: None,
+            auto_advance: false,
+            is_default: false,
+            is_final: true,
+            kanban_column: None,
+            steps: vec![StepDisplayInfo {
+                id: Some("step-123".to_string()),
+                name: "review".to_string(),
+                model: Some("sonnet".to_string()),
+                order: 0,
+                prompt: None,
+            }],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+
+        let json = serde_json::to_value(&detail).unwrap();
+
+        assert_eq!(json["is_final"], true);
+        assert_eq!(json["steps"][0]["id"], "step-123");
+        assert_eq!(json["steps"][0]["name"], "review");
+    }
+
+    #[test]
     fn test_step_display_info_debug() {
         let step = StepDisplayInfo {
+            id: Some("step-id".to_string()),
             name: "review".to_string(),
             model: Some("opus".to_string()),
             order: 0,
@@ -648,6 +728,7 @@ mod tests {
     #[test]
     fn test_step_display_info_no_model() {
         let step = StepDisplayInfo {
+            id: Some("step-id".to_string()),
             name: "test".to_string(),
             model: None,
             order: 0,
@@ -666,8 +747,10 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
+                id: Some("step-id".to_string()),
                 name: "review".to_string(),
                 model: None,
                 order: 0,
@@ -689,8 +772,10 @@ mod tests {
             description: None,
             auto_advance: false,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
+                id: Some("step-id".to_string()),
                 name: "basic".to_string(),
                 model: None,
                 order: 0,

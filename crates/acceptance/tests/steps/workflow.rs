@@ -300,6 +300,38 @@ async fn workflow_bool_field_should_be_false(world: &mut SmokeWorld, field: Stri
     );
 }
 
+#[then(expr = "the workflow JSON steps should include ids for {string}")]
+async fn workflow_json_steps_should_include_ids(world: &mut SmokeWorld, step_names: String) {
+    let json = get_workflow_json(world).await;
+    let steps = json["steps"].as_array().unwrap_or_else(|| {
+        panic!(
+            "expected workflow steps to be an array\nJSON: {}",
+            serde_json::to_string_pretty(&json).unwrap_or_default()
+        )
+    });
+
+    for expected_name in step_names.split(", ").map(str::trim) {
+        let step = steps
+            .iter()
+            .find(|step| step["name"].as_str() == Some(expected_name))
+            .unwrap_or_else(|| {
+                panic!(
+                    "expected workflow JSON to include step '{}'\nJSON: {}",
+                    expected_name,
+                    serde_json::to_string_pretty(&json).unwrap_or_default()
+                )
+            });
+
+        let id = step["id"].as_str().unwrap_or("");
+        assert!(
+            !id.is_empty(),
+            "expected workflow JSON step '{}' to include a non-empty id\nStep: {}",
+            expected_name,
+            serde_json::to_string_pretty(step).unwrap_or_default()
+        );
+    }
+}
+
 // ============================================================================
 // Workflow update steps
 // ============================================================================

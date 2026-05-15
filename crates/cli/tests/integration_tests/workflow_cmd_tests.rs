@@ -696,6 +696,53 @@ async fn test_workflow_show_displays_default_no() {
 }
 
 #[tokio::test]
+async fn test_workflow_show_displays_final_flag() {
+    let services = mock_services();
+
+    let options = CreateWorkflowOptions::new("Terminal Workflow", vec![]).with_is_final(true);
+    let wf_id = services.workflows().create_workflow(options).await.unwrap();
+
+    let cmd = WorkflowShowCommand { id: wf_id };
+    let output = cmd.execute(&services).await.unwrap();
+
+    assert!(
+        output.contains("Final: Yes"),
+        "expected 'Final: Yes' in show output: {}",
+        output
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_show_json_includes_final_flag_and_step_ids() {
+    let services = mock_services();
+
+    let options = CreateWorkflowOptions::new("JSON Workflow", vec![]).with_is_final(true);
+    let wf_id = services.workflows().create_workflow(options).await.unwrap();
+
+    let review_step = Step::new("review", &wf_id);
+    let review_step = services.steps().create_step(&review_step).await.unwrap();
+    let review_step_id = review_step.id.unwrap();
+
+    let done_step = Step::new("done", &wf_id).with_is_final(true);
+    let done_step = services.steps().create_step(&done_step).await.unwrap();
+    let done_step_id = done_step.id.unwrap();
+
+    let cmd = WorkflowShowCommand { id: wf_id };
+    let detail = cmd.execute_detail(&services).await.unwrap();
+    let json = serde_json::to_value(&detail).unwrap();
+
+    assert_eq!(json["is_final"], true);
+
+    let mut steps = json["steps"].as_array().unwrap().clone();
+    steps.sort_by_key(|step| step["name"].as_str().unwrap().to_string());
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0]["id"], done_step_id);
+    assert_eq!(steps[0]["name"], "done");
+    assert_eq!(steps[1]["id"], review_step_id);
+    assert_eq!(steps[1]["name"], "review");
+}
+
+#[tokio::test]
 async fn test_list_workflows_full_returns_all_workflows() {
     let services = mock_services();
     let id1 = create_workflow(&services, "WF Alpha", None).await;
