@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { waitFor } from "@testing-library/react";
-import { render, screen } from "../test/test-utils";
+import { waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "../test/test-utils";
 import { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
 
 type EventCallback = (event: { payload: Record<string, unknown> }) => void;
@@ -175,6 +175,47 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
       expect(screen.getByTitle("2 active")).toBeInTheDocument();
     });
     expect(screen.queryByTitle("2 running")).not.toBeInTheDocument();
+  });
+
+  it("preserves pipeline workflow final status for the zone badge and detail toggle", async () => {
+    vi.mocked(commands.getPipelineSummary).mockResolvedValue({
+      status: "ok",
+      data: {
+        workflows: [
+          {
+            id: "wf-final",
+            name: "Release Complete",
+            description: null,
+            initial_step_id: "s1",
+            kanban_column: null,
+            is_default: false,
+            is_final: true,
+            display_order: 0,
+            workflow_steps: [makeStep("s1", "wf-final", "done", 0)],
+            transitions: [],
+          },
+        ],
+      },
+    });
+
+    render(<AllWorkflowsPipeline />);
+
+    let workflowButton: HTMLElement;
+    await waitFor(() => {
+      workflowButton = screen.getByRole("button", { name: "Release Complete" });
+      expect(workflowButton).toBeInTheDocument();
+      expect(
+        within(workflowButton.closest("div") as HTMLElement).getByText("Final"),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(workflowButton!);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("switch", { name: "Final workflow: enabled" }),
+      ).toHaveAttribute("aria-checked", "true");
+    });
   });
 
   it("applies task_run_step_changed deltas incrementally without refetching", async () => {
