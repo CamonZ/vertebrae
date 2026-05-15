@@ -27,3 +27,14 @@ Feature: Workflow creation with kanban column and default flag
       | description | A regular workflow |
     Then the command should succeed
     And the workflow is_default should be false
+
+  Scenario: Show workflow exposes final state and JSON step ids
+    Given I create a workflow "Inspectable WF" with:
+      | steps | review, done |
+    Then the command should succeed
+    When I store the workflow short ID as "wf"
+    And I run vtb "workflow show <wf>"
+    Then the command should succeed
+    And the output should contain "Final: No"
+    And the workflow is_final should be false
+    And the workflow JSON steps should include ids for "review, done"
