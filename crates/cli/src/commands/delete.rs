@@ -4,6 +4,7 @@
 //! of children and dependencies.
 
 use clap::Args;
+use serde::Serialize;
 use std::io::{self, Write};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -34,6 +35,15 @@ pub enum ChildAction {
     Cancel,
 }
 
+/// Structured result of a delete command.
+#[derive(Debug, Serialize)]
+pub struct DeleteResult {
+    pub task_id: String,
+    pub cascade: bool,
+    pub deleted: bool,
+    pub deleted_count: usize,
+}
+
 impl DeleteCommand {
     /// Execute the delete command.
     ///
@@ -49,7 +59,10 @@ impl DeleteCommand {
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<DeleteResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -79,17 +92,32 @@ impl DeleteCommand {
 
         // Handle cancel
         if child_action == ChildAction::Cancel {
-            return Ok("Deletion cancelled".to_string());
+            return Ok(DeleteResult {
+                task_id: id,
+                cascade: false,
+                deleted: false,
+                deleted_count: 0,
+            });
         }
 
         // If not --force and task blocks others, warn and confirm
         if !self.force && blocks_count > 0 && !self.confirm_blocking(blocks_count)? {
-            return Ok("Deletion cancelled".to_string());
+            return Ok(DeleteResult {
+                task_id: id,
+                cascade: false,
+                deleted: false,
+                deleted_count: 0,
+            });
         }
 
         // If not --force and no children, just confirm deletion
         if !self.force && children_count == 0 && !self.confirm_delete(task_title)? {
-            return Ok("Deletion cancelled".to_string());
+            return Ok(DeleteResult {
+                task_id: id,
+                cascade: false,
+                deleted: false,
+                deleted_count: 0,
+            });
         }
 
         // Determine if we should cascade
@@ -105,12 +133,27 @@ impl DeleteCommand {
         // Perform the deletion via service
         services.tasks().delete_task(&id, cascade).await?;
 
-        if deleted_count == 1 {
-            Ok(format!("Deleted task: {}", id))
+        Ok(DeleteResult {
+            task_id: id,
+            cascade,
+            deleted: true,
+            deleted_count,
+        })
+    }
+
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let result = self.execute_result(services).await?;
+
+        if !result.deleted {
+            return Ok("Deletion cancelled".to_string());
+        }
+
+        if result.deleted_count == 1 {
+            Ok(format!("Deleted task: {}", result.task_id))
         } else {
             Ok(format!(
                 "Deleted {} tasks (including children)",
-                deleted_count
+                result.deleted_count
             ))
         }
     }

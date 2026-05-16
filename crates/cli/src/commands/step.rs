@@ -201,21 +201,7 @@ fn validate_route_output_schema(schema: &serde_json::Value) -> Result<(), Servic
 }
 
 impl StepAddCommand {
-    /// Execute the add step command.
-    ///
-    /// Creates a new step with the specified options and stores it in the database.
-    ///
-    /// # Arguments
-    ///
-    /// * `service` - Reference to the step service
-    ///
-    /// # Errors
-    ///
-    /// Returns `ServiceError` if:
-    /// - The name is empty
-    /// - The workflow doesn't exist
-    /// - Service operations fail
-    pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
+    pub async fn execute_result(&self, service: &dyn StepService) -> Result<String, ServiceError> {
         let workflow_id = self.workflow.to_lowercase();
 
         let agent_config = build_overlayed_agent_config(
@@ -283,12 +269,29 @@ impl StepAddCommand {
             service.create_step(&step).await?
         };
 
-        let step_id = created
+        Ok(created
             .id
             .as_ref()
             .map(|t| t.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+            .unwrap_or_else(|| "unknown".to_string()))
+    }
 
+    /// Execute the add step command.
+    ///
+    /// Creates a new step with the specified options and stores it in the database.
+    ///
+    /// # Arguments
+    ///
+    /// * `service` - Reference to the step service
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError` if:
+    /// - The name is empty
+    /// - The workflow doesn't exist
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
+        let step_id = self.execute_result(service).await?;
         Ok(format!("Created step: {}", step_id))
     }
 }

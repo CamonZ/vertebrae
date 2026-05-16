@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
+use serde::Serialize;
 use std::collections::BTreeMap;
 use vertebrae_core::{ExecutionStatus, SessionLog, StepExecution};
 use vertebrae_core::{ServiceError, VertebraeServices};
@@ -141,6 +142,12 @@ impl ExecutionCreateCommand {
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct ExecutionShowResult {
+    pub execution: StepExecution,
+    pub logs: Vec<SessionLog>,
+}
+
 /// Update an existing execution
 #[derive(Debug, Args)]
 pub struct ExecutionUpdateCommand {
@@ -220,6 +227,22 @@ pub struct ExecutionListCommand {
 }
 
 impl ExecutionListCommand {
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<Vec<StepExecution>, ServiceError> {
+        match (&self.task_id, &self.task_run_id) {
+            (Some(task_id), None) => self.executions_for_task(task_id, services).await,
+            (None, Some(task_run_id)) => self.executions_for_task_run(task_run_id, services).await,
+            (None, None) => Err(ServiceError::validation_failed(
+                "execution list requires a task ID or --task-run <full-task-run-id>",
+            )),
+            (Some(_), Some(_)) => Err(ServiceError::validation_failed(
+                "execution list accepts either a task ID or --task-run, not both",
+            )),
+        }
+    }
+
     /// Execute the compact execution list command.
     ///
     /// A positional ID is always interpreted as a task ID and may be a short ID.
@@ -250,9 +273,8 @@ impl ExecutionListCommand {
         services: &VertebraeServices,
     ) -> Result<String, ServiceError> {
         let task_id = resolve_task_id(task_id, services).await?;
-        let executions = services
-            .executions()
-            .list_executions_for_task(&task_id)
+        let executions = self
+            .executions_for_resolved_task(&task_id, services)
             .await?;
 
         Ok(render_task_execution_list(&task_id, &executions))
@@ -263,6 +285,38 @@ impl ExecutionListCommand {
         task_run_id: &str,
         services: &VertebraeServices,
     ) -> Result<String, ServiceError> {
+        let executions = self.executions_for_task_run(task_run_id, services).await?;
+        Ok(render_exact_task_run_execution_list(
+            &task_run_id.to_lowercase(),
+            &executions,
+        ))
+    }
+
+    async fn executions_for_task(
+        &self,
+        task_id: &str,
+        services: &VertebraeServices,
+    ) -> Result<Vec<StepExecution>, ServiceError> {
+        let task_id = resolve_task_id(task_id, services).await?;
+        self.executions_for_resolved_task(&task_id, services).await
+    }
+
+    async fn executions_for_resolved_task(
+        &self,
+        task_id: &str,
+        services: &VertebraeServices,
+    ) -> Result<Vec<StepExecution>, ServiceError> {
+        services
+            .executions()
+            .list_executions_for_task(task_id)
+            .await
+    }
+
+    async fn executions_for_task_run(
+        &self,
+        task_run_id: &str,
+        services: &VertebraeServices,
+    ) -> Result<Vec<StepExecution>, ServiceError> {
         let task_run_id = task_run_id.to_lowercase();
         if crate::commands::is_short_id(&task_run_id) {
             return Err(task_run_short_id_error());
@@ -283,10 +337,7 @@ impl ExecutionListCommand {
             .filter(|execution| execution.task_run_id.as_deref() == Some(task_run_id.as_str()))
             .collect();
 
-        Ok(render_exact_task_run_execution_list(
-            &task_run_id,
-            &executions,
-        ))
+        Ok(executions)
     }
 }
 
@@ -437,6 +488,34 @@ pub struct ExecutionShowCommand {
 }
 
 impl ExecutionShowCommand {
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<ExecutionShowResult, ServiceError> {
+        let execution = services
+            .executions()
+            .get_execution(&self.execution_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "execution '{}' not found",
+                    self.execution_id
+                ))
+            })?;
+
+        let exec_id = execution
+            .id
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.execution_id.clone());
+        let logs = services
+            .executions()
+            .list_logs_for_execution(&exec_id)
+            .await?;
+
+        Ok(ExecutionShowResult { execution, logs })
+    }
+
     /// Execute the show execution command.
     ///
     /// Displays full details of a specific execution including session logs.
@@ -451,17 +530,8 @@ impl ExecutionShowCommand {
     /// - The execution is not found
     /// - Database operations fail
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        // Try to get the execution
-        let execution = services
-            .executions()
-            .get_execution(&self.execution_id)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::validation_failed(format!(
-                    "execution '{}' not found",
-                    self.execution_id
-                ))
-            })?;
+        let detail = self.execute_result(services).await?;
+        let execution = detail.execution;
 
         let exec_id = execution
             .id
@@ -556,10 +626,7 @@ impl ExecutionShowCommand {
         }
 
         // Get session logs for this execution
-        let logs = services
-            .executions()
-            .list_logs_for_execution(&exec_id)
-            .await?;
+        let logs = detail.logs;
 
         if !logs.is_empty() {
             output.push('\n');
@@ -597,6 +664,30 @@ pub struct ExecutionLogCommand {
 }
 
 impl ExecutionLogCommand {
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<String, ServiceError> {
+        let execution = services
+            .executions()
+            .get_execution(&self.execution_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "execution '{}' not found",
+                    self.execution_id
+                ))
+            })?;
+
+        let exec_id = execution
+            .id
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| self.execution_id.clone());
+        let log = SessionLog::new(exec_id, &self.content);
+        services.executions().add_log(log).await
+    }
+
     /// Execute the log command.
     ///
     /// Adds a log entry to the specified execution.
@@ -611,26 +702,7 @@ impl ExecutionLogCommand {
     /// - The execution is not found
     /// - Database operations fail
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        // Verify the execution exists
-        let execution = services
-            .executions()
-            .get_execution(&self.execution_id)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::validation_failed(format!(
-                    "execution '{}' not found",
-                    self.execution_id
-                ))
-            })?;
-
-        // Create the session log
-        let exec_id = execution
-            .id
-            .as_ref()
-            .cloned()
-            .unwrap_or_else(|| self.execution_id.clone());
-        let log = SessionLog::new(exec_id, &self.content);
-        let log_id = services.executions().add_log(log).await?;
+        let log_id = self.execute_result(services).await?;
 
         let content_preview = if self.content.len() > 50 {
             format!("{}...", &self.content[..50])

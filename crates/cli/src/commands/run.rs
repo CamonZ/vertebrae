@@ -1,4 +1,5 @@
 use clap::Args;
+use vertebrae_core::StepExecution;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 #[derive(Debug, Args)]
@@ -9,7 +10,10 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
-    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<StepExecution, ServiceError> {
         let task = services.tasks().get_task(&self.task_id).await?;
 
         let _workflow_id = task.workflow_id.as_deref().ok_or_else(|| {
@@ -26,7 +30,7 @@ impl RunCommand {
             ))
         })?;
 
-        let execution = services
+        services
             .executions()
             .run_step(&self.task_id, step_id)
             .await
@@ -40,7 +44,11 @@ impl RunCommand {
                 } else {
                     e
                 }
-            })?;
+            })
+    }
+
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let execution = self.execute_result(services).await?;
 
         let id = execution.id.as_deref().unwrap_or("unknown");
         let short_id = if id.len() > 8 { &id[..8] } else { id };

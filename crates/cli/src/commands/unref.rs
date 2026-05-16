@@ -4,6 +4,7 @@
 //! Supports removing by file path or removing all references.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Remove code references from a task
@@ -23,7 +24,7 @@ pub struct UnrefCommand {
 }
 
 /// Result of the unref command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct UnrefResult {
     /// The task ID that was updated
     pub id: String,

@@ -1,5 +1,5 @@
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskRunSummary, VertebraeServices};
+use vertebrae_core::{ServiceError, TaskRun, TaskRunSummary, VertebraeServices};
 
 #[derive(Debug, Args)]
 pub struct RunWorkflowCommand {
@@ -9,9 +9,15 @@ pub struct RunWorkflowCommand {
 }
 
 impl RunWorkflowCommand {
-    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        let run = services.executions().run_workflow(&self.task_id).await?;
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<TaskRun, ServiceError> {
+        services.executions().run_workflow(&self.task_id).await
+    }
 
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let run = self.execute_result(services).await?;
         Ok(format!(
             "Run: {}",
             crate::output::format_task_run_brief(&TaskRunSummary::from(&run))

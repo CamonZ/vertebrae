@@ -73,6 +73,40 @@ pub fn parse_step(s: &str) -> Result<ParsedStep, String> {
 }
 
 impl WorkflowAddCommand {
+    pub async fn execute_result(
+        &self,
+        service: &dyn WorkflowService,
+    ) -> Result<String, ServiceError> {
+        let steps: Vec<WorkflowStepInput> = self
+            .steps
+            .iter()
+            .map(|s| {
+                WorkflowStepInput::new(
+                    &s.name,
+                    s.agent_config
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string()),
+                )
+            })
+            .collect();
+
+        let mut options = CreateWorkflowOptions::new(&self.name, steps)
+            .with_auto_advance(self.auto_advance)
+            .with_is_default(self.default)
+            .with_order(self.order);
+
+        if let Some(description) = &self.description {
+            options = options.with_description(description);
+        }
+
+        if let Some(kanban_column) = &self.kanban_column {
+            options = options.with_kanban_column(kanban_column);
+        }
+
+        service.create_workflow(options).await
+    }
+
     /// Execute the add workflow command.
     ///
     /// Creates a new workflow with the specified options and stores it in the database.
@@ -88,38 +122,7 @@ impl WorkflowAddCommand {
     /// - No steps are provided
     /// - Service operations fail
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
-        // Build the workflow steps
-        let steps: Vec<WorkflowStepInput> = self
-            .steps
-            .iter()
-            .map(|s| {
-                WorkflowStepInput::new(
-                    &s.name,
-                    s.agent_config
-                        .model
-                        .clone()
-                        .unwrap_or_else(|| "default".to_string()),
-                )
-            })
-            .collect();
-
-        // Build the create options
-        let mut options = CreateWorkflowOptions::new(&self.name, steps)
-            .with_auto_advance(self.auto_advance)
-            .with_is_default(self.default)
-            .with_order(self.order);
-
-        if let Some(description) = &self.description {
-            options = options.with_description(description);
-        }
-
-        if let Some(kanban_column) = &self.kanban_column {
-            options = options.with_kanban_column(kanban_column);
-        }
-
-        // Create the workflow
-        let id = service.create_workflow(options).await?;
-
+        let id = self.execute_result(service).await?;
         Ok(format!("Created workflow: {}", id))
     }
 }

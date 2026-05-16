@@ -4,6 +4,7 @@
 //! Supports GitHub-style file:line notation (file:L45-67, file:L45, or just file).
 
 use clap::Args;
+use serde::Serialize;
 use std::path::Path;
 use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
@@ -40,7 +41,7 @@ pub struct ParsedFileRef {
 }
 
 /// Result of the ref command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct RefResult {
     /// The task ID that was updated
     pub id: String,

@@ -4,6 +4,7 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::Task;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -12,7 +13,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 pub struct ReadyCommand {}
 
 /// Result of the ready command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct ReadyResult {
     /// Tasks that are ready to start (backlog status, unblocked, work not started on children)
     pub backlog_ready: Vec<Task>,

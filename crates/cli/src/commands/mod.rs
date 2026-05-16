@@ -69,7 +69,7 @@ pub use workflow::WorkflowCommand;
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use clap::builder::ValueParser;
-use serde_json;
+use serde_json::{self, json};
 use vertebrae_core::{SectionType, ServiceError, VertebraeServices};
 
 /// Check whether a string is a valid short ID prefix (8 hex characters).
@@ -210,6 +210,26 @@ pub enum CommandResult {
     Table(String),
     /// A JSON value to display (used when --json flag is set)
     Json(serde_json::Value),
+}
+
+fn json_value<T: serde::Serialize>(value: T) -> Result<serde_json::Value, ServiceError> {
+    serde_json::to_value(value).map_err(|e| ServiceError::validation_failed(e.to_string()))
+}
+
+fn operation_result(
+    command: &'static str,
+    status: &'static str,
+    fields: serde_json::Value,
+) -> serde_json::Value {
+    let mut result = serde_json::Map::new();
+    result.insert("command".to_string(), json!(command));
+    result.insert("status".to_string(), json!(status));
+    if let serde_json::Value::Object(fields) = fields {
+        for (key, value) in fields {
+            result.insert(key, value);
+        }
+    }
+    serde_json::Value::Object(result)
 }
 
 impl std::fmt::Display for CommandResult {
@@ -731,69 +751,268 @@ impl Command {
 
     /// Execute the command and return JSON output.
     ///
-    /// For commands that produce structured data (show, list, sections, refs, blockers),
-    /// this serializes the result directly to JSON. For all other commands, it wraps the
-    /// text output in a `{"output": "..."}` JSON object.
+    /// Every command has an explicit JSON contract. Human-readable prose stays
+    /// on the normal `execute` path.
     pub async fn execute_json(
         &self,
         services: &VertebraeServices,
     ) -> Result<CommandResult, ServiceError> {
-        match self {
+        let json = match self {
+            Command::Add(cmd) => {
+                let task_id = cmd.execute(services).await?;
+                operation_result("add", "created", json!({ "task_id": task_id }))
+            }
+            Command::Archive(cmd) => {
+                cmd.execute(services).await?;
+                operation_result(
+                    "archive",
+                    "updated",
+                    json!({ "task_id": cmd.id.to_lowercase(), "archived": true }),
+                )
+            }
             Command::Show(cmd) => {
                 let detail = cmd.execute(services).await?;
-                let json = serde_json::to_value(&detail)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&detail)?
             }
             Command::List(cmd) => {
                 let tasks = cmd.execute(services).await?;
-                let json = serde_json::to_value(&tasks)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&tasks)?
             }
+            Command::Blockers(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::CriterionRef(cmd) => {
+                let result = cmd.execute(services).await?;
+                operation_result(
+                    "criterion-ref",
+                    "created",
+                    json!({
+                        "task_id": result.task_id,
+                        "criterion_index": result.criterion_index,
+                        "criterion_content": result.criterion_content,
+                        "path": result.path,
+                        "line_start": result.line_start,
+                        "line_end": result.line_end,
+                        "name": result.name,
+                        "warning": result.warning,
+                    }),
+                )
+            }
+            Command::Daemon(cmd) => {
+                let message = cmd
+                    .execute()
+                    .await
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                operation_result("daemon", "ok", json!({ "message": message }))
+            }
+            Command::Delete(cmd) => {
+                let result = cmd.execute_result(services).await?;
+                operation_result(
+                    "delete",
+                    if result.deleted {
+                        "deleted"
+                    } else {
+                        "cancelled"
+                    },
+                    json_value(result)?,
+                )
+            }
+            Command::Depend(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Execution(cmd) => match cmd {
+                execution::ExecutionCommand::Create(cmd) => {
+                    let execution_id = cmd.execute(services).await?;
+                    operation_result(
+                        "execution create",
+                        "created",
+                        json!({ "execution_id": execution_id, "task_id": cmd.task_id.to_lowercase() }),
+                    )
+                }
+                execution::ExecutionCommand::List(cmd) => {
+                    json_value(cmd.execute_result(services).await?)?
+                }
+                execution::ExecutionCommand::Show(cmd) => {
+                    json_value(cmd.execute_result(services).await?)?
+                }
+                execution::ExecutionCommand::Update(cmd) => {
+                    cmd.execute(services).await?;
+                    operation_result(
+                        "execution update",
+                        "updated",
+                        json!({ "execution_id": cmd.execution_id.to_lowercase() }),
+                    )
+                }
+                execution::ExecutionCommand::Log(cmd) => {
+                    let log_id = cmd.execute_result(services).await?;
+                    operation_result(
+                        "execution log",
+                        "created",
+                        json!({ "execution_id": cmd.execution_id.to_lowercase(), "log_id": log_id }),
+                    )
+                }
+            },
+            Command::Init(cmd) => {
+                let result = cmd
+                    .execute()
+                    .await
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                operation_result("init", "ok", json!({ "message": result.to_string() }))
+            }
+            Command::Path(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Ready(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Ref(cmd) => {
+                let result = cmd.execute(services).await?;
+                operation_result(
+                    "ref",
+                    "created",
+                    json!({
+                        "task_id": result.id,
+                        "path": result.path,
+                        "line_start": result.line_start,
+                        "line_end": result.line_end,
+                        "name": result.name,
+                        "warning": result.warning,
+                    }),
+                )
+            }
+            Command::Refs(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Review(cmd) => {
+                let result = cmd.execute_result(services).await?;
+                operation_result("review", "updated", json_value(result)?)
+            }
+            Command::Run(cmd) => json_value(cmd.execute_result(services).await?)?,
+            Command::RunWorkflow(cmd) => json_value(cmd.execute_result(services).await?)?,
+            Command::Section(cmd) => json_value(cmd.execute(services).await?)?,
             Command::Sections(cmd) => {
                 let result = cmd.execute(services).await?;
-                let json = serde_json::to_value(&result)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&result)?
             }
-            Command::Refs(cmd) => {
-                let result = cmd.execute(services).await?;
-                let json = serde_json::to_value(&result)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+            Command::Stop(cmd) => json_value(cmd.execute_result(services).await?)?,
+            Command::Unarchive(cmd) => {
+                cmd.execute(services).await?;
+                operation_result(
+                    "unarchive",
+                    "updated",
+                    json!({ "task_id": cmd.id.to_lowercase(), "archived": false }),
+                )
             }
-            Command::Blockers(cmd) => {
-                let result = cmd.execute(services).await?;
-                let json = serde_json::to_value(&result)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
-            }
+            Command::UncheckItem(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Undepend(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Unref(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Unsection(cmd) => json_value(cmd.execute(services).await?)?,
             Command::Step(step::StepCommand::List(cmd)) => {
                 let steps = cmd.list_steps(services.steps()).await?;
-                let json = serde_json::to_value(&steps)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&steps)?
             }
             Command::Step(step::StepCommand::Show(cmd)) => {
                 let step = cmd.get_step(services.steps()).await?;
-                let json = serde_json::to_value(&step)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&step)?
+            }
+            Command::Step(step::StepCommand::Add(cmd)) => {
+                let step_id = cmd.execute_result(services.steps()).await?;
+                operation_result(
+                    "step add",
+                    "created",
+                    json!({ "step_id": step_id, "workflow_id": cmd.workflow.to_lowercase() }),
+                )
+            }
+            Command::Step(step::StepCommand::Update(cmd)) => {
+                cmd.execute(services.steps()).await?;
+                operation_result(
+                    "step update",
+                    "updated",
+                    json!({ "step_id": cmd.id.to_lowercase() }),
+                )
+            }
+            Command::Step(step::StepCommand::Delete(cmd)) => {
+                cmd.execute(services.steps()).await?;
+                operation_result(
+                    "step delete",
+                    "deleted",
+                    json!({ "step_id": cmd.id.to_lowercase() }),
+                )
+            }
+            Command::CheckItem(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::TransitionTo(cmd) => json_value(cmd.execute(services).await?)?,
+            Command::Update(cmd) => {
+                let task_id = cmd.execute(services).await?;
+                operation_result("update", "updated", json!({ "task_id": task_id }))
+            }
+            Command::Workflow(workflow::WorkflowCommand::List(_cmd)) => {
+                let workflows = services.workflows().list_workflows().await?;
+                json_value(workflows)?
             }
             Command::Workflow(workflow::WorkflowCommand::Show(cmd)) => {
                 let detail = cmd.execute_detail(services).await?;
-                let json = serde_json::to_value(&detail)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Json(json))
+                json_value(&detail)?
             }
-            _ => {
-                let result = self.execute(services).await?;
-                let text = format!("{}", result);
-                let json = serde_json::json!({ "output": text });
-                Ok(CommandResult::Json(json))
+            Command::Workflow(workflow::WorkflowCommand::Add(cmd)) => {
+                let workflow_id = cmd.execute_result(services.workflows()).await?;
+                operation_result(
+                    "workflow add",
+                    "created",
+                    json!({ "workflow_id": workflow_id }),
+                )
             }
-        }
+            Command::Workflow(workflow::WorkflowCommand::Update(cmd)) => {
+                cmd.execute(services.workflows()).await?;
+                operation_result(
+                    "workflow update",
+                    "updated",
+                    json!({ "workflow_id": cmd.id.to_lowercase() }),
+                )
+            }
+            Command::Workflow(workflow::WorkflowCommand::Delete(cmd)) => {
+                cmd.execute(services.workflows()).await?;
+                operation_result(
+                    "workflow delete",
+                    "deleted",
+                    json!({ "workflow_id": cmd.id.to_lowercase() }),
+                )
+            }
+            Command::Workflow(workflow::WorkflowCommand::Assign(cmd)) => {
+                cmd.execute(services.workflows()).await?;
+                operation_result(
+                    "workflow assign",
+                    "updated",
+                    json!({ "task_id": cmd.task_id.to_lowercase(), "workflow_id": cmd.workflow_id.to_lowercase() }),
+                )
+            }
+            Command::Workflow(workflow::WorkflowCommand::Unassign(cmd)) => {
+                cmd.execute(services.workflows()).await?;
+                operation_result(
+                    "workflow unassign",
+                    "updated",
+                    json!({ "task_id": cmd.task_id.to_lowercase(), "workflow_id": null }),
+                )
+            }
+            Command::Workflow(workflow::WorkflowCommand::Transition(cmd)) => match cmd {
+                workflow::transition::TransitionCommand::List(cmd) => json_value(
+                    services
+                        .workflows()
+                        .list_workflow_transitions(cmd.workflow_id.as_deref())
+                        .await?,
+                )?,
+                workflow::transition::TransitionCommand::Add(cmd) => {
+                    let transition = services
+                        .workflows()
+                        .create_workflow_transition(
+                            &cmd.from_workflow_id,
+                            &cmd.to_workflow_id,
+                            &cmd.label,
+                            cmd.target_step.as_deref(),
+                        )
+                        .await?;
+                    json_value(transition)?
+                }
+                workflow::transition::TransitionCommand::Delete(cmd) => {
+                    cmd.execute(services.workflows()).await?;
+                    operation_result(
+                        "workflow transition delete",
+                        "deleted",
+                        json!({ "from_workflow_id": cmd.from_workflow_id.to_lowercase(), "to_workflow_id": cmd.to_workflow_id.to_lowercase() }),
+                    )
+                }
+            },
+        };
+        Ok(CommandResult::Json(json))
     }
 }
 
@@ -2231,15 +2450,19 @@ mod tests {
     }
 
     #[test]
-    fn test_command_result_json_wraps_text_output() {
-        let json = serde_json::json!({"output": "Created task: abc-123"});
+    fn test_command_result_json_displays_operation_result() {
+        let json = serde_json::json!({
+            "command": "add",
+            "status": "created",
+            "task_id": "abc-123"
+        });
         let result = CommandResult::Json(json);
         let output = format!("{}", result);
         let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(
-            parsed["output"], "Created task: abc-123",
-            "Wrapped text output should be accessible via the output key"
-        );
+        assert!(parsed.get("output").is_none());
+        assert_eq!(parsed["command"], "add");
+        assert_eq!(parsed["status"], "created");
+        assert_eq!(parsed["task_id"], "abc-123");
     }
 
     #[test]

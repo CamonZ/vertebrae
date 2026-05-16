@@ -3,6 +3,7 @@
 //! Implements the `vtb check-item` command to mark individual checklist items within a task as done.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Mark a checklist item as done within a task
@@ -18,7 +19,7 @@ pub struct CheckItemCommand {
 }
 
 /// Result of executing the check-item command
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CheckItemResult {
     /// The task ID
     pub task_id: String,

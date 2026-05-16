@@ -7,6 +7,7 @@
 //! fires properly for GUI cache invalidation.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Create a dependency relationship between tasks
@@ -22,7 +23,7 @@ pub struct DependCommand {
 }
 
 /// Result of the depend command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct DependResult {
     /// The task ID that now depends on the blocker
     pub task_id: String,

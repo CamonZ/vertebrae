@@ -4,6 +4,7 @@
 //! back to done=false, done_at=null.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Uncheck a previously checked checklist item within a task
@@ -19,7 +20,7 @@ pub struct UncheckItemCommand {
 }
 
 /// Result of executing the uncheck-item command
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct UncheckItemResult {
     /// The task ID
     pub task_id: String,
