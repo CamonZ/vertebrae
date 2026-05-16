@@ -118,7 +118,6 @@ vi.mock("../../bindings", () => ({
       .fn()
       .mockResolvedValue({ status: "ok", data: null }),
     deleteTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    runStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     runWorkflow: vi.fn(),
     stopRun: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
