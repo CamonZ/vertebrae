@@ -195,7 +195,6 @@ export function TaskDetailPanel({
   });
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isRunningStep, setIsRunningStep] = useState(false);
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
@@ -457,27 +456,6 @@ export function TaskDetailPanel({
     [taskData, refetch]
   );
 
-  const handleRunStep = useCallback(async () => {
-    if (!taskData?.id || !taskData.current_step_id) return;
-    setIsRunningStep(true);
-    setWorkflowError(null);
-    try {
-      const result = await commands.runStep(
-        taskData.id,
-        taskData.current_step_id
-      );
-      if (result.status === "error") {
-        setWorkflowError(result.error.message);
-      }
-    } catch (err) {
-      setWorkflowError(
-        err instanceof Error ? err.message : "Failed to run step"
-      );
-    } finally {
-      setIsRunningStep(false);
-    }
-  }, [taskData?.id, taskData?.current_step_id]);
-
   const handleRunWorkflow = useCallback(async () => {
     if (!taskData?.id) return;
     setIsRunningWorkflow(true);
@@ -537,7 +515,7 @@ export function TaskDetailPanel({
   const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
   const isExecuting = runControlsState.hasActiveRun;
   const runWorkflowDisabled =
-    isRunningStep || isRunningWorkflow || runControlsState.runDisabled;
+    isRunningWorkflow || runControlsState.runDisabled;
   const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
     isStoppingWorkflow || runControlsState.stopDisabled;
@@ -661,30 +639,6 @@ export function TaskDetailPanel({
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Run Step Button */}
-          {taskData?.workflow_id && taskData?.current_step_id && !runControlsState.hasActiveRun && (
-            <button
-              type="button"
-              onClick={handleRunStep}
-              disabled={isRunningStep || isRunningWorkflow}
-              className="cursor-pointer flex items-center gap-1.5 rounded-md border border-border-strong px-2.5 py-1.5 text-xs font-medium text-text-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Run current step"
-              title="Run the current workflow step"
-            >
-              {isRunningStep ? (
-                <Spinner />
-              ) : (
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              )}
-              <span>{isRunningStep ? "Running..." : "Run Step"}</span>
-            </button>
-          )}
           {/* Run Workflow Button */}
           {taskData?.workflow_id && !runControlsState.hasActiveRun && (
             <button

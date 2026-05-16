@@ -115,7 +115,6 @@ vi.mock("../../bindings", () => ({
     updateTask: vi.fn(),
     runWorkflow: vi.fn(),
     stopRun: vi.fn(),
-    runStep: vi.fn(),
     orchestrateTask: vi.fn(),
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
@@ -610,12 +609,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       };
     }
 
-    it("shows Run Step button when task has workflow and current step", () => {
+    it("does not render the deprecated Run Step affordance", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
-        screen.getByRole("button", { name: /run current step/i })
-      ).toBeInTheDocument();
+        screen.queryByRole("button", { name: /run current step/i })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Run Step")).not.toBeInTheDocument();
     });
 
     it("renders the Run button even when run_controls is missing", () => {
