@@ -142,6 +142,48 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 
+  it("does not render a collapse toggle and keeps step nodes visible after c is pressed", async () => {
+    vi.mocked(commands.getPipelineSummary).mockResolvedValue({
+      status: "ok",
+      data: {
+        workflows: [
+          {
+            id: "wf-1",
+            name: "Pipeline Alpha",
+            description: null,
+            initial_step_id: "s1",
+            kanban_column: null,
+            is_default: true,
+            is_final: false,
+            display_order: 0,
+            workflow_steps: [
+              makeStep("s1", "wf-1", "backlog", 0),
+              makeStep("s2", "wf-1", "review", 1),
+            ],
+            transitions: [],
+          },
+        ],
+      },
+    });
+
+    render(<AllWorkflowsPipeline />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("step-node-backlog")).toBeInTheDocument();
+      expect(screen.getByTestId("step-node-review")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTitle("Press 'c' to toggle")).not.toBeInTheDocument();
+    expect(screen.queryByText("Expanded")).not.toBeInTheDocument();
+    expect(screen.queryByText("Collapsed")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "c" });
+    fireEvent.keyDown(window, { key: "C" });
+
+    expect(screen.getByTestId("step-node-backlog")).toBeInTheDocument();
+    expect(screen.getByTestId("step-node-review")).toBeInTheDocument();
+  });
+
   it("maps TaskRun-backed active counts into step nodes", async () => {
     vi.mocked(commands.getPipelineSummary).mockResolvedValue({
       status: "ok",
