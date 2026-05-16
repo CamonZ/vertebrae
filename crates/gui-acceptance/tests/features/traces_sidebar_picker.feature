@@ -39,6 +39,41 @@ Feature: Traces sidebar entry and task picker
     And the GUI should show an element with test id "subtree-rail" within 5 seconds
     And the GUI should not show an element with test id "traces-picker-rail" within 5 seconds
 
+  Scenario: Searching traces picker by description filters the left pane
+    When I create a task with:
+      | title       | Traces Picker Description Search Target |
+      | description | traces picker description needle         |
+    And I create a task with:
+      | title       | Traces Picker Description Search Miss |
+      | description | Unrelated traces picker description   |
+    And I click on the element with test id "sidebar-nav-traces"
+    Then the GUI should show an element with test id "task-picker-input" within 10 seconds
+    When I type "traces picker description needle" into the element with test id "task-picker-input"
+    Then the GUI should show "Traces Picker Description Search Target" within 10 seconds
+    And the GUI should not show "Traces Picker Description Search Miss" within 10 seconds
+
+  Scenario: Searching traces picker by full UUID filters the left pane
+    When I create a task with:
+      | title | Traces Picker Full UUID Search Miss |
+    And I create a task with:
+      | title | Traces Picker Full UUID Search Target |
+    And I click on the element with test id "sidebar-nav-traces"
+    Then the GUI should show an element with test id "task-picker-input" within 10 seconds
+    When I type the current task ID into the element with test id "task-picker-input"
+    Then the GUI should show "Traces Picker Full UUID Search Target" within 10 seconds
+    And the GUI should not show "Traces Picker Full UUID Search Miss" within 10 seconds
+
+  Scenario: Searching traces picker by UUID prefix filters the left pane
+    When I create a task with:
+      | title | Traces Picker UUID Prefix Search Miss |
+    And I create a task with:
+      | title | Traces Picker UUID Prefix Search Target |
+    And I click on the element with test id "sidebar-nav-traces"
+    Then the GUI should show an element with test id "task-picker-input" within 10 seconds
+    When I type the current task short ID into the element with test id "task-picker-input"
+    Then the GUI should show "Traces Picker UUID Prefix Search Target" within 10 seconds
+    And the GUI should not show "Traces Picker UUID Prefix Search Miss" within 10 seconds
+
   Scenario: Switch button swaps the subtree rail for the picker rail
     When I click on the element with test id "sidebar-nav-traces"
     Then the GUI should show an element with test id "task-picker-input" within 10 seconds

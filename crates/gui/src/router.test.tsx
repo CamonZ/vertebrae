@@ -365,7 +365,7 @@ describe("Router Acceptance Tests", () => {
       await waitFor(() => {
         expect(screen.getByText("Level")).toBeInTheDocument();
       });
-      expect(screen.getByLabelText("Search tasks by title")).toBeInTheDocument();
+      expect(screen.getByLabelText("Search tasks by title or ID")).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /done/i })).not.toBeInTheDocument();
     });
@@ -392,7 +392,7 @@ describe("Router Acceptance Tests", () => {
         }),
       );
 
-      fireEvent.change(screen.getByLabelText("Search tasks by title"), {
+      fireEvent.change(screen.getByLabelText("Search tasks by title or ID"), {
         target: { value: "release" },
       });
 
