@@ -1,14 +1,19 @@
 import { useEffect, useCallback } from "react";
 import {
+  commands,
   events,
   type TaskChangedEvent,
   type TaskChangeType,
+  type TaskRunStepChangedEvent,
+  type TaskStepChangedEvent,
 } from "../bindings";
 import { useTaskStore, useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+
+const taskRefreshesInFlight = new Set<string>();
 
 /** Get toast message for task change type */
 function getTaskChangeMessage(
@@ -45,7 +50,7 @@ export function useTaskChangeListener(
   options: UseTaskChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const upsertTask = useTaskStore((state) => state.upsertTask);
+  const reconcileTask = useTaskStore((state) => state.reconcileTask);
   const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
@@ -71,10 +76,40 @@ export function useTaskChangeListener(
       if (change_type === "Deleted") {
         removeTask(task_id);
       } else if (task) {
-        upsertTask(task);
+        reconcileTask(task);
       }
     },
-    [addToast, upsertTask, removeTask, projectScopeGeneration]
+    [addToast, reconcileTask, removeTask, projectScopeGeneration]
+  );
+
+  const fetchAndReconcileTask = useCallback(
+    async (taskId: string) => {
+      if (taskRefreshesInFlight.has(taskId)) return;
+      taskRefreshesInFlight.add(taskId);
+      const requestGeneration = projectScopeGeneration;
+      try {
+        const result = await commands.getTask(taskId);
+        if (requestGeneration !== getProjectScopeGeneration()) return;
+        if (result.status === "ok") {
+          reconcileTask(result.data);
+        } else {
+          console.warn(
+            `[TaskChangeListener] Failed to refresh task ${taskId.slice(0, 6)} after step change: ${result.error.message}`
+          );
+        }
+      } finally {
+        taskRefreshesInFlight.delete(taskId);
+      }
+    },
+    [projectScopeGeneration, reconcileTask]
+  );
+
+  const handleTaskStepChanged = useCallback(
+    (event: { payload: TaskStepChangedEvent | TaskRunStepChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+      void fetchAndReconcileTask(event.payload.task_id);
+    },
+    [fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {
@@ -83,9 +118,19 @@ export function useTaskChangeListener(
     }
 
     const unlistenPromise = events.taskChangedEvent.listen(handleTaskChanged);
+    const unlistenTaskStepPromise =
+      events.taskStepChangedEvent.listen(handleTaskStepChanged);
+    const unlistenTaskRunStepPromise =
+      events.taskRunStepChangedEvent.listen(handleTaskStepChanged);
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
+      unlistenTaskStepPromise.then((unlisten) => unlisten());
+      unlistenTaskRunStepPromise.then((unlisten) => unlisten());
     };
-  }, [enabled, handleTaskChanged]);
+  }, [
+    enabled,
+    handleTaskChanged,
+    handleTaskStepChanged,
+  ]);
 }
