@@ -1368,7 +1368,7 @@ export type StepTransitionChangedEvent = { transition_id: string; from_step_id: 
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType = "execute" | "evaluate" | "route" | "wait_children"
+export type StepType = "execute" | "evaluate" | "route" | "wait_children" | "human_input" | { unsupported: string }
 /**
  * StopRun command input. Provide either `task_run_id` or `task_id`.
  */

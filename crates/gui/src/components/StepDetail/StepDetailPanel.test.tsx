@@ -605,6 +605,40 @@ describe("StepDetailPanel", () => {
       expect(badge.className).toContain("warning");
     });
 
+    it("displays step type badge with 'human_input' for human input steps", () => {
+      const step = createStep({ step_type: "human_input" });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("human_input");
+      expect(badge).not.toHaveTextContent("execute");
+      expect(badge.className).toContain("success");
+    });
+
+    it("displays unsupported step types without falling back to execute", () => {
+      const step = createStep({ step_type: { unsupported: "manual_gate" } });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("unsupported:manual_gate");
+      expect(badge).not.toHaveTextContent("execute");
+      expect(badge.className).toContain("danger");
+    });
+
     it("displays output schema as a type tree when present", () => {
       const schema = {
         type: "object",

@@ -775,6 +775,12 @@ impl Command {
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 Ok(CommandResult::Json(json))
             }
+            Command::Step(step::StepCommand::Show(cmd)) => {
+                let step = cmd.get_step(services.steps()).await?;
+                let json = serde_json::to_value(&step)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
             Command::Workflow(workflow::WorkflowCommand::Show(cmd)) => {
                 let detail = cmd.execute_detail(services).await?;
                 let json = serde_json::to_value(&detail)
