@@ -33,7 +33,6 @@ function createWorkflowZoneNodeProps(overrides?: Partial<WorkflowZoneNodeData>) 
     height: 400,
     onWorkflowClick: vi.fn(),
     isWorkflowSelected: false,
-    isCollapsed: false,
     ...overrides,
   };
 
@@ -56,11 +55,10 @@ function createWorkflowZoneNodeProps(overrides?: Partial<WorkflowZoneNodeData>) 
 }
 
 describe("WorkflowZoneNode", () => {
-  describe("expanded view", () => {
+  describe("workflow zone", () => {
     it("renders workflow name", () => {
       const props = createWorkflowZoneNodeProps({
         workflow: createWorkflow({ name: "Build Pipeline" }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -73,7 +71,6 @@ describe("WorkflowZoneNode", () => {
       const props = createWorkflowZoneNodeProps({
         stepCount: 4,
         taskCount: 12,
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -88,7 +85,6 @@ describe("WorkflowZoneNode", () => {
           name: "Build",
           description: "Main build pipeline",
         }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -99,7 +95,6 @@ describe("WorkflowZoneNode", () => {
     it("applies selected styling when workflow is selected", () => {
       const props = createWorkflowZoneNodeProps({
         isWorkflowSelected: true,
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -110,10 +105,9 @@ describe("WorkflowZoneNode", () => {
   });
 
   describe("is_default badge", () => {
-    it("renders 'Default' badge in expanded view when is_default is true", () => {
+    it("renders 'Default' badge when is_default is true", () => {
       const props = createWorkflowZoneNodeProps({
         workflow: createWorkflow({ is_default: true }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -121,10 +115,9 @@ describe("WorkflowZoneNode", () => {
       expect(container.textContent).toContain("Default");
     });
 
-    it("does not render 'Default' badge in expanded view when is_default is false", () => {
+    it("does not render 'Default' badge when is_default is false", () => {
       const props = createWorkflowZoneNodeProps({
         workflow: createWorkflow({ is_default: false }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -132,34 +125,12 @@ describe("WorkflowZoneNode", () => {
       expect(container.textContent).not.toContain("Default");
     });
 
-    it("renders 'Default' badge in collapsed view when is_default is true", () => {
-      const props = createWorkflowZoneNodeProps({
-        workflow: createWorkflow({ is_default: true }),
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      expect(container.textContent).toContain("Default");
-    });
-
-    it("does not render 'Default' badge in collapsed view when is_default is false", () => {
-      const props = createWorkflowZoneNodeProps({
-        workflow: createWorkflow({ is_default: false }),
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      expect(container.textContent).not.toContain("Default");
-    });
   });
 
   describe("kanban_column display", () => {
-    it("renders kanban_column in expanded view when set", () => {
+    it("renders kanban_column when set", () => {
       const props = createWorkflowZoneNodeProps({
         workflow: createWorkflow({ kanban_column: "in_progress" }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -167,10 +138,9 @@ describe("WorkflowZoneNode", () => {
       expect(container.textContent).toContain("in_progress");
     });
 
-    it("does not render kanban_column in expanded view when null", () => {
+    it("does not render kanban_column when null", () => {
       const props = createWorkflowZoneNodeProps({
         workflow: createWorkflow({ kanban_column: null }),
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -178,76 +148,12 @@ describe("WorkflowZoneNode", () => {
       expect(container.textContent).not.toContain("in_progress");
     });
 
-    it("renders kanban_column in collapsed view when set", () => {
-      const props = createWorkflowZoneNodeProps({
-        workflow: createWorkflow({ kanban_column: "done" }),
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      expect(container.textContent).toContain("done");
-    });
-
-    it("does not render kanban_column in collapsed view when null", () => {
-      const props = createWorkflowZoneNodeProps({
-        workflow: createWorkflow({ kanban_column: null }),
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      // Only the default text should be present, not any kanban column value
-      const text = container.textContent || "";
-      expect(text).toContain("3 steps");
-      expect(text).toContain("5 tasks");
-    });
-  });
-
-  describe("collapsed view", () => {
-    it("renders compact card with workflow name", () => {
-      const props = createWorkflowZoneNodeProps({
-        workflow: createWorkflow({ name: "Deploy" }),
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      expect(container.textContent).toContain("Deploy");
-    });
-
-    it("renders step and task counts in collapsed view", () => {
-      const props = createWorkflowZoneNodeProps({
-        stepCount: 2,
-        taskCount: 8,
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      expect(container.textContent).toContain("2 steps");
-      expect(container.textContent).toContain("8 tasks");
-    });
-
-    it("applies selected ring in collapsed view", () => {
-      const props = createWorkflowZoneNodeProps({
-        isWorkflowSelected: true,
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      const card = container.firstChild;
-      expect(card).toHaveClass("ring-2");
-      expect(card).toHaveClass("ring-primary");
-    });
   });
 
   describe("flash animation", () => {
-    it("applies flash animation class when isFlashing is true in expanded view", () => {
+    it("applies flash animation class when isFlashing is true", () => {
       const props = createWorkflowZoneNodeProps({
         isFlashing: true,
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -256,10 +162,9 @@ describe("WorkflowZoneNode", () => {
       expect(zone).toHaveClass("animate-flash-border");
     });
 
-    it("does not apply flash animation class when isFlashing is false in expanded view", () => {
+    it("does not apply flash animation class when isFlashing is false", () => {
       const props = createWorkflowZoneNodeProps({
         isFlashing: false,
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -268,10 +173,8 @@ describe("WorkflowZoneNode", () => {
       expect(zone).not.toHaveClass("animate-flash-border");
     });
 
-    it("does not apply flash animation class when isFlashing is undefined in expanded view", () => {
-      const props = createWorkflowZoneNodeProps({
-        isCollapsed: false,
-      });
+    it("does not apply flash animation class when isFlashing is undefined", () => {
+      const props = createWorkflowZoneNodeProps();
 
       const { container } = render(<WorkflowZoneNode {...props} />);
 
@@ -281,14 +184,13 @@ describe("WorkflowZoneNode", () => {
   });
 
   describe("click handler", () => {
-    it("calls onWorkflowClick when workflow is clicked in expanded view", () => {
+    it("calls onWorkflowClick when workflow is clicked", () => {
       const mockClick = vi.fn();
       const workflow = createWorkflow({ name: "Test" });
 
       const props = createWorkflowZoneNodeProps({
         workflow,
         onWorkflowClick: mockClick,
-        isCollapsed: false,
       });
 
       const { container } = render(<WorkflowZoneNode {...props} />);
@@ -299,22 +201,5 @@ describe("WorkflowZoneNode", () => {
       expect(mockClick).toHaveBeenCalledWith(workflow);
     });
 
-    it("calls onWorkflowClick when workflow is clicked in collapsed view", () => {
-      const mockClick = vi.fn();
-      const workflow = createWorkflow({ name: "Test" });
-
-      const props = createWorkflowZoneNodeProps({
-        workflow,
-        onWorkflowClick: mockClick,
-        isCollapsed: true,
-      });
-
-      const { container } = render(<WorkflowZoneNode {...props} />);
-
-      const card = container.firstChild as HTMLElement;
-      card?.click();
-
-      expect(mockClick).toHaveBeenCalledWith(workflow);
-    });
   });
 });

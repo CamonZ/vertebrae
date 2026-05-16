@@ -3,12 +3,6 @@ import { type NodeProps, type Node, Handle, Position } from "@xyflow/react";
 import type { Workflow } from "../../bindings";
 
 /**
- * Collapsed dimensions for workflow cards when zoomed out
- */
-export const COLLAPSED_WORKFLOW_WIDTH = 280;
-export const COLLAPSED_WORKFLOW_HEIGHT = 100;
-
-/**
  * Data passed to WorkflowZoneNode
  */
 export type WorkflowZoneNodeData = {
@@ -19,8 +13,6 @@ export type WorkflowZoneNodeData = {
   height: number;
   onWorkflowClick?: (workflow: Workflow) => void;
   isWorkflowSelected?: boolean;
-  /** When true, renders as a compact card without internal details */
-  isCollapsed?: boolean;
   isFlashing?: boolean;
   isWorkflowHighlighted?: boolean;
 };
@@ -29,8 +21,7 @@ export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode"
 
 /**
  * Custom node component for displaying a workflow zone.
- * When zoomed out (isCollapsed=true), renders as a compact card.
- * When zoomed in, renders as a container for step nodes and task zones.
+ * Renders a container for step nodes and task zones.
  */
 function WorkflowZoneNodeComponent({
   data,
@@ -43,7 +34,6 @@ function WorkflowZoneNodeComponent({
     height,
     onWorkflowClick,
     isWorkflowSelected,
-    isCollapsed = false,
     isFlashing = false,
     isWorkflowHighlighted = false,
   } = data;
@@ -54,64 +44,6 @@ function WorkflowZoneNodeComponent({
     }
   };
 
-  // Collapsed view - compact card
-  if (isCollapsed) {
-    return (
-      <div
-        className={`relative rounded-xl bg-bg-secondary/80 backdrop-blur-sm transition-all cursor-pointer hover:bg-bg-secondary ${
-          isWorkflowSelected ? "ring-2 ring-primary" : ""
-        }`}
-        style={{
-          width: `${COLLAPSED_WORKFLOW_WIDTH}px`,
-          height: `${COLLAPSED_WORKFLOW_HEIGHT}px`,
-          border: isWorkflowHighlighted
-            ? "2px dashed #ff5c2e"
-            : "1px solid rgba(100, 116, 139, 0.5)",
-        }}
-        onClick={handleWorkflowClick}
-      >
-        {/* Handles for workflow-to-workflow transition edges */}
-        <Handle
-          type="target"
-          position={Position.Top}
-          className="!bg-accent !border-bg-primary !w-3 !h-3"
-        />
-        <Handle
-          type="source"
-          position={Position.Bottom}
-          className="!bg-accent !border-bg-primary !w-3 !h-3"
-        />
-
-        {/* Compact content */}
-        <div className="p-4 h-full flex flex-col justify-center">
-          <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-text-primary truncate">
-              {workflow.name}
-            </h3>
-            {workflow.is_default && (
-              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-primary">
-                Default
-              </span>
-            )}
-            {workflow.is_final && (
-              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
-                Final
-              </span>
-            )}
-          </div>
-          <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
-            <span>{stepCount} steps</span>
-            <span>{taskCount} tasks</span>
-            {workflow.kanban_column && (
-              <span>{workflow.kanban_column}</span>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Expanded view - full zone with dashed border
   return (
     <div
       className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''}`}
