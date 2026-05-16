@@ -5,7 +5,7 @@ import { isActiveRunStatus } from "../../utils/runState";
 import { ScanIdentifier } from "../shared/EntityId";
 
 interface RunHistoryRailProps {
-  /** All known runs for the task, newest first. */
+  /** All known runs for the current trace tree. */
   runs: readonly TaskRun[];
   /**
    * The run that the trace view is currently showing. May come from an
@@ -79,6 +79,7 @@ interface RunRowProps {
   run: TaskRun;
   isActive: boolean;
   activeRunSource: ResolvedRunSource;
+  depth: number;
   onSelect: () => void;
 }
 
@@ -86,6 +87,7 @@ function RunRow({
   run,
   isActive,
   activeRunSource,
+  depth,
   onSelect,
 }: RunRowProps): ReactNode {
   const terminal = !isActiveRunStatus(run.status);
@@ -98,6 +100,7 @@ function RunRow({
       data-terminal={terminal ? "true" : "false"}
       data-active={isActive ? "true" : "false"}
       data-active-source={isActive ? activeRunSource : undefined}
+      data-depth={depth}
     >
       <button
         type="button"
@@ -107,7 +110,14 @@ function RunRow({
         className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-bg-hover ${
           isActive ? "bg-bg-hover" : ""
         }`}
+        style={{ paddingLeft: `${12 + depth * 16}px` }}
       >
+        {depth > 0 && (
+          <span
+            aria-hidden="true"
+            className="-ml-1 h-px w-3 flex-shrink-0 bg-border"
+          />
+        )}
         <span
           data-testid="run-history-row-pip"
           data-status={run.status}
@@ -143,6 +153,58 @@ function RunRow({
   );
 }
 
+interface RunTreeRow {
+  run: TaskRun;
+  depth: number;
+}
+
+function orderRunsByLineage(runs: readonly TaskRun[]): RunTreeRow[] {
+  const byId = new Map<string, TaskRun>();
+  for (const run of runs) {
+    if (!byId.has(run.id)) byId.set(run.id, run);
+  }
+
+  const childrenByParent = new Map<string, TaskRun[]>();
+  const roots: TaskRun[] = [];
+
+  for (const run of byId.values()) {
+    const parentId = run.parent_task_run_id;
+    if (parentId && byId.has(parentId)) {
+      const children = childrenByParent.get(parentId);
+      if (children) children.push(run);
+      else childrenByParent.set(parentId, [run]);
+    } else {
+      roots.push(run);
+    }
+  }
+
+  const timestamp = (run: TaskRun): number => {
+    const value = Date.parse(run.started_at ?? run.inserted_at ?? "");
+    return Number.isNaN(value) ? 0 : value;
+  };
+  const byStartedDesc = (a: TaskRun, b: TaskRun): number =>
+    timestamp(b) - timestamp(a);
+
+  roots.sort(byStartedDesc);
+  for (const children of childrenByParent.values()) {
+    children.sort(byStartedDesc);
+  }
+
+  const rows: RunTreeRow[] = [];
+  const visited = new Set<string>();
+  const visit = (run: TaskRun, depth: number): void => {
+    if (visited.has(run.id)) return;
+    visited.add(run.id);
+    rows.push({ run, depth });
+    for (const child of childrenByParent.get(run.id) ?? []) {
+      visit(child, depth + 1);
+    }
+  };
+  for (const root of roots) visit(root, 0);
+  for (const run of byId.values()) visit(run, 0);
+  return rows;
+}
+
 export function RunHistoryRail({
   runs,
   activeRunId,
@@ -152,6 +214,8 @@ export function RunHistoryRail({
   collapsed,
   onToggleCollapsed,
 }: RunHistoryRailProps): ReactNode {
+  const rows = orderRunsByLineage(runs);
+
   if (collapsed) {
     return (
       <aside
@@ -222,13 +286,17 @@ export function RunHistoryRail({
             No runs for this task yet.
           </div>
         ) : (
-          <ul data-testid="run-history-rail-list" className="divide-y divide-border">
-            {runs.map((run) => (
+          <ul
+            data-testid="run-history-rail-list"
+            className="divide-y divide-border"
+          >
+            {rows.map(({ run, depth }) => (
               <RunRow
                 key={run.id}
                 run={run}
                 isActive={run.id === activeRunId}
                 activeRunSource={activeRunSource}
+                depth={depth}
                 onSelect={() => onSelectRun(run.id)}
               />
             ))}

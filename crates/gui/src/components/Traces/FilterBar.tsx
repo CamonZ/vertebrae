@@ -6,12 +6,7 @@
  * CORRIDOR rendering, so a filter change narrows all three consistently.
  */
 
-import {
-  forwardRef,
-  useMemo,
-  type ChangeEvent,
-  type ReactNode,
-} from "react";
+import { forwardRef, useMemo, type ChangeEvent, type ReactNode } from "react";
 import type { StepExecution } from "../../bindings";
 import type { TraceFilters } from "../../hooks/useTraceFilters";
 

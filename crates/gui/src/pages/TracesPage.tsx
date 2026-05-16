@@ -13,12 +13,7 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import type {
-  SessionLog,
-  StepExecution,
-  Task,
-  Workflow,
-} from "../bindings";
+import type { SessionLog, StepExecution, Task, Workflow } from "../bindings";
 import { commands } from "../bindings";
 import { resolveHumanInputGate } from "../utils/humanInputGate";
 import {
@@ -40,7 +35,15 @@ import { IdentityBadge } from "../components/shared/EntityId";
 import {
   filterExecutions,
   matchesSearch,
+  resolveLineageScope,
+  scopedRunIdsForLineage,
 } from "../components/Traces/applyFilters";
+import {
+  summarizeExecutions,
+  summarizeProjection,
+  summarizeRuns,
+  traceDebug,
+} from "../components/Traces/traceDebug";
 import { useTask, useTaskRuns, useTaskRunTrace } from "../hooks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
@@ -92,6 +95,13 @@ function renderModeContent(props: ModeContentProps): ReactNode {
     isStoppingActiveRun,
     onStopActiveRun,
   } = props;
+  traceDebug(`render ${mode}`, {
+    mode,
+    rootTaskId: taskId,
+    executions: summarizeExecutions(executions),
+    hasRunProjection: runProjection?.hasRuns === true,
+    projection: summarizeProjection(runProjection),
+  });
   switch (mode) {
     case "thread":
       return (
@@ -107,7 +117,8 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           scrollRef={threadScrollRef}
           eventFilter={
             search
-              ? (tagged: TaggedConversationEvent) => matchesSearch(tagged, search)
+              ? (tagged: TaggedConversationEvent) =>
+                  matchesSearch(tagged, search)
               : undefined
           }
           autoScroll={autoScroll}
@@ -191,28 +202,17 @@ export function TracesPage({
   const pickerRef = useRef<TaskPickerHandle | null>(null);
 
   const safeTaskId = taskId ?? null;
-  const { task, isLoading: isTaskLoading, error: taskError } = useTask(safeTaskId);
+  const {
+    task,
+    isLoading: isTaskLoading,
+    error: taskError,
+  } = useTask(safeTaskId);
 
   // URL state for stable trace links. `runId` selects a specific TaskRun for
   // the entry-point task; `rootRunId` pins the trace tree to a recursive root
   // (e.g. for cross-task deep links into a workflow run).
   const selectedRunId = searchParams.get("runId") ?? null;
   const rootRunIdParam = searchParams.get("rootRunId") ?? null;
-
-  const setSelectedRunId = useCallback(
-    (next: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next) params.set("runId", next);
-          else params.delete("runId");
-          return params;
-        },
-        { replace: true }
-      );
-    },
-    [setSearchParams]
-  );
 
   const {
     runs,
@@ -261,6 +261,38 @@ export function TracesPage({
 
   const executions = useLegacySubtree ? legacyExecutions : runExecutions;
 
+  const selectedTraceRun = useMemo(() => {
+    if (!selectedRunId) return null;
+    return runTaskRuns.find((run) => run.id === selectedRunId) ?? null;
+  }, [runTaskRuns, selectedRunId]);
+
+  const activeTraceRun = selectedTraceRun ?? resolvedRun.run;
+  const activeTraceRunSource = selectedTraceRun
+    ? "selected"
+    : resolvedRun.source;
+
+  useEffect(() => {
+    traceDebug("run trace inputs", {
+      taskId: safeTaskId,
+      selectedRunId,
+      rootRunIdParam,
+      resolvedRunId: resolvedRun.run?.id ?? null,
+      resolvedRunSource: resolvedRun.source,
+      resolvedRunRootTaskRunId: resolvedRun.run?.root_task_run_id ?? null,
+      rootTaskRunId,
+      useLegacySubtree,
+    });
+  }, [
+    rootTaskRunId,
+    rootRunIdParam,
+    resolvedRun.run?.id,
+    resolvedRun.run?.root_task_run_id,
+    resolvedRun.source,
+    safeTaskId,
+    selectedRunId,
+    useLegacySubtree,
+  ]);
+
   // Build a map of execution -> session logs keyed by execution id. The
   // run-trace endpoint returns logs as a flat list, so we group them here.
   const runLogsByExecutionId = useMemo<Record<string, SessionLog[]>>(() => {
@@ -276,8 +308,9 @@ export function TracesPage({
     return map;
   }, [useLegacySubtree, runSessionLogs]);
 
-  const { logsByExecutionId: legacyLogsByExecutionId } =
-    useSubtreeSessionLogs(useLegacySubtree ? legacyExecutions : []);
+  const { logsByExecutionId: legacyLogsByExecutionId } = useSubtreeSessionLogs(
+    useLegacySubtree ? legacyExecutions : []
+  );
 
   const logsByExecutionId = useLegacySubtree
     ? legacyLogsByExecutionId
@@ -296,15 +329,87 @@ export function TracesPage({
   const { filters, setStatus, setStepName, setModel, setSearch, setRootOnly } =
     useTraceFilters();
 
+  const effectiveLineageScope = useMemo(
+    () => resolveLineageScope(filters, activeTraceRun),
+    [filters, activeTraceRun]
+  );
+
+  const scopedRunIds = useMemo(
+    () =>
+      scopedRunIdsForLineage(
+        runTaskRuns,
+        activeTraceRun?.id ?? null,
+        effectiveLineageScope
+      ),
+    [runTaskRuns, activeTraceRun?.id, effectiveLineageScope]
+  );
+
+  const scopedRunTaskRuns = useMemo(() => {
+    if (useLegacySubtree || !scopedRunIds) return runTaskRuns;
+    return runTaskRuns.filter((run) => scopedRunIds.has(run.id));
+  }, [useLegacySubtree, runTaskRuns, scopedRunIds]);
+
+  useEffect(() => {
+    traceDebug("lineage scope", {
+      taskId: safeTaskId,
+      selectedRunId,
+      resolvedRunId: resolvedRun.run?.id ?? null,
+      activeTraceRunId: activeTraceRun?.id ?? null,
+      rootTaskRunId,
+      effectiveLineageScope,
+      scopedRunIds: scopedRunIds ? Array.from(scopedRunIds) : null,
+      scopedRuns: summarizeRuns(scopedRunTaskRuns),
+      fetchedRuns: summarizeRuns(runTaskRuns),
+    });
+  }, [
+    effectiveLineageScope,
+    rootTaskRunId,
+    runTaskRuns,
+    safeTaskId,
+    scopedRunIds,
+    scopedRunTaskRuns,
+    selectedRunId,
+    activeTraceRun?.id,
+    resolvedRun.run?.id,
+  ]);
+
   const filteredExecutions = useMemo<StepExecution[]>(() => {
     if (!safeTaskId) return [];
-    return filterExecutions(executions, filters, { rootTaskId: safeTaskId });
-  }, [executions, filters, safeTaskId]);
+    return filterExecutions(executions, filters, {
+      rootTaskId: safeTaskId,
+      scopedRunIds: useLegacySubtree ? null : scopedRunIds,
+    });
+  }, [executions, filters, safeTaskId, scopedRunIds, useLegacySubtree]);
 
   const runProjection = useMemo<TaskRunTraceProjection | null>(() => {
-    if (useLegacySubtree || runTaskRuns.length === 0) return null;
-    return projectTaskRunTrace(runTaskRuns, filteredExecutions, tasks);
-  }, [useLegacySubtree, runTaskRuns, filteredExecutions, tasks]);
+    if (useLegacySubtree || scopedRunTaskRuns.length === 0) return null;
+    return projectTaskRunTrace(scopedRunTaskRuns, filteredExecutions, tasks);
+  }, [useLegacySubtree, scopedRunTaskRuns, filteredExecutions, tasks]);
+
+  useEffect(() => {
+    traceDebug("execution filters", {
+      taskId: safeTaskId,
+      useLegacySubtree,
+      rawExecutions: summarizeExecutions(executions),
+      filteredExecutions: summarizeExecutions(filteredExecutions),
+      filters,
+      scopedRunIds: scopedRunIds ? Array.from(scopedRunIds) : null,
+    });
+  }, [
+    executions,
+    filteredExecutions,
+    filters,
+    safeTaskId,
+    scopedRunIds,
+    useLegacySubtree,
+  ]);
+
+  useEffect(() => {
+    traceDebug("projection output", {
+      taskId: safeTaskId,
+      projection: summarizeProjection(runProjection),
+    });
+  }, [runProjection, safeTaskId]);
 
   const humanInputGate = useMemo(() => {
     if (useLegacySubtree) return null;
@@ -390,9 +495,7 @@ export function TracesPage({
       if (list.length === 0) return;
       e.preventDefault();
       setActiveExecutionId((current) => {
-        const ids = list
-          .map((x) => x.id)
-          .filter((id): id is string => !!id);
+        const ids = list.map((x) => x.id).filter((id): id is string => !!id);
         if (ids.length === 0) return current;
         const idx = current ? ids.indexOf(current) : -1;
         if (idx < 0) return ids[0];
@@ -439,20 +542,35 @@ export function TracesPage({
     [navigate, onPickTask]
   );
 
-  const handleSelectRun = useCallback(
-    (runId: string) => {
-      setSelectedRunId(runId);
-    },
-    [setSelectedRunId]
-  );
-
   const showPickerRail = !taskId || pickerInRail;
   // Show the run-history rail whenever the task has TaskRun data; fall back
   // to the legacy subtree rail for tasks that never had a durable run.
   const showRunHistoryRail = runs.length > 0;
-  const headerError = taskId
-    ? (taskError ?? runsError ?? dataError)
-    : null;
+  const railRuns =
+    !useLegacySubtree && runTaskRuns.length > 0 ? runTaskRuns : runs;
+
+  const handleSelectRun = useCallback(
+    (runId: string) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          params.set("runId", runId);
+          const selected = railRuns.find((run) => run.id === runId);
+          const isRootRun =
+            selected &&
+            (!selected.parent_task_run_id ||
+              !railRuns.some((run) => run.id === selected.parent_task_run_id));
+          if (isRootRun) params.set("scope", "lineage");
+          else params.delete("scope");
+          return params;
+        },
+        { replace: true }
+      );
+    },
+    [railRuns, setSearchParams]
+  );
+
+  const headerError = taskId ? (taskError ?? runsError ?? dataError) : null;
   const headerLoading = taskId
     ? isTaskLoading || isRunsLoading || dataLoading
     : false;
@@ -497,9 +615,9 @@ export function TracesPage({
           />
         ) : showRunHistoryRail ? (
           <RunHistoryRail
-            runs={runs}
-            activeRunId={resolvedRun.run?.id ?? null}
-            activeRunSource={resolvedRun.source}
+            runs={railRuns}
+            activeRunId={activeTraceRun?.id ?? null}
+            activeRunSource={activeTraceRunSource}
             onSelectRun={handleSelectRun}
             onSwitchTask={() => setPickerInRail(true)}
             collapsed={railCollapsed}
@@ -546,16 +664,16 @@ export function TracesPage({
               <div className="flex items-center justify-between gap-3">
                 <ModeToggle mode={mode} onChange={setMode} />
                 <div className="flex items-center gap-3">
-                  {showRunHistoryRail && resolvedRun.run && (
+                  {showRunHistoryRail && activeTraceRun && (
                     <span
                       data-testid="traces-active-run"
-                      data-run-id={resolvedRun.run.id}
-                      data-run-source={resolvedRun.source}
+                      data-run-id={activeTraceRun.id}
+                      data-run-source={activeTraceRunSource}
                       className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted"
                     >
-                      <span>{resolvedRun.source} run</span>
+                      <span>{activeTraceRunSource} run</span>
                       <IdentityBadge
-                        id={resolvedRun.run.id}
+                        id={activeTraceRun.id}
                         kind="task run"
                         className="px-1 text-text-secondary"
                         testId="traces-active-run-id"

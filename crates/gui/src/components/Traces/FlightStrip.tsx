@@ -21,6 +21,11 @@ import {
   type TimelineProjection,
 } from "./timeline";
 import type { TaskRunTraceProjection } from "./taskRunTrace";
+import {
+  summarizeExecutions,
+  summarizeProjection,
+  traceDebug,
+} from "./traceDebug";
 
 interface FlightStripProps {
   rootTaskId: string;
@@ -119,6 +124,23 @@ export function FlightStrip({
     runProjection,
     logsByExecutionId,
   ]);
+
+  useEffect(() => {
+    traceDebug("render flight-strip", {
+      rootTaskId,
+      executions: summarizeExecutions(executions),
+      projection: summarizeProjection(runProjection ?? null),
+      timelineRows: projection.mainRows.map((row) => ({
+        rowKey: row.rowKey,
+        taskRunId: row.taskRunId,
+        taskId: row.taskId,
+      })),
+      thresholdExecutionIds: projection.thresholds.map(
+        (marker) => marker.executionId
+      ),
+      mainExecutionIds: projection.main.map((marker) => marker.executionId),
+    });
+  }, [executions, projection, rootTaskId, runProjection]);
 
   useEffect(() => {
     let attached: HTMLElement | null = null;
@@ -344,10 +366,7 @@ export function FlightStrip({
         </label>
       </div>
 
-      <div
-        className="relative flex w-full"
-        style={{ height: totalHeight }}
-      >
+      <div className="relative flex w-full" style={{ height: totalHeight }}>
         <LaneGutter
           thresholdsOnly={thresholdsOnly}
           thresholdBlockHeight={thresholdBlockHeight}
