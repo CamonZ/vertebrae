@@ -62,6 +62,17 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Barrier" in the workflow should have step_type "wait_children"
 
+  Scenario: Step show displays human_input step type
+    When I add a step "Gate" to the workflow with flag "--step-type" and value "human_input"
+    And I show the step "Gate"
+    Then the output should contain "Step Type:     human_input"
+    And the output should not contain "Step Type:     execute"
+
+  Scenario: Step show JSON preserves human_input step type
+    When I add a step "JsonGate" to the workflow with flag "--step-type" and value "human_input"
+    And I show the step "JsonGate" as JSON
+    Then the step show JSON should have step_type "human_input"
+
   Scenario: Update a step's step_type to wait_children
     When I add a step "Waiter" to the workflow
     And I update the step "Waiter" in the workflow with flag "--step-type" and value "wait_children"

@@ -16,6 +16,8 @@ pub enum CliStepType {
     Route,
     #[value(name = "wait_children")]
     WaitChildren,
+    #[value(name = "human_input")]
+    HumanInput,
 }
 
 impl From<CliStepType> for StepType {
@@ -25,6 +27,7 @@ impl From<CliStepType> for StepType {
             CliStepType::Evaluate => StepType::Evaluate,
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
+            CliStepType::HumanInput => StepType::HumanInput,
         }
     }
 }
@@ -119,7 +122,7 @@ pub struct StepAddCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// Type of this step (execute, evaluate, route, wait_children)
+    /// Type of this step (execute, evaluate, route, wait_children, human_input)
     #[arg(long, value_enum, default_value = "execute")]
     pub step_type: CliStepType,
 
@@ -362,6 +365,14 @@ pub struct StepShowCommand {
 }
 
 impl StepShowCommand {
+    /// Fetch the step for structured output.
+    pub async fn get_step(&self, service: &dyn StepService) -> Result<Step, ServiceError> {
+        service
+            .get_step(&self.id.to_lowercase())
+            .await?
+            .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {}", self.id)))
+    }
+
     /// Execute the show step command.
     ///
     /// Fetches the step with the given ID and returns detailed information.
@@ -375,45 +386,42 @@ impl StepShowCommand {
     /// Returns `ServiceError::NotFound` if the step doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        let step = service.get_step(&self.id.to_lowercase()).await?;
+        let s = self.get_step(service).await?;
+        let id =
+            s.id.as_ref()
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "?".to_string());
+        let workflow_id = s.workflow_id.to_string();
+        let model = s.agent_config.model.as_deref().unwrap_or("default");
 
-        match step {
-            Some(s) => {
-                let id =
-                    s.id.as_ref()
-                        .map(|t| t.to_string())
-                        .unwrap_or_else(|| "?".to_string());
-                let workflow_id = s.workflow_id.to_string();
-                let model = s.agent_config.model.as_deref().unwrap_or("default");
+        let goal = s.goal.as_deref().unwrap_or("(none)");
 
-                let goal = s.goal.as_deref().unwrap_or("(none)");
+        let agents = if s.agents.is_empty() {
+            "(none)".to_string()
+        } else {
+            s.agents.join(", ")
+        };
 
-                let agents = if s.agents.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    s.agents.join(", ")
-                };
+        let skills = if s.skills.is_empty() {
+            "(none)".to_string()
+        } else {
+            s.skills.join(", ")
+        };
 
-                let skills = if s.skills.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    s.skills.join(", ")
-                };
+        let transitions = if s.transitions_to.is_empty() {
+            "(none)".to_string()
+        } else {
+            s.transitions_to.join(", ")
+        };
 
-                let transitions = if s.transitions_to.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    s.transitions_to.join(", ")
-                };
+        let output_schema = s
+            .output_schema
+            .as_ref()
+            .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+            .unwrap_or_else(|| "(none)".to_string());
 
-                let output_schema = s
-                    .output_schema
-                    .as_ref()
-                    .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
-                    .unwrap_or_else(|| "(none)".to_string());
-
-                let output = format!(
-                    r#"Step: {} - {}
+        let output = format!(
+            r#"Step: {} - {}
 ============================================================
 
 Workflow:      {}
@@ -428,33 +436,27 @@ Is Final:      {}
 Transitions:   {}
 Created:       {}
 Updated:       {}"#,
-                    id,
-                    s.name,
-                    workflow_id,
-                    s.order,
-                    s.step_type,
-                    goal,
-                    agents,
-                    skills,
-                    model,
-                    output_schema,
-                    if s.is_final { "Yes" } else { "No" },
-                    transitions,
-                    s.created_at
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                    s.updated_at
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                        .unwrap_or_else(|| "-".to_string()),
-                );
+            id,
+            s.name,
+            workflow_id,
+            s.order,
+            s.step_type,
+            goal,
+            agents,
+            skills,
+            model,
+            output_schema,
+            if s.is_final { "Yes" } else { "No" },
+            transitions,
+            s.created_at
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            s.updated_at
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_else(|| "-".to_string()),
+        );
 
-                Ok(output)
-            }
-            None => Err(ServiceError::validation_failed(format!(
-                "Step not found: {}",
-                self.id
-            ))),
-        }
+        Ok(output)
     }
 }
 
@@ -515,7 +517,7 @@ pub struct StepUpdateCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// New step type (execute, evaluate, route, wait_children)
+    /// New step type (execute, evaluate, route, wait_children, human_input)
     #[arg(long, value_enum)]
     pub step_type: Option<CliStepType>,
 
@@ -1266,6 +1268,27 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_step_type_human_input() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Human Approval",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "human_input",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::HumanInput);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_update_with_step_type_wait_children() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -1279,6 +1302,25 @@ mod tests {
             StepCommand::Update(cmd) => {
                 let core_type: StepType = cmd.step_type.unwrap().into();
                 assert_eq!(core_type, StepType::WaitChildren);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_step_type_human_input() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--step-type",
+            "human_input",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                let core_type: StepType = cmd.step_type.unwrap().into();
+                assert_eq!(core_type, StepType::HumanInput);
             }
             _ => panic!("Expected Update command"),
         }

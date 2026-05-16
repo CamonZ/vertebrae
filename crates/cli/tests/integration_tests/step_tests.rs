@@ -4,6 +4,7 @@
 
 use super::mock::mock_services;
 use vertebrae_cli::commands::step::*;
+use vertebrae_cli::commands::{Command, CommandResult};
 use vertebrae_core::CreateWorkflowOptions;
 
 // ============================================================================
@@ -735,6 +736,59 @@ mod step_show_tests {
         let result = show_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("MyStep"));
+    }
+
+    #[tokio::test]
+    async fn test_show_step_json_outputs_structured_human_input_step() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Ask human".to_string(),
+            workflow: workflow_id.clone(),
+            id: Some("human-gate".to_string()),
+            goal: Some("Collect reviewer decision".to_string()),
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            order: 2,
+            r#final: false,
+            transitions_to: vec![],
+            step_type: CliStepType::HumanInput,
+            output_schema: Some(r#"{"type":"object","required":["decision"]}"#.to_string()),
+        };
+        cmd.execute(services.steps()).await.unwrap();
+
+        let command = Command::Step(StepCommand::Show(StepShowCommand {
+            id: "human-gate".to_string(),
+        }));
+        let result = command.execute_json(&services).await.unwrap();
+
+        let CommandResult::Json(json) = result else {
+            panic!("step show --json should return JSON output");
+        };
+
+        assert!(
+            json.get("output").is_none(),
+            "step show --json should not wrap human-readable output"
+        );
+        assert_eq!(json["id"], "human-gate");
+        assert_eq!(json["name"], "Ask human");
+        assert_eq!(json["workflow_id"], workflow_id);
+        assert_eq!(json["goal"], "Collect reviewer decision");
+        assert_eq!(json["order"], 2);
+        assert_eq!(json["step_type"], "human_input");
+        assert_eq!(json["output_schema"]["required"][0], "decision");
     }
 }
 

@@ -12,3 +12,13 @@ Feature: Real-time step detail panel updates
     Then the GUI should show "Step Configuration" within 5 seconds
     When I update the step name to "Updated Step Name" via the CLI
     Then the GUI should show "Updated Step Name" within 10 seconds
+
+  Scenario: Human input step type renders in open step detail panel
+    Given I create a workflow with:
+      | name | Human Input Step Panel Workflow |
+    And I create a step "Approval Gate" with type "human_input" in the workflow "Human Input Step Panel Workflow" via the CLI
+    And the GUI is on the pipeline view
+    Then the GUI should show "Approval Gate" within 10 seconds
+    When I click on the element with test id "step-node-Approval Gate"
+    Then the GUI should show "Step Configuration" within 5 seconds
+    And the GUI element with test id "step-type-badge" should have text "human_input" within 5 seconds

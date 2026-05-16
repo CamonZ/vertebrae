@@ -58,21 +58,30 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-const STEP_TYPE_STYLES: Record<StepType, string> = {
+const STEP_TYPE_STYLES: Record<Extract<StepType, string>, string> = {
   execute: "border-text-muted/30 bg-text-muted/10 text-text-secondary",
   evaluate: "border-info/30 bg-info/10 text-info",
   route: "border-warning/30 bg-warning/10 text-warning",
   wait_children: "border-accent/30 bg-accent/10 text-accent",
+  human_input: "border-success/30 bg-success/10 text-success",
 };
 
+function formatStepType(stepType: StepType) {
+  if (typeof stepType === "string") return stepType;
+  return `unsupported:${stepType.unsupported}`;
+}
+
 function StepTypeBadge({ stepType }: { stepType: StepType }) {
-  const style = STEP_TYPE_STYLES[stepType] ?? STEP_TYPE_STYLES.execute;
+  const style =
+    typeof stepType === "string"
+      ? STEP_TYPE_STYLES[stepType]
+      : "border-danger/30 bg-danger/10 text-danger";
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-xs ${style}`}
       data-testid="step-type-badge"
     >
-      {stepType}
+      {formatStepType(stepType)}
     </span>
   );
 }

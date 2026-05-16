@@ -57,13 +57,7 @@ impl SacrumStepService {
         let step_type = response
             .step_type
             .as_deref()
-            .map(|s| match s {
-                "execute" => StepType::Execute,
-                "evaluate" => StepType::Evaluate,
-                "route" => StepType::Route,
-                "wait_children" => StepType::WaitChildren,
-                _ => StepType::Execute,
-            })
+            .map(StepType::from_wire_str)
             .unwrap_or_default();
 
         Step {
@@ -480,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_step_unknown_step_type_defaults_to_execute() {
+    fn test_response_to_step_unknown_step_type_is_preserved() {
         let response = WorkflowStepResponse {
             id: "step-unk".to_string(),
             name: "Unknown".to_string(),
@@ -500,7 +494,11 @@ mod tests {
         };
 
         let step = SacrumStepService::response_to_step(&response);
-        assert_eq!(step.step_type, StepType::Execute);
+        assert_eq!(
+            step.step_type,
+            StepType::Unsupported("future_type".to_string())
+        );
+        assert_ne!(step.step_type, StepType::Execute);
     }
 
     #[test]
@@ -510,6 +508,7 @@ mod tests {
             ("evaluate", StepType::Evaluate),
             ("route", StepType::Route),
             ("wait_children", StepType::WaitChildren),
+            ("human_input", StepType::HumanInput),
         ] {
             let response = WorkflowStepResponse {
                 id: "step-x".to_string(),
@@ -653,6 +652,54 @@ mod tests {
         assert_eq!(step.goal.as_deref(), Some("Write the code"));
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.transitions_to, vec!["step-2"]);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_maps_human_input_step_type() {
+        let server = MockServer::start().await;
+
+        let mut response = make_step_response("step-1", "Approval", "wf-1", 0);
+        response["step_type"] = json!("human_input");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = service.get_step("step-1").await.unwrap().unwrap();
+
+        assert_eq!(step.step_type, StepType::HumanInput);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_preserves_unsupported_step_type() {
+        let server = MockServer::start().await;
+
+        let mut response = make_step_response("step-1", "Manual Gate", "wf-1", 0);
+        response["step_type"] = json!("manual_gate");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = service.get_step("step-1").await.unwrap().unwrap();
+
+        assert_eq!(
+            step.step_type,
+            StepType::Unsupported("manual_gate".to_string())
+        );
+        assert_ne!(step.step_type, StepType::Execute);
     }
 
     #[tokio::test]

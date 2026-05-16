@@ -141,24 +141,37 @@ impl SectionType {
 }
 
 /// The type of a workflow step
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum StepType {
     #[default]
     Execute,
     Evaluate,
     Route,
-    #[serde(rename = "wait_children")]
     WaitChildren,
+    HumanInput,
+    Unsupported(String),
 }
 
 impl StepType {
-    pub fn as_str(&self) -> &'static str {
+    pub fn from_wire_str(value: &str) -> Self {
+        match value {
+            "execute" => StepType::Execute,
+            "evaluate" => StepType::Evaluate,
+            "route" => StepType::Route,
+            "wait_children" => StepType::WaitChildren,
+            "human_input" => StepType::HumanInput,
+            _ => StepType::Unsupported(value.to_string()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
         match self {
             StepType::Execute => "execute",
             StepType::Evaluate => "evaluate",
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
+            StepType::HumanInput => "human_input",
+            StepType::Unsupported(value) => value.as_str(),
         }
     }
 
@@ -188,6 +201,25 @@ impl StepType {
             "required": ["transition_to", "transition_type"],
             "additionalProperties": false
         })
+    }
+}
+
+impl serde::Serialize for StepType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for StepType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Ok(StepType::from_wire_str(&value))
     }
 }
 
@@ -2603,6 +2635,11 @@ mod tests {
         assert_eq!(StepType::Evaluate.as_str(), "evaluate");
         assert_eq!(StepType::Route.as_str(), "route");
         assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
+        assert_eq!(StepType::HumanInput.as_str(), "human_input");
+        assert_eq!(
+            StepType::Unsupported("manual_gate".to_string()).as_str(),
+            "manual_gate"
+        );
     }
 
     #[test]
@@ -2611,6 +2648,11 @@ mod tests {
         assert_eq!(StepType::Evaluate.to_string(), "evaluate");
         assert_eq!(StepType::Route.to_string(), "route");
         assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
+        assert_eq!(StepType::HumanInput.to_string(), "human_input");
+        assert_eq!(
+            StepType::Unsupported("manual_gate".to_string()).to_string(),
+            "manual_gate"
+        );
     }
 
     #[test]
@@ -2651,6 +2693,7 @@ mod tests {
             (StepType::Evaluate, "\"evaluate\""),
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
+            (StepType::HumanInput, "\"human_input\""),
         ] {
             let serialized = serde_json::to_string(&variant).unwrap();
             assert_eq!(serialized, expected_json);
@@ -2658,6 +2701,19 @@ mod tests {
             let deserialized: StepType = serde_json::from_str(&serialized).unwrap();
             assert_eq!(deserialized, variant);
         }
+    }
+
+    #[test]
+    fn step_type_serde_preserves_unknown_values() {
+        let deserialized: StepType = serde_json::from_str("\"manual_gate\"").unwrap();
+        assert_eq!(
+            deserialized,
+            StepType::Unsupported("manual_gate".to_string())
+        );
+        assert_eq!(
+            serde_json::to_string(&deserialized).unwrap(),
+            "\"manual_gate\""
+        );
     }
 
     #[test]
