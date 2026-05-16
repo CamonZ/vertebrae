@@ -49,8 +49,6 @@ import {
   LAYOUT_CONSTANTS,
   calculateWorkflowZoneWidth,
   calculateWorkflowZoneHeight,
-  COLLAPSED_WORKFLOW_WIDTH,
-  COLLAPSED_WORKFLOW_HEIGHT,
 } from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
@@ -241,7 +239,6 @@ function AllWorkflowsPipelineInner() {
   );
 
   const [panelHistory, setPanelHistory] = useState<PanelEntry[]>([]);
-  const [isCollapsed, setIsCollapsed] = useState(false);
   const [selectedTransitionEdgeId, setSelectedTransitionEdgeId] = useState<
     string | null
   >(null);
@@ -538,23 +535,6 @@ function AllWorkflowsPipelineInner() {
     { direction: "DOWN", nodeSpacing: 60, layerSpacing: 120 }
   );
 
-  // Toggle collapsed view with 'c'
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
-      if (e.key === "c" || e.key === "C") {
-        setIsCollapsed((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   // Build canvas nodes
   const allNodes = useMemo(() => {
     const nodes: Node[] = [];
@@ -563,12 +543,12 @@ function AllWorkflowsPipelineInner() {
     for (const wf of pipelineWorkflows) {
       const sortedSteps = workflowStepsMap.get(wf.id) ?? [];
       const taskCount = workflowTaskCounts.get(wf.id) ?? 0;
-      const zoneWidth = isCollapsed
-        ? COLLAPSED_WORKFLOW_WIDTH
-        : calculateWorkflowZoneWidth(sortedSteps.length);
-      const zoneHeight = isCollapsed
-        ? COLLAPSED_WORKFLOW_HEIGHT
-        : calculateWorkflowZoneHeight();
+      const dimensions = workflowDimensions.get(wf.id) ?? {
+        width: calculateWorkflowZoneWidth(sortedSteps.length),
+        height: calculateWorkflowZoneHeight(),
+      };
+      const zoneWidth = dimensions.width;
+      const zoneHeight = dimensions.height;
 
       const elkPosition = elkPositions.get(wf.id);
       const zoneX = elkPosition?.x ?? 0;
@@ -590,7 +570,6 @@ function AllWorkflowsPipelineInner() {
           height: zoneHeight,
           onWorkflowClick: handleWorkflowClick,
           isWorkflowSelected: selectedWorkflow?.id === wf.id,
-          isCollapsed,
           isFlashing: flashingWorkflowIds.has(wf.id),
           isWorkflowHighlighted: highlightedTransitionWorkflowIds.has(wf.id),
         } as WorkflowZoneNodeData,
@@ -598,47 +577,45 @@ function AllWorkflowsPipelineInner() {
         selectable: false,
       });
 
-      if (!isCollapsed) {
-        sortedSteps.forEach((step, index) => {
-          const isStepSelected = selectedStepId === step.id;
-          const aggregates = (step.id && stepAggregates.get(step.id)) || {
-            taskCounts: { epic: 0, ticket: 0, task: 0 },
-            active: 0,
-          };
+      sortedSteps.forEach((step, index) => {
+        const isStepSelected = selectedStepId === step.id;
+        const aggregates = (step.id && stepAggregates.get(step.id)) || {
+          taskCounts: { epic: 0, ticket: 0, task: 0 },
+          active: 0,
+        };
 
-          nodes.push({
-            id: `step-${wf.id}-${step.order ?? 0}`,
-            type: "stepNode",
-            position: {
-              x:
-                zoneX +
-                LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING +
-                index * LAYOUT_CONSTANTS.NODE_SPACING_X,
-              y:
-                zoneY +
-                LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
-                LAYOUT_CONSTANTS.STEP_Y_OFFSET,
+        nodes.push({
+          id: `step-${wf.id}-${step.order ?? 0}`,
+          type: "stepNode",
+          position: {
+            x:
+              zoneX +
+              LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING +
+              index * LAYOUT_CONSTANTS.NODE_SPACING_X,
+            y:
+              zoneY +
+              LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
+              LAYOUT_CONSTANTS.STEP_Y_OFFSET,
+          },
+          width: LAYOUT_CONSTANTS.STEP_NODE_WIDTH,
+          height: LAYOUT_CONSTANTS.STEP_NODE_HEIGHT,
+          data: {
+            step,
+            isFirst: index === 0,
+            isLast: index === sortedSteps.length - 1,
+            onStepClick: handleStepClick,
+            isSelected: isStepSelected,
+            taskCounts: aggregates.taskCounts,
+            executionCounts: {
+              active: aggregates.active,
+              completed: 0,
+              failed: 0,
             },
-            width: LAYOUT_CONSTANTS.STEP_NODE_WIDTH,
-            height: LAYOUT_CONSTANTS.STEP_NODE_HEIGHT,
-            data: {
-              step,
-              isFirst: index === 0,
-              isLast: index === sortedSteps.length - 1,
-              onStepClick: handleStepClick,
-              isSelected: isStepSelected,
-              taskCounts: aggregates.taskCounts,
-              executionCounts: {
-                active: aggregates.active,
-                completed: 0,
-                failed: 0,
-              },
-              isFlashing: step.id ? flashingStepIds.has(step.id) : false,
-            } as StepNodeData,
-            draggable: false,
-          });
+            isFlashing: step.id ? flashingStepIds.has(step.id) : false,
+          } as StepNodeData,
+          draggable: false,
         });
-      }
+      });
 
       fallbackY += zoneHeight + LAYOUT_CONSTANTS.WORKFLOW_ZONE_GAP;
     }
@@ -655,57 +632,53 @@ function AllWorkflowsPipelineInner() {
     selectedStepId,
     handleWorkflowClick,
     selectedWorkflow,
-    isCollapsed,
     flashingWorkflowIds,
     flashingStepIds,
     highlightedTransitionWorkflowIds,
+    workflowDimensions,
   ]);
 
   const allEdges = useMemo(() => {
     const edges: Edge[] = [];
 
-    if (!isCollapsed) {
-      for (const wf of pipelineWorkflows) {
-        const wfSteps = workflowStepsMap.get(wf.id) ?? [];
-        const stepIdToOrder = new Map<string, number>();
-        wfSteps.forEach((s) => {
-          if (s.id) stepIdToOrder.set(s.id, s.order ?? 0);
+    for (const wf of pipelineWorkflows) {
+      const wfSteps = workflowStepsMap.get(wf.id) ?? [];
+      const stepIdToOrder = new Map<string, number>();
+      wfSteps.forEach((s) => {
+        if (s.id) stepIdToOrder.set(s.id, s.order ?? 0);
+      });
+      wfSteps.forEach((s) => {
+        if (!s.id) return;
+        (s.transitions_to || []).forEach((targetStepId) => {
+          const targetOrder = stepIdToOrder.get(targetStepId);
+          if (targetOrder !== undefined) {
+            edges.push({
+              id: `edge-${wf.id}-${s.order}-${targetOrder}`,
+              source: `step-${wf.id}-${s.order}`,
+              target: `step-${wf.id}-${targetOrder}`,
+              type: "smoothstep",
+              animated: false,
+              style: {
+                stroke: "rgba(99, 102, 241, 0.5)",
+                strokeWidth: 2,
+              },
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: "rgba(99, 102, 241, 0.7)",
+                width: 20,
+                height: 20,
+              },
+            });
+          }
         });
-        wfSteps.forEach((s) => {
-          if (!s.id) return;
-          (s.transitions_to || []).forEach((targetStepId) => {
-            const targetOrder = stepIdToOrder.get(targetStepId);
-            if (targetOrder !== undefined) {
-              edges.push({
-                id: `edge-${wf.id}-${s.order}-${targetOrder}`,
-                source: `step-${wf.id}-${s.order}`,
-                target: `step-${wf.id}-${targetOrder}`,
-                type: "smoothstep",
-                animated: false,
-                style: {
-                  stroke: "rgba(99, 102, 241, 0.5)",
-                  strokeWidth: 2,
-                },
-                markerEnd: {
-                  type: MarkerType.ArrowClosed,
-                  color: "rgba(99, 102, 241, 0.7)",
-                  width: 20,
-                  height: 20,
-                },
-              });
-            }
-          });
-        });
-      }
+      });
     }
 
     workflowTransitions
       .filter((t) => t.from_workflow_id !== t.to_workflow_id)
       .forEach((transition, index) => {
         const elkEdgeId = `elk-edge-${index}`;
-        const elkEdgePath = !isCollapsed
-          ? elkEdgePaths.get(elkEdgeId)
-          : undefined;
+        const elkEdgePath = elkEdgePaths.get(elkEdgeId);
 
         const edgeId = `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`;
         const isSelected = selectedTransitionEdgeId === edgeId;
@@ -757,7 +730,6 @@ function AllWorkflowsPipelineInner() {
     workflowStepsMap,
     workflowTransitions,
     elkEdgePaths,
-    isCollapsed,
     selectedTransitionEdgeId,
   ]);
 
@@ -870,19 +842,6 @@ function AllWorkflowsPipelineInner() {
                 {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
               </p>
             </div>
-            <button
-              onClick={() => setIsCollapsed((prev) => !prev)}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${isCollapsed
-                  ? "bg-accent/20 text-accent hover:bg-accent/30"
-                  : "bg-bg-secondary text-text-muted hover:bg-bg-elevated"
-                }`}
-              title="Press 'c' to toggle"
-            >
-              {isCollapsed ? "Collapsed" : "Expanded"}
-              <kbd className="rounded bg-bg-primary/50 px-1.5 py-0.5 text-[10px]">
-                c
-              </kbd>
-            </button>
           </div>
         </div>
 
