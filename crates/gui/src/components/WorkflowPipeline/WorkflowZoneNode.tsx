@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { type NodeProps, type Node, Handle, Position } from "@xyflow/react";
 import type { Workflow } from "../../bindings";
+import { ScanIdentifier } from "../shared/EntityId";
 
 /**
  * Data passed to WorkflowZoneNode
@@ -97,7 +98,13 @@ function WorkflowZoneNodeComponent({
           )}
         </div>
         <div className="mt-1 flex items-center gap-3 text-xs text-text-muted">
-          <code className="font-mono">{workflow.id?.slice(0, 8)}</code>
+          <ScanIdentifier
+            id={workflow.id}
+            kind="workflow"
+            copyable={false}
+            className="text-xs"
+            testId="workflow-zone-id"
+          />
           <span className="flex items-center gap-1">
             <svg
               className="h-3 w-3"

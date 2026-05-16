@@ -29,11 +29,14 @@ describe("WorkflowCard", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders truncated workflow ID (first 6 chars)", () => {
+    it("renders truncated workflow ID (first 8 chars)", () => {
       const workflow = createWorkflow({ id: "workflow-abc123" });
       render(<WorkflowCard workflow={workflow} />);
 
-      expect(screen.getByText("workfl")).toBeInTheDocument();
+      expect(screen.getByText("workflow")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Copy full workflow ID" })
+      ).not.toBeInTheDocument();
     });
 
     it("renders description when provided", () => {

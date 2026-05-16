@@ -10,6 +10,8 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
 import { useTaskStore } from "../../stores";
 
+const FULL_TASK_ID = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+
 // Use vi.hoisted to define mock data that's available in hoisted mocks
 const { mockTaskData } = vi.hoisted(() => {
   const sections = [
@@ -132,6 +134,7 @@ vi.mock("../../bindings", () => ({
 describe("TaskDetailPanel - Inline Editing Integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTaskData.id = "task-123";
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
@@ -143,6 +146,25 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
 
   afterEach(() => {
     useTaskStore.getState().setTasks([]);
+  });
+
+  it("copies the full rendered task ID from the panel chrome", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockTaskData.id = FULL_TASK_ID;
+
+    render(<TaskDetailPanel taskId={FULL_TASK_ID} onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("task-detail-id")).toHaveTextContent("860cde1b");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Copy full task ID" })
+    );
+
+    expect(writeText).toHaveBeenCalledWith(FULL_TASK_ID);
   });
 
   describe("Details section - Inline editing UX", () => {

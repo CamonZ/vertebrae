@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { Spinner } from "../Spinner";
 import type { HumanInputGateContext } from "../../utils/humanInputGate";
+import { DiagnosticId } from "../shared/EntityId";
 
 interface HumanInputGateProps {
   context: HumanInputGateContext;
@@ -143,24 +144,27 @@ export function HumanInputGate({
           <dt className="font-mono uppercase tracking-wider text-text-muted">
             Run
           </dt>
-          <dd
-            data-testid="human-input-gate-run-id"
-            className="break-all font-mono text-text-primary"
-            title={run.id}
-          >
-            {run.id}
+          <dd>
+            <DiagnosticId
+              id={run.id}
+              kind="task run"
+              className="text-[11px]"
+              testId="human-input-gate-run-id"
+            />
           </dd>
         </div>
         <div>
           <dt className="font-mono uppercase tracking-wider text-text-muted">
             Execution
           </dt>
-          <dd
-            data-testid="human-input-gate-execution-id"
-            className="break-all font-mono text-text-primary"
-            title={execution?.id ?? "—"}
-          >
-            {execution?.id ?? "—"}
+          <dd>
+            <DiagnosticId
+              id={execution?.id}
+              kind="step execution"
+              className="text-[11px]"
+              testId="human-input-gate-execution-id"
+              emptyValue="—"
+            />
           </dd>
         </div>
       </dl>

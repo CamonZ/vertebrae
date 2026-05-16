@@ -8,6 +8,7 @@ import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { ResizablePanel } from "../ResizablePanel";
 import type { TaskTreeNode } from "../../types/ui";
 import { isActiveRunStatus } from "../../utils/runState";
+import { IdentityBadge } from "../shared/EntityId";
 
 interface FilteredTasksPanelProps {
   step: Step | null;
@@ -392,11 +393,14 @@ export function FilteredTasksPanel({
             {totalTasks} task{totalTasks !== 1 ? "s" : ""}
           </p>
           {selectedTaskId && (
-            <p className="font-mono text-xs text-text-muted">
+            <p className="flex items-center gap-1 font-mono text-xs text-text-muted">
               Selected:{" "}
-              <span className="text-primary">
-                {selectedTaskId.slice(0, 6)}
-              </span>
+              <IdentityBadge
+                id={selectedTaskId}
+                kind="task"
+                className="text-primary"
+                testId="filtered-tasks-selected-task-id"
+              />
             </p>
           )}
         </div>

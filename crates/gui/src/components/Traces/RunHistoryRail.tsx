@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { TaskRun, TaskRunStatus } from "../../bindings";
 import type { ResolvedRunSource } from "../../hooks/useTaskRuns";
 import { isActiveRunStatus } from "../../utils/runState";
+import { ScanIdentifier } from "../shared/EntityId";
 
 interface RunHistoryRailProps {
   /** All known runs for the task, newest first. */
@@ -127,8 +128,14 @@ function RunRow({
               </span>
             )}
           </span>
-          <span className="truncate font-mono text-[10px] text-text-muted">
-            {formatStartedAt(run.started_at)} · {run.id.slice(0, 8)}
+          <span className="flex items-center gap-1 truncate font-mono text-[10px] text-text-muted">
+            <span>{formatStartedAt(run.started_at)} ·</span>
+            <ScanIdentifier
+              id={run.id}
+              kind="task run"
+              className="text-[10px]"
+              testId="run-history-row-id"
+            />
           </span>
         </span>
       </button>

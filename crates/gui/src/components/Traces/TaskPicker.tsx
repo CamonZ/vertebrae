@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Task } from "../../bindings";
+import { ScanIdentifier } from "../shared/EntityId";
 
 export interface TaskPickerProps {
   /** Tasks available to be picked. */
@@ -184,9 +185,14 @@ export const TaskPicker = forwardRef<TaskPickerHandle, TaskPickerProps>(
                 }`}
               >
                 <span className="truncate font-medium">{t.title}</span>
-                <span className="font-mono text-[10px] text-text-muted">
-                  {t.id.slice(0, 8)}
-                  {t.level ? ` · ${t.level}` : ""}
+                <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
+                  <ScanIdentifier
+                    id={t.id}
+                    kind="task"
+                    className="text-[10px]"
+                    testId="task-picker-task-id"
+                  />
+                  {t.level ? <span>· {t.level}</span> : null}
                 </span>
               </li>
             );

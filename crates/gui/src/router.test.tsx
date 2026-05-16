@@ -367,6 +367,57 @@ describe("Router Acceptance Tests", () => {
         expect(screen.getByText("Level")).toBeInTheDocument();
       });
     });
+
+    it("renders task IDs as eight-character short IDs in TasksPage", async () => {
+      (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "feedface-3456-7890-abcd-ef1234567890",
+            title: "Short ID task",
+            level: "task",
+            description: null,
+            tags: [],
+            code_refs: [],
+            sections: [],
+            priority: null,
+            needs_human_review: false,
+            workflow_id: null,
+            current_step_id: null,
+            workflow_name: null,
+            step_name: null,
+            review_comment: null,
+            revision_feedback: null,
+            rejection_reason: null,
+            parent_id: null,
+            dependency_ids: [],
+            run_controls: null,
+            archived: false,
+            worktree: null,
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+      });
+      const router = createTestRouter(["/tasks"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId("task-tree-node-id")).toHaveTextContent(
+          "feedface",
+        );
+      });
+      expect(
+        screen.queryByText("feedface-3456-7890-abcd-ef1234567890"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe("Route independence", () => {

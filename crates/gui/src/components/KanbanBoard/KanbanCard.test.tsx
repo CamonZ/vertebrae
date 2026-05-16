@@ -11,11 +11,12 @@ describe("KanbanCard", () => {
       expect(screen.getByText("Implement login flow")).toBeInTheDocument();
     });
 
-    it("renders truncated task ID (first 8 chars)", () => {
-      const task = createMockTask({ id: "abcdef12-3456-7890-abcd-ef1234567890" });
+    it("renders the 8-digit short task ID", () => {
+      const task = createMockTask({ id: "860cde1b-9093-42ff-a19d-7453f3b7891b" });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("abcdef12")).toBeInTheDocument();
+      expect(screen.getByTestId("kanban-card-id")).toHaveTextContent("860cde1b");
+      expect(screen.queryByText(task.id)).not.toBeInTheDocument();
     });
 
     it("renders level badge for epic", () => {
