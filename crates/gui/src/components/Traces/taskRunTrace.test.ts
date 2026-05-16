@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  projectTaskRunTrace,
-  resolveParentExecution,
-} from "./taskRunTrace";
+import { projectTaskRunTrace, resolveParentExecution } from "./taskRunTrace";
 import type {
   StepExecution,
   Task,
@@ -118,6 +115,7 @@ describe("projectTaskRunTrace", () => {
     expect(proj.orderedRuns.map((n) => n.depth)).toEqual([0, 1, 2]);
     expect(proj.runsById.get("r-root")?.childRunIds).toEqual(["r-child"]);
     expect(proj.runsById.get("r-child")?.childRunIds).toEqual(["r-grand"]);
+    expect(proj.runsById.get("r-grand")?.childRunIds).toEqual([]);
     expect(proj.hasRuns).toBe(true);
   });
 
@@ -169,11 +167,146 @@ describe("projectTaskRunTrace", () => {
     ]);
   });
 
-  it("emits a delegation edge per child run resolving the triggering execution", () => {
+  it("sorts executions and orphans by id when timestamps tie", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [makeRun({ id: "r-root", task_id: "t-root" })];
+    const executions = [
+      makeExec({
+        id: "e-run-b",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "e-run-a",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "e-orphan-b",
+        task_id: "t-root",
+        task_run_id: null,
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "e-orphan-a",
+        task_id: "t-root",
+        task_run_id: null,
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, executions, tasks);
+
+    expect(proj.runsById.get("r-root")?.executions.map((e) => e.id)).toEqual([
+      "e-run-a",
+      "e-run-b",
+    ]);
+    expect(proj.orphanExecutions.map((e) => e.id)).toEqual([
+      "e-orphan-a",
+      "e-orphan-b",
+    ]);
+  });
+
+  it("sorts sibling child runs chronologically with id tiebreaks", () => {
     const tasks = [
       makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
+      makeTask({ id: "t-child-a" }),
+      makeTask({ id: "t-child-b" }),
+      makeTask({ id: "t-child-c" }),
     ];
+    const runs = [
+      makeRun({
+        id: "r-child-c",
+        task_id: "t-child-c",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeRun({
+        id: "r-child-b",
+        task_id: "t-child-b",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeRun({
+        id: "r-child-a",
+        task_id: "t-child-a",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, [], tasks);
+
+    expect(proj.orderedRuns.map((node) => node.run.id)).toEqual([
+      "r-root",
+      "r-child-a",
+      "r-child-b",
+      "r-child-c",
+    ]);
+    expect(proj.runsById.get("r-root")?.childRunIds).toEqual([
+      "r-child-a",
+      "r-child-b",
+      "r-child-c",
+    ]);
+  });
+
+  it("treats runs with missing parents as roots and sorts them chronologically", () => {
+    const tasks = [makeTask({ id: "t-a" }), makeTask({ id: "t-z" })];
+    const runs = [
+      makeRun({
+        id: "r-a-late",
+        task_id: "t-a",
+        parent_task_run_id: "r-missing",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeRun({
+        id: "r-z-early",
+        task_id: "t-z",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, [], tasks);
+
+    expect(proj.orderedRuns.map((node) => node.run.id)).toEqual([
+      "r-z-early",
+      "r-a-late",
+    ]);
+    expect(proj.orderedRuns.map((node) => node.depth)).toEqual([0, 0]);
+  });
+
+  it("surfaces cyclic runs once when no root can be resolved", () => {
+    const tasks = [makeTask({ id: "t-a" }), makeTask({ id: "t-b" })];
+    const runs = [
+      makeRun({
+        id: "r-a",
+        task_id: "t-a",
+        parent_task_run_id: "r-b",
+      }),
+      makeRun({
+        id: "r-b",
+        task_id: "t-b",
+        parent_task_run_id: "r-a",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, [], tasks);
+
+    expect(proj.orderedRuns.map((node) => node.run.id)).toEqual(["r-a", "r-b"]);
+    expect(new Set(proj.orderedRuns.map((node) => node.run.id))).toEqual(
+      new Set(["r-a", "r-b"])
+    );
+  });
+
+  it("emits a delegation edge per child run resolving the triggering execution", () => {
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const parentExecs = [
       makeExec({
         id: "p1",
@@ -208,11 +341,7 @@ describe("projectTaskRunTrace", () => {
         started_at: "2024-01-01T00:00:25Z",
       }),
     ];
-    const proj = projectTaskRunTrace(
-      runs,
-      [...parentExecs, childExec],
-      tasks
-    );
+    const proj = projectTaskRunTrace(runs, [...parentExecs, childExec], tasks);
 
     expect(proj.delegationEdges).toHaveLength(1);
     const edge = proj.delegationEdges[0];
@@ -224,10 +353,7 @@ describe("projectTaskRunTrace", () => {
   });
 
   it("falls back to the latest parent execution before the child started when the trigger is unknown", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -275,6 +401,80 @@ describe("projectTaskRunTrace", () => {
     // such execution. p-after started after c1 and must not be picked.
     const parent = resolveParentExecution(proj, edge);
     expect(parent?.id).toBe("p2");
+  });
+
+  it("allows a parent execution that starts exactly when the child starts", () => {
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
+    const runs = [
+      makeRun({ id: "r-root", task_id: "t-root" }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "p-before",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "p-equal",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, executions, tasks);
+    const parent = resolveParentExecution(proj, proj.delegationEdges[0]);
+
+    expect(parent?.id).toBe("p-equal");
+  });
+
+  it("keeps the first sorted parent execution when fallback timestamps tie", () => {
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
+    const runs = [
+      makeRun({ id: "r-root", task_id: "t-root" }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "p-b",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "p-a",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, executions, tasks);
+    const parent = resolveParentExecution(proj, proj.delegationEdges[0]);
+
+    expect(parent?.id).toBe("p-a");
   });
 
   it("nulls triggeringExecutionId when the trigger execution belongs to a different run than the parent", () => {

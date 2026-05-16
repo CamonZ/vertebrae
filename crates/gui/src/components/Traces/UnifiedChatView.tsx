@@ -47,6 +47,11 @@ import { DelegationBlock } from "./conversation/DelegationBlock";
 import { HumanInputGate } from "./HumanInputGate";
 import type { TaskRunTraceProjection } from "./taskRunTrace";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
+import {
+  summarizeExecutions,
+  summarizeProjection,
+  traceDebug,
+} from "./traceDebug";
 
 interface UnifiedChatViewProps {
   rootTaskId: string;
@@ -145,16 +150,17 @@ interface Segment {
   sessionFacts: SessionFacts;
 }
 
-/** Group consecutive tagged events by executionId, preserving order. */
+/** Group tagged events into one render segment per executionId. */
 function groupByExecution(
   events: TaggedConversationEvent[],
   taskRunIdByExecutionId: Map<string, string>
 ): Segment[] {
   const segments: Segment[] = [];
+  const segmentsByExecutionId = new Map<string, Segment>();
   for (const tagged of events) {
-    const last = segments[segments.length - 1];
-    if (last && last.executionId === tagged.executionId) {
-      foldOrPush(last, tagged);
+    const existing = segmentsByExecutionId.get(tagged.executionId);
+    if (existing) {
+      foldOrPush(existing, tagged);
       continue;
     }
     const seg: Segment = {
@@ -174,6 +180,7 @@ function groupByExecution(
     };
     foldOrPush(seg, tagged);
     segments.push(seg);
+    segmentsByExecutionId.set(tagged.executionId, seg);
   }
   return segments;
 }
@@ -285,6 +292,31 @@ export function UnifiedChatView({
     () => groupByExecution(filteredMerged, taskRunIdByExecutionId),
     [filteredMerged, taskRunIdByExecutionId]
   );
+
+  useEffect(() => {
+    traceDebug("render thread", {
+      rootTaskId,
+      executions: summarizeExecutions(executions),
+      projection: summarizeProjection(runProjection ?? null),
+      mergedEventCount: merged.length,
+      filteredEventCount: filteredMerged.length,
+      segmentExecutionIds: segments.map((segment) => segment.executionId),
+      logsByExecutionId: Object.fromEntries(
+        Object.entries(logsByExecutionId).map(([executionId, logs]) => [
+          executionId,
+          logs.length,
+        ])
+      ),
+    });
+  }, [
+    executions,
+    filteredMerged.length,
+    logsByExecutionId,
+    merged.length,
+    rootTaskId,
+    runProjection,
+    segments,
+  ]);
 
   const humanInputGate = useMemo(() => {
     if (!runProjection) return null;
@@ -538,6 +570,7 @@ export function UnifiedChatView({
             return (
               <div
                 key={segment.executionId}
+                data-testid="unified-chat-segment"
                 data-segment-execution-id={segment.executionId}
                 data-segment-task-id={segment.taskId}
                 data-segment-task-run-id={segment.taskRunId ?? undefined}

@@ -69,6 +69,61 @@ describe("RunHistoryRail", () => {
     expect(onSelectRun).toHaveBeenCalledWith("run-2");
   });
 
+  it("renders parent and child runs as an indented lineage tree", () => {
+    render(
+      <RunHistoryRail
+        runs={[
+          run({ id: "run-child", parent_task_run_id: "run-root" }),
+          run({ id: "run-root", parent_task_run_id: null }),
+          run({ id: "run-grandchild", parent_task_run_id: "run-child" }),
+          run({ id: "run-sibling", parent_task_run_id: "run-root" }),
+        ]}
+        activeRunId="run-child"
+        activeRunSource="selected"
+        onSelectRun={() => undefined}
+      />
+    );
+
+    const rows = screen.getAllByTestId("run-history-row");
+    expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
+      "run-root",
+      "run-child",
+      "run-grandchild",
+      "run-sibling",
+    ]);
+    expect(rows.map((r) => r.getAttribute("data-depth"))).toEqual([
+      "0",
+      "1",
+      "2",
+      "1",
+    ]);
+  });
+
+  it("deduplicates repeated runs and does not loop on cyclic parent data", () => {
+    render(
+      <RunHistoryRail
+        runs={[
+          run({ id: "run-root", parent_task_run_id: null }),
+          run({ id: "run-child", parent_task_run_id: "run-root" }),
+          run({ id: "run-child", parent_task_run_id: "run-root" }),
+          run({ id: "run-cycle-a", parent_task_run_id: "run-cycle-b" }),
+          run({ id: "run-cycle-b", parent_task_run_id: "run-cycle-a" }),
+        ]}
+        activeRunId="run-root"
+        activeRunSource="selected"
+        onSelectRun={() => undefined}
+      />
+    );
+
+    const rows = screen.getAllByTestId("run-history-row");
+    expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
+      "run-root",
+      "run-child",
+      "run-cycle-a",
+      "run-cycle-b",
+    ]);
+  });
+
   it("renders a source label for non-selected sources", () => {
     render(
       <RunHistoryRail

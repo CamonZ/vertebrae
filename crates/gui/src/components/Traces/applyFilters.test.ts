@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
+  defaultLineageScopeForRun,
   filterExecutions,
   filterTaggedEvents,
   matchesSearch,
+  scopedRunIdsForLineage,
 } from "./applyFilters";
 import type { TaggedConversationEvent } from "../../types/conversation";
-import { createMockStepExecution } from "../../test/test-utils";
+import {
+  createMockStepExecution,
+  createMockTaskRun,
+} from "../../test/test-utils";
 
 const baseFilters = {
   status: null,
@@ -13,6 +18,7 @@ const baseFilters = {
   model: null,
   search: "",
   rootOnly: false,
+  lineageScope: null,
 };
 
 describe("filterExecutions", () => {
@@ -75,6 +81,135 @@ describe("filterExecutions", () => {
       { rootTaskId: "root" }
     );
     expect(out).toHaveLength(0);
+  });
+
+  it("scopedRunIds narrows by TaskRun id instead of task id", () => {
+    const retryA = createMockStepExecution({
+      id: "retry-a",
+      task_id: "child",
+      task_run_id: "run-a",
+    });
+    const retryB = createMockStepExecution({
+      id: "retry-b",
+      task_id: "child",
+      task_run_id: "run-b",
+    });
+    const out = filterExecutions([retryA, retryB], baseFilters, {
+      rootTaskId: "child",
+      scopedRunIds: new Set(["run-b"]),
+    });
+    expect(out.map((e) => e.id)).toEqual(["retry-b"]);
+  });
+
+  it("deduplicates step executions that appear through overlapping run scopes", () => {
+    const parentExec = createMockStepExecution({
+      id: "shared-parent-exec",
+      task_id: "root",
+      task_run_id: "run-parent",
+    });
+    const childExec = createMockStepExecution({
+      id: "shared-child-exec",
+      task_id: "child",
+      task_run_id: "run-child",
+    });
+    const out = filterExecutions(
+      [parentExec, childExec, parentExec, childExec],
+      baseFilters,
+      {
+        rootTaskId: "root",
+        scopedRunIds: new Set(["run-parent", "run-child"]),
+      }
+    );
+    expect(out.map((e) => e.id)).toEqual([
+      "shared-parent-exec",
+      "shared-child-exec",
+    ]);
+  });
+});
+
+describe("TaskRun lineage scopes", () => {
+  it("defaults child runs to descendants scope and root runs to full lineage", () => {
+    expect(
+      defaultLineageScopeForRun(
+        createMockTaskRun({
+          id: "run-root",
+          parent_task_run_id: null,
+          root_task_run_id: "run-root",
+        })
+      )
+    ).toBe("lineage");
+    expect(
+      defaultLineageScopeForRun(
+        createMockTaskRun({
+          id: "run-child",
+          parent_task_run_id: "run-root",
+          root_task_run_id: "run-root",
+        })
+      )
+    ).toBe("descendants");
+    expect(
+      defaultLineageScopeForRun(
+        createMockTaskRun({
+          id: "run-child-with-parent-only",
+          parent_task_run_id: "run-root",
+          root_task_run_id: "run-child-with-parent-only",
+        })
+      )
+    ).toBe("descendants");
+    expect(
+      defaultLineageScopeForRun(
+        createMockTaskRun({
+          id: "run-child-with-root-only",
+          parent_task_run_id: null,
+          root_task_run_id: "run-root",
+        })
+      )
+    ).toBe("descendants");
+  });
+
+  it("returns selected run and descendants without including siblings", () => {
+    const ids = scopedRunIdsForLineage(
+      [
+        createMockTaskRun({ id: "run-root" }),
+        createMockTaskRun({
+          id: "run-child",
+          parent_task_run_id: "run-root",
+        }),
+        createMockTaskRun({
+          id: "run-grandchild",
+          parent_task_run_id: "run-child",
+        }),
+        createMockTaskRun({
+          id: "run-sibling",
+          parent_task_run_id: "run-root",
+        }),
+      ],
+      "run-child",
+      "descendants"
+    );
+    expect(ids).toEqual(new Set(["run-child", "run-grandchild"]));
+  });
+
+  it("returns null for full lineage so callers keep the whole tree", () => {
+    expect(scopedRunIdsForLineage([], "run-child", "lineage")).toBeNull();
+  });
+
+  it("does not loop when descendant TaskRun parent links contain a cycle", () => {
+    const ids = scopedRunIdsForLineage(
+      [
+        createMockTaskRun({
+          id: "run-a",
+          parent_task_run_id: "run-b",
+        }),
+        createMockTaskRun({
+          id: "run-b",
+          parent_task_run_id: "run-a",
+        }),
+      ],
+      "run-a",
+      "descendants"
+    );
+    expect(ids).toEqual(new Set(["run-a", "run-b"]));
   });
 });
 
