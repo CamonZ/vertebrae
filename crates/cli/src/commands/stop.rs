@@ -9,12 +9,18 @@ pub struct StopCommand {
 }
 
 impl StopCommand {
-    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        let stopped_run = services
+    pub async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<Option<vertebrae_core::TaskRun>, ServiceError> {
+        services
             .executions()
             .stop_run(StopRunTarget::TaskId(self.task_id.clone()))
-            .await?;
+            .await
+    }
 
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let stopped_run = self.execute_result(services).await?;
         Ok(match stopped_run {
             Some(run) => format!(
                 "Stopped run: {}",

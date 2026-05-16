@@ -4,6 +4,7 @@
 //! between two tasks using BFS traversal of the dependency graph.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Find the dependency path between two tasks
@@ -19,7 +20,7 @@ pub struct PathCommand {
 }
 
 /// A task summary for path display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TaskSummary {
     /// Task ID
     pub id: String,
@@ -28,7 +29,7 @@ pub struct TaskSummary {
 }
 
 /// Result of the path command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct PathResult {
     /// The source task ID
     pub from_id: String,

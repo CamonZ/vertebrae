@@ -6,6 +6,7 @@
 
 use crate::commands::r#ref::parse_file_ref;
 use clap::Args;
+use serde::Serialize;
 use std::path::Path;
 use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
@@ -35,7 +36,7 @@ pub struct CriterionRefCommand {
 }
 
 /// Result of executing the criterion-ref command
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct CriterionRefResult {
     /// The task ID
     pub task_id: String,

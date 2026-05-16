@@ -136,14 +136,11 @@ impl SmokeWorld {
                 return Some(uuid.to_string());
             }
         }
-        // Fallback for --json mode: {"output": "Created task: <uuid>"}
+        // JSON mode: {"command":"add","status":"created","task_id":"<uuid>"}
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(stdout) {
-            if let Some(output) = json.get("output").and_then(|v| v.as_str()) {
-                if let Some(rest) = output.strip_prefix("Created task: ") {
-                    let uuid = rest.trim();
-                    if !uuid.is_empty() {
-                        return Some(uuid.to_string());
-                    }
+            if let Some(task_id) = json.get("task_id").and_then(|v| v.as_str()) {
+                if !task_id.is_empty() {
+                    return Some(task_id.to_string());
                 }
             }
         }
