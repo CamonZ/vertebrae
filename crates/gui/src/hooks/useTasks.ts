@@ -20,18 +20,20 @@ import {
 export function useTasks(filter?: TaskFilterOptions) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { tasks, setTasks } = useTaskStore();
+  const { tasks, setTasks, setActiveFilter } = useTaskStore();
 
   const fetchTasks = useCallback(async () => {
+    const activeFilter = filter ?? null;
     const projectScopeGeneration = getProjectScopeGeneration();
     const taskIdsAtFetchStart = new Set(
       useTaskStore.getState().tasks.map((task) => task.id)
     );
 
+    setActiveFilter(activeFilter);
     setIsLoading(true);
     setError(null);
     try {
-      const result = await commands.listTasks(filter ?? null);
+      const result = await commands.listTasks(activeFilter);
       if (result.status === "ok") {
         if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) {
           return;
@@ -59,7 +61,7 @@ export function useTasks(filter?: TaskFilterOptions) {
     } finally {
       setIsLoading(false);
     }
-  }, [filter, setTasks]);
+  }, [filter, setActiveFilter, setTasks]);
 
   useEffect(() => {
     fetchTasks();

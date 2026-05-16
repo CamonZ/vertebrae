@@ -7,6 +7,7 @@ describe("taskStore", () => {
     // Reset store state before each test
     useTaskStore.setState({
       tasks: [],
+      activeFilter: null,
       selectedTaskId: null,
       selectedTask: null,
       isLoading: false,
@@ -412,6 +413,57 @@ describe("taskStore", () => {
       useTaskStore.getState().removeTask("nonexistent");
 
       expect(useTaskStore.getState().tasks).toBe(tasksBefore);
+    });
+  });
+
+  describe("reconcileTask", () => {
+    it("does not insert tasks from a different active workflow filter", () => {
+      useTaskStore.getState().setActiveFilter({
+        step_names: null,
+        levels: null,
+        tags: null,
+        root_only: null,
+        children_of: null,
+        include_done: true,
+        search: null,
+        workflow_id: "workflow-visible",
+        step_id: null,
+      });
+
+      useTaskStore.getState().reconcileTask(
+        createMockTask({
+          id: "wrong-workflow",
+          workflow_id: "workflow-hidden",
+        })
+      );
+
+      expect(useTaskStore.getState().tasks).toEqual([]);
+    });
+
+    it("removes existing tasks that leave the active workflow filter", () => {
+      const task = createMockTask({
+        id: "workflow-task",
+        workflow_id: "workflow-visible",
+      });
+      useTaskStore.getState().setActiveFilter({
+        step_names: null,
+        levels: null,
+        tags: null,
+        root_only: null,
+        children_of: null,
+        include_done: true,
+        search: null,
+        workflow_id: "workflow-visible",
+        step_id: null,
+      });
+      useTaskStore.getState().setTasks([task]);
+
+      useTaskStore.getState().reconcileTask({
+        ...task,
+        workflow_id: "workflow-hidden",
+      });
+
+      expect(useTaskStore.getState().tasks).toEqual([]);
     });
   });
 
