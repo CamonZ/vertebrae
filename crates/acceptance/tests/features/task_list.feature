@@ -130,7 +130,7 @@ Feature: List tasks
     Then the output should contain "<child_id>"
     And the output should not contain "<unrelated_id>"
 
-  Scenario: Search by text
+  Scenario: Search by title
     Given I create a task with:
       | title | Database migration |
     And I store the task ID as "db_id"
@@ -141,6 +141,45 @@ Feature: List tasks
       | search | Database |
     Then the output should contain "<db_id>"
     And the output should not contain "<api_id>"
+
+  Scenario: Search by description
+    Given I create a task with:
+      | title       | Description target |
+      | description | Find by description token |
+    And I store the task ID as "description_id"
+    And I create a task with:
+      | title       | Description miss |
+      | description | Different text |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | search | description token |
+    Then the output should contain "<description_id>"
+    And the output should not contain "<other_id>"
+
+  Scenario: Search by full task UUID
+    Given I create a task with:
+      | title | Full UUID target |
+    And I store the task ID as "target_id"
+    And I create a task with:
+      | title | Full UUID miss |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | search | <target_id> |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
+
+  Scenario: Search by task UUID prefix
+    Given I create a task with:
+      | title | UUID prefix target |
+    And I store the task ID as "target_id"
+    And I store the task short ID as "target_short_id"
+    And I create a task with:
+      | title | UUID prefix miss |
+    And I store the task ID as "other_id"
+    When I list tasks with:
+      | search | <target_short_id> |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
 
   Scenario: No priority filter returns tasks of all priorities
     Given I create a task with:

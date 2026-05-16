@@ -65,11 +65,12 @@ export function TaskFilters({
       <div className="relative min-w-48 flex-1">
         <input
           type="text"
-          placeholder="Search tasks..."
+          placeholder="Search tasks by title or ID..."
           value={filters.search ?? ''}
           onChange={handleSearchChange}
           className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-2 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          aria-label="Search tasks by title"
+          aria-label="Search tasks by title or ID"
+          data-testid="task-search-input"
         />
         <svg
           className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
