@@ -20,6 +20,7 @@ describe("useTasks", () => {
     vi.clearAllMocks();
     useTaskStore.setState({
       tasks: [],
+      activeFilter: null,
       selectedTaskId: null,
       selectedTask: null,
       isLoading: false,
@@ -185,6 +186,7 @@ describe("useTasks", () => {
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledWith(filter);
     });
+    expect(useTaskStore.getState().activeFilter).toEqual(filter);
   });
 
   it("sets error state on fetch failure without corrupting the store", async () => {

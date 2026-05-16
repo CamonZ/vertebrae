@@ -9,10 +9,18 @@ import { createMockTask } from "../test/test-utils";
 const mockListen = vi.fn();
 
 vi.mock("../bindings", () => ({
-  commands: {},
+  commands: {
+    getTask: vi.fn(),
+  },
   events: {
     taskChangedEvent: {
       listen: (...args: unknown[]) => mockListen(...args),
+    },
+    taskStepChangedEvent: {
+      listen: vi.fn(async () => vi.fn()),
+    },
+    taskRunStepChangedEvent: {
+      listen: vi.fn(async () => vi.fn()),
     },
   },
 }));
