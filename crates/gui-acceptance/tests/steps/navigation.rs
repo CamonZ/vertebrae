@@ -392,6 +392,64 @@ async fn gui_should_show_element_with_test_id_within(
         .await;
 }
 
+#[then(
+    expr = "the GUI element with test id {string} should have text {string} within {int} seconds"
+)]
+async fn gui_element_with_test_id_should_have_text_within(
+    world: &mut GuiWorld,
+    test_id: String,
+    expected_text: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    world
+        .screenshot(
+            &client,
+            &format!("before-assert-testid-{test_id}-text-{expected_text}"),
+        )
+        .await;
+
+    let locator = Locator::Css(&format!("[data-testid=\"{}\"]", test_id));
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    let poll_interval = std::time::Duration::from_millis(250);
+
+    loop {
+        if let Ok(element) = client.find(locator.clone()).await {
+            let actual_text = element.text().await.unwrap_or_default();
+            if actual_text.trim() == expected_text {
+                world
+                    .screenshot(
+                        &client,
+                        &format!("after-assert-testid-{test_id}-text-{expected_text}"),
+                    )
+                    .await;
+                return;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(
+                    &client,
+                    &format!("fail-testid-{test_id}-text-{expected_text}"),
+                )
+                .await;
+            panic!(
+                "expected GUI element with test id '{}' to have text '{}' within {} seconds",
+                test_id, expected_text, timeout
+            );
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
 #[then(expr = "the workflow final toggle should be {word} within {int} seconds")]
 async fn workflow_final_toggle_should_be_state(
     world: &mut GuiWorld,

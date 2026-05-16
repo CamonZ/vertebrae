@@ -452,6 +452,8 @@ pub enum StepType {
     Evaluate,
     Route,
     WaitChildren,
+    HumanInput,
+    Unsupported(String),
 }
 
 impl From<vertebrae_core::StepType> for StepType {
@@ -461,6 +463,8 @@ impl From<vertebrae_core::StepType> for StepType {
             vertebrae_core::StepType::Evaluate => StepType::Evaluate,
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
+            vertebrae_core::StepType::HumanInput => StepType::HumanInput,
+            vertebrae_core::StepType::Unsupported(value) => StepType::Unsupported(value),
         }
     }
 }
@@ -472,6 +476,8 @@ impl From<StepType> for vertebrae_core::StepType {
             StepType::Evaluate => vertebrae_core::StepType::Evaluate,
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
+            StepType::HumanInput => vertebrae_core::StepType::HumanInput,
+            StepType::Unsupported(value) => vertebrae_core::StepType::Unsupported(value),
         }
     }
 }
