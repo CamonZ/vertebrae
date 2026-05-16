@@ -11,16 +11,15 @@ import { IdentityBadge } from "../components/shared/EntityId";
 import { isActiveRunStatus } from "../utils/runState";
 import { popOut, stashTask } from "../utils";
 
-/**
- * Initial filter state - shows all tasks including done when status is 'All'
- */
-const INITIAL_FILTERS: TaskFilterOptions = {
+type TasksPageFilters = Omit<TaskFilterOptions, "include_done">;
+
+/** Initial filter state for the Tasks page. */
+const INITIAL_FILTERS: TasksPageFilters = {
   step_names: null,
   levels: null,
   tags: null,
   root_only: null,
   children_of: null,
-  include_done: true, // Include done tasks by default when showing 'All' statuses
   search: null,
   workflow_id: null,
   step_id: null,
@@ -42,10 +41,9 @@ function countHierarchyTasks(nodes: TaskTreeNode[]): number {
  */
 export function TasksPage() {
   const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
+  const [filters, setFilters] = useState<TasksPageFilters>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('tree');
-  const [showDone, setShowDone] = useState(false);
 
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
@@ -61,19 +59,12 @@ export function TasksPage() {
     }
   }, [searchParams]);
 
-  const memoizedFilters = useMemo(
-    () => ({
-      ...filters,
-      include_done: showDone,
-    }),
-    [filters, showDone]
-  );
-  const { tasks, isLoading, error } = useTasks(memoizedFilters);
+  const { tasks, isLoading, error } = useTasks(filters as TaskFilterOptions);
 
   // Build tree locally from flat task list (no separate API call needed)
   const hierarchy = useMemo(() => buildTreeFromTasks(tasks), [tasks]);
 
-  const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
+  const handleFiltersChange = useCallback((newFilters: TasksPageFilters) => {
     setFilters(newFilters);
   }, []);
 
@@ -157,8 +148,6 @@ export function TasksPage() {
               onFiltersChange={handleFiltersChange}
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
-              showDone={showDone}
-              onShowDoneChange={setShowDone}
             />
           </div>
         </div>

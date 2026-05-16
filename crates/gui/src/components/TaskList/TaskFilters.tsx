@@ -2,27 +2,14 @@ import { useCallback } from 'react';
 import type { TaskLevel, TaskFilterOptions } from '../../bindings';
 
 export type ViewMode = 'list' | 'tree';
+export type TaskFiltersValue = Omit<TaskFilterOptions, 'include_done'>;
 
 interface TaskFiltersProps {
-  filters: TaskFilterOptions;
-  onFiltersChange: (filters: TaskFilterOptions) => void;
+  filters: TaskFiltersValue;
+  onFiltersChange: (filters: TaskFiltersValue) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
-  showDone?: boolean;
-  onShowDoneChange?: (showDone: boolean) => void;
 }
-
-/**
- * Available status options for filtering.
- * These are common workflow step names used in the default workflow.
- */
-const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: 'backlog', label: 'Backlog' },
-  { value: 'todo', label: 'Todo' },
-  { value: 'in_progress', label: 'Active' },
-  { value: 'pending_review', label: 'Review' },
-  { value: 'rejected', label: 'Rejected' },
-];
 
 /** Available level options for filtering */
 const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
@@ -33,27 +20,14 @@ const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
 
 /**
  * TaskFilters component with neural-pathway design.
- * Includes status dropdown, level dropdown, search, view mode toggle, and show done toggle.
+ * Includes level dropdown, search, and view mode toggle.
  */
 export function TaskFilters({
   filters,
   onFiltersChange,
   viewMode = 'list',
   onViewModeChange,
-  showDone = false,
-  onShowDoneChange,
 }: TaskFiltersProps) {
-  const handleStatusChange = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = event.target.value;
-      const step_names = value ? [value] : null;
-      // When 'All' is selected (no specific status), include done tasks to show everything
-      const include_done = value ? filters.include_done : true;
-      onFiltersChange({ ...filters, step_names, include_done });
-    },
-    [filters, onFiltersChange]
-  );
-
   const handleLevelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
@@ -73,28 +47,16 @@ export function TaskFilters({
 
   const handleClearFilters = useCallback(() => {
     onFiltersChange({
-      step_names: null,
+      ...filters,
       levels: null,
-      tags: null,
-      root_only: null,
-      children_of: null,
-      include_done: true, // Include done tasks when showing 'All' statuses
       search: null,
-      workflow_id: null,
-      step_id: null,
     });
-  }, [onFiltersChange]);
-
-  const handleToggleDone = useCallback(() => {
-    onShowDoneChange?.(!showDone);
-  }, [showDone, onShowDoneChange]);
+  }, [filters, onFiltersChange]);
 
   const hasActiveFilters =
-    filters.step_names ||
     filters.levels ||
     filters.search;
 
-  const selectedStatus = filters.step_names?.[0] ?? '';
   const selectedLevel = filters.levels?.[0] ?? '';
 
   return (
@@ -127,31 +89,6 @@ export function TaskFilters({
 
       {/* Filters group */}
       <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-tertiary/50 p-1">
-        {/* Status filter */}
-        <div className="flex items-center">
-          <label
-            htmlFor="status-filter"
-            className="px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted"
-          >
-            Status
-          </label>
-          <select
-            id="status-filter"
-            value={selectedStatus}
-            onChange={handleStatusChange}
-            className="rounded-md border-0 bg-transparent px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="">All</option>
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="h-4 w-px bg-border" />
-
         {/* Level filter */}
         <div className="flex items-center">
           <label
@@ -201,35 +138,6 @@ export function TaskFilters({
           Clear
         </button>
       )}
-
-      {/* Show done toggle */}
-      <button
-        type="button"
-        onClick={handleToggleDone}
-        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
-          showDone
-            ? 'border-primary/30 bg-primary/10 text-primary hover:border-primary/50 hover:bg-primary/20'
-            : 'border-border bg-bg-tertiary/50 text-text-muted hover:border-border/80 hover:bg-bg-tertiary'
-        } focus:outline-none focus:ring-2 focus:ring-primary/20`}
-        aria-label="Toggle show done tasks"
-        aria-pressed={showDone}
-      >
-        <svg
-          className="h-4 w-4"
-          fill={showDone ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        Done
-      </button>
 
       {/* View mode toggle */}
       {onViewModeChange && (
