@@ -145,6 +145,18 @@ const TASK_FILTER: TaskFilterOptions = {
   step_id: null,
 };
 
+function matchesTaskSearch(task: Task, normalizedSearch: string): boolean {
+  if (!normalizedSearch) return true;
+
+  const taskId = task.id.toLowerCase();
+  return (
+    task.title.toLowerCase().includes(normalizedSearch) ||
+    task.description?.toLowerCase().includes(normalizedSearch) ||
+    taskId === normalizedSearch ||
+    taskId.slice(0, 8) === normalizedSearch
+  );
+}
+
 export function BoardPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
@@ -222,11 +234,9 @@ export function BoardPage() {
       filtered = filtered.filter((t) => t.level === levelFilter);
     }
 
-    if (search) {
-      const lowerSearch = search.toLowerCase();
-      filtered = filtered.filter((t) =>
-        t.title.toLowerCase().includes(lowerSearch)
-      );
+    const normalizedSearch = search.trim().toLowerCase();
+    if (normalizedSearch) {
+      filtered = filtered.filter((t) => matchesTaskSearch(t, normalizedSearch));
     }
 
     // Seed with all known columns so empty ones still appear
@@ -290,11 +300,12 @@ export function BoardPage() {
             <div className="relative min-w-48 flex-1">
               <input
                 type="text"
-                placeholder="Search tasks..."
+                placeholder="Search tasks by title or ID..."
                 value={search}
                 onChange={handleSearchChange}
                 className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-2 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                aria-label="Search tasks by title"
+                aria-label="Search tasks by title or ID"
+                data-testid="board-task-search-input"
               />
               <svg
                 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"

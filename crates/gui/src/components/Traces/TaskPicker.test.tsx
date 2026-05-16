@@ -6,7 +6,11 @@ import { TaskPicker, filterTasksForPicker } from "./TaskPicker";
 const tasks = [
   createMockTask({ id: "abcd1234-aaaa", title: "Refactor router" }),
   createMockTask({ id: "ef567890-bbbb", title: "Add Traces nav" }),
-  createMockTask({ id: "12345678-cccc", title: "Fix typo in UI" }),
+  createMockTask({
+    id: "12345678-cccc",
+    title: "Fix typo in UI",
+    description: "Trace picker description needle",
+  }),
 ];
 
 describe("filterTasksForPicker", () => {
@@ -22,16 +26,27 @@ describe("filterTasksForPicker", () => {
   });
 
   it("matches by id prefix", () => {
-    const results = filterTasksForPicker(tasks, "abcd");
+    const results = filterTasksForPicker(tasks, "abcd1234");
     expect(results).toHaveLength(1);
     expect(results[0].id).toBe("abcd1234-aaaa");
   });
 
+  it("matches by case-insensitive description substring", () => {
+    const results = filterTasksForPicker(tasks, "DESCRIPTION NEEDLE");
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("12345678-cccc");
+  });
+
+  it("matches by full id", () => {
+    const results = filterTasksForPicker(tasks, "ef567890-bbbb");
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("ef567890-bbbb");
+  });
+
   it("does not match id substrings beyond the prefix", () => {
-    // '1234' is a prefix of the third task's id but is NOT a prefix of the
-    // first task's id (which starts with 'abcd'), so only one result.
+    // Only full ids and 8-character short ids match, not arbitrary fragments.
     const results = filterTasksForPicker(tasks, "1234");
-    expect(results.map((t) => t.id)).toEqual(["12345678-cccc"]);
+    expect(results).toHaveLength(0);
   });
 });
 
