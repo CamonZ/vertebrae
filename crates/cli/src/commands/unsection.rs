@@ -4,7 +4,7 @@
 //! Supports removing single-instance types or specific multi-instance sections by index.
 
 use clap::Args;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use vertebrae_core::SectionType;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -26,7 +26,7 @@ pub struct UnsectionCommand {
 }
 
 /// Result of the unsection command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct UnsectionResult {
     /// The task ID that was updated
     pub id: String,

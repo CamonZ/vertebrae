@@ -4,6 +4,7 @@
 //! workflow steps. Validates transitions against the step transitions graph.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Transition a task to a specific workflow step
@@ -31,7 +32,7 @@ pub struct TransitionToCommand {
 }
 
 /// Result of the transition-to command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct TransitionToResult {
     pub id: String,
     pub target_workflow: String,
