@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
 import * as React from "react";
@@ -353,7 +353,7 @@ describe("Router Acceptance Tests", () => {
       });
     });
 
-    it("shows task filters on TasksPage", async () => {
+    it("shows supported task filters on TasksPage without status or done controls", async () => {
       const router = createTestRouter(["/tasks"]);
 
       render(
@@ -363,9 +363,99 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Status")).toBeInTheDocument();
         expect(screen.getByText("Level")).toBeInTheDocument();
       });
+      expect(screen.getByLabelText("Search tasks by title")).toBeInTheDocument();
+      expect(screen.queryByText("Status")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /done/i })).not.toBeInTheDocument();
+    });
+
+    it("updates search and level filters on TasksPage without status or done filter overrides", async () => {
+      const router = createTestRouter(["/tasks"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(commands.listTasks).toHaveBeenCalledWith(
+          expect.objectContaining({
+            step_names: null,
+          }),
+        );
+      });
+      expect(commands.listTasks).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({
+          include_done: expect.anything(),
+        }),
+      );
+
+      fireEvent.change(screen.getByLabelText("Search tasks by title"), {
+        target: { value: "release" },
+      });
+
+      await waitFor(() => {
+        expect(commands.listTasks).toHaveBeenCalledWith(
+          expect.objectContaining({
+            search: "release",
+            step_names: null,
+          }),
+        );
+      });
+      expect(commands.listTasks).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({
+          include_done: expect.anything(),
+        }),
+      );
+
+      fireEvent.change(screen.getByLabelText("Level"), {
+        target: { value: "ticket" },
+      });
+
+      await waitFor(() => {
+        expect(commands.listTasks).toHaveBeenCalledWith(
+          expect.objectContaining({
+            search: "release",
+            levels: ["ticket"],
+            step_names: null,
+          }),
+        );
+      });
+      expect(commands.listTasks).toHaveBeenLastCalledWith(
+        expect.not.objectContaining({
+          include_done: expect.anything(),
+        }),
+      );
+    });
+
+    it("switches between tree and list views on TasksPage", async () => {
+      const router = createTestRouter(["/tasks"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Tree view" })).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "List view" }));
+
+      expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "Tree view" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
     });
 
     it("renders task IDs as eight-character short IDs in TasksPage", async () => {
