@@ -136,10 +136,10 @@ describe("HumanInputGate", () => {
     expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /resume/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /bypass/i })).toBeNull();
-    // The only button should be Stop.
-    const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(2); // Stop + collapsible prompt toggle
-    expect(buttons.some((b) => /stop/i.test(b.textContent ?? ""))).toBe(true);
+    expect(screen.getByRole("button", { name: /stop/i })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: /copy full .* ID/i })
+    ).toHaveLength(2);
   });
 
   it("renders prompt content when expanded", async () => {

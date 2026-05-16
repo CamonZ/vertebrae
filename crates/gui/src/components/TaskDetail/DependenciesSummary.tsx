@@ -1,12 +1,10 @@
+import { NavigableReference } from "../shared/EntityId";
+
 interface DependenciesSummaryProps {
   parentId: string | null;
   dependsOnIds: string[];
   dependentIds: string[];
   onTaskSelect?: (taskId: string) => void;
-}
-
-function truncateId(id: string): string {
-  return id.slice(0, 8);
 }
 
 function TaskLink({
@@ -16,15 +14,29 @@ function TaskLink({
   taskId: string;
   onClick?: (taskId: string) => void;
 }) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onClick?.(taskId);
+    }
+  };
+
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       onClick={() => onClick?.(taskId)}
+      onKeyDown={handleKeyDown}
       className="inline-flex items-center rounded bg-bg-tertiary px-2 py-0.5 font-mono text-[11px] text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary cursor-pointer"
       title={`View task ${taskId}`}
     >
-      {truncateId(taskId)}
-    </button>
+      <NavigableReference
+        id={taskId}
+        kind="task"
+        className="text-[11px]"
+        testId="dependencies-summary-task-id"
+      />
+    </span>
   );
 }
 

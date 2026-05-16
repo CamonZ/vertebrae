@@ -108,12 +108,12 @@ describe('TaskRelations', () => {
 
     it('shows parent task link when parentId is set', () => {
       render(<TaskRelations {...defaultProps} parentId="parent-123" />);
-      expect(screen.getByText('parent')).toBeInTheDocument(); // truncated ID
+      expect(screen.getByText('parent-1')).toBeInTheDocument(); // truncated ID
     });
 
     it('calls onTaskSelect when parent link is clicked', async () => {
       render(<TaskRelations {...defaultProps} parentId="parent-123" />);
-      await userEvent.click(screen.getByText('parent'));
+      await userEvent.click(screen.getByText('parent-1'));
       expect(defaultProps.onTaskSelect).toHaveBeenCalledWith('parent-123');
     });
   });
@@ -126,7 +126,7 @@ describe('TaskRelations', () => {
 
     it('shows child task links', () => {
       render(<TaskRelations {...defaultProps} childrenIds={['child-1', 'child-2']} />);
-      const childLinks = screen.getAllByText('child-');
+      const childLinks = screen.getAllByText(/child-[12]/);
       expect(childLinks).toHaveLength(2);
     });
 
@@ -146,7 +146,7 @@ describe('TaskRelations', () => {
 
     it('shows blocker task links', () => {
       render(<TaskRelations {...defaultProps} dependsOnIds={['blocker-1']} />);
-      expect(screen.getByText('blocke')).toBeInTheDocument(); // truncated
+      expect(screen.getByText('blocker-')).toBeInTheDocument(); // truncated
     });
 
     it('shows count badge for blockers', () => {
@@ -164,7 +164,7 @@ describe('TaskRelations', () => {
 
     it('shows dependent task links', () => {
       render(<TaskRelations {...defaultProps} dependentIds={['dependent-1']} />);
-      expect(screen.getByText('depend')).toBeInTheDocument(); // truncated
+      expect(screen.getByText('dependen')).toBeInTheDocument(); // truncated
     });
   });
 

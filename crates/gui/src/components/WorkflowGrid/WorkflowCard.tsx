@@ -1,15 +1,9 @@
 import { Link } from 'react-router-dom';
 import type { Workflow } from '../../bindings';
+import { ScanIdentifier } from '../shared/EntityId';
 
 interface WorkflowCardProps {
   workflow: Workflow;
-}
-
-/**
- * Truncate workflow ID for display (show first 6 characters)
- */
-function truncateId(id: string): string {
-  return id.slice(0, 6);
 }
 
 /**
@@ -42,9 +36,12 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
             </span>
           )}
         </div>
-        <span className="font-mono text-xs text-text-muted">
-          {truncateId(workflowId)}
-        </span>
+        <ScanIdentifier
+          id={workflowId}
+          kind="workflow"
+          copyable={false}
+          testId="workflow-card-id"
+        />
       </div>
 
       {workflow.description && (

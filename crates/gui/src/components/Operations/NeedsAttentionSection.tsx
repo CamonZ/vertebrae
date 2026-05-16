@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { Task, TaskRun } from "../../bindings";
 import { commands } from "../../bindings";
 import { formatDuration } from "./formatDuration";
+import { ScanIdentifier } from "../shared/EntityId";
 
 export interface AttentionItem {
   kind: "failed_run" | "review_request";
@@ -113,7 +114,17 @@ export function NeedsAttentionSection({
                       {item.kind === "failed_run" ? (
                         <>
                           {item.task.workflow_name && <>{item.task.workflow_name} &middot; </>}
-                          Run <span className="font-mono">{item.taskRun?.id?.slice(0, 8) ?? "unknown"}</span>
+                          Run{" "}
+                          {item.taskRun?.id ? (
+                            <ScanIdentifier
+                              id={item.taskRun.id}
+                              kind="task run"
+                              className="text-xs"
+                              testId="needs-attention-run-id"
+                            />
+                          ) : (
+                            <span className="font-mono">unknown</span>
+                          )}
                           {item.taskRun?.started_at && (
                             <> &middot; {formatDuration(item.taskRun.started_at, item.taskRun.ended_at)}</>
                           )}

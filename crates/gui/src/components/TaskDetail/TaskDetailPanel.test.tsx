@@ -178,6 +178,24 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(screen.getAllByText("in progress").length).toBeGreaterThan(0);
     });
 
+    it("renders the task side panel ID as an eight-character short ID", () => {
+      mockTaskOverrides.current = {
+        id: "12345678-90ab-cdef-1234-567890abcdef",
+      };
+
+      render(
+        <TaskDetailPanel
+          taskId="12345678-90ab-cdef-1234-567890abcdef"
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId("task-detail-id")).toHaveTextContent("12345678");
+      expect(
+        screen.queryByText("12345678-90ab-cdef-1234-567890abcdef"),
+      ).not.toBeInTheDocument();
+    });
+
     it("status badge does NOT glow purely from step_name=in_progress without an active run", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
