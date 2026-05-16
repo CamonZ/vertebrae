@@ -965,7 +965,6 @@ mod tests {
     fn make_task_response(id: &str, title: &str) -> TaskResponse {
         TaskResponse {
             id: id.to_string(),
-            short_id: None,
             project_id: "test-project".to_string(),
             title: title.to_string(),
             description: None,
@@ -1008,7 +1007,6 @@ mod tests {
         let service = SacrumTaskService::new(client);
 
         let mut response = make_task_response("task-123", "Test Task");
-        response.short_id = Some("t-123".to_string());
         response.description = Some("Task description".to_string());
         response.level = Some("ticket".to_string());
         response.priority = Some("high".to_string());
@@ -1492,7 +1490,7 @@ mod tests {
 
         let mut task_data = gql_task_data("task-1", "My Task");
         task_data["blockers"] = json!([
-            { "id": "task-2", "short_id": "t-2", "title": "Blocker" }
+            { "id": "task-2", "title": "Blocker" }
         ]);
 
         Mock::given(method("POST"))
@@ -1562,8 +1560,8 @@ mod tests {
 
         let mut task_data = gql_task_data("epic-1", "Epic");
         task_data["children"] = json!([
-            { "id": "ticket-1", "short_id": "t-1", "title": "Child 1", "level": "ticket", "priority": "high" },
-            { "id": "ticket-2", "short_id": "t-2", "title": "Child 2", "level": "ticket" }
+            { "id": "ticket-1", "title": "Child 1", "level": "ticket", "priority": "high" },
+            { "id": "ticket-2", "title": "Child 2", "level": "ticket" }
         ]);
 
         Mock::given(method("POST"))
