@@ -325,6 +325,45 @@ async fn create_step_in_workflow_via_cli(
     do_create_step_in_workflow(world, step_name, workflow_name).await;
 }
 
+#[given(expr = "I create a step {string} with type {string} in the workflow {string} via the CLI")]
+async fn given_create_step_with_type_in_workflow_via_cli(
+    world: &mut GuiWorld,
+    step_name: String,
+    step_type: String,
+    workflow_name: String,
+) {
+    let workflow_id = world
+        .workflow_id_by_name(&workflow_name)
+        .unwrap_or_else(|| {
+            panic!(
+                "no workflow ID found for '{}' — create it first",
+                workflow_name
+            )
+        })
+        .clone();
+
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "--workflow",
+            &workflow_id,
+            "--step-type",
+            &step_type,
+            &step_name,
+        ])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb step add failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+
+    if let Some(id) = world.extract_step_id_from_output() {
+        world.track_step(id);
+    }
+}
+
 #[when(expr = "I update the step name to {string} via the CLI")]
 async fn update_step_name_via_cli(world: &mut GuiWorld, new_name: String) {
     let step_id = world.step_id.as_ref().expect("no step ID stored").clone();

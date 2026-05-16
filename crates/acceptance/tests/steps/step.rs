@@ -303,6 +303,17 @@ async fn when_show_step(world: &mut SmokeWorld, name: String) {
     world.run_vtb(&["step", "show", &step_id]).await;
 }
 
+/// Show a specific step by name as JSON (looks up the stored step ID)
+#[when(expr = "I show the step {string} as JSON")]
+async fn when_show_step_as_json(world: &mut SmokeWorld, name: String) {
+    let step_id = world
+        .stored_ids
+        .get(&format!("step:{}", name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
+    world.run_vtb(&["--json", "step", "show", &step_id]).await;
+}
+
 // ============================================================================
 // Then steps
 // ============================================================================
@@ -354,6 +365,27 @@ async fn then_step_should_have_step_type(
         actual, expected,
         "step '{}' step_type mismatch: expected '{}', got '{}'\nJSON: {}",
         step_name, expected, actual, json
+    );
+}
+
+#[then(expr = "the step show JSON should have step_type {string}")]
+async fn then_step_show_json_should_have_step_type(world: &mut SmokeWorld, expected: String) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "expected JSON step show command to succeed, but got exit {}.\nstdout: '{}'\nstderr: '{}'",
+        world.last_exit_code, world.last_stdout, world.last_stderr
+    );
+    let json: serde_json::Value = serde_json::from_str(&world.last_stdout).unwrap_or_else(|err| {
+        panic!(
+            "failed to parse step show JSON: {err}\nstdout: {}",
+            world.last_stdout
+        )
+    });
+    let actual = json["step_type"].as_str().unwrap_or("");
+    assert_eq!(
+        actual, expected,
+        "step show JSON step_type mismatch: expected '{}', got '{}'\nJSON: {}",
+        expected, actual, json
     );
 }
 
