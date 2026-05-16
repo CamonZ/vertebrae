@@ -83,12 +83,16 @@ export const useTaskStore = create<TaskStore>((set) => ({
     }),
 
   removeTask: (taskId) =>
-    set((state) => ({
-      tasks: state.tasks.filter((t) => t.id !== taskId),
-      ...(state.selectedTaskId === taskId
-        ? { selectedTaskId: null, selectedTask: null }
-        : {}),
-    })),
+    set((state) => {
+      if (!state.tasks.some((task) => task.id === taskId)) return state;
+
+      return {
+        tasks: state.tasks.filter((t) => t.id !== taskId),
+        ...(state.selectedTaskId === taskId
+          ? { selectedTaskId: null, selectedTask: null }
+          : {}),
+      };
+    }),
 
   replaceTaskRunControls: (taskId, runControls) =>
     set((state) => {

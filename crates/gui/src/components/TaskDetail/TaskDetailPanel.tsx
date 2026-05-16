@@ -3,6 +3,7 @@ import type { TaskLevel, TaskPriority, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
+import { useDeleteTask } from "../../hooks/useDeleteTask";
 import { useTaskStore } from "../../stores";
 import { TraceMiniView } from "./TraceMiniView";
 import { DeleteConfirmation } from "../DeleteConfirmation";
@@ -193,10 +194,6 @@ export function TaskDetailPanel({
   });
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [cascade, setCascade] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isRunningStep, setIsRunningStep] = useState(false);
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
@@ -204,6 +201,16 @@ export function TaskDetailPanel({
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { executions: taskExecutions } = useTaskExecutions(taskId);
   const allTasks = useTaskStore((s) => s.tasks);
+  const {
+    isDeleteDialogOpen,
+    openDeleteDialog,
+    closeDeleteDialog,
+    cascade,
+    setCascade,
+    isDeleting,
+    deleteError,
+    confirmDelete,
+  } = useDeleteTask(taskData?.id, { onDeleted: onClose });
 
   // Derive children and dependents from the already-loaded task list
   const children = useMemo(() => {
@@ -449,41 +456,6 @@ export function TaskDetailPanel({
     [taskData, refetch]
   );
 
-  // Delete confirmation handlers
-  const handleShowDeleteConfirmation = useCallback(() => {
-    setShowDeleteConfirmation(true);
-    setDeleteError(null);
-  }, []);
-
-  const handleCancelDelete = useCallback(() => {
-    setShowDeleteConfirmation(false);
-    setDeleteError(null);
-  }, []);
-
-  const handleConfirmDelete = useCallback(async () => {
-    if (!taskData?.id) return;
-
-    setIsDeleting(true);
-    setDeleteError(null);
-
-    try {
-      const result = await commands.deleteTask(taskData.id, cascade);
-
-      if (result.status === "error") {
-        setDeleteError(result.error.message);
-      } else {
-        setShowDeleteConfirmation(false);
-        onClose?.();
-      }
-    } catch (err) {
-      setDeleteError(
-        err instanceof Error ? err.message : "Failed to delete task"
-      );
-    } finally {
-      setIsDeleting(false);
-    }
-  }, [taskData?.id, cascade, onClose]);
-
   const handleRunStep = useCallback(async () => {
     if (!taskData?.id || !taskData.current_step_id) return;
     setIsRunningStep(true);
@@ -568,6 +540,51 @@ export function TaskDetailPanel({
   const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
     isStoppingWorkflow || runControlsState.stopDisabled;
+  const deleteConfirmation =
+    taskData && isDeleteDialogOpen ? (
+      <DeleteConfirmation
+        itemType="Task"
+        itemName={taskData.title}
+        isDeleting={isDeleting}
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onCancel={closeDeleteDialog}
+        testId="task-delete-confirmation"
+      >
+        {childrenIds.length > 0 && (
+          <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
+            <p className="text-xs text-warning font-medium mb-2">
+              This task has {childrenIds.length} child task
+              {childrenIds.length !== 1 ? "s" : ""}
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cascade}
+                onChange={(e) => setCascade(e.target.checked)}
+                disabled={isDeleting}
+                className="rounded border border-border"
+              />
+              <span className="text-xs text-text-secondary">
+                Delete all child tasks
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+              <input
+                type="checkbox"
+                checked={!cascade}
+                onChange={(e) => setCascade(!e.target.checked)}
+                disabled={isDeleting}
+                className="rounded border border-border"
+              />
+              <span className="text-xs text-text-secondary">
+                Keep child tasks without parent
+              </span>
+            </label>
+          </div>
+        )}
+      </DeleteConfirmation>
+    ) : null;
 
   const content = (
     <>
@@ -748,28 +765,31 @@ export function TaskDetailPanel({
             />
           )}
           {/* Delete Button */}
-          <button
-            type="button"
-            onClick={handleShowDeleteConfirmation}
-            className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error"
-            aria-label="Delete task"
-            title="Delete this task"
-          >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+          {taskData && (
+            <button
+              type="button"
+              onClick={openDeleteDialog}
+              className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error"
+              aria-label="Delete task"
+              title="Delete this task"
+              data-testid="task-detail-delete-button"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A1 1 0 0016.138 21H7.862a1 1 0 00-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-            <span>Delete</span>
-          </button>
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A1 1 0 0016.138 21H7.862a1 1 0 00-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+              <span>Delete</span>
+            </button>
+          )}
           {onDetach && (
             <button
               type="button"
@@ -819,6 +839,8 @@ export function TaskDetailPanel({
           )}
         </div>
       </div>
+
+      {deleteConfirmation}
 
       {/* Workflow error banner */}
       {workflowError && (
@@ -1448,52 +1470,6 @@ export function TaskDetailPanel({
             </div>
           </CollapsibleSection>
 
-          {/* Delete Confirmation Section */}
-          {showDeleteConfirmation && (
-            <div className="border-t border-border">
-              <DeleteConfirmation
-                itemType="Task"
-                itemName={taskData.title}
-                isDeleting={isDeleting}
-                error={deleteError}
-                onConfirm={handleConfirmDelete}
-                onCancel={handleCancelDelete}
-              >
-                {childrenIds.length > 0 && (
-                  <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
-                    <p className="text-xs text-warning font-medium mb-2">
-                      This task has {childrenIds.length} child task
-                      {childrenIds.length !== 1 ? "s" : ""}
-                    </p>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={cascade}
-                        onChange={(e) => setCascade(e.target.checked)}
-                        disabled={isDeleting}
-                        className="rounded border border-border"
-                      />
-                      <span className="text-xs text-text-secondary">
-                        Delete all child tasks
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                      <input
-                        type="checkbox"
-                        checked={!cascade}
-                        onChange={(e) => setCascade(!e.target.checked)}
-                        disabled={isDeleting}
-                        className="rounded border border-border"
-                      />
-                      <span className="text-xs text-text-secondary">
-                        Keep child tasks without parent
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </DeleteConfirmation>
-            </div>
-          )}
         </div>
       )}
     </>

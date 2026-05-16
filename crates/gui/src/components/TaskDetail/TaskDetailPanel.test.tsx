@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import {
   render,
   createMockTask,
@@ -480,6 +480,76 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(
         screen.getByRole("button", { name: /delete task/i })
       ).toBeInTheDocument();
+    });
+
+    it("opens confirmation and deletes the selected task without cascade by default", async () => {
+      const onClose = vi.fn();
+      vi.mocked(eventsModule.commands.deleteTask).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+      useTaskStore.getState().setTasks([mockTaskData]);
+
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
+      expect(screen.getByText("Delete Task?")).toBeInTheDocument();
+      expect(screen.getByTestId("task-delete-confirmation")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
+
+      await waitFor(() => {
+        expect(eventsModule.commands.deleteTask).toHaveBeenCalledWith(
+          mockTaskData.id,
+          false
+        );
+      });
+      await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+      expect(useTaskStore.getState().tasks).toEqual([]);
+    });
+
+    it("renders confirmation before the task content when opened from the header", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
+
+      const confirmationHeading = screen.getByRole("heading", {
+        name: "Delete Task?",
+      });
+      const idBadge = screen.getByText(mockTaskData.id.slice(0, 8));
+
+      expect(
+        confirmationHeading.compareDocumentPosition(idBadge) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+    });
+
+    it("preserves cascade selection for parent tasks with children", async () => {
+      const childTask = createMockTask({
+        id: "child-001",
+        title: "Child task",
+        parent_id: mockTaskData.id,
+      });
+      vi.mocked(eventsModule.commands.deleteTask).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+      useTaskStore.getState().setTasks([mockTaskData, childTask]);
+
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
+      expect(screen.getByText("This task has 1 child task")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText("Delete all child tasks"));
+      fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
+
+      await waitFor(() => {
+        expect(eventsModule.commands.deleteTask).toHaveBeenCalledWith(
+          mockTaskData.id,
+          true
+        );
+      });
     });
   });
 

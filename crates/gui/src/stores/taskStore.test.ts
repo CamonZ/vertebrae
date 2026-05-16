@@ -407,10 +407,11 @@ describe("taskStore", () => {
     it("is a no-op when the task ID does not exist", () => {
       const task = createMockTask({ id: "task-1", title: "Task 1" });
       useTaskStore.getState().setTasks([task]);
+      const tasksBefore = useTaskStore.getState().tasks;
 
       useTaskStore.getState().removeTask("nonexistent");
 
-      expect(useTaskStore.getState().tasks).toHaveLength(1);
+      expect(useTaskStore.getState().tasks).toBe(tasksBefore);
     });
   });
 
