@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import type { Task, TaskLevel } from "../../bindings";
+import { ScanIdentifier } from "../shared/EntityId";
 
 interface KanbanCardProps {
   task: Task;
@@ -93,9 +94,12 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
     >
       {/* Header: ID and level badge */}
       <div className="mb-2 flex items-center justify-between">
-        <code className="font-mono text-[10px] text-text-muted">
-          {task.id.slice(0, 8)}
-        </code>
+        <ScanIdentifier
+          id={task.id}
+          kind="task"
+          className="text-[10px]"
+          testId="kanban-card-id"
+        />
         <span
           className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}
         >

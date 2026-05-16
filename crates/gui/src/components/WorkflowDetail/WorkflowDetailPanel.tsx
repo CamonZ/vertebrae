@@ -4,6 +4,7 @@ import { commands } from "../../bindings";
 import { ResizablePanel } from "../ResizablePanel";
 import { OpenChatButton } from "../OpenChatButton";
 import { Toggle } from "../Toggle";
+import { IdentityBadge } from "../shared/EntityId";
 
 interface WorkflowDetailPanelProps {
   workflow: Workflow | null;
@@ -174,7 +175,12 @@ export function WorkflowDetailPanel({
         <h3 className="text-lg font-semibold text-text-primary">
           {workflow.name}
         </h3>
-        <p className="mt-1 font-mono text-xs text-text-muted">{workflow.id}</p>
+        <IdentityBadge
+          id={workflow.id}
+          kind="workflow"
+          className="mt-1 text-xs text-text-muted"
+          testId="workflow-detail-id"
+        />
       </div>
 
       {/* Content */}

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { commands } from '../../bindings';
+import { NavigableReference, ScanIdentifier } from '../shared/EntityId';
 
 interface TaskRelationsProps {
   taskId?: string;
@@ -30,13 +31,6 @@ interface TaskOption {
 }
 
 /**
- * Truncate task ID for display
- */
-function truncateId(id: string): string {
-  return id.slice(0, 6);
-}
-
-/**
  * Clickable task ID link
  */
 function TaskLink({
@@ -46,15 +40,24 @@ function TaskLink({
   taskId: string;
   onClick?: (taskId: string) => void;
 }) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onClick?.(taskId);
+    }
+  };
+
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={0}
       onClick={() => onClick?.(taskId)}
+      onKeyDown={handleKeyDown}
       className="inline-flex items-center rounded bg-bg-tertiary px-2 py-1 font-mono text-xs text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary focus:outline-none focus:ring-2 focus:ring-border-focus cursor-pointer"
       title={`View task ${taskId}`}
     >
-      {truncateId(taskId)}
-    </button>
+      <NavigableReference id={taskId} kind="task" testId="task-relation-id" />
+    </span>
   );
 }
 
@@ -183,7 +186,12 @@ function ParentPicker({
                   onClick={() => onParentChange(task.id)}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-text-primary hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
                 >
-                  <div className="font-mono text-[10px] text-text-muted">{truncateId(task.id)}</div>
+                  <ScanIdentifier
+                    id={task.id}
+                    kind="task"
+                    className="text-[10px]"
+                    testId="parent-picker-task-id"
+                  />
                   <div className="truncate">{task.title}</div>
                 </button>
               ))}
@@ -298,7 +306,12 @@ function DependencyPicker({
                     className="mt-0.5 rounded border-border cursor-pointer"
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="font-mono text-[10px] text-text-muted">{truncateId(task.id)}</div>
+                    <ScanIdentifier
+                      id={task.id}
+                      kind="task"
+                      className="text-[10px]"
+                      testId="dependency-picker-task-id"
+                    />
                     <div className="truncate text-xs text-text-primary">{task.title}</div>
                   </div>
                 </label>

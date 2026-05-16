@@ -7,6 +7,7 @@ import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
+import { IdentityBadge } from "../components/shared/EntityId";
 import { isActiveRunStatus } from "../utils/runState";
 import { popOut, stashTask } from "../utils";
 
@@ -196,11 +197,14 @@ export function TasksPage() {
               )}
             </p>
             {selectedTaskId && (
-              <p className="font-mono text-xs text-text-muted">
+              <p className="flex items-center gap-1 font-mono text-xs text-text-muted">
                 Selected:{" "}
-                <span className="text-primary">
-                  {selectedTaskId.slice(0, 6)}
-                </span>
+                <IdentityBadge
+                  id={selectedTaskId}
+                  kind="task"
+                  className="text-primary"
+                  testId="tasks-page-selected-task-id"
+                />
               </p>
             )}
           </div>

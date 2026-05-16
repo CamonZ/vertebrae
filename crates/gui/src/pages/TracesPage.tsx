@@ -36,6 +36,7 @@ import {
   type TaskRunTraceProjection,
   type TraceMode,
 } from "../components/Traces";
+import { IdentityBadge } from "../components/shared/EntityId";
 import {
   filterExecutions,
   matchesSearch,
@@ -553,9 +554,12 @@ export function TracesPage({
                       className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted"
                     >
                       <span>{resolvedRun.source} run</span>
-                      <span className="rounded bg-bg-tertiary px-1 text-text-secondary">
-                        {resolvedRun.run.id.slice(0, 8)}
-                      </span>
+                      <IdentityBadge
+                        id={resolvedRun.run.id}
+                        kind="task run"
+                        className="px-1 text-text-secondary"
+                        testId="traces-active-run-id"
+                      />
                     </span>
                   )}
                   {mode === "thread" && (

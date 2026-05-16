@@ -133,8 +133,47 @@ describe("StepDetailPanel", () => {
     });
 
     it("renders panel header with 'Step Configuration' title", () => {
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const step = createStep({
+        id: "860cde1b-9093-42ff-a19d-7453f3b7891b",
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId={step.id!} allSteps={[]} />);
+
       expect(screen.getByText("Step Configuration")).toBeInTheDocument();
+      expect(screen.getByTestId("step-detail-id")).toHaveTextContent(
+        "860cde1b"
+      );
+      expect(screen.queryByText(step.id!)).not.toBeInTheDocument();
+    });
+
+    it("renders the step side panel ID as an eight-character short ID", () => {
+      const step = createStep({ id: "abcdef12-3456-7890-abcd-ef1234567890" });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(
+        <StepDetailPanel
+          stepId="abcdef12-3456-7890-abcd-ef1234567890"
+          allSteps={[]}
+        />,
+      );
+
+      expect(screen.getByTestId("step-detail-id")).toHaveTextContent("abcdef12");
+      expect(
+        screen.queryByText("abcdef12-3456-7890-abcd-ef1234567890"),
+      ).not.toBeInTheDocument();
     });
 
     it("renders step name in editable field", () => {

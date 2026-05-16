@@ -20,6 +20,7 @@ import { OpenChatButton } from "../OpenChatButton";
 import { deriveRunControlsState, deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
+import { IdentityBadge } from "../shared/EntityId";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -921,9 +922,7 @@ export function TaskDetailPanel({
                   {priorityStyles.indicator}
                 </span>
               )}
-              <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
-                {taskData.id?.slice(0, 8) ?? "-"}
-              </code>
+              <IdentityBadge id={taskData.id} kind="task" testId="task-detail-id" />
             </div>
           </div>
           <div className="px-4 py-3">
