@@ -3,7 +3,6 @@
 pub const TASK_FIELDS: &str = r#"
     fragment TaskFields on Task {
         id
-        short_id
         project_id
         title
         description
@@ -145,6 +144,29 @@ pub const FIND_PATH: &str = r#"
         find_path(from_id: $from_id, to_id: $to_id)
     }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn compact_graphql(query: &str) -> String {
+        query.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn task_fields_do_not_request_unused_short_id() {
+        assert!(!TASK_FIELDS.contains("short_id"));
+    }
+
+    #[test]
+    fn resolve_short_id_keeps_dedicated_id_only_query() {
+        let query = compact_graphql(RESOLVE_SHORT_ID);
+
+        assert!(query.contains("resolveShortId(project_id: $project_id, prefix: $prefix) { id }"));
+        assert!(!RESOLVE_SHORT_ID.contains("...TaskFields"));
+        assert!(!RESOLVE_SHORT_ID.contains("short_id"));
+    }
+}
 
 pub const CREATE_TASK: &str = r#"
     mutation CreateTask(
