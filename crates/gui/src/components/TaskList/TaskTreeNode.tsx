@@ -8,6 +8,7 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
 import { deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
+import { ScanIdentifier } from "../shared/EntityId";
 
 interface TaskTreeNodeProps {
   node: TaskTreeNodeType;
@@ -130,10 +131,6 @@ function getPriorityIndicator(
     default:
       return null;
   }
-}
-
-function truncateId(id: string): string {
-  return id.slice(0, 6);
 }
 
 /**
@@ -272,9 +269,12 @@ export function TaskTreeNode({
         )}
 
         {/* Task ID */}
-        <code className="shrink-0 font-mono text-xs text-text-muted">
-          {truncateId(task.id)}
-        </code>
+        <ScanIdentifier
+          id={task.id}
+          kind="task"
+          className="shrink-0"
+          testId="task-tree-node-id"
+        />
 
         {/* Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2">

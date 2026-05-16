@@ -77,11 +77,20 @@ describe("WorkflowDetailPanel", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders workflow ID", () => {
-      const workflow = createWorkflow({ id: "impl-workflow-123" });
+    it("renders the 8-digit short workflow ID", () => {
+      const workflowId = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+      const workflow = createWorkflow({
+        id: workflowId,
+      });
       render(<WorkflowDetailPanel workflow={workflow} />);
 
-      expect(screen.getByText("impl-workflow-123")).toBeInTheDocument();
+      expect(screen.getByTestId("workflow-detail-id")).toHaveTextContent(
+        "860cde1b"
+      );
+      expect(screen.queryByText(workflowId)).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Copy full workflow ID" })
+      ).toBeInTheDocument();
     });
   });
 

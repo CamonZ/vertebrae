@@ -12,6 +12,7 @@ import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
 import { LiquidHighlight } from "./LiquidHighlight";
+import { IdentityBadge } from "../shared/EntityId";
 
 interface StepDetailPanelProps {
   stepId: string | null;
@@ -555,6 +556,12 @@ export function StepDetailPanel({
                   onSave={async (value) => {
                     await handleUpdateField({ name: value });
                   }}
+                />
+                <IdentityBadge
+                  id={step.id}
+                  kind="step"
+                  className="mt-1 text-xs text-text-muted"
+                  testId="step-detail-id"
                 />
               </div>
             </div>

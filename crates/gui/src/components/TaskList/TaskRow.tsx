@@ -1,6 +1,7 @@
 import type { Task, TaskLevel, TaskPriority } from '../../bindings';
 import { RelativeTime } from '../RelativeTime';
 import { deriveRunStateChip, getRunChipStyles } from '../../utils/runState';
+import { ScanIdentifier } from '../shared/EntityId';
 
 interface TaskRowProps {
   task: Task;
@@ -101,10 +102,6 @@ function getPriorityIndicator(priority: TaskPriority | null): { icon: string; co
   }
 }
 
-function truncateId(id: string): string {
-  return id.slice(0, 6);
-}
-
 /**
  * TaskRow component displays a single task in the task list.
  * Features neural-inspired styling with glowing active states and resizable columns.
@@ -153,9 +150,7 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
         style={{ width: columnWidths['id'] ? `${columnWidths['id']}px` : '80px' }}
         className="whitespace-nowrap px-4 py-3"
       >
-        <code className="font-mono text-xs text-text-muted">
-          {truncateId(task.id)}
-        </code>
+        <ScanIdentifier id={task.id} kind="task" testId="task-row-id" />
       </td>
 
       {/* Title column */}
