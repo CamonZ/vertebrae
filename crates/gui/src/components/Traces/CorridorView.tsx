@@ -29,6 +29,11 @@ import {
   type CorridorNodeStatus,
 } from "./corridor";
 import type { TaskRunTraceProjection } from "./taskRunTrace";
+import {
+  summarizeExecutions,
+  summarizeProjection,
+  traceDebug,
+} from "./traceDebug";
 
 interface CorridorViewProps {
   rootTaskId: string;
@@ -85,6 +90,22 @@ export function CorridorView({
     }
     return computeCorridorLayout(rootTaskId, executions, tasks);
   }, [layoutOverride, rootTaskId, executions, tasks, runProjection]);
+
+  useEffect(() => {
+    traceDebug("render corridor", {
+      rootTaskId,
+      executions: summarizeExecutions(executions),
+      projection: summarizeProjection(runProjection ?? null),
+      lanes: layout.lanes.map((lane) => ({
+        laneId: lane.laneId,
+        taskRunId: lane.taskRunId,
+        taskId: lane.taskId,
+        nodeCount: lane.nodeCount,
+      })),
+      nodeExecutionIds: layout.nodes.map((node) => node.executionId),
+      edges: layout.edges,
+    });
+  }, [executions, layout, rootTaskId, runProjection]);
 
   const nodeById = useMemo(() => {
     const m = new Map<string, CorridorNode>();
@@ -189,10 +210,7 @@ export function CorridorView({
         data-scale="1.000"
         className="relative flex h-full w-full items-center justify-center bg-bg-secondary"
       >
-        <div
-          data-testid="corridor-empty"
-          className="text-xs text-text-muted"
-        >
+        <div data-testid="corridor-empty" className="text-xs text-text-muted">
           No executions to graph yet.
         </div>
       </div>
@@ -257,9 +275,7 @@ export function CorridorView({
                 x2={to.x}
                 y2={to.y}
                 className={
-                  isDelegation
-                    ? "stroke-accent-primary"
-                    : "stroke-text-muted"
+                  isDelegation ? "stroke-accent-primary" : "stroke-text-muted"
                 }
                 strokeWidth={isDelegation ? 1.5 : 1}
                 strokeOpacity={isDelegation ? 0.8 : 0.6}

@@ -205,6 +205,50 @@ describe("UnifiedChatView", () => {
     expect(transition).toHaveAttribute("data-task-id", "t-root");
   });
 
+  it("renders one segment per execution when timestamps interleave", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const execA = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const execB = makeExec({
+      id: "exec-b",
+      task_id: "t-root",
+      step_name: "implement",
+      started_at: "2024-01-01T10:00:01.000Z",
+    });
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", thinking("a-1"), "2024-01-01T10:00:01.000Z", 0),
+        makeLog("exec-a", thinking("a-2"), "2024-01-01T10:00:03.000Z", 1),
+      ],
+      "exec-b": [
+        makeLog("exec-b", thinking("b-1"), "2024-01-01T10:00:02.000Z", 0),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[execA, execB]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+
+    const segments = screen.getAllByTestId("unified-chat-segment");
+    expect(segments).toHaveLength(2);
+    expect(segments.map((segment) => segment.getAttribute("data-segment-execution-id"))).toEqual([
+      "exec-a",
+      "exec-b",
+    ]);
+    expect(screen.getAllByTestId("unified-chat-step-boundary")).toHaveLength(2);
+    expect(within(segments[0]).getByText("a-1")).toBeInTheDocument();
+    expect(within(segments[0]).getByText("a-2")).toBeInTheDocument();
+    expect(within(segments[1]).getByText("b-1")).toBeInTheDocument();
+  });
+
   it("renders a delegation block for a descendant task with its own boundary header indented", () => {
     const tasks = [
       makeTask({ id: "t-root", title: "Root Task" }),

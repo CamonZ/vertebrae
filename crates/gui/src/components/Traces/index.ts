@@ -3,9 +3,12 @@ export { TaskPicker, filterTasksForPicker } from "./TaskPicker";
 export type { TaskPickerHandle, TaskPickerProps } from "./TaskPicker";
 export { FilterBar } from "./FilterBar";
 export {
+  defaultLineageScopeForRun,
   filterExecutions,
   filterTaggedEvents,
   matchesSearch,
+  resolveLineageScope,
+  scopedRunIdsForLineage,
 } from "./applyFilters";
 export { SubtreeRail } from "./SubtreeRail";
 export { RunHistoryRail } from "./RunHistoryRail";

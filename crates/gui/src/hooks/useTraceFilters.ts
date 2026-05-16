@@ -10,6 +10,7 @@
  *   - model    : execution model id filter (exact)
  *   - q        : free-text search across event content
  *   - rootOnly : "1" to collapse the subtree to just the root task
+ *   - scope    : TaskRun lineage scope ("selected" | "descendants" | "lineage")
  */
 
 import { useCallback, useMemo } from "react";
@@ -21,6 +22,7 @@ export interface TraceFilters {
   model: string | null;
   search: string;
   rootOnly: boolean;
+  lineageScope: TraceLineageScope | null;
 }
 
 export interface UseTraceFiltersResult {
@@ -30,10 +32,37 @@ export interface UseTraceFiltersResult {
   setModel: (v: string | null) => void;
   setSearch: (v: string) => void;
   setRootOnly: (v: boolean) => void;
+  setLineageScope: (v: TraceLineageScope | null) => void;
   clear: () => void;
 }
 
-const FILTER_PARAM_KEYS = ["status", "step", "model", "q", "rootOnly"] as const;
+export type TraceLineageScope = "selected" | "descendants" | "lineage";
+
+export const TRACE_LINEAGE_SCOPE_OPTIONS = [
+  { value: "selected", label: "Selected run" },
+  { value: "descendants", label: "Selected + descendants" },
+  { value: "lineage", label: "Full lineage" },
+] as const satisfies readonly {
+  value: TraceLineageScope;
+  label: string;
+}[];
+
+function parseLineageScope(value: string | null): TraceLineageScope | null {
+  if (!value) return null;
+  return (
+    TRACE_LINEAGE_SCOPE_OPTIONS.find((option) => option.value === value)
+      ?.value ?? null
+  );
+}
+
+const FILTER_PARAM_KEYS = [
+  "status",
+  "step",
+  "model",
+  "q",
+  "rootOnly",
+  "scope",
+] as const;
 
 export function useTraceFilters(): UseTraceFiltersResult {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -45,6 +74,7 @@ export function useTraceFilters(): UseTraceFiltersResult {
       model: searchParams.get("model") || null,
       search: searchParams.get("q") ?? "",
       rootOnly: searchParams.get("rootOnly") === "1",
+      lineageScope: parseLineageScope(searchParams.get("scope")),
     }),
     [searchParams]
   );
@@ -84,6 +114,10 @@ export function useTraceFilters(): UseTraceFiltersResult {
     (v: boolean) => updateParam("rootOnly", v ? "1" : null),
     [updateParam]
   );
+  const setLineageScope = useCallback(
+    (v: TraceLineageScope | null) => updateParam("scope", v),
+    [updateParam]
+  );
 
   const clear = useCallback(() => {
     setSearchParams(
@@ -103,6 +137,7 @@ export function useTraceFilters(): UseTraceFiltersResult {
     setModel,
     setSearch,
     setRootOnly,
+    setLineageScope,
     clear,
   };
 }
