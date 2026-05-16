@@ -2,6 +2,10 @@ import { useState, useCallback } from 'react';
 import { commands } from '../bindings';
 import { useTaskStore } from '../stores';
 
+interface UseDeleteTaskOptions {
+  onDeleted?: () => void;
+}
+
 /**
  * Hook for deleting a task with confirmation state management.
  *
@@ -14,12 +18,16 @@ import { useTaskStore } from '../stores';
  * @param taskId - The task ID to delete
  * @returns Object containing delete state and handlers
  */
-export function useDeleteTask(taskId: string | null | undefined) {
+export function useDeleteTask(
+  taskId: string | null | undefined,
+  options: UseDeleteTaskOptions = {}
+) {
+  const { onDeleted } = options;
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [cascade, setCascade] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const { clearSelection } = useTaskStore();
+  const { removeTask } = useTaskStore();
 
   const openDeleteDialog = useCallback(() => {
     setIsDeleteDialogOpen(true);
@@ -41,9 +49,9 @@ export function useDeleteTask(taskId: string | null | undefined) {
     try {
       const result = await commands.deleteTask(taskId, cascade);
       if (result.status === 'ok') {
-        // Deletion successful - clear selection and close dialog
-        clearSelection();
+        removeTask(taskId);
         setIsDeleteDialogOpen(false);
+        onDeleted?.();
       } else {
         setDeleteError(result.error.message);
       }
@@ -52,7 +60,7 @@ export function useDeleteTask(taskId: string | null | undefined) {
     } finally {
       setIsDeleting(false);
     }
-  }, [taskId, cascade, clearSelection]);
+  }, [taskId, cascade, removeTask, onDeleted]);
 
   return {
     isDeleteDialogOpen,

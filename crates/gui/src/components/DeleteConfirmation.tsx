@@ -15,6 +15,8 @@ interface DeleteConfirmationProps {
   onCancel: () => void;
   /** Optional additional content (e.g., cascade options) */
   children?: ReactNode;
+  /** Stable selector for integration and acceptance tests */
+  testId?: string;
 }
 
 /**
@@ -29,9 +31,10 @@ export function DeleteConfirmation({
   onConfirm,
   onCancel,
   children,
+  testId,
 }: DeleteConfirmationProps) {
   return (
-    <div className="border-t border-error/20 bg-error/5 p-4">
+    <div className="border-t border-error/20 bg-error/5 p-4" data-testid={testId}>
       <div className="space-y-3">
         <div>
           <h4 className="text-sm font-semibold text-error">Delete {itemType}?</h4>
