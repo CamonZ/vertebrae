@@ -4,6 +4,7 @@
 //! Uses the TaskService layer to ensure MutationCallback fires properly for GUI cache invalidation.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Remove a dependency relationship between tasks
@@ -19,7 +20,7 @@ pub struct UndependCommand {
 }
 
 /// Result of the undepend command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct UndependResult {
     /// The task ID that no longer depends on the blocker
     pub task_id: String,

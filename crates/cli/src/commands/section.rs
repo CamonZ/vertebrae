@@ -6,6 +6,7 @@
 //! section types.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -27,7 +28,7 @@ pub struct SectionCommand {
 }
 
 /// Result of the section command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SectionResult {
     /// The task ID that was updated
     pub id: String,

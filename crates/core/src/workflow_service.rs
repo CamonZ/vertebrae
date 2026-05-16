@@ -214,7 +214,7 @@ impl UpdateWorkflowOptions {
 }
 
 /// Summary of a workflow
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkflowSummary {
     /// Workflow ID
     pub id: String,

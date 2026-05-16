@@ -37,6 +37,117 @@ mod lifecycle_tests {
     }
 
     #[tokio::test]
+    async fn test_add_json_returns_structured_task_id_without_output_wrapper() {
+        let services = mock_services();
+        let command = Command::Add(AddCommand {
+            title: "JSON task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        });
+
+        let result = command.execute_json(&services).await.unwrap();
+        let CommandResult::Json(json) = result else {
+            panic!("add --json should return JSON output");
+        };
+
+        assert!(json.get("output").is_none());
+        assert_eq!(json["command"], "add");
+        assert_eq!(json["status"], "created");
+        let task_id = json["task_id"]
+            .as_str()
+            .expect("task id should be a string");
+        assert!(!task_id.is_empty());
+
+        let task = services.tasks().get_task(task_id).await.unwrap();
+        assert_eq!(task.title, "JSON task");
+    }
+
+    #[tokio::test]
+    async fn test_add_human_output_is_unchanged() {
+        let services = mock_services();
+        let command = Command::Add(AddCommand {
+            title: "Human task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        });
+
+        let result = command.execute(&services).await.unwrap();
+        let output = result.to_string();
+
+        assert!(output.starts_with("Created task: "));
+        assert!(!output.strip_prefix("Created task: ").unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_show_json_returns_domain_data_without_output_wrapper() {
+        let services = mock_services();
+        let add = AddCommand {
+            title: "Readable task".to_string(),
+            level: None,
+            description: Some("Structured detail".to_string()),
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let task_id = add.execute(&services).await.unwrap();
+
+        let command = Command::Show(ShowCommand {
+            id: task_id.clone(),
+        });
+        let result = command.execute_json(&services).await.unwrap();
+        let CommandResult::Json(json) = result else {
+            panic!("show --json should return JSON output");
+        };
+
+        assert!(json.get("output").is_none());
+        assert_eq!(json["id"], task_id);
+        assert_eq!(json["title"], "Readable task");
+        assert_eq!(json["description"], "Structured detail");
+    }
+
+    #[tokio::test]
+    async fn test_workflow_list_json_returns_nested_structured_data_without_output_wrapper() {
+        let services = mock_services();
+        services
+            .workflows()
+            .create_workflow(vertebrae_core::CreateWorkflowOptions::new(
+                "Structured workflow",
+                vec![],
+            ))
+            .await
+            .unwrap();
+
+        let command = Command::Workflow(workflow::WorkflowCommand::List(
+            workflow::WorkflowListCommand {},
+        ));
+        let result = command.execute_json(&services).await.unwrap();
+        let CommandResult::Json(json) = result else {
+            panic!("workflow list --json should return JSON output");
+        };
+
+        assert!(json.get("output").is_none());
+        let workflows = json.as_array().expect("workflow list should be an array");
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(workflows[0]["name"], "Structured workflow");
+        assert_eq!(workflows[0]["step_count"], 0);
+    }
+
+    #[tokio::test]
     async fn test_create_task_with_metadata() {
         let services = mock_services();
         let cmd = AddCommand {
