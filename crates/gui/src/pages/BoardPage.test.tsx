@@ -286,7 +286,7 @@ describe("BoardPage", () => {
       ];
       render(<BoardPage />);
 
-      const searchInput = screen.getByLabelText("Search tasks by title");
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "feature" } });
 
       expect(screen.getByText("Login feature")).toBeInTheDocument();
@@ -303,10 +303,89 @@ describe("BoardPage", () => {
       ];
       render(<BoardPage />);
 
-      const searchInput = screen.getByLabelText("Search tasks by title");
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "login" } });
 
       expect(screen.getByText("Login Feature")).toBeInTheDocument();
+    });
+
+    it("filters cards by task description", () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "t-1",
+          title: "Description match",
+          description: "Contains backend search needle",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Description miss",
+          description: "Unrelated content",
+          workflow_id: "wf-1",
+        }),
+      ];
+      render(<BoardPage />);
+
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
+      fireEvent.change(searchInput, { target: { value: "search needle" } });
+
+      expect(screen.getByText("Description match")).toBeInTheDocument();
+      expect(screen.queryByText("Description miss")).not.toBeInTheDocument();
+    });
+
+    it("filters cards by full task ID", () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c",
+          title: "Matching ID task",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "11111111-2222-4333-8444-555555555555",
+          title: "Other task",
+          workflow_id: "wf-1",
+        }),
+      ];
+      render(<BoardPage />);
+
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
+      fireEvent.change(searchInput, {
+        target: { value: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c" },
+      });
+
+      expect(screen.getByText("Matching ID task")).toBeInTheDocument();
+      expect(screen.queryByText("Other task")).not.toBeInTheDocument();
+    });
+
+    it("filters cards by 8-character short task ID", () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
+      ];
+      mockTasks = [
+        createMockTask({
+          id: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c",
+          title: "Matching short ID task",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "11111111-2222-4333-8444-555555555555",
+          title: "Other task",
+          workflow_id: "wf-1",
+        }),
+      ];
+      render(<BoardPage />);
+
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
+      fireEvent.change(searchInput, { target: { value: "5d7658d4" } });
+
+      expect(screen.getByText("Matching short ID task")).toBeInTheDocument();
+      expect(screen.queryByText("Other task")).not.toBeInTheDocument();
     });
   });
 
@@ -324,7 +403,7 @@ describe("BoardPage", () => {
       expect(screen.queryByText("Clear")).not.toBeInTheDocument();
 
       // Apply a search filter
-      const searchInput = screen.getByLabelText("Search tasks by title");
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "something" } });
 
       // Now clear button appears
@@ -342,7 +421,7 @@ describe("BoardPage", () => {
       render(<BoardPage />);
 
       // Apply search
-      const searchInput = screen.getByLabelText("Search tasks by title");
+      const searchInput = screen.getByLabelText("Search tasks by title or ID");
       fireEvent.change(searchInput, { target: { value: "Find" } });
       expect(screen.queryByText("Hidden")).not.toBeInTheDocument();
 

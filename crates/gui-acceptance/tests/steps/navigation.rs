@@ -814,6 +814,22 @@ async fn type_into_element_with_test_id(world: &mut GuiWorld, text: String, test
         .await;
 }
 
+#[when(expr = "I type the current task ID into the element with test id {string}")]
+async fn type_current_task_id_into_element_with_test_id(world: &mut GuiWorld, test_id: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    type_into_element_with_test_id(world, task_id, test_id).await;
+}
+
+#[when(expr = "I type the current task short ID into the element with test id {string}")]
+async fn type_current_task_short_id_into_element_with_test_id(
+    world: &mut GuiWorld,
+    test_id: String,
+) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let short_id: String = task_id.chars().take(8).collect();
+    type_into_element_with_test_id(world, short_id, test_id).await;
+}
+
 #[when(expr = "I press the {string} key")]
 async fn press_key(world: &mut GuiWorld, key_name: String) {
     let wd = world

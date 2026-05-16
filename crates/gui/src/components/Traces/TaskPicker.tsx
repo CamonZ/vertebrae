@@ -29,14 +29,20 @@ export interface TaskPickerHandle {
   focus: () => void;
 }
 
-/** Case-insensitive filter by title or id-prefix. */
+/** Case-insensitive filter by title, description, full id, or 8-char id prefix. */
 export function filterTasksForPicker(tasks: Task[], query: string): Task[] {
   const q = query.trim().toLowerCase();
   if (!q) return tasks;
   return tasks.filter((t) => {
     const title = t.title?.toLowerCase() ?? "";
+    const description = t.description?.toLowerCase() ?? "";
     const id = t.id?.toLowerCase() ?? "";
-    return title.includes(q) || id.startsWith(q);
+    return (
+      title.includes(q) ||
+      description.includes(q) ||
+      id === q ||
+      id.slice(0, 8) === q
+    );
   });
 }
 
