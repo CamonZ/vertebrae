@@ -34,8 +34,6 @@ where
 pub struct TaskResponse {
     pub id: String,
     #[serde(default)]
-    pub short_id: Option<String>,
-    #[serde(default)]
     pub project_id: String,
     pub title: String,
     #[serde(default)]
@@ -355,28 +353,6 @@ pub struct SessionLogResponse {
     pub updated_at: Option<String>,
 }
 
-/// Blocker/dependent task summary from GraphQL nested fields
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockerTaskResponse {
-    pub id: String,
-    #[serde(default)]
-    pub short_id: Option<String>,
-    pub title: String,
-}
-
-/// Child task summary from GraphQL nested fields
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChildTaskResponse {
-    pub id: String,
-    #[serde(default)]
-    pub short_id: Option<String>,
-    pub title: String,
-    #[serde(default)]
-    pub level: Option<String>,
-    #[serde(default)]
-    pub priority: Option<String>,
-}
-
 /// Error response from Sacrum API
 ///
 /// The API returns errors in two shapes:
@@ -619,7 +595,6 @@ mod tests {
     fn test_task_response_deserialization() {
         let json = r#"{
             "id": "task-uuid-123",
-            "short_id": "task-123",
             "title": "Test Task",
             "description": "Test description",
             "priority": "high",
@@ -629,7 +604,6 @@ mod tests {
 
         let task: TaskResponse = serde_json::from_str(json).unwrap();
         assert_eq!(task.id, "task-uuid-123");
-        assert_eq!(task.short_id, Some("task-123".to_string()));
         assert_eq!(task.title, "Test Task");
     }
 
@@ -637,7 +611,6 @@ mod tests {
     fn test_task_response_with_all_fields() {
         let json = r#"{
             "id": "task-123",
-            "short_id": "t-123",
             "title": "Full Task",
             "description": "Complete description",
             "level": "ticket",
@@ -659,7 +632,6 @@ mod tests {
 
         let task: TaskResponse = serde_json::from_str(json).unwrap();
         assert_eq!(task.id, "task-123");
-        assert_eq!(task.short_id.as_deref(), Some("t-123"));
         assert_eq!(task.title, "Full Task");
         assert_eq!(task.description.as_deref(), Some("Complete description"));
         assert_eq!(task.level.as_deref(), Some("ticket"));
@@ -684,7 +656,6 @@ mod tests {
         let task: TaskResponse = serde_json::from_str(json).unwrap();
         assert_eq!(task.id, "task-min");
         assert_eq!(task.title, "Minimal");
-        assert!(task.short_id.is_none());
         assert!(task.description.is_none());
         assert!(task.level.is_none());
         assert!(task.tags.is_empty());
@@ -1019,73 +990,13 @@ mod tests {
     }
 
     #[test]
-    fn test_blocker_task_response_deserialization() {
-        let json = r#"{
-            "id": "blocker-1",
-            "short_id": "b-1",
-            "title": "Blocking Task"
-        }"#;
-
-        let blocker: BlockerTaskResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(blocker.id, "blocker-1");
-        assert_eq!(blocker.short_id.as_deref(), Some("b-1"));
-        assert_eq!(blocker.title, "Blocking Task");
-    }
-
-    #[test]
-    fn test_blocker_task_response_minimal() {
-        let json = r#"{
-            "id": "blocker-2",
-            "title": "Minimal Blocker"
-        }"#;
-
-        let blocker: BlockerTaskResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(blocker.id, "blocker-2");
-        assert!(blocker.short_id.is_none());
-        assert_eq!(blocker.title, "Minimal Blocker");
-    }
-
-    #[test]
-    fn test_child_task_response_deserialization() {
-        let json = r#"{
-            "id": "child-1",
-            "short_id": "c-1",
-            "title": "Child Task",
-            "level": "ticket",
-            "priority": "high"
-        }"#;
-
-        let child: ChildTaskResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(child.id, "child-1");
-        assert_eq!(child.short_id.as_deref(), Some("c-1"));
-        assert_eq!(child.title, "Child Task");
-        assert_eq!(child.level.as_deref(), Some("ticket"));
-        assert_eq!(child.priority.as_deref(), Some("high"));
-    }
-
-    #[test]
-    fn test_child_task_response_minimal() {
-        let json = r#"{
-            "id": "child-2",
-            "title": "Minimal Child"
-        }"#;
-
-        let child: ChildTaskResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(child.id, "child-2");
-        assert!(child.short_id.is_none());
-        assert_eq!(child.title, "Minimal Child");
-        assert!(child.level.is_none());
-        assert!(child.priority.is_none());
-    }
-
-    #[test]
     fn test_task_response_with_nested_relations() {
         let json = r#"{
             "id": "task-rel",
             "title": "Task with relations",
             "project_id": "proj-1",
             "blockers": [
-                {"id": "b-1", "short_id": "s-1", "title": "Blocker 1"}
+                {"id": "b-1", "title": "Blocker 1"}
             ],
             "dependents": [
                 {"id": "d-1", "title": "Dependent 1"}
