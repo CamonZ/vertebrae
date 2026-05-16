@@ -5,6 +5,7 @@
 // TaskRun.status (not StepExecution.status) defines the terminal state of a run.
 import type { StepExecution, Task, TaskRun } from "../../bindings";
 import { safeMs } from "./timeUtils";
+import { summarizeExecutions, traceDebug } from "./traceDebug";
 
 export interface TaskRunNode {
   run: TaskRun;
@@ -89,6 +90,16 @@ export function projectTaskRunTrace(
     node.executions.sort(compareExecutions);
   }
   orphanExecutions.sort(compareExecutions);
+
+  traceDebug("projection buckets", {
+    taskRunCount: taskRuns.length,
+    executionCount: executions.length,
+    buckets: Array.from(runsById.values()).map((node) => ({
+      taskRunId: node.run.id,
+      executions: summarizeExecutions(node.executions),
+    })),
+    orphanExecutions: summarizeExecutions(orphanExecutions),
+  });
 
   // Build parent->children adjacency. Children of a parent are sorted by
   // started_at so DFS order is chronological within a fan-out.

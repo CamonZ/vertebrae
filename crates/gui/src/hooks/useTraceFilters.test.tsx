@@ -25,6 +25,7 @@ describe("useTraceFilters", () => {
       model: "opus",
       search: "foo",
       rootOnly: true,
+      lineageScope: null,
     });
   });
 
@@ -38,6 +39,7 @@ describe("useTraceFilters", () => {
       model: null,
       search: "",
       rootOnly: false,
+      lineageScope: null,
     });
   });
 
@@ -91,10 +93,10 @@ describe("useTraceFilters", () => {
     expect(result.current.filters.rootOnly).toBe(false);
   });
 
-  it("clear empties all five filter params", () => {
+  it("clear empties all filter params", () => {
     const { result } = renderHook(() => useTraceFilters(), {
       wrapper: wrapperWith(
-        "/traces/abc?status=failed&step=in_progress&model=opus&q=foo&rootOnly=1"
+        "/traces/abc?status=failed&step=in_progress&model=opus&q=foo&rootOnly=1&scope=descendants"
       ),
     });
     act(() => result.current.clear());
@@ -104,6 +106,7 @@ describe("useTraceFilters", () => {
       model: null,
       search: "",
       rootOnly: false,
+      lineageScope: null,
     });
   });
 });

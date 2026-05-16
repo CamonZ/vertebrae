@@ -10,6 +10,11 @@ import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import {
+  summarizeExecutions,
+  summarizeRuns,
+  traceDebug,
+} from "../components/Traces/traceDebug";
 
 export interface UseTaskRunTraceResult {
   /** Recursive trace tree rooted at `rootTaskRunId`, or null when not loaded. */
@@ -49,6 +54,7 @@ export function useTaskRunTrace(
 
   const fetchTrace = useCallback(async () => {
     if (!rootTaskRunId) {
+      traceDebug("fetch skipped", { rootTaskRunId: null });
       setTrace(null);
       setError(null);
       return;
@@ -57,17 +63,48 @@ export function useTaskRunTrace(
     const projectScopeGeneration = getProjectScopeGeneration();
     setIsLoading(true);
     setError(null);
+    traceDebug("fetch start", {
+      rootTaskRunId,
+      seq,
+      projectScopeGeneration,
+    });
     try {
       const result = await commands.getTaskRunTrace(rootTaskRunId);
       if (
         seq !== fetchSeqRef.current ||
         !isCurrentProjectScopeGeneration(projectScopeGeneration)
       ) {
+        traceDebug("fetch ignored", {
+          rootTaskRunId,
+          seq,
+          latestSeq: fetchSeqRef.current,
+          projectScopeGeneration,
+          isCurrentProjectScopeGeneration: isCurrentProjectScopeGeneration(
+            projectScopeGeneration
+          ),
+        });
         return;
       }
       if (result.status === "ok") {
+        const taskRuns = result.data.task_runs ?? [];
+        const executions = result.data.step_executions ?? [];
+        const sessionLogs = result.data.session_logs ?? [];
+        traceDebug("fetch ok", {
+          rootTaskRunId,
+          seq,
+          taskRunCount: taskRuns.length,
+          executionCount: executions.length,
+          sessionLogCount: sessionLogs.length,
+          taskRuns: summarizeRuns(taskRuns),
+          executions: summarizeExecutions(executions),
+        });
         setTrace(result.data);
       } else {
+        traceDebug("fetch error", {
+          rootTaskRunId,
+          seq,
+          error: result.error.message,
+        });
         setError(result.error.message);
         setTrace(null);
       }
@@ -76,6 +113,11 @@ export function useTaskRunTrace(
         seq === fetchSeqRef.current &&
         isCurrentProjectScopeGeneration(projectScopeGeneration)
       ) {
+        traceDebug("fetch exception", {
+          rootTaskRunId,
+          seq,
+          error: e instanceof Error ? e.message : String(e),
+        });
         setError(e instanceof Error ? e.message : String(e));
         setTrace(null);
       }
