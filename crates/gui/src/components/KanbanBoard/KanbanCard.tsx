@@ -1,37 +1,12 @@
 import type { KeyboardEvent } from "react";
-import type { Task, TaskLevel } from "../../bindings";
+import type { Task } from "../../bindings";
 import { ScanIdentifier } from "../shared/EntityId";
+import { TaskLevelLabel } from "../shared/TaskLevelLabel";
 
 interface KanbanCardProps {
   task: Task;
   isSelected?: boolean;
   onClick?: (task: Task) => void;
-}
-
-function getLevelStyles(level: TaskLevel | null): { bg: string; text: string; border: string } {
-  switch (level) {
-    case "epic":
-      return { bg: "bg-info/10", text: "text-info", border: "border-info/30" };
-    case "ticket":
-      return { bg: "bg-primary/10", text: "text-primary", border: "border-primary/30" };
-    case "task":
-      return { bg: "bg-bg-tertiary", text: "text-text-secondary", border: "border-border" };
-    default:
-      return { bg: "bg-bg-tertiary", text: "text-text-muted", border: "border-border" };
-  }
-}
-
-function formatLevel(level: TaskLevel | null): string {
-  switch (level) {
-    case "epic":
-      return "Epic";
-    case "ticket":
-      return "Ticket";
-    case "task":
-      return "Task";
-    default:
-      return level ?? "Unknown";
-  }
 }
 
 function getStepStyles(stepName: string | null): { bg: string; text: string; glow?: string } {
@@ -65,7 +40,6 @@ function formatStepName(stepName: string | null): string {
 }
 
 export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProps) {
-  const levelStyles = getLevelStyles(task.level);
   const stepStyles = getStepStyles(task.step_name);
 
   const handleClick = () => {
@@ -100,11 +74,7 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
           className="text-[10px]"
           testId="kanban-card-id"
         />
-        <span
-          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}
-        >
-          {formatLevel(task.level)}
-        </span>
+        <TaskLevelLabel level={task.level} />
       </div>
 
       {/* Title */}
