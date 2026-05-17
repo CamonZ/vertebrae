@@ -14,6 +14,8 @@ interface ResizablePanelProps {
   glowColor?: string;
   /** Additional className for the panel container */
   className?: string;
+  /** Stable test id for acceptance and component tests */
+  testId?: string;
 }
 
 const DEFAULT_MIN_WIDTH = 280;
@@ -31,6 +33,7 @@ export function ResizablePanel({
   storageKey,
   glowColor = "from-primary/0 via-primary/30 to-primary/0",
   className = "",
+  testId,
 }: ResizablePanelProps) {
   // Initialize width from localStorage or default
   const [width, setWidth] = useState<number>(() => {
@@ -104,6 +107,7 @@ export function ResizablePanel({
   return (
     <div
       ref={panelRef}
+      data-testid={testId}
       className={`relative flex h-full flex-col border-l border-border bg-bg-secondary ${className}`}
       style={{ width: `${width}px` }}
     >

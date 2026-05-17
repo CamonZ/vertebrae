@@ -59,7 +59,7 @@ async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
         .wait()
         .at_most(std::time::Duration::from_secs(10))
         .for_element(Locator::XPath(&format!(
-            "//*[contains(text(), '{}')]",
+            "//*[contains(normalize-space(.), '{}')]",
             expected_text
         )))
         .await;
@@ -98,7 +98,7 @@ async fn gui_should_show_text_within(world: &mut GuiWorld, expected_text: String
         .wait()
         .at_most(std::time::Duration::from_secs(timeout))
         .for_element(Locator::XPath(&format!(
-            "//*[contains(text(), '{}')]",
+            "//*[contains(normalize-space(.), '{}')]",
             expected_text
         )))
         .await;
@@ -261,7 +261,7 @@ async fn pipeline_step_should_show_element_with_title_within(
         .clone();
     let client = wd.lock().await;
     let locator_xpath = format!(
-        "//button[.//h3[normalize-space()='{}']]//*[@title='{}']",
+        "//button[contains(normalize-space(.), '{}')]//*[@title='{}']",
         step_name, title
     );
 
@@ -479,7 +479,13 @@ async fn gui_element_with_test_id_should_contain_text_within(
 
     loop {
         if let Ok(element) = client.find(locator.clone()).await {
-            let actual_text = element.text().await.unwrap_or_default();
+            let element_json = serde_json::to_value(&element).expect("serialize element");
+            let actual_text = client
+                .execute("return arguments[0].textContent || '';", vec![element_json])
+                .await
+                .ok()
+                .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                .unwrap_or_default();
             if actual_text.contains(&expected_text) {
                 world
                     .screenshot(

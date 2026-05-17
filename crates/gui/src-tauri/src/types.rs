@@ -269,8 +269,6 @@ pub struct TaskFilterOptions {
     pub root_only: Option<bool>,
     /// Show only children of a specific task
     pub children_of: Option<String>,
-    /// Include done items (excluded by default)
-    pub include_done: Option<bool>,
     /// Search text in title and description
     pub search: Option<String>,
     /// Filter by workflow_id (tasks assigned to a specific workflow)
@@ -309,10 +307,6 @@ impl From<TaskFilterOptions> for vertebrae_core::TaskFilter {
 
         if let Some(parent_id) = opts.children_of {
             filter = filter.children_of(parent_id);
-        }
-
-        if opts.include_done.unwrap_or(false) {
-            filter = filter.include_done();
         }
 
         if let Some(search) = opts.search {
@@ -1636,16 +1630,6 @@ mod tests {
     }
 
     #[test]
-    fn task_filter_from_gui_include_done() {
-        let gui_filter = TaskFilterOptions {
-            include_done: Some(true),
-            ..Default::default()
-        };
-        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
-        assert!(core_filter.include_done);
-    }
-
-    #[test]
     fn task_filter_from_gui_with_search() {
         let gui_filter = TaskFilterOptions {
             search: Some("authentication".to_string()),
@@ -1682,7 +1666,6 @@ mod tests {
             step_names: Some(vec!["in_progress".to_string()]),
             tags: Some(vec!["urgent".to_string()]),
             root_only: Some(true),
-            include_done: Some(false),
             search: Some("auth".to_string()),
             children_of: None,
             workflow_id: Some("wf1".to_string()),
@@ -1693,7 +1676,6 @@ mod tests {
         assert_eq!(core_filter.step_names.len(), 1);
         assert_eq!(core_filter.tags.len(), 1);
         assert!(core_filter.root_only);
-        assert!(!core_filter.include_done);
         assert_eq!(core_filter.search, Some("auth".to_string()));
         assert_eq!(core_filter.workflow_id, Some("wf1".to_string()));
         assert_eq!(core_filter.step_id, Some("step-1".to_string()));

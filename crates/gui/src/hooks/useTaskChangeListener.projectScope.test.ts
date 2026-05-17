@@ -86,6 +86,9 @@ describe("useTaskChangeListener project scope hygiene", () => {
     const currentTask = createMockTask({
       id: "new-project-task",
       title: "New Project Task",
+      workflow_name: "Workflow",
+      current_step_id: "step-todo",
+      step_name: "todo",
     });
     act(() => {
       currentHandler({

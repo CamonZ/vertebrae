@@ -1517,10 +1517,6 @@ root_only: boolean | null;
  */
 children_of: string | null; 
 /**
- * Include done items (excluded by default)
- */
-include_done: boolean | null; 
-/**
  * Search text in title and description
  */
 search: string | null; 

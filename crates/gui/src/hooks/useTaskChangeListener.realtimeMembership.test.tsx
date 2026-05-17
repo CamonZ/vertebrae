@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   TaskChangedEvent,
+  TaskFilterOptions,
   TaskRunStepChangedEvent,
   TaskStepChangedEvent,
 } from "../bindings";
@@ -80,6 +81,22 @@ function emitTaskRunStepChanged(payload: TaskRunStepChangedEvent) {
   });
 }
 
+function taskFilter(
+  overrides: Partial<TaskFilterOptions> = {},
+): TaskFilterOptions {
+  return {
+    step_names: null,
+    levels: null,
+    tags: null,
+    root_only: null,
+    children_of: null,
+    search: null,
+    workflow_id: null,
+    step_id: null,
+    ...overrides,
+  };
+}
+
 describe("useTaskChangeListener realtime list membership", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,17 +126,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-review",
       step_name: "pending_review",
     };
-    useTaskStore.getState().setActiveFilter({
-      step_names: null,
-      levels: null,
-      tags: null,
-      root_only: null,
-      children_of: null,
-      include_done: true,
-      search: null,
-      workflow_id: null,
-      step_id: null,
-    });
+    useTaskStore.getState().setActiveFilter(taskFilter());
     useTaskStore.getState().setTasks([original]);
     mockGetTask.mockResolvedValue({ status: "ok", data: updated });
 
@@ -212,17 +219,15 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    useTaskStore.getState().setActiveFilter({
-      step_names: ["todo"],
-      levels: ["ticket"],
-      tags: null,
-      root_only: null,
-      children_of: null,
-      include_done: false,
-      search: "visible",
-      workflow_id: "workflow-1",
-      step_id: "step-todo",
-    });
+    useTaskStore.getState().setActiveFilter(
+      taskFilter({
+        step_names: ["todo"],
+        levels: ["ticket"],
+        search: "visible",
+        workflow_id: "workflow-1",
+        step_id: "step-todo",
+      }),
+    );
     useTaskStore.getState().setTasks([visible]);
 
     renderHook(() => useTaskChangeListener());
@@ -251,7 +256,12 @@ describe("useTaskChangeListener realtime list membership", () => {
       "visible",
     ]);
 
-    const movedToDone = { ...visible, step_name: "done" };
+    const movedToDone = {
+      ...visible,
+      workflow_name: "Implementation",
+      current_step_id: "step-done",
+      step_name: "done",
+    };
     emitTaskChanged({
       task_id: "visible",
       change_type: "Updated",
@@ -287,5 +297,123 @@ describe("useTaskChangeListener realtime list membership", () => {
       archived: false,
     });
     expect(useTaskStore.getState().tasks).toEqual([]);
+  });
+
+  it("keeps a task visible when realtime moves it to done under the default list filter", async () => {
+    const visible = createMockTask({
+      id: "visible-done",
+      title: "Visible done work",
+      level: "ticket",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-todo",
+      step_name: "todo",
+    });
+    useTaskStore.getState().setActiveFilter(taskFilter());
+    useTaskStore.getState().setTasks([visible]);
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    const doneTask = {
+      ...visible,
+      workflow_name: "Finished",
+      current_step_id: "step-done",
+      step_name: "done",
+    };
+    emitTaskChanged({
+      task_id: "visible-done",
+      change_type: "Updated",
+      task: doneTask,
+      current_step_id: "step-done",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    expect(useTaskStore.getState().tasks).toHaveLength(1);
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      id: "visible-done",
+      workflow_name: "Finished",
+      current_step_id: "step-done",
+      step_name: "done",
+    });
+  });
+
+  it("hydrates task changed events when payload task data is missing labels", async () => {
+    const partial = createMockTask({
+      id: "needs-hydration",
+      workflow_id: "workflow-1",
+      workflow_name: null,
+      current_step_id: "step-review",
+      step_name: null,
+    });
+    const hydrated = {
+      ...partial,
+      workflow_name: "Implementation",
+      step_name: "review",
+    };
+    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "needs-hydration",
+      change_type: "Updated",
+      task: partial,
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    await waitFor(() => {
+      expect(mockGetTask).toHaveBeenCalledWith("needs-hydration");
+    });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      id: "needs-hydration",
+      workflow_name: "Implementation",
+      step_name: "review",
+    });
+  });
+
+  it("hydrates task changed events when payload task data is absent", async () => {
+    const hydrated = createMockTask({
+      id: "missing-task",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-review",
+      step_name: "review",
+    });
+    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "missing-task",
+      change_type: "Updated",
+      task: null,
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    await waitFor(() => {
+      expect(mockGetTask).toHaveBeenCalledWith("missing-task");
+    });
+    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+      id: "missing-task",
+      workflow_name: "Implementation",
+      step_name: "review",
+    });
   });
 });
