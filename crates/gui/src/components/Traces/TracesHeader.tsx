@@ -52,9 +52,9 @@ export function TracesHeader({
     <header
       data-testid="traces-header"
       data-task-id={taskId ?? ""}
-      className="flex flex-col gap-3 border-b border-border bg-bg-secondary px-4 py-3"
+      className="flex flex-col border-b border-border bg-bg-secondary"
     >
-      <div className="flex items-center gap-3">
+      <div className="flex h-12 items-center gap-3 px-6">
         {onBack && (
           <button
             type="button"
@@ -102,7 +102,7 @@ export function TracesHeader({
 
         <h1
           data-testid="traces-title"
-          className="truncate text-base font-semibold text-text-primary"
+          className="truncate text-sm font-semibold text-text-primary"
         >
           {displayTitle}
         </h1>
@@ -138,7 +138,7 @@ export function TracesHeader({
       {hasTask && (
       <div
         data-testid="traces-rollup"
-        className="flex flex-wrap items-stretch gap-2"
+        className="flex flex-wrap items-stretch gap-2 border-t border-border px-6 py-2"
       >
         <RollupStat
           testId="traces-rollup-runs"

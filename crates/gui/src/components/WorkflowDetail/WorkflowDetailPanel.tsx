@@ -122,7 +122,7 @@ export function WorkflowDetailPanel({
       glowColor="from-primary/0 via-primary/30 to-primary/0"
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           {onBack && (
             <button
