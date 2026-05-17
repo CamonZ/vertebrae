@@ -118,15 +118,6 @@ function ErrorState({ error }: { error: string }) {
 }
 
 /**
- * Count total tasks in hierarchy (recursive)
- */
-function countTasks(nodes: TaskTreeNodeType[]): number {
-  return nodes.reduce((count, node) => {
-    return count + 1 + countTasks(node.children);
-  }, 0);
-}
-
-/**
  * TaskTreeView component displays tasks in a hierarchical tree structure.
  * Shows parent-child relationships with expandable/collapsible nodes.
  * Uses the Neural Pathways design system.
@@ -152,17 +143,8 @@ export function TaskTreeView({
     return <EmptyState />;
   }
 
-  const totalTasks = countTasks(hierarchy);
-
   return (
     <div className="overflow-x-auto">
-      {/* Tree header with task count */}
-      <div className="sticky top-0 z-10 flex items-center justify-end border-b border-border bg-bg-secondary/50 px-4 py-2 backdrop-blur-sm">
-        <span className="font-mono text-[10px] text-text-muted">
-          {hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""} / {totalTasks} total
-        </span>
-      </div>
-
       {/* Tree content */}
       <div role="tree" aria-label="Task hierarchy">
         {hierarchy.map((node) => (

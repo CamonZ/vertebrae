@@ -42,10 +42,10 @@ export function OperationsPage() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header */}
-      <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+      <div className="relative flex h-12 items-center border-b border-border bg-bg-primary px-6">
         <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
         <div className="relative flex items-center gap-4">
-          <h1 className="text-lg font-semibold text-text-primary">
+          <h1 className="text-sm font-semibold text-text-primary">
             Operations
           </h1>
           {liveItems.length > 0 && (

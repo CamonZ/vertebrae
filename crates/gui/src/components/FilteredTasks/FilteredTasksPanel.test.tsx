@@ -170,36 +170,6 @@ describe("FilteredTasksPanel", () => {
     });
   });
 
-  describe("view mode toggle", () => {
-    it("renders tree and list view toggle buttons", () => {
-      const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
-
-      expect(screen.getByLabelText("Tree view")).toBeInTheDocument();
-      expect(screen.getByLabelText("List view")).toBeInTheDocument();
-    });
-
-    it("defaults to tree view", () => {
-      const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
-
-      const treeButton = screen.getByLabelText("Tree view");
-      expect(treeButton).toHaveClass("bg-primary/10", "text-primary");
-    });
-
-    it("switches to list view when button clicked", async () => {
-      const user = userEvent.setup();
-      const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
-
-      const listButton = screen.getByLabelText("List view");
-      await user.click(listButton);
-
-      expect(listButton).toHaveClass("bg-primary/10", "text-primary");
-      expect(screen.getByLabelText("Tree view")).not.toHaveClass("bg-primary/10");
-    });
-  });
-
   describe("close button", () => {
     it("renders close button when onClose is provided", () => {
       const step = createStep();
@@ -229,7 +199,7 @@ describe("FilteredTasksPanel", () => {
   });
 
   describe("task selection", () => {
-    it("calls onTaskSelect when task is clicked in list view", async () => {
+    it("calls onTaskSelect when task is clicked", async () => {
       const user = userEvent.setup();
       const step = createStep();
       const tasks = [
@@ -245,10 +215,6 @@ describe("FilteredTasksPanel", () => {
         />
       );
 
-      // Switch to list view
-      await user.click(screen.getByLabelText("List view"));
-
-      // Find and click the task
       const taskElement = await screen.findByText("Test Task");
       await user.click(taskElement);
 
