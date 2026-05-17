@@ -62,7 +62,7 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
       className={`group cursor-pointer rounded-lg border p-3 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
         isSelected
           ? "border-primary/50 bg-primary/5 shadow-glow-sm"
-          : "border-border bg-bg-primary hover:border-border/80 hover:bg-bg-hover"
+          : "border-border bg-bg-tertiary hover:border-border/80 hover:bg-bg-hover"
       }`}
     >
       <div className="mb-2 flex items-center">

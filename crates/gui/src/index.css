@@ -42,9 +42,9 @@
 
   /* Background tones - warm neutrals, ~6 lightness steps apart */
   --color-bg-primary: #0a0a0a;
-  --color-bg-secondary: #111111;
-  --color-bg-tertiary: #161616;
-  --color-bg-elevated: #161616;
+  --color-bg-secondary: #141414;
+  --color-bg-tertiary: #222222;
+  --color-bg-elevated: #222222;
   --color-bg-hover: rgba(244, 241, 236, 0.04);
 
   /* Text - warm off-whites, never pure white */
@@ -122,10 +122,10 @@
    LIGHT MODE OVERRIDES (Optional - for users who prefer light)
    ============================================================================= */
 .light {
-  --color-bg-primary: #f7f4ee;
+  --color-bg-primary: #fafafa;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #ffffff;
-  --color-bg-elevated: #ffffff;
+  --color-bg-tertiary: #e6e6e6;
+  --color-bg-elevated: #e6e6e6;
   --color-bg-hover: rgba(10, 10, 10, 0.04);
 
   --color-text-primary: #0a0a0a;
@@ -307,23 +307,18 @@ body {
 @keyframes flash-border {
   0% {
     border-color: inherit;
-    box-shadow: none;
   }
   20% {
     border-color: var(--color-warning);
-    box-shadow: 0 0 14px var(--color-warning-dim);
   }
   45% {
     border-color: inherit;
-    box-shadow: none;
   }
   65% {
     border-color: var(--color-warning);
-    box-shadow: 0 0 14px var(--color-warning-dim);
   }
   100% {
     border-color: inherit;
-    box-shadow: none;
   }
 }
 
@@ -626,7 +621,7 @@ body {
 
 /* Base container - force dark background */
 .react-flow {
-  background-color: var(--color-bg-secondary) !important;
+  background-color: var(--color-bg-primary) !important;
 }
 
 .react-flow__renderer,
@@ -637,7 +632,7 @@ body {
 
 /* Background pattern */
 .react-flow__background {
-  background-color: var(--color-bg-secondary) !important;
+  background-color: var(--color-bg-primary) !important;
 }
 
 .react-flow__background pattern circle,
@@ -685,7 +680,7 @@ body {
 
 /* Edge styling */
 .react-flow__edge-path {
-  stroke: var(--color-border) !important;
+  stroke: var(--color-border);
   stroke-width: 2;
 }
 

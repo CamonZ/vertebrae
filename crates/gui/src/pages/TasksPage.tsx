@@ -154,7 +154,7 @@ export function TasksPage() {
         </div>
 
         {/* Task tree section */}
-        <div className="flex-1 overflow-auto bg-bg-primary">
+        <div className="flex-1 overflow-auto bg-bg-secondary">
           <TaskTreeView
             hierarchy={hierarchy}
             isLoading={isLoading && tasks.length === 0}
@@ -167,7 +167,7 @@ export function TasksPage() {
 
         {/* Footer with task count */}
         {!currentIsLoading && !currentError && taskCount > 0 && (
-          <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-6 py-2">
+          <div className="flex items-center justify-between border-t border-border bg-bg-primary px-6 py-2">
             <p className="font-mono text-xs text-text-muted">
               {taskCount} task{taskCount !== 1 ? "s" : ""}
               {hierarchy.length > 0 && (
