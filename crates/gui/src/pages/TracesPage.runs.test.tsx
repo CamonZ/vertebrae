@@ -8,7 +8,7 @@
  *   - tasks with no TaskRun history fall back to the legacy SubtreeRail
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import {
   createMockTask,
@@ -16,6 +16,7 @@ import {
   createMockTaskRun,
 } from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
+import { useSessionLogStore } from "../stores/sessionLogStore";
 import { TracesPage } from "./TracesPage";
 import type { SessionLog, TaskRun } from "../bindings";
 
@@ -41,40 +42,57 @@ let mockTraceRuns: TaskRun[] = [];
 let mockTraceLogs: SessionLog[] = [];
 let lastTraceRootId: string | null = null;
 
-vi.mock("../hooks", () => ({
-  useTask: () => ({
-    task: createMockTask({ id: "root", title: "Root", level: "epic" }),
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useTaskRuns: () => ({
-    runs: mockRuns,
-    activeRun: mockRuns.find((r) => r.status === "executing") ?? null,
-    latestRun:
-      mockRuns.find((r) => r.status === "executing") == null
-        ? (mockRuns.find((r) =>
-            ["completed", "failed", "stopped"].includes(r.status)
-          ) ?? null)
-        : null,
-    resolveRun: (id: string | null) => mockResolve(id),
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useTaskRunTrace: (rootTaskRunId: string | null) => {
-    lastTraceRootId = rootTaskRunId;
-    return {
-      trace: rootTaskRunId ? { root_task_run_id: rootTaskRunId } : null,
-      taskRuns: rootTaskRunId ? mockTraceRuns : [],
-      executions: rootTaskRunId ? mockTraceExecutions : [],
-      sessionLogs: rootTaskRunId ? mockTraceLogs : [],
+vi.mock("../hooks", async () => {
+  const { useSessionLogStore } = await vi.importActual<
+    typeof import("../stores/sessionLogStore")
+  >("../stores/sessionLogStore");
+
+  return {
+    useTask: () => ({
+      task: createMockTask({ id: "root", title: "Root", level: "epic" }),
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    };
-  },
-}));
+    }),
+    useTaskRuns: () => ({
+      runs: mockRuns,
+      activeRun: mockRuns.find((r) => r.status === "executing") ?? null,
+      latestRun:
+        mockRuns.find((r) => r.status === "executing") == null
+          ? (mockRuns.find((r) =>
+              ["completed", "failed", "stopped"].includes(r.status)
+            ) ?? null)
+          : null,
+      resolveRun: (id: string | null) => mockResolve(id),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useTaskRunTrace: (rootTaskRunId: string | null) => {
+      lastTraceRootId = rootTaskRunId;
+      const liveBuckets = useSessionLogStore(
+        (state) => state.logsByExecutionId
+      );
+      const executionIds = new Set(
+        mockTraceExecutions
+          .map((execution) => execution.id)
+          .filter((id): id is string => !!id)
+      );
+      const liveLogs = Array.from(executionIds).flatMap(
+        (executionId) => liveBuckets[executionId] ?? []
+      );
+      return {
+        trace: rootTaskRunId ? { root_task_run_id: rootTaskRunId } : null,
+        taskRuns: rootTaskRunId ? mockTraceRuns : [],
+        executions: rootTaskRunId ? mockTraceExecutions : [],
+        sessionLogs: rootTaskRunId ? [...mockTraceLogs, ...liveLogs] : [],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      };
+    },
+  };
+});
 
 const subtreeExecutions = [
   createMockStepExecution({ id: "subtree-ex-1", task_id: "root" }),
@@ -149,6 +167,7 @@ describe("TracesPage with TaskRun history", () => {
     mockTraceRuns = [];
     mockTraceLogs = [];
     lastTraceRootId = null;
+    useSessionLogStore.setState({ logsByExecutionId: {} });
     useTaskStore.setState({
       tasks: [
         createMockTask({ id: "root", title: "Root" }),
@@ -470,6 +489,44 @@ describe("TracesPage with TaskRun history", () => {
       .queryAllByTestId("unified-chat-event")
       .map((el) => el.getAttribute("data-execution-id"));
     expect(new Set(segments)).toEqual(new Set(["exec-child"]));
+  });
+
+  it("live-tails TaskRun trace session logs without navigation", () => {
+    const activeRun = makeRun({
+      id: "run-active",
+      status: "executing",
+      root_task_run_id: "run-active",
+    });
+    mockRuns = [activeRun];
+    mockTraceRuns = [activeRun];
+    mockResolve = () => ({ run: activeRun, source: "active" });
+    mockTraceExecutions = [
+      createMockStepExecution({
+        id: "trace-ex-1",
+        task_id: "root",
+        task_run_id: "run-active",
+      }),
+    ];
+    mockTraceLogs = [makeLog("trace-ex-1", "initial trace log")];
+
+    renderAt("/traces/root?runId=run-active#exec=trace-ex-1");
+
+    expect(screen.getByText(/initial trace log/)).toBeTruthy();
+    expect(screen.queryByText(/live trace log/)).toBeNull();
+
+    act(() => {
+      useSessionLogStore.getState().appendLog("trace-ex-1", {
+        ...makeLog("trace-ex-1", "live trace log"),
+        id: "log-trace-ex-1-live",
+      });
+    });
+
+    expect(screen.getByText(/live trace log/)).toBeTruthy();
+    expect(currentSearchParams().get("runId")).toBe("run-active");
+    const active = document.querySelector('[data-active="1"]');
+    expect(active?.getAttribute("data-segment-execution-id")).toBe(
+      "trace-ex-1"
+    );
   });
 
   it("clicking a child run from the trace rail scopes THREAD and flight strip to that child", () => {
