@@ -831,18 +831,16 @@ function AllWorkflowsPipelineInner() {
   return (
     <div className="flex min-h-0 flex-1">
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+        <div className="relative flex h-12 items-center border-b border-border bg-bg-primary px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-text-primary">
-                Workflow Pipelines
-              </h1>
-              <p className="mt-1 text-sm text-text-muted">
-                {pipelineWorkflows.length} workflow
-                {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
-              </p>
-            </div>
+          <div className="relative flex items-center gap-3">
+            <h1 className="text-sm font-semibold text-text-primary">
+              Workflow Pipelines
+            </h1>
+            <span className="font-mono text-xs text-text-muted">
+              {pipelineWorkflows.length} workflow
+              {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
+            </span>
           </div>
         </div>
 
