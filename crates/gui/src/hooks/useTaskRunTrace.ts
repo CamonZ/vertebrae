@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   commands,
   type SessionLog,
@@ -6,6 +6,11 @@ import {
   type TaskRun,
   type TaskRunTrace,
 } from "../bindings";
+import {
+  useExecutionStore,
+  useSessionLogStore,
+  useTaskRunStore,
+} from "../stores";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
@@ -30,6 +35,11 @@ export interface UseTaskRunTraceResult {
   refetch: () => void;
 }
 
+type TraceState = {
+  trace: TaskRunTrace;
+  projectScopeGeneration: number;
+};
+
 /**
  * Loads the recursive trace tree for a root TaskRun.
  *
@@ -37,25 +47,26 @@ export interface UseTaskRunTraceResult {
  * traces page fall back to its legacy subtree-execution path while a run
  * resolution is still pending or when the task has no TaskRun history.
  *
- * Callers that need live updates should also rely on the global
- * step-execution and session-log listeners; this hook only owns the
- * initial fetch and explicit refetches.
+ * The fetched trace remains the source of truth for lineage. Websocket-backed
+ * stores are overlaid only for runs and executions that already belong to that
+ * lineage, so the page can live-tail without provider-specific render paths.
  */
 export function useTaskRunTrace(
   rootTaskRunId: string | null | undefined
 ): UseTaskRunTraceResult {
-  const [trace, setTrace] = useState<TaskRunTrace | null>(null);
+  const [traceState, setTraceState] = useState<TraceState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Guards against out-of-order responses when `rootTaskRunId` flips between
   // resolutions while a fetch is in flight.
   const fetchSeqRef = useRef(0);
+  const pendingChildRunRefetchIdsRef = useRef<Set<string>>(new Set());
 
   const fetchTrace = useCallback(async () => {
     if (!rootTaskRunId) {
       traceDebug("fetch skipped", { rootTaskRunId: null });
-      setTrace(null);
+      setTraceState(null);
       setError(null);
       return;
     }
@@ -98,7 +109,11 @@ export function useTaskRunTrace(
           taskRuns: summarizeRuns(taskRuns),
           executions: summarizeExecutions(executions),
         });
-        setTrace(result.data);
+        setTraceState({
+          trace: result.data,
+          projectScopeGeneration,
+        });
+        pendingChildRunRefetchIdsRef.current.clear();
       } else {
         traceDebug("fetch error", {
           rootTaskRunId,
@@ -106,7 +121,7 @@ export function useTaskRunTrace(
           error: result.error.message,
         });
         setError(result.error.message);
-        setTrace(null);
+        setTraceState(null);
       }
     } catch (e) {
       if (
@@ -119,7 +134,7 @@ export function useTaskRunTrace(
           error: e instanceof Error ? e.message : String(e),
         });
         setError(e instanceof Error ? e.message : String(e));
-        setTrace(null);
+        setTraceState(null);
       }
     } finally {
       if (seq === fetchSeqRef.current) {
@@ -132,15 +147,192 @@ export function useTaskRunTrace(
     fetchTrace();
   }, [fetchTrace]);
 
+  const liveTaskRuns = useTaskRunStore((state) => state.taskRuns);
+  const liveExecutions = useExecutionStore((state) => state.executions);
+  const liveLogsByExecutionId = useSessionLogStore(
+    (state) => state.logsByExecutionId
+  );
+
+  useEffect(() => {
+    if (!traceState) return;
+    if (!isCurrentProjectScopeGeneration(traceState.projectScopeGeneration)) {
+      return;
+    }
+
+    const trace = traceState.trace;
+    const fetchedRunIds = new Set((trace.task_runs ?? []).map((run) => run.id));
+    if (fetchedRunIds.size === 0) return;
+
+    const unseenChildRun = liveTaskRuns.find((run) => {
+      if (fetchedRunIds.has(run.id)) return false;
+      if (run.root_task_run_id !== trace.root_task_run_id) return false;
+      return (
+        run.parent_task_run_id !== null &&
+        fetchedRunIds.has(run.parent_task_run_id)
+      );
+    });
+
+    if (!unseenChildRun) return;
+    if (pendingChildRunRefetchIdsRef.current.has(unseenChildRun.id)) return;
+
+    pendingChildRunRefetchIdsRef.current.add(unseenChildRun.id);
+    fetchTrace();
+  }, [fetchTrace, liveTaskRuns, traceState]);
+
+  const mergedTrace = useMemo<TaskRunTrace | null>(() => {
+    if (!traceState) return null;
+    const { trace, projectScopeGeneration } = traceState;
+    if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+      return trace;
+    }
+
+    const fetchedTaskRuns = trace.task_runs ?? EMPTY_RUNS;
+    const fetchedExecutions = trace.step_executions ?? EMPTY_EXECUTIONS;
+    const fetchedSessionLogs = trace.session_logs ?? EMPTY_LOGS;
+
+    const taskRuns = mergeTaskRuns(fetchedTaskRuns, liveTaskRuns);
+    const taskRunIds = new Set(taskRuns.map((run) => run.id));
+    const executions = mergeExecutions(
+      fetchedExecutions,
+      liveExecutions,
+      taskRunIds
+    );
+    const executionIds = new Set(
+      executions
+        .map((execution) => execution.id)
+        .filter((id): id is string => !!id)
+    );
+    const sessionLogs = mergeSessionLogs(
+      fetchedSessionLogs,
+      liveLogsByExecutionId,
+      executionIds
+    );
+
+    if (
+      taskRuns === fetchedTaskRuns &&
+      executions === fetchedExecutions &&
+      sessionLogs === fetchedSessionLogs
+    ) {
+      return trace;
+    }
+
+    return {
+      ...trace,
+      task_runs: taskRuns,
+      step_executions: executions,
+      session_logs: sessionLogs,
+    };
+  }, [liveExecutions, liveLogsByExecutionId, liveTaskRuns, traceState]);
+
   return {
-    trace,
-    taskRuns: trace?.task_runs ?? EMPTY_RUNS,
-    executions: trace?.step_executions ?? EMPTY_EXECUTIONS,
-    sessionLogs: trace?.session_logs ?? EMPTY_LOGS,
+    trace: mergedTrace,
+    taskRuns: mergedTrace?.task_runs ?? EMPTY_RUNS,
+    executions: mergedTrace?.step_executions ?? EMPTY_EXECUTIONS,
+    sessionLogs: mergedTrace?.session_logs ?? EMPTY_LOGS,
     isLoading,
     error,
     refetch: fetchTrace,
   };
+}
+
+function mergeTaskRuns(
+  fetchedRuns: TaskRun[],
+  liveRuns: readonly TaskRun[]
+): TaskRun[] {
+  if (fetchedRuns.length === 0 || liveRuns.length === 0) {
+    return fetchedRuns;
+  }
+
+  const liveById = new Map(liveRuns.map((run) => [run.id, run]));
+  let changed = false;
+  const merged = fetchedRuns.map((run) => {
+    const live = liveById.get(run.id);
+    if (live && live !== run) {
+      changed = true;
+      return live;
+    }
+    return run;
+  });
+  return changed ? merged : fetchedRuns;
+}
+
+function mergeExecutions(
+  fetchedExecutions: StepExecution[],
+  liveExecutions: readonly StepExecution[],
+  taskRunIds: ReadonlySet<string>
+): StepExecution[] {
+  if (liveExecutions.length === 0) {
+    return fetchedExecutions;
+  }
+
+  const merged = new Map<string, StepExecution>();
+  const order: string[] = [];
+  let changed = false;
+
+  for (const execution of fetchedExecutions) {
+    if (!execution.id) continue;
+    merged.set(execution.id, execution);
+    order.push(execution.id);
+  }
+
+  for (const execution of liveExecutions) {
+    if (!execution.id || !execution.task_run_id) continue;
+    if (!taskRunIds.has(execution.task_run_id)) continue;
+    if (!merged.has(execution.id)) {
+      order.push(execution.id);
+      changed = true;
+    } else if (merged.get(execution.id) !== execution) {
+      changed = true;
+    }
+    merged.set(execution.id, execution);
+  }
+
+  return changed
+    ? order.map((id) => merged.get(id)).filter(isDefined)
+    : fetchedExecutions;
+}
+
+function mergeSessionLogs(
+  fetchedLogs: SessionLog[],
+  liveLogsByExecutionId: Record<string, SessionLog[]>,
+  executionIds: ReadonlySet<string>
+): SessionLog[] {
+  if (executionIds.size === 0) {
+    return fetchedLogs;
+  }
+
+  const logsById = new Map<string, SessionLog>();
+  const order: string[] = [];
+  let changed = false;
+
+  const addLog = (log: SessionLog) => {
+    if (!log.id || !log.step_execution_id) return;
+    if (!executionIds.has(log.step_execution_id)) return;
+    if (!logsById.has(log.id)) order.push(log.id);
+    logsById.set(log.id, log);
+  };
+
+  for (const log of fetchedLogs) {
+    addLog(log);
+  }
+
+  for (const executionId of executionIds) {
+    for (const log of liveLogsByExecutionId[executionId] ?? []) {
+      const existing = log.id ? logsById.get(log.id) : undefined;
+      addLog(log);
+      if (!existing || existing !== log) {
+        changed = true;
+      }
+    }
+  }
+
+  return changed
+    ? order.map((id) => logsById.get(id)).filter(isDefined)
+    : fetchedLogs;
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
 }
 
 // Stable empty arrays so consumers can safely use these as dependency-array
