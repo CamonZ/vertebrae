@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockGetTaskRunTrace = vi.fn();
 
@@ -11,6 +11,12 @@ vi.mock("../bindings", () => ({
 
 import { useTaskRunTrace } from "./useTaskRunTrace";
 import type { SessionLog, StepExecution, TaskRun } from "../bindings";
+import {
+  useExecutionStore,
+  useSessionLogStore,
+  useTaskRunStore,
+} from "../stores";
+import { resetProjectScopedStores } from "../stores/projectScopedStores";
 
 function makeRun(id: string): TaskRun {
   return {
@@ -58,12 +64,11 @@ function makeLog(id: string, executionId: string): SessionLog {
 describe("useTaskRunTrace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetProjectScopedStores();
   });
 
   it("does not fetch when rootTaskRunId is null", async () => {
-    const { result } = renderHook(() =>
-      useTaskRunTrace(null as string | null)
-    );
+    const { result } = renderHook(() => useTaskRunTrace(null as string | null));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(mockGetTaskRunTrace).not.toHaveBeenCalled();
@@ -158,5 +163,140 @@ describe("useTaskRunTrace", () => {
     );
 
     expect(mockGetTaskRunTrace).toHaveBeenCalledTimes(2);
+  });
+
+  it("merges live executions for task runs already in the trace", async () => {
+    mockGetTaskRunTrace.mockResolvedValue({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-root",
+        task_runs: [makeRun("run-root"), makeRun("run-child")],
+        step_executions: [makeExec("exec-1", "run-root")],
+        session_logs: [],
+      },
+    });
+
+    const { result } = renderHook(() => useTaskRunTrace("run-root"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      useExecutionStore
+        .getState()
+        .upsertExecution(makeExec("exec-live", "run-child"));
+      useExecutionStore
+        .getState()
+        .upsertExecution(makeExec("exec-ignored", "run-outside"));
+    });
+
+    expect(result.current.executions.map((execution) => execution.id)).toEqual([
+      "exec-1",
+      "exec-live",
+    ]);
+    expect(mockGetTaskRunTrace).toHaveBeenCalledTimes(1);
+  });
+
+  it("merges live session logs for execution ids in the trace", async () => {
+    mockGetTaskRunTrace.mockResolvedValue({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-root",
+        task_runs: [makeRun("run-root")],
+        step_executions: [makeExec("exec-1", "run-root")],
+        session_logs: [makeLog("log-fetched", "exec-1")],
+      },
+    });
+
+    const { result } = renderHook(() => useTaskRunTrace("run-root"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      useSessionLogStore
+        .getState()
+        .appendLog("exec-1", makeLog("log-live", "exec-1"));
+      useSessionLogStore
+        .getState()
+        .appendLog("exec-outside", makeLog("log-ignored", "exec-outside"));
+    });
+
+    expect(result.current.sessionLogs.map((log) => log.id)).toEqual([
+      "log-fetched",
+      "log-live",
+    ]);
+    expect(mockGetTaskRunTrace).toHaveBeenCalledTimes(1);
+  });
+
+  it("overlays live task run updates for runs already in the trace", async () => {
+    mockGetTaskRunTrace.mockResolvedValue({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-root",
+        task_runs: [makeRun("run-root")],
+        step_executions: [],
+        session_logs: [],
+      },
+    });
+
+    const { result } = renderHook(() => useTaskRunTrace("run-root"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      useTaskRunStore.getState().upsertTaskRun({
+        ...makeRun("run-root"),
+        status: "executing",
+        latest_step_execution_id: "exec-live",
+      });
+      useTaskRunStore.getState().upsertTaskRun(makeRun("run-outside"));
+    });
+
+    expect(result.current.taskRuns).toHaveLength(1);
+    expect(result.current.taskRuns[0]).toMatchObject({
+      id: "run-root",
+      status: "executing",
+      latest_step_execution_id: "exec-live",
+    });
+    expect(mockGetTaskRunTrace).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches when a live child run appears under the current trace root", async () => {
+    const rootRun = makeRun("run-root");
+    const childRun = {
+      ...makeRun("run-child"),
+      parent_task_run_id: "run-root",
+      root_task_run_id: "run-root",
+    };
+    mockGetTaskRunTrace
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          root_task_run_id: "run-root",
+          task_runs: [rootRun],
+          step_executions: [],
+          session_logs: [],
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          root_task_run_id: "run-root",
+          task_runs: [rootRun, childRun],
+          step_executions: [],
+          session_logs: [],
+        },
+      });
+
+    const { result } = renderHook(() => useTaskRunTrace("run-root"));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      useTaskRunStore.getState().upsertTaskRun(childRun);
+    });
+
+    await waitFor(() => expect(mockGetTaskRunTrace).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(result.current.taskRuns.map((run) => run.id)).toEqual([
+        "run-root",
+        "run-child",
+      ])
+    );
   });
 });
