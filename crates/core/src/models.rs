@@ -570,7 +570,6 @@ pub struct TaskFilter {
     pub tags: Vec<String>,
     pub root_only: bool,
     pub children_of: Option<String>,
-    pub include_done: bool,
     pub include_archived: bool,
     pub search: Option<String>,
     pub workflow_id: Option<String>,
@@ -634,11 +633,6 @@ impl TaskFilter {
 
     pub fn children_of(mut self, parent_id: impl Into<String>) -> Self {
         self.children_of = Some(parent_id.into());
-        self
-    }
-
-    pub fn include_done(mut self) -> Self {
-        self.include_done = true;
         self
     }
 
@@ -3124,7 +3118,6 @@ mod tests {
         assert!(filter.tags.is_empty());
         assert!(!filter.root_only);
         assert!(filter.children_of.is_none());
-        assert!(!filter.include_done);
         assert!(!filter.include_archived);
         assert!(filter.search.is_none());
         assert!(filter.workflow_id.is_none());
@@ -3192,12 +3185,6 @@ mod tests {
     }
 
     #[test]
-    fn task_filter_include_done() {
-        let filter = TaskFilter::new().include_done();
-        assert!(filter.include_done);
-    }
-
-    #[test]
     fn task_filter_with_search() {
         let filter = TaskFilter::new().with_search("authentication");
         assert_eq!(filter.search, Some("authentication".to_string()));
@@ -3241,13 +3228,11 @@ mod tests {
             .with_level(Level::Epic)
             .with_priority(Priority::High)
             .with_search("test")
-            .include_done()
             .include_archived();
         assert!(filter.root_only);
         assert_eq!(filter.levels, vec![Level::Epic]);
         assert_eq!(filter.priorities, vec![Priority::High]);
         assert_eq!(filter.search, Some("test".to_string()));
-        assert!(filter.include_done);
         assert!(filter.include_archived);
     }
 

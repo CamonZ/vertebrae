@@ -2,11 +2,10 @@ import { useCallback } from 'react';
 import type { TaskLevel, TaskFilterOptions } from '../../bindings';
 
 export type ViewMode = 'list' | 'tree';
-export type TaskFiltersValue = Omit<TaskFilterOptions, 'include_done'>;
 
 interface TaskFiltersProps {
-  filters: TaskFiltersValue;
-  onFiltersChange: (filters: TaskFiltersValue) => void;
+  filters: TaskFilterOptions;
+  onFiltersChange: (filters: TaskFilterOptions) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
 }

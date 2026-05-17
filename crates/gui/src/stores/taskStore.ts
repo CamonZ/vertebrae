@@ -58,10 +58,6 @@ function taskMatchesFilter(task: Task, filter: TaskFilterOptions | null): boolea
   if (task.archived) return false;
   if (!filter) return true;
 
-  if ((filter.include_done ?? false) === false && task.step_name === "done") {
-    return false;
-  }
-
   if (filter.levels?.length && (!task.level || !filter.levels.includes(task.level))) {
     return false;
   }
