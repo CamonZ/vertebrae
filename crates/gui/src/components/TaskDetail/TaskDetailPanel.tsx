@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import type { TaskLevel, TaskPriority, TaskChangedEvent } from "../../bindings";
+import type { Task, TaskPriority, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
@@ -72,38 +72,6 @@ function getStatusStyles(status: string): {
       return { bg: "bg-error/10", text: "text-error" };
     default:
       return { bg: "bg-bg-tertiary", text: "text-text-muted" };
-  }
-}
-
-/**
- * Get level styling
- */
-function getLevelStyles(level: TaskLevel | null): {
-  bg: string;
-  text: string;
-  border: string;
-} {
-  switch (level) {
-    case "epic":
-      return { bg: "bg-info/10", text: "text-info", border: "border-info/30" };
-    case "ticket":
-      return {
-        bg: "bg-primary/10",
-        text: "text-primary",
-        border: "border-primary/30",
-      };
-    case "task":
-      return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-secondary",
-        border: "border-border",
-      };
-    default:
-      return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-muted",
-        border: "border-border",
-      };
   }
 }
 
@@ -226,6 +194,52 @@ export function TaskDetailPanel({
       .filter((t) => t.dependency_ids?.includes(taskId))
       .map((t) => t.id);
   }, [taskId, allTasks]);
+
+  const [fetchedLevels, setFetchedLevels] = useState<
+    Record<string, Task["level"]>
+  >({});
+  const taskLevelById = useMemo(() => {
+    const map = new Map<string, Task["level"]>();
+    for (const t of allTasks) map.set(t.id, t.level);
+    for (const [id, level] of Object.entries(fetchedLevels)) {
+      if (!map.has(id)) map.set(id, level);
+    }
+    return map;
+  }, [allTasks, fetchedLevels]);
+  const getTaskLevel = useCallback(
+    (id: string) => taskLevelById.get(id) ?? null,
+    [taskLevelById]
+  );
+
+  useEffect(() => {
+    if (!taskData) return;
+    const relationIds = [
+      ...(taskData.parent_id ? [taskData.parent_id] : []),
+      ...(taskData.dependency_ids ?? []),
+      ...dependentIds,
+    ];
+    const missing = relationIds.filter(
+      (id) => !taskLevelById.has(id) && !(id in fetchedLevels)
+    );
+    if (missing.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      missing.map(async (id) => {
+        const result = await commands.getTask(id);
+        return result.status === "ok" ? ([id, result.data.level] as const) : null;
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      const updates: Record<string, Task["level"]> = {};
+      for (const entry of entries) if (entry) updates[entry[0]] = entry[1];
+      if (Object.keys(updates).length > 0) {
+        setFetchedLevels((prev) => ({ ...prev, ...updates }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [taskData, dependentIds, taskLevelById, fetchedLevels]);
 
   // Extract sections by type
   const acceptanceCriteria = useMemo(
@@ -503,7 +517,6 @@ export function TaskDetailPanel({
   const statusStyles = taskData
     ? getStatusStyles(taskData.step_name ?? "unassigned")
     : null;
-  const levelStyles = taskData ? getLevelStyles(taskData.level) : null;
   const priorityStyles = taskData ? getPriorityStyles(taskData.priority) : null;
   const runControlsState = deriveRunControlsState(
     taskData?.run_controls ?? null,
@@ -568,7 +581,7 @@ export function TaskDetailPanel({
   const content = (
     <>
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           {onBack && (
             <button
@@ -879,11 +892,6 @@ export function TaskDetailPanel({
             )}
             {/* Compact badges */}
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span
-                className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles?.bg} ${levelStyles?.text} ${levelStyles?.border}`}
-              >
-                {taskData.level ?? "unknown"}
-              </span>
               {!taskData.workflow_name && (
                 <span
                   className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg} ${statusStyles?.text} ${isExecuting ? "animate-pulse-glow" : ""}`}
@@ -898,7 +906,12 @@ export function TaskDetailPanel({
                   {priorityStyles.indicator}
                 </span>
               )}
-              <IdentityBadge id={taskData.id} kind="task" testId="task-detail-id" />
+              <IdentityBadge
+                id={taskData.id}
+                kind="task"
+                level={taskData.level}
+                testId="task-detail-id"
+              />
             </div>
           </div>
           <div className="px-4 py-3">
@@ -1125,7 +1138,6 @@ export function TaskDetailPanel({
             >
               <div className="space-y-1 px-4 py-2">
                 {children.map((child) => {
-                  const childLevelStyles = getLevelStyles(child.level);
                   const childStepName =
                     child.step_name?.replace("_", " ") ?? null;
 
@@ -1137,11 +1149,13 @@ export function TaskDetailPanel({
                       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-bg-tertiary/50 cursor-pointer"
                       data-testid={`child-task-${child.id}`}
                     >
-                      <span
-                        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider ${childLevelStyles.bg} ${childLevelStyles.text} ${childLevelStyles.border}`}
-                      >
-                        {child.level ?? "?"}
-                      </span>
+                      <IdentityBadge
+                        id={child.id}
+                        kind="task"
+                        level={child.level}
+                        copyable={false}
+                        testId={`child-task-id-${child.id}`}
+                      />
                       <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
                         {child.title}
                       </span>
@@ -1190,6 +1204,7 @@ export function TaskDetailPanel({
               dependsOnIds={taskData.dependency_ids ?? []}
               dependentIds={dependentIds}
               onTaskSelect={onTaskSelect}
+              getTaskLevel={getTaskLevel}
             />
           </CollapsibleSection>
 

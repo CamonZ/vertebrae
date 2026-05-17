@@ -9,6 +9,7 @@ import {
   type UtilizationLevel,
 } from "../../utils/modelContextWindow";
 import { MarkdownContent } from "../shared/MarkdownContent";
+import { ChatInput } from "../ChatInput";
 
 const LEVEL_CLASSES: Record<UtilizationLevel, string> = {
   danger: "border-error/40 bg-error/10 text-error",
@@ -309,21 +310,6 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
     setInputValue("");
   }, [inputValue, isActive, sendMessage]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (isActive) {
-          handleSend();
-        } else if (inputValue.trim()) {
-          startSession(inputValue.trim());
-          setInputValue("");
-        }
-      }
-    },
-    [handleSend, isActive, inputValue, startSession]
-  );
-
   const handleStartSession = useCallback(() => {
     const initialPrompt = inputValue.trim();
     startSession(initialPrompt || undefined);
@@ -476,39 +462,16 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
 
       {/* Input area */}
       <div className="border-t border-border bg-bg-secondary p-3">
-        <div className="flex gap-2">
-          <textarea
-            ref={inputRef}
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              isActive ? "Type a message..." : "Type a message to start..."
-            }
-            className="flex-1 resize-none rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            rows={2}
-          />
-          <button
-            onClick={isActive ? handleSend : handleStartSession}
-            disabled={!inputValue.trim() && !isActive}
-            className="flex h-auto items-center justify-center rounded-lg bg-primary px-3 text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            title={isActive ? "Send message" : "Start session"}
-          >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-              />
-            </svg>
-          </button>
-        </div>
+        <ChatInput
+          ref={inputRef}
+          value={inputValue}
+          onChange={setInputValue}
+          onSubmit={isActive ? handleSend : handleStartSession}
+          canSubmit={isActive || inputValue.trim().length > 0}
+          placeholder={isActive ? "Type a message..." : "Type a message to start..."}
+          buttonTitle={isActive ? "Send message" : "Start session"}
+          buttonAriaLabel={isActive ? "Send message" : "Start session"}
+        />
       </div>
     </div>
   );

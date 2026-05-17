@@ -1,9 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
 import type { Task, Step, TaskLevel } from "../../bindings";
 import { commands } from "../../bindings";
-import type { ViewMode } from "../TaskList";
-import { TaskList, TaskTreeView } from "../TaskList";
-import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
+import { TaskTreeView, ExpandCollapseAllButton } from "../TaskList";
+import { buildTreeFromTasks, collectExpandableIds } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { ResizablePanel } from "../ResizablePanel";
 import type { TaskTreeNode } from "../../types/ui";
@@ -157,7 +156,6 @@ export function FilteredTasksPanel({
   selectedTaskId,
 }: FilteredTasksPanelProps) {
   const [search, setSearch] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("tree");
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   // Use expanded nodes hook to preserve tree collapse state
@@ -175,9 +173,20 @@ export function FilteredTasksPanel({
     return buildTreeFromTasks(filtered);
   }, [tasks, search]);
 
-  const handleViewModeChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-  }, []);
+  const expandableIds = useMemo(
+    () => collectExpandableIds(hierarchy),
+    [hierarchy]
+  );
+  const allExpanded =
+    expandableIds.length > 0 &&
+    expandableIds.every((id) => expandedNodes.isNodeExpanded(id));
+  const handleToggleExpandAll = useCallback(() => {
+    if (allExpanded) {
+      expandedNodes.resetExpandedNodes();
+    } else {
+      expandedNodes.expandAll(expandableIds);
+    }
+  }, [allExpanded, expandableIds, expandedNodes]);
 
   const handleTaskCreated = useCallback(
     (taskId: string) => {
@@ -196,11 +205,10 @@ export function FilteredTasksPanel({
     isActiveRunStatus(t.run_controls?.active_run?.status ?? null)
   ).length;
 
-  // Count total tasks based on view mode
-  const totalTasks =
-    viewMode === "tree" && hierarchy && Array.isArray(hierarchy)
-      ? hierarchy.reduce((count, node) => count + countHierarchyTasks(node), 0)
-      : tasks.length;
+  const totalTasks = hierarchy.reduce(
+    (count, node) => count + countHierarchyTasks(node),
+    0
+  );
 
   return (
     <ResizablePanel
@@ -208,7 +216,7 @@ export function FilteredTasksPanel({
       glowColor="from-primary/0 via-primary/30 to-primary/0"
     >
       {/* Header with step info */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
@@ -304,86 +312,25 @@ export function FilteredTasksPanel({
             </svg>
           </div>
 
-          {/* View mode toggle */}
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-tertiary/50 p-0.5 flex-shrink-0">
-            <button
-              type="button"
-              onClick={() => handleViewModeChange("tree")}
-              className={`flex items-center rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                viewMode === "tree"
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-              aria-label="Tree view"
-              aria-pressed={viewMode === "tree"}
-            >
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-                />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleViewModeChange("list")}
-              className={`flex items-center rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                viewMode === "list"
-                  ? "bg-primary/10 text-primary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-              aria-label="List view"
-              aria-pressed={viewMode === "list"}
-            >
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M4 6h16M4 10h16M4 14h16M4 18h16"
-                />
-              </svg>
-            </button>
-          </div>
+          <ExpandCollapseAllButton
+            allExpanded={allExpanded}
+            onToggle={handleToggleExpandAll}
+            disabled={expandableIds.length === 0}
+          />
         </div>
       </div>
 
-      {/* Task list/tree section */}
+      {/* Task tree section */}
       <div className="flex-1 overflow-auto">
-        {viewMode === "tree" ? (
-          <TaskTreeView
-            hierarchy={hierarchy}
-            isLoading={false}
-            error={null}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={(task) => onTaskSelect?.(task.id)}
-            expandedNodes={expandedNodes}
-            hideStatus
-          />
-        ) : (
-          <TaskList
-            tasks={tasks}
-            isLoading={false}
-            error={null}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={(task) => onTaskSelect?.(task.id)}
-            hideStatus
-          />
-        )}
+        <TaskTreeView
+          hierarchy={hierarchy}
+          isLoading={false}
+          error={null}
+          selectedTaskId={selectedTaskId}
+          onTaskSelect={(task) => onTaskSelect?.(task.id)}
+          expandedNodes={expandedNodes}
+          hideStatus
+        />
       </div>
 
       {/* Footer with task count */}

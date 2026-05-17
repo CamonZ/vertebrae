@@ -816,24 +816,6 @@ describe("StepDetailPanel", () => {
       expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
     });
 
-    it("displays view mode toggle (tree/list) in Tasks tab", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1" })];
-      
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-      
-      await user.click(screen.getByText("Tasks"));
-      
-      // Look for tree and list view buttons
-      const treeButton = screen.getByLabelText("Tree view");
-      const listButton = screen.getByLabelText("List view");
-      
-      expect(treeButton).toBeInTheDocument();
-      expect(listButton).toBeInTheDocument();
-    });
-
     it("filters tasks by search query", async () => {
       const user = userEvent.setup();
       const tasks = [
@@ -854,26 +836,6 @@ describe("StepDetailPanel", () => {
       
       // Should filter the tasks (implementation detail verified via integration)
       expect(searchInput).toHaveValue("Deploy");
-    });
-
-    it("toggles between tree and list view", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1" })];
-      
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-      
-      await user.click(screen.getByText("Tasks"));
-      
-      // Tree view should be active by default
-      expect(screen.getByLabelText("Tree view")).toHaveClass("bg-primary/10");
-      
-      // Click list view
-      await user.click(screen.getByLabelText("List view"));
-      
-      // List view should now be active
-      expect(screen.getByLabelText("List view")).toHaveClass("bg-primary/10");
     });
 
     it("calls onTaskSelect when a task is selected", () => {
@@ -1228,25 +1190,6 @@ describe("StepDetailPanel", () => {
 
       expect(screen.getByTestId("task-tree-node-run-chip-label")).toHaveTextContent(
         "Stopping"
-      );
-    });
-
-    it("renders run chip in list view when an active run is present", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        withActiveRun(createTask({ id: "task-1", title: "Running Task" }), "executing"),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-      await user.click(screen.getByLabelText("List view"));
-
-      expect(screen.getByTestId("task-row-run-chip")).toHaveAttribute(
-        "data-run-status",
-        "executing"
       );
     });
 

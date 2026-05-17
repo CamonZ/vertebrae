@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, waitFor, screen, fireEvent, render } from "../test/test-utils";
+import { act, waitFor, screen, render } from "../test/test-utils";
 import type { TaskStepChangedEvent } from "../bindings";
 import { createMockTask } from "../test/test-utils";
 import { resetProjectScopedStores } from "../stores/projectScopedStores";
@@ -91,8 +91,5 @@ describe("TasksPage realtime task membership", () => {
     });
     expect(screen.queryByText("Todo")).not.toBeInTheDocument();
     expect(mockListTasks).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "List view" }));
-    expect(screen.getByText("Pending review")).toBeInTheDocument();
   });
 });
