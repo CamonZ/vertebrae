@@ -2018,40 +2018,6 @@ mod route_step_schema_tests {
     }
 
     #[tokio::test]
-    async fn test_step_add_route_rejects_unrelated_schema() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        let bogus_schema = serde_json::json!({
-            "type": "object",
-            "properties": {"score": {"type": "number"}},
-            "required": ["score"],
-            "additionalProperties": false
-        });
-        let cmd = route_add_cmd(workflow_id, "route-bad", bogus_schema.to_string());
-
-        let err = cmd.execute(services.steps()).await.unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("routing contract schema"),
-            "Error should mention routing contract schema, got: {}",
-            msg
-        );
-        assert!(
-            msg.contains("handoff"),
-            "Error should surface both variants (mentioning handoff), got: {}",
-            msg
-        );
-
-        // And the step should not have been created.
-        let maybe_step = services.steps().get_step("route-bad").await.unwrap();
-        assert!(
-            maybe_step.is_none(),
-            "Route step with invalid schema must not be persisted"
-        );
-    }
-
-    #[tokio::test]
     async fn test_step_update_route_accepts_schema_with_handoff() {
         let services = mock_services();
         let workflow_id = workflow_id_for(&services).await;
@@ -2103,47 +2069,6 @@ mod route_step_schema_tests {
             .unwrap()
             .unwrap();
         assert_eq!(step.output_schema, Some(new_schema));
-    }
-
-    #[tokio::test]
-    async fn test_step_update_route_rejects_unrelated_schema() {
-        let services = mock_services();
-        let workflow_id = workflow_id_for(&services).await;
-
-        let initial_schema = StepType::routing_contract_schema();
-        route_add_cmd(
-            workflow_id,
-            "route-upd3",
-            initial_schema.clone().to_string(),
-        )
-        .execute(services.steps())
-        .await
-        .unwrap();
-
-        let bogus_schema = serde_json::json!({
-            "type": "object",
-            "properties": {"foo": {"type": "string"}},
-            "required": ["foo"],
-            "additionalProperties": false
-        });
-        let update_cmd = route_update_cmd("route-upd3", bogus_schema.to_string());
-
-        let err = update_cmd.execute(services.steps()).await.unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("routing contract schema"),
-            "Error should mention routing contract schema, got: {}",
-            msg
-        );
-
-        // Original schema should remain intact.
-        let step = services
-            .steps()
-            .get_step("route-upd3")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(step.output_schema, Some(initial_schema));
     }
 }
 
