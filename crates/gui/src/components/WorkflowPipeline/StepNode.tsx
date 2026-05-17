@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import type { Step } from '../../bindings';
+import { formatAgentModelLabel } from '../../utils/agentConfigLabel';
 import { NODE_SIZING, NODE_SHADOW_STYLE, HANDLE_SIZING } from './nodeConstants';
 
 /**
@@ -107,7 +108,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           )}
           {!step.goal && agentConfig?.model && (
             <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
-              {agentConfig.model}
+              {formatAgentModelLabel(agentConfig)}
             </p>
           )}
         </div>

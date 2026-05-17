@@ -11,6 +11,7 @@ import { OpenChatButton } from "../OpenChatButton";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
+import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { LiquidHighlight } from "./LiquidHighlight";
 import { IdentityBadge } from "../shared/EntityId";
 
@@ -703,7 +704,7 @@ export function StepDetailPanel({
               <DetailRow label="Primary">
                 {step.agent_config?.model ? (
                   <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
-                    {step.agent_config.model}
+                    {formatAgentModelLabel(step.agent_config)}
                   </code>
                 ) : (
                   <span className="text-xs italic text-text-muted">Default</span>
