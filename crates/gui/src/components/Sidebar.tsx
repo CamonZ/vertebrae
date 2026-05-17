@@ -78,13 +78,13 @@ function ProjectSwitcher() {
   return (
     <button
       onClick={handleClick}
-      className="flex w-full items-center justify-center border-b border-border px-4 py-3 transition-colors hover:bg-bg-hover"
+      className="flex h-12 w-full shrink-0 items-center justify-center border-b border-border px-4 transition-colors hover:bg-bg-hover"
       title={`Switch project: ${projectName}`}
     >
       {/* Folder icon */}
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
         <svg
-          className="h-4 w-4 text-primary"
+          className="h-5 w-5 text-primary"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -164,12 +164,12 @@ export function Sidebar() {
       <div className="neural-grid pointer-events-none absolute inset-0 opacity-30" />
 
       {/* Logo/Brand area */}
-      <div className="relative flex h-14 items-center justify-center border-b border-border">
+      <div className="relative flex h-12 items-center justify-center border-b border-border">
         {/* Vertebrae logo mark */}
-        <div className="relative flex h-8 w-8 items-center justify-center">
+        <div className="relative flex h-5 w-5 items-center justify-center">
           {/* Spine/vertebrae icon - orange accent */}
           <svg
-            className="h-6 w-6 text-accent"
+            className="h-5 w-5 text-accent"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

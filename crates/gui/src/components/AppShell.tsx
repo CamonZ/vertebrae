@@ -22,10 +22,12 @@ export function AppShell({
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header title={title} subtitle={subtitle} />
-        <ContentArea>{children}</ContentArea>
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <ContentArea>{children}</ContentArea>
+          <LiveChatPanel />
+        </div>
       </div>
       <ChatWindowManager />
-      <LiveChatPanel />
       <ToastContainer />
     </div>
   );
