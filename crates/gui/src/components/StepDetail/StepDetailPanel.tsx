@@ -445,6 +445,7 @@ export function StepDetailPanel({
       <button
         type="button"
         onClick={() => setActiveTab(tab)}
+        data-testid={`step-detail-tab-${tab}`}
         className={`flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
           isActive
             ? "border-b-2 border-primary text-primary"
@@ -453,7 +454,10 @@ export function StepDetailPanel({
       >
         {label}
         {tab === "tasks" && (
-          <span className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary">
+          <span
+            className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary"
+            data-testid="step-detail-tab-tasks-count"
+          >
             {tasks.length}
           </span>
         )}
@@ -465,6 +469,7 @@ export function StepDetailPanel({
     <ResizablePanel
       storageKey="step-detail-panel-width"
       glowColor="from-info/0 via-info/30 to-info/0"
+      testId="step-detail-panel"
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -844,10 +849,15 @@ export function StepDetailPanel({
           </div>
 
           {/* Task list/tree section */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-auto" data-testid="step-detail-tasks-content">
             {tasks.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <p className="text-sm text-text-muted">No tasks assigned to this step</p>
+                <p
+                  className="text-sm text-text-muted"
+                  data-testid="step-detail-tasks-empty"
+                >
+                  No tasks assigned to this step
+                </p>
               </div>
             ) : viewMode === "tree" ? (
               <TaskTreeView

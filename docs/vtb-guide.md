@@ -739,7 +739,6 @@ vtb list --tag backend                # By tag (can repeat)
 vtb list --parent <id>                # Children of a specific parent task
 vtb list --root                       # Only root items (no parent)
 vtb list --search "auth"              # Search title/description (case-insensitive)
-vtb list --all                        # Include done items
 vtb list --include-archived           # Include archived items
 ```
 

@@ -17,6 +17,7 @@ Feature: Step detail panel fetches tasks on demand
     Then the GUI should show "Triage" within 10 seconds
     When I click on the element with test id "step-node-Triage"
     Then the GUI should show "Step Configuration" within 5 seconds
-    When I click on the element containing text "Tasks"
-    Then the GUI should show "First Triage Task" within 10 seconds
-    And the GUI should show "Second Triage Task" within 10 seconds
+    When I click on the element with test id "step-detail-tab-tasks"
+    Then the GUI element with test id "step-detail-tab-tasks-count" should have text "2" within 10 seconds
+    And the GUI element with test id "step-detail-tasks-content" should contain text "First Triage Task" within 10 seconds
+    And the GUI element with test id "step-detail-tasks-content" should contain text "Second Triage Task" within 10 seconds

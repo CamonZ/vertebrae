@@ -633,7 +633,7 @@ pub async fn get_workflow_with_tasks(
     let workflow = workflow_service.get_workflow(&id).await?;
 
     // Get tasks associated with this workflow using the service
-    let filter = vertebrae_core::TaskFilter::new().include_done();
+    let filter = vertebrae_core::TaskFilter::new();
     let all_tasks = service.tasks().list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
@@ -688,9 +688,7 @@ pub async fn get_workflow_with_task_details(
 
     // Query tasks with filter for the workflow
     let query_start = std::time::Instant::now();
-    let filter = vertebrae_core::TaskFilter::new()
-        .include_done()
-        .with_workflow_id(workflow_id_str.clone());
+    let filter = vertebrae_core::TaskFilter::new().with_workflow_id(workflow_id_str.clone());
     let tasks = service.tasks().list_tasks(&filter).await?;
     log::info!(
         "[get_workflow_with_task_details] Fetched {} tasks in {}ms",

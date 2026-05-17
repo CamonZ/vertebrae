@@ -73,10 +73,6 @@ pub struct ListCommand {
     #[arg(long, value_parser = crate::commands::parse_uuid("parent ID"))]
     pub parent: Option<String>,
 
-    /// Include done items (excluded by default)
-    #[arg(long)]
-    pub all: bool,
-
     /// Include archived items (excluded by default)
     #[arg(long)]
     pub include_archived: bool,
@@ -240,11 +236,6 @@ impl ListCommand {
 
         if let Some(ref parent_id) = self.parent {
             filter = filter.children_of(parent_id);
-        }
-
-        // Include done items if --all is specified
-        if self.all {
-            filter = filter.include_done();
         }
 
         // Include archived items if --include-archived is specified

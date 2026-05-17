@@ -13,7 +13,7 @@
  *   - scope    : TaskRun lineage scope ("selected" | "descendants" | "lineage")
  */
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 export interface TraceFilters {
@@ -66,18 +66,12 @@ const FILTER_PARAM_KEYS = [
 
 export function useTraceFilters(): UseTraceFiltersResult {
   const [searchParams, setSearchParams] = useSearchParams();
+  const querySearch = searchParams.get("q") ?? "";
+  const [searchDraft, setSearchDraft] = useState(querySearch);
 
-  const filters = useMemo<TraceFilters>(
-    () => ({
-      status: searchParams.get("status") || null,
-      stepName: searchParams.get("step") || null,
-      model: searchParams.get("model") || null,
-      search: searchParams.get("q") ?? "",
-      rootOnly: searchParams.get("rootOnly") === "1",
-      lineageScope: parseLineageScope(searchParams.get("scope")),
-    }),
-    [searchParams]
-  );
+  useEffect(() => {
+    setSearchDraft(querySearch);
+  }, [querySearch]);
 
   const updateParam = useCallback(
     (key: string, value: string | null) => {
@@ -94,6 +88,28 @@ export function useTraceFilters(): UseTraceFiltersResult {
     [setSearchParams]
   );
 
+  useEffect(() => {
+    if (searchDraft === querySearch) return;
+
+    const timeout = window.setTimeout(() => {
+      updateParam("q", searchDraft);
+    }, 150);
+
+    return () => window.clearTimeout(timeout);
+  }, [querySearch, searchDraft, updateParam]);
+
+  const filters = useMemo<TraceFilters>(
+    () => ({
+      status: searchParams.get("status") || null,
+      stepName: searchParams.get("step") || null,
+      model: searchParams.get("model") || null,
+      search: searchDraft,
+      rootOnly: searchParams.get("rootOnly") === "1",
+      lineageScope: parseLineageScope(searchParams.get("scope")),
+    }),
+    [searchDraft, searchParams]
+  );
+
   const setStatus = useCallback(
     (v: string | null) => updateParam("status", v),
     [updateParam]
@@ -106,10 +122,9 @@ export function useTraceFilters(): UseTraceFiltersResult {
     (v: string | null) => updateParam("model", v),
     [updateParam]
   );
-  const setSearch = useCallback(
-    (v: string) => updateParam("q", v),
-    [updateParam]
-  );
+  const setSearch = useCallback((v: string) => {
+    setSearchDraft(v);
+  }, []);
   const setRootOnly = useCallback(
     (v: boolean) => updateParam("rootOnly", v ? "1" : null),
     [updateParam]

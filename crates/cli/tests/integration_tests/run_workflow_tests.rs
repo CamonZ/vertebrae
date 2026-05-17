@@ -166,7 +166,6 @@ mod run_workflow_command_tests {
             step: None,
             root: false,
             parent: None,
-            all: false,
             include_archived: false,
             search: None,
             flat: false,

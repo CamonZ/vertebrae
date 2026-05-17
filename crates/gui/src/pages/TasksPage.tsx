@@ -11,10 +11,8 @@ import { IdentityBadge } from "../components/shared/EntityId";
 import { isActiveRunStatus } from "../utils/runState";
 import { popOut, stashTask } from "../utils";
 
-type TasksPageFilters = Omit<TaskFilterOptions, "include_done">;
-
 /** Initial filter state for the Tasks page. */
-const INITIAL_FILTERS: TasksPageFilters = {
+const INITIAL_FILTERS: TaskFilterOptions = {
   step_names: null,
   levels: null,
   tags: null,
@@ -41,7 +39,7 @@ function countHierarchyTasks(nodes: TaskTreeNode[]): number {
  */
 export function TasksPage() {
   const [searchParams] = useSearchParams();
-  const [filters, setFilters] = useState<TasksPageFilters>(INITIAL_FILTERS);
+  const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('tree');
 
@@ -59,12 +57,12 @@ export function TasksPage() {
     }
   }, [searchParams]);
 
-  const { tasks, isLoading, error } = useTasks(filters as TaskFilterOptions);
+  const { tasks, isLoading, error } = useTasks(filters);
 
   // Build tree locally from flat task list (no separate API call needed)
   const hierarchy = useMemo(() => buildTreeFromTasks(tasks), [tasks]);
 
-  const handleFiltersChange = useCallback((newFilters: TasksPageFilters) => {
+  const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);
   }, []);
 
