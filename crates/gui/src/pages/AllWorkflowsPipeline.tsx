@@ -13,7 +13,6 @@ import {
   type NodeTypes,
   type EdgeTypes,
   type Connection,
-  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -46,6 +45,9 @@ import {
   type WorkflowZoneNodeData,
   ElkRoutedEdge,
   type ElkRoutedEdgeData,
+  transitionArrowMarker,
+  transitionEdgeStyle,
+  TransitionEdgeMarkers,
   LAYOUT_CONSTANTS,
   calculateWorkflowZoneWidth,
   calculateWorkflowZoneHeight,
@@ -368,6 +370,23 @@ function AllWorkflowsPipelineInner() {
   const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(
     new Set()
   );
+  const [flashingEdgeIds, setFlashingEdgeIds] = useState<Set<string>>(
+    new Set()
+  );
+
+  const stepLocationByStepId = useMemo(() => {
+    const map = new Map<string, { workflowId: string; order: number }>();
+    for (const [wfId, steps] of workflowStepsMap.entries()) {
+      for (const s of steps) {
+        if (s.id) map.set(s.id, { workflowId: wfId, order: s.order ?? 0 });
+      }
+    }
+    return map;
+  }, [workflowStepsMap]);
+  const stepLocationRef = useRef(stepLocationByStepId);
+  useEffect(() => {
+    stepLocationRef.current = stepLocationByStepId;
+  }, [stepLocationByStepId]);
 
   function currentPanelEntry(): PanelEntry | null {
     if (selectedTaskId) return { type: "task", id: selectedTaskId };
@@ -463,6 +482,34 @@ function AllWorkflowsPipelineInner() {
       }
       return newHistory;
     });
+  }, []);
+
+  useEffect(() => {
+    const unlistenPromise = events.taskStepChangedEvent.listen((event) => {
+      const { from_step_id, to_step_id, workflow_id } = event.payload;
+      if (!from_step_id || !to_step_id) return;
+      const fromLoc = stepLocationRef.current.get(from_step_id);
+      const toLoc = stepLocationRef.current.get(to_step_id);
+      if (
+        !fromLoc ||
+        !toLoc ||
+        fromLoc.workflowId !== workflow_id ||
+        toLoc.workflowId !== workflow_id
+      )
+        return;
+      const edgeId = `edge-${workflow_id}-${fromLoc.order}-${toLoc.order}`;
+      setFlashingEdgeIds((prev) => new Set(prev).add(edgeId));
+      setTimeout(() => {
+        setFlashingEdgeIds((prev) => {
+          const next = new Set(prev);
+          next.delete(edgeId);
+          return next;
+        });
+      }, 250);
+    });
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
   }, []);
 
   useEffect(() => {
@@ -653,22 +700,16 @@ function AllWorkflowsPipelineInner() {
         (s.transitions_to || []).forEach((targetStepId) => {
           const targetOrder = stepIdToOrder.get(targetStepId);
           if (targetOrder !== undefined) {
+            const edgeId = `edge-${wf.id}-${s.order}-${targetOrder}`;
+            const isFlashing = flashingEdgeIds.has(edgeId);
             edges.push({
-              id: `edge-${wf.id}-${s.order}-${targetOrder}`,
+              id: edgeId,
               source: `step-${wf.id}-${s.order}`,
               target: `step-${wf.id}-${targetOrder}`,
               type: "smoothstep",
               animated: false,
-              style: {
-                stroke: "rgba(99, 102, 241, 0.5)",
-                strokeWidth: 2,
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: "rgba(99, 102, 241, 0.7)",
-                width: 20,
-                height: 20,
-              },
+              style: transitionEdgeStyle({ selected: isFlashing }),
+              markerEnd: transitionArrowMarker({ selected: isFlashing }),
             });
           }
         });
@@ -711,17 +752,8 @@ function AllWorkflowsPipelineInner() {
             ? ([6, 3] as [number, number])
             : undefined,
           labelBgBorderRadius: !elkEdgePath ? 4 : undefined,
-          style: {
-            stroke: isSelected ? "#f59e0b" : "rgba(251, 146, 60, 0.6)",
-            strokeWidth: isSelected ? 2.5 : 2,
-            strokeDasharray: "5,5",
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: isSelected ? "#f59e0b" : "#a1a1a1",
-            width: 18,
-            height: 18,
-          },
+          style: transitionEdgeStyle({ selected: isSelected, dashed: true }),
+          markerEnd: transitionArrowMarker({ selected: isSelected }),
         });
       });
 
@@ -732,6 +764,7 @@ function AllWorkflowsPipelineInner() {
     workflowTransitions,
     elkEdgePaths,
     selectedTransitionEdgeId,
+    flashingEdgeIds,
   ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
@@ -831,22 +864,21 @@ function AllWorkflowsPipelineInner() {
   return (
     <div className="flex min-h-0 flex-1">
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+        <div className="relative flex h-12 items-center border-b border-border bg-bg-primary px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative flex items-center justify-between">
-            <div>
-              <h1 className="text-lg font-semibold text-text-primary">
-                Workflow Pipelines
-              </h1>
-              <p className="mt-1 text-sm text-text-muted">
-                {pipelineWorkflows.length} workflow
-                {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
-              </p>
-            </div>
+          <div className="relative flex items-center gap-3">
+            <h1 className="text-sm font-semibold text-text-primary">
+              Workflow Pipelines
+            </h1>
+            <span className="font-mono text-xs text-text-muted">
+              {pipelineWorkflows.length} workflow
+              {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
+            </span>
           </div>
         </div>
 
         <div className="flex-1 relative">
+          <TransitionEdgeMarkers />
           <ReactFlow
             nodes={nodes}
             edges={edges}

@@ -243,8 +243,8 @@ describe("StepNode", () => {
 
       const { container } = render(<StepNode {...selectedProps} />);
 
-      // Should have border-primary class when selected
-      const node = container.querySelector(".border-primary");
+      // Should have border-primary/50 class when selected
+      const node = container.querySelector('[class*="border-primary/50"]');
       expect(node).toBeInTheDocument();
     });
   });

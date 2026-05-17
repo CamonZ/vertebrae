@@ -4,6 +4,7 @@ import { useLiveChatStore } from "../../stores/liveChatStore";
 import { detachLiveChat } from "../../utils/detachLiveChat";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { LiveChatHistoryDrawer } from "./LiveChatHistoryDrawer";
+import { ChatInput } from "../ChatInput";
 
 interface LiveChatHeaderProps {
   standalone: boolean;
@@ -23,7 +24,7 @@ function LiveChatHeader({
   onClose,
 }: LiveChatHeaderProps) {
   return (
-    <div className="z-30 flex items-center gap-1 border-b border-border bg-bg-primary px-3 py-2">
+    <div className="z-30 flex h-12 items-center gap-1 border-b border-border bg-bg-primary px-3">
       <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
         Live
       </span>
@@ -176,16 +177,6 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
     await sendMessage(trimmed);
   }, [inputValue, sendDisabled, sendMessage]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void handleSend();
-      }
-    },
-    [handleSend]
-  );
-
   const handleNewChat = useCallback(() => {
     newChat();
     setHistoryOpen(false);
@@ -281,38 +272,16 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
         </div>
       )}
 
-      <div className="flex gap-2 border-t border-border bg-bg-secondary p-3">
-        <textarea
+      <div className="border-t border-border bg-bg-secondary p-3">
+        <ChatInput
           ref={inputRef}
           value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message..."
-          aria-label="Message"
+          onChange={setInputValue}
+          onSubmit={() => void handleSend()}
           disabled={sending || creatingSession}
-          className="flex-1 resize-none rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-          rows={2}
+          canSubmit={!sendDisabled}
+          ariaLabel="Message"
         />
-        <button
-          onClick={() => void handleSend()}
-          disabled={sendDisabled}
-          aria-label="Send message"
-          className="flex h-auto items-center justify-center rounded-lg bg-primary px-3 text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <svg
-            className="h-5 w-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-            />
-          </svg>
-        </button>
       </div>
     </div>
   );

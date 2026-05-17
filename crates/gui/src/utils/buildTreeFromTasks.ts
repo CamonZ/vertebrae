@@ -47,3 +47,18 @@ export function buildTreeFromTasks(tasks: Task[]): TaskTreeNode[] {
 
   return roots.map(buildNode);
 }
+
+/**
+ * Collect IDs of every node in the hierarchy that has children
+ * (i.e., is expandable).
+ */
+export function collectExpandableIds(nodes: TaskTreeNode[]): string[] {
+  const ids: string[] = [];
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      ids.push(node.task.id);
+      ids.push(...collectExpandableIds(node.children));
+    }
+  }
+  return ids;
+}

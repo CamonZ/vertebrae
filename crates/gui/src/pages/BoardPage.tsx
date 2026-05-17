@@ -280,12 +280,11 @@ export function BoardPage() {
     <div className="flex min-h-0 flex-1">
       {/* Main board area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Header section */}
-        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+        {/* Title + filters bar */}
+        <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg-primary px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-
-          <div className="relative mb-4 flex items-center gap-4">
-            <h1 className="text-lg font-semibold text-text-primary">Board</h1>
+          <div className="relative flex shrink-0 items-center gap-3">
+            <h1 className="text-sm font-semibold text-text-primary">Board</h1>
             {totalFiltered > 0 && (
               <span className="font-mono text-xs text-text-muted">
                 {totalFiltered} task{totalFiltered !== 1 ? "s" : ""}
@@ -293,8 +292,7 @@ export function BoardPage() {
             )}
           </div>
 
-          {/* Filter bar */}
-          <div className="relative flex flex-wrap items-center gap-3">
+          <div className="relative flex flex-1 items-center gap-3">
             {/* Search input */}
             <div className="relative min-w-48 flex-1">
               <input
@@ -302,7 +300,7 @@ export function BoardPage() {
                 placeholder="Search tasks by title or ID..."
                 value={search}
                 onChange={handleSearchChange}
-                className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-2 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="h-8 w-full rounded-md border border-border bg-bg-tertiary px-3 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 aria-label="Search tasks by title or ID"
                 data-testid="board-task-search-input"
               />
@@ -323,20 +321,19 @@ export function BoardPage() {
             </div>
 
             {/* Level filter */}
-            <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-tertiary/50 p-1">
-              <div className="flex items-center">
-                <label
-                  htmlFor="board-level-filter"
-                  className="px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted"
-                >
-                  Level
-                </label>
-                <select
-                  id="board-level-filter"
-                  value={levelFilter}
-                  onChange={handleLevelChange}
-                  className="rounded-md border-0 bg-transparent px-2 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
+            <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-tertiary/50 px-1">
+              <label
+                htmlFor="board-level-filter"
+                className="px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted"
+              >
+                Level
+              </label>
+              <select
+                id="board-level-filter"
+                value={levelFilter}
+                onChange={handleLevelChange}
+                className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
                   <option value="">All</option>
                   {LEVEL_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -344,7 +341,6 @@ export function BoardPage() {
                     </option>
                   ))}
                 </select>
-              </div>
             </div>
 
             {/* Clear filters */}

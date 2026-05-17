@@ -4,6 +4,8 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import type { TaskLevel } from "../../bindings";
+import { levelTextColor } from "./TaskLevelLabel";
 
 export type EntityIdKind =
   | "task"
@@ -20,6 +22,15 @@ interface BaseEntityIdProps {
   testId?: string;
   emptyValue?: string;
   copyable?: boolean;
+  level?: TaskLevel | null;
+}
+
+function taskLevelColor(
+  kind: EntityIdKind | undefined,
+  level: TaskLevel | null | undefined
+): string | undefined {
+  if (kind !== "task" || level == null) return undefined;
+  return levelTextColor(level);
 }
 
 interface FormattedEntityIdOptions {
@@ -43,8 +54,12 @@ export function formatEntityId(
   return id.slice(0, options.length ?? 8);
 }
 
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function kindLabel(kind: EntityIdKind): string {
-  return kind.charAt(0).toUpperCase() + kind.slice(1);
+  return capitalize(kind);
 }
 
 function CopyIcon(): ReactNode {
@@ -123,13 +138,14 @@ function EntityIdShell({
   copyClassName,
   emptyValue,
   copyable = true,
+  level,
   children,
 }: BaseEntityIdProps & {
   full?: boolean;
   copyClassName?: string;
   children: ReactNode;
 }): ReactNode {
-  const label = kindLabel(kind);
+  const label = kind === "task" && level ? capitalize(level) : kindLabel(kind);
 
   if (!id) {
     return (
@@ -168,17 +184,17 @@ export function ScanIdentifier({
   testId,
   emptyValue,
   copyable,
+  level,
 }: BaseEntityIdProps): ReactNode {
+  const textColor = taskLevelColor(kind, level) ?? "text-text-muted";
   return (
     <EntityIdShell
       id={id}
       kind={kind}
+      level={level}
       emptyValue={emptyValue}
       copyable={copyable}
-      className={[
-        "font-mono text-xs text-text-muted",
-        className,
-      ]
+      className={["font-mono text-xs", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}
@@ -195,15 +211,19 @@ export function IdentityBadge({
   testId,
   emptyValue,
   copyable,
+  level,
 }: BaseEntityIdProps): ReactNode {
+  const textColor = taskLevelColor(kind, level) ?? "text-text-muted";
   return (
     <EntityIdShell
       id={id}
       kind={kind}
+      level={level}
       emptyValue={emptyValue}
       copyable={copyable}
       className={[
-        "rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px] text-text-muted",
+        "rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px]",
+        textColor,
         className,
       ]
         .filter(Boolean)
@@ -222,17 +242,17 @@ export function NavigableReference({
   testId,
   emptyValue,
   copyable,
+  level,
 }: BaseEntityIdProps): ReactNode {
+  const textColor = taskLevelColor(kind, level) ?? "text-text-secondary";
   return (
     <EntityIdShell
       id={id}
       kind={kind}
+      level={level}
       emptyValue={emptyValue}
       copyable={copyable}
-      className={[
-        "font-mono text-xs text-text-secondary transition-colors",
-        className,
-      ]
+      className={["font-mono text-xs transition-colors", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}
@@ -249,18 +269,18 @@ export function DiagnosticId({
   testId,
   emptyValue,
   copyable,
+  level,
 }: BaseEntityIdProps): ReactNode {
+  const textColor = taskLevelColor(kind, level) ?? "text-text-primary";
   return (
     <EntityIdShell
       id={id}
       kind={kind}
+      level={level}
       full
       emptyValue={emptyValue}
       copyable={copyable}
-      className={[
-        "break-all font-mono text-xs text-text-primary",
-        className,
-      ]
+      className={["break-all font-mono text-xs", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}

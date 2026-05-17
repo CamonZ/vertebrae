@@ -8,9 +8,8 @@ import { ResizablePanel } from "../ResizablePanel";
 import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
 import { OpenChatButton } from "../OpenChatButton";
-import type { ViewMode } from "../TaskList";
-import { TaskList, TaskTreeView } from "../TaskList";
-import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
+import { TaskTreeView, ExpandCollapseAllButton } from "../TaskList";
+import { buildTreeFromTasks, collectExpandableIds } from "../../utils/buildTreeFromTasks";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { LiquidHighlight } from "./LiquidHighlight";
 import { IdentityBadge } from "../shared/EntityId";
@@ -254,7 +253,6 @@ export function StepDetailPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [search, setSearch] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("tree");
 
   // Fetch step data on mount; applyUpdate lets us apply WS payloads without a round-trip
   const { step, applyUpdate } = useStep(stepId);
@@ -273,6 +271,21 @@ export function StepDetailPanel({
       : tasks;
     return buildTreeFromTasks(filtered);
   }, [tasks, search]);
+
+  const expandableIds = useMemo(
+    () => collectExpandableIds(taskHierarchy),
+    [taskHierarchy]
+  );
+  const allExpanded =
+    expandableIds.length > 0 &&
+    expandableIds.every((id) => expandedNodes.isNodeExpanded(id));
+  const handleToggleExpandAll = useCallback(() => {
+    if (allExpanded) {
+      expandedNodes.resetExpandedNodes();
+    } else {
+      expandedNodes.expandAll(expandableIds);
+    }
+  }, [allExpanded, expandableIds, expandedNodes]);
 
   // Apply WS payloads directly — no round-trip needed since the payload is the full entity
   useStepChangeListener({
@@ -472,7 +485,7 @@ export function StepDetailPanel({
       testId="step-detail-panel"
     >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-2">
           {onBack && (
             <button
@@ -790,65 +803,15 @@ export function StepDetailPanel({
                 </svg>
               </div>
 
-              {/* View mode toggle */}
-              <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-tertiary/50 p-0.5 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("tree")}
-                  className={`flex items-center rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                    viewMode === "tree"
-                      ? "bg-primary/10 text-primary"
-                      : "text-text-muted hover:text-text-primary"
-                  }`}
-                  aria-label="Tree view"
-                  aria-pressed={viewMode === "tree"}
-                >
-                  <svg
-                    className="h-3 w-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("list")}
-                  className={`flex items-center rounded-md px-2 py-1 text-xs font-medium transition-all ${
-                    viewMode === "list"
-                      ? "bg-primary/10 text-primary"
-                      : "text-text-muted hover:text-text-primary"
-                  }`}
-                  aria-label="List view"
-                  aria-pressed={viewMode === "list"}
-                >
-                  <svg
-                    className="h-3 w-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M4 6h16M4 10h16M4 14h16M4 18h16"
-                    />
-                  </svg>
-                </button>
-              </div>
+              <ExpandCollapseAllButton
+                allExpanded={allExpanded}
+                onToggle={handleToggleExpandAll}
+                disabled={expandableIds.length === 0}
+              />
             </div>
           </div>
 
-          {/* Task list/tree section */}
+          {/* Task tree section */}
           <div className="flex-1 overflow-auto" data-testid="step-detail-tasks-content">
             {tasks.length === 0 ? (
               <div className="flex items-center justify-center h-full">
@@ -859,7 +822,7 @@ export function StepDetailPanel({
                   No tasks assigned to this step
                 </p>
               </div>
-            ) : viewMode === "tree" ? (
+            ) : (
               <TaskTreeView
                 hierarchy={taskHierarchy}
                 isLoading={false}
@@ -867,15 +830,6 @@ export function StepDetailPanel({
                 selectedTaskId={selectedTaskId}
                 onTaskSelect={(task) => onTaskSelect?.(task.id)}
                 expandedNodes={expandedNodes}
-                hideStatus
-              />
-            ) : (
-              <TaskList
-                tasks={tasks}
-                isLoading={false}
-                error={null}
-                selectedTaskId={selectedTaskId}
-                onTaskSelect={(task) => onTaskSelect?.(task.id)}
                 hideStatus
               />
             )}

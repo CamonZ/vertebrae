@@ -3,9 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task } from "../bindings";
 import type { TaskTreeNode } from "../types/ui";
 import { useTasks } from "../hooks/useTasks";
-import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
+import { buildTreeFromTasks, collectExpandableIds } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
-import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
+import { TaskFilters, TaskTreeView } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
 import { isActiveRunStatus } from "../utils/runState";
@@ -41,7 +41,6 @@ export function TasksPage() {
   const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('tree');
 
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
@@ -98,39 +97,44 @@ export function TasksPage() {
     setSelectedTaskId(null);
   }, [selectedTaskId, tasks]);
 
-  const handleViewModeChange = useCallback((mode: ViewMode) => {
-    setViewMode(mode);
-  }, []);
+  const expandableIds = useMemo(
+    () => collectExpandableIds(hierarchy),
+    [hierarchy]
+  );
+  const allExpanded =
+    expandableIds.length > 0 &&
+    expandableIds.every((id) => expandedNodes.isNodeExpanded(id));
+  const handleToggleExpandAll = useCallback(() => {
+    if (allExpanded) {
+      expandedNodes.resetExpandedNodes();
+    } else {
+      expandedNodes.expandAll(expandableIds);
+    }
+  }, [allExpanded, expandableIds, expandedNodes]);
 
   const activeCount = tasks.filter((t) =>
     isActiveRunStatus(t.run_controls?.active_run?.status ?? null)
   ).length;
 
-  // Determine current loading/error state based on view mode
   const currentIsLoading = isLoading;
   const currentError = error;
 
-  // Calculate task count for footer
-  const taskCount = viewMode === 'tree'
-    ? countHierarchyTasks(hierarchy)
-    : tasks.length;
+  const taskCount = countHierarchyTasks(hierarchy);
 
   return (
     <div className="flex min-h-0 flex-1">
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Header section */}
-        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
-          {/* Neural grid background */}
+        {/* Title + filters bar */}
+        <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg-primary px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-
-          <div className="relative mb-4 flex items-center gap-4">
-            <h1 className="text-lg font-semibold text-text-primary">Tasks</h1>
+          <div className="relative flex shrink-0 items-center gap-3">
+            <h1 className="text-sm font-semibold text-text-primary">Tasks</h1>
             {activeCount > 0 && (
-              <div className="flex items-center gap-2 rounded-full border border-warning/30 bg-warning/10 px-3 py-1">
-                <span className="relative flex h-2 w-2">
+              <div className="flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5">
+                <span className="relative flex h-1.5 w-1.5">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-warning" />
                 </span>
                 <span className="text-xs font-medium text-warning">
                   {activeCount} active
@@ -138,46 +142,35 @@ export function TasksPage() {
               </div>
             )}
           </div>
-
-          {/* Filter controls */}
-          <div className="relative">
+          <div className="relative flex flex-1 items-center">
             <TaskFilters
               filters={filters}
               onFiltersChange={handleFiltersChange}
-              viewMode={viewMode}
-              onViewModeChange={handleViewModeChange}
+              allExpanded={allExpanded}
+              onToggleExpandAll={handleToggleExpandAll}
+              expandAllDisabled={expandableIds.length === 0}
             />
           </div>
         </div>
 
-        {/* Task list/tree section */}
-        <div className="flex-1 overflow-auto bg-bg-primary">
-          {viewMode === 'tree' ? (
-            <TaskTreeView
-              hierarchy={hierarchy}
-              isLoading={isLoading && tasks.length === 0}
-              error={error}
-              selectedTaskId={selectedTaskId}
-              onTaskSelect={handleTaskSelect}
-              expandedNodes={expandedNodes}
-            />
-          ) : (
-            <TaskList
-              tasks={tasks}
-              isLoading={isLoading && tasks.length === 0}
-              error={error}
-              selectedTaskId={selectedTaskId}
-              onTaskSelect={handleTaskSelect}
-            />
-          )}
+        {/* Task tree section */}
+        <div className="flex-1 overflow-auto bg-bg-secondary">
+          <TaskTreeView
+            hierarchy={hierarchy}
+            isLoading={isLoading && tasks.length === 0}
+            error={error}
+            selectedTaskId={selectedTaskId}
+            onTaskSelect={handleTaskSelect}
+            expandedNodes={expandedNodes}
+          />
         </div>
 
         {/* Footer with task count */}
         {!currentIsLoading && !currentError && taskCount > 0 && (
-          <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-6 py-2">
+          <div className="flex items-center justify-between border-t border-border bg-bg-primary px-6 py-2">
             <p className="font-mono text-xs text-text-muted">
               {taskCount} task{taskCount !== 1 ? "s" : ""}
-              {viewMode === 'tree' && hierarchy.length > 0 && (
+              {hierarchy.length > 0 && (
                 <span className="ml-2 text-text-muted/70">
                   ({hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""})
                 </span>

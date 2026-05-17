@@ -430,34 +430,6 @@ describe("Router Acceptance Tests", () => {
       );
     });
 
-    it("switches between tree and list views on TasksPage", async () => {
-      const router = createTestRouter(["/tasks"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>,
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole("button", { name: "Tree view" })).toHaveAttribute(
-          "aria-pressed",
-          "true",
-        );
-      });
-
-      fireEvent.click(screen.getByRole("button", { name: "List view" }));
-
-      expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-      expect(screen.getByRole("button", { name: "Tree view" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      );
-    });
-
     it("renders task IDs as eight-character short IDs in TasksPage", async () => {
       (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
