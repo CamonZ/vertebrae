@@ -14,7 +14,7 @@ use vertebrae_core::models::AgentConfig;
 use crate::actors::step_executor::{
     StepExecutorConfig, build_claude_command_with_settings, log_built_argv,
 };
-use crate::settings_synthesis::SyntheticSettings;
+use crate::settings_synthesis::{SELF_TRANSITION_DENY_TOOLS, SyntheticSettings};
 
 /// How to interpret the child process's stdout stream.
 ///
@@ -188,7 +188,9 @@ fn build_codex_command(
     let step = &config.step_config;
     let agent_config = &step.agent_config;
 
-    cmd.arg("exec").arg("--json");
+    cmd.arg("exec")
+        .arg("--json")
+        .arg("--dangerously-bypass-approvals-and-sandbox");
 
     if let Some(model) = agent_config
         .model
@@ -201,6 +203,15 @@ fn build_codex_command(
     if let Some(reasoning_effort) = reasoning_effort {
         cmd.arg("-c")
             .arg(format!("model_reasoning_effort=\"{reasoning_effort}\""));
+    }
+
+    let deny_tools = SELF_TRANSITION_DENY_TOOLS
+        .iter()
+        .copied()
+        .chain(agent_config.disallowed_tools.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    if let Some(config_override) = codex_prefix_rules_config(&deny_tools) {
+        cmd.arg("-c").arg(config_override);
     }
 
     if let Some(schema) = agent_config.json_schema.as_ref()
@@ -231,6 +242,34 @@ fn build_codex_command(
     }
 
     Ok(cmd)
+}
+
+fn codex_prefix_rules_config(claude_deny_tools: &[&str]) -> Option<String> {
+    let rules = claude_deny_tools
+        .iter()
+        .filter_map(|deny_tool| codex_prefix_rule_from_claude_deny_tool(deny_tool))
+        .collect::<Vec<_>>();
+    if rules.is_empty() {
+        None
+    } else {
+        Some(format!("prefix_rules=[{}]", rules.join(",")))
+    }
+}
+
+fn codex_prefix_rule_from_claude_deny_tool(deny_tool: &str) -> Option<String> {
+    let command = deny_tool.strip_prefix("Bash(")?.strip_suffix(')')?;
+    let command = command.trim_end_matches('*').trim();
+    if command.is_empty() {
+        return None;
+    }
+
+    let prefix_rule = command
+        .split_whitespace()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?
+        .join(",");
+    Some(format!("{{prefix_rule=[{prefix_rule}],decision=\"deny\"}}"))
 }
 
 #[cfg(test)]
@@ -411,12 +450,24 @@ mod tests {
         // First two args define the exec mode.
         assert_eq!(argv.first().map(String::as_str), Some("exec"));
         assert_eq!(argv.get(1).map(String::as_str), Some("--json"));
+        assert!(
+            argv.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()),
+            "Codex must run in daemon-autonomous YOLO mode by default: {argv:?}"
+        );
+        let bypass_idx = argv
+            .iter()
+            .position(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+            .expect("bypass flag must be present");
         // Model comes through.
         let model_idx = argv
             .iter()
             .position(|a| a == "--model")
             .expect("--model must be present");
         assert_eq!(argv[model_idx + 1], "gpt-4o");
+        assert!(
+            bypass_idx < model_idx,
+            "provider-level defaults should be emitted before model-specific args"
+        );
         // Prompt is the trailing positional.
         assert_eq!(argv.last().map(String::as_str), Some("Refactor X"));
 
@@ -429,6 +480,62 @@ mod tests {
             !argv
                 .iter()
                 .any(|arg| arg.contains("model_reasoning_effort"))
+        );
+    }
+
+    #[test]
+    fn openai_provider_mirrors_claude_self_transition_restrictions() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_disallowed_tools(vec!["Bash(rm -rf *)".to_string()]);
+        let config = make_config(agent_config, "do guarded work", "/usr/local/bin/codex");
+
+        let resolved = resolve_provider_command(&config, None).expect("openai resolution");
+        let argv = argv_strings(&resolved.command);
+
+        let config_idx = argv
+            .iter()
+            .position(|a| a == "-c")
+            .expect("Codex command must include prefix-rule config");
+        let config_arg = &argv[config_idx + 1];
+        assert!(
+            config_arg.starts_with("prefix_rules=["),
+            "Codex restrictions must use prefix_rules config, got {config_arg}"
+        );
+        assert!(
+            config_arg.contains(r#"{prefix_rule=["vtb","transition-to"],decision="deny"}"#),
+            "Codex deny rules must block vtb transition-to, got {config_arg}"
+        );
+        assert!(
+            config_arg.contains(r#"{prefix_rule=["vtb","workflow","assign"],decision="deny"}"#),
+            "Codex deny rules must block vtb workflow assign, got {config_arg}"
+        );
+        assert!(
+            config_arg.contains(r#"{prefix_rule=["rm","-rf"],decision="deny"}"#),
+            "Codex deny rules must include Bash-shaped agent_config disallowed_tools, got {config_arg}"
+        );
+        assert_eq!(
+            argv.iter()
+                .filter(|arg| arg.contains("prefix_rules=["))
+                .count(),
+            1,
+            "prefix rules should be emitted as one config override so they are not overwritten"
+        );
+        assert_eq!(argv.last().map(String::as_str), Some("do guarded work"));
+    }
+
+    #[test]
+    fn codex_prefix_rules_support_existing_claude_bash_patterns() {
+        let config_arg = codex_prefix_rules_config(&["Bash(rm*)", r#"Bash(echo "quoted" *)"#])
+            .expect("valid Bash patterns should produce Codex prefix rules");
+
+        assert!(
+            config_arg.contains(r#"{prefix_rule=["rm"],decision="deny"}"#),
+            "Codex deny rules must preserve compact Claude Bash patterns, got {config_arg}"
+        );
+        assert!(
+            config_arg.contains(r#"{prefix_rule=["echo","\"quoted\""],decision="deny"}"#),
+            "Codex deny rules must escape TOML-sensitive command segments, got {config_arg}"
         );
     }
 

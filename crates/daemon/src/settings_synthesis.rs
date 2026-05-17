@@ -14,6 +14,8 @@ use tempfile::TempDir;
 const DENY_HOOK_SCRIPT: &str = include_str!("../resources/deny-self-transition.sh");
 const HOOK_SCRIPT_FILENAME: &str = "deny-self-transition.sh";
 const SETTINGS_FILENAME: &str = "settings.json";
+pub(crate) const SELF_TRANSITION_DENY_TOOLS: &[&str] =
+    &["Bash(vtb transition-to *)", "Bash(vtb workflow assign *)"];
 
 /// A synthesized, per-execution Claude Code settings bundle. The temp
 /// directory it owns is deleted on drop.
@@ -65,10 +67,7 @@ impl SyntheticSettings {
 fn build_settings_json(hook_script: &Path) -> String {
     let settings = json!({
         "permissions": {
-            "deny": [
-                "Bash(vtb transition-to *)",
-                "Bash(vtb workflow assign *)"
-            ]
+            "deny": SELF_TRANSITION_DENY_TOOLS
         },
         "hooks": {
             "PreToolUse": [
