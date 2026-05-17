@@ -1316,7 +1316,6 @@ mod tests {
             Command::List(cmd) => {
                 assert!(cmd.levels.is_empty());
                 assert!(cmd.statuses.is_empty());
-                assert!(!cmd.all);
                 assert!(!cmd.root);
             }
             _ => panic!("Expected List command"),
@@ -1421,13 +1420,7 @@ mod tests {
     #[test]
     fn test_command_list_with_all() {
         let cli = TestCli::try_parse_from(["test", "list", "--all"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::List(cmd) => {
-                assert!(cmd.all);
-            }
-            _ => panic!("Expected List command"),
-        }
+        assert!(cli.is_err());
     }
 
     #[test]

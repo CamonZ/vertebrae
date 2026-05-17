@@ -20,4 +20,4 @@ Feature: Real-time TaskRun updates on task detail
     When I start the task workflow via the CLI
     Then the GUI should show an element with title "Stop the running orchestrator for this task" within 10 seconds
     When I stop the task workflow via the CLI
-    Then the GUI should show a disabled element with title "Stop the running orchestrator for this task" within 10 seconds
+    Then the GUI should show an element with title "Run the entire workflow for this task" within 10 seconds

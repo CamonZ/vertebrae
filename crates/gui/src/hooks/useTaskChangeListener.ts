@@ -41,8 +41,8 @@ interface UseTaskChangeListenerOptions {
 
 /**
  * Hook that listens to TaskChangedEvent from Tauri and applies entity data
- * directly to the task store. No REST refetch is needed since WS payloads
- * carry the full entity.
+ * directly to the task store. If a realtime payload is incomplete, the hook
+ * hydrates the task before reconciling it into the current list.
  *
  * @param options - Configuration options for the listener
  */
@@ -54,33 +54,6 @@ export function useTaskChangeListener(
   const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
-
-  const handleTaskChanged = useCallback(
-    (event: { payload: TaskChangedEvent }) => {
-      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
-
-      const { task_id, change_type, task } = event.payload;
-
-      console.debug(
-        `[TaskChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
-      );
-
-      const toastType =
-        change_type === "Created"
-          ? "success"
-          : change_type === "Deleted"
-            ? "error"
-            : "info";
-      addToast(getTaskChangeMessage(change_type, task_id), toastType);
-
-      if (change_type === "Deleted") {
-        removeTask(task_id);
-      } else if (task) {
-        reconcileTask(task);
-      }
-    },
-    [addToast, reconcileTask, removeTask, projectScopeGeneration]
-  );
 
   const fetchAndReconcileTask = useCallback(
     async (taskId: string) => {
@@ -94,7 +67,7 @@ export function useTaskChangeListener(
           reconcileTask(result.data);
         } else {
           console.warn(
-            `[TaskChangeListener] Failed to refresh task ${taskId.slice(0, 6)} after step change: ${result.error.message}`
+            `[TaskChangeListener] Failed to refresh task ${taskId.slice(0, 6)} after realtime change: ${result.error.message}`
           );
         }
       } finally {
@@ -102,6 +75,39 @@ export function useTaskChangeListener(
       }
     },
     [projectScopeGeneration, reconcileTask]
+  );
+
+  const handleTaskChanged = useCallback(
+    (event: { payload: TaskChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
+      const { task_id, change_type, task, archived } = event.payload;
+
+      console.debug(
+        `[TaskChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
+      );
+
+      const toastType =
+        change_type === "Created"
+          ? "success"
+          : change_type === "Deleted"
+            ? "error"
+            : "info";
+      addToast(getTaskChangeMessage(change_type, task_id), toastType);
+
+      if (change_type === "Deleted" || archived) {
+        removeTask(task_id);
+      } else if (task) {
+        if (!task.workflow_name || !task.step_name) {
+          void fetchAndReconcileTask(task_id);
+        } else {
+          reconcileTask(task);
+        }
+      } else {
+        void fetchAndReconcileTask(task_id);
+      }
+    },
+    [addToast, fetchAndReconcileTask, reconcileTask, removeTask, projectScopeGeneration]
   );
 
   const handleTaskStepChanged = useCallback(

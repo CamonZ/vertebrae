@@ -175,7 +175,6 @@ describe("useTasks", () => {
       tags: null,
       root_only: null,
       children_of: null,
-      include_done: false,
       search: null,
       workflow_id: null,
       step_id: null,
