@@ -394,6 +394,8 @@ pub struct AgentConfig {
     pub model: Option<String>,
     /// Fallback model when default model is overloaded
     pub fallback_model: Option<String>,
+    /// OpenAI/Codex reasoning effort for the configured model
+    pub reasoning_effort: Option<String>,
     /// System prompt to use for the session
     pub system_prompt: Option<String>,
     /// Append a system prompt to the default system prompt
@@ -428,6 +430,7 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
         AgentConfig {
             model: config.model,
             fallback_model: config.fallback_model,
+            reasoning_effort: config.reasoning_effort,
             system_prompt: config.system_prompt,
             append_system_prompt: config.append_system_prompt,
             agents: config.agents.map(|v| v.to_string()),
@@ -1753,6 +1756,16 @@ mod tests {
         let core = vertebrae_core::AgentConfig::new().with_model("claude-opus");
         let gui = AgentConfig::from(core);
         assert_eq!(gui.model, Some("claude-opus".to_string()));
+    }
+
+    #[test]
+    fn agent_config_from_core_with_reasoning_effort() {
+        let core = vertebrae_core::AgentConfig::new()
+            .with_model("gpt-5.5")
+            .with_reasoning_effort("medium");
+        let gui = AgentConfig::from(core);
+        assert_eq!(gui.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(gui.reasoning_effort.as_deref(), Some("medium"));
     }
 
     #[test]

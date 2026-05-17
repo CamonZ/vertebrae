@@ -35,6 +35,7 @@ function createStep(overrides?: Partial<Step>): Step {
     agent_config: {
       model: null,
       fallback_model: null,
+      reasoning_effort: null,
       system_prompt: null,
       append_system_prompt: null,
       tools: [],
