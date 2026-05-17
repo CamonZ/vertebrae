@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
+import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { ResizablePanel } from "../ResizablePanel";
 import { OpenChatButton } from "../OpenChatButton";
 import { Toggle } from "../Toggle";
@@ -282,34 +283,40 @@ export function WorkflowDetailPanel({
             <div className="space-y-2">
               {steps
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                .map((step) => (
-                  <div
-                    key={step.id || step.name}
-                    onClick={() => onStepSelect?.(step)}
-                    className={`flex items-center gap-3 rounded-lg border border-border bg-bg-tertiary p-2 transition-colors ${
-                      onStepSelect
-                        ? "cursor-pointer hover:border-primary/50 hover:bg-bg-hover"
-                        : ""
-                    }`}
-                  >
-                    <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
-                      {(step.order ?? 0) + 1}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-text-primary">
-                        {step.name}
-                      </p>
-                      {step.goal && (
-                        <p className="truncate text-xs text-text-muted">
-                          {step.goal}
+                .map((step) => {
+                  const modelLabel = formatAgentModelLabel(step.agent_config);
+                  return (
+                    <div
+                      key={step.id || step.name}
+                      onClick={() => onStepSelect?.(step)}
+                      className={`flex items-center gap-3 rounded-lg border border-border bg-bg-tertiary p-2 transition-colors ${
+                        onStepSelect
+                          ? "cursor-pointer hover:border-primary/50 hover:bg-bg-hover"
+                          : ""
+                      }`}
+                    >
+                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
+                        {(step.order ?? 0) + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {step.name}
                         </p>
-                      )}
+                        {step.goal && (
+                          <p className="truncate text-xs text-text-muted">
+                            {step.goal}
+                          </p>
+                        )}
+                      </div>
+                      <code
+                        className="max-w-[10rem] shrink truncate rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-text-muted"
+                        title={modelLabel}
+                      >
+                        {modelLabel}
+                      </code>
                     </div>
-                    <code className="flex-shrink-0 rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
-                      {step.agent_config?.model || "default"}
-                    </code>
-                  </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
         )}

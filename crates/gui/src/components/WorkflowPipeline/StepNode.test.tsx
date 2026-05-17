@@ -11,6 +11,7 @@ function createAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
   return {
     model: null,
     fallback_model: null,
+    reasoning_effort: null,
     system_prompt: null,
     append_system_prompt: null,
     agents: null,
@@ -119,6 +120,25 @@ describe("StepNode", () => {
       render(<StepNode {...props} />);
 
       expect(screen.getByText("claude-3-opus")).toBeInTheDocument();
+    });
+
+    it("renders model and reasoning effort as one compact value", () => {
+      const props = createStepNodeProps({
+        step: createStep({
+          name: "Test",
+          order: 0,
+          goal: null,
+          agent_config: createAgentConfig({
+            model: "gpt-5.5",
+            reasoning_effort: "medium",
+          }),
+        }),
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.getByText("gpt-5.5:medium")).toBeInTheDocument();
+      expect(screen.queryByText("medium")).not.toBeInTheDocument();
     });
   });
 

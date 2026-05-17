@@ -868,6 +868,10 @@ model: string | null;
  */
 fallback_model: string | null; 
 /**
+ * OpenAI/Codex reasoning effort for the configured model
+ */
+reasoning_effort: string | null;
+/**
  * System prompt to use for the session
  */
 system_prompt: string | null; 

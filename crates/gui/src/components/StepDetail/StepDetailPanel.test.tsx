@@ -47,6 +47,7 @@ function createStep(overrides?: Partial<Step>): Step {
     agent_config: {
       model: null,
       fallback_model: null,
+      reasoning_effort: null,
       system_prompt: null,
       append_system_prompt: null,
       tools: [],
@@ -289,6 +290,7 @@ describe("StepDetailPanel", () => {
         agent_config: {
           model: "opus",
           fallback_model: null,
+          reasoning_effort: null,
           system_prompt: null,
           append_system_prompt: null,
           tools: ["browser"],
@@ -313,6 +315,50 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.getByText("Model")).toBeInTheDocument();
       expect(screen.getByText("opus")).toBeInTheDocument();
+    });
+
+    it("displays reasoning effort with the primary model when configured", () => {
+      const step = createStep({
+        agent_config: {
+          ...createStep().agent_config!,
+          model: "gpt-5.5",
+          reasoning_effort: "medium",
+        },
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+
+      expect(screen.getByText("gpt-5.5:medium")).toBeInTheDocument();
+      expect(screen.queryByText("medium")).not.toBeInTheDocument();
+    });
+
+    it("does not render a reasoning effort suffix when absent", () => {
+      const step = createStep({
+        agent_config: {
+          ...createStep().agent_config!,
+          model: "gpt-5.5",
+          reasoning_effort: null,
+        },
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+
+      expect(screen.getByText("gpt-5.5")).toBeInTheDocument();
+      expect(screen.queryByText("gpt-5.5:medium")).not.toBeInTheDocument();
     });
 
     it("displays timeline section", () => {
