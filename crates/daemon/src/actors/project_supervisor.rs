@@ -297,6 +297,23 @@ fn attach_resolved_metadata(
     params
 }
 
+fn completed_update_params(
+    output: Option<&String>,
+    agent_config: Option<&AgentConfig>,
+) -> UpdateExecutionStatusParams {
+    let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
+
+    if let Some(text) = output {
+        params = params.with_output(text);
+    }
+
+    if let Some(cfg) = agent_config {
+        params = attach_resolved_metadata(params, cfg);
+    }
+
+    params
+}
+
 /// Stable tracing target for verbose daemon diagnostics.
 ///
 /// Lines emitted under this target are gated behind a step's
@@ -789,24 +806,10 @@ impl ProjectSupervisor {
                     output.is_some(),
                 );
 
-                // Build update params, populating metrics and output when available.
-                let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
-
-                if let Some(m) = metrics {
-                    params = params
-                        .with_input_tokens(m.input_tokens)
-                        .with_output_tokens(m.output_tokens)
-                        .with_cost(m.cost_usd.to_string())
-                        .with_duration_ms(m.duration_ms);
-                }
-
-                if let Some(text) = output {
-                    params = params.with_output(text);
-                }
-
-                if let Some(cfg) = agent_config.as_ref() {
-                    params = attach_resolved_metadata(params, cfg);
-                }
+                // Sacrum derives execution rollups from SessionLog rows. The
+                // daemon only reports terminal status, output, and resolved
+                // provider metadata here to avoid duplicating those rollups.
+                let params = completed_update_params(output.as_ref(), agent_config.as_ref());
 
                 // Report completed status to Sacrum via updateStepExecution.
                 if let Err(e) = state
@@ -1925,5 +1928,36 @@ mod tests {
         assert_eq!(params.output.as_deref(), Some("done"));
         assert_eq!(params.model.as_deref(), Some("claude-sonnet-4-5"));
         assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn completed_update_params_do_not_emit_execution_rollup_metrics() {
+        let output = "final answer".to_string();
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5");
+
+        let params = completed_update_params(Some(&output), Some(&agent_config));
+
+        assert_eq!(params.status, ExecutionStatus::Completed);
+        assert_eq!(params.output.as_deref(), Some("final answer"));
+        assert_eq!(params.model.as_deref(), Some("gpt-5"));
+        assert_eq!(params.model_provider.as_deref(), Some("openai"));
+        assert_eq!(
+            params.input_tokens, None,
+            "daemon finish path must not send Sacrum-derived input token rollups"
+        );
+        assert_eq!(
+            params.output_tokens, None,
+            "daemon finish path must not send Sacrum-derived output token rollups"
+        );
+        assert_eq!(
+            params.cost, None,
+            "daemon finish path must not send Sacrum-derived cost rollups"
+        );
+        assert_eq!(
+            params.duration_ms, None,
+            "daemon finish path must not send Sacrum-derived duration rollups"
+        );
     }
 }
