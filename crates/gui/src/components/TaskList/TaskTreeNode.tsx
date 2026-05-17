@@ -4,8 +4,7 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
 import { deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
-import { ScanIdentifier } from "../shared/EntityId";
-import { TaskLevelLabel } from "../shared/TaskLevelLabel";
+import { IdentityBadge } from "../shared/EntityId";
 
 const ROW_BASE_PADDING_PX = 6;
 const ROW_DEPTH_INDENT_PX = 10;
@@ -191,13 +190,11 @@ export function TaskTreeNode({
           {priorityIndicator?.icon ?? "·"}
         </span>
 
-        {/* Level */}
-        <TaskLevelLabel level={task.level} className="w-12 shrink-0" />
-
         {/* ID + copy */}
-        <ScanIdentifier
+        <IdentityBadge
           id={task.id}
           kind="task"
+          level={task.level}
           className="shrink-0"
           testId="task-tree-node-id"
         />

@@ -19,25 +19,34 @@ describe("KanbanCard", () => {
       expect(screen.queryByText(task.id)).not.toBeInTheDocument();
     });
 
-    it("renders level badge for epic", () => {
+    it("labels the id badge with the level for epic", () => {
       const task = createMockTask({ level: "epic" });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("Epic")).toBeInTheDocument();
+      expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
+        "title",
+        `Epic ID: ${task.id}`
+      );
     });
 
-    it("renders level badge for ticket", () => {
+    it("labels the id badge with the level for ticket", () => {
       const task = createMockTask({ level: "ticket" });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("Ticket")).toBeInTheDocument();
+      expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
+        "title",
+        `Ticket ID: ${task.id}`
+      );
     });
 
-    it("renders level badge for task", () => {
+    it("labels the id badge with the level for task", () => {
       const task = createMockTask({ level: "task" });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("Task")).toBeInTheDocument();
+      expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
+        "title",
+        `Task ID: ${task.id}`
+      );
     });
 
     it("renders workflow name when present", () => {
