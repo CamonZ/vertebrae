@@ -28,7 +28,7 @@ function formatTaskLevel(
   }
 }
 
-function levelTextColor(level: TaskLevel | null): string {
+export function levelTextColor(level: TaskLevel | null): string {
   switch (level) {
     case "epic":
       return "text-info";

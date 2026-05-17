@@ -1,7 +1,6 @@
 import type { KeyboardEvent } from "react";
 import type { Task } from "../../bindings";
-import { ScanIdentifier } from "../shared/EntityId";
-import { TaskLevelLabel } from "../shared/TaskLevelLabel";
+import { IdentityBadge } from "../shared/EntityId";
 
 interface KanbanCardProps {
   task: Task;
@@ -66,15 +65,13 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
           : "border-border bg-bg-primary hover:border-border/80 hover:bg-bg-hover"
       }`}
     >
-      {/* Header: ID and level badge */}
-      <div className="mb-2 flex items-center justify-between">
-        <ScanIdentifier
+      <div className="mb-2 flex items-center">
+        <IdentityBadge
           id={task.id}
           kind="task"
-          className="text-[10px]"
+          level={task.level}
           testId="kanban-card-id"
         />
-        <TaskLevelLabel level={task.level} />
       </div>
 
       {/* Title */}

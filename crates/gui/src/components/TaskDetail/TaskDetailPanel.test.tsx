@@ -571,10 +571,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Level and ID badges", () => {
-    it("shows level badge in title area", () => {
+    it("labels the id badge with the task level", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      expect(screen.getByText("task")).toBeInTheDocument();
+      expect(screen.getByTestId("task-detail-id")).toHaveAttribute(
+        "title",
+        `Task ID: ${mockTaskData.id}`
+      );
     });
 
     it("shows short task ID in title area", () => {
@@ -793,7 +796,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(childrenSection).toHaveTextContent("2");
     });
 
-    it("displays each child with its level badge, title, and step name", () => {
+    it("displays each child with its id badge, title, and step name", () => {
       useTaskStore.getState().setTasks([childTask1, childTask2]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
@@ -802,12 +805,16 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(screen.getByText("Second child task")).toBeInTheDocument();
 
       const child1Element = screen.getByTestId("child-task-child-001");
-      expect(child1Element).toHaveTextContent("task");
+      expect(
+        child1Element.querySelector('[data-testid="child-task-id-child-001"]')
+      ).toHaveAttribute("title", `Task ID: ${childTask1.id}`);
       expect(child1Element).toHaveTextContent("First child task");
       expect(child1Element).toHaveTextContent("in progress");
 
       const child2Element = screen.getByTestId("child-task-child-002");
-      expect(child2Element).toHaveTextContent("ticket");
+      expect(
+        child2Element.querySelector('[data-testid="child-task-id-child-002"]')
+      ).toHaveAttribute("title", `Ticket ID: ${childTask2.id}`);
       expect(child2Element).toHaveTextContent("Second child task");
       expect(child2Element).toHaveTextContent("todo");
     });

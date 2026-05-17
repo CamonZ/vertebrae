@@ -1,3 +1,4 @@
+import type { TaskLevel } from "../../bindings";
 import { NavigableReference } from "../shared/EntityId";
 
 interface DependenciesSummaryProps {
@@ -5,13 +6,16 @@ interface DependenciesSummaryProps {
   dependsOnIds: string[];
   dependentIds: string[];
   onTaskSelect?: (taskId: string) => void;
+  getTaskLevel?: (taskId: string) => TaskLevel | null;
 }
 
 function TaskLink({
   taskId,
+  level,
   onClick,
 }: {
   taskId: string;
+  level: TaskLevel | null;
   onClick?: (taskId: string) => void;
 }) {
   const handleKeyDown = (event: React.KeyboardEvent<HTMLSpanElement>) => {
@@ -27,12 +31,12 @@ function TaskLink({
       tabIndex={0}
       onClick={() => onClick?.(taskId)}
       onKeyDown={handleKeyDown}
-      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-0.5 font-mono text-[11px] text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary cursor-pointer"
-      title={`View task ${taskId}`}
+      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-0.5 transition-colors hover:bg-primary/10 cursor-pointer"
     >
       <NavigableReference
         id={taskId}
         kind="task"
+        level={level}
         className="text-[11px]"
         testId="dependencies-summary-task-id"
       />
@@ -45,11 +49,13 @@ function RelationRow({
   icon,
   taskIds,
   onTaskSelect,
+  getTaskLevel,
 }: {
   label: string;
   icon: React.ReactNode;
   taskIds: string[];
   onTaskSelect?: (taskId: string) => void;
+  getTaskLevel?: (taskId: string) => TaskLevel | null;
 }) {
   if (taskIds.length === 0) return null;
 
@@ -62,7 +68,12 @@ function RelationRow({
         </span>
         <div className="mt-1 flex flex-wrap gap-1.5">
           {taskIds.map((id) => (
-            <TaskLink key={id} taskId={id} onClick={onTaskSelect} />
+            <TaskLink
+              key={id}
+              taskId={id}
+              level={getTaskLevel?.(id) ?? null}
+              onClick={onTaskSelect}
+            />
           ))}
         </div>
       </div>
@@ -75,6 +86,7 @@ export function DependenciesSummary({
   dependsOnIds,
   dependentIds,
   onTaskSelect,
+  getTaskLevel,
 }: DependenciesSummaryProps) {
   const hasAnyRelation =
     parentId !== null || dependsOnIds.length > 0 || dependentIds.length > 0;
@@ -109,6 +121,7 @@ export function DependenciesSummary({
           }
           taskIds={[parentId]}
           onTaskSelect={onTaskSelect}
+          getTaskLevel={getTaskLevel}
         />
       )}
       <RelationRow
@@ -130,6 +143,7 @@ export function DependenciesSummary({
         }
         taskIds={dependsOnIds}
         onTaskSelect={onTaskSelect}
+        getTaskLevel={getTaskLevel}
       />
       <RelationRow
         label="Blocking"
@@ -150,6 +164,7 @@ export function DependenciesSummary({
         }
         taskIds={dependentIds}
         onTaskSelect={onTaskSelect}
+        getTaskLevel={getTaskLevel}
       />
     </div>
   );
