@@ -19,6 +19,7 @@ function createStep(id: string, name: string, order: number): Step {
     agent_config: {
       model: "haiku",
       fallback_model: null,
+      reasoning_effort: null,
       system_prompt: null,
       append_system_prompt: null,
       agents: null,
