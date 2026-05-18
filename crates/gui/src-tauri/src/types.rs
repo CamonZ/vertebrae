@@ -862,6 +862,9 @@ pub struct StepExecution {
     /// Name of the step being executed
     #[serde(default)]
     pub step_name: String,
+    /// Semantic workflow step type, when provided by Sacrum
+    #[serde(default)]
+    pub step_type: Option<String>,
     /// When this step execution started (ISO 8601 string)
     #[serde(default)]
     pub started_at: String,
@@ -934,6 +937,7 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             task_run_id: exec.task_run_id,
             workflow_id: exec.workflow_id,
             step_name: exec.step_name,
+            step_type: exec.step_type,
             started_at: exec.started_at.to_rfc3339(),
             completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
             status: exec.status.into(),
@@ -1865,6 +1869,7 @@ mod tests {
         assert_eq!(gui.task_id, "task1");
         assert_eq!(gui.workflow_id, "wf1");
         assert_eq!(gui.step_name, "review");
+        assert_eq!(gui.step_type, None);
         assert_eq!(gui.status, ExecutionStatus::InProgress);
         assert_eq!(gui.completed_at, None);
     }
@@ -2240,6 +2245,7 @@ mod tests {
             "task_id": "task-001",
             "workflow_id": "wf-001",
             "step_name": "review",
+            "step_type": "human_input",
             "status": "in_progress",
             "started_at": "2026-03-15T10:00:00.000000Z",
             "completed_at": null,
@@ -2252,6 +2258,7 @@ mod tests {
         assert_eq!(exec.task_id, "task-001");
         assert_eq!(exec.workflow_id, "wf-001");
         assert_eq!(exec.step_name, "review");
+        assert_eq!(exec.step_type.as_deref(), Some("human_input"));
         assert_eq!(exec.status, ExecutionStatus::InProgress);
         assert_eq!(exec.started_at, "2026-03-15T10:00:00.000000Z");
         assert_eq!(exec.completed_at, None);
@@ -2268,6 +2275,7 @@ mod tests {
         assert_eq!(exec.task_id, "");
         assert_eq!(exec.workflow_id, "");
         assert_eq!(exec.step_name, "");
+        assert_eq!(exec.step_type, None);
         assert_eq!(exec.status, ExecutionStatus::InProgress);
     }
 

@@ -7,6 +7,7 @@ pub const EXECUTION_FIELDS: &str = r#"
         task_run_id
         workflow_id
         step_name
+        step_type
         status
         context
         prompt

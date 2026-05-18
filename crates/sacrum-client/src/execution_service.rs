@@ -72,6 +72,7 @@ impl SacrumExecutionService {
             task_run_id: response.task_run_id.clone(),
             workflow_id: response.workflow_id.clone(),
             step_name: response.step_name.clone(),
+            step_type: response.step_type.clone(),
             started_at,
             completed_at,
             status,
@@ -437,6 +438,7 @@ mod tests {
             task_run_id: Some("run-1".to_string()),
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
+            step_type: Some("human_input".to_string()),
             status: "completed".to_string(),
             context: Some(serde_json::Value::String("ctx".to_string())),
             prompt: Some("prompt".to_string()),
@@ -460,6 +462,7 @@ mod tests {
         assert_eq!(execution.task_run_id.as_deref(), Some("run-1"));
         assert_eq!(execution.workflow_id, "wf-1");
         assert_eq!(execution.step_name, "review");
+        assert_eq!(execution.step_type.as_deref(), Some("human_input"));
         assert_eq!(execution.status, ExecutionStatus::Completed);
         assert_eq!(execution.context.as_deref(), Some("ctx"));
         assert_eq!(execution.output.as_deref(), Some("output"));
@@ -481,6 +484,7 @@ mod tests {
             task_run_id: None,
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
+            step_type: None,
             status: "in_progress".to_string(),
             context: None,
             prompt: None,
