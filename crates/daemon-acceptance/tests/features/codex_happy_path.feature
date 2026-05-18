@@ -13,7 +13,7 @@ Feature: Codex JSONL step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution output contains "codex-final-answer"
-    And the execution records input_tokens 1700 and output_tokens 800
+    And the execution records input_tokens 1500 and output_tokens 800
 
   Scenario: Codex reasoning effort reaches the CLI before the prompt
     Given a configured daemon test environment
