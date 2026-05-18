@@ -7,6 +7,7 @@ pub const EXECUTION_FIELDS: &str = r#"
         task_run_id
         workflow_id
         step_name
+        step_type
         status
         context
         prompt
@@ -16,6 +17,13 @@ pub const EXECUTION_FIELDS: &str = r#"
         model_provider
         input_tokens
         output_tokens
+        session_input_tokens
+        session_cache_read_input_tokens
+        session_output_tokens
+        session_total_tokens
+        context_window_input_tokens
+        context_window_cache_read_input_tokens
+        context_window_total_tokens
         cost
         duration_ms
         handoff
@@ -53,6 +61,7 @@ pub const SESSION_LOG_FIELDS: &str = r#"
         id
         step_execution_id
         content
+        format
         inserted_at
         updated_at
     }
@@ -226,10 +235,11 @@ pub const LIST_LOGS: &str = r#"
 "#;
 
 pub const CREATE_LOG: &str = r#"
-    mutation CreateLog($step_execution_id: Uuid4!, $content: String!) {
+    mutation CreateLog($step_execution_id: Uuid4!, $content: String!, $format: String) {
         create_session_log(
             step_execution_id: $step_execution_id,
             content: $content
+            format: $format
         ) {
             id
         }

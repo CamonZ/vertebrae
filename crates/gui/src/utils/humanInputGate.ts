@@ -2,6 +2,8 @@ import type { StepExecution, TaskRun } from "../bindings";
 import { safeMs } from "../components/Traces/timeUtils";
 
 const WAIT_CHILDREN_STEP_NAME = "wait_children";
+const WAIT_CHILDREN_STEP_TYPE = "wait_children";
+const HUMAN_INPUT_STEP_TYPE = "human_input";
 
 export type WaitingGateKind = "human_input" | "wait_children";
 
@@ -37,9 +39,18 @@ export function pickLatestExecution(
 export function classifyWaitingRun(
   execution: StepExecution | null
 ): WaitingGateKind {
-  if (execution?.step_name === WAIT_CHILDREN_STEP_NAME) {
+  if (execution?.step_type === WAIT_CHILDREN_STEP_TYPE) {
     return "wait_children";
   }
+  if (execution?.step_type === HUMAN_INPUT_STEP_TYPE) return "human_input";
+
+  // Legacy/minimal payloads may not include step_type. Keep this fallback
+  // deliberately narrow so authored step names remain display-only once the
+  // semantic field is present.
+  if (!execution?.step_type && execution?.step_name === WAIT_CHILDREN_STEP_NAME) {
+    return "wait_children";
+  }
+
   return "human_input";
 }
 
