@@ -62,6 +62,7 @@ export function useTaskRunTrace(
   // resolutions while a fetch is in flight.
   const fetchSeqRef = useRef(0);
   const pendingChildRunRefetchIdsRef = useRef<Set<string>>(new Set());
+  const pendingStepExecutionRefetchIdsRef = useRef<Set<string>>(new Set());
 
   const fetchTrace = useCallback(async () => {
     if (!rootTaskRunId) {
@@ -113,13 +114,24 @@ export function useTaskRunTrace(
           trace: result.data,
           projectScopeGeneration,
         });
-        pendingChildRunRefetchIdsRef.current.clear();
+        prunePendingIds(
+          pendingChildRunRefetchIdsRef.current,
+          result.data.task_runs ?? EMPTY_RUNS,
+          (run) => run.id
+        );
+        prunePendingIds(
+          pendingStepExecutionRefetchIdsRef.current,
+          result.data.step_executions ?? EMPTY_EXECUTIONS,
+          (execution) => execution.id
+        );
       } else {
         traceDebug("fetch error", {
           rootTaskRunId,
           seq,
           error: result.error.message,
         });
+        pendingChildRunRefetchIdsRef.current.clear();
+        pendingStepExecutionRefetchIdsRef.current.clear();
         setError(result.error.message);
         setTraceState(null);
       }
@@ -133,6 +145,8 @@ export function useTaskRunTrace(
           seq,
           error: e instanceof Error ? e.message : String(e),
         });
+        pendingChildRunRefetchIdsRef.current.clear();
+        pendingStepExecutionRefetchIdsRef.current.clear();
         setError(e instanceof Error ? e.message : String(e));
         setTraceState(null);
       }
@@ -160,7 +174,7 @@ export function useTaskRunTrace(
     }
 
     const trace = traceState.trace;
-    const fetchedRunIds = new Set((trace.task_runs ?? []).map((run) => run.id));
+    const fetchedRunIds = getTraceRunIds(trace);
     if (fetchedRunIds.size === 0) return;
 
     const unseenChildRun = liveTaskRuns.find((run) => {
@@ -176,6 +190,34 @@ export function useTaskRunTrace(
     if (pendingChildRunRefetchIdsRef.current.has(unseenChildRun.id)) return;
 
     pendingChildRunRefetchIdsRef.current.add(unseenChildRun.id);
+    fetchTrace();
+    return;
+  }, [fetchTrace, liveTaskRuns, traceState]);
+
+  useEffect(() => {
+    if (!traceState) return;
+    if (!isCurrentProjectScopeGeneration(traceState.projectScopeGeneration)) {
+      return;
+    }
+
+    const trace = traceState.trace;
+    const fetchedRunIds = getTraceRunIds(trace);
+    const fetchedExecutionIds = getTraceExecutionIds(
+      trace.step_executions ?? EMPTY_EXECUTIONS
+    );
+
+    const runWithUnseenLatestExecution = liveTaskRuns.find((run) => {
+      if (!fetchedRunIds.has(run.id)) return false;
+      const executionId = run.latest_step_execution_id;
+      if (!executionId) return false;
+      return !fetchedExecutionIds.has(executionId);
+    });
+
+    const executionId = runWithUnseenLatestExecution?.latest_step_execution_id;
+    if (!executionId) return;
+    if (pendingStepExecutionRefetchIdsRef.current.has(executionId)) return;
+
+    pendingStepExecutionRefetchIdsRef.current.add(executionId);
     fetchTrace();
   }, [fetchTrace, liveTaskRuns, traceState]);
 
@@ -233,6 +275,31 @@ export function useTaskRunTrace(
     error,
     refetch: fetchTrace,
   };
+}
+
+function getTraceRunIds(trace: TaskRunTrace): Set<string> {
+  return new Set((trace.task_runs ?? []).map((run) => run.id));
+}
+
+function getTraceExecutionIds(
+  executions: readonly StepExecution[]
+): Set<string> {
+  return new Set(
+    executions
+      .map((execution) => execution.id)
+      .filter((id): id is string => !!id)
+  );
+}
+
+function prunePendingIds<T>(
+  pendingIds: Set<string>,
+  fetchedItems: readonly T[],
+  getId: (item: T) => string | null | undefined
+) {
+  for (const item of fetchedItems) {
+    const id = getId(item);
+    if (id) pendingIds.delete(id);
+  }
 }
 
 function mergeTaskRuns(
