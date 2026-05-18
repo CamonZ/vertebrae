@@ -251,6 +251,8 @@ pub struct StepExecutionResponse {
     pub task_run_id: Option<String>,
     pub workflow_id: String,
     pub step_name: String,
+    #[serde(default)]
+    pub step_type: Option<String>,
     pub status: String,
     #[serde(default)]
     pub context: Option<serde_json::Value>,

@@ -1535,6 +1535,10 @@ pub struct StepExecution {
     /// Step name
     pub step_name: String,
 
+    /// Semantic workflow step type, when provided by Sacrum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_type: Option<String>,
+
     /// When execution started
     pub started_at: DateTime<Utc>,
 
@@ -1605,6 +1609,7 @@ impl StepExecution {
             task_run_id: None,
             workflow_id: workflow_id.into(),
             step_name: step_name.into(),
+            step_type: None,
             started_at: Utc::now(),
             completed_at: None,
             status: ExecutionStatus::InProgress,
@@ -1741,6 +1746,7 @@ impl PartialEq for StepExecution {
             && self.task_run_id == other.task_run_id
             && self.workflow_id == other.workflow_id
             && self.step_name == other.step_name
+            && self.step_type == other.step_type
             && self.status == other.status
     }
 }
