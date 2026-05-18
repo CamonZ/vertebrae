@@ -33,8 +33,16 @@ pub async fn output_contains(world: &mut DaemonWorld, needle: String) {
 #[then(expr = "the execution records input_tokens {int} and output_tokens {int}")]
 pub async fn records_tokens(world: &mut DaemonWorld, input: i64, output: i64) {
     let exec = last_execution(world);
-    assert_eq!(exec.input_tokens, Some(input), "unexpected input_tokens");
-    assert_eq!(exec.output_tokens, Some(output), "unexpected output_tokens");
+    assert_eq!(
+        exec.effective_input_tokens(),
+        Some(input),
+        "unexpected input_tokens"
+    );
+    assert_eq!(
+        exec.effective_output_tokens(),
+        Some(output),
+        "unexpected output_tokens"
+    );
 }
 
 #[then("the execution records positive duration_ms")]

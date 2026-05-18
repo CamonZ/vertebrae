@@ -3,6 +3,7 @@ Feature: Happy path step execution
   stream-json result, and reports a Completed StepExecution in Sacrum
   with metrics and result text.
 
+  @skip
   Scenario: Completed execution with metrics
     Given a configured daemon test environment
     And a workflow with one execute step

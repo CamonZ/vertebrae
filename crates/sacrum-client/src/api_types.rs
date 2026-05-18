@@ -270,6 +270,20 @@ pub struct StepExecutionResponse {
     pub input_tokens: Option<i64>,
     #[serde(default)]
     pub output_tokens: Option<i64>,
+    #[serde(default)]
+    pub session_input_tokens: Option<i64>,
+    #[serde(default)]
+    pub session_cache_read_input_tokens: Option<i64>,
+    #[serde(default)]
+    pub session_output_tokens: Option<i64>,
+    #[serde(default)]
+    pub session_total_tokens: Option<i64>,
+    #[serde(default)]
+    pub context_window_input_tokens: Option<i64>,
+    #[serde(default)]
+    pub context_window_cache_read_input_tokens: Option<i64>,
+    #[serde(default)]
+    pub context_window_total_tokens: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_f64_from_string")]
     pub cost: Option<f64>,
     #[serde(default)]
@@ -280,6 +294,43 @@ pub struct StepExecutionResponse {
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+impl StepExecutionResponse {
+    pub fn effective_input_tokens(&self) -> Option<i64> {
+        self.input_tokens
+            .or(self.session_input_tokens)
+            .or(self.context_window_input_tokens)
+            .or_else(|| {
+                match (
+                    self.session_total_tokens,
+                    self.session_output_tokens,
+                    self.context_window_total_tokens,
+                    self.context_window_cache_read_input_tokens,
+                ) {
+                    (Some(total), Some(output), _, _) => Some(total - output),
+                    (None, None, Some(total), Some(cached)) => Some(total - cached),
+                    (None, None, Some(total), None) => Some(total),
+                    _ => None,
+                }
+            })
+    }
+
+    pub fn effective_output_tokens(&self) -> Option<i64> {
+        self.output_tokens
+            .or(self.session_output_tokens)
+            .or_else(|| {
+                match (
+                    self.context_window_total_tokens,
+                    self.context_window_input_tokens,
+                    self.context_window_cache_read_input_tokens,
+                ) {
+                    (Some(total), Some(input), Some(cached)) => Some(total - input - cached),
+                    (Some(total), Some(input), None) => Some(total - input),
+                    _ => None,
+                }
+            })
+    }
 }
 
 /// TaskRun response from Sacrum API (matches TaskRun GraphQL fields).
@@ -349,6 +400,8 @@ pub struct SessionLogResponse {
     pub id: String,
     pub step_execution_id: String,
     pub content: String,
+    #[serde(default)]
+    pub format: Option<String>,
     #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]

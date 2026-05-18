@@ -183,7 +183,13 @@ impl StepType {
     /// instead. Both shapes are accepted by the Sacrum validator.
     pub fn routing_contract_schema() -> serde_json::Value {
         let mut schema = Self::routing_contract_schema_without_handoff();
-        schema["properties"]["handoff"] = serde_json::json!({"type": "object"});
+        schema["properties"]["handoff"] = serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": false
+        });
+        schema["required"] = serde_json::json!(["transition_to", "transition_type", "handoff"]);
         schema
     }
 
@@ -1907,6 +1913,10 @@ pub struct SessionLog {
     /// Log content
     pub content: String,
 
+    /// Log format, e.g. stream-json or openai
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+
     /// When created
     #[serde(alias = "inserted_at")]
     pub created_at: DateTime<Utc>,
@@ -1919,8 +1929,15 @@ impl SessionLog {
             id: None,
             step_execution_id: step_execution_id.into(),
             content: content.into(),
+            format: None,
             created_at: Utc::now(),
         }
+    }
+
+    /// Set log format
+    pub fn with_format(mut self, format: impl Into<String>) -> Self {
+        self.format = Some(format.into());
+        self
     }
 
     /// Set creation time
@@ -2663,9 +2680,14 @@ mod tests {
             "properties": {
                 "transition_to": {"type": "string"},
                 "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]},
-                "handoff": {"type": "object"}
+                "handoff": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": false
+                }
             },
-            "required": ["transition_to", "transition_type"],
+            "required": ["transition_to", "transition_type", "handoff"],
             "additionalProperties": false
         });
         assert_eq!(schema, expected);
