@@ -529,6 +529,61 @@ describe("TracesPage with TaskRun history", () => {
     );
   });
 
+  it("renders a newly started TaskRun trace step and log while the view stays mounted", () => {
+    const activeRun = makeRun({
+      id: "run-active",
+      status: "executing",
+      root_task_run_id: "run-active",
+      latest_step_execution_id: "trace-ex-1",
+    });
+    mockRuns = [activeRun];
+    mockTraceRuns = [activeRun];
+    mockResolve = () => ({ run: activeRun, source: "active" });
+    mockTraceExecutions = [
+      createMockStepExecution({
+        id: "trace-ex-1",
+        task_id: "root",
+        task_run_id: "run-active",
+        step_name: "execute",
+      }),
+    ];
+    mockTraceLogs = [makeLog("trace-ex-1", "initial trace log")];
+
+    renderAt("/traces/root?runId=run-active");
+
+    expect(screen.getByText(/initial trace log/)).toBeTruthy();
+    expect(screen.queryByText(/second step log/)).toBeNull();
+
+    act(() => {
+      mockTraceRuns = [
+        {
+          ...activeRun,
+          latest_step_execution_id: "trace-ex-2",
+        },
+      ];
+      mockTraceExecutions = [
+        ...mockTraceExecutions,
+        createMockStepExecution({
+          id: "trace-ex-2",
+          task_id: "root",
+          task_run_id: "run-active",
+          step_name: "evaluate",
+        }),
+      ];
+      useSessionLogStore
+        .getState()
+        .appendLog("trace-ex-2", makeLog("trace-ex-2", "second step log"));
+    });
+
+    expect(screen.getByText(/second step log/)).toBeTruthy();
+    expect(currentSearchParams().get("runId")).toBe("run-active");
+    const segments = screen
+      .queryAllByTestId("unified-chat-event")
+      .map((el) => el.getAttribute("data-execution-id"));
+    expect(segments).toContain("trace-ex-1");
+    expect(segments).toContain("trace-ex-2");
+  });
+
   it("clicking a child run from the trace rail scopes THREAD and flight strip to that child", () => {
     const rootRun = makeRun({
       id: "run-root",
