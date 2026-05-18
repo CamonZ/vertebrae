@@ -1280,6 +1280,10 @@ workflow_id?: string;
  */
 step_name?: string; 
 /**
+ * Semantic workflow step type, when provided by Sacrum
+ */
+step_type?: string | null;
+/**
  * When this step execution started (ISO 8601 string)
  */
 started_at?: string; 

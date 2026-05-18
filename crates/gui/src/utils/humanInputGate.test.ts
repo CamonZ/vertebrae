@@ -30,12 +30,14 @@ function makeRun(overrides: Partial<TaskRun> & { id: string }): TaskRun {
 function makeExec(
   overrides: Partial<StepExecution> & { id: string }
 ): StepExecution {
+  const hasStepType = Object.prototype.hasOwnProperty.call(overrides, "step_type");
   return {
     id: overrides.id,
     task_id: overrides.task_id ?? "task-1",
     task_run_id: overrides.task_run_id ?? "run-1",
     workflow_id: overrides.workflow_id ?? "wf-1",
     step_name: overrides.step_name ?? "implement",
+    step_type: hasStepType ? overrides.step_type : "human_input",
     started_at: overrides.started_at ?? "2026-05-08T10:00:00Z",
     completed_at: overrides.completed_at ?? null,
     status: overrides.status ?? "in_progress",
@@ -55,15 +57,45 @@ function makeExec(
 }
 
 describe("classifyWaitingRun", () => {
-  it("classifies wait_children executions as wait_children", () => {
-    const exec = makeExec({ id: "e-1", step_name: "wait_children" });
+  it("classifies wait_children executions by step_type even with a custom step name", () => {
+    const exec = makeExec({
+      id: "e-1",
+      step_name: "wait",
+      step_type: "wait_children",
+    });
     expect(classifyWaitingRun(exec)).toBe("wait_children");
   });
 
-  it("classifies any other step name as human_input", () => {
-    expect(classifyWaitingRun(makeExec({ id: "e-1", step_name: "review" }))).toBe(
-      "human_input"
-    );
+  it("classifies human_input executions by step_type independent of step name", () => {
+    expect(
+      classifyWaitingRun(
+        makeExec({
+          id: "e-1",
+          step_name: "wait_children",
+          step_type: "human_input",
+        })
+      )
+    ).toBe("human_input");
+  });
+
+  it("uses a narrow wait_children step_name fallback for legacy payloads without step_type", () => {
+    expect(
+      classifyWaitingRun(
+        makeExec({
+          id: "e-1",
+          step_name: "wait_children",
+          step_type: undefined,
+        })
+      )
+    ).toBe("wait_children");
+  });
+
+  it("defaults absent or legacy non-wait_children payloads to human_input", () => {
+    expect(
+      classifyWaitingRun(
+        makeExec({ id: "e-1", step_name: "review", step_type: undefined })
+      )
+    ).toBe("human_input");
     expect(classifyWaitingRun(null)).toBe("human_input");
   });
 });
@@ -120,7 +152,11 @@ describe("resolveHumanInputGate", () => {
       status: "waiting",
       latest_step_execution_id: "e-1",
     });
-    const exec = makeExec({ id: "e-1", step_name: "wait_children" });
+    const exec = makeExec({
+      id: "e-1",
+      step_name: "wait",
+      step_type: "wait_children",
+    });
     expect(resolveHumanInputGate(run, [exec])).toBeNull();
   });
 

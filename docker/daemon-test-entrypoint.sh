@@ -41,6 +41,7 @@ mkdir -p "${MOCK_OUTPUT_DIR}"
 export VTB_URL VTB_TOKEN MOCK_OUTPUT_DIR
 export CLAUDE_CODE_PATH=/usr/local/bin/mock-claude
 export CODEX_PATH=/usr/local/bin/mock-codex
+export CUCUMBER_FILTER_TAGS="${CUCUMBER_FILTER_TAGS:-not @skip}"
 
 echo "==> Running daemon-acceptance tests..."
 cargo test -p daemon-acceptance --test daemon_acceptance

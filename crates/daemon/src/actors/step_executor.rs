@@ -582,7 +582,12 @@ impl StepExecutor {
                                 }
                             }
 
-                            let log = SessionLog::new(execution_id.clone(), line);
+                            let log_format = match parser_kind {
+                                ParserKind::CodexJsonl => "openai",
+                                ParserKind::StreamJson => "anthropic",
+                            };
+                            let log =
+                                SessionLog::new(execution_id.clone(), line).with_format(log_format);
 
                             if let Err(e) = execution_service.add_log(log).await {
                                 tracing::warn!(

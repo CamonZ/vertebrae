@@ -37,6 +37,7 @@ const makeExec = (overrides: Partial<StepExecution> & { id: string; task_id: str
   task_id: overrides.task_id,
   workflow_id: overrides.workflow_id ?? "wf-1",
   step_name: overrides.step_name ?? "implement",
+  step_type: overrides.step_type ?? "human_input",
   started_at: overrides.started_at ?? "2024-01-01T10:00:00.000Z",
   completed_at: overrides.completed_at ?? null,
   status: overrides.status ?? "completed",
@@ -800,13 +801,14 @@ describe("UnifiedChatView", () => {
       expect(screen.getByTestId("human-input-gate-stop")).toBeEnabled();
     });
 
-    it("does not render the gate for wait_children waiting runs", () => {
+    it("does not render the gate for wait_children waiting runs with custom step names", () => {
       const tasks = [makeTask({ id: "t-root" })];
       const exec = makeExec({
         id: "exec-wait",
         task_id: "t-root",
         task_run_id: "run-1",
-        step_name: "wait_children",
+        step_name: "wait",
+        step_type: "wait_children",
       });
       const projection = makeRunProjection([
         {
@@ -830,6 +832,35 @@ describe("UnifiedChatView", () => {
         />
       );
       expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
+    });
+
+    it("renders the gate for human_input even when the display step name is wait_children", () => {
+      const tasks = [makeTask({ id: "t-root" })];
+      const exec = makeExec({
+        id: "exec-wait",
+        task_id: "t-root",
+        task_run_id: "run-1",
+        step_name: "wait_children",
+        step_type: "human_input",
+      });
+      const projection = makeRunProjection([
+        {
+          id: "run-1",
+          status: "waiting",
+          executions: [exec],
+          latestExecutionId: "exec-wait",
+        },
+      ]);
+      render(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[exec]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={{}}
+        />
+      );
+      expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
     });
 
     it("renders the gate even when there are no events yet", () => {

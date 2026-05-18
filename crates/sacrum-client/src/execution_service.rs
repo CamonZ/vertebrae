@@ -72,6 +72,7 @@ impl SacrumExecutionService {
             task_run_id: response.task_run_id.clone(),
             workflow_id: response.workflow_id.clone(),
             step_name: response.step_name.clone(),
+            step_type: response.step_type.clone(),
             started_at,
             completed_at,
             status,
@@ -81,13 +82,14 @@ impl SacrumExecutionService {
             transition_result: response.transition_result.clone(),
             model_used: response.model.clone(),
             session_id: None,
-            token_usage: (response.input_tokens.is_some() || response.output_tokens.is_some())
-                .then(|| {
-                    vertebrae_core::TokenUsage::new(
-                        response.input_tokens.unwrap_or(0).max(0) as u64,
-                        response.output_tokens.unwrap_or(0).max(0) as u64,
-                    )
-                }),
+            token_usage: (response.effective_input_tokens().is_some()
+                || response.effective_output_tokens().is_some())
+            .then(|| {
+                vertebrae_core::TokenUsage::new(
+                    response.effective_input_tokens().unwrap_or(0).max(0) as u64,
+                    response.effective_output_tokens().unwrap_or(0).max(0) as u64,
+                )
+            }),
             cost_usd: response.cost,
             duration_ms: response.duration_ms.map(|v| v as u64),
             model_provider: response.model_provider.clone(),
@@ -124,6 +126,7 @@ impl SacrumExecutionService {
             id: Some(response.id.clone()),
             step_execution_id: response.step_execution_id.clone(),
             content: response.content.clone(),
+            format: response.format.clone(),
             created_at,
         }
     }
@@ -250,6 +253,7 @@ impl ExecutionService for SacrumExecutionService {
         let variables = json!({
             "step_execution_id": log.step_execution_id,
             "content": log.content,
+            "format": log.format,
         });
 
         let result: IdOnly = self
@@ -437,6 +441,7 @@ mod tests {
             task_run_id: Some("run-1".to_string()),
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
+            step_type: Some("human_input".to_string()),
             status: "completed".to_string(),
             context: Some(serde_json::Value::String("ctx".to_string())),
             prompt: Some("prompt".to_string()),
@@ -446,6 +451,13 @@ mod tests {
             model_provider: None,
             input_tokens: Some(1000),
             output_tokens: Some(500),
+            session_input_tokens: None,
+            session_cache_read_input_tokens: None,
+            session_output_tokens: None,
+            session_total_tokens: None,
+            context_window_input_tokens: None,
+            context_window_cache_read_input_tokens: None,
+            context_window_total_tokens: None,
             cost: Some(0.05),
             duration_ms: Some(1500),
             handoff: Some(serde_json::json!({"to": "next-task"})),
@@ -460,6 +472,7 @@ mod tests {
         assert_eq!(execution.task_run_id.as_deref(), Some("run-1"));
         assert_eq!(execution.workflow_id, "wf-1");
         assert_eq!(execution.step_name, "review");
+        assert_eq!(execution.step_type.as_deref(), Some("human_input"));
         assert_eq!(execution.status, ExecutionStatus::Completed);
         assert_eq!(execution.context.as_deref(), Some("ctx"));
         assert_eq!(execution.output.as_deref(), Some("output"));
@@ -481,6 +494,7 @@ mod tests {
             task_run_id: None,
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
+            step_type: None,
             status: "in_progress".to_string(),
             context: None,
             prompt: None,
@@ -490,6 +504,13 @@ mod tests {
             model_provider: None,
             input_tokens: None,
             output_tokens: None,
+            session_input_tokens: None,
+            session_cache_read_input_tokens: None,
+            session_output_tokens: None,
+            session_total_tokens: None,
+            context_window_input_tokens: None,
+            context_window_cache_read_input_tokens: None,
+            context_window_total_tokens: None,
             cost: None,
             duration_ms: None,
             handoff: None,
@@ -506,11 +527,51 @@ mod tests {
     }
 
     #[test]
+    fn test_response_to_execution_uses_session_token_rollups() {
+        let response = StepExecutionResponse {
+            id: "exec-3".to_string(),
+            task_id: "task-1".to_string(),
+            task_run_id: None,
+            workflow_id: "wf-1".to_string(),
+            step_name: "implement".to_string(),
+            step_type: None,
+            status: "completed".to_string(),
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model: None,
+            model_provider: None,
+            input_tokens: None,
+            output_tokens: None,
+            session_input_tokens: Some(1200),
+            session_cache_read_input_tokens: Some(300),
+            session_output_tokens: Some(200),
+            session_total_tokens: Some(1700),
+            context_window_input_tokens: None,
+            context_window_cache_read_input_tokens: None,
+            context_window_total_tokens: None,
+            cost: None,
+            duration_ms: None,
+            handoff: None,
+            inserted_at: None,
+            updated_at: None,
+        };
+
+        let execution = SacrumExecutionService::response_to_execution(&response);
+
+        let token_usage = execution.token_usage.expect("token_usage populated");
+        assert_eq!(token_usage.input_tokens, 1200);
+        assert_eq!(token_usage.output_tokens, 200);
+    }
+
+    #[test]
     fn test_response_to_log_conversion() {
         let response = SessionLogResponse {
             id: "log-1".to_string(),
             step_execution_id: "exec-1".to_string(),
             content: "Log content".to_string(),
+            format: Some("openai".to_string()),
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
             updated_at: None,
         };
@@ -520,6 +581,7 @@ mod tests {
         assert_eq!(log.id, Some("log-1".to_string()));
         assert_eq!(log.step_execution_id, "exec-1");
         assert_eq!(log.content, "Log content");
+        assert_eq!(log.format.as_deref(), Some("openai"));
     }
 
     #[test]

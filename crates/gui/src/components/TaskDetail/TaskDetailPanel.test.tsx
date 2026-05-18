@@ -892,7 +892,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     function execFor(
       runId: string,
       execId: string,
-      overrides: Partial<{ step_name: string; prompt: string | null }> = {}
+      overrides: Partial<{
+        step_name: string;
+        step_type: string | null;
+        prompt: string | null;
+      }> = {}
     ) {
       return {
         id: execId,
@@ -900,6 +904,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         task_run_id: runId,
         workflow_id: "wf-1",
         step_name: overrides.step_name ?? "approval",
+        step_type: overrides.step_type ?? "human_input",
         started_at: "2026-05-08T10:00:00Z",
         completed_at: null,
         status: "in_progress" as const,
@@ -982,12 +987,26 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(gate.textContent ?? "").not.toMatch(/bypass\b/i);
     });
 
-    it("does not render the gate for wait_children waiting runs", () => {
+    it("does not render the gate for wait_children waiting runs with custom step names", () => {
       mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-1", "exec-wait-1", { step_name: "wait_children" }),
+        execFor("run-wait-1", "exec-wait-1", {
+          step_name: "wait",
+          step_type: "wait_children",
+        }),
       ];
       renderWithTaskOverrides({ run_controls: waitingControls() });
       expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
+    });
+
+    it("renders the gate for human_input even when the display step name is wait_children", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1", {
+          step_name: "wait_children",
+          step_type: "human_input",
+        }),
+      ];
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+      expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
     });
 
     it("does not render the gate when there is no active run", () => {
