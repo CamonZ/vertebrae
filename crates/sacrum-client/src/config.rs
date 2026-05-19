@@ -175,13 +175,27 @@ impl SacrumConfig {
 /// Worktree paths do not prefix the main repo path, so configured project paths
 /// would never match. `git rev-parse --git-common-dir` returns the main repo's
 /// `.git` directory even from a worktree; stripping `/.git` yields the main root.
-/// Non-colocated JJ workspaces do not expose Git metadata to the working copy,
-/// so fall back to `jj root` only after Git resolution fails.
+/// Non-colocated JJ workspaces usually do not expose Git metadata to the working
+/// copy, but they can still live under an unrelated ancestor Git repository.
+/// In that case Git succeeds with the wrong root, so use `jj root` when it
+/// identifies a closer workspace root nested below the Git root.
 /// Falls back to the input `cwd` when not in a repo or VCS tools are unavailable.
 fn resolve_project_root_at(cwd: &Path) -> PathBuf {
-    resolve_git_project_root_at(cwd)
-        .or_else(|| resolve_jj_project_root_at(cwd))
-        .unwrap_or_else(|| cwd.to_path_buf())
+    let git_root = resolve_git_project_root_at(cwd);
+    let jj_root = resolve_jj_project_root_at(cwd);
+
+    match (git_root, jj_root) {
+        (Some(git_root), Some(jj_root)) if should_prefer_jj_root(cwd, &git_root, &jj_root) => {
+            jj_root
+        }
+        (Some(git_root), _) => git_root,
+        (None, Some(jj_root)) => jj_root,
+        (None, None) => cwd.to_path_buf(),
+    }
+}
+
+fn should_prefer_jj_root(cwd: &Path, git_root: &Path, jj_root: &Path) -> bool {
+    jj_root != git_root && cwd.starts_with(jj_root) && jj_root.starts_with(git_root)
 }
 
 fn resolve_git_project_root_at(cwd: &Path) -> Option<PathBuf> {
@@ -906,6 +920,31 @@ path = "/Users/test/other"
 
         assert_eq!(resolve_git_project_root_at(&subdir), None);
         assert_eq!(resolve_project_root_at(&subdir), repo);
+    }
+
+    #[test]
+    fn test_resolve_project_root_in_non_colocated_jj_workspace_under_ancestor_git_uses_jj_root() {
+        if !jj_available() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outer_repo = tmp.path().join("outer");
+        std::fs::create_dir_all(&outer_repo).unwrap();
+        let outer_repo = outer_repo.canonicalize().unwrap();
+        run_git(&outer_repo, &["init", "-q"]);
+
+        let workspace = outer_repo.join("jj-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+        run_jj(&workspace, &["git", "init", "--no-colocate"]);
+
+        let subdir = workspace.join("nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert_eq!(resolve_git_project_root_at(&subdir), Some(outer_repo));
+        assert_eq!(resolve_jj_project_root_at(&subdir), Some(workspace.clone()));
+        assert_eq!(resolve_project_root_at(&subdir), workspace);
     }
 
     #[test]
