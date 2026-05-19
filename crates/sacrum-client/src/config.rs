@@ -175,8 +175,16 @@ impl SacrumConfig {
 /// Worktree paths do not prefix the main repo path, so configured project paths
 /// would never match. `git rev-parse --git-common-dir` returns the main repo's
 /// `.git` directory even from a worktree; stripping `/.git` yields the main root.
-/// Falls back to the input `cwd` when not in a repo or git is unavailable.
+/// Non-colocated JJ workspaces do not expose Git metadata to the working copy,
+/// so fall back to `jj root` only after Git resolution fails.
+/// Falls back to the input `cwd` when not in a repo or VCS tools are unavailable.
 fn resolve_project_root_at(cwd: &Path) -> PathBuf {
+    resolve_git_project_root_at(cwd)
+        .or_else(|| resolve_jj_project_root_at(cwd))
+        .unwrap_or_else(|| cwd.to_path_buf())
+}
+
+fn resolve_git_project_root_at(cwd: &Path) -> Option<PathBuf> {
     let mut cmd = std::process::Command::new("git");
     cmd.args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
         .current_dir(cwd);
@@ -185,23 +193,38 @@ fn resolve_project_root_at(cwd: &Path) -> PathBuf {
             cmd.env_remove(key);
         }
     }
-    let Ok(out) = cmd.output() else {
-        return cwd.to_path_buf();
-    };
+    let out = cmd.output().ok()?;
     if !out.status.success() {
-        return cwd.to_path_buf();
+        return None;
     }
-    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if raw.is_empty() {
-        return cwd.to_path_buf();
-    }
-    let git_dir = PathBuf::from(raw);
+    let git_dir = path_from_command_stdout(&out.stdout)?;
     let root = if git_dir.file_name() == Some(std::ffi::OsStr::new(".git")) {
         git_dir.parent().map(Path::to_path_buf).unwrap_or(git_dir)
     } else {
         git_dir
     };
-    root.canonicalize().unwrap_or(root)
+    Some(root.canonicalize().unwrap_or(root))
+}
+
+fn resolve_jj_project_root_at(cwd: &Path) -> Option<PathBuf> {
+    let out = std::process::Command::new("jj")
+        .args(["root", "--ignore-working-copy"])
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    path_from_command_stdout(&out.stdout)
+}
+
+fn path_from_command_stdout(stdout: &[u8]) -> Option<PathBuf> {
+    let raw = String::from_utf8_lossy(stdout).trim().to_string();
+    if raw.is_empty() {
+        return None;
+    }
+    let root = PathBuf::from(raw);
+    Some(root.canonicalize().unwrap_or(root))
 }
 
 /// Resolve the base URL using `VTB_URL` env var precedence.
@@ -761,6 +784,47 @@ path = "/Users/test/other"
         assert!(status.success(), "git {:?} failed", args);
     }
 
+    fn jj_available() -> bool {
+        std::process::Command::new("jj")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    fn run_jj(repo: &Path, args: &[&str]) {
+        let output = std::process::Command::new("jj")
+            .args(args)
+            .current_dir(repo)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "jj {:?} failed in {:?}: stdout={} stderr={}",
+            args,
+            repo,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    struct CurrentDirGuard {
+        original: PathBuf,
+    }
+
+    impl CurrentDirGuard {
+        fn push(path: &Path) -> Self {
+            let original = std::env::current_dir().unwrap();
+            std::env::set_current_dir(path).unwrap();
+            Self { original }
+        }
+    }
+
+    impl Drop for CurrentDirGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.original).unwrap();
+        }
+    }
+
     #[test]
     fn test_resolve_project_root_in_repo() {
         let tmp = tempfile::tempdir().unwrap();
@@ -805,11 +869,92 @@ path = "/Users/test/other"
     }
 
     #[test]
+    fn test_resolve_project_root_in_colocated_jj_workspace_uses_git_root() {
+        if !jj_available() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo = repo.canonicalize().unwrap();
+
+        run_jj(&repo, &["git", "init", "--colocate"]);
+
+        let subdir = repo.join("src");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert_eq!(resolve_git_project_root_at(&subdir), Some(repo.clone()));
+        assert_eq!(resolve_project_root_at(&subdir), repo);
+    }
+
+    #[test]
+    fn test_resolve_project_root_in_non_colocated_jj_workspace_uses_jj_root() {
+        if !jj_available() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo = repo.canonicalize().unwrap();
+
+        run_jj(&repo, &["git", "init", "--no-colocate"]);
+
+        let subdir = repo.join("src");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert_eq!(resolve_git_project_root_at(&subdir), None);
+        assert_eq!(resolve_project_root_at(&subdir), repo);
+    }
+
+    #[test]
     fn test_resolve_project_root_outside_repo_falls_back_to_cwd() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().canonicalize().unwrap();
 
         assert_eq!(resolve_project_root_at(&dir), dir);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_from_config_resolves_non_colocated_jj_workspace_without_project_env() {
+        if !jj_available() {
+            return;
+        }
+        clear_vtb_env_vars();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let repo = repo.canonicalize().unwrap();
+
+        run_jj(&repo, &["git", "init", "--no-colocate"]);
+
+        let subdir = repo.join("nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://file-url:4000".to_string(),
+                token: Some("file-token".to_string()),
+            },
+            projects: BTreeMap::from([(
+                "jj-project".to_string(),
+                ProjectSection {
+                    id: "jj-project-id".to_string(),
+                    path: repo.to_string_lossy().to_string(),
+                },
+            )]),
+        };
+
+        let _cwd = CurrentDirGuard::push(&subdir);
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "jj-project-id");
+        clear_vtb_env_vars();
     }
 
     /// Helper: build a VertebraeConfigFile for `load_for_project` tests with a
