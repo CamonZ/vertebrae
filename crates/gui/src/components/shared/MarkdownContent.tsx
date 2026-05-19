@@ -34,7 +34,7 @@ const codeBlockStyle: React.CSSProperties = {
   margin: 0,
   padding: "0.75rem",
   background: "var(--color-bg-primary)",
-  fontSize: "13px",
+  fontSize: "0.8125rem",
   lineHeight: "1.6",
   overflow: "auto",
 };
@@ -46,7 +46,7 @@ const codeTagStyle = {
 const components = {
   p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
     <p
-      className="mb-2 text-[15px] leading-relaxed text-text-primary antialiased last:mb-0"
+      className="mb-2 text-sm leading-relaxed text-text-primary antialiased last:mb-0"
       {...props}
     >
       {children}
@@ -86,7 +86,7 @@ const components = {
   ),
   ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
     <ul
-      className="mb-2 ml-4 list-disc space-y-1 text-[15px] text-text-primary"
+      className="mb-2 ml-4 list-disc space-y-1 text-sm text-text-primary"
       {...props}
     >
       {children}
@@ -94,7 +94,7 @@ const components = {
   ),
   ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
     <ol
-      className="mb-2 ml-4 list-decimal space-y-1 text-[15px] text-text-primary"
+      className="mb-2 ml-4 list-decimal space-y-1 text-sm text-text-primary"
       {...props}
     >
       {children}
@@ -177,7 +177,7 @@ const components = {
         <div className="group relative mb-2 overflow-hidden rounded-md border border-border/50 bg-bg-primary">
           {match && (
             <div className="flex items-center border-b border-border/50 px-3 py-1">
-              <span className="font-mono text-[11px] text-text-muted">
+              <span className="font-mono text-xs text-text-muted">
                 {match[1]}
               </span>
             </div>
@@ -197,7 +197,7 @@ const components = {
 
     return (
       <code
-        className="rounded bg-bg-primary/80 px-1.5 py-0.5 font-mono text-[13px] text-primary"
+        className="rounded bg-bg-primary/80 px-1.5 py-0.5 font-mono text-sm text-primary"
         {...props}
       >
         {children}

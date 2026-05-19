@@ -136,7 +136,7 @@ export function WorkflowDetailPanel({
               </svg>
             </button>
           )}
-          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+          <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
             Workflow Details
           </h2>
         </div>

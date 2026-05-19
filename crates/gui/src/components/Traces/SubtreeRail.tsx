@@ -136,7 +136,7 @@ function ExecutionRow({
       data-testid="subtree-rail-execution"
       data-execution-id={execution.id ?? ""}
       data-status={execution.status ?? "in_progress"}
-      className="flex items-center gap-2 px-2 py-1 text-[11px] text-text-secondary"
+      className="flex items-center gap-2 px-2 py-1 text-xs text-text-secondary"
     >
       <StatusPip status={execution.status ?? "in_progress"} />
       <span className="truncate font-mono">
@@ -250,7 +250,7 @@ function GroupSection({
           style={{ paddingLeft: `${1.5 + depth * 0.75}rem` }}
         >
           {executions.length === 0 ? (
-            <li className="px-2 py-1 text-[11px] italic text-text-muted">
+            <li className="px-2 py-1 text-xs italic text-text-muted">
               No executions yet
             </li>
           ) : (

@@ -222,7 +222,7 @@ export function FilteredTasksPanel({
             <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
               {(step.order ?? 0) + 1}
             </span>
-            <h2 className="truncate font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+            <h2 className="truncate font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
               {step.name}
             </h2>
           </div>

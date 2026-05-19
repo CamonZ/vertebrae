@@ -127,7 +127,7 @@ function RunRow({
           )}`}
         />
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex items-center gap-2 truncate font-mono text-[11px] text-text-primary">
+          <span className="flex items-center gap-2 truncate font-mono text-xs text-text-primary">
             <span className="truncate">{label}</span>
             {isActive && activeRunSource !== "selected" && (
               <span

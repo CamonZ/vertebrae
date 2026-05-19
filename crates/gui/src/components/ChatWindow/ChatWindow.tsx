@@ -32,7 +32,7 @@ function ContextUtilizationBadge({
 
   return (
     <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${LEVEL_CLASSES[level]}`}
+      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${LEVEL_CLASSES[level]}`}
       title={`${used.toLocaleString()} / ${max.toLocaleString()} input tokens (${pct}%)`}
     >
       {modelLabel ? `${modelLabel} · ` : ""}
@@ -123,7 +123,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 {message.toolName}
               </span>
             </div>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-[13px] leading-relaxed text-text-secondary antialiased">
+            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-sm leading-relaxed text-text-secondary antialiased">
               {message.input}
             </pre>
           </div>
@@ -176,7 +176,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
                 {message.isError ? "Error" : "Result"}
               </span>
             </div>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-[13px] leading-relaxed text-text-secondary antialiased">
+            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-sm leading-relaxed text-text-secondary antialiased">
               {message.result}
             </pre>
           </div>
@@ -416,7 +416,7 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
             <summary className="cursor-pointer select-none hover:text-text-secondary">
               Context injected
             </summary>
-            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px]">
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-xs">
               {session.contextSummary}
             </pre>
           </details>

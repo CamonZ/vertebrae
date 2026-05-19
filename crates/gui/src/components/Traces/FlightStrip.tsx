@@ -658,7 +658,7 @@ function ThresholdLane({
                 data-execution-id={m.executionId}
                 data-visible={showTitle ? "true" : "false"}
                 aria-hidden={showTitle ? undefined : "true"}
-                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[8px] uppercase tracking-wider ${
+                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[9px] uppercase tracking-wider ${
                   isError ? "text-error" : "text-text-secondary"
                 }`}
                 style={{

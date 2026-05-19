@@ -248,10 +248,10 @@ export function TaskTreeNode({
           {task.created_at ? (
             <RelativeTime
               date={task.created_at}
-              className="font-mono text-[11px] tabular-nums text-text-muted"
+              className="font-mono text-xs tabular-nums text-text-muted"
             />
           ) : (
-            <span className="font-mono text-[11px] text-text-muted">—</span>
+            <span className="font-mono text-xs text-text-muted">—</span>
           )}
         </div>
       </div>

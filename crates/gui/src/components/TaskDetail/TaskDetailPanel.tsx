@@ -646,7 +646,7 @@ export function TaskDetailPanel({
               )}
             </div>
           ) : (
-            <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+            <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
               Task Details
             </h2>
           )}
@@ -975,7 +975,7 @@ export function TaskDetailPanel({
                     d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-text-primary">
+                <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-primary">
                   Acceptance Criteria
                 </h3>
               </div>

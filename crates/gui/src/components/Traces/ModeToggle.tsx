@@ -33,7 +33,7 @@ export function ModeToggle({ mode, onChange }: ModeToggleProps): ReactNode {
             data-testid={`trace-mode-option-${m}`}
             data-active={isActive}
             onClick={() => onChange(m)}
-            className={`rounded px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors ${
+            className={`rounded px-3 py-1 text-[10px] font-medium uppercase tracking-wider transition-colors ${
               isActive
                 ? "bg-primary/10 text-primary"
                 : "text-text-muted hover:text-text-secondary"

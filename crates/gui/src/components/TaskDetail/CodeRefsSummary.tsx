@@ -62,7 +62,7 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
           />
         </svg>
-        <code className="truncate font-mono text-[11px] text-text-secondary">
+        <code className="truncate font-mono text-xs text-text-secondary">
           {codeRef.path.split("/").pop() ?? codeRef.path}
         </code>
         {lineRange && (

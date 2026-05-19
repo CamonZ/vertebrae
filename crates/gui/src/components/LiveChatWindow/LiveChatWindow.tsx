@@ -248,7 +248,7 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
               } ${message.error ? "border border-error/40" : ""}`}
             >
               <MarkdownContent text={message.content} />
-              <div className="mt-2 flex items-center justify-end gap-2 text-[11px] text-text-muted">
+              <div className="mt-2 flex items-center justify-end gap-2 text-xs text-text-muted">
                 {message.pending && <span>sending…</span>}
                 {message.error && (
                   <span className="text-error">{message.error}</span>

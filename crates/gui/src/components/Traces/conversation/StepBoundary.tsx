@@ -158,7 +158,7 @@ export function StepBoundary({
             </span>
           </>
         )}
-        <span className="ml-auto flex items-center gap-3 text-[11px] text-text-muted">
+        <span className="ml-auto flex items-center gap-3 text-xs text-text-muted">
           {startedAt && <span className="font-mono">{formatTimestamp(startedAt)}</span>}
           {durationMs != null && durationMs > 0 && (
             <span data-testid="step-boundary-duration" className="font-mono">

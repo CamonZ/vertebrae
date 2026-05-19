@@ -139,7 +139,7 @@ export function HumanInputGate({
           </button>
         )}
       </div>
-      <dl className="mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         <div>
           <dt className="font-mono uppercase tracking-wider text-text-muted">
             Run
@@ -148,7 +148,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={run.id}
               kind="task run"
-              className="text-[11px]"
+              className="text-xs"
               testId="human-input-gate-run-id"
             />
           </dd>
@@ -161,7 +161,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={execution?.id}
               kind="step execution"
-              className="text-[11px]"
+              className="text-xs"
               testId="human-input-gate-execution-id"
               emptyValue="—"
             />
@@ -187,7 +187,7 @@ export function HumanInputGate({
             >
               <pre
                 data-testid="human-input-gate-schema"
-                className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 font-mono text-[11px] text-text-primary"
+                className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 font-mono text-xs text-text-primary"
               >
                 {schemaJson}
               </pre>

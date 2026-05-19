@@ -89,7 +89,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
         }`}
       >
         <header className="sticky top-0 flex items-center justify-between border-b border-border bg-bg-primary px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
             Past chats
           </span>
           <button
@@ -149,7 +149,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => void handleConfirmDelete(session.id)}
                         disabled={isDeleting}
                         aria-label={`Confirm delete chat ${session.id}`}
-                        className="rounded border border-error/50 px-2 py-1 text-[11px] text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-error/50 px-2 py-1 text-xs text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -158,7 +158,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => setConfirmDeleteId(null)}
                         disabled={isDeleting}
                         aria-label={`Cancel delete chat ${session.id}`}
-                        className="rounded border border-border px-2 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-border px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Cancel
                       </button>

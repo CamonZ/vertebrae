@@ -37,8 +37,7 @@ function TaskLink({
         id={taskId}
         kind="task"
         level={level}
-        className="text-[11px]"
-        testId="dependencies-summary-task-id"
+        className="text-xs"
       />
     </span>
   );
