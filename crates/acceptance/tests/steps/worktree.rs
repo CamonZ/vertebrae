@@ -32,17 +32,43 @@ async fn run_jj(repo: &Path, args: &[&str]) {
     assert!(status.success(), "jj {:?} failed in {:?}", args, repo);
 }
 
-async fn assert_git_root_unavailable(repo: &Path) {
-    let status = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
+async fn command_stdout(repo: &Path, command: &str, args: &[&str]) -> String {
+    let output = Command::new(command)
+        .args(args)
         .current_dir(repo)
-        .status()
+        .output()
         .await
-        .expect("failed to spawn git");
+        .unwrap_or_else(|_| panic!("failed to spawn {}", command));
     assert!(
-        !status.success(),
-        "git root unexpectedly resolved in non-colocated JJ workspace {:?}",
-        repo
+        output.status.success(),
+        "{} {:?} failed in {:?}: stdout={} stderr={}",
+        command,
+        args,
+        repo,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+async fn assert_git_root(repo: &Path, expected: &Path) {
+    let root = command_stdout(repo, "git", &["rev-parse", "--show-toplevel"]).await;
+    let root = PathBuf::from(root).canonicalize().unwrap();
+    assert_eq!(
+        root, expected,
+        "expected git root in {:?} to resolve to {:?}",
+        repo, expected
+    );
+}
+
+async fn assert_jj_root(repo: &Path, expected: &Path) {
+    let root = command_stdout(repo, "jj", &["root", "--ignore-working-copy"]).await;
+    assert_eq!(
+        PathBuf::from(root),
+        expected,
+        "expected jj root in {:?} to resolve to {:?}",
+        repo,
+        expected
     );
 }
 
@@ -97,12 +123,18 @@ async fn given_registered_non_colocated_jj_workspace(world: &mut SmokeWorld) {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let home = tmp.path().to_path_buf();
-    let workspace = home.join("jj-workspace");
+    let outer_repo = home.join("outer-git");
+    std::fs::create_dir_all(&outer_repo).unwrap();
+    let outer_repo = outer_repo.canonicalize().unwrap();
+    run_git(&outer_repo, &["init", "-q"]).await;
+
+    let workspace = outer_repo.join("jj-workspace");
     std::fs::create_dir_all(&workspace).unwrap();
     let workspace = workspace.canonicalize().unwrap();
 
     run_jj(&workspace, &["git", "init", "--no-colocate"]).await;
-    assert_git_root_unavailable(&workspace).await;
+    assert_git_root(&workspace, &outer_repo).await;
+    assert_jj_root(&workspace, &workspace).await;
 
     let nested_dir = workspace.join("nested");
     std::fs::create_dir_all(&nested_dir).unwrap();
