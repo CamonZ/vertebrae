@@ -22,6 +22,30 @@ async fn run_git(repo: &Path, args: &[&str]) {
     assert!(status.success(), "git {:?} failed in {:?}", args, repo);
 }
 
+async fn run_jj(repo: &Path, args: &[&str]) {
+    let status = Command::new("jj")
+        .args(args)
+        .current_dir(repo)
+        .status()
+        .await
+        .expect("failed to spawn jj");
+    assert!(status.success(), "jj {:?} failed in {:?}", args, repo);
+}
+
+async fn assert_git_root_unavailable(repo: &Path) {
+    let status = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(repo)
+        .status()
+        .await
+        .expect("failed to spawn git");
+    assert!(
+        !status.success(),
+        "git root unexpectedly resolved in non-colocated JJ workspace {:?}",
+        repo
+    );
+}
+
 #[given("the project is registered at a temporary git repository")]
 async fn given_registered_temp_repo(world: &mut SmokeWorld) {
     let project_id = world
@@ -63,6 +87,47 @@ async fn given_registered_temp_repo(world: &mut SmokeWorld) {
     });
 }
 
+#[given("the project is registered at a temporary non-colocated JJ workspace")]
+async fn given_registered_non_colocated_jj_workspace(world: &mut SmokeWorld) {
+    let project_id = world
+        .env
+        .get("VTB_PROJECT_ID")
+        .expect("VTB_PROJECT_ID set by Sacrum client setup")
+        .clone();
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let home = tmp.path().to_path_buf();
+    let workspace = home.join("jj-workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let workspace = workspace.canonicalize().unwrap();
+
+    run_jj(&workspace, &["git", "init", "--no-colocate"]).await;
+    assert_git_root_unavailable(&workspace).await;
+
+    let nested_dir = workspace.join("nested");
+    std::fs::create_dir_all(&nested_dir).unwrap();
+    let nested_dir = nested_dir.canonicalize().unwrap();
+
+    let config_path = home.join(config_subpath());
+    std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+
+    let url = world.env.get("VTB_URL").cloned().unwrap_or_default();
+    let token = world.env.get("VTB_TOKEN").cloned().unwrap_or_default();
+    let workspace_str = workspace.to_string_lossy().to_string();
+    let config_doc = format!(
+        "[sacrum]\nurl = \"{}\"\ntoken = \"{}\"\n\n[projects.acceptance]\nid = \"{}\"\npath = \"{}\"\n",
+        url, token, project_id, workspace_str
+    );
+    std::fs::write(&config_path, config_doc).unwrap();
+
+    world.worktree = Some(WorktreeFixture {
+        _tmp: tmp,
+        home,
+        main_repo: workspace,
+        worktree_path: nested_dir,
+    });
+}
+
 #[given("a git worktree of that repository")]
 async fn given_worktree(world: &mut SmokeWorld) {
     let fixture = world.worktree.as_mut().expect("worktree fixture set up");
@@ -84,6 +149,15 @@ async fn given_worktree(world: &mut SmokeWorld) {
 
 #[when(expr = "I run vtb add {string} from the worktree directory")]
 async fn when_run_add_from_worktree(world: &mut SmokeWorld, title: String) {
+    run_add_from_vcs_workspace(world, title).await;
+}
+
+#[when(expr = "I run vtb add {string} from the VCS workspace directory")]
+async fn when_run_add_from_vcs_workspace(world: &mut SmokeWorld, title: String) {
+    run_add_from_vcs_workspace(world, title).await;
+}
+
+async fn run_add_from_vcs_workspace(world: &mut SmokeWorld, title: String) {
     let fixture = world
         .worktree
         .as_ref()
