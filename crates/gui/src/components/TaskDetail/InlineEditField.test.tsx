@@ -140,6 +140,35 @@ describe('InlineEditField', () => {
       expect(screen.getByRole('textbox')).toHaveAttribute('rows', '4');
     });
 
+    it('allows multiline textareas to be resized vertically', async () => {
+      render(<InlineEditField {...defaultProps} multiline rows={4} monospace />);
+      await userEvent.click(screen.getByText('Test value'));
+
+      const textarea = screen.getByRole('textbox');
+      expect(textarea.tagName).toBe('TEXTAREA');
+      expect(textarea).toHaveClass('resize-y', 'font-mono');
+      expect(textarea).not.toHaveClass('resize-none');
+    });
+
+    it('allows multiline resize behavior to be configured', async () => {
+      render(<InlineEditField {...defaultProps} multiline resize="none" />);
+      await userEvent.click(screen.getByText('Test value'));
+
+      const textarea = screen.getByRole('textbox');
+      expect(textarea).toHaveClass('resize-none');
+      expect(textarea).not.toHaveClass('resize-y');
+    });
+
+    it('keeps single-line editors as non-resizable inputs', async () => {
+      render(<InlineEditField {...defaultProps} />);
+      await userEvent.click(screen.getByText('Test value'));
+
+      const input = screen.getByRole('textbox');
+      expect(input.tagName).toBe('INPUT');
+      expect(input).not.toHaveAttribute('rows');
+      expect(input).not.toHaveClass('resize-y');
+    });
+
     it('requires Ctrl+Enter to save in multiline mode', async () => {
       const onSave = vi.fn().mockResolvedValue(undefined);
       render(<InlineEditField {...defaultProps} onSave={onSave} multiline />);
