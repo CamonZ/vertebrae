@@ -49,7 +49,7 @@ export function TransitionMarker({
     >
       <div className="h-px flex-1 bg-border" />
       <span
-        className={`inline-flex items-center gap-1 rounded-full border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${borderClass} ${textClass}`}
+        className={`inline-flex items-center gap-1 rounded-full border bg-bg-tertiary px-2 py-0.5 font-mono text-xs uppercase tracking-wider ${borderClass} ${textClass}`}
       >
         <span>{clean(fromStep)}</span>
         <span aria-hidden="true">→</span>

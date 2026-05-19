@@ -26,7 +26,7 @@ function RollupStat({ label, value, testId }: RollupStatProps): ReactNode {
       data-testid={testId}
       className="flex flex-col rounded border border-border bg-bg-tertiary/50 px-3 py-1.5"
     >
-      <span className="font-mono text-[9px] uppercase tracking-wider text-text-muted">
+      <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
         {label}
       </span>
       <span className="text-sm font-medium text-text-primary">{value}</span>
@@ -168,7 +168,7 @@ export function TracesHeader({
         {isLoading && (
           <span
             data-testid="traces-rollup-loading"
-            className="self-center text-[10px] text-text-muted italic"
+            className="self-center text-xs text-text-muted italic"
           >
             Loading...
           </span>
@@ -176,7 +176,7 @@ export function TracesHeader({
         {error && !isLoading && (
           <span
             data-testid="traces-rollup-error"
-            className="self-center rounded border border-error/20 bg-error/5 px-2 py-1 text-[10px] text-error"
+            className="self-center rounded border border-error/20 bg-error/5 px-2 py-1 text-xs text-error"
           >
             {error}
           </span>

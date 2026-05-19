@@ -108,7 +108,7 @@ export function ProjectSetupPage() {
       >
         {/* Header */}
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-3xl font-bold text-primary">Vertebrae</h1>
+          <h1 className="mb-2 text-xl font-bold text-primary">Vertebrae</h1>
           <p className="text-text-secondary">
             Select a project to get started, or add a new one.
           </p>

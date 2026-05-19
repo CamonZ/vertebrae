@@ -191,11 +191,11 @@ export const TaskPicker = forwardRef<TaskPickerHandle, TaskPickerProps>(
                 }`}
               >
                 <span className="truncate font-medium">{t.title}</span>
-                <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
+                <span className="flex items-center gap-1 font-mono text-xs text-text-muted">
                   <ScanIdentifier
                     id={t.id}
                     kind="task"
-                    className="text-[10px]"
+                    className="text-xs"
                     testId="task-picker-task-id"
                   />
                   {t.level ? <span>· {t.level}</span> : null}

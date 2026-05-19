@@ -27,7 +27,7 @@ function Disclosure({ label, testIdBase, children }: DisclosureProps): ReactNode
         data-testid={`${testIdBase}-toggle`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary"
+        className="flex items-center gap-1 font-mono text-xs uppercase tracking-wider text-text-muted hover:text-text-secondary"
       >
         <span aria-hidden="true">{open ? "▾" : "▸"}</span>
         <span>{label}</span>

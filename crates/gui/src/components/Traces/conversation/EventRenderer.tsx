@@ -313,7 +313,7 @@ export function AssistantMessageBlock({
       className="py-2 border-l-2 border-primary/40 pl-3"
     >
       <div className="flex items-start gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-primary mt-1">
+        <span className="font-mono text-xs uppercase tracking-wider text-primary mt-1">
           assistant
         </span>
         <div className="flex-1 min-w-0">
@@ -353,7 +353,7 @@ export function FileEditBlock({
     >
       <div className="flex items-start gap-2">
         <span
-          className={`font-mono text-[10px] uppercase tracking-wider mt-1 ${failed ? "text-error" : "text-success"}`}
+          className={`font-mono text-xs uppercase tracking-wider mt-1 ${failed ? "text-error" : "text-success"}`}
         >
           {failed ? "patch failed" : "patch"}
         </span>
@@ -370,7 +370,7 @@ export function FileEditBlock({
                   disabled={!hasDiff}
                 >
                   <span
-                    className={`font-mono text-[10px] uppercase tracking-wider ${changeKindClass(change.kind)}`}
+                    className={`font-mono text-xs uppercase tracking-wider ${changeKindClass(change.kind)}`}
                   >
                     {change.kind}
                   </span>
@@ -458,7 +458,7 @@ export function TodoListBlock({
   return (
     <div data-testid="todo-list" data-item-id={event.itemId} className="py-2">
       <div className="flex items-start gap-2">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-primary mt-1">
+        <span className="font-mono text-xs uppercase tracking-wider text-primary mt-1">
           plan
         </span>
         <ul className="flex-1 min-w-0 space-y-0.5">

@@ -29,7 +29,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2">
-      <span className="flex-shrink-0 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <span className="flex-shrink-0 font-mono text-xs uppercase tracking-wider text-text-muted">
         {label}
       </span>
       <span className="text-right text-sm text-text-primary">{children}</span>
@@ -42,7 +42,7 @@ function DetailRow({
  */
 function SectionHeader({ title }: { title: string }) {
   return (
-    <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+    <h3 className="mb-2 font-mono text-xs uppercase tracking-wider text-text-muted">
       {title}
     </h3>
   );
@@ -136,7 +136,7 @@ export function WorkflowDetailPanel({
               </svg>
             </button>
           )}
-          <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
             Workflow Details
           </h2>
         </div>
@@ -202,7 +202,7 @@ export function WorkflowDetailPanel({
           <div className="space-y-1">
             {workflow.is_default && (
               <DetailRow label="Default">
-                <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+                <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wider text-primary">
                   Yes
                 </span>
               </DetailRow>
@@ -309,7 +309,7 @@ export function WorkflowDetailPanel({
                         )}
                       </div>
                       <code
-                        className="max-w-[10rem] shrink truncate rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-text-muted"
+                        className="max-w-[10rem] shrink truncate rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-xs text-text-muted"
                         title={modelLabel}
                       >
                         {modelLabel}

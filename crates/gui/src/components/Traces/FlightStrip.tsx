@@ -348,12 +348,12 @@ export function FlightStrip({
       style={{ paddingLeft: PADDING_X, paddingRight: PADDING_X }}
     >
       <div className="flex items-center justify-between gap-2 px-1 pt-1">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
           Flight strip
         </span>
         <label
           data-testid="flight-strip-thresholds-only-label"
-          className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
+          className="flex cursor-pointer items-center gap-1 text-xs text-text-secondary"
         >
           <input
             data-testid="flight-strip-thresholds-only"
@@ -559,7 +559,7 @@ function GutterLabel({
   return (
     <div
       data-testid={testId}
-      className="absolute left-0 right-1 flex items-center justify-end pr-2 font-mono text-[9px] uppercase tracking-wider text-text-muted"
+      className="absolute left-0 right-1 flex items-center justify-end pr-2 font-mono text-xs uppercase tracking-wider text-text-muted"
       style={{ top, height }}
     >
       {label}
@@ -658,7 +658,7 @@ function ThresholdLane({
                 data-execution-id={m.executionId}
                 data-visible={showTitle ? "true" : "false"}
                 aria-hidden={showTitle ? undefined : "true"}
-                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[9px] uppercase tracking-wider ${
+                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-xs uppercase tracking-wider ${
                   isError ? "text-error" : "text-text-secondary"
                 }`}
                 style={{

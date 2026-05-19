@@ -25,7 +25,7 @@ function LiveChatHeader({
 }: LiveChatHeaderProps) {
   return (
     <div className="z-30 flex h-12 items-center gap-1 border-b border-border bg-bg-primary px-3">
-      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs uppercase tracking-wider text-primary">
         Live
       </span>
       <button

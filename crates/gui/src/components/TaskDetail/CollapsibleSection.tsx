@@ -35,7 +35,7 @@ export function CollapsibleSection({
               {icon}
             </span>
           )}
-          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
             {title}
           </span>
           {badge}

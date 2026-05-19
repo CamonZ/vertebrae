@@ -62,7 +62,7 @@ function RelationRow({
     <div className="flex items-start gap-2 py-1.5">
       <span className="mt-0.5 flex-shrink-0 text-text-muted">{icon}</span>
       <div className="min-w-0">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
+        <span className="text-xs font-medium uppercase tracking-wider text-text-muted">
           {label}
         </span>
         <div className="mt-1 flex flex-wrap gap-1.5">

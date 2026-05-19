@@ -35,7 +35,7 @@ export function RecentlyCompletedSection({
   return (
     <section aria-label="Recently completed">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
           <span className="inline-block h-2.5 w-2.5 rounded-sm bg-text-muted" aria-hidden="true" />
           Recently Completed
           <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs font-medium text-text-muted">

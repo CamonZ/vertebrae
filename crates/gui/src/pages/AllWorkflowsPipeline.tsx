@@ -825,7 +825,7 @@ function AllWorkflowsPipelineInner() {
         <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
         <div className="relative">
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-text-primary">
+            <h1 className="text-xl font-bold text-text-primary">
               Workflow Pipelines
             </h1>
             <p className="mt-2 text-sm text-text-muted">

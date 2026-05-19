@@ -26,12 +26,12 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
             {workflow.name}
           </h3>
           {workflow.is_default && (
-            <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+            <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wider text-primary">
               Default
             </span>
           )}
           {workflow.is_final && (
-            <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-warning">
+            <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium uppercase tracking-wider text-warning">
               Final
             </span>
           )}

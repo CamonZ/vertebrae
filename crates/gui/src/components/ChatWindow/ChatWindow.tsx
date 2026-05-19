@@ -32,7 +32,7 @@ function ContextUtilizationBadge({
 
   return (
     <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${LEVEL_CLASSES[level]}`}
+      className={`rounded border px-1.5 py-0.5 font-mono text-xs ${LEVEL_CLASSES[level]}`}
       title={`${used.toLocaleString()} / ${max.toLocaleString()} input tokens (${pct}%)`}
     >
       {modelLabel ? `${modelLabel} · ` : ""}
@@ -242,7 +242,7 @@ function ScopeBreadcrumb({
 }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
-      <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+      <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs uppercase tracking-wider text-primary">
         {scopeLabel(scope)}
       </span>
       <span className="max-w-[150px] truncate text-text-secondary" title={label}>

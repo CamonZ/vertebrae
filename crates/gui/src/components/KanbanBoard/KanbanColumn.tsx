@@ -22,10 +22,10 @@ export function KanbanColumn({
     >
       {/* Column header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+        <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
           {columnName}
         </h2>
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-bg-tertiary px-1.5 font-mono text-[10px] font-medium text-text-muted">
+        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-bg-tertiary px-1.5 font-mono text-xs font-medium text-text-muted">
           {tasks.length}
         </span>
       </div>

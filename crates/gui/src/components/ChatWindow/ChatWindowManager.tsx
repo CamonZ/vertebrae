@@ -78,7 +78,7 @@ export function ChatWindowManager() {
 
               {session.isDetached && (
                 <span
-                  className="rounded bg-accent/15 px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent"
+                  className="rounded bg-accent/15 px-1 py-0.5 font-mono text-xs uppercase tracking-wider text-accent"
                   title="Detached into pop-out window"
                 >
                   detached

@@ -128,7 +128,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
         {label}
       </span>
       <span className="text-sm text-text-primary">{children}</span>
@@ -627,7 +627,7 @@ export function TaskDetailPanel({
                     />
                   </svg>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
                     data-testid="status-badge"
                   >
                     {taskData.step_name.replace("_", " ")}
@@ -638,7 +638,7 @@ export function TaskDetailPanel({
                 <span
                   data-testid="task-detail-run-chip"
                   data-run-status={runChip.status}
-                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
                   aria-label={`Run state: ${runChip.label}`}
                 >
                   {runChip.label}
@@ -646,7 +646,7 @@ export function TaskDetailPanel({
               )}
             </div>
           ) : (
-            <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+            <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
               Task Details
             </h2>
           )}
@@ -894,7 +894,7 @@ export function TaskDetailPanel({
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {!taskData.workflow_name && (
                 <span
-                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg} ${statusStyles?.text} ${isExecuting ? "animate-pulse-glow" : ""}`}
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles?.bg} ${statusStyles?.text} ${isExecuting ? "animate-pulse-glow" : ""}`}
                 >
                   {(taskData.step_name ?? "unassigned").replace("_", " ")}
                 </span>
@@ -975,7 +975,7 @@ export function TaskDetailPanel({
                     d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-primary">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-text-primary">
                   Acceptance Criteria
                 </h3>
               </div>
@@ -1012,7 +1012,7 @@ export function TaskDetailPanel({
             }
             badge={
               checklistItems.length > 0 ? (
-                <span className="font-mono text-[10px] text-text-muted">
+                <span className="font-mono text-xs text-text-muted">
                   {checklistItems.filter((c) => c.done).length}/
                   {checklistItems.length}
                 </span>
@@ -1030,7 +1030,7 @@ export function TaskDetailPanel({
                       className="flex items-start gap-2 py-1"
                     >
                       <span
-                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[10px] ${
+                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-xs ${
                           item.done
                             ? "bg-success/20 text-success"
                             : "bg-bg-tertiary text-text-muted"
@@ -1131,7 +1131,7 @@ export function TaskDetailPanel({
                 </svg>
               }
               badge={
-                <span className="font-mono text-[10px] text-text-muted">
+                <span className="font-mono text-xs text-text-muted">
                   {children.length}
                 </span>
               }
@@ -1160,7 +1160,7 @@ export function TaskDetailPanel({
                         {child.title}
                       </span>
                       {childStepName && (
-                        <span className="flex-shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-muted">
+                        <span className="flex-shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-xs text-text-muted">
                           {childStepName}
                         </span>
                       )}
@@ -1192,7 +1192,7 @@ export function TaskDetailPanel({
               </svg>
             }
             badge={
-              <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+              <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs text-text-muted">
                 {(taskData.dependency_ids?.length ?? 0) +
                   dependentIds.length +
                   (taskData.parent_id ? 1 : 0)}
@@ -1230,7 +1230,7 @@ export function TaskDetailPanel({
             }
             badge={
               (taskData.code_refs?.length ?? 0) > 0 ? (
-                <span className="font-mono text-[10px] text-text-muted">
+                <span className="font-mono text-xs text-text-muted">
                   {taskData.code_refs?.length}
                 </span>
               ) : undefined
@@ -1263,7 +1263,7 @@ export function TaskDetailPanel({
             <div className="divide-y divide-border px-4 py-2">
               {/* Priority */}
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                   Priority
                 </h4>
                 {editingField === "priority" ? (
@@ -1301,7 +1301,7 @@ export function TaskDetailPanel({
 
               {/* Level */}
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                   Level
                 </h4>
                 {editingField === "level" ? (
@@ -1345,7 +1345,7 @@ export function TaskDetailPanel({
 
               {/* Tags */}
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                   Tags
                 </h4>
                 <InlineEditField
@@ -1363,7 +1363,7 @@ export function TaskDetailPanel({
 
               {/* Timestamps */}
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                   Timeline
                 </h4>
                 <div className="space-y-1">
@@ -1389,7 +1389,7 @@ export function TaskDetailPanel({
               {/* Worktree */}
               {taskData.worktree && (
                 <div className="py-3">
-                  <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                     Worktree
                   </h4>
                   <p className="font-mono text-xs text-text-secondary break-all">
@@ -1401,7 +1401,7 @@ export function TaskDetailPanel({
               {/* Human Review Toggle */}
               <div className="py-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  <h4 className="font-mono text-xs uppercase tracking-wider text-text-muted">
                     Human Review
                   </h4>
                   <Toggle
@@ -1422,7 +1422,7 @@ export function TaskDetailPanel({
 
               {/* Revision Feedback */}
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                <h4 className="mb-1 font-mono text-xs uppercase tracking-wider text-text-muted">
                   Revision Feedback
                 </h4>
                 <InlineEditField

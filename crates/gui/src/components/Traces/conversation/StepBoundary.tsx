@@ -123,16 +123,16 @@ export function StepBoundary({
           <span
             data-testid="step-boundary-threshold-callout"
             data-kind={thresholdKind}
-            className={`rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${thresholdKindClass(thresholdKind)}`}
+            className={`rounded border border-current px-2 py-0.5 font-mono text-xs uppercase tracking-wider ${thresholdKindClass(thresholdKind)}`}
           >
             {humanizeStepName(thresholdKind)}
           </span>
         )}
-        <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+        <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-xs uppercase tracking-wider text-primary">
           {workflowName ?? "workflow"}
         </span>
         <span className="text-text-muted">·</span>
-        <span className="rounded bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-secondary">
+        <span className="rounded bg-bg-tertiary px-2 py-0.5 font-mono text-xs uppercase tracking-wider text-text-secondary">
           {stepLabel}
         </span>
         {model && (
@@ -140,7 +140,7 @@ export function StepBoundary({
             <span className="text-text-muted">·</span>
             <span
               data-testid="step-boundary-model"
-              className="font-mono text-[10px] uppercase tracking-wider text-text-secondary"
+              className="font-mono text-xs uppercase tracking-wider text-text-secondary"
             >
               {model}
             </span>
@@ -196,7 +196,7 @@ export function StepBoundary({
             data-testid="step-boundary-prompt-toggle"
             aria-expanded={promptExpanded}
             onClick={() => setPromptExpanded((v) => !v)}
-            className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary"
+            className="flex items-center gap-1 font-mono text-xs uppercase tracking-wider text-text-muted hover:text-text-secondary"
           >
             <span aria-hidden="true">{promptExpanded ? "▾" : "▸"}</span>
             <span>Prompt</span>

@@ -74,7 +74,7 @@ export function TracesPickerRail({
       className="flex h-full w-80 flex-col border-r border-border bg-bg-secondary"
     >
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
           Pick a task
         </span>
         <div className="flex items-center gap-1">
@@ -84,7 +84,7 @@ export function TracesPickerRail({
               onClick={onCancel}
               data-testid="traces-picker-rail-cancel"
               aria-label="Cancel switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded px-1.5 py-0.5 text-xs uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
             >
               Cancel
             </button>

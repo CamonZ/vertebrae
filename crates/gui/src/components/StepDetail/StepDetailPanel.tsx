@@ -40,7 +40,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2">
-      <span className="flex-shrink-0 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <span className="flex-shrink-0 font-mono text-xs uppercase tracking-wider text-text-muted">
         {label}
       </span>
       <span className="text-right text-sm text-text-primary">{children}</span>
@@ -53,7 +53,7 @@ function DetailRow({
  */
 function SectionHeader({ title }: { title: string }) {
   return (
-    <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+    <h3 className="mb-2 font-mono text-xs uppercase tracking-wider text-text-muted">
       {title}
     </h3>
   );
@@ -190,7 +190,7 @@ function SchemaNode({
 
         {/* Required marker */}
         {required && (
-          <span className="font-mono text-[10px] text-error/70" title="required">*</span>
+          <span className="font-mono text-xs text-error/70" title="required">*</span>
         )}
 
         {/* Root title */}
@@ -202,7 +202,7 @@ function SchemaNode({
       {/* Description */}
       {description && depth > 0 && (
         <div className="ml-8 pl-1">
-          <span className="text-[10px] italic leading-tight text-text-muted/70">{description}</span>
+          <span className="text-xs italic leading-tight text-text-muted/70">{description}</span>
         </div>
       )}
 
@@ -499,7 +499,7 @@ export function StepDetailPanel({
               </svg>
             </button>
           )}
-          <h2 className="font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
+          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
             Step Configuration
           </h2>
         </div>
@@ -587,7 +587,7 @@ export function StepDetailPanel({
 
             {/* Goal - inline editable */}
             <div className="mt-3">
-              <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+              <h3 className="mb-2 font-mono text-xs uppercase tracking-wider text-text-muted">
                 Goal
               </h3>
               <InlineEditField

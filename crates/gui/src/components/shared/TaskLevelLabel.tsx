@@ -48,7 +48,7 @@ export function TaskLevelLabel({
 }: TaskLevelLabelProps): ReactNode {
   const label = formatTaskLevel(level, labelCase);
   const classes = [
-    "font-mono text-[10px] uppercase tracking-wider",
+    "font-mono text-xs uppercase tracking-wider",
     levelTextColor(level),
     className,
   ];

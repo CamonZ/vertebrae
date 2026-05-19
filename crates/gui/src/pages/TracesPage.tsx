@@ -652,7 +652,7 @@ export function TracesPage({
                 <p className="mt-2 text-sm text-text-muted">
                   Search for a task in the panel on the left to view its
                   execution traces. Press{" "}
-                  <kbd className="rounded border border-border bg-bg-tertiary px-1 font-mono text-[10px] text-text-secondary">
+                  <kbd className="rounded border border-border bg-bg-tertiary px-1 font-mono text-xs text-text-secondary">
                     /
                   </kbd>{" "}
                   to focus the search field.
@@ -669,7 +669,7 @@ export function TracesPage({
                       data-testid="traces-active-run"
                       data-run-id={activeTraceRun.id}
                       data-run-source={activeTraceRunSource}
-                      className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted"
+                      className="flex items-center gap-1 font-mono text-xs uppercase tracking-wider text-text-muted"
                     >
                       <span>{activeTraceRunSource} run</span>
                       <IdentityBadge
@@ -683,7 +683,7 @@ export function TracesPage({
                   {mode === "thread" && (
                     <label
                       data-testid="traces-auto-scroll-label"
-                      className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
+                      className="flex cursor-pointer items-center gap-1 text-xs text-text-secondary"
                     >
                       <input
                         data-testid="traces-auto-scroll"
@@ -736,7 +736,7 @@ export function TracesPage({
                     data-execution-id={pinnedExecutionId}
                     className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-tertiary p-3 text-xs"
                   >
-                    <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                    <div className="mb-2 font-mono text-xs uppercase tracking-wider text-text-muted">
                       Pinned execution
                     </div>
                     <div className="break-all font-mono text-text-primary">

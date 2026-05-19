@@ -35,7 +35,7 @@ function StatusPill({ status }: { status: ExecutionStatus }) {
     <span
       data-testid="trace-mini-status"
       data-status={status}
-      className={`inline-flex flex-shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${styles.bg} ${styles.text}`}
+      className={`inline-flex flex-shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium uppercase tracking-wider ${styles.bg} ${styles.text}`}
     >
       {status.replace(/_/g, " ")}
     </span>
@@ -79,8 +79,8 @@ function RollupCard({
     ? "rounded border border-primary/30 bg-primary/5 px-2 py-1.5"
     : "rounded border border-border bg-bg-tertiary/50 px-2 py-1.5";
   const labelClass = accent
-    ? "font-mono text-[9px] uppercase tracking-wider text-primary"
-    : "font-mono text-[9px] uppercase tracking-wider text-text-muted";
+    ? "font-mono text-xs uppercase tracking-wider text-primary"
+    : "font-mono text-xs uppercase tracking-wider text-text-muted";
   return (
     <div data-testid={testId} className={containerClass}>
       <div className={labelClass}>{label}</div>
@@ -91,17 +91,17 @@ function RollupCard({
         >
           {runs}
         </span>
-        <span className="text-[10px] text-text-muted">
+        <span className="text-xs text-text-muted">
           {runs === 1 ? "run" : "runs"}
         </span>
       </div>
       <div
         data-testid={`${testId}-attempts`}
-        className="font-mono text-[10px] text-text-secondary"
+        className="font-mono text-xs text-text-secondary"
       >
         {attempts} {attempts === 1 ? "attempt" : "attempts"}
       </div>
-      <div className="font-mono text-[10px] text-text-secondary">
+      <div className="font-mono text-xs text-text-secondary">
         {formatCost(cost)}
       </div>
     </div>
@@ -200,7 +200,7 @@ export function TraceMiniView({
       {lastExecution && (
         <div
           data-testid="trace-mini-last-exec"
-          className="mt-2 flex items-center gap-3 font-mono text-[10px] text-text-muted"
+          className="mt-2 flex items-center gap-3 font-mono text-xs text-text-muted"
         >
           <span>
             {formatDuration(
@@ -237,12 +237,12 @@ export function TraceMiniView({
       </div>
 
       {isLoading && (
-        <div className="mt-2 text-[10px] text-text-muted italic">
+        <div className="mt-2 text-xs text-text-muted italic">
           Loading traces...
         </div>
       )}
       {error && !isLoading && (
-        <div className="mt-2 rounded border border-error/20 bg-error/5 px-2 py-1 text-[10px] text-error">
+        <div className="mt-2 rounded border border-error/20 bg-error/5 px-2 py-1 text-xs text-error">
           {error}
         </div>
       )}

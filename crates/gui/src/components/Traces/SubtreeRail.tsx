@@ -143,7 +143,7 @@ function ExecutionRow({
         {(execution.step_name ?? "").replace(/_/g, " ") || "step"}
       </span>
       {displayCost !== null && (
-        <span className="ml-auto font-mono text-[10px] text-text-muted">
+        <span className="ml-auto font-mono text-xs text-text-muted">
           {formatCost(displayCost)}
         </span>
       )}
@@ -226,7 +226,7 @@ function GroupSection({
 
       <div
         data-testid="subtree-rail-group-rollup"
-        className="flex items-center gap-2 px-2 pb-1 font-mono text-[10px] text-text-muted"
+        className="flex items-center gap-2 px-2 pb-1 font-mono text-xs text-text-muted"
         style={{ paddingLeft: `${1.75 + depth * 0.75}rem` }}
       >
         <span data-testid="subtree-rail-group-runs">
@@ -348,7 +348,7 @@ export function SubtreeRail({
       className="flex h-full w-72 flex-col border-r border-border bg-bg-secondary"
     >
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
           Subtree
         </span>
         <div className="flex items-center gap-1">
@@ -358,7 +358,7 @@ export function SubtreeRail({
               onClick={onSwitchTask}
               data-testid="subtree-rail-switch-task"
               aria-label="Switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded px-1.5 py-0.5 text-xs uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
             >
               Switch
             </button>

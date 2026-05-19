@@ -34,7 +34,7 @@ const codeBlockStyle: React.CSSProperties = {
   margin: 0,
   padding: "0.75rem",
   background: "var(--color-bg-primary)",
-  fontSize: "0.8125rem",
+  fontSize: "1rem",
   lineHeight: "1.6",
   overflow: "auto",
 };

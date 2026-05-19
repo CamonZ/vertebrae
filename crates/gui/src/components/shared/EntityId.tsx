@@ -222,7 +222,7 @@ export function IdentityBadge({
       emptyValue={emptyValue}
       copyable={copyable}
       className={[
-        "rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px]",
+        "rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs",
         textColor,
         className,
       ]

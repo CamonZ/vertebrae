@@ -66,12 +66,12 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
           {codeRef.path.split("/").pop() ?? codeRef.path}
         </code>
         {lineRange && (
-          <span className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[10px] text-primary">
+          <span className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-xs text-primary">
             {lineRange}
           </span>
         )}
         {codeRef.name && (
-          <span className="truncate text-[10px] text-text-muted">
+          <span className="truncate text-xs text-text-muted">
             {codeRef.name}
           </span>
         )}

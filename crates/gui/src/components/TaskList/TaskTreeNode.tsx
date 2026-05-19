@@ -140,7 +140,7 @@ export function TaskTreeNode({
         <div className="flex w-8 shrink-0 items-center justify-end gap-0.5">
           {hasChildren ? (
             <>
-              <span className="w-4 text-right font-mono text-[10px] tabular-nums text-text-muted">
+              <span className="w-4 text-right font-mono text-xs tabular-nums text-text-muted">
                 {node.children.length}
               </span>
               <button
@@ -215,14 +215,14 @@ export function TaskTreeNode({
             {task.title}
           </span>
           {task.needs_human_review && (
-            <span className="inline-flex shrink-0 items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
+            <span className="inline-flex shrink-0 items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-xs font-medium uppercase tracking-wider text-warning">
               Review
             </span>
           )}
           {runChip && runChipStyles && (
             <span
               data-testid="task-tree-node-run-chip-label"
-              className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+              className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-xs font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
             >
               {runChip.label}
             </span>
@@ -236,7 +236,7 @@ export function TaskTreeNode({
               <span className="text-text-muted">{task.workflow_name}</span>
             )}
             <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${stepStyles.bg} ${stepStyles.text}`}
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${stepStyles.bg} ${stepStyles.text}`}
             >
               {formatStepName(task.step_name)}
             </span>

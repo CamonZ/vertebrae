@@ -132,18 +132,18 @@ function RunRow({
             {isActive && activeRunSource !== "selected" && (
               <span
                 data-testid="run-history-row-source"
-                className="rounded bg-bg-tertiary px-1 font-mono text-[9px] uppercase tracking-wider text-text-muted"
+                className="rounded bg-bg-tertiary px-1 font-mono text-xs uppercase tracking-wider text-text-muted"
               >
                 {activeRunSource}
               </span>
             )}
           </span>
-          <span className="flex items-center gap-1 truncate font-mono text-[10px] text-text-muted">
+          <span className="flex items-center gap-1 truncate font-mono text-xs text-text-muted">
             <span>{formatStartedAt(run.started_at)} ·</span>
             <ScanIdentifier
               id={run.id}
               kind="task run"
-              className="text-[10px]"
+              className="text-xs"
               testId="run-history-row-id"
             />
           </span>
@@ -247,7 +247,7 @@ export function RunHistoryRail({
       <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
         <span
           data-testid="run-history-rail-title"
-          className="font-mono text-[10px] uppercase tracking-wider text-text-muted"
+          className="font-mono text-xs uppercase tracking-wider text-text-muted"
         >
           Runs
         </span>
@@ -258,7 +258,7 @@ export function RunHistoryRail({
               onClick={onSwitchTask}
               data-testid="run-history-rail-switch-task"
               aria-label="Switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded px-1.5 py-0.5 text-xs uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
             >
               Switch
             </button>

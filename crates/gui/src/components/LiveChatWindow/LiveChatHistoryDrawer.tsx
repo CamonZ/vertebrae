@@ -89,7 +89,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
         }`}
       >
         <header className="sticky top-0 flex items-center justify-between border-b border-border bg-bg-primary px-3 py-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-text-secondary">
+          <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
             Past chats
           </span>
           <button
@@ -192,7 +192,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                       {title}
                     </span>
                     {stamp && (
-                      <span className="mt-0.5 text-[10px] text-text-muted">
+                      <span className="mt-0.5 text-xs text-text-muted">
                         {stamp}
                       </span>
                     )}

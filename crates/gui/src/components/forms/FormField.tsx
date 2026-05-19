@@ -76,7 +76,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
 
         {/* Optional help text */}
         {helpText && (
-          <small className="text-[10px] text-text-muted">{helpText}</small>
+          <small className="text-xs text-text-muted">{helpText}</small>
         )}
 
         {/* The wrapped input component */}
@@ -85,7 +85,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
 
         {/* Error message */}
         {error && (
-          <small className="flex items-center gap-1 text-[10px] text-error" role="alert">
+          <small className="flex items-center gap-1 text-xs text-error" role="alert">
             <svg
               className="h-3 w-3 flex-shrink-0"
               fill="none"
