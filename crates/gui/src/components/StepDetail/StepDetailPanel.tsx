@@ -609,7 +609,8 @@ export function StepDetailPanel({
                   value={step.prompt || ""}
                   placeholder="Click to add prompt..."
                   multiline
-                  rows={4}
+                  rows={12}
+                  resize="vertical"
                   monospace
                   renderDisplay={(value) => (
                     <LiquidHighlight source={value} data-testid="prompt-liquid-display" />
