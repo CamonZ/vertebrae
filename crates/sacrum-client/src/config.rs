@@ -177,25 +177,23 @@ impl SacrumConfig {
 /// `.git` directory even from a worktree; stripping `/.git` yields the main root.
 /// Non-colocated JJ workspaces usually do not expose Git metadata to the working
 /// copy, but they can still live under an unrelated ancestor Git repository.
-/// In that case Git succeeds with the wrong root, so use `jj root` when it
-/// identifies a closer workspace root nested below the Git root.
+/// In that case Git succeeds with the wrong root, so use JJ's `default`
+/// workspace root when it identifies a workspace nested below the Git root.
 /// Falls back to the input `cwd` when not in a repo or VCS tools are unavailable.
 fn resolve_project_root_at(cwd: &Path) -> PathBuf {
     let git_root = resolve_git_project_root_at(cwd);
     let jj_root = resolve_jj_project_root_at(cwd);
 
     match (git_root, jj_root) {
-        (Some(git_root), Some(jj_root)) if should_prefer_jj_root(cwd, &git_root, &jj_root) => {
-            jj_root
-        }
+        (Some(git_root), Some(jj_root)) if should_prefer_jj_root(&git_root, &jj_root) => jj_root,
         (Some(git_root), _) => git_root,
         (None, Some(jj_root)) => jj_root,
         (None, None) => cwd.to_path_buf(),
     }
 }
 
-fn should_prefer_jj_root(cwd: &Path, git_root: &Path, jj_root: &Path) -> bool {
-    jj_root != git_root && cwd.starts_with(jj_root) && jj_root.starts_with(git_root)
+fn should_prefer_jj_root(git_root: &Path, jj_root: &Path) -> bool {
+    jj_root != git_root && jj_root.starts_with(git_root)
 }
 
 fn resolve_git_project_root_at(cwd: &Path) -> Option<PathBuf> {
@@ -222,7 +220,13 @@ fn resolve_git_project_root_at(cwd: &Path) -> Option<PathBuf> {
 
 fn resolve_jj_project_root_at(cwd: &Path) -> Option<PathBuf> {
     let out = std::process::Command::new("jj")
-        .args(["root", "--ignore-working-copy"])
+        .args([
+            "workspace",
+            "root",
+            "--name",
+            "default",
+            "--ignore-working-copy",
+        ])
         .current_dir(cwd)
         .output()
         .ok()?;
@@ -923,7 +927,8 @@ path = "/Users/test/other"
     }
 
     #[test]
-    fn test_resolve_project_root_in_non_colocated_jj_workspace_under_ancestor_git_uses_jj_root() {
+    fn test_resolve_project_root_in_non_colocated_jj_workspace_under_ancestor_git_uses_default_jj_root()
+     {
         if !jj_available() {
             return;
         }
@@ -945,6 +950,49 @@ path = "/Users/test/other"
         assert_eq!(resolve_git_project_root_at(&subdir), Some(outer_repo));
         assert_eq!(resolve_jj_project_root_at(&subdir), Some(workspace.clone()));
         assert_eq!(resolve_project_root_at(&subdir), workspace);
+    }
+
+    #[test]
+    fn test_resolve_project_root_in_secondary_jj_workspace_under_ancestor_git_uses_default_workspace_root()
+     {
+        if !jj_available() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let outer_repo = tmp.path().join("outer");
+        std::fs::create_dir_all(&outer_repo).unwrap();
+        let outer_repo = outer_repo.canonicalize().unwrap();
+        run_git(&outer_repo, &["init", "-q"]);
+
+        let default_workspace = outer_repo.join("repo");
+        std::fs::create_dir_all(&default_workspace).unwrap();
+        let default_workspace = default_workspace.canonicalize().unwrap();
+
+        run_jj(&default_workspace, &["git", "init", "--no-colocate"]);
+
+        let secondary_workspace = outer_repo.join("repo-984cd381");
+        run_jj(
+            &default_workspace,
+            &[
+                "workspace",
+                "add",
+                "--name",
+                "task-984cd381",
+                secondary_workspace.to_str().unwrap(),
+            ],
+        );
+        let secondary_workspace = secondary_workspace.canonicalize().unwrap();
+
+        let subdir = secondary_workspace.join("nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert_eq!(resolve_git_project_root_at(&subdir), Some(outer_repo));
+        assert_eq!(
+            resolve_jj_project_root_at(&subdir),
+            Some(default_workspace.clone())
+        );
+        assert_eq!(resolve_project_root_at(&subdir), default_workspace);
     }
 
     #[test]
