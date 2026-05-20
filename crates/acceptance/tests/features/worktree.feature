@@ -10,7 +10,7 @@ Feature: Worktree project resolution
     Then the command succeeds
     And the created task belongs to the configured project
 
-  Scenario: vtb add resolves a registered non-colocated JJ workspace without project env
+  Scenario: vtb add resolves a non-colocated JJ workspace to the registered default workspace
     Given a configured Sacrum client
     And the project is registered at a temporary non-colocated JJ workspace
     When I run vtb add "JJ workspace-resolved task" from the VCS workspace directory

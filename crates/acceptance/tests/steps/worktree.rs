@@ -72,6 +72,28 @@ async fn assert_jj_root(repo: &Path, expected: &Path) {
     );
 }
 
+async fn assert_jj_default_workspace_root(repo: &Path, expected: &Path) {
+    let root = command_stdout(
+        repo,
+        "jj",
+        &[
+            "workspace",
+            "root",
+            "--name",
+            "default",
+            "--ignore-working-copy",
+        ],
+    )
+    .await;
+    assert_eq!(
+        PathBuf::from(root),
+        expected,
+        "expected default jj workspace root in {:?} to resolve to {:?}",
+        repo,
+        expected
+    );
+}
+
 #[given("the project is registered at a temporary git repository")]
 async fn given_registered_temp_repo(world: &mut SmokeWorld) {
     let project_id = world
@@ -128,13 +150,30 @@ async fn given_registered_non_colocated_jj_workspace(world: &mut SmokeWorld) {
     let outer_repo = outer_repo.canonicalize().unwrap();
     run_git(&outer_repo, &["init", "-q"]).await;
 
-    let workspace = outer_repo.join("jj-workspace");
-    std::fs::create_dir_all(&workspace).unwrap();
-    let workspace = workspace.canonicalize().unwrap();
+    let default_workspace = outer_repo.join("jj-default-workspace");
+    std::fs::create_dir_all(&default_workspace).unwrap();
+    let default_workspace = default_workspace.canonicalize().unwrap();
 
-    run_jj(&workspace, &["git", "init", "--no-colocate"]).await;
+    run_jj(&default_workspace, &["git", "init", "--no-colocate"]).await;
+    assert_git_root(&default_workspace, &outer_repo).await;
+    assert_jj_root(&default_workspace, &default_workspace).await;
+
+    let workspace = outer_repo.join("jj-task-workspace");
+    run_jj(
+        &default_workspace,
+        &[
+            "workspace",
+            "add",
+            "--name",
+            "task-workspace",
+            workspace.to_str().unwrap(),
+        ],
+    )
+    .await;
+    let workspace = workspace.canonicalize().unwrap();
     assert_git_root(&workspace, &outer_repo).await;
     assert_jj_root(&workspace, &workspace).await;
+    assert_jj_default_workspace_root(&workspace, &default_workspace).await;
 
     let nested_dir = workspace.join("nested");
     std::fs::create_dir_all(&nested_dir).unwrap();
@@ -145,7 +184,7 @@ async fn given_registered_non_colocated_jj_workspace(world: &mut SmokeWorld) {
 
     let url = world.env.get("VTB_URL").cloned().unwrap_or_default();
     let token = world.env.get("VTB_TOKEN").cloned().unwrap_or_default();
-    let workspace_str = workspace.to_string_lossy().to_string();
+    let workspace_str = default_workspace.to_string_lossy().to_string();
     let config_doc = format!(
         "[sacrum]\nurl = \"{}\"\ntoken = \"{}\"\n\n[projects.acceptance]\nid = \"{}\"\npath = \"{}\"\n",
         url, token, project_id, workspace_str
@@ -155,7 +194,7 @@ async fn given_registered_non_colocated_jj_workspace(world: &mut SmokeWorld) {
     world.worktree = Some(WorktreeFixture {
         _tmp: tmp,
         home,
-        main_repo: workspace,
+        main_repo: default_workspace,
         worktree_path: nested_dir,
     });
 }
