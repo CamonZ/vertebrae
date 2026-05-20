@@ -9,6 +9,8 @@ export interface InlineEditFieldProps {
   multiline?: boolean;
   /** Number of rows for textarea */
   rows?: number;
+  /** How the multiline textarea can be resized */
+  resize?: 'none' | 'vertical' | 'horizontal' | 'both';
   /** Callback when value is saved */
   onSave: (value: string) => Promise<void>;
   /** Optional validation function - returns error message or null */
@@ -47,6 +49,7 @@ export function InlineEditField({
   placeholder = 'Click to edit',
   multiline = false,
   rows = 4,
+  resize = 'vertical',
   onSave,
   validate,
   allowEmpty = true,
@@ -166,6 +169,12 @@ export function InlineEditField({
     const buttonPadding = compact ? 'p-1' : 'p-1.5';
     const buttonMargin = compact ? 'mt-0.5' : 'mt-1.5';
     const dotMargin = compact ? 'mt-1.5' : 'mt-2.5';
+    const resizeClasses = {
+      none: 'resize-none',
+      vertical: 'resize-y',
+      horizontal: 'resize-x',
+      both: 'resize',
+    };
 
     return (
       <div className="flex-1 min-w-0">
@@ -185,7 +194,7 @@ export function InlineEditField({
               disabled={isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
-              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50 resize-none`}
+              className={`flex-1 min-h-0 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50 ${resizeClasses[resize]}`}
             />
           ) : (
             <input
@@ -207,7 +216,7 @@ export function InlineEditField({
               onClick={handleSave}
               disabled={isSubmitting || isDeleting}
               className={`${buttonPadding} rounded text-warning hover:bg-warning/10 transition-colors disabled:opacity-50 cursor-pointer`}
-              title="Save (Enter)"
+              title={multiline ? 'Save (Ctrl+Enter)' : 'Save (Enter)'}
               aria-label="Save"
             >
               {isSubmitting ? (

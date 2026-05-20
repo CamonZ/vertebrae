@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StepDetailPanel } from "./StepDetailPanel";
 import type { Step, Task } from "../../bindings";
@@ -626,6 +626,54 @@ describe("StepDetailPanel", () => {
       expect(
         screen.getByText("Review the pull request for correctness and style")
       ).toBeInTheDocument();
+    });
+
+    it("edits long prompt templates with a tall resizable textarea and visible controls", async () => {
+      const longPrompt = [
+        "Review this workflow step.",
+        "{% if task.level == \"epic\" %}",
+        "Check the epic outcome and child ticket sequencing.",
+        "{% else %}",
+        "Check the ticket implementation and verification evidence.",
+        "{% endif %}",
+        "Return a concise result with concrete blockers.",
+      ].join("\n\n");
+      const step = createStep({ prompt: longPrompt });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+      vi.mocked(bindings.commands.updateStep).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByTestId("prompt-liquid-display")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("prompt-liquid-display"));
+
+      const textarea = screen.getByRole("textbox");
+      expect(textarea).toHaveValue(longPrompt);
+      expect(textarea).toHaveAttribute("rows", "12");
+      expect(textarea).toHaveClass("resize-y", "font-mono");
+      expect(screen.getByRole("button", { name: /save/i })).toBeVisible();
+      expect(screen.getByRole("button", { name: /cancel/i })).toBeVisible();
+
+      await userEvent.type(textarea, "\n\nAdditional verification note.");
+      await userEvent.keyboard("{Control>}{Enter}{/Control}");
+
+      await waitFor(() => {
+        expect(bindings.commands.updateStep).toHaveBeenCalledWith(
+          expect.objectContaining({
+            step_id: "step-test",
+            prompt: `${longPrompt}\n\nAdditional verification note.`,
+          })
+        );
+      });
     });
 
     it("shows prompt section with placeholder when prompt is null", () => {
