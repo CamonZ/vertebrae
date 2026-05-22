@@ -1,8 +1,5 @@
-// Shared TaskRun-lineage projection consumed by THREAD, TIMELINE, and CORRIDOR.
-// Lanes/groups are keyed by task_run_id; delegation edges come from
-// parent_task_run_id + triggered_by_step_execution_id. Executions without a
-// known task_run_id are surfaced via `orphanExecutions` for the legacy path.
-// TaskRun.status (not StepExecution.status) defines the terminal state of a run.
+// Shared TaskRun trace projection consumed by THREAD, TIMELINE, CORRIDOR, and
+// the run rail. Attempts keep TaskRun lineage, while navigation groups by task.
 import type { StepExecution, Task, TaskRun } from "../../bindings";
 import { safeMs } from "./timeUtils";
 import { summarizeExecutions, traceDebug } from "./traceDebug";
@@ -18,6 +15,16 @@ export interface TaskRunNode {
   childRunIds: string[];
 }
 
+export interface TaskTraceGroup {
+  taskId: string;
+  task: Task | null;
+  /** 0 = root task group. */
+  depth: number;
+  /** TaskRun attempts for this task, sorted chronologically. */
+  runs: TaskRunNode[];
+  childTaskIds: string[];
+}
+
 export interface RunDelegationEdge {
   parentRunId: string;
   childRunId: string;
@@ -31,6 +38,9 @@ export interface RunDelegationEdge {
 }
 
 export interface TaskRunTraceProjection {
+  /** Task hierarchy first, each group containing that task's run attempts. */
+  orderedTaskGroups: TaskTraceGroup[];
+  taskGroupsById: Map<string, TaskTraceGroup>;
   /** Roots first, each followed by its children recursively. */
   orderedRuns: TaskRunNode[];
   runsById: Map<string, TaskRunNode>;
@@ -90,6 +100,16 @@ export function projectTaskRunTrace(
     node.executions.sort(compareExecutions);
   }
   orphanExecutions.sort(compareExecutions);
+
+  const runsByTaskId = new Map<string, TaskRunNode[]>();
+  for (const node of runsById.values()) {
+    const list = runsByTaskId.get(node.run.task_id) ?? [];
+    list.push(node);
+    runsByTaskId.set(node.run.task_id, list);
+  }
+  for (const list of runsByTaskId.values()) {
+    list.sort((a, b) => compareRuns(a.run, b.run));
+  }
 
   traceDebug("projection buckets", {
     taskRunCount: taskRuns.length,
@@ -160,7 +180,88 @@ export function projectTaskRunTrace(
     });
   }
 
+  const childTaskIdsByParent = new Map<string | null, string[]>();
+  for (const task of tasks) {
+    const parentId = task.parent_id ?? null;
+    const list = childTaskIdsByParent.get(parentId) ?? [];
+    list.push(task.id);
+    childTaskIdsByParent.set(parentId, list);
+  }
+  for (const list of childTaskIdsByParent.values()) {
+    list.sort((a, b) => a.localeCompare(b));
+  }
+
+  const taskGroupsById = new Map<string, TaskTraceGroup>();
+  const taskIdsWithRuns = new Set(runsByTaskId.keys());
+  const orderedTaskGroups: TaskTraceGroup[] = [];
+  const visitedTaskIds = new Set<string>();
+  const subtreeRunPresence = new Map<string, boolean>();
+
+  function hasRunInSubtree(taskId: string, stack = new Set<string>()): boolean {
+    const cached = subtreeRunPresence.get(taskId);
+    if (cached !== undefined) return cached;
+    if (stack.has(taskId)) return false;
+    if (taskIdsWithRuns.has(taskId)) return true;
+    stack.add(taskId);
+    for (const childId of childTaskIdsByParent.get(taskId) ?? []) {
+      if (hasRunInSubtree(childId, stack)) {
+        stack.delete(taskId);
+        subtreeRunPresence.set(taskId, true);
+        return true;
+      }
+    }
+    stack.delete(taskId);
+    subtreeRunPresence.set(taskId, false);
+    return false;
+  }
+
+  function visitTask(taskId: string, depth: number): void {
+    if (visitedTaskIds.has(taskId) || !hasRunInSubtree(taskId)) return;
+    visitedTaskIds.add(taskId);
+    const childTaskIds = (childTaskIdsByParent.get(taskId) ?? []).filter(
+      (childId) => hasRunInSubtree(childId)
+    );
+    const group: TaskTraceGroup = {
+      taskId,
+      task: tasksById.get(taskId) ?? null,
+      depth,
+      runs: runsByTaskId.get(taskId) ?? [],
+      childTaskIds,
+    };
+    taskGroupsById.set(taskId, group);
+    orderedTaskGroups.push(group);
+    for (const childId of childTaskIds) visitTask(childId, depth + 1);
+  }
+
+  const rootTaskIds = new Set<string>();
+  for (const taskId of taskIdsWithRuns) {
+    let cursor = tasksById.get(taskId);
+    const seenAncestors = new Set<string>([taskId]);
+    while (
+      cursor?.parent_id &&
+      tasksById.has(cursor.parent_id) &&
+      !seenAncestors.has(cursor.parent_id)
+    ) {
+      seenAncestors.add(cursor.parent_id);
+      cursor = tasksById.get(cursor.parent_id);
+    }
+    rootTaskIds.add(cursor?.id ?? taskId);
+  }
+  const sortedRootTaskIds = Array.from(rootTaskIds).sort((a, b) => {
+    const firstA = runsByTaskId.get(a)?.[0]?.run;
+    const firstB = runsByTaskId.get(b)?.[0]?.run;
+    if (firstA && firstB) return compareRuns(firstA, firstB);
+    return a.localeCompare(b);
+  });
+  for (const taskId of sortedRootTaskIds) visitTask(taskId, 0);
+
+  for (const taskId of taskIdsWithRuns) {
+    if (!visitedTaskIds.has(taskId)) visitTask(taskId, 0);
+  }
+
   return {
+    orderedTaskGroups,
+    taskGroupsById,
     orderedRuns,
     runsById,
     delegationEdges,

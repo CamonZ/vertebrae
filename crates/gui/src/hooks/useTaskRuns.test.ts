@@ -9,7 +9,7 @@ vi.mock("../bindings", () => ({
   },
 }));
 
-import { useTaskRuns } from "./useTaskRuns";
+import { useTaskRuns, useTaskRunsForTasks } from "./useTaskRuns";
 import { useTaskRunStore } from "../stores/taskRunStore";
 import { createMockTaskRun } from "../test/test-utils";
 import type { TaskRun } from "../bindings";
@@ -199,5 +199,110 @@ describe("useTaskRuns", () => {
 
     expect(result.current.runs.map((r) => r.id)).toEqual(["run-new"]);
     expect(result.current.activeRun?.id).toBe("run-new");
+  });
+});
+
+describe("useTaskRunsForTasks", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useTaskRunStore.setState({ taskRuns: [], taskRunsByTaskId: {} });
+  });
+
+  it("fetches each unique task id once and returns all runs newest-first", async () => {
+    const task1Old = makeRun({
+      id: "run-task-1-old",
+      task_id: "task-1",
+      status: "completed",
+      started_at: "2026-01-01T08:00:00.000Z",
+    });
+    const task2New = makeRun({
+      id: "run-task-2-new",
+      task_id: "task-2",
+      status: "completed",
+      started_at: "2026-01-02T08:00:00.000Z",
+    });
+
+    mockGetTaskRuns.mockImplementation(async (taskId: string) => ({
+      status: "ok",
+      data: taskId === "task-1" ? [task1Old] : [task2New],
+    }));
+
+    const { result } = renderHook(() =>
+      useTaskRunsForTasks(["task-2", "task-1", "task-2"])
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(mockGetTaskRuns).toHaveBeenCalledTimes(2);
+    expect(mockGetTaskRuns.mock.calls.map(([taskId]) => taskId)).toEqual([
+      "task-1",
+      "task-2",
+    ]);
+    expect(result.current.runs.map((r) => r.id)).toEqual([
+      "run-task-2-new",
+      "run-task-1-old",
+    ]);
+    expect(useTaskRunStore.getState().taskRunsByTaskId["task-1"]).toEqual([
+      task1Old,
+    ]);
+    expect(useTaskRunStore.getState().taskRunsByTaskId["task-2"]).toEqual([
+      task2New,
+    ]);
+  });
+
+  it("returns immediately without fetching when no task ids are provided", async () => {
+    const { result } = renderHook(() => useTaskRunsForTasks([]));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(mockGetTaskRuns).not.toHaveBeenCalled();
+    expect(result.current.runs).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("keeps successful task runs while surfacing the first fetch error", async () => {
+    const successfulRun = makeRun({
+      id: "run-success",
+      task_id: "task-success",
+      status: "completed",
+    });
+
+    mockGetTaskRuns.mockImplementation(async (taskId: string) =>
+      taskId === "task-fail"
+        ? { status: "error", error: { message: "cannot load task runs" } }
+        : { status: "ok", data: [successfulRun] }
+    );
+
+    const { result } = renderHook(() =>
+      useTaskRunsForTasks(["task-fail", "task-success"])
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.error).toBe("cannot load task runs");
+    expect(result.current.runs.map((r) => r.id)).toEqual(["run-success"]);
+    expect(useTaskRunStore.getState().taskRunsByTaskId["task-success"]).toEqual(
+      [successfulRun]
+    );
+  });
+
+  it("refetches when the task id set changes", async () => {
+    mockGetTaskRuns.mockResolvedValue({ status: "ok", data: [] });
+
+    const { result, rerender } = renderHook(
+      ({ taskIds }: { taskIds: string[] }) => useTaskRunsForTasks(taskIds),
+      { initialProps: { taskIds: ["task-1"] } }
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(mockGetTaskRuns.mock.calls.map(([taskId]) => taskId)).toEqual([
+      "task-1",
+    ]);
+
+    rerender({ taskIds: ["task-1", "task-2"] });
+    await waitFor(() => expect(mockGetTaskRuns).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(mockGetTaskRuns.mock.calls.map(([taskId]) => taskId)).toEqual([
+      "task-1",
+      "task-1",
+      "task-2",
+    ]);
   });
 });

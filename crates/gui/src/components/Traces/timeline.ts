@@ -566,9 +566,7 @@ export function buildTimelineProjectionFromProjection(
     const childFirst = childNode.executions[0];
     const triggerExec = resolveParentExecution(projection, edge);
     const anchorMs =
-      safeMs(childFirst?.started_at) ??
-      safeMs(triggerExec?.started_at) ??
-      0;
+      safeMs(childFirst?.started_at) ?? safeMs(triggerExec?.started_at) ?? 0;
     delegations.push({
       lane: "delegation",
       x: xOf(anchorMs),
@@ -596,4 +594,3 @@ export function buildTimelineProjectionFromProjection(
     taggedEvents: tagged,
   };
 }
-
