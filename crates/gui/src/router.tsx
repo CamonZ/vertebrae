@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
+import { StyleguideShortcut } from "./components/StyleguideShortcut";
 import { useTheme } from "./hooks";
 import {
   ProjectSetupPage,
@@ -14,6 +15,7 @@ import {
   OperationsPage,
   BoardPage,
   TracesPage,
+  StyleguidePage,
   TaskDetailPage,
   StandaloneChatWindow,
   StandaloneLiveChatWindow,
@@ -27,6 +29,7 @@ function RootLayout() {
 
   return (
     <AppShell title="Vertebrae" subtitle="Agent Orchestrator">
+      <StyleguideShortcut />
       <Outlet />
     </AppShell>
   );
@@ -153,6 +156,14 @@ export const router = createBrowserRouter([
         element: (
           <ProjectGuard>
             <TracesPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "styleguide",
+        element: (
+          <ProjectGuard>
+            <StyleguidePage />
           </ProjectGuard>
         ),
       },

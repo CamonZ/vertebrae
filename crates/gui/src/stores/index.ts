@@ -23,6 +23,8 @@ export type { ToastStore } from "./toastStore";
 export { useDebugStore } from "./debugStore";
 export type { DebugStore } from "./debugStore";
 
+export { useStyleguideStore } from "./styleguideStore";
+
 export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 

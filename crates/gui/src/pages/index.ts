@@ -5,6 +5,7 @@ export { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
 export { OperationsPage } from "./OperationsPage";
 export { BoardPage } from "./BoardPage";
 export { TracesPage } from "./TracesPage";
+export { StyleguidePage } from "./StyleguidePage";
 export { TaskDetailPage } from "./TaskDetailPage";
 export { StandaloneChatWindow } from "./StandaloneChatWindow";
 export { StandaloneLiveChatWindow } from "./StandaloneLiveChatWindow";

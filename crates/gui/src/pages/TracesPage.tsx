@@ -64,6 +64,7 @@ import { useTraceFilters } from "../hooks/useTraceFilters";
 import { useTaskStore } from "../stores/taskStore";
 import type { TaggedConversationEvent } from "../types/conversation";
 import { computeExecutionRollups, popOut } from "../utils";
+import { isEditableShortcutTarget } from "../utils/keyboard";
 
 interface ModeContentProps {
   mode: TraceMode;
@@ -648,13 +649,7 @@ export function TracesPage({
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName?.toLowerCase();
-      const isEditable =
-        tag === "input" ||
-        tag === "textarea" ||
-        tag === "select" ||
-        target?.isContentEditable === true;
+      const isEditable = isEditableShortcutTarget(e.target);
 
       if (e.key === "/" && !isEditable) {
         e.preventDefault();
