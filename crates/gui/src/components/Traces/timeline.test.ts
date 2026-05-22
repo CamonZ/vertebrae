@@ -293,7 +293,7 @@ describe("buildTimelineProjectionFromProjection", () => {
   it("builds rows per TaskRun and emits run-keyed delegation edges", () => {
     const tasks = [
       makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
+      makeTask({ id: "t-child", parent_id: "t-root" }),
     ];
     const runs = [
       makeRun({
@@ -355,10 +355,7 @@ describe("buildTimelineProjectionFromProjection", () => {
   });
 
   it("buckets thinking markers into mainByRow keyed on the execution's TaskRun, not its task", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -424,11 +421,86 @@ describe("buildTimelineProjectionFromProjection", () => {
     expect(proj.main.find((m) => m.executionId === "ec")?.rowIndex).toBe(1);
   });
 
-  it("emits model_fallback per-run only (no cross-run fallback) and at the new exec's x", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
+  it("keeps multiple attempts for one task as separate timeline rows", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [
+      makeRun({
+        id: "r-stopped",
+        task_id: "t-root",
+        status: "stopped",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-active",
+        task_id: "t-root",
+        status: "executing",
+        started_at: "2024-01-01T10:05:00Z",
+      }),
     ];
+    const executions = [
+      makeExec({
+        id: "e-stopped",
+        task_id: "t-root",
+        task_run_id: "r-stopped",
+        started_at: "2024-01-01T10:00:10Z",
+      }),
+      makeExec({
+        id: "e-active",
+        task_id: "t-root",
+        task_run_id: "r-active",
+        started_at: "2024-01-01T10:05:10Z",
+      }),
+    ];
+
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, executions, tasks),
+      {}
+    );
+
+    expect(proj.mainRows.map((row) => row.rowKey)).toEqual([
+      "r-stopped",
+      "r-active",
+    ]);
+    expect(proj.thresholds.map((marker) => marker.executionId)).toEqual([
+      "e-stopped",
+      "e-active",
+    ]);
+  });
+
+  it("keeps same-task run delegation edges in the timeline projection", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [
+      makeRun({
+        id: "r-first",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-restart",
+        task_id: "t-root",
+        parent_task_run_id: "r-first",
+        started_at: "2024-01-01T10:05:00Z",
+      }),
+    ];
+
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, [], tasks),
+      {}
+    );
+
+    expect(proj.mainRows.map((row) => row.rowKey)).toEqual([
+      "r-first",
+      "r-restart",
+    ]);
+    expect(proj.delegations).toHaveLength(1);
+    expect(proj.delegations[0]).toMatchObject({
+      parentTaskRunId: "r-first",
+      childTaskRunId: "r-restart",
+    });
+  });
+
+  it("emits model_fallback per-run only (no cross-run fallback) and at the new exec's x", () => {
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -471,7 +543,9 @@ describe("buildTimelineProjectionFromProjection", () => {
       projectTaskRunTrace(runs, executions, tasks),
       {}
     );
-    const fallbacks = proj.thresholds.filter((m) => m.kind === "model_fallback");
+    const fallbacks = proj.thresholds.filter(
+      (m) => m.kind === "model_fallback"
+    );
     expect(fallbacks).toHaveLength(1);
     expect(fallbacks[0].executionId).toBe("p2");
     // p2 is at the midpoint of [10:00:00, 10:01:00] → x = 0.5.
@@ -480,10 +554,7 @@ describe("buildTimelineProjectionFromProjection", () => {
   });
 
   it("anchors run-aware delegation x at the child's first execution and binds row indices to the projection order", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -565,7 +636,11 @@ describe("buildTimelineProjectionFromProjection", () => {
 
     // Single row keyed on the run; both executions live there.
     expect(proj.mainRows).toHaveLength(1);
-    expect(proj.mainRows[0].taskRunId).toBe("r-root");
+    expect(proj.mainRows[0]).toMatchObject({
+      rowKey: "r-root",
+      taskId: "t-root",
+      taskRunId: "r-root",
+    });
     // No cross-task delegation edge — both executions belong to the same run.
     expect(proj.delegations).toEqual([]);
     // Same-step retry threshold still surfaces inside the run.

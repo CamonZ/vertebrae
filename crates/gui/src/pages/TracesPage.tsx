@@ -13,7 +13,14 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import type { SessionLog, StepExecution, Task, Workflow } from "../bindings";
+import type {
+  SessionLog,
+  StepExecution,
+  Task,
+  TaskFilterOptions,
+  TaskRun,
+  Workflow,
+} from "../bindings";
 import { commands } from "../bindings";
 import { resolveHumanInputGate } from "../utils/humanInputGate";
 import {
@@ -44,7 +51,12 @@ import {
   summarizeRuns,
   traceDebug,
 } from "../components/Traces/traceDebug";
-import { useTask, useTaskRuns, useTaskRunTrace } from "../hooks";
+import {
+  useTask,
+  useTaskRuns,
+  useTaskRunsForTasks,
+  useTaskRunTrace,
+} from "../hooks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
 import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
@@ -154,6 +166,95 @@ function parseExecHash(hash: string): string | null {
   return null;
 }
 
+function collectTraceTaskIds(
+  rootTaskId: string | null,
+  tasks: readonly Task[]
+): string[] {
+  if (!rootTaskId) return [];
+  const tasksById = new Map(tasks.map((task) => [task.id, task]));
+  const childrenByParent = new Map<string | null, string[]>();
+  for (const task of tasks) {
+    const parentId = task.parent_id ?? null;
+    const children = childrenByParent.get(parentId) ?? [];
+    children.push(task.id);
+    childrenByParent.set(parentId, children);
+  }
+
+  const ids: string[] = [];
+  const visited = new Set<string>();
+
+  const ancestors: string[] = [];
+  let cursor: Task | undefined = tasksById.get(rootTaskId);
+  while (cursor) {
+    if (visited.has(cursor.id)) break;
+    ancestors.push(cursor.id);
+    const parentId = cursor.parent_id;
+    if (!parentId) break;
+    cursor = tasksById.get(parentId);
+  }
+  for (const taskId of ancestors.reverse()) {
+    visited.add(taskId);
+    ids.push(taskId);
+  }
+
+  const visit = (taskId: string): void => {
+    if (visited.has(taskId)) return;
+    visited.add(taskId);
+    ids.push(taskId);
+    for (const childId of childrenByParent.get(taskId) ?? []) {
+      visit(childId);
+    }
+  };
+  if (!visited.has(rootTaskId)) {
+    visited.add(rootTaskId);
+    ids.push(rootTaskId);
+  }
+  for (const childId of childrenByParent.get(rootTaskId) ?? []) {
+    visit(childId);
+  }
+  return ids;
+}
+
+function mergeRunsNewestFirst(
+  primaryRuns: readonly TaskRun[],
+  secondaryRuns: readonly TaskRun[]
+): TaskRun[] {
+  const runsById = new Map<string, TaskRun>();
+  for (const run of primaryRuns) runsById.set(run.id, run);
+  for (const run of secondaryRuns) {
+    if (!runsById.has(run.id)) runsById.set(run.id, run);
+  }
+  return Array.from(runsById.values()).sort((a, b) => {
+    const aTs = a.started_at ?? a.inserted_at ?? "";
+    const bTs = b.started_at ?? b.inserted_at ?? "";
+    if (aTs !== bTs) return bTs.localeCompare(aTs);
+    return b.id.localeCompare(a.id);
+  });
+}
+
+function taskChildrenFilter(parentId: string): TaskFilterOptions {
+  return {
+    step_names: null,
+    levels: null,
+    tags: null,
+    root_only: null,
+    children_of: parentId,
+    search: null,
+    workflow_id: null,
+    step_id: null,
+  };
+}
+
+function mergeTasksById(...taskLists: readonly (readonly Task[])[]): Task[] {
+  const byId = new Map<string, Task>();
+  for (const taskList of taskLists) {
+    for (const nextTask of taskList) {
+      byId.set(nextTask.id, { ...byId.get(nextTask.id), ...nextTask });
+    }
+  }
+  return Array.from(byId.values());
+}
+
 interface TracesPageProps {
   /**
    * If provided, overrides the `:taskId` route param. Used by the
@@ -196,10 +297,12 @@ export function TracesPage({
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(
     null
   );
+  const [fetchedTraceTasks, setFetchedTraceTasks] = useState<Task[]>([]);
   const [pickerInRail, setPickerInRail] = useState(false);
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const pickerRef = useRef<TaskPickerHandle | null>(null);
+  const traceTaskFetchSeqRef = useRef(0);
 
   const safeTaskId = taskId ?? null;
   const {
@@ -207,6 +310,63 @@ export function TracesPage({
     isLoading: isTaskLoading,
     error: taskError,
   } = useTask(safeTaskId);
+  const traceTasks = useMemo(
+    () => mergeTasksById(tasks, fetchedTraceTasks, task ? [task] : []),
+    [tasks, fetchedTraceTasks, task]
+  );
+
+  useEffect(() => {
+    if (!safeTaskId) {
+      setFetchedTraceTasks([]);
+      return;
+    }
+
+    const seq = ++traceTaskFetchSeqRef.current;
+    let cancelled = false;
+
+    const fetchTraceTasks = async (): Promise<void> => {
+      const byId = new Map<string, Task>();
+      for (const existingTask of tasks) byId.set(existingTask.id, existingTask);
+      if (task) byId.set(task.id, task);
+
+      const fetchTaskById = async (id: string): Promise<Task | null> => {
+        const existing = byId.get(id);
+        if (existing) return existing;
+        const result = await commands.getTask(id);
+        if (result.status !== "ok") return null;
+        byId.set(result.data.id, result.data);
+        return result.data;
+      };
+
+      let cursor = await fetchTaskById(safeTaskId);
+      const seenAncestors = new Set<string>();
+      while (cursor?.parent_id && !seenAncestors.has(cursor.parent_id)) {
+        seenAncestors.add(cursor.parent_id);
+        cursor = await fetchTaskById(cursor.parent_id);
+      }
+
+      const seenDescendants = new Set<string>();
+      const fetchChildren = async (parentId: string): Promise<void> => {
+        if (seenDescendants.has(parentId)) return;
+        seenDescendants.add(parentId);
+        const result = await commands.listTasks(taskChildrenFilter(parentId));
+        if (result.status !== "ok") return;
+        for (const child of result.data) byId.set(child.id, child);
+        for (const child of result.data) await fetchChildren(child.id);
+      };
+      await fetchChildren(safeTaskId);
+
+      if (!cancelled && seq === traceTaskFetchSeqRef.current) {
+        setFetchedTraceTasks(Array.from(byId.values()));
+      }
+    };
+
+    void fetchTraceTasks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [safeTaskId, task, tasks]);
 
   // URL state for stable trace links. `runId` selects a specific TaskRun for
   // the entry-point task; `rootRunId` pins the trace tree to a recursive root
@@ -220,6 +380,21 @@ export function TracesPage({
     isLoading: isRunsLoading,
     error: runsError,
   } = useTaskRuns(safeTaskId);
+  const railTaskIds = useMemo(
+    () => collectTraceTaskIds(safeTaskId, traceTasks),
+    [safeTaskId, traceTasks]
+  );
+  const descendantRailTaskIds = useMemo(
+    () => railTaskIds.filter((id) => id !== safeTaskId),
+    [railTaskIds, safeTaskId]
+  );
+  const {
+    runs: descendantRailRuns,
+  } = useTaskRunsForTasks(descendantRailTaskIds);
+  const railRuns = useMemo(
+    () => mergeRunsNewestFirst(runs, descendantRailRuns),
+    [runs, descendantRailRuns]
+  );
 
   // Resolve the run that backs the current trace. `rootRunId` always wins so
   // shared deep links remain stable even when a newer run is active; if it
@@ -229,17 +404,19 @@ export function TracesPage({
       const match = runs.find((r) => r.id === rootRunIdParam);
       if (match) return { run: match, source: "selected" as const };
     }
+    if (selectedRunId) {
+      const selectedFromRail = railRuns.find((r) => r.id === selectedRunId);
+      if (selectedFromRail) {
+        return { run: selectedFromRail, source: "selected" as const };
+      }
+    }
     return resolveRun(selectedRunId);
-  }, [rootRunIdParam, runs, resolveRun, selectedRunId]);
+  }, [rootRunIdParam, runs, railRuns, resolveRun, selectedRunId]);
 
-  // The trace fetch is keyed on the root TaskRun id. When the resolved run
-  // already has a `root_task_run_id` (child workflow runs), prefer that so
-  // the recursive trace tree shows the full lineage.
-  const rootTaskRunId =
-    rootRunIdParam ??
-    resolvedRun.run?.root_task_run_id ??
-    resolvedRun.run?.id ??
-    null;
+  // The trace fetch is keyed on the selected TaskRun id. The rail shows the
+  // task hierarchy; selecting an attempt should inspect that attempt's logs,
+  // not implicitly jump back to the root TaskRun lineage.
+  const rootTaskRunId = rootRunIdParam ?? resolvedRun.run?.id ?? null;
 
   const {
     taskRuns: runTaskRuns,
@@ -383,8 +560,12 @@ export function TracesPage({
 
   const runProjection = useMemo<TaskRunTraceProjection | null>(() => {
     if (useLegacySubtree || scopedRunTaskRuns.length === 0) return null;
-    return projectTaskRunTrace(scopedRunTaskRuns, filteredExecutions, tasks);
-  }, [useLegacySubtree, scopedRunTaskRuns, filteredExecutions, tasks]);
+    return projectTaskRunTrace(
+      scopedRunTaskRuns,
+      filteredExecutions,
+      traceTasks
+    );
+  }, [useLegacySubtree, scopedRunTaskRuns, filteredExecutions, traceTasks]);
 
   useEffect(() => {
     traceDebug("execution filters", {
@@ -545,9 +726,7 @@ export function TracesPage({
   const showPickerRail = !taskId || pickerInRail;
   // Show the run-history rail whenever the task has TaskRun data; fall back
   // to the legacy subtree rail for tasks that never had a durable run.
-  const showRunHistoryRail = runs.length > 0;
-  const railRuns =
-    !useLegacySubtree && runTaskRuns.length > 0 ? runTaskRuns : runs;
+  const showRunHistoryRail = railRuns.length > 0;
 
   const handleSelectRun = useCallback(
     (runId: string) => {
@@ -616,6 +795,7 @@ export function TracesPage({
         ) : showRunHistoryRail ? (
           <RunHistoryRail
             runs={railRuns}
+            tasks={traceTasks}
             activeRunId={activeTraceRun?.id ?? null}
             activeRunSource={activeTraceRunSource}
             onSelectRun={handleSelectRun}
@@ -626,7 +806,7 @@ export function TracesPage({
         ) : (
           <SubtreeRail
             rootTaskId={taskId!}
-            tasks={tasks}
+            tasks={traceTasks}
             subtreeTaskIds={subtreeTaskIds}
             executions={filteredExecutions}
             logsByExecutionId={logsByExecutionId}
@@ -701,7 +881,7 @@ export function TracesPage({
                 <FlightStrip
                   rootTaskId={taskId}
                   executions={filteredExecutions}
-                  tasks={tasks}
+                  tasks={traceTasks}
                   runProjection={runProjection}
                   logsByExecutionId={logsByExecutionId}
                   threadScrollRef={threadScrollRef}
@@ -713,7 +893,7 @@ export function TracesPage({
                     mode,
                     taskId,
                     executions: filteredExecutions,
-                    tasks,
+                    tasks: traceTasks,
                     runProjection,
                     workflows,
                     logsByExecutionId,

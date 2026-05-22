@@ -32,7 +32,9 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   completed_at: null,
 });
 
-const makeExec = (overrides: Partial<StepExecution> & { id: string; task_id: string }): StepExecution => ({
+const makeExec = (
+  overrides: Partial<StepExecution> & { id: string; task_id: string }
+): StepExecution => ({
   id: overrides.id,
   task_id: overrides.task_id,
   workflow_id: overrides.workflow_id ?? "wf-1",
@@ -134,10 +136,20 @@ describe("UnifiedChatView", () => {
     });
     const logs = {
       "exec-a": [
-        makeLog("exec-a", thinking("planning step"), "2024-01-01T10:00:01.000Z", 0),
+        makeLog(
+          "exec-a",
+          thinking("planning step"),
+          "2024-01-01T10:00:01.000Z",
+          0
+        ),
       ],
       "exec-b": [
-        makeLog("exec-b", thinking("implementing step"), "2024-01-01T10:05:01.000Z", 0),
+        makeLog(
+          "exec-b",
+          thinking("implementing step"),
+          "2024-01-01T10:05:01.000Z",
+          0
+        ),
       ],
     };
     render(
@@ -164,7 +176,9 @@ describe("UnifiedChatView", () => {
     expect(within(view).getByText("implementing step")).toBeInTheDocument();
 
     // Two distinct sticky step boundaries — visually distinct, not just <hr>
-    const boundaries = within(view).getAllByTestId("unified-chat-step-boundary");
+    const boundaries = within(view).getAllByTestId(
+      "unified-chat-step-boundary"
+    );
     expect(boundaries).toHaveLength(2);
     expect(boundaries[0]).toHaveAttribute("data-step-name", "plan");
     expect(boundaries[1]).toHaveAttribute("data-step-name", "implement");
@@ -189,8 +203,12 @@ describe("UnifiedChatView", () => {
       started_at: "2024-01-01T10:05:00.000Z",
     });
     const logs = {
-      "exec-a": [makeLog("exec-a", thinking("a"), "2024-01-01T10:00:01.000Z", 0)],
-      "exec-b": [makeLog("exec-b", thinking("b"), "2024-01-01T10:05:01.000Z", 0)],
+      "exec-a": [
+        makeLog("exec-a", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+      ],
+      "exec-b": [
+        makeLog("exec-b", thinking("b"), "2024-01-01T10:05:01.000Z", 0),
+      ],
     };
     render(
       <UnifiedChatView
@@ -240,10 +258,11 @@ describe("UnifiedChatView", () => {
 
     const segments = screen.getAllByTestId("unified-chat-segment");
     expect(segments).toHaveLength(2);
-    expect(segments.map((segment) => segment.getAttribute("data-segment-execution-id"))).toEqual([
-      "exec-a",
-      "exec-b",
-    ]);
+    expect(
+      segments.map((segment) =>
+        segment.getAttribute("data-segment-execution-id")
+      )
+    ).toEqual(["exec-a", "exec-b"]);
     expect(screen.getAllByTestId("unified-chat-step-boundary")).toHaveLength(2);
     expect(within(segments[0]).getByText("a-1")).toBeInTheDocument();
     expect(within(segments[0]).getByText("a-2")).toBeInTheDocument();
@@ -269,10 +288,20 @@ describe("UnifiedChatView", () => {
     });
     const logs = {
       "exec-parent": [
-        makeLog("exec-parent", thinking("parent thinking"), "2024-01-01T10:00:30.000Z", 0),
+        makeLog(
+          "exec-parent",
+          thinking("parent thinking"),
+          "2024-01-01T10:00:30.000Z",
+          0
+        ),
       ],
       "exec-child": [
-        makeLog("exec-child", thinking("child thinking"), "2024-01-01T10:01:30.000Z", 0),
+        makeLog(
+          "exec-child",
+          thinking("child thinking"),
+          "2024-01-01T10:01:30.000Z",
+          0
+        ),
       ],
     };
     render(
@@ -287,9 +316,13 @@ describe("UnifiedChatView", () => {
     expect(delegation).toHaveAttribute("data-parent-task-id", "t-root");
     expect(delegation).toHaveAttribute("data-child-task-id", "t-child");
     // Indented (depth ≥ 1)
-    expect(Number(delegation.getAttribute("data-depth"))).toBeGreaterThanOrEqual(1);
+    expect(
+      Number(delegation.getAttribute("data-depth"))
+    ).toBeGreaterThanOrEqual(1);
     // Has its own boundary header inside
-    const innerBoundary = within(delegation).getByTestId("unified-chat-step-boundary");
+    const innerBoundary = within(delegation).getByTestId(
+      "unified-chat-step-boundary"
+    );
     expect(innerBoundary).toHaveAttribute("data-task-id", "t-child");
     expect(innerBoundary).toHaveAttribute("data-step-name", "review");
     // Child's events appear inside the delegation block, not flat
@@ -392,12 +425,15 @@ describe("UnifiedChatView", () => {
     // Folded facts appear in the boundary header.
     const boundary = screen.getByTestId("unified-chat-step-boundary");
     expect(within(boundary).getByText("claude-sonnet-4-6")).toBeInTheDocument();
-    expect(within(boundary).getByTestId("step-boundary-duration").textContent)
-      .toBe("12.5s");
-    expect(within(boundary).getByTestId("step-boundary-turns").textContent)
-      .toBe("4 turns");
-    expect(within(boundary).getByTestId("step-boundary-cost").textContent)
-      .toBe("$0.31");
+    expect(
+      within(boundary).getByTestId("step-boundary-duration").textContent
+    ).toBe("12.5s");
+    expect(
+      within(boundary).getByTestId("step-boundary-turns").textContent
+    ).toBe("4 turns");
+    expect(within(boundary).getByTestId("step-boundary-cost").textContent).toBe(
+      "$0.31"
+    );
 
     // Only the thinking event survives in the renderable event list — the
     // session_start / session_end events were folded out.
@@ -414,7 +450,9 @@ describe("UnifiedChatView", () => {
       step_name: "plan",
     });
     const logs = {
-      "exec-a": [makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0)],
+      "exec-a": [
+        makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0),
+      ],
     };
     render(
       <UnifiedChatView
@@ -432,7 +470,11 @@ describe("UnifiedChatView", () => {
   it("renders descendant task titles as a subtitle in subtree views (multi-task scope)", () => {
     const tasks = [
       makeTask({ id: "t-root", title: "Root" }),
-      makeTask({ id: "t-child", title: "Child Task Subtitle", parent_id: "t-root" }),
+      makeTask({
+        id: "t-child",
+        title: "Child Task Subtitle",
+        parent_id: "t-root",
+      }),
     ];
     const parentExec = makeExec({
       id: "exec-parent",
@@ -480,7 +522,9 @@ describe("UnifiedChatView", () => {
     const tasks = [makeTask({ id: "t-root" })];
     const exec = makeExec({ id: "exec-a", task_id: "t-root" });
     const logs = {
-      "exec-a": [makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0)],
+      "exec-a": [
+        makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0),
+      ],
     };
     render(
       <UnifiedChatView
@@ -613,7 +657,9 @@ describe("UnifiedChatView", () => {
     expect(implBoundary.getAttribute("data-execution-id")).toBe("exec-impl");
     expect(within(backlogBoundary).getByText("Backlog")).toBeInTheDocument();
     expect(within(backlogBoundary).queryByText("Implementation")).toBeNull();
-    expect(within(implBoundary).getByText("Implementation")).toBeInTheDocument();
+    expect(
+      within(implBoundary).getByText("Implementation")
+    ).toBeInTheDocument();
   });
 
   it("falls back to the task's current workflow_name when no workflows prop is provided", () => {
@@ -698,7 +744,19 @@ describe("UnifiedChatView", () => {
           if (e.id) runIdByExecutionId.set(e.id, node.run.id);
         }
       }
+      const orderedTaskGroups = ordered.map((node) => ({
+        taskId: node.run.task_id,
+        task: null,
+        depth: node.depth,
+        runs: [node],
+        childTaskIds: [],
+      }));
+      const taskGroupsById = new Map(
+        orderedTaskGroups.map((group) => [group.taskId, group])
+      );
       return {
+        orderedTaskGroups,
+        taskGroupsById,
         orderedRuns: ordered,
         runsById,
         delegationEdges: [],
@@ -744,12 +802,16 @@ describe("UnifiedChatView", () => {
       const gate = screen.getByTestId("human-input-gate");
       expect(gate).toHaveAttribute("data-run-id", "run-1");
       expect(gate).toHaveAttribute("data-execution-id", "exec-wait");
-      expect(within(gate).getByTestId("human-input-gate-step")).toHaveTextContent(
-        "approval"
-      );
+      expect(
+        within(gate).getByTestId("human-input-gate-step")
+      ).toHaveTextContent("approval");
       // No submit/approve/bypass action is exposed.
-      expect(within(gate).queryByRole("button", { name: /approve/i })).toBeNull();
-      expect(within(gate).queryByRole("button", { name: /submit/i })).toBeNull();
+      expect(
+        within(gate).queryByRole("button", { name: /approve/i })
+      ).toBeNull();
+      expect(
+        within(gate).queryByRole("button", { name: /submit/i })
+      ).toBeNull();
     });
 
     it("does not render Stop unless activeRunStoppable is true", () => {
@@ -772,7 +834,12 @@ describe("UnifiedChatView", () => {
           runProjection={projection}
           logsByExecutionId={{
             "exec-wait": [
-              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+              makeLog(
+                "exec-wait",
+                thinking("a"),
+                "2024-01-01T10:00:01.000Z",
+                0
+              ),
             ],
           }}
           activeRunStoppable={false}
@@ -791,7 +858,12 @@ describe("UnifiedChatView", () => {
           runProjection={projection}
           logsByExecutionId={{
             "exec-wait": [
-              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+              makeLog(
+                "exec-wait",
+                thinking("a"),
+                "2024-01-01T10:00:01.000Z",
+                0
+              ),
             ],
           }}
           activeRunStoppable={true}
@@ -826,7 +898,12 @@ describe("UnifiedChatView", () => {
           runProjection={projection}
           logsByExecutionId={{
             "exec-wait": [
-              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+              makeLog(
+                "exec-wait",
+                thinking("a"),
+                "2024-01-01T10:00:01.000Z",
+                0
+              ),
             ],
           }}
         />

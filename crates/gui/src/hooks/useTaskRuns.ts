@@ -36,6 +36,14 @@ export interface UseTaskRunsResult {
   refetch: () => void;
 }
 
+export interface UseTaskRunsForTasksResult {
+  /** All known runs for the requested tasks, newest first. */
+  runs: TaskRun[];
+  isLoading: boolean;
+  error: string | null;
+  refetch: () => void;
+}
+
 /**
  * Sort runs by recency. Prefers `started_at`, falls back to `inserted_at`,
  * finally `id` for total ordering. Newer first.
@@ -130,6 +138,78 @@ export function useTaskRuns(
     activeRun,
     latestRun,
     resolveRun,
+    isLoading,
+    error,
+    refetch: fetchRuns,
+  };
+}
+
+export function useTaskRunsForTasks(
+  taskIds: readonly string[]
+): UseTaskRunsForTasksResult {
+  const setTaskRunsForTask = useTaskRunStore(
+    (state) => state.setTaskRunsForTask
+  );
+  const taskRunsByTaskId = useTaskRunStore((state) => state.taskRunsByTaskId);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const taskIdsKey = useMemo(
+    () => Array.from(new Set(taskIds)).sort().join("|"),
+    [taskIds]
+  );
+  const stableTaskIds = useMemo(
+    () => (taskIdsKey ? taskIdsKey.split("|") : []),
+    [taskIdsKey]
+  );
+
+  const fetchRuns = useCallback(async () => {
+    if (stableTaskIds.length === 0) {
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+    const projectScopeGeneration = getProjectScopeGeneration();
+
+    setIsLoading(true);
+    setError(null);
+    let firstError: string | null = null;
+    try {
+      for (const taskId of stableTaskIds) {
+        const result = await commands.getTaskRuns(taskId);
+        if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
+        if (result.status === "ok") {
+          setTaskRunsForTask(taskId, result.data);
+        } else if (!firstError) {
+          firstError = result.error.message;
+        }
+      }
+    } catch (e) {
+      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+        firstError = e instanceof Error ? e.message : String(e);
+      }
+    } finally {
+      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
+        setError(firstError);
+        setIsLoading(false);
+      }
+    }
+  }, [stableTaskIds, setTaskRunsForTask]);
+
+  useEffect(() => {
+    fetchRuns();
+  }, [fetchRuns]);
+
+  const runs = useMemo(() => {
+    const allRuns = stableTaskIds.flatMap(
+      (taskId) => taskRunsByTaskId[taskId] ?? []
+    );
+    return sortRunsNewestFirst(allRuns);
+  }, [stableTaskIds, taskRunsByTaskId]);
+
+  return {
+    runs,
     isLoading,
     error,
     refetch: fetchRuns,
