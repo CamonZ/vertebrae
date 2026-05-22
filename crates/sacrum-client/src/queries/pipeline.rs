@@ -16,7 +16,6 @@ pub const PIPELINE_SUMMARY: &str = r#"
             id
             name
             description
-            auto_advance
             is_default
             is_final
             display_order

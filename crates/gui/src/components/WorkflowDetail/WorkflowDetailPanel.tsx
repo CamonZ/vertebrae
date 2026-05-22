@@ -95,7 +95,6 @@ export function WorkflowDetailPanel({
         workflow_id: workflow.id,
         name: null,
         description: null,
-        auto_advance: null,
         order: null,
         is_default: null,
         is_final: value,

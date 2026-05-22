@@ -648,7 +648,6 @@ impl WorkflowService for MockWorkflowService {
             description: options.description.clone(),
             initial_step: None,
             metadata: std::collections::HashMap::new(),
-            auto_advance: options.auto_advance,
             order: options.order,
             is_default: options.is_default,
             is_final: options.is_final,
@@ -729,9 +728,6 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(description) = &options.description {
             wf.description = description.clone();
-        }
-        if let Some(auto_advance) = options.auto_advance {
-            wf.auto_advance = auto_advance;
         }
         if let Some(is_default) = options.is_default {
             wf.is_default = is_default;
@@ -1389,7 +1385,6 @@ impl MockSeeder {
                 description: None,
                 initial_step: None,
                 metadata: std::collections::HashMap::new(),
-                auto_advance: false,
                 order: 0,
                 is_default: false,
                 is_final: false,

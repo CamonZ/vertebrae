@@ -1714,7 +1714,7 @@ worktree: string | null }
  * 
  * Only fields that are Some will be updated.
  */
-export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; auto_advance: boolean | null; order: number | null; is_default: boolean | null; is_final: boolean | null; kanban_column: string | null }
+export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; order: number | null; is_default: boolean | null; is_final: boolean | null; kanban_column: string | null }
 /**
  * Workflow - mirrors db::Workflow
  */

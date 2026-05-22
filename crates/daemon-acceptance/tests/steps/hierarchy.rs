@@ -35,7 +35,6 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
             &wf_name,
             "--step",
             "run:claude-sonnet-4-6",
-            "--auto-advance",
         ])
         .await;
     world.assert_vtb_ok("workflow add (child)");
@@ -45,7 +44,7 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
 
     let step_id = step_id_by_name(world, &wf_id, "run").await;
 
-    // Mark the child step as final so `auto_advance` completes the task.
+    // Mark the child step as final so the TaskRun completes the task.
     world
         .run_vtb(&["step", "update", &step_id, "--final", "true"])
         .await;
@@ -382,7 +381,6 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             "wait_children:claude-sonnet-4-6",
             "--step",
             "work:claude-sonnet-4-6",
-            "--auto-advance",
         ])
         .await;
     world.assert_vtb_ok("workflow add (parent/intermediate)");

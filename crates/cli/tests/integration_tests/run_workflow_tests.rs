@@ -31,7 +31,6 @@ async fn create_task_with_workflow(
         name: "Orchestration Workflow".to_string(),
         description: Some("Workflow for testing run-workflow command".to_string()),
         steps: vec![],
-        auto_advance: false,
         order: 0,
         is_default: false,
         is_final: false,
