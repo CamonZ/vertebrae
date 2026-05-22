@@ -168,6 +168,63 @@ describe("StepNode", () => {
     });
   });
 
+  describe("boundary handles", () => {
+    it("keeps the first step target handle hidden and non-connectable", () => {
+      const props = createStepNodeProps({ isFirst: true, isLast: false });
+
+      const { container } = render(<StepNode {...props} />);
+
+      const targetHandle = container.querySelector(".react-flow__handle-left");
+      expect(targetHandle).toBeInTheDocument();
+      expect(targetHandle).toHaveClass("!opacity-0");
+      expect(targetHandle).not.toHaveClass("connectable");
+      expect(targetHandle).toHaveClass("target");
+
+      const sourceHandle = container.querySelector(".react-flow__handle-right");
+      expect(sourceHandle).toBeInTheDocument();
+      expect(sourceHandle).not.toHaveClass("!opacity-0");
+      expect(sourceHandle).toHaveClass("connectable");
+      expect(sourceHandle).toHaveClass("connectablestart");
+    });
+
+    it("keeps the last step source handle hidden and non-connectable", () => {
+      const props = createStepNodeProps({ isFirst: false, isLast: true });
+
+      const { container } = render(<StepNode {...props} />);
+
+      const sourceHandle = container.querySelector(".react-flow__handle-right");
+      expect(sourceHandle).toBeInTheDocument();
+      expect(sourceHandle).toHaveClass("!opacity-0");
+      expect(sourceHandle).not.toHaveClass("connectable");
+      expect(sourceHandle).toHaveClass("source");
+
+      const targetHandle = container.querySelector(".react-flow__handle-left");
+      expect(targetHandle).toBeInTheDocument();
+      expect(targetHandle).not.toHaveClass("!opacity-0");
+      expect(targetHandle).toHaveClass("connectable");
+      expect(targetHandle).toHaveClass("connectableend");
+    });
+
+    it("keeps middle step handles visible and connectable", () => {
+      const props = createStepNodeProps({ isFirst: false, isLast: false });
+
+      const { container } = render(<StepNode {...props} />);
+
+      const targetHandle = container.querySelector(".react-flow__handle-left");
+      const sourceHandle = container.querySelector(".react-flow__handle-right");
+
+      expect(targetHandle).toBeInTheDocument();
+      expect(targetHandle).not.toHaveClass("!opacity-0");
+      expect(targetHandle).toHaveClass("connectable");
+      expect(targetHandle).toHaveClass("connectableend");
+
+      expect(sourceHandle).toBeInTheDocument();
+      expect(sourceHandle).not.toHaveClass("!opacity-0");
+      expect(sourceHandle).toHaveClass("connectable");
+      expect(sourceHandle).toHaveClass("connectablestart");
+    });
+  });
+
   describe("agent config indicators", () => {
     it("shows Prompt badge when system prompt is configured", () => {
       const props = createStepNodeProps({

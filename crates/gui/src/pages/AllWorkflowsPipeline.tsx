@@ -45,6 +45,8 @@ import {
   type WorkflowZoneNodeData,
   ElkRoutedEdge,
   type ElkRoutedEdgeData,
+  RouteBackEdge,
+  ROUTE_BACK_EDGE_TYPE,
   transitionArrowMarker,
   transitionEdgeStyle,
   TransitionEdgeMarkers,
@@ -64,6 +66,7 @@ const nodeTypes: NodeTypes = {
 
 const edgeTypes: EdgeTypes = {
   elkRouted: ElkRoutedEdge,
+  [ROUTE_BACK_EDGE_TYPE]: RouteBackEdge,
 };
 
 const EMPTY_AGENT_CONFIG: AgentConfig = {
@@ -124,6 +127,91 @@ type PanelEntry =
   | { type: "task"; id: string }
   | { type: "step"; id: string }
   | { type: "workflow"; id: string };
+
+const EMPTY_FLASHING_EDGE_IDS = new Set<string>();
+
+type RenderableWorkflowTransition = {
+  transition: WorkflowTransition;
+  elkEdgeId: string;
+};
+
+function stepEdgeId(
+  workflowId: string,
+  sourceStepId: string,
+  targetStepId: string
+) {
+  return `edge-${workflowId}-${sourceStepId}-${targetStepId}`;
+}
+
+export function buildStepTransitionEdges(
+  pipelineWorkflows: PipelineWorkflow[],
+  flashingEdgeIds: Set<string> = EMPTY_FLASHING_EDGE_IDS,
+  selectedEdgeId: string | null = null
+): Edge[] {
+  const edges: Edge[] = [];
+
+  for (const wf of pipelineWorkflows) {
+    const wfSteps = wf.workflow_steps;
+    let routeBackEdgeIndex = 0;
+    const stepIdToOrder = new Map<string, number>();
+    wfSteps.forEach((s) => {
+      stepIdToOrder.set(s.id, s.step_order);
+    });
+    wfSteps.forEach((s) => {
+      s.transitions_to.forEach((targetStepId) => {
+        const targetOrder = stepIdToOrder.get(targetStepId);
+        if (targetOrder !== undefined) {
+          const edgeId = stepEdgeId(wf.id, s.id, targetStepId);
+          const isSelected = selectedEdgeId === edgeId;
+          const isFlashing = flashingEdgeIds.has(edgeId);
+          const isHighlighted = isSelected || isFlashing;
+          const isRouteBackTransition =
+            s.step_type === "route" && targetOrder < s.step_order;
+          const routeBackLoopLane = Math.floor(routeBackEdgeIndex / 2);
+          const routeBackLoopSide =
+            routeBackEdgeIndex % 2 === 0 ? "bottom" : "top";
+          edges.push({
+            id: edgeId,
+            source: `step-${wf.id}-${s.step_order}`,
+            target: `step-${wf.id}-${targetOrder}`,
+            selected: isSelected,
+            selectable: true,
+            type: isRouteBackTransition ? ROUTE_BACK_EDGE_TYPE : "smoothstep",
+            animated: false,
+            data: isRouteBackTransition
+              ? {
+                  loopLane: routeBackLoopLane,
+                  loopSide: routeBackLoopSide,
+                }
+              : undefined,
+            style: transitionEdgeStyle({
+              selected: isHighlighted,
+              dashed: isRouteBackTransition,
+            }),
+            markerEnd: transitionArrowMarker({ selected: isHighlighted }),
+            interactionWidth: 20,
+          });
+          if (isRouteBackTransition) {
+            routeBackEdgeIndex += 1;
+          }
+        }
+      });
+    });
+  }
+
+  return edges;
+}
+
+export function buildRenderableWorkflowTransitions(
+  workflowTransitions: WorkflowTransition[]
+): RenderableWorkflowTransition[] {
+  return workflowTransitions
+    .filter((t) => t.from_workflow_id !== t.to_workflow_id)
+    .map((transition, index) => ({
+      transition,
+      elkEdgeId: `elk-edge-${index}`,
+    }));
+}
 
 function AllWorkflowsPipelineInner() {
   const addToast = useToastStore((state) => state.addToast);
@@ -245,13 +333,16 @@ function AllWorkflowsPipelineInner() {
   const [selectedTransitionEdgeId, setSelectedTransitionEdgeId] = useState<
     string | null
   >(null);
-  const [pendingTransition, setPendingTransition] = useState<
-    { from: string; to: string } | null
-  >(null);
+  const [pendingTransition, setPendingTransition] = useState<{
+    from: string;
+    to: string;
+  } | null>(null);
   const [pendingLabel, setPendingLabel] = useState("");
   const [pendingTargetStepId, setPendingTargetStepId] = useState<string>("");
   const [isCreatingTransition, setIsCreatingTransition] = useState(false);
-  const [createTransitionError, setCreateTransitionError] = useState<string | undefined>(undefined);
+  const [createTransitionError, setCreateTransitionError] = useState<
+    string | undefined
+  >(undefined);
 
   const selectedTransition = useMemo(() => {
     if (!selectedTransitionEdgeId) return null;
@@ -314,7 +405,10 @@ function AllWorkflowsPipelineInner() {
       const fromId = sourceMatch[1];
       const toId = targetMatch[1];
       if (fromId === toId) {
-        addToast("Cannot create a transition from a workflow to itself", "error");
+        addToast(
+          "Cannot create a transition from a workflow to itself",
+          "error"
+        );
         return;
       }
       setPendingTransition({ from: fromId, to: toId });
@@ -497,7 +591,7 @@ function AllWorkflowsPipelineInner() {
         toLoc.workflowId !== workflow_id
       )
         return;
-      const edgeId = `edge-${workflow_id}-${fromLoc.order}-${toLoc.order}`;
+      const edgeId = stepEdgeId(workflow_id, from_step_id, to_step_id);
       setFlashingEdgeIds((prev) => new Set(prev).add(edgeId));
       setTimeout(() => {
         setFlashingEdgeIds((prev) => {
@@ -567,15 +661,18 @@ function AllWorkflowsPipelineInner() {
     });
   }, [pipelineWorkflows, workflowDimensions]);
 
+  const renderableWorkflowTransitions = useMemo(
+    () => buildRenderableWorkflowTransitions(workflowTransitions),
+    [workflowTransitions]
+  );
+
   const elkLayoutEdges = useMemo((): LayoutEdge[] => {
-    return workflowTransitions
-      .filter((t) => t.from_workflow_id !== t.to_workflow_id)
-      .map((t, index) => ({
-        id: `elk-edge-${index}`,
-        source: t.from_workflow_id,
-        target: t.to_workflow_id,
-      }));
-  }, [workflowTransitions]);
+    return renderableWorkflowTransitions.map(({ transition, elkEdgeId }) => ({
+      id: elkEdgeId,
+      source: transition.from_workflow_id,
+      target: transition.to_workflow_id,
+    }));
+  }, [renderableWorkflowTransitions]);
 
   const { nodes: elkPositions, edges: elkEdgePaths } = useElkLayout(
     elkLayoutNodes,
@@ -687,81 +784,52 @@ function AllWorkflowsPipelineInner() {
   ]);
 
   const allEdges = useMemo(() => {
-    const edges: Edge[] = [];
+    const edges = buildStepTransitionEdges(
+      pipelineWorkflows,
+      flashingEdgeIds,
+      selectedTransitionEdgeId
+    );
 
-    for (const wf of pipelineWorkflows) {
-      const wfSteps = workflowStepsMap.get(wf.id) ?? [];
-      const stepIdToOrder = new Map<string, number>();
-      wfSteps.forEach((s) => {
-        if (s.id) stepIdToOrder.set(s.id, s.order ?? 0);
-      });
-      wfSteps.forEach((s) => {
-        if (!s.id) return;
-        (s.transitions_to || []).forEach((targetStepId) => {
-          const targetOrder = stepIdToOrder.get(targetStepId);
-          if (targetOrder !== undefined) {
-            const edgeId = `edge-${wf.id}-${s.order}-${targetOrder}`;
-            const isFlashing = flashingEdgeIds.has(edgeId);
-            edges.push({
-              id: edgeId,
-              source: `step-${wf.id}-${s.order}`,
-              target: `step-${wf.id}-${targetOrder}`,
-              type: "smoothstep",
-              animated: false,
-              style: transitionEdgeStyle({ selected: isFlashing }),
-              markerEnd: transitionArrowMarker({ selected: isFlashing }),
-            });
-          }
-        });
-      });
-    }
+    renderableWorkflowTransitions.forEach(({ transition, elkEdgeId }) => {
+      const elkEdgePath = elkEdgePaths.get(elkEdgeId);
 
-    workflowTransitions
-      .filter((t) => t.from_workflow_id !== t.to_workflow_id)
-      .forEach((transition, index) => {
-        const elkEdgeId = `elk-edge-${index}`;
-        const elkEdgePath = elkEdgePaths.get(elkEdgeId);
+      const edgeId = `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`;
+      const isSelected = selectedTransitionEdgeId === edgeId;
 
-        const edgeId = `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`;
-        const isSelected = selectedTransitionEdgeId === edgeId;
-
-        edges.push({
-          id: edgeId,
-          source: `workflow-zone-${transition.from_workflow_id}`,
-          target: `workflow-zone-${transition.to_workflow_id}`,
-          selected: isSelected,
-          type: "elkRouted",
-          animated: false,
-          data: elkEdgePath
-            ? ({
+      edges.push({
+        id: edgeId,
+        source: `workflow-zone-${transition.from_workflow_id}`,
+        target: `workflow-zone-${transition.to_workflow_id}`,
+        selected: isSelected,
+        type: "elkRouted",
+        animated: false,
+        data: elkEdgePath
+          ? ({
               sourcePoint: elkEdgePath.sourcePoint,
               targetPoint: elkEdgePath.targetPoint,
               bendPoints: elkEdgePath.bendPoints,
               label: transition.label,
               highlighted: isSelected,
             } as ElkRoutedEdgeData)
-            : undefined,
-          label: elkEdgePath ? undefined : transition.label,
-          labelStyle: !elkEdgePath
-            ? { fill: "#a1a1aa", fontSize: 11, fontWeight: 500 }
-            : undefined,
-          labelBgStyle: !elkEdgePath
-            ? { fill: "#18181b", fillOpacity: 0.9 }
-            : undefined,
-          labelBgPadding: !elkEdgePath
-            ? ([6, 3] as [number, number])
-            : undefined,
-          labelBgBorderRadius: !elkEdgePath ? 4 : undefined,
-          style: transitionEdgeStyle({ selected: isSelected, dashed: true }),
-          markerEnd: transitionArrowMarker({ selected: isSelected }),
-        });
+          : undefined,
+        label: elkEdgePath ? undefined : transition.label,
+        labelStyle: !elkEdgePath
+          ? { fill: "#a1a1aa", fontSize: 11, fontWeight: 500 }
+          : undefined,
+        labelBgStyle: !elkEdgePath
+          ? { fill: "#18181b", fillOpacity: 0.9 }
+          : undefined,
+        labelBgPadding: !elkEdgePath ? ([6, 3] as [number, number]) : undefined,
+        labelBgBorderRadius: !elkEdgePath ? 4 : undefined,
+        style: transitionEdgeStyle({ selected: isSelected, dashed: true }),
+        markerEnd: transitionArrowMarker({ selected: isSelected }),
       });
+    });
 
     return edges;
   }, [
     pipelineWorkflows,
-    workflowStepsMap,
-    workflowTransitions,
+    renderableWorkflowTransitions,
     elkEdgePaths,
     selectedTransitionEdgeId,
     flashingEdgeIds,
@@ -914,36 +982,6 @@ function AllWorkflowsPipelineInner() {
               bgColor="#0c0c0e"
             />
           </ReactFlow>
-
-          {selectedTransition && (
-            <div className="absolute right-4 top-4 z-20 flex items-center gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2 shadow-lg">
-              <div className="text-xs text-text-muted">
-                <span className="font-medium text-text-primary">
-                  {selectedTransition.from_workflow_name}
-                </span>
-                <span className="mx-1">to</span>
-                <span className="font-medium text-text-primary">
-                  {selectedTransition.to_workflow_name}
-                </span>
-                {selectedTransition.label && (
-                  <span className="ml-2 italic">"{selectedTransition.label}"</span>
-                )}
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  void handleDeleteTransition(
-                    selectedTransition.from_workflow_id,
-                    selectedTransition.to_workflow_id
-                  )
-                }
-                className="rounded-md bg-error/15 px-2 py-1 text-xs font-medium text-error hover:bg-error/25"
-                title="Delete transition (Delete or Backspace)"
-              >
-                Delete
-              </button>
-            </div>
-          )}
         </div>
       </div>
 
@@ -951,16 +989,20 @@ function AllWorkflowsPipelineInner() {
         pendingTransition={pendingTransition}
         fromWorkflowName={
           pendingTransition
-            ? workflows.find((w) => w.id === pendingTransition.from)?.name ?? pendingTransition.from
+            ? (workflows.find((w) => w.id === pendingTransition.from)?.name ??
+              pendingTransition.from)
             : ""
         }
         toWorkflowName={
           pendingTransition
-            ? workflows.find((w) => w.id === pendingTransition.to)?.name ?? pendingTransition.to
+            ? (workflows.find((w) => w.id === pendingTransition.to)?.name ??
+              pendingTransition.to)
             : ""
         }
         targetSteps={
-          pendingTransition ? workflowStepsMap.get(pendingTransition.to) ?? [] : []
+          pendingTransition
+            ? (workflowStepsMap.get(pendingTransition.to) ?? [])
+            : []
         }
         label={pendingLabel}
         onLabelChange={setPendingLabel}
@@ -980,7 +1022,6 @@ function AllWorkflowsPipelineInner() {
           if (ok) setPendingTransition(null);
         }}
       />
-
 
       {selectedTaskId && (
         <TaskDetailPanel
@@ -1059,8 +1100,12 @@ function CreateTransitionModal({
       submitButtonText="Create transition"
     >
       <p className="mb-4 text-xs text-text-muted">
-        From <span className="font-medium text-text-primary">{fromWorkflowName}</span>{" "}
-        to <span className="font-medium text-text-primary">{toWorkflowName}</span>
+        From{" "}
+        <span className="font-medium text-text-primary">
+          {fromWorkflowName}
+        </span>{" "}
+        to{" "}
+        <span className="font-medium text-text-primary">{toWorkflowName}</span>
       </p>
 
       <div>
