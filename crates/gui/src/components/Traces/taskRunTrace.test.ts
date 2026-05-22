@@ -80,6 +80,124 @@ const makeExec = (
 });
 
 describe("projectTaskRunTrace", () => {
+  it("groups stopped and restarted attempts for the same task under one task group", () => {
+    const tasks = [makeTask({ id: "t-ticket", title: "Ticket" })];
+    const runs = [
+      makeRun({
+        id: "r-stopped",
+        task_id: "t-ticket",
+        status: "stopped",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r-restarted",
+        task_id: "t-ticket",
+        status: "executing",
+        started_at: "2024-01-01T00:05:00Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "e-stopped",
+        task_id: "t-ticket",
+        task_run_id: "r-stopped",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeExec({
+        id: "e-restarted",
+        task_id: "t-ticket",
+        task_run_id: "r-restarted",
+        started_at: "2024-01-01T00:05:30Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, executions, tasks);
+
+    expect(proj.orderedTaskGroups.map((group) => group.taskId)).toEqual([
+      "t-ticket",
+    ]);
+    expect(proj.orderedTaskGroups[0].runs.map((node) => node.run.id)).toEqual([
+      "r-stopped",
+      "r-restarted",
+    ]);
+    expect(proj.runIdByExecutionId.get("e-stopped")).toBe("r-stopped");
+    expect(proj.runIdByExecutionId.get("e-restarted")).toBe("r-restarted");
+  });
+
+  it("orders task groups by task hierarchy before their run attempts", () => {
+    const tasks = [
+      makeTask({ id: "t-epic", level: "epic", title: "Epic" }),
+      makeTask({
+        id: "t-ticket",
+        parent_id: "t-epic",
+        level: "ticket",
+        title: "Ticket",
+      }),
+      makeTask({
+        id: "t-child",
+        parent_id: "t-ticket",
+        level: "task",
+        title: "Child",
+      }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        started_at: "2024-01-01T00:10:00Z",
+      }),
+      makeRun({
+        id: "r-ticket",
+        task_id: "t-ticket",
+        started_at: "2024-01-01T00:05:00Z",
+      }),
+      makeRun({
+        id: "r-epic",
+        task_id: "t-epic",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, [], tasks);
+
+    expect(
+      proj.orderedTaskGroups.map((group) => ({
+        taskId: group.taskId,
+        depth: group.depth,
+        runIds: group.runs.map((node) => node.run.id),
+      }))
+    ).toEqual([
+      { taskId: "t-epic", depth: 0, runIds: ["r-epic"] },
+      { taskId: "t-ticket", depth: 1, runIds: ["r-ticket"] },
+      { taskId: "t-child", depth: 2, runIds: ["r-child"] },
+    ]);
+  });
+
+  it("does not loop when task parent links contain a cycle", () => {
+    const tasks = [
+      makeTask({ id: "t-a", parent_id: "t-b" }),
+      makeTask({ id: "t-b", parent_id: "t-a" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-a",
+        task_id: "t-a",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r-b",
+        task_id: "t-b",
+        started_at: "2024-01-01T00:01:00Z",
+      }),
+    ];
+
+    const proj = projectTaskRunTrace(runs, [], tasks);
+
+    expect(proj.orderedTaskGroups.map((group) => group.taskId).sort()).toEqual(
+      ["t-a", "t-b"]
+    );
+  });
+
   it("orders runs DFS from root using parent_task_run_id", () => {
     const tasks = [
       makeTask({ id: "t-root" }),

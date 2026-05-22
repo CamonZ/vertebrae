@@ -8,7 +8,13 @@
  *   - tasks with no TaskRun history fall back to the legacy SubtreeRail
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import {
   createMockTask,
@@ -18,7 +24,27 @@ import {
 import { useTaskStore } from "../stores/taskStore";
 import { useSessionLogStore } from "../stores/sessionLogStore";
 import { TracesPage } from "./TracesPage";
-import type { SessionLog, TaskRun } from "../bindings";
+import type { SessionLog, Task, TaskRun } from "../bindings";
+
+const bindingMocks = vi.hoisted(() => ({
+  getTask: vi.fn(),
+  listTasks: vi.fn(),
+  stopRun: vi.fn(),
+}));
+
+vi.mock("../bindings", async () => {
+  const actual =
+    await vi.importActual<typeof import("../bindings")>("../bindings");
+  return {
+    ...actual,
+    commands: {
+      ...actual.commands,
+      getTask: bindingMocks.getTask,
+      listTasks: bindingMocks.listTasks,
+      stopRun: bindingMocks.stopRun,
+    },
+  };
+});
 
 vi.mock("react-router-dom", async () => {
   const actual =
@@ -32,6 +58,7 @@ vi.mock("react-router-dom", async () => {
 });
 
 let mockRuns: TaskRun[] = [];
+let mockRailRuns: TaskRun[] | null = null;
 let mockResolve: (selectedRunId: string | null) => {
   run: TaskRun | null;
   source: "active" | "latest" | "selected" | "none";
@@ -64,6 +91,12 @@ vi.mock("../hooks", async () => {
             ) ?? null)
           : null,
       resolveRun: (id: string | null) => mockResolve(id),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    }),
+    useTaskRunsForTasks: () => ({
+      runs: mockRailRuns ?? mockRuns,
       isLoading: false,
       error: null,
       refetch: vi.fn(),
@@ -162,11 +195,18 @@ function currentSearchParams() {
 describe("TracesPage with TaskRun history", () => {
   beforeEach(() => {
     mockRuns = [];
+    mockRailRuns = null;
     mockResolve = () => ({ run: null, source: "none" });
     mockTraceExecutions = [];
     mockTraceRuns = [];
     mockTraceLogs = [];
     lastTraceRootId = null;
+    bindingMocks.getTask.mockResolvedValue({
+      status: "ok",
+      data: createMockTask({ id: "root", title: "Root", level: "epic" }),
+    });
+    bindingMocks.listTasks.mockResolvedValue({ status: "ok", data: [] });
+    bindingMocks.stopRun.mockResolvedValue({ status: "ok", data: null });
     useSessionLogStore.setState({ logsByExecutionId: {} });
     useTaskStore.setState({
       tasks: [
@@ -284,7 +324,7 @@ describe("TracesPage with TaskRun history", () => {
     expect(lastTraceRootId).toBe("run-pinned");
   });
 
-  it("clicking a run in the rail updates the runId URL parameter", () => {
+  it("clicking a run in the rail updates the runId URL parameter", async () => {
     const activeRun = makeRun({
       id: "run-active",
       status: "executing",
@@ -309,14 +349,112 @@ describe("TracesPage with TaskRun history", () => {
     // Older run should be the second one (newest first).
     fireEvent.click(rows[1]);
 
+    await waitFor(() =>
+      expect(screen.getByTestId("traces-active-run")).toHaveAttribute(
+        "data-run-id",
+        "run-old"
+      )
+    );
     const indicator = screen.getByTestId("traces-active-run");
-    expect(indicator.getAttribute("data-run-id")).toBe("run-old");
     expect(indicator.getAttribute("data-run-source")).toBe("selected");
     expect(currentSearchParams().get("runId")).toBe("run-old");
     expect(currentSearchParams().get("scope")).toBe("lineage");
   });
 
-  it("treats a run whose parent is absent from the rail as a root selection", () => {
+  it("shows every durable run for the current task even when the selected trace lineage has one run", () => {
+    const latestRun = makeRun({
+      id: "run-latest",
+      status: "completed",
+      root_task_run_id: "run-latest",
+      started_at: "2026-01-03T00:00:00.000Z",
+    });
+    const stoppedRun = makeRun({
+      id: "run-stopped",
+      status: "stopped",
+      root_task_run_id: "run-stopped",
+      started_at: "2026-01-02T00:00:00.000Z",
+    });
+    const olderRun = makeRun({
+      id: "run-older",
+      status: "completed",
+      root_task_run_id: "run-older",
+      started_at: "2026-01-01T00:00:00.000Z",
+    });
+    mockRuns = [latestRun, stoppedRun, olderRun];
+    mockTraceRuns = [latestRun];
+    mockResolve = () => ({ run: latestRun, source: "latest" });
+    mockTraceExecutions = [
+      createMockStepExecution({
+        id: "trace-ex-latest",
+        task_id: "root",
+        task_run_id: "run-latest",
+      }),
+    ];
+
+    renderAt("/traces/root");
+
+    expect(lastTraceRootId).toBe("run-latest");
+    expect(
+      screen
+        .getAllByTestId("run-history-row")
+        .map((row) => row.getAttribute("data-run-id"))
+    ).toEqual(["run-latest", "run-stopped", "run-older"]);
+  });
+
+  it("loads child tasks for the rail when they are not already in the task store", async () => {
+    const rootTask = createMockTask({
+      id: "root",
+      title: "Root",
+      level: "ticket",
+    });
+    const childTask = createMockTask({
+      id: "child",
+      title: "Child",
+      level: "task",
+      parent_id: "root",
+    });
+    const rootRun = makeRun({
+      id: "run-root",
+      task_id: "root",
+      status: "completed",
+    });
+    const childRun = makeRun({
+      id: "run-child",
+      task_id: "child",
+      status: "completed",
+    });
+    mockRuns = [rootRun];
+    mockRailRuns = [childRun];
+    mockResolve = () => ({ run: rootRun, source: "latest" });
+    bindingMocks.getTask.mockResolvedValue({ status: "ok", data: rootTask });
+    bindingMocks.listTasks.mockImplementation(
+      async (filter: { children_of: string | null }) => ({
+        status: "ok" as const,
+        data: filter.children_of === "root" ? [childTask] : ([] as Task[]),
+      })
+    );
+    useTaskStore.setState({
+      tasks: [rootTask],
+      selectedTaskId: null,
+      selectedTask: null,
+      isLoading: false,
+    });
+
+    renderAt("/traces/root");
+
+    await waitFor(() => {
+      expect(
+        screen
+          .getAllByTestId("run-history-task-group")
+          .map((group) => group.getAttribute("data-task-id"))
+      ).toEqual(["root", "child"]);
+    });
+    expect(bindingMocks.listTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ children_of: "root" })
+    );
+  });
+
+  it("treats a run whose parent is absent from the rail as a root selection", async () => {
     const activeRun = makeRun({
       id: "run-active",
       status: "executing",
@@ -341,8 +479,13 @@ describe("TracesPage with TaskRun history", () => {
 
     fireEvent.click(screen.getAllByTestId("run-history-row-button")[1]);
 
+    await waitFor(() =>
+      expect(screen.getByTestId("traces-active-run")).toHaveAttribute(
+        "data-run-id",
+        "run-detached"
+      )
+    );
     const indicator = screen.getByTestId("traces-active-run");
-    expect(indicator.getAttribute("data-run-id")).toBe("run-detached");
     expect(indicator.getAttribute("data-run-source")).toBe("selected");
     expect(currentSearchParams().get("runId")).toBe("run-detached");
     expect(currentSearchParams().get("scope")).toBe("lineage");
@@ -360,7 +503,7 @@ describe("TracesPage with TaskRun history", () => {
     expect(lastTraceRootId).toBeNull();
   });
 
-  it("keeps a child run selected while fetching its root trace tree and defaults to descendants scope", () => {
+  it("keeps a child run selected while fetching that specific run trace", () => {
     const rootRun = makeRun({
       id: "run-root",
       task_id: "root",
@@ -419,7 +562,7 @@ describe("TracesPage with TaskRun history", () => {
 
     const indicator = screen.getByTestId("traces-active-run");
     expect(indicator.getAttribute("data-run-id")).toBe("run-child");
-    expect(lastTraceRootId).toBe("run-root");
+    expect(lastTraceRootId).toBe("run-child");
     expect(screen.queryByTestId("trace-filter-lineage-scope")).toBeNull();
 
     const segments = screen
@@ -435,12 +578,7 @@ describe("TracesPage with TaskRun history", () => {
         el.getAttribute("data-run-id"),
         el.getAttribute("data-depth"),
       ]);
-    expect(railRows).toEqual([
-      ["run-root", "0"],
-      ["run-child", "1"],
-      ["run-grandchild", "2"],
-      ["run-sibling", "1"],
-    ]);
+    expect(railRows).toEqual([["run-child", "2"]]);
   });
 
   it("uses runId to select a child run under a parent root", () => {
@@ -484,7 +622,7 @@ describe("TracesPage with TaskRun history", () => {
     expect(indicator.getAttribute("data-run-source")).toBe("selected");
     expect(currentSearchParams().get("runId")).toBe("run-child");
     expect(currentSearchParams().has("scope")).toBe(false);
-    expect(lastTraceRootId).toBe("run-root");
+    expect(lastTraceRootId).toBe("run-child");
     const segments = screen
       .queryAllByTestId("unified-chat-event")
       .map((el) => el.getAttribute("data-execution-id"));
@@ -584,7 +722,7 @@ describe("TracesPage with TaskRun history", () => {
     expect(segments).toContain("trace-ex-2");
   });
 
-  it("clicking a child run from the trace rail scopes THREAD and flight strip to that child", () => {
+  it("clicking a child run from the trace rail scopes THREAD and flight strip to that child", async () => {
     const rootRun = makeRun({
       id: "run-root",
       task_id: "root",
@@ -606,6 +744,7 @@ describe("TracesPage with TaskRun history", () => {
       root_task_run_id: "run-root",
     });
     mockRuns = [rootRun];
+    mockRailRuns = [rootRun, childRun, siblingRun];
     mockTraceRuns = [rootRun, childRun, siblingRun];
     mockResolve = () => ({ run: rootRun, source: "latest" });
     mockTraceExecutions = [
@@ -631,8 +770,13 @@ describe("TracesPage with TaskRun history", () => {
 
     fireEvent.click(screen.getAllByTestId("run-history-row-button")[1]);
 
+    await waitFor(() =>
+      expect(screen.getByTestId("traces-active-run")).toHaveAttribute(
+        "data-run-id",
+        "run-child"
+      )
+    );
     const indicator = screen.getByTestId("traces-active-run");
-    expect(indicator.getAttribute("data-run-id")).toBe("run-child");
     expect(indicator.getAttribute("data-run-source")).toBe("selected");
     expect(currentSearchParams().get("runId")).toBe("run-child");
     expect(currentSearchParams().has("scope")).toBe(false);
@@ -688,6 +832,7 @@ describe("TracesPage with TaskRun history", () => {
       root_task_run_id: "run-root",
     });
     mockRuns = [childRun];
+    mockRailRuns = [rootRun, childRun, grandchildRun, siblingRun];
     mockTraceRuns = [rootRun, childRun, grandchildRun, siblingRun];
     mockResolve = () => ({ run: childRun, source: "active" });
     mockTraceExecutions = [

@@ -6,8 +6,12 @@ export { useDeleteTask } from "./useDeleteTask";
 export { useTaskExecutions } from "./useTaskExecutions";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";
 export type { UseSubtreeExecutionsResult } from "./useSubtreeExecutions";
-export { useTaskRuns } from "./useTaskRuns";
-export type { ResolvedTaskRun, UseTaskRunsResult } from "./useTaskRuns";
+export { useTaskRuns, useTaskRunsForTasks } from "./useTaskRuns";
+export type {
+  ResolvedTaskRun,
+  UseTaskRunsForTasksResult,
+  UseTaskRunsResult,
+} from "./useTaskRuns";
 export { useTaskRunTrace } from "./useTaskRunTrace";
 export type { UseTaskRunTraceResult } from "./useTaskRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
