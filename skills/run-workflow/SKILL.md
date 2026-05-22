@@ -5,7 +5,7 @@ description: Orchestrate a task through its entire workflow via Sacrum
 
 # /run-workflow
 
-Orchestrate a task through its entire workflow. Sends a request to the Sacrum backend which uses the TaskOrchestrator FSM to drive the task through all workflow steps automatically (auto-advance, eval prompts, workflow chaining).
+Orchestrate a task through its entire workflow. Sends a request to the Sacrum backend which uses the TaskOrchestrator FSM to drive the task through workflow execution, eval prompts, and workflow chaining.
 
 ## Usage
 

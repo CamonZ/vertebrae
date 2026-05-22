@@ -56,7 +56,6 @@ A requirements entity — the "what and why" something needs to get done. Not a 
 - Prompt templating exists but is minimal: only `{task_id}` and `{output}` string replacement in `ExecutionDispatcher`
 - `is_default` flag on workflows — **per-project**, needs uniqueness constraint and validation
 - `on_done_workflow_id` and `on_reject_workflow_id` for workflow chaining
-- `auto_advance` flag on workflows
 - `metadata: map` on workflows — could store kanban_column, but a first-class field is cleaner
 - `StepExecution` records store: status, output, transition_result, prompt, model, tokens, cost, duration_ms
 - `SessionLog` records store full agent conversation per execution

@@ -281,12 +281,11 @@ Workflows define the stages a task progresses through.
 # Basic workflow with inline steps (format: name:model)
 vtb workflow add "Implementation" --step Coding:sonnet --step Testing:haiku --step Docs:haiku
 
-# With description, auto-advance, and kanban column
+# With description and kanban column
 vtb workflow add "Code Review" \
   -d "Review and approval process" \
   --step Review:sonnet \
   --step Approved:haiku \
-  --auto-advance \
   --kanban-column "In Review"
 
 # Mark as default workflow for new tasks
@@ -302,8 +301,6 @@ vtb workflow add "Triage" --order 1
 vtb workflow list                                  # List all workflows
 vtb workflow show <workflow-id>                    # See steps and details
 vtb workflow update <id> --name "Dev"              # Rename
-vtb workflow update <id> --auto-advance            # Enable auto-advance
-vtb workflow update <id> --no-auto-advance         # Disable auto-advance
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
 vtb workflow update <id> --default                 # Mark as default
 vtb workflow update <id> --no-default              # Unmark as default

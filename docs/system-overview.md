@@ -134,7 +134,6 @@ A named state machine defining how a task progresses through stages.
 |-------|-------------|
 | `name` | Human-readable name |
 | `initial_step_id` | First step to execute |
-| `auto_advance` | Automatically move to next step on completion |
 | `on_done_workflow_id` | Chain to this workflow when all steps complete |
 | `on_reject_workflow_id` | Chain to this workflow on rejection |
 

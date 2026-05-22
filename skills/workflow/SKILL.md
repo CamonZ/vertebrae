@@ -42,12 +42,11 @@ Create a new workflow with steps.
 # Basic workflow with steps
 vtb workflow add "Code Review" --step review:sonnet --step approved:haiku
 
-# With description and auto-advance
+# With description
 vtb workflow add "CI Pipeline" \
   -d "Automated build and test" \
   --step build:haiku \
-  --step test:sonnet \
-  --auto-advance
+  --step test:sonnet
 ```
 
 ### Options
@@ -56,7 +55,6 @@ vtb workflow add "CI Pipeline" \
 |------|-------|-------------|
 | `--description` | `-d` | Workflow description |
 | `--step` | `-s` | Step in `name:model` format (repeatable) |
-| `--auto-advance` | | Auto-advance on completion |
 | `--order` | `-o` | Display order (default: 0) |
 
 ---
@@ -89,8 +87,6 @@ Update workflow properties.
 vtb workflow update <id> --name "Development"
 vtb workflow update <id> --description "New description"
 vtb workflow update <id> --clear-description
-vtb workflow update <id> --auto-advance
-vtb workflow update <id> --no-auto-advance
 ```
 
 ### Options
@@ -100,8 +96,6 @@ vtb workflow update <id> --no-auto-advance
 | `--name` | `-n` | New workflow name |
 | `--description` | `-d` | New description |
 | `--clear-description` | | Remove description |
-| `--auto-advance` | | Enable auto-advance |
-| `--no-auto-advance` | | Disable auto-advance |
 
 ---
 

@@ -48,7 +48,6 @@ async fn test_execution_create_success() {
     let workflow = CreateWorkflowOptions {
         name: "test-workflow".to_string(),
         description: None,
-        auto_advance: false,
         steps: vec![],
         order: 0,
         is_default: false,
@@ -135,7 +134,6 @@ async fn test_execution_create_with_context_and_prompt() {
         .create_workflow(CreateWorkflowOptions {
             name: "workflow".to_string(),
             description: None,
-            auto_advance: false,
             steps: vec![],
             order: 0,
             is_default: false,
@@ -212,7 +210,6 @@ async fn test_execution_create_invalid_context_json_fails() {
         .create_workflow(CreateWorkflowOptions {
             name: "wf".to_string(),
             description: None,
-            auto_advance: false,
             steps: vec![],
             order: 0,
             is_default: false,

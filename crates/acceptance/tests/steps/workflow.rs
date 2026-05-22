@@ -189,11 +189,6 @@ pub async fn do_create_workflow(
                 args.push("--kanban-column".to_string());
                 args.push(value);
             }
-            "auto_advance" => {
-                if value == "true" {
-                    args.push("--auto-advance".to_string());
-                }
-            }
             "default" => {
                 if value == "true" {
                     args.push("--default".to_string());

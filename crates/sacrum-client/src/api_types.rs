@@ -165,8 +165,6 @@ pub struct WorkflowResponse {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub auto_advance: Option<bool>,
-    #[serde(default)]
     pub is_default: Option<bool>,
     #[serde(default)]
     pub is_final: Option<bool>,
@@ -545,8 +543,6 @@ pub struct PipelineWorkflowResponse {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub auto_advance: Option<bool>,
-    #[serde(default)]
     pub is_default: Option<bool>,
     #[serde(default)]
     pub is_final: Option<bool>,
@@ -752,7 +748,6 @@ mod tests {
             "id": "wf-123",
             "name": "Review Workflow",
             "description": "Multi-step review process",
-            "auto_advance": true,
             "is_default": false,
             "display_order": 1,
             "initial_step_id": "step-1",
@@ -765,7 +760,6 @@ mod tests {
         let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
         assert_eq!(workflow.id, "wf-123");
         assert_eq!(workflow.name, "Review Workflow");
-        assert_eq!(workflow.auto_advance, Some(true));
         assert_eq!(workflow.initial_step_id.as_deref(), Some("step-1"));
         assert_eq!(workflow.transitions.as_ref().unwrap().len(), 1);
     }
@@ -1126,7 +1120,6 @@ mod tests {
                 "id": "wf-1",
                 "name": "Backlog",
                 "description": null,
-                "auto_advance": false,
                 "is_default": true,
                 "display_order": 0,
                 "metadata": null,

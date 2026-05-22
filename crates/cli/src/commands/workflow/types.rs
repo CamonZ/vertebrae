@@ -55,8 +55,6 @@ pub struct WorkflowDetail {
     pub name: String,
     /// Optional description
     pub description: Option<String>,
-    /// Whether to automatically advance to the next step on successful completion
-    pub auto_advance: bool,
     /// Whether this is the default workflow for new tasks
     pub is_default: bool,
     /// Whether this workflow is terminal/final
@@ -87,13 +85,6 @@ impl std::fmt::Display for WorkflowDetail {
             writeln!(f, "{}", description)?;
             writeln!(f)?;
         }
-
-        // Auto advance setting
-        writeln!(
-            f,
-            "Auto Advance: {}",
-            if self.auto_advance { "Yes" } else { "No" }
-        )?;
 
         // Default workflow setting
         writeln!(f, "Default: {}", if self.is_default { "Yes" } else { "No" })?;
@@ -212,7 +203,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Test Workflow".to_string(),
             description: Some("A detailed workflow".to_string()),
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -240,7 +230,6 @@ mod tests {
         let output = format!("{}", detail);
         assert!(output.contains("Workflow: wf1 - Test Workflow"));
         assert!(output.contains("A detailed workflow"));
-        assert!(output.contains("Auto Advance: No"));
         assert!(output.contains("Final: No"));
         assert!(output.contains("1. step1 (model: model1)"));
         assert!(output.contains("2. step2 (model: model2)"));
@@ -255,7 +244,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Test".to_string(),
             description: None,
-            auto_advance: true,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -314,7 +302,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Test".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -335,7 +322,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Empty".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -350,31 +336,11 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_detail_display_auto_advance_yes() {
-        let detail = WorkflowDetail {
-            id: "wf1".to_string(),
-            name: "Auto".to_string(),
-            description: None,
-            auto_advance: true,
-            is_default: false,
-            is_final: false,
-            kanban_column: None,
-            steps: vec![],
-            metadata: HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let output = format!("{}", detail);
-        assert!(output.contains("Auto Advance: Yes"));
-    }
-
-    #[test]
     fn test_workflow_detail_display_default_yes() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
             name: "Def".to_string(),
             description: None,
-            auto_advance: false,
             is_default: true,
             is_final: false,
             kanban_column: None,
@@ -393,7 +359,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "NoDef".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -412,7 +377,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Final".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: true,
             kanban_column: None,
@@ -431,7 +395,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Timestamped".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -452,7 +415,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Created".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -473,7 +435,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Updated".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -494,7 +455,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "NoTs".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -513,7 +473,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Default Model".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -538,7 +497,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Sorted".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -584,7 +542,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "NoDesc".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -608,7 +565,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Meta".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -687,7 +643,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Serializable".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: true,
             kanban_column: None,
@@ -745,7 +700,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "Prompted".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
@@ -770,7 +724,6 @@ mod tests {
             id: "wf1".to_string(),
             name: "NoPrompts".to_string(),
             description: None,
-            auto_advance: false,
             is_default: false,
             is_final: false,
             kanban_column: None,
