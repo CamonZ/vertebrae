@@ -5,6 +5,8 @@ export const TRANSITION_ARROW_COLOR_SELECTED = "#f59e0b";
 
 const MARKER_ID_DEFAULT = "transition-arrow";
 const MARKER_ID_SELECTED = "transition-arrow-selected";
+export const DESTINATION_ARROW_LENGTH = 9;
+export const DESTINATION_ARROW_HALF_WIDTH = 5;
 
 export interface TransitionMarkerOptions {
   selected?: boolean;
@@ -30,6 +32,30 @@ export function transitionEdgeStyle({
     strokeWidth: selected ? 2.5 : 2,
     ...(dashed ? { strokeDasharray: "5,5" } : null),
   };
+}
+
+export function transitionDestinationArrowPath(
+  targetX: number,
+  targetY: number,
+  previousX: number,
+  previousY: number
+): string {
+  const dx = targetX - previousX;
+  const dy = targetY - previousY;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  const baseX = targetX - ux * DESTINATION_ARROW_LENGTH;
+  const baseY = targetY - uy * DESTINATION_ARROW_LENGTH;
+  const perpX = -uy * DESTINATION_ARROW_HALF_WIDTH;
+  const perpY = ux * DESTINATION_ARROW_HALF_WIDTH;
+
+  return [
+    `M ${targetX} ${targetY}`,
+    `L ${baseX + perpX} ${baseY + perpY}`,
+    `L ${baseX - perpX} ${baseY - perpY}`,
+    "Z",
+  ].join(" ");
 }
 
 /**

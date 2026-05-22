@@ -1,6 +1,12 @@
-import { type EdgeProps, BaseEdge, EdgeLabelRenderer, type Edge } from "@xyflow/react";
+import {
+  type EdgeProps,
+  BaseEdge,
+  EdgeLabelRenderer,
+  type Edge,
+} from "@xyflow/react";
 import type { LayoutPoint } from "../../hooks";
 import type { CSSProperties } from "react";
+import { transitionDestinationArrowPath } from "./transitionEdge";
 
 /**
  * Data passed to the ElkRoutedEdge component
@@ -78,7 +84,8 @@ function getPathMidpoint(
 
   // Calculate total path length
   let totalLength = 0;
-  const segments: { start: LayoutPoint; end: LayoutPoint; length: number }[] = [];
+  const segments: { start: LayoutPoint; end: LayoutPoint; length: number }[] =
+    [];
 
   for (let i = 0; i < allPoints.length - 1; i++) {
     const start = allPoints[i];
@@ -149,7 +156,8 @@ export function ElkRoutedEdge({
   const hitPath = (() => {
     const points = [effectiveSourcePoint, ...bendPoints, effectiveTargetPoint];
     let p = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 1; i < points.length; i++) p += ` L ${points[i].x} ${points[i].y}`;
+    for (let i = 1; i < points.length; i++)
+      p += ` L ${points[i].x} ${points[i].y}`;
     return p;
   })();
 
@@ -159,6 +167,10 @@ export function ElkRoutedEdge({
     : null;
 
   const baseStyle = style as CSSProperties;
+  const arrowFill =
+    typeof baseStyle.stroke === "string" ? baseStyle.stroke : "currentColor";
+  const allPoints = [effectiveSourcePoint, ...bendPoints, effectiveTargetPoint];
+  const previousTargetPoint = allPoints[allPoints.length - 2];
 
   return (
     <g style={{ cursor: "pointer" }}>
@@ -176,6 +188,18 @@ export function ElkRoutedEdge({
         path={tailPath}
         style={{ ...baseStyle, strokeDasharray: undefined }}
         markerEnd={markerEnd as string}
+      />
+      <path
+        id={`${id}-destination-arrow`}
+        data-testid="workflow-transition-destination-arrow"
+        d={transitionDestinationArrowPath(
+          effectiveTargetPoint.x,
+          effectiveTargetPoint.y,
+          previousTargetPoint.x,
+          previousTargetPoint.y
+        )}
+        fill={arrowFill}
+        stroke="none"
       />
       {label && labelPosition && (
         <EdgeLabelRenderer>
