@@ -58,6 +58,7 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { popOut } from "../utils";
+import { isEditableShortcutTarget } from "../utils/keyboard";
 
 const nodeTypes: NodeTypes = {
   stepNode: StepNode,
@@ -424,13 +425,7 @@ function AllWorkflowsPipelineInner() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
+      if (isEditableShortcutTarget(e.target)) {
         return;
       }
       const tr = selectedTransitionRef.current;

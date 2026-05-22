@@ -1,12 +1,18 @@
 import { useLiveChatStore } from "../../stores/liveChatStore";
+import { useStyleguideStore } from "../../stores/styleguideStore";
 
 interface OpenLiveChatButtonProps {
   className?: string;
 }
 
-export function OpenLiveChatButton({ className = "" }: OpenLiveChatButtonProps) {
+export function OpenLiveChatButton({
+  className = "",
+}: OpenLiveChatButtonProps) {
+  const isVisible = useStyleguideStore((s) => s.isLiveChatButtonVisible);
   const panelOpen = useLiveChatStore((s) => s.panelOpen);
   const togglePanel = useLiveChatStore((s) => s.togglePanel);
+
+  if (!isVisible) return null;
 
   return (
     <button

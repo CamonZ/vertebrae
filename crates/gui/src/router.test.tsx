@@ -60,6 +60,7 @@ import { TasksPage } from "./pages/TasksPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
+import { StyleguidePage } from "./pages/StyleguidePage";
 
 /**
  * Helper to create a test router with the new route structure
@@ -90,6 +91,10 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/traces",
         element: <TracesPage />,
+      },
+      {
+        path: "/styleguide",
+        element: <StyleguidePage />,
       },
     ],
     { initialEntries },
@@ -557,11 +562,12 @@ describe("Router Acceptance Tests", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("all four routes render distinct pages", async () => {
+    it("primary routes render distinct pages", async () => {
       const routes = [
         { path: "/operations", heading: "Operations" },
         { path: "/board", heading: "Board" },
         { path: "/tasks", heading: "Tasks" },
+        { path: "/styleguide", heading: "GUI Styleguide" },
       ];
 
       for (const route of routes) {
