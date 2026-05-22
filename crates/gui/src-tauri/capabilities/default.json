@@ -2,16 +2,12 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "enables the default permissions",
-  "windows": [
-    "main",
-    "task-*",
-    "chat-*",
-    "traces-*"
-  ],
+  "windows": ["main", "task-*", "chat-*", "traces-*"],
   "permissions": [
     "core:default",
     "core:webview:allow-create-webview-window",
     "core:webview:allow-webview-close",
+    "core:window:allow-destroy",
     "core:window:allow-set-focus",
     "dialog:default"
   ]

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "../test/test-utils";
+import { useUIStore } from "../stores";
 
 const mockGlobalListeners = vi.fn();
 
@@ -17,6 +18,11 @@ vi.mock("./Toast", () => ({
 import { WindowLayout } from "./WindowLayout";
 
 describe("WindowLayout", () => {
+  beforeEach(() => {
+    document.documentElement.classList.remove("dark", "light");
+    useUIStore.setState({ theme: "system" });
+  });
+
   it("renders children inside the main region", () => {
     render(
       <WindowLayout>
@@ -48,6 +54,19 @@ describe("WindowLayout", () => {
     );
 
     expect(screen.getByTestId("toast-container")).toBeInTheDocument();
+  });
+
+  it("applies the selected theme inside detached windows", () => {
+    useUIStore.setState({ theme: "light" });
+
+    render(
+      <WindowLayout>
+        <span />
+      </WindowLayout>
+    );
+
+    expect(document.documentElement).toHaveClass("light");
+    expect(document.documentElement).not.toHaveClass("dark");
   });
 
   it("does not render Sidebar, Header, or ChatWindowManager", () => {

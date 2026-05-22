@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import { useTheme } from "../hooks";
 import { ToastContainer } from "./Toast";
 import { GlobalListeners } from "./GlobalListeners";
 
@@ -12,6 +13,8 @@ interface WindowLayoutProps {
  * bootstraps its own subscriptions to backend events.
  */
 export function WindowLayout({ children }: WindowLayoutProps) {
+  useTheme();
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary">
       <GlobalListeners />
