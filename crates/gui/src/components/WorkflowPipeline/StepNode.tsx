@@ -57,11 +57,13 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       type="button"
       onClick={handleClick}
       data-testid={`step-node-${step.name}`}
-      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${isFlashing ? "animate-flash-border" : ""
-        } ${isNodeSelected
+      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+        isFlashing ? "animate-flash-border" : ""
+      } ${
+        isNodeSelected
           ? "border-primary/50 bg-primary/5 shadow-glow-sm"
           : "border-border hover:border-border/80 hover:bg-bg-hover"
-        }`}
+      }`}
       style={{
         boxShadow: NODE_SHADOW_STYLE.boxShadow,
       }}
@@ -71,23 +73,22 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         className={`pointer-events-none absolute inset-0 ${NODE_SIZING.borderRadiusClass} from-primary/5 to-transparent`}
       />
 
-      {/* Input handle - hidden for first step */}
-      {!isFirst && (
-        <Handle
-          type="target"
-          position={Position.Left}
-          className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm`}
-        />
-      )}
+      <Handle
+        type="target"
+        position={Position.Left}
+        isConnectable={!isFirst}
+        className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isFirst ? "!opacity-0" : ""}`}
+      />
 
       {/* Step header with order badge */}
       <div className="relative mb-3 flex items-center gap-3">
         <div className="relative">
           <span
-            className={`flex h-7 w-7 items-center justify-center rounded-lg border font-mono text-xs font-bold ${isFirst
+            className={`flex h-7 w-7 items-center justify-center rounded-lg border font-mono text-xs font-bold ${
+              isFirst
                 ? "border-accent/30 bg-accent/10 text-accent"
                 : "border-primary/30 bg-primary/10 text-primary"
-              }`}
+            }`}
           >
             {(step.order ?? 0) + 1}
           </span>
@@ -335,14 +336,12 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </div>
         )}
 
-      {/* Output handle - hidden for last step */}
-      {!isLast && (
-        <Handle
-          type="source"
-          position={Position.Right}
-          className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm`}
-        />
-      )}
+      <Handle
+        type="source"
+        position={Position.Right}
+        isConnectable={!isLast}
+        className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isLast ? "!opacity-0" : ""}`}
+      />
     </button>
   );
 }
