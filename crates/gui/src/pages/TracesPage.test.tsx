@@ -18,6 +18,14 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+vi.mock("../bindings", () => ({
+  commands: {
+    getTask: vi.fn(async () => ({ status: "error", error: { message: "not found" } })),
+    listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
+    getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
+  },
+}));
+
 let mockTask: ReturnType<typeof createMockTask> | null = null;
 let mockTaskLoading = false;
 let mockTaskError: string | null = null;
@@ -34,6 +42,12 @@ vi.mock("../hooks", () => ({
     activeRun: null,
     latestRun: null,
     resolveRun: () => ({ run: null, source: "none" }),
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useTaskRunsForTasks: () => ({
+    runs: [],
     isLoading: false,
     error: null,
     refetch: vi.fn(),
