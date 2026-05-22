@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
 import { useOpenChat } from "../hooks/useScopedChat";
+import { useStyleguideStore } from "../stores/styleguideStore";
 
 interface NavItemProps {
   to: string;
@@ -147,6 +148,46 @@ function ProjectChatButton() {
         </span>
       </button>
     </li>
+  );
+}
+
+function StyleguideNavItem() {
+  const location = useLocation();
+  const isStyleguideNavVisible = useStyleguideStore(
+    (state) => state.isStyleguideNavVisible
+  );
+  const showStyleguideNav =
+    isStyleguideNavVisible || location.pathname === "/styleguide";
+
+  if (!showStyleguideNav) return null;
+
+  return (
+    <NavItem
+      to="/styleguide"
+      label="Styleguide"
+      icon={
+        <svg
+          className="h-5 w-5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M4 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2H4V5z"
+          />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M4 9h16v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9zM8 13h3m-3 3h8"
+          />
+        </svg>
+      }
+    />
   );
 }
 
@@ -319,6 +360,7 @@ export function Sidebar() {
               </svg>
             }
           />
+          <StyleguideNavItem />
           <ProjectChatButton />
         </ul>
       </nav>

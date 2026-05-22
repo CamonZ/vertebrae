@@ -2,15 +2,17 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const { popOutMock, onCloseRequestedMock, mockWebview } = vi.hoisted(() => {
   const onCloseRequestedMock =
-    vi.fn<(handler: () => void) => Promise<() => void>>();
+    vi.fn<(handler: () => void | Promise<void>) => Promise<() => void>>();
   onCloseRequestedMock.mockImplementation(async () => () => {});
-  const mockWebview = { onCloseRequested: onCloseRequestedMock };
+  const mockWebview = {
+    onCloseRequested: onCloseRequestedMock,
+  };
   const popOutMock =
     vi.fn<
       (
         route: string,
         label: string,
-        opts?: Record<string, unknown>,
+        opts?: Record<string, unknown>
       ) => Promise<{ window: typeof mockWebview; reused: boolean }>
     >();
   popOutMock.mockResolvedValue({ window: mockWebview, reused: false });
@@ -71,7 +73,7 @@ describe("chatStore detach / reattach", () => {
 
     // Simulate the pop-out window closing
     const closeHandler = onCloseRequestedMock.mock.calls[0][0];
-    closeHandler();
+    await closeHandler();
 
     expect(useChatStore.getState().sessions[id].isDetached).toBe(false);
     expect(useChatStore.getState().activeSessionId).toBe(id);
