@@ -19,10 +19,6 @@ pub struct WorkflowAddCommand {
     #[arg(short, long = "step", value_parser = parse_step)]
     pub steps: Vec<ParsedStep>,
 
-    /// Automatically advance to the next step on successful completion
-    #[arg(long)]
-    pub auto_advance: bool,
-
     /// Display order for sorting workflows (lower values appear first)
     #[arg(short, long, default_value = "0")]
     pub order: i32,
@@ -92,7 +88,6 @@ impl WorkflowAddCommand {
             .collect();
 
         let mut options = CreateWorkflowOptions::new(&self.name, steps)
-            .with_auto_advance(self.auto_advance)
             .with_is_default(self.default)
             .with_order(self.order);
 

@@ -604,7 +604,6 @@ pub struct UpdateWorkflowOptions {
     pub workflow_id: String,
     pub name: Option<String>,
     pub description: Option<String>,
-    pub auto_advance: Option<bool>,
     pub order: Option<i32>,
     pub is_default: Option<bool>,
     pub is_final: Option<bool>,
@@ -619,9 +618,6 @@ impl From<UpdateWorkflowOptions> for vertebrae_core::UpdateWorkflowOptions {
         }
         if let Some(description) = opts.description {
             update = update.with_description(description);
-        }
-        if let Some(auto_advance) = opts.auto_advance {
-            update = update.with_auto_advance(auto_advance);
         }
         if let Some(order) = opts.order {
             update = update.with_order(order);

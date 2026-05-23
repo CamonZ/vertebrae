@@ -1407,10 +1407,6 @@ pub struct Workflow {
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 
-    /// Auto-advance on completion
-    #[serde(default)]
-    pub auto_advance: bool,
-
     /// Display order
     #[serde(default)]
     pub order: i32,
@@ -1449,7 +1445,6 @@ impl Workflow {
             description: None,
             initial_step: None,
             metadata: std::collections::HashMap::new(),
-            auto_advance: false,
             order: 0,
             is_default: false,
             is_final: false,
@@ -1458,12 +1453,6 @@ impl Workflow {
             created_at: None,
             updated_at: None,
         }
-    }
-
-    /// Set auto_advance
-    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
-        self.auto_advance = auto_advance;
-        self
     }
 
     /// Set the display order
@@ -1515,7 +1504,6 @@ impl PartialEq for Workflow {
             && self.description == other.description
             && self.initial_step == other.initial_step
             && self.metadata == other.metadata
-            && self.auto_advance == other.auto_advance
     }
 }
 
@@ -2276,14 +2264,12 @@ mod tests {
     fn workflow_new_and_builders() {
         let wf = Workflow::new("Dev")
             .with_description("Development workflow")
-            .with_auto_advance(true)
             .with_order(2)
             .with_metadata("key", "value")
             .with_initial_step("step1");
 
         assert_eq!(wf.name, "Dev");
         assert_eq!(wf.description.as_deref(), Some("Development workflow"));
-        assert!(wf.auto_advance);
         assert_eq!(wf.order, 2);
         assert_eq!(wf.metadata.get("key").unwrap(), "value");
         assert_eq!(wf.initial_step.as_deref(), Some("step1"));

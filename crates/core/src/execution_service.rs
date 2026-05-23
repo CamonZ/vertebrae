@@ -249,8 +249,8 @@ pub trait ExecutionService: Send + Sync {
     /// Orchestrate a task through its entire workflow via the backend.
     ///
     /// Calls the `orchestrate_task` mutation on Sacrum, which drives the task
-    /// through all workflow steps using the TaskOrchestrator FSM (auto-advance,
-    /// eval prompts, workflow chaining).
+    /// through all workflow steps using the TaskOrchestrator FSM (eval prompts,
+    /// workflow chaining).
     ///
     /// # Arguments
     ///
