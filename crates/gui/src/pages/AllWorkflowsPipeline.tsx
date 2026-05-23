@@ -1,4 +1,11 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
 import {
   ReactFlow,
   Controls,
@@ -23,6 +30,9 @@ import {
   type Workflow,
   type StepType,
   type AgentConfig,
+  type SessionLog,
+  type TaskFilterOptions,
+  type TaskRunStatus,
   type WorkflowTransition,
 } from "../bindings";
 import {
@@ -30,13 +40,15 @@ import {
   type LayoutNode,
   type LayoutEdge,
   usePipelineSummary,
+  useTaskRunTrace,
   useStepTasks,
+  useTasks,
 } from "../hooks";
 import type {
   PipelineStep,
   PipelineWorkflow,
 } from "../hooks/usePipelineSummary";
-import { useToastStore } from "../stores";
+import { useTaskStore, useToastStore } from "../stores";
 import { FormModal } from "../components/forms/FormModal";
 import {
   StepNode,
@@ -57,8 +69,16 @@ import {
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
+import { IdentityBadge } from "../components/shared/EntityId";
+import { UnifiedChatView, projectTaskRunTrace } from "../components/Traces";
 import { popOut } from "../utils";
 import { isEditableShortcutTarget } from "../utils/keyboard";
+import {
+  deriveActiveTaskRuns,
+  deriveRunControlsState,
+  runStatusLabel,
+  type ActiveTaskRun,
+} from "../utils/runState";
 
 const nodeTypes: NodeTypes = {
   stepNode: StepNode,
@@ -88,6 +108,17 @@ const EMPTY_AGENT_CONFIG: AgentConfig = {
 };
 const EXECUTE_STEP_TYPE: StepType = "execute";
 const EMPTY_PIPELINE_WORKFLOWS: PipelineWorkflow[] = [];
+const PIPELINE_FLASH_DURATION_MS = 250;
+const PIPELINE_TASK_FILTER: TaskFilterOptions = {
+  step_names: null,
+  levels: null,
+  tags: null,
+  root_only: null,
+  children_of: null,
+  search: null,
+  workflow_id: null,
+  step_id: null,
+};
 
 function pipelineStepToStep(step: PipelineStep): Step {
   return {
@@ -135,6 +166,108 @@ type RenderableWorkflowTransition = {
   transition: WorkflowTransition;
   elkEdgeId: string;
 };
+
+type PipelinePanelTab = "ready" | "running";
+type StepTypeById = Map<string, string | null>;
+
+type PipelineRunIndicator = {
+  label: string;
+  dotClass: string;
+  pulse: boolean;
+};
+
+function runningIndicatorForTask(
+  task: ActiveTaskRun["task"],
+  status: TaskRunStatus,
+  stepTypeById: StepTypeById
+): PipelineRunIndicator {
+  switch (status) {
+    case "queued":
+      return { label: "Queued", dotClass: "bg-sky-400", pulse: false };
+    case "executing":
+      return { label: "Running", dotClass: "bg-success", pulse: false };
+    case "waiting": {
+      const stepType = task.current_step_id
+        ? stepTypeById.get(task.current_step_id)
+        : null;
+      if (stepType === "wait_children") {
+        return {
+          label: "Waiting on children",
+          dotClass: "bg-sky-400",
+          pulse: true,
+        };
+      }
+      if (stepType === "human_input") {
+        return {
+          label: "Waiting for human input",
+          dotClass: "bg-warning",
+          pulse: false,
+        };
+      }
+      return { label: "Waiting", dotClass: "bg-sky-400", pulse: false };
+    }
+    case "stopping":
+      return { label: "Stopping", dotClass: "bg-text-muted", pulse: true };
+    default:
+      return {
+        label: runStatusLabel(status),
+        dotClass: "bg-text-muted",
+        pulse: false,
+      };
+  }
+}
+
+function useActivePipelineRuns(): ActiveTaskRun[] {
+  const tasks = useTaskStore((state) => state.tasks);
+
+  return useMemo(() => {
+    const activeRuns = deriveActiveTaskRuns(tasks, { sortNewestFirst: true });
+    const activeTaskIds = new Set(activeRuns.map(({ task }) => task.id));
+    return activeRuns.filter(({ task }) => {
+      return !task.parent_id || !activeTaskIds.has(task.parent_id);
+    });
+  }, [tasks]);
+}
+
+function useReadyPipelineTasks(): ActiveTaskRun["task"][] {
+  const tasks = useTaskStore((state) => state.tasks);
+
+  return useMemo(() => {
+    const taskMap = new Map(tasks.map((task) => [task.id, task]));
+    return tasks.filter((task) => {
+      if (task.archived || task.completed_at) return false;
+      if (task.run_controls?.active_run) return false;
+      if (task.run_controls && task.run_controls.runnable !== true) {
+        return false;
+      }
+      if (!task.run_controls && !task.workflow_id) return false;
+      const deps = task.dependency_ids ?? [];
+      return deps.every((depId) => {
+        const dep = taskMap.get(depId);
+        if (!dep) return false;
+        const depRunStatus = dep.run_controls?.active_run?.status ?? null;
+        if (depRunStatus === "completed") return true;
+        return dep.step_name === "done";
+      });
+    });
+  }, [tasks]);
+}
+
+function useTasksByParentId(): Map<string, ActiveTaskRun["task"][]> {
+  const tasks = useTaskStore((state) => state.tasks);
+
+  return useMemo(() => {
+    const byParentId = new Map<string, ActiveTaskRun["task"][]>();
+    for (const task of tasks) {
+      if (!task.parent_id) continue;
+      if (task.completed_at) continue;
+      const childTasks = byParentId.get(task.parent_id) ?? [];
+      childTasks.push(task);
+      byParentId.set(task.parent_id, childTasks);
+    }
+    return byParentId;
+  }, [tasks]);
+}
 
 function stepEdgeId(
   workflowId: string,
@@ -253,6 +386,16 @@ function AllWorkflowsPipelineInner() {
     for (const steps of workflowStepsMap.values()) out.push(...steps);
     return out;
   }, [workflowStepsMap]);
+
+  const stepTypeById = useMemo<StepTypeById>(() => {
+    const map: StepTypeById = new Map();
+    for (const workflow of pipelineWorkflows) {
+      for (const step of workflow.workflow_steps) {
+        map.set(step.id, step.step_type);
+      }
+    }
+    return map;
+  }, [pipelineWorkflows]);
 
   // Per-step aggregates from the pipeline summary, keyed by step id.
   const stepAggregates = useMemo(() => {
@@ -512,6 +655,15 @@ function AllWorkflowsPipelineInner() {
     [selectedTaskId, selectedStepId, selectedWorkflowId]
   );
 
+  const handleActiveRunTaskSelect = useCallback((taskId: string) => {
+    setSelectedTaskId((currentTaskId) =>
+      currentTaskId === taskId ? null : taskId
+    );
+    setSelectedStepId(null);
+    setSelectedWorkflowId(null);
+    setPanelHistory([]);
+  }, []);
+
   const handleStepClick = useCallback((step: Step) => {
     setSelectedStepId(step.id || null);
     setSelectedTaskId(null);
@@ -594,7 +746,7 @@ function AllWorkflowsPipelineInner() {
           next.delete(edgeId);
           return next;
         });
-      }, 250);
+      }, PIPELINE_FLASH_DURATION_MS);
     });
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
@@ -615,7 +767,7 @@ function AllWorkflowsPipelineInner() {
             next.delete(wfId);
             return next;
           });
-        }, 2000);
+        }, PIPELINE_FLASH_DURATION_MS);
       }
       if (stepId) {
         setFlashingStepIds((prev) => new Set(prev).add(stepId));
@@ -625,7 +777,7 @@ function AllWorkflowsPipelineInner() {
             next.delete(stepId);
             return next;
           });
-        }, 2000);
+        }, PIPELINE_FLASH_DURATION_MS);
       }
     });
     return () => {
@@ -977,6 +1129,10 @@ function AllWorkflowsPipelineInner() {
               bgColor="#0c0c0e"
             />
           </ReactFlow>
+          <ActiveRunsPanelContainer
+            onTaskSelect={handleActiveRunTaskSelect}
+            stepTypeById={stepTypeById}
+          />
         </div>
       </div>
 
@@ -1052,6 +1208,570 @@ function AllWorkflowsPipelineInner() {
         />
       )}
     </div>
+  );
+}
+
+type ActiveRunsPanelProps = {
+  items: ActiveTaskRun[];
+  readyTasks: ActiveTaskRun["task"][];
+  childTasksByParentId: Map<string, ActiveTaskRun["task"][]>;
+  onTaskSelect: (taskId: string) => void;
+  onRunSelect: (selection: SelectedTraceRun) => void;
+  onTaskStart: (task: ActiveTaskRun["task"]) => void;
+  onTaskStop: (task: ActiveTaskRun["task"]) => void;
+  pendingTaskIds: Set<string>;
+  stepTypeById: StepTypeById;
+  activeTab: PipelinePanelTab;
+  onTabChange: (tab: PipelinePanelTab) => void;
+};
+
+type SelectedTraceRun = {
+  task: ActiveTaskRun["task"];
+  taskRun: ActiveTaskRun["taskRun"];
+};
+
+function ActiveRunsPanelContainer({
+  onTaskSelect,
+  stepTypeById,
+}: Pick<ActiveRunsPanelProps, "onTaskSelect" | "stepTypeById">) {
+  useTasks(PIPELINE_TASK_FILTER);
+  const [selectedTraceRun, setSelectedTraceRun] =
+    useState<SelectedTraceRun | null>(null);
+  const [activeTab, setActiveTab] = useState<PipelinePanelTab>("running");
+  const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const items = useActivePipelineRuns();
+  const readyTasks = useReadyPipelineTasks();
+  const childTasksByParentId = useTasksByParentId();
+
+  const handleRunSelect = useCallback((selection: SelectedTraceRun) => {
+    setSelectedTraceRun((currentSelection) =>
+      currentSelection?.taskRun.id === selection.taskRun.id ? null : selection
+    );
+  }, []);
+
+  const setTaskPending = useCallback((taskId: string, pending: boolean) => {
+    setPendingTaskIds((current) => {
+      const next = new Set(current);
+      if (pending) {
+        next.add(taskId);
+      } else {
+        next.delete(taskId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTaskStart = useCallback(
+    async (task: ActiveTaskRun["task"]) => {
+      const runControls = deriveRunControlsState(task.run_controls ?? null, {
+        hasWorkflow: Boolean(task.workflow_id),
+      });
+      if (runControls.runDisabled || pendingTaskIds.has(task.id)) return;
+      setTaskPending(task.id, true);
+      try {
+        await commands.runWorkflow(task.id);
+      } finally {
+        setTaskPending(task.id, false);
+      }
+    },
+    [pendingTaskIds, setTaskPending]
+  );
+
+  const handleTaskStop = useCallback(
+    async (task: ActiveTaskRun["task"]) => {
+      const runControls = deriveRunControlsState(task.run_controls ?? null, {
+        hasWorkflow: Boolean(task.workflow_id),
+      });
+      if (runControls.stopDisabled || pendingTaskIds.has(task.id)) return;
+      setTaskPending(task.id, true);
+      try {
+        await commands.stopRun({
+          task_run_id: runControls.activeRun?.id ?? null,
+          task_id: runControls.activeRun ? null : task.id,
+        });
+      } finally {
+        setTaskPending(task.id, false);
+      }
+    },
+    [pendingTaskIds, setTaskPending]
+  );
+
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex w-[32rem] max-w-[calc(100%-2rem)] flex-col gap-3">
+      <ActiveRunsPanel
+        items={items}
+        readyTasks={readyTasks}
+        childTasksByParentId={childTasksByParentId}
+        onTaskSelect={onTaskSelect}
+        onRunSelect={handleRunSelect}
+        onTaskStart={handleTaskStart}
+        onTaskStop={handleTaskStop}
+        pendingTaskIds={pendingTaskIds}
+        stepTypeById={stepTypeById}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
+      {selectedTraceRun && (
+        <ActiveRunTracePanel
+          selection={selectedTraceRun}
+          onClose={() => setSelectedTraceRun(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function RunStatusDot({
+  task,
+  status,
+  stepTypeById,
+}: {
+  task: ActiveTaskRun["task"];
+  status: TaskRunStatus;
+  stepTypeById: StepTypeById;
+}) {
+  const indicator = runningIndicatorForTask(task, status, stepTypeById);
+  return (
+    <span
+      className={`mx-0.5 inline-flex h-2 w-2 shrink-0 rounded-full ${indicator.dotClass} ${
+        indicator.pulse ? "animate-pulse [animation-duration:3s]" : ""
+      }`}
+      title={indicator.label}
+      aria-label={indicator.label}
+      role="img"
+    />
+  );
+}
+
+function TraceIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M3 12h4l2-6 4 12 2-6h6"
+      />
+    </svg>
+  );
+}
+
+function DetailsIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"
+      />
+    </svg>
+  );
+}
+
+function StartIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg
+      className="h-3.5 w-3.5"
+      fill="currentColor"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+    >
+      <path d="M7 7h10v10H7z" />
+    </svg>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  children,
+  variant = "muted",
+  disabled = false,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  variant?: "muted" | "success" | "danger";
+  disabled?: boolean;
+}) {
+  const variantClass =
+    variant === "success"
+      ? "text-success hover:bg-success/10 hover:text-success"
+      : variant === "danger"
+        ? "text-error hover:bg-error/10 hover:text-error"
+        : "text-text-muted hover:bg-bg-secondary hover:text-text-primary";
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 ${variantClass}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ActiveRunsPanel({
+  items,
+  readyTasks,
+  childTasksByParentId,
+  onTaskSelect,
+  onRunSelect,
+  onTaskStart,
+  onTaskStop,
+  pendingTaskIds,
+  stepTypeById,
+  activeTab,
+  onTabChange,
+}: ActiveRunsPanelProps) {
+  if (items.length === 0 && readyTasks.length === 0) return null;
+  const tabItems = activeTab === "running" ? items : readyTasks;
+
+  return (
+    <section
+      aria-label="Pipeline task launcher"
+      className="pointer-events-auto overflow-hidden rounded-lg border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
+    >
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div
+          role="tablist"
+          aria-label="Pipeline task tabs"
+          className="flex rounded-md bg-bg-primary p-0.5"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "ready"}
+            onClick={() => onTabChange("ready")}
+            className={`rounded px-2 py-1 text-xs font-medium ${
+              activeTab === "ready"
+                ? "bg-bg-tertiary text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Ready <span className="font-mono">{readyTasks.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "running"}
+            onClick={() => onTabChange("running")}
+            className={`rounded px-2 py-1 text-xs font-medium ${
+              activeTab === "running"
+                ? "bg-bg-tertiary text-text-primary"
+                : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            Running <span className="font-mono">{items.length}</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="p-2">
+        {activeTab === "ready" &&
+          readyTasks.map((task) => (
+            <TaskPanelRow
+              key={task.id}
+              task={task}
+              onTaskSelect={onTaskSelect}
+              onTaskStart={() => onTaskStart(task)}
+              pending={pendingTaskIds.has(task.id)}
+            />
+          ))}
+        {activeTab === "running" &&
+          items.map(({ task, taskRun }) => {
+            const childTasks = childTasksByParentId.get(task.id) ?? [];
+            return (
+              <div
+                key={taskRun.id}
+                className="border-l-2 border-l-success/50"
+                data-testid="pipeline-active-run"
+                data-run-status={taskRun.status}
+              >
+                <TaskPanelRow
+                  task={task}
+                  testId="pipeline-active-run-task-id"
+                  onTaskSelect={onTaskSelect}
+                  onTaskStop={() => onTaskStop(task)}
+                  pending={pendingTaskIds.has(task.id)}
+                  stepTypeById={stepTypeById}
+                  onRunSelect={() => onRunSelect({ task, taskRun })}
+                />
+                {childTasks.length > 0 && (
+                  <div
+                    className="border-t border-border/60 bg-bg-primary/40 py-1 pl-5 pr-2"
+                    data-testid="pipeline-active-run-children"
+                  >
+                    {childTasks.map((childTask) => (
+                      <div
+                        key={childTask.id}
+                        className="flex w-full items-center gap-2 px-2 py-1 text-left"
+                        data-testid="pipeline-active-run-child"
+                      >
+                        <div className="flex shrink-0 items-center gap-1">
+                          {childTask.run_controls?.active_run && (
+                            <IconButton
+                              label={`Stop orchestration for ${childTask.title}`}
+                              onClick={() => onTaskStop(childTask)}
+                              variant="danger"
+                              disabled={pendingTaskIds.has(childTask.id)}
+                            >
+                              <StopIcon />
+                            </IconButton>
+                          )}
+                          {childTask.run_controls?.active_run && (
+                            <RunStatusDot
+                              task={childTask}
+                              status={childTask.run_controls.active_run.status}
+                              stepTypeById={stepTypeById}
+                            />
+                          )}
+                          {childTask.run_controls?.active_run && (
+                            <IconButton
+                              label={`Show traces for ${childTask.title}`}
+                              onClick={() =>
+                                onRunSelect({
+                                  task: childTask,
+                                  taskRun: childTask.run_controls!.active_run!,
+                                })
+                              }
+                            >
+                              <TraceIcon />
+                            </IconButton>
+                          )}
+                          <IconButton
+                            label={`Show details for ${childTask.title}`}
+                            onClick={() => onTaskSelect(childTask.id)}
+                          >
+                            <DetailsIcon />
+                          </IconButton>
+                        </div>
+                        <IdentityBadge
+                          id={childTask.id}
+                          kind="task"
+                          level={childTask.level}
+                          className="shrink-0"
+                          testId="pipeline-active-run-child-id"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
+                          {childTask.title}
+                        </span>
+                        <span className="min-w-0 max-w-32 shrink truncate text-[10px] text-text-muted">
+                          {childTask.workflow_name ?? "No workflow"}{" "}
+                          <span aria-hidden="true">&middot;</span>{" "}
+                          {childTask.step_name ?? "No step"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        {tabItems.length === 0 && (
+          <div className="px-3 py-6 text-center text-xs text-text-muted">
+            No {activeTab} tasks.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TaskPanelRow({
+  task,
+  testId = "pipeline-task-row-id",
+  onTaskSelect,
+  onRunSelect,
+  onTaskStart,
+  onTaskStop,
+  stepTypeById = new Map(),
+  pending = false,
+}: {
+  task: ActiveTaskRun["task"];
+  testId?: string;
+  onTaskSelect: (taskId: string) => void;
+  onRunSelect?: () => void;
+  onTaskStart?: () => void;
+  onTaskStop?: () => void;
+  stepTypeById?: StepTypeById;
+  pending?: boolean;
+}) {
+  const workflowName = task.workflow_name ?? "No workflow";
+  const stepName = task.step_name ?? "Unknown step";
+  return (
+    <div className="flex items-start justify-between gap-3 px-3 py-2 hover:bg-bg-secondary">
+      <div className="flex min-w-0 flex-1 items-start gap-2">
+        <div className="flex shrink-0 items-center gap-1">
+          {onTaskStart && (
+            <IconButton
+              label={`Start orchestration for ${task.title}`}
+              onClick={onTaskStart}
+              variant="success"
+              disabled={pending}
+            >
+              <StartIcon />
+            </IconButton>
+          )}
+          {onTaskStop && (
+            <IconButton
+              label={`Stop orchestration for ${task.title}`}
+              onClick={onTaskStop}
+              variant="danger"
+              disabled={pending}
+            >
+              <StopIcon />
+            </IconButton>
+          )}
+          {onRunSelect && task.run_controls?.active_run && (
+            <RunStatusDot
+              task={task}
+              status={task.run_controls.active_run.status}
+              stepTypeById={stepTypeById}
+            />
+          )}
+          {onRunSelect && (
+            <IconButton
+              label={`Show traces for ${task.title}`}
+              onClick={onRunSelect}
+            >
+              <TraceIcon />
+            </IconButton>
+          )}
+          <IconButton
+            label={`Show details for ${task.title}`}
+            onClick={() => onTaskSelect(task.id)}
+          >
+            <DetailsIcon />
+          </IconButton>
+        </div>
+        <div className="min-w-0">
+          <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-text-primary">
+            <IdentityBadge
+              id={task.id}
+              kind="task"
+              level={task.level}
+              className="shrink-0"
+              testId={testId}
+            />
+            <span className="truncate">{task.title}</span>
+          </p>
+          <p className="mt-1 truncate text-xs text-text-muted">
+            {workflowName} <span aria-hidden="true">&middot;</span> {stepName}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function groupSessionLogsByExecutionId(sessionLogs: readonly SessionLog[]) {
+  const grouped: Record<string, SessionLog[]> = {};
+  for (const log of sessionLogs) {
+    const executionId = log.step_execution_id;
+    if (!executionId) continue;
+    grouped[executionId] = grouped[executionId] ?? [];
+    grouped[executionId].push(log);
+  }
+  return grouped;
+}
+
+type ActiveRunTracePanelProps = {
+  selection: SelectedTraceRun;
+  onClose: () => void;
+};
+
+function ActiveRunTracePanel({ selection, onClose }: ActiveRunTracePanelProps) {
+  const trace = useTaskRunTrace(selection.taskRun.id);
+  const traceTasks = useMemo(() => [selection.task], [selection.task]);
+  const runProjection = useMemo(
+    () => projectTaskRunTrace(trace.taskRuns, trace.executions, traceTasks),
+    [trace.executions, trace.taskRuns, traceTasks]
+  );
+  const groupedLogs = useMemo(
+    () => groupSessionLogsByExecutionId(trace.sessionLogs),
+    [trace.sessionLogs]
+  );
+
+  return (
+    <section
+      aria-label="Live task run trace"
+      className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
+      data-testid="pipeline-active-run-trace-panel"
+      data-run-id={selection.taskRun.id}
+    >
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="min-w-0">
+          <p className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase text-text-secondary">
+            Live trace
+            <IdentityBadge
+              id={selection.taskRun.id}
+              kind="task run"
+              className="shrink-0"
+              testId="pipeline-active-run-trace-id"
+            />
+          </p>
+          <p className="mt-1 truncate text-xs text-text-muted">
+            {selection.task.title}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-secondary hover:text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          aria-label="Close live trace"
+        >
+          Close
+        </button>
+      </div>
+      <div className="min-h-0 flex-1">
+        <UnifiedChatView
+          rootTaskId={selection.task.id}
+          executions={trace.executions}
+          tasks={traceTasks}
+          runProjection={runProjection}
+          logsByExecutionId={groupedLogs}
+          isLoading={trace.isLoading}
+          error={trace.error}
+          autoScroll
+          activeExecutionId={selection.taskRun.latest_step_execution_id}
+        />
+      </div>
+    </section>
   );
 }
 

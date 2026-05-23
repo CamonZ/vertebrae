@@ -3,6 +3,7 @@ import type { TaskRun, TaskRunControls, TaskRunStatus } from "../bindings";
 import {
   deriveRunControlsState,
   deriveRunStateChip,
+  getRunChipStyles,
   isActiveRunStatus,
 } from "./runState";
 
@@ -78,13 +79,13 @@ describe("deriveRunStateChip", () => {
       label: "Running",
       status: "executing",
       isActive: true,
-      tone: "warning",
+      tone: "success",
     });
   });
 
-  it.each<[TaskRunStatus, string, "info" | "warning" | "muted"]>([
+  it.each<[TaskRunStatus, string, "info" | "success" | "muted"]>([
     ["queued", "Queued", "info"],
-    ["executing", "Running", "warning"],
+    ["executing", "Running", "success"],
     ["waiting", "Waiting", "info"],
     ["stopping", "Stopping", "muted"],
   ])("emits chip for active status %s", (status, label, tone) => {
@@ -95,6 +96,22 @@ describe("deriveRunStateChip", () => {
     expect(chip!.label).toBe(label);
     expect(chip!.tone).toBe(tone);
     expect(chip!.isActive).toBe(true);
+  });
+
+  it("styles queued and generic waiting chips as solid sky blue", () => {
+    expect(
+      getRunChipStyles({
+        label: "Queued",
+        status: "queued",
+        isActive: true,
+        tone: "info",
+      })
+    ).toMatchObject({
+      bg: "bg-sky-400/10",
+      text: "text-sky-300",
+      dot: "bg-sky-400",
+      pulse: false,
+    });
   });
 
   it("hides terminal statuses by default but exposes them when includeTerminal is true", () => {
@@ -150,10 +167,9 @@ describe("deriveRunControlsState", () => {
   });
 
   it("disables Run when there is no workflow", () => {
-    const state = deriveRunControlsState(
-      makeControls({ runnable: true }),
-      { hasWorkflow: false }
-    );
+    const state = deriveRunControlsState(makeControls({ runnable: true }), {
+      hasWorkflow: false,
+    });
     expect(state.runDisabled).toBe(true);
     expect(state.showStop).toBe(false);
   });

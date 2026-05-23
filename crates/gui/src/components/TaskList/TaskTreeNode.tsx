@@ -128,8 +128,9 @@ export function TaskTreeNode({
         role="treeitem"
         aria-expanded={hasChildren ? isExpanded : undefined}
         aria-selected={isSelected}
-        className={`group relative flex h-9 cursor-pointer items-center gap-2 border-b border-border/40 pr-4 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary ${isSelected ? "bg-primary/5" : "hover:bg-bg-hover/60"
-          }`}
+        className={`group relative flex h-9 cursor-pointer items-center gap-2 border-b border-border/40 pr-4 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary ${
+          isSelected ? "bg-primary/5" : "hover:bg-bg-hover/60"
+        }`}
         style={{ paddingLeft: `${ROW_BASE_PADDING_PX}px` }}
       >
         {isSelected && (
@@ -184,8 +185,9 @@ export function TaskTreeNode({
 
         {/* Priority */}
         <span
-          className={`w-4 shrink-0 text-center font-mono text-xs font-bold ${priorityIndicator?.color ?? "text-text-muted/40"
-            }`}
+          className={`w-4 shrink-0 text-center font-mono text-xs font-bold ${
+            priorityIndicator?.color ?? "text-text-muted/40"
+          }`}
         >
           {priorityIndicator?.icon ?? "·"}
         </span>
@@ -205,8 +207,11 @@ export function TaskTreeNode({
             <span
               data-testid="task-tree-node-run-chip"
               data-run-status={runChip.status}
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${runChipStyles.dot} ${runChipStyles.pulse ? "animate-pulse" : ""
-                }`}
+              className={`h-1.5 w-1.5 shrink-0 rounded-full ${runChipStyles.dot} ${
+                runChipStyles.pulse
+                  ? "animate-pulse [animation-duration:3s]"
+                  : ""
+              }`}
               title={`Run: ${runChip.label}`}
               aria-label={`Run state: ${runChip.label}`}
             />

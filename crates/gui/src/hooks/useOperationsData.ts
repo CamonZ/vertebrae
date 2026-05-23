@@ -9,7 +9,7 @@ import { useTasks } from "./useTasks";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
-import { isActiveRunStatus } from "../utils/runState";
+import { deriveActiveTaskRuns, isActiveRunStatus } from "../utils/runState";
 
 const ALL_TASKS_FILTER: TaskFilterOptions = {
   step_names: null,
@@ -123,22 +123,10 @@ export function useOperationsData(): OperationsData {
 
   // Excludes "stopping" — that transition is signalled via the run chip/Stop
   // button, not the Live tile.
-  const liveItems = useMemo<LiveItem[]>(() => {
-    const live: LiveItem[] = [];
-    for (const task of tasks) {
-      const activeRun = task.run_controls?.active_run;
-      if (!activeRun) continue;
-      const status = activeRun.status;
-      if (
-        status === "queued" ||
-        status === "executing" ||
-        status === "waiting"
-      ) {
-        live.push({ task, taskRun: activeRun });
-      }
-    }
-    return live;
-  }, [tasks]);
+  const liveItems = useMemo<LiveItem[]>(
+    () => deriveActiveTaskRuns(tasks, { includeStopping: false }),
+    [tasks]
+  );
 
   const completedItems = useMemo<CompletedItem[]>(() => {
     return executions
