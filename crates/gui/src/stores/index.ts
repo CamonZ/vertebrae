@@ -40,3 +40,5 @@ export { useLiveChatStore } from "./liveChatStore";
 export type { LiveChatStore, LiveChatMessage } from "./liveChatStore";
 
 export { resetProjectScopedStores } from "./projectScopedStores";
+
+export { useShellStore } from "./shellStore";
