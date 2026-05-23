@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ChatMessage, ChatSession } from "../../bindings";
 
@@ -442,5 +442,90 @@ describe("LiveChatWindow", () => {
 
     await user.click(screen.getByLabelText("Detach live chat"));
     expect(mockDetachLiveChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("standalone mount auto-resumes the cached active session so reply events apply", async () => {
+    const session = makeSession({ id: "sess-resume" });
+    mockedGetActive.mockReset();
+    mockedGetActive.mockResolvedValue({ status: "ok", data: "sess-resume" });
+    mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+    mockedListMessages.mockResolvedValueOnce({
+      status: "ok",
+      data: [
+        makeMessage({
+          id: "msg-prior",
+          chat_session_id: "sess-resume",
+          content: "prior transcript",
+        }),
+      ],
+    });
+
+    render(<LiveChatWindow standalone />);
+
+    await waitFor(() => {
+      expect(useLiveChatStore.getState().currentSession?.id).toBe("sess-resume");
+    });
+    expect(mockedGetSession).toHaveBeenCalledWith("sess-resume");
+    expect(mockedListMessages).toHaveBeenCalledWith("sess-resume", 200, null);
+    const userMsg = await screen.findByTestId("live-chat-message-user");
+    expect(within(userMsg).getByText("prior transcript")).toBeInTheDocument();
+
+    // Now that currentSession is set, a remote reply for that session must
+    // render — this is the bug the ticket fixes.
+    const reply = makeMessage({
+      id: "msg-reply",
+      chat_session_id: "sess-resume",
+      role: "assistant",
+      content: "live reply after detach",
+    });
+    act(() => {
+      useLiveChatStore.getState().applyRemoteMessage(reply, null);
+    });
+
+    const assistantMsg = await screen.findByTestId("live-chat-message-assistant");
+    expect(within(assistantMsg).getByText("live reply after detach")).toBeInTheDocument();
+  });
+
+  it("standalone mount with no cached active session shows empty state and does not auto-create", async () => {
+    // Default beforeEach already configures getActiveChatSessionId -> null.
+    render(<LiveChatWindow standalone />);
+
+    // Allow the mount effect to resolve.
+    await waitFor(() => {
+      expect(mockedGetActive).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText("Start a live chat")).toBeInTheDocument();
+    expect(useLiveChatStore.getState().currentSession).toBeNull();
+    expect(mockedGetSession).not.toHaveBeenCalled();
+    expect(mockedListMessages).not.toHaveBeenCalled();
+    expect(mockedCreate).not.toHaveBeenCalled();
+    // Resume link must not appear in standalone when there's no cached id.
+    expect(screen.queryByLabelText("Resume last session")).not.toBeInTheDocument();
+  });
+
+  it("embedded panel does NOT auto-resume — it shows the resume link instead", async () => {
+    const session = makeSession({ id: "sess-resume-embedded" });
+    mockedGetActive.mockReset();
+    mockedGetActive.mockResolvedValue({
+      status: "ok",
+      data: "sess-resume-embedded",
+    });
+    // If selectSession were called, these mocks would back it; assert they
+    // are NOT touched.
+    mockedGetSession.mockResolvedValue({ status: "ok", data: session });
+    mockedListMessages.mockResolvedValue({ status: "ok", data: [] });
+
+    render(<LiveChatWindow />);
+
+    // Resume link is the embedded-panel UX — wait for it to appear so we know
+    // loadResumableSessionId has resolved.
+    const link = await screen.findByLabelText("Resume last session");
+    expect(link).toBeInTheDocument();
+
+    // The embedded panel must not have auto-selected the session.
+    expect(useLiveChatStore.getState().currentSession).toBeNull();
+    expect(mockedGetSession).not.toHaveBeenCalled();
+    expect(mockedListMessages).not.toHaveBeenCalled();
   });
 });

@@ -147,15 +147,30 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
   const loadResumableSessionId = useLiveChatStore(
     (s) => s.loadResumableSessionId
   );
+  const selectSession = useLiveChatStore((s) => s.selectSession);
   const resumeLastSession = useLiveChatStore((s) => s.resumeLastSession);
   const newChat = useLiveChatStore((s) => s.newChat);
 
-  // On panel/page open: load history list and probe for a resumable session,
-  // but do NOT auto-select it. The empty state surfaces a "Resume" link.
+  // On panel/page open: load history list and probe for a resumable session.
+  //
+  // Embedded panel (`standalone=false`): we do NOT auto-select the resumable
+  // session — the empty state surfaces a "Resume" link so the user can choose
+  // between starting fresh and resuming.
+  //
+  // Standalone window (`standalone=true`): the user just detached an active
+  // chat, so their intent is "continue the chat I detached". Auto-select the
+  // cached active session — without this, `currentSession` stays null and
+  // `applyRemoteMessage` silently drops incoming reply events (see ticket
+  // 57de9a26). When there is no cached id we fall through to the empty state.
   useEffect(() => {
     void loadSessions();
-    void loadResumableSessionId();
-  }, [loadSessions, loadResumableSessionId]);
+    void (async () => {
+      const id = await loadResumableSessionId();
+      if (!standalone || !id) return;
+      if (useLiveChatStore.getState().currentSession) return;
+      await selectSession(id);
+    })();
+  }, [loadSessions, loadResumableSessionId, selectSession, standalone]);
 
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current) {
