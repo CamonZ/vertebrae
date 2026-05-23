@@ -1,0 +1,450 @@
+/* ==========================================================================
+   Vertebrae · Hearth — Warm dark identity
+   Dark like Console; serif moments like Imprint. Workshop / atelier / firelight.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,300;1,6..72,400&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* ── Color: warm ink (dark = primary) ──────────────────── */
+  --bg:           #131318;   /* cool charcoal w/ faint warmth */
+  --bg-1:         #19191f;   /* default surface */
+  --bg-2:         #21212a;   /* elevated */
+  --bg-3:         #2b2b34;   /* overlay */
+  --bg-4:         #36363f;   /* highest */
+
+  --fg:           #e8e5dd;   /* warm neutral cream */
+  --fg-soft:      #ccc8c0;
+  --fg-mute:      #9c988e;
+  --fg-faint:     #645f57;
+  --fg-ghost:     #45413c;
+
+  --line:         #2b2b34;
+  --line-soft:    #21212a;
+  --line-strong:  #45434e;
+
+  /* Accent: warm copper / firelight gold */
+  --accent:        oklch(0.78 0.13 70);   /* primary — warm copper */
+  --accent-deep:   oklch(0.62 0.15 55);   /* hover / pressed */
+  --accent-mute:   oklch(0.55 0.10 65);
+  --accent-wash:   oklch(0.32 0.10 60);   /* selected row tint */
+  --accent-glow:   rgba(232, 188, 110, 0.20);
+
+  /* Status (5) */
+  --ok:            oklch(0.78 0.15 145);
+  --ok-wash:       oklch(0.32 0.10 145);
+  --warn:          oklch(0.78 0.15 75);
+  --warn-wash:     oklch(0.32 0.10 70);
+  --err:           oklch(0.72 0.18 25);
+  --err-wash:      oklch(0.32 0.12 25);
+  --info:          oklch(0.78 0.13 220);
+  --info-wash:     oklch(0.32 0.10 220);
+
+  /* ── Step types (5 — mapped to Vertebrae step kinds) ─────
+   *   execute            — agent runs code / does work
+   *   eval               — agent evaluates a result
+   *   route              — routing / branching decision
+   *   human_review       — human must act
+   *   wait_for_children  — paused on subtasks / passive
+   * ───────────────────────────────────────────────────── */
+  --step-execute:        oklch(0.72 0.16 285);  /* violet */
+  --step-execute-wash:   oklch(0.32 0.12 285);
+  --step-execute-fg:     oklch(0.82 0.14 285);
+
+  --step-eval:           oklch(0.78 0.13 200);  /* cyan */
+  --step-eval-wash:      oklch(0.32 0.10 200);
+  --step-eval-fg:        oklch(0.85 0.12 200);
+
+  --step-route:          oklch(0.82 0.18 135);  /* lime */
+  --step-route-wash:     oklch(0.32 0.12 135);
+  --step-route-fg:       oklch(0.88 0.16 135);
+
+  --step-human:          oklch(0.80 0.15 70);   /* warm amber — distinct from accent */
+  --step-human-wash:     oklch(0.32 0.10 70);
+  --step-human-fg:       oklch(0.85 0.14 70);
+
+  --step-wait:           oklch(0.62 0.04 250);  /* slate */
+  --step-wait-wash:      oklch(0.28 0.02 250);
+  --step-wait-fg:        oklch(0.75 0.04 250);
+
+  /* ── Type ─────────────────────────────────────────────── */
+  --serif:    'Newsreader', 'Iowan Old Style', Georgia, serif;
+  --sans:     'Geist', system-ui, -apple-system, sans-serif;
+  --mono:     'JetBrains Mono', ui-monospace, monospace;
+
+  --display:    clamp(72px, 11vw, 140px);
+  --h1:         56px;
+  --h2:         36px;
+  --h3:         20px;
+  --eyebrow:    11px;
+  --body:       15px;
+  --body-sm:    13px;
+  --caption:    12px;
+
+  /* Space */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
+  --s-20: 80px; --s-24: 96px;
+
+  /* Radii — between Imprint (soft) and Console (sharp) */
+  --r-xs: 2px; --r-sm: 3px; --r-md: 5px; --r-lg: 8px; --r-xl: 12px; --r-full: 9999px;
+
+  /* Elevation — dark uses surface shifts + occasional warm glow */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line-strong);
+  --shadow-3: 0 24px 56px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--line-strong);
+
+  /* Motion */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 100ms;
+  --t-base: 180ms;
+  --t-slow: 280ms;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--fg); }
+body {
+  font-family: var(--sans);
+  font-size: var(--body);
+  line-height: 1.6;
+  font-weight: 400;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; text-decoration: none; transition: color var(--t-fast) var(--ease); }
+a:hover { color: var(--accent); }
+
+/* Typographic primitives */
+.serif { font-family: var(--serif); }
+.sans  { font-family: var(--sans); }
+.mono  { font-family: var(--mono); }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: var(--eyebrow);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.display {
+  font-family: var(--serif);
+  font-size: var(--display);
+  font-weight: 400;
+  line-height: 0.92;
+  letter-spacing: -0.025em;
+  color: var(--fg);
+}
+.italic { font-style: italic; }
+
+h1, .h1 { font-family: var(--serif); font-size: var(--h1); font-weight: 400; line-height: 1.0; letter-spacing: -0.02em; color: var(--fg); }
+h2, .h2 { font-family: var(--serif); font-size: var(--h2); font-weight: 400; line-height: 1.05; letter-spacing: -0.015em; color: var(--fg); }
+h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; line-height: 1.3; color: var(--fg); }
+
+.caption { font-size: var(--caption); color: var(--fg-mute); }
+.lede {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 300;
+  font-style: italic;
+  line-height: 1.45;
+  color: var(--fg-soft);
+  max-width: 60ch;
+}
+
+/* Plate / figure marker */
+.plate-num {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--accent); letter-spacing: 0.14em; text-transform: uppercase;
+}
+.plate-num .n {
+  font-family: var(--serif); font-style: italic; font-size: 18px;
+  letter-spacing: 0; color: var(--accent);
+}
+
+/* Page */
+.page {
+  max-width: 1240px; margin: 0 auto; padding: 0 var(--s-10);
+}
+
+/* Masthead */
+.masthead {
+  padding: var(--s-6) 0 var(--s-4);
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--s-6);
+  align-items: baseline;
+  margin-top: var(--s-3);
+}
+.masthead .wordmark {
+  font-family: var(--serif);
+  font-size: 24px;
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+.masthead .wordmark .ember {
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  vertical-align: 4px;
+  margin-left: 4px;
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.masthead .crumb {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-mute);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.masthead .meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-mute);
+  text-align: right;
+  letter-spacing: 0.06em;
+}
+
+/* Nav */
+.chapters {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+}
+.chapters a {
+  padding: var(--s-3) var(--s-4);
+  color: var(--fg-mute);
+  border-right: 1px solid var(--line);
+  transition: all var(--t-fast) var(--ease);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  position: relative;
+}
+.chapters a:first-child { border-left: 1px solid var(--line); }
+.chapters a:hover { background: var(--bg-1); color: var(--fg); }
+.chapters a.current { background: var(--bg-1); color: var(--accent); }
+.chapters a.current::after {
+  content: ''; position: absolute; bottom: -1px; left: 0; right: 0;
+  height: 1px; background: var(--accent);
+}
+
+/* Section header */
+.section-head {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: var(--s-12);
+  padding: var(--s-16) 0 var(--s-10);
+  border-bottom: 1px solid var(--accent);
+  align-items: baseline;
+}
+.section-head .title {
+  font-family: var(--serif); font-size: 56px; line-height: 1; font-weight: 400;
+  letter-spacing: -0.02em; color: var(--fg);
+}
+.section-head .title .em { font-style: italic; color: var(--accent); }
+.section-head .blurb {
+  font-family: var(--serif); font-style: italic; font-size: 22px; font-weight: 300;
+  color: var(--fg-mute); line-height: 1.45;
+}
+
+/* Component primitives — used across pages */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 var(--s-4);
+  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  border-radius: var(--r-md);
+  transition: all var(--t-fast) var(--ease);
+  white-space: nowrap;
+  letter-spacing: -0.005em;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); color: var(--bg); box-shadow: 0 0 16px var(--accent-glow); }
+.btn.ghost { border-color: transparent; color: var(--fg-mute); }
+.btn.ghost:hover { color: var(--accent); background: var(--bg-1); border-color: transparent; }
+.btn.danger { background: var(--err); color: var(--bg); border-color: var(--err); font-weight: 600; }
+.btn.danger:hover { background: var(--bg); color: var(--err); }
+.btn.sm { height: 26px; padding: 0 var(--s-3); font-size: 12px; }
+.btn.lg { height: 40px; padding: 0 var(--s-5); font-size: 14px; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Badge */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px;
+  font-family: var(--sans); font-size: 11px; font-weight: 500;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.badge .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.badge.ok    { color: var(--ok);    background: var(--ok-wash);   border-color: color-mix(in oklch, var(--ok) 35%, transparent); }
+.badge.warn  { color: var(--warn);  background: var(--warn-wash); border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
+.badge.err   { color: var(--err);   background: var(--err-wash);  border-color: color-mix(in oklch, var(--err) 40%, transparent); }
+.badge.info  { color: var(--info);  background: var(--info-wash); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+.badge.accent{ color: var(--accent); background: var(--accent-wash); border-color: color-mix(in oklch, var(--accent) 45%, transparent); }
+
+.id-badge { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); }
+
+/* Input */
+.input {
+  height: 34px; padding: 0 var(--s-3);
+  background: var(--bg-1); border: 1px solid var(--line-strong);
+  font-family: var(--sans); font-size: 14px; color: var(--fg);
+  width: 100%; outline: none;
+  border-radius: var(--r-md);
+  transition: all var(--t-fast) var(--ease);
+}
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.input::placeholder { color: var(--fg-faint); }
+
+/* Util */
+.row { display: flex; align-items: center; gap: var(--s-3); }
+.col { display: flex; flex-direction: column; gap: var(--s-3); }
+.between { display: flex; align-items: center; justify-content: space-between; }
+.grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--s-4); }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-4); }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-4); }
+.grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-4); }
+.grid-6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: var(--s-3); }
+.mt-4 { margin-top: var(--s-4); } .mt-8 { margin-top: var(--s-8); } .mt-12 { margin-top: var(--s-12); }
+
+/* Colophon */
+.colophon {
+  margin-top: var(--s-24);
+  padding: var(--s-10) 0 var(--s-12);
+  border-top: 1px solid var(--line);
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--s-10);
+  font-size: var(--body-sm); color: var(--fg-mute);
+}
+.colophon h4 {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+  margin-bottom: var(--s-3);
+}
+.colophon a { color: var(--fg-soft); }
+.colophon a:hover { color: var(--accent); }
+.colophon em { color: var(--fg); font-style: italic; }
+
+
+/* ──────────────────────────────────────────────────────────
+   .theme-light — light counterpart, applied to <html> by toggle
+   Preserves the cool undertone & copper accent in inverted form.
+   ────────────────────────────────────────────────────────── */
+html.theme-light {
+  --bg:           #f4f3ee;   /* cool cream paper */
+  --bg-1:         #ecebe5;
+  --bg-2:         #e3e2db;
+  --bg-3:         #d6d5cc;
+  --bg-4:         #c4c3b9;
+
+  --fg:           #1a1a20;
+  --fg-soft:      #3a3a44;
+  --fg-mute:      #66665e;
+  --fg-faint:     #8e8e83;
+  --fg-ghost:     #b6b5aa;
+
+  --line:         #d6d5cc;
+  --line-soft:    #e3e2db;
+  --line-strong:  #b6b5aa;
+
+  /* Accent — deeper, more saturated for light bg */
+  --accent:        oklch(0.55 0.14 55);
+  --accent-deep:   oklch(0.42 0.14 45);
+  --accent-mute:   oklch(0.78 0.10 60);
+  --accent-wash:   oklch(0.91 0.04 60);
+  --accent-glow:   rgba(180, 110, 50, 0.18);
+
+  /* Status — light-mode tuned */
+  --ok:            oklch(0.50 0.15 145);
+  --ok-wash:       oklch(0.92 0.05 145);
+  --warn:          oklch(0.55 0.15 70);
+  --warn-wash:     oklch(0.93 0.06 75);
+  --err:           oklch(0.50 0.18 25);
+  --err-wash:      oklch(0.93 0.05 25);
+  --info:          oklch(0.48 0.13 220);
+  --info-wash:     oklch(0.93 0.04 220);
+
+  /* Step types */
+  --step-execute:        oklch(0.52 0.18 285);
+  --step-execute-wash:   oklch(0.93 0.05 285);
+  --step-execute-fg:     oklch(0.42 0.18 285);
+
+  --step-eval:           oklch(0.52 0.13 200);
+  --step-eval-wash:      oklch(0.93 0.05 200);
+  --step-eval-fg:        oklch(0.40 0.13 200);
+
+  --step-route:          oklch(0.55 0.18 135);
+  --step-route-wash:     oklch(0.93 0.07 135);
+  --step-route-fg:       oklch(0.45 0.18 135);
+
+  --step-human:          oklch(0.55 0.15 70);
+  --step-human-wash:     oklch(0.93 0.06 75);
+  --step-human-fg:       oklch(0.45 0.15 70);
+
+  --step-wait:           oklch(0.50 0.04 250);
+  --step-wait-wash:      oklch(0.92 0.02 250);
+  --step-wait-fg:        oklch(0.42 0.04 250);
+
+  /* Light-mode shadows have visible elevation */
+  --shadow-1: 0 1px 2px rgba(20, 20, 20, 0.08);
+  --shadow-2: 0 6px 18px rgba(20, 20, 20, 0.10), 0 0 0 1px rgba(20, 20, 20, 0.06);
+  --shadow-3: 0 18px 44px rgba(20, 20, 20, 0.14), 0 0 0 1px rgba(20, 20, 20, 0.06);
+}
+
+/* Theme toggle widget — floats bottom-right, persists across pages */
+.theme-toggle {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: 9999px;
+  box-shadow: var(--shadow-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+  cursor: pointer;
+  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+}
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 16px var(--accent-glow); }
+.theme-toggle .sym {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  font-size: 14px;
+  color: var(--accent);
+}
+.theme-toggle .knob {
+  display: inline-block; width: 28px; height: 16px;
+  background: var(--bg-1); border: 1px solid var(--line-strong);
+  border-radius: 9999px; position: relative; margin: 0 6px;
+}
+.theme-toggle .knob::after {
+  content: ''; position: absolute; top: 1px; left: 1px;
+  width: 12px; height: 12px; background: var(--accent); border-radius: 50%;
+  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+html.theme-light .theme-toggle .knob::after { transform: translateX(12px); }
