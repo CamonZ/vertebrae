@@ -307,10 +307,10 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             <div className="flex items-center gap-1.5 ml-auto">
               {executionCounts.active > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-warning"
+                  className="flex items-center gap-1 text-[10px] text-success"
                   title={`${executionCounts.active} active`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+                  <span className="w-2 h-2 rounded-full bg-success" />
                   {executionCounts.active}
                 </span>
               )}

@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTaskStore } from "./taskStore";
-import { createMockTask, createMockTaskRun } from "../test/test-utils";
+import {
+  createMockTask,
+  createMockTaskRun,
+  createMockTaskRunControls,
+} from "../test/test-utils";
 
 describe("taskStore", () => {
   beforeEach(() => {
@@ -472,13 +476,7 @@ describe("taskStore", () => {
         id: "run-active",
         task_id: "task-1",
       });
-      const runControls = {
-        runnable: false,
-        stoppable: true,
-        disabled_reason_code: "active_run",
-        disabled_reason: "A TaskRun is already active",
-        active_run: activeRun,
-      };
+      const runControls = createMockTaskRunControls(activeRun);
       useTaskStore.getState().setTasks([task]);
 
       useTaskStore.getState().replaceTaskRunControls("task-1", runControls);
@@ -498,13 +496,7 @@ describe("taskStore", () => {
         id: "run-selected",
         task_id: "task-selected",
       });
-      const runControls = {
-        runnable: false,
-        stoppable: true,
-        disabled_reason_code: "active_run",
-        disabled_reason: "A TaskRun is already active",
-        active_run: activeRun,
-      };
+      const runControls = createMockTaskRunControls(activeRun);
       useTaskStore.getState().setTasks([selected]);
       useTaskStore.getState().selectTask("task-selected", selected);
 
@@ -524,13 +516,7 @@ describe("taskStore", () => {
       });
       const task = createMockTask({
         id: "task-1",
-        run_controls: {
-          runnable: false,
-          stoppable: true,
-          disabled_reason_code: "active_run",
-          disabled_reason: "A TaskRun is already active",
-          active_run: activeRun,
-        },
+        run_controls: createMockTaskRunControls(activeRun),
       });
       useTaskStore.getState().setTasks([task]);
 
@@ -539,5 +525,21 @@ describe("taskStore", () => {
       expect(useTaskStore.getState().tasks[0].run_controls).toBeNull();
     });
 
+    it("does not replace task objects when controls are unchanged", () => {
+      const activeRun = createMockTaskRun({
+        id: "run-same",
+        task_id: "task-1",
+      });
+      const runControls = createMockTaskRunControls(activeRun);
+      const task = createMockTask({
+        id: "task-1",
+        run_controls: runControls,
+      });
+      useTaskStore.getState().setTasks([task]);
+
+      useTaskStore.getState().replaceTaskRunControls("task-1", runControls);
+
+      expect(useTaskStore.getState().tasks[0]).toBe(task);
+    });
   });
 });

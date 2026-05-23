@@ -1,4 +1,14 @@
-import type { Task, TaskRun, TaskRunControls, TaskRunStatus } from "../bindings";
+import type {
+  Task,
+  TaskRun,
+  TaskRunControls,
+  TaskRunStatus,
+} from "../bindings";
+
+export interface ActiveTaskRun {
+  task: Task;
+  taskRun: TaskRun;
+}
 
 /**
  * Statuses that represent a TaskRun the daemon is actively driving (or about
@@ -19,8 +29,33 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<TaskRunStatus> = new Set([
  * after the user has clicked Stop and we are waiting for the orchestrator to
  * acknowledge -- it is not idle until it transitions to a terminal status.
  */
-export function isActiveRunStatus(status: TaskRunStatus | null | undefined): boolean {
+export function isActiveRunStatus(
+  status: TaskRunStatus | null | undefined
+): boolean {
   return status != null && ACTIVE_RUN_STATUSES.has(status);
+}
+
+export function deriveActiveTaskRuns(
+  tasks: Task[],
+  options: { includeStopping?: boolean; sortNewestFirst?: boolean } = {}
+): ActiveTaskRun[] {
+  const { includeStopping = true, sortNewestFirst = false } = options;
+  const items: ActiveTaskRun[] = [];
+
+  for (const task of tasks) {
+    const taskRun = task.run_controls?.active_run;
+    if (!taskRun || !isActiveRunStatus(taskRun.status)) continue;
+    if (!includeStopping && taskRun.status === "stopping") continue;
+    items.push({ task, taskRun });
+  }
+
+  if (!sortNewestFirst) return items;
+
+  return items.sort((a, b) => {
+    const aStarted = a.taskRun.started_at ?? a.taskRun.inserted_at ?? "";
+    const bStarted = b.taskRun.started_at ?? b.taskRun.inserted_at ?? "";
+    return bStarted.localeCompare(aStarted);
+  });
 }
 
 /**
@@ -38,13 +73,7 @@ export interface RunStateChip {
   /** Whether this run is still active (queued/executing/waiting/stopping). */
   isActive: boolean;
   /** Semantic tone hint for styling. */
-  tone:
-    | "neutral"
-    | "info"
-    | "warning"
-    | "success"
-    | "error"
-    | "muted";
+  tone: "neutral" | "info" | "warning" | "success" | "error" | "muted";
 }
 
 /**
@@ -76,7 +105,7 @@ export function deriveRunStateChip(
     case "queued":
       return { label, status, isActive: true, tone: "info" };
     case "executing":
-      return { label, status, isActive: true, tone: "warning" };
+      return { label, status, isActive: true, tone: "success" };
     case "waiting":
       return { label, status, isActive: true, tone: "info" };
     case "stopping":
@@ -119,7 +148,9 @@ export interface RunControlsState {
   stopDisabled: boolean;
 }
 
-export function runStatusLabel(status: TaskRunStatus | null | undefined): string {
+export function runStatusLabel(
+  status: TaskRunStatus | null | undefined
+): string {
   switch (status) {
     case "queued":
       return "Queued";
@@ -150,17 +181,47 @@ export interface RunChipStyles {
 export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
   switch (chip.tone) {
     case "warning":
-      return { bg: "bg-warning/10", text: "text-warning", dot: "bg-warning", pulse: true };
+      return {
+        bg: "bg-warning/10",
+        text: "text-warning",
+        dot: "bg-warning",
+        pulse: false,
+      };
     case "info":
-      return { bg: "bg-info/10", text: "text-info", dot: "bg-info", pulse: chip.status === "queued" };
+      return {
+        bg: "bg-sky-400/10",
+        text: "text-sky-300",
+        dot: "bg-sky-400",
+        pulse: false,
+      };
     case "success":
-      return { bg: "bg-success/10", text: "text-success", dot: "bg-success", pulse: false };
+      return {
+        bg: "bg-success/10",
+        text: "text-success",
+        dot: "bg-success",
+        pulse: false,
+      };
     case "error":
-      return { bg: "bg-error/10", text: "text-error", dot: "bg-error", pulse: false };
+      return {
+        bg: "bg-error/10",
+        text: "text-error",
+        dot: "bg-error",
+        pulse: false,
+      };
     case "muted":
-      return { bg: "bg-bg-tertiary", text: "text-text-muted", dot: "bg-text-muted", pulse: chip.status === "stopping" };
+      return {
+        bg: "bg-bg-tertiary",
+        text: "text-text-muted",
+        dot: "bg-text-muted",
+        pulse: chip.status === "stopping",
+      };
     default:
-      return { bg: "bg-bg-tertiary", text: "text-text-secondary", dot: "bg-text-muted", pulse: false };
+      return {
+        bg: "bg-bg-tertiary",
+        text: "text-text-secondary",
+        dot: "bg-text-muted",
+        pulse: false,
+      };
   }
 }
 
