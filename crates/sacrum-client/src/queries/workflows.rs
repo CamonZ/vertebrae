@@ -5,7 +5,6 @@ pub const WORKFLOW_FIELDS: &str = r#"
         id
         name
         description
-        auto_advance
         is_default
         is_final
         display_order
@@ -69,7 +68,6 @@ pub const CREATE_WORKFLOW: &str = r#"
         $project_id: Uuid4!,
         $name: String!,
         $description: String,
-        $auto_advance: Boolean,
         $display_order: Int,
         $is_default: Boolean,
         $is_final: Boolean,
@@ -79,7 +77,6 @@ pub const CREATE_WORKFLOW: &str = r#"
             project_id: $project_id,
             name: $name,
             description: $description,
-            auto_advance: $auto_advance,
             display_order: $display_order,
             is_default: $is_default,
             is_final: $is_final,
@@ -95,7 +92,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $id: Uuid4!,
         $name: String,
         $description: String,
-        $auto_advance: Boolean,
         $display_order: Int,
         $is_default: Boolean,
         $is_final: Boolean,
@@ -106,7 +102,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
             id: $id,
             name: $name,
             description: $description,
-            auto_advance: $auto_advance,
             display_order: $display_order,
             is_default: $is_default,
             is_final: $is_final,

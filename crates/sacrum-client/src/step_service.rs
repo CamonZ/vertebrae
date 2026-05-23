@@ -925,7 +925,7 @@ mod tests {
                 json!([
                     {
                         "id": "wf-1", "name": "Dev",
-                        "description": null, "auto_advance": false,
+                        "description": null,
                         "is_default": false, "display_order": 0,
                         "metadata": null, "initial_step_id": null,
                         "project_id": "test-project",

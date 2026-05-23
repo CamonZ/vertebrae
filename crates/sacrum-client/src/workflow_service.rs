@@ -103,7 +103,6 @@ impl SacrumWorkflowService {
             description: response.description.clone(),
             initial_step: response.initial_step_id.clone(),
             metadata,
-            auto_advance: response.auto_advance.unwrap_or(false),
             order: response.display_order.unwrap_or(0),
             is_default: response.is_default.unwrap_or(false),
             is_final: response.is_final.unwrap_or(false),
@@ -184,7 +183,6 @@ impl WorkflowService for SacrumWorkflowService {
             "project_id": self.client.project_id(),
             "name": options.name,
             "description": options.description,
-            "auto_advance": options.auto_advance,
             "display_order": options.order,
             "is_default": options.is_default,
             "is_final": options.is_final,
@@ -311,9 +309,6 @@ impl WorkflowService for SacrumWorkflowService {
         }
         if let Some(desc) = &options.description {
             variables["description"] = json!(desc);
-        }
-        if let Some(auto_advance) = options.auto_advance {
-            variables["auto_advance"] = json!(auto_advance);
         }
         if let Some(order) = options.order {
             variables["display_order"] = json!(order);
@@ -579,7 +574,6 @@ mod tests {
             id: id.to_string(),
             name: name.to_string(),
             description: None,
-            auto_advance: None,
             is_default: None,
             is_final: None,
             display_order: None,
@@ -645,7 +639,6 @@ mod tests {
     fn test_response_to_workflow_conversion() {
         let mut response = make_workflow_response("wf-4", "Domain Workflow");
         response.description = Some("For domain objects".to_string());
-        response.auto_advance = Some(true);
         response.display_order = Some(3);
         response.initial_step_id = Some("step-1".to_string());
 
@@ -656,7 +649,6 @@ mod tests {
         assert_eq!(workflow.id, Some("wf-4".to_string()));
         assert_eq!(workflow.name, "Domain Workflow");
         assert_eq!(workflow.description, Some("For domain objects".to_string()));
-        assert!(workflow.auto_advance);
         assert_eq!(workflow.order, 3);
         assert_eq!(workflow.initial_step.as_deref(), Some("step-1"));
     }
@@ -672,7 +664,6 @@ mod tests {
         assert_eq!(workflow.id, Some("wf-5".to_string()));
         assert_eq!(workflow.name, "Minimal");
         assert_eq!(workflow.description, None);
-        assert!(!workflow.auto_advance);
         assert_eq!(workflow.order, 0);
         assert!(workflow.initial_step.is_none());
     }
@@ -995,7 +986,6 @@ mod tests {
                         "id": "wf-1",
                         "name": "Dev Workflow",
                         "description": "Development process",
-                        "auto_advance": true,
                         "display_order": 1,
                         "initial_step_id": "step-1",
                         "workflow_steps": [
@@ -1024,7 +1014,6 @@ mod tests {
             workflow.description,
             Some("Development process".to_string())
         );
-        assert!(workflow.auto_advance);
         assert_eq!(workflow.order, 1);
     }
 
@@ -1068,7 +1057,6 @@ mod tests {
                         {
                             "id": "wf-1",
                             "name": "Full Workflow",
-                            "auto_advance": true,
                             "display_order": 2,
                             "transitions": [
                                 { "id": "t-1", "to_workflow_id": "wf-2", "label": "on_done" }
@@ -1085,7 +1073,6 @@ mod tests {
 
         assert_eq!(workflows.len(), 1);
         assert_eq!(workflows[0].name, "Full Workflow");
-        assert!(workflows[0].auto_advance);
         assert_eq!(workflows[0].order, 2);
         assert_eq!(workflows[0].transitions.len(), 1);
     }

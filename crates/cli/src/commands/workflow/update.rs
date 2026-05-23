@@ -22,14 +22,6 @@ pub struct WorkflowUpdateCommand {
     #[arg(long, conflicts_with = "description")]
     pub clear_description: bool,
 
-    /// Enable automatic advancement to the next step on successful completion
-    #[arg(long, conflicts_with = "no_auto_advance")]
-    pub auto_advance: bool,
-
-    /// Disable automatic advancement to the next step
-    #[arg(long, conflicts_with = "auto_advance")]
-    pub no_auto_advance: bool,
-
     /// Kanban column for the workflow (use empty string "" to clear)
     #[arg(long = "kanban-column")]
     pub kanban_column: Option<String>,
@@ -70,12 +62,6 @@ impl WorkflowUpdateCommand {
             options = options.clear_description();
         }
 
-        if self.auto_advance {
-            options = options.with_auto_advance(true);
-        } else if self.no_auto_advance {
-            options = options.with_auto_advance(false);
-        }
-
         if self.default {
             options = options.with_is_default(true);
         } else if self.no_default {
@@ -93,7 +79,7 @@ impl WorkflowUpdateCommand {
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, --clear-description, --auto-advance, --no-auto-advance, --default, --no-default, or --kanban-column options)",
+                "no updates specified (use --name, --description, --clear-description, --default, --no-default, or --kanban-column options)",
             ));
         }
 
@@ -115,8 +101,6 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
-            auto_advance: false,
-            no_auto_advance: false,
             default: false,
             no_default: false,
             kanban_column: None,

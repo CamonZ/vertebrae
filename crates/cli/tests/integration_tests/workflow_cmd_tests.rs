@@ -22,7 +22,6 @@ async fn create_workflow(
         name: name.to_string(),
         description: description.map(|d| d.to_string()),
         steps: vec![],
-        auto_advance: false,
         order: 0,
         is_default: false,
         is_final: false,
@@ -124,7 +123,6 @@ async fn test_workflow_list_shows_default_marker() {
         name: "Default Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         is_default: true,
         is_final: false,
@@ -190,8 +188,6 @@ async fn test_workflow_update_name() {
         name: Some("New Name".to_string()),
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -217,8 +213,6 @@ async fn test_workflow_update_description() {
         name: None,
         description: Some("Updated description".to_string()),
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -233,31 +227,6 @@ async fn test_workflow_update_description() {
 }
 
 #[tokio::test]
-async fn test_workflow_update_auto_advance_enable() {
-    let services = mock_services();
-    let wf_id = create_workflow(&services, "Auto Workflow", None).await;
-
-    let cmd = WorkflowUpdateCommand {
-        id: wf_id.clone(),
-        name: None,
-        description: None,
-        clear_description: false,
-        auto_advance: true,
-        no_auto_advance: false,
-        default: false,
-        no_default: false,
-        kanban_column: None,
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    assert!(output.contains("Updated workflow"));
-
-    // Verify auto_advance was enabled
-    let updated = services.workflows().get_workflow(&wf_id).await.unwrap();
-    assert!(updated.auto_advance);
-}
-
-#[tokio::test]
 async fn test_workflow_update_multiple_fields() {
     let services = mock_services();
     let wf_id = create_workflow(&services, "Multi Update", None).await;
@@ -267,8 +236,6 @@ async fn test_workflow_update_multiple_fields() {
         name: Some("Updated Multi Workflow".to_string()),
         description: Some("Multiple fields updated".to_string()),
         clear_description: false,
-        auto_advance: true,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -284,7 +251,6 @@ async fn test_workflow_update_multiple_fields() {
         updated.description,
         Some("Multiple fields updated".to_string())
     );
-    assert!(updated.auto_advance);
 }
 
 #[tokio::test]
@@ -297,8 +263,6 @@ async fn test_workflow_update_no_updates_fails() {
         name: None,
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -317,8 +281,6 @@ async fn test_workflow_update_nonexistent_workflow() {
         name: Some("New Name".to_string()),
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -366,8 +328,6 @@ async fn test_workflow_command_dispatch_update() {
         name: Some("Updated via dispatch".to_string()),
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -396,8 +356,6 @@ async fn test_workflow_show_after_update() {
         name: Some("Modified".to_string()),
         description: Some("Modified description".to_string()),
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: false,
         kanban_column: None,
@@ -474,7 +432,6 @@ async fn test_workflow_add_basic() {
         name: "Basic Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         default: false,
         kanban_column: None,
@@ -490,7 +447,6 @@ async fn test_workflow_add_with_kanban_column() {
         name: "Kanban Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         default: false,
         kanban_column: Some("In Progress".to_string()),
@@ -509,7 +465,6 @@ async fn test_workflow_add_with_kanban_column_and_options() {
         name: "Full Workflow".to_string(),
         description: Some("A fully specified workflow".to_string()),
         steps: vec![],
-        auto_advance: true,
         order: 5,
         default: false,
         kanban_column: Some("Review".to_string()),
@@ -524,7 +479,6 @@ async fn test_workflow_add_with_kanban_column_and_options() {
         Some("A fully specified workflow".to_string())
     );
     assert_eq!(wf.kanban_column, Some("Review".to_string()));
-    assert!(wf.auto_advance);
 }
 
 #[tokio::test]
@@ -534,7 +488,6 @@ async fn test_workflow_add_without_kanban_column() {
         name: "Plain Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         default: false,
         kanban_column: None,
@@ -553,7 +506,6 @@ async fn test_workflow_add_with_default_flag() {
         name: "Default Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         default: true,
         kanban_column: None,
@@ -572,7 +524,6 @@ async fn test_workflow_add_without_default_flag() {
         name: "Regular Workflow".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         default: false,
         kanban_column: None,
@@ -597,8 +548,6 @@ async fn test_workflow_update_default_flag() {
         name: None,
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: true,
         no_default: false,
         kanban_column: None,
@@ -622,7 +571,6 @@ async fn test_workflow_update_no_default_flag() {
         name: "Default WF".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         is_default: true,
         is_final: false,
@@ -640,8 +588,6 @@ async fn test_workflow_update_no_default_flag() {
         name: None,
         description: None,
         clear_description: false,
-        auto_advance: false,
-        no_auto_advance: false,
         default: false,
         no_default: true,
         kanban_column: None,
@@ -664,7 +610,6 @@ async fn test_workflow_show_displays_default_yes() {
         name: "Default Show WF".to_string(),
         description: None,
         steps: vec![],
-        auto_advance: false,
         order: 0,
         is_default: true,
         is_final: false,

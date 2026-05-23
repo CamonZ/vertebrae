@@ -39,8 +39,6 @@ pub struct CreateWorkflowOptions {
     pub description: Option<String>,
     /// Workflow steps
     pub steps: Vec<WorkflowStepInput>,
-    /// Whether to automatically advance to the next step on successful completion
-    pub auto_advance: bool,
     /// Display order for sorting workflows (lower values appear first)
     pub order: i32,
     /// Whether this is the default workflow for new tasks
@@ -58,7 +56,6 @@ impl CreateWorkflowOptions {
             name: name.into(),
             description: None,
             steps,
-            auto_advance: false,
             order: 0,
             is_default: false,
             is_final: false,
@@ -69,12 +66,6 @@ impl CreateWorkflowOptions {
     /// Set the description
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
-        self
-    }
-
-    /// Set the auto_advance setting
-    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
-        self.auto_advance = auto_advance;
         self
     }
 
@@ -129,8 +120,6 @@ pub struct UpdateWorkflowOptions {
     pub name: Option<String>,
     /// New description (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub description: Option<Option<String>>,
-    /// Auto advance setting (Some(bool) to set, None leaves unchanged)
-    pub auto_advance: Option<bool>,
     /// Display order for sorting workflows (Some(i32) to set, None leaves unchanged)
     pub order: Option<i32>,
     /// Whether this is the default workflow (Some(bool) to set, None leaves unchanged)
@@ -162,12 +151,6 @@ impl UpdateWorkflowOptions {
     /// Clear the description
     pub fn clear_description(mut self) -> Self {
         self.description = Some(None);
-        self
-    }
-
-    /// Set the auto_advance setting
-    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
-        self.auto_advance = Some(auto_advance);
         self
     }
 
@@ -205,7 +188,6 @@ impl UpdateWorkflowOptions {
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
             || self.description.is_some()
-            || self.auto_advance.is_some()
             || self.order.is_some()
             || self.is_default.is_some()
             || self.is_final.is_some()
@@ -447,13 +429,11 @@ mod tests {
     fn create_workflow_options_builder_chain() {
         let opts = CreateWorkflowOptions::new("test", vec![])
             .with_description("desc")
-            .with_auto_advance(true)
             .with_order(5)
             .with_is_default(true)
             .with_kanban_column("Review");
         assert_eq!(opts.name, "test");
         assert_eq!(opts.description, Some("desc".to_string()));
-        assert!(opts.auto_advance);
         assert_eq!(opts.order, 5);
         assert!(opts.is_default);
         assert_eq!(opts.kanban_column, Some("Review".to_string()));
