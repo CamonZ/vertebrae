@@ -5,6 +5,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 interface UseTaskRunChangeListenerOptions {
   /** Whether the listener is enabled (default: true) */
@@ -24,6 +25,9 @@ export function useTaskRunChangeListener(
     (state) => state.replaceTaskRunControls
   );
   const projectScopeGeneration = useProjectScopeGeneration();
+  const fetchAndReconcileTask = useRefreshTaskForRealtimeChange(
+    "TaskRunChangeListener"
+  );
 
   const handleTaskRunChanged = useCallback(
     (event: { payload: TaskRunChangedEvent }) => {
@@ -36,8 +40,16 @@ export function useTaskRunChangeListener(
       }
 
       replaceTaskRunControls(task_id, run_controls);
+      if (!useTaskStore.getState().tasks.some((task) => task.id === task_id)) {
+        void fetchAndReconcileTask(task_id);
+      }
     },
-    [replaceTaskRunControls, upsertTaskRun, projectScopeGeneration]
+    [
+      fetchAndReconcileTask,
+      replaceTaskRunControls,
+      upsertTaskRun,
+      projectScopeGeneration,
+    ]
   );
 
   useEffect(() => {

@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { createMockTask, createMockTaskRun } from "../test/test-utils";
+import {
+  createMockTask,
+  createMockTaskRun,
+  createMockTaskRunControls,
+} from "../test/test-utils";
 
 type EventCallback = (event: { payload: Record<string, unknown> }) => void;
 
@@ -32,7 +36,12 @@ const { mockEvents, eventListeners, emitEvent } = vi.hoisted(() => {
   };
 });
 
+const mockGetTask = vi.hoisted(() => vi.fn());
+
 vi.mock("../bindings", () => ({
+  commands: {
+    getTask: (...args: unknown[]) => mockGetTask(...args),
+  },
   events: mockEvents,
 }));
 
@@ -45,13 +54,9 @@ describe("useTaskRunChangeListener", () => {
     Object.keys(eventListeners).forEach((key) => {
       eventListeners[key] = [];
     });
+    mockGetTask.mockReset();
     useTaskRunStore.setState({ taskRuns: [], taskRunsByTaskId: {} });
-    useTaskStore.setState({
-      tasks: [],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
+    useTaskStore.getState().reset();
   });
 
   it("upserts the TaskRun and replaces task run_controls from the payload", async () => {
@@ -61,13 +66,7 @@ describe("useTaskRunChangeListener", () => {
       task_id: "task-1",
       status: "executing",
     });
-    const runControls = {
-      runnable: false,
-      stoppable: true,
-      disabled_reason_code: "active_run",
-      disabled_reason: "A TaskRun is already active",
-      active_run: taskRun,
-    };
+    const runControls = createMockTaskRunControls(taskRun);
     useTaskStore.getState().setTasks([task]);
 
     renderHook(() => useTaskRunChangeListener());
@@ -101,13 +100,7 @@ describe("useTaskRunChangeListener", () => {
       id: "run-selected",
       task_id: "task-selected",
     });
-    const runControls = {
-      runnable: false,
-      stoppable: true,
-      disabled_reason_code: "active_run",
-      disabled_reason: "A TaskRun is already active",
-      active_run: taskRun,
-    };
+    const runControls = createMockTaskRunControls(taskRun);
     useTaskStore.getState().setTasks([task]);
     useTaskStore.getState().selectTask("task-selected", task);
 
@@ -140,13 +133,7 @@ describe("useTaskRunChangeListener", () => {
     });
     const task = createMockTask({
       id: "task-1",
-      run_controls: {
-        runnable: false,
-        stoppable: true,
-        disabled_reason_code: "active_run",
-        disabled_reason: "A TaskRun is already active",
-        active_run: taskRun,
-      },
+      run_controls: createMockTaskRunControls(taskRun),
     });
     useTaskStore.getState().setTasks([task]);
 
@@ -176,13 +163,7 @@ describe("useTaskRunChangeListener", () => {
       id: "run-active",
       task_id: "task-1",
     });
-    const runControls = {
-      runnable: false,
-      stoppable: true,
-      disabled_reason_code: "active_run",
-      disabled_reason: "A TaskRun is already active",
-      active_run: activeRun,
-    };
+    const runControls = createMockTaskRunControls(activeRun);
     useTaskStore.getState().setTasks([task]);
 
     renderHook(() => useTaskRunChangeListener());
@@ -203,6 +184,47 @@ describe("useTaskRunChangeListener", () => {
 
     expect(useTaskRunStore.getState().taskRuns).toEqual([]);
     expect(useTaskStore.getState().tasks[0].run_controls).toEqual(runControls);
+  });
+
+  it("hydrates a missing task on run start so store-derived active run surfaces can render it", async () => {
+    const taskRun = createMockTaskRun({
+      id: "run-new",
+      task_id: "task-new",
+      status: "executing",
+    });
+    const runControls = createMockTaskRunControls(taskRun);
+    const task = createMockTask({
+      id: "task-new",
+      title: "Started by websocket",
+      workflow_name: "Implementation",
+      step_name: "coding",
+      run_controls: runControls,
+    });
+    mockGetTask.mockResolvedValue({ status: "ok", data: task });
+
+    renderHook(() => useTaskRunChangeListener());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    act(() => {
+      emitEvent("taskRunChanged", {
+        task_run_id: "run-new",
+        task_id: "task-new",
+        status: "executing",
+        change_type: "Created",
+        task_run: taskRun,
+        run_controls: runControls,
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockGetTask).toHaveBeenCalledWith("task-new");
+    expect(useTaskStore.getState().tasks).toEqual([task]);
+    expect(useTaskRunStore.getState().taskRuns[0]).toEqual(taskRun);
   });
 
   it("does not register when disabled", async () => {
