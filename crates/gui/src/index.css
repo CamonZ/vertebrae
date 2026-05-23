@@ -328,7 +328,7 @@ body {
 }
 
 .animate-flash-border {
-  animation: flash-border 2s ease-in-out;
+  animation: flash-border 250ms ease-in-out;
 }
 
 .animate-signal-flow {

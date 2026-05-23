@@ -54,11 +54,17 @@ function normalizeText(value: string | null | undefined): string {
   return value?.trim().toLocaleLowerCase() ?? "";
 }
 
-function taskMatchesFilter(task: Task, filter: TaskFilterOptions | null): boolean {
+function taskMatchesFilter(
+  task: Task,
+  filter: TaskFilterOptions | null
+): boolean {
   if (task.archived) return false;
   if (!filter) return true;
 
-  if (filter.levels?.length && (!task.level || !filter.levels.includes(task.level))) {
+  if (
+    filter.levels?.length &&
+    (!task.level || !filter.levels.includes(task.level))
+  ) {
     return false;
   }
 
@@ -77,7 +83,8 @@ function taskMatchesFilter(task: Task, filter: TaskFilterOptions | null): boolea
     if (!title.includes(search) && !description.includes(search)) return false;
   }
 
-  if (filter.workflow_id && task.workflow_id !== filter.workflow_id) return false;
+  if (filter.workflow_id && task.workflow_id !== filter.workflow_id)
+    return false;
   if (filter.step_id && task.current_step_id !== filter.step_id) return false;
 
   if (
@@ -105,6 +112,13 @@ function mergeTask(existing: Task, task: Task): Task {
 
 function taskObjectsEqual(a: Task, b: Task): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function taskRunControlsEqual(
+  a: TaskRunControls | null | undefined,
+  b: TaskRunControls | null | undefined
+): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
 function upsertTaskInState(state: TaskStore, task: Task): Partial<TaskStore> {
@@ -180,14 +194,17 @@ export const useTaskStore = create<TaskStore>((set) => ({
       let changed = false;
       const tasks = state.tasks.map((task) => {
         if (task.id !== taskId) return task;
+        if (taskRunControlsEqual(task.run_controls, runControls)) return task;
         changed = true;
         return { ...task, run_controls: runControls };
       });
 
       let selectedTask = state.selectedTask;
       if (selectedTask?.id === taskId) {
-        changed = true;
-        selectedTask = { ...selectedTask, run_controls: runControls };
+        if (!taskRunControlsEqual(selectedTask.run_controls, runControls)) {
+          changed = true;
+          selectedTask = { ...selectedTask, run_controls: runControls };
+        }
       }
 
       if (!changed) return state;

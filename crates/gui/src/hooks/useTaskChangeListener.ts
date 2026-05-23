@@ -1,6 +1,5 @@
 import { useEffect, useCallback } from "react";
 import {
-  commands,
   events,
   type TaskChangedEvent,
   type TaskChangeType,
@@ -12,8 +11,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-
-const taskRefreshesInFlight = new Set<string>();
+import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for task change type */
 function getTaskChangeMessage(
@@ -54,28 +52,8 @@ export function useTaskChangeListener(
   const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
-
-  const fetchAndReconcileTask = useCallback(
-    async (taskId: string) => {
-      if (taskRefreshesInFlight.has(taskId)) return;
-      taskRefreshesInFlight.add(taskId);
-      const requestGeneration = projectScopeGeneration;
-      try {
-        const result = await commands.getTask(taskId);
-        if (requestGeneration !== getProjectScopeGeneration()) return;
-        if (result.status === "ok") {
-          reconcileTask(result.data);
-        } else {
-          console.warn(
-            `[TaskChangeListener] Failed to refresh task ${taskId.slice(0, 6)} after realtime change: ${result.error.message}`
-          );
-        }
-      } finally {
-        taskRefreshesInFlight.delete(taskId);
-      }
-    },
-    [projectScopeGeneration, reconcileTask]
-  );
+  const fetchAndReconcileTask =
+    useRefreshTaskForRealtimeChange("TaskChangeListener");
 
   const handleTaskChanged = useCallback(
     (event: { payload: TaskChangedEvent }) => {
@@ -107,7 +85,13 @@ export function useTaskChangeListener(
         void fetchAndReconcileTask(task_id);
       }
     },
-    [addToast, fetchAndReconcileTask, reconcileTask, removeTask, projectScopeGeneration]
+    [
+      addToast,
+      fetchAndReconcileTask,
+      reconcileTask,
+      removeTask,
+      projectScopeGeneration,
+    ]
   );
 
   const handleTaskStepChanged = useCallback(
@@ -124,19 +108,17 @@ export function useTaskChangeListener(
     }
 
     const unlistenPromise = events.taskChangedEvent.listen(handleTaskChanged);
-    const unlistenTaskStepPromise =
-      events.taskStepChangedEvent.listen(handleTaskStepChanged);
-    const unlistenTaskRunStepPromise =
-      events.taskRunStepChangedEvent.listen(handleTaskStepChanged);
+    const unlistenTaskStepPromise = events.taskStepChangedEvent.listen(
+      handleTaskStepChanged
+    );
+    const unlistenTaskRunStepPromise = events.taskRunStepChangedEvent.listen(
+      handleTaskStepChanged
+    );
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
       unlistenTaskStepPromise.then((unlisten) => unlisten());
       unlistenTaskRunStepPromise.then((unlisten) => unlisten());
     };
-  }, [
-    enabled,
-    handleTaskChanged,
-    handleTaskStepChanged,
-  ]);
+  }, [enabled, handleTaskChanged, handleTaskStepChanged]);
 }

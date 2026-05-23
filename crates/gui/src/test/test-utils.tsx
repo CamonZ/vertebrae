@@ -8,6 +8,7 @@ import type {
   StepExecution,
   Task,
   TaskRun,
+  TaskRunControls,
   Workflow,
 } from "../bindings";
 
@@ -37,7 +38,9 @@ export { customRender as render };
 /**
  * Create a complete AgentConfig with defaults
  */
-export function createMockAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
+export function createMockAgentConfig(
+  overrides?: Partial<AgentConfig>
+): AgentConfig {
   return {
     model: null,
     fallback_model: null,
@@ -125,7 +128,9 @@ export function createMockSteps(workflowId = "test-workflow-1"): Step[] {
 /**
  * Create mock step execution data for testing
  */
-export function createMockStepExecution(overrides?: Partial<StepExecution>): StepExecution {
+export function createMockStepExecution(
+  overrides?: Partial<StepExecution>
+): StepExecution {
   return {
     id: `exec-${Math.random().toString(36).slice(2, 10)}`,
     task_id: "task-1",
@@ -157,6 +162,20 @@ export function createMockTaskRun(overrides?: Partial<TaskRun>): TaskRun {
     triggered_by_step_execution_id: null,
     inserted_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+export function createMockTaskRunControls(
+  activeRun: TaskRun,
+  overrides?: Partial<TaskRunControls>
+): TaskRunControls {
+  return {
+    runnable: false,
+    stoppable: true,
+    disabled_reason_code: "active_run",
+    disabled_reason: "A TaskRun is already active",
+    active_run: activeRun,
     ...overrides,
   };
 }
