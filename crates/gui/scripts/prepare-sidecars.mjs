@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 // Prepare Tauri sidecar binaries for the Vertebrae GUI bundle.
 //
-// Builds `vtb` and `vtb-daemon` (release) from the workspace and stages
-// them under `crates/gui/src-tauri/binaries/<bin>-<target-triple>` using
-// the naming convention Tauri's `externalBin` expects.
+// Builds `vtb` and `vtb-daemon` from the workspace and stages them under
+// `crates/gui/src-tauri/binaries/<bin>-<target-triple>` using the naming
+// convention Tauri's `externalBin` expects.
+//
+// Profile: defaults to `release`. Set SIDECAR_PROFILE=debug to build and
+// stage debug binaries instead — used by the GUI acceptance Docker build,
+// which compiles everything in debug for speed.
 //
 // Idempotency: if the staged copies exist and are at least as new as the
-// source binaries in `target/release/`, the script skips the rebuild and
+// source binaries in `target/<profile>/`, the script skips the rebuild and
 // the copy. That keeps `tauri:dev` fast for engineers who run it manually.
 
 import { spawnSync } from "node:child_process";
@@ -25,12 +29,14 @@ const BINARIES = [
   { cargoPkg: "vertebrae-daemon", binName: "vtb-daemon" },
 ];
 
+const PROFILE = process.env.SIDECAR_PROFILE === "debug" ? "debug" : "release";
+
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const guiDir = resolve(scriptDir, "..");
 const tauriDir = join(guiDir, "src-tauri");
 const workspaceRoot = resolve(guiDir, "..", "..");
 const stagingDir = join(tauriDir, "binaries");
-const releaseDir = join(workspaceRoot, "target", "release");
+const profileDir = join(workspaceRoot, "target", PROFILE);
 
 function detectTargetTriple() {
   // Tauri sets this env var when invoking beforeBuildCommand for the
@@ -58,7 +64,7 @@ function exeSuffix(target) {
 }
 
 function sourcePath(binName, suffix) {
-  return join(releaseDir, `${binName}${suffix}`);
+  return join(profileDir, `${binName}${suffix}`);
 }
 
 function stagedPath(binName, target, suffix) {
@@ -92,14 +98,10 @@ function stagedBinariesPresent(target, suffix) {
 }
 
 function runCargoBuild() {
-  const args = [
-    "build",
-    "--release",
-    "-p",
-    "vertebrae-cli",
-    "-p",
-    "vertebrae-daemon",
-  ];
+  const args = ["build", "-p", "vertebrae-cli", "-p", "vertebrae-daemon"];
+  if (PROFILE === "release") {
+    args.splice(1, 0, "--release");
+  }
   console.log(`[prepare-sidecars] cargo ${args.join(" ")}`);
   const result = spawnSync("cargo", args, {
     cwd: workspaceRoot,
