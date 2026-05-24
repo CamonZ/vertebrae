@@ -795,6 +795,62 @@ async getWebsocketStatus() : Promise<Result<string, CommandError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Probe the current install state without making any changes.
+ * 
+ * Safe to call on every app launch — performs only filesystem lookups and a
+ * single OS service-manager status query (no `launchctl load`, no copy).
+ */
+async installationStatus() : Promise<Result<InstallationStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("installation_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Install the selected components from the bundled sidecars.
+ * 
+ * Steps for each component the caller asked for:
+ * 
+ * 1. Resolve the sidecar binary path next to the GUI executable
+ * (`<exe_dir>/<name>-<target-triple>`).
+ * 2. Hand it to `vertebrae_installer::install_binary`, which copies it into
+ * the per-OS data dir, sets `0o755`, and creates a symlink in
+ * `~/.local/bin`.
+ * 
+ * If the daemon was installed, we then call
+ * `vertebrae_installer::install_service` to register it with launchd /
+ * systemd `--user`. The CLI does not need a service.
+ * 
+ * Returns the post-install [`InstallationStatus`] so the caller can refresh
+ * its UI without a follow-up `installation_status()` round-trip.
+ */
+async installComponents(installCli: boolean, installDaemon: boolean) : Promise<Result<InstallationStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_components", { installCli, installDaemon }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist a "user dismissed the installer" flag so the welcome screen
+ * does not reappear on next launch.
+ * 
+ * We only ever write `true`. There is no UI to un-skip, by design — if the
+ * user later wants to install components, they go through the explicit
+ * install flow which will recompute the real status anyway.
+ */
+async skipInstallation() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("skip_installation") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -870,7 +926,7 @@ fallback_model: string | null;
 /**
  * OpenAI/Codex reasoning effort for the configured model
  */
-reasoning_effort: string | null;
+reasoning_effort: string | null; 
 /**
  * System prompt to use for the session
  */
@@ -1015,6 +1071,31 @@ description: string | null }
  */
 export type CommandError = { message: string }
 /**
+ * State of a single component (one of `vtb`, `vtb-daemon`) on this machine.
+ * 
+ * The welcome screen renders different copy depending on whether the user
+ * already has the binary available from a previous `cargo install` or
+ * package-manager install. We surface both signals so the UI can pick the
+ * right message without having to call `PATH` itself.
+ */
+export type ComponentStatus = { 
+/**
+ * `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
+ * component, or another tool did). When this is `true` the installer
+ * can be skipped for this component.
+ */
+installed_at_symlink: boolean; 
+/**
+ * Absolute path of the symlink we manage in `~/.local/bin`.
+ */
+symlink_path: string; 
+/**
+ * `true` if some executable named `<name>` is resolvable on `$PATH`
+ * (anywhere — not necessarily the symlink we manage). Lets the UI
+ * avoid pestering users who already have `vtb` from `cargo install`.
+ */
+on_path: boolean }
+/**
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; agents: string[]; skills: string[]; order: number; is_final: boolean; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null }
@@ -1023,6 +1104,16 @@ export type DeleteChatSessionResult = { deleted_session_id: string; success: boo
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * Aggregate snapshot of installation state returned from both
+ * `installation_status()` and `install_components()`.
+ */
+export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; service: ServiceState; 
+/**
+ * `true` once the user clicked "Skip" on the welcome screen. Persisted
+ * in `installer-state.json` under the app config dir.
+ */
+skipped: boolean }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Generic chat event for types not covered by the typed channel events
@@ -1150,6 +1241,24 @@ export type SectionChangedEvent = { section_id: string; task_id: string; change_
  * Section type - mirrors db::SectionType
  */
 export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "checklist_item" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+/**
+ * State of the daemon's OS service registration (launchd on macOS, systemd
+ * `--user` on Linux). Mirrors [`vertebrae_installer::ServiceStatus`] in a
+ * shape that's friendlier to TypeScript.
+ */
+export type ServiceState = 
+/**
+ * Service is registered and currently running.
+ */
+{ kind: "running"; pid: number } | 
+/**
+ * Service is registered but not currently running.
+ */
+{ kind: "loaded"; last_exit_status: number } | 
+/**
+ * Service is not registered with the OS service manager.
+ */
+{ kind: "not_loaded" }
 /**
  * Session log entry - mirrors db::SessionLog
  */
@@ -1282,7 +1391,7 @@ step_name?: string;
 /**
  * Semantic workflow step type, when provided by Sacrum
  */
-step_type?: string | null;
+step_type?: string | null; 
 /**
  * When this step execution started (ISO 8601 string)
  */
