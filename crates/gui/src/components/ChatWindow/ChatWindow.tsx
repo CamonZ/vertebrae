@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
@@ -9,12 +9,17 @@ import {
   type UtilizationLevel,
 } from "../../utils/modelContextWindow";
 import { MarkdownContent } from "../shared/MarkdownContent";
+import { ChatMessage as ChatBubble } from "../molecules/ChatMessage";
+import {
+  ToolCallBlock,
+  type ToolCallState,
+} from "../molecules/ToolCallBlock";
 import { ChatInput } from "../ChatInput";
 
 const LEVEL_CLASSES: Record<UtilizationLevel, string> = {
-  danger: "border-error/40 bg-error/10 text-error",
-  warn: "border-warning/40 bg-warning/10 text-warning",
-  ok: "border-border bg-bg-tertiary text-text-muted",
+  danger: "border-[var(--color-err)]/40 bg-[var(--color-err)]/10 text-[var(--color-err)]",
+  warn: "border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 text-[var(--color-warn)]",
+  ok: "border-[var(--color-line)] bg-[var(--color-bg-2)] text-[var(--color-fg-mute)]",
 };
 
 function ContextUtilizationBadge({
@@ -47,186 +52,175 @@ function ContextUtilizationBadge({
 function ThinkingIndicator() {
   return (
     <div className="flex justify-start">
-      <div className="flex items-center gap-2 rounded-lg bg-bg-tertiary px-4 py-3">
+      <div className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] px-4 py-3">
         <div className="flex gap-1">
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.3s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary [animation-delay:-0.15s]" />
-          <span className="h-2 w-2 animate-bounce rounded-full bg-primary" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)] [animation-delay:-0.3s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)] [animation-delay:-0.15s]" />
+          <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--color-accent)]" />
         </div>
-        <span className="text-sm text-text-muted">Thinking...</span>
+        <span className="text-sm text-[var(--color-fg-mute)]">Thinking...</span>
       </div>
     </div>
   );
 }
 
-/**
- * Renders a single chat message based on its kind
- */
-const ChatMessageItem = memo(function ChatMessageItem({
-  message,
-}: {
+// ---------------------------------------------------------------------------
+// Turn grouping
+// ---------------------------------------------------------------------------
+//
+// chatStore emits each Claude event as a sibling `ChatMessage`. The UI groups
+// tool_call + tool_result siblings INTO the preceding assistant message so the
+// conversation reads as turns (one bubble per assistant reply, tool calls
+// nested as `ToolCallBlock` children) rather than a flat event list.
+
+interface PendingTool {
+  toolName: string;
+  toolId: string;
+  input: string;
+  state: ToolCallState;
+  result?: string;
+  timestamp: string;
+}
+
+interface AssistantTurn {
+  kind: "assistant";
+  text: string;
+  timestamp: string;
+  isPartial?: boolean;
+  tools: PendingTool[];
+}
+
+interface SimpleTurn {
+  kind: "user" | "permission_request" | "error";
   message: ChatMessage;
-}) {
-  switch (message.kind) {
-    case "user":
-      return (
-        <div className="flex justify-end">
-          <div className="max-w-[85%] rounded-lg bg-primary/20 px-4 py-3">
-            <MarkdownContent text={message.text} />
-            <p className="mt-2 text-right text-xs text-text-muted">
-              {new Date(message.timestamp).toLocaleTimeString()}
-            </p>
-          </div>
-        </div>
-      );
+}
 
-    case "assistant":
-      return (
-        <div className="flex justify-start">
-          <div className="max-w-[85%] rounded-lg bg-bg-tertiary px-4 py-3">
-            <MarkdownContent text={message.text} />
-            {message.isPartial && (
-              <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-primary" />
-            )}
-            <p className="mt-2 text-xs text-text-muted">
-              {new Date(message.timestamp).toLocaleTimeString()}
-            </p>
-          </div>
-        </div>
-      );
+type Turn = AssistantTurn | SimpleTurn;
 
-    case "tool_call":
-      return (
-        <div className="flex justify-start">
-          <div className="max-w-[90%] rounded-lg border border-accent/30 bg-accent/5 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-4 w-4 text-accent"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-              </svg>
-              <span className="font-mono text-sm font-medium text-accent">
-                {message.toolName}
-              </span>
-            </div>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-[13px] leading-relaxed text-text-secondary antialiased">
-              {message.input}
-            </pre>
-          </div>
-        </div>
-      );
+function groupChatMessages(messages: readonly ChatMessage[]): Turn[] {
+  const turns: Turn[] = [];
+  let activeAssistant: AssistantTurn | null = null;
 
-    case "tool_result":
-      return (
-        <div className="flex justify-start">
-          <div
-            className={`max-w-[90%] rounded-lg border px-4 py-3 ${
-              message.isError
-                ? "border-error/30 bg-error/5"
-                : "border-success/30 bg-success/5"
-            }`}
-          >
-            <div className="flex items-center gap-2">
-              {message.isError ? (
-                <svg
-                  className="h-4 w-4 text-error"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  className="h-4 w-4 text-success"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                  />
-                </svg>
-              )}
-              <span
-                className={`text-sm font-medium ${message.isError ? "text-error" : "text-success"}`}
-              >
-                {message.isError ? "Error" : "Result"}
-              </span>
-            </div>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-bg-primary/50 p-3 font-mono text-[13px] leading-relaxed text-text-secondary antialiased">
-              {message.result}
-            </pre>
-          </div>
-        </div>
-      );
-
-    case "permission_request":
-      return (
-        <div className="flex justify-center py-2">
-          <div className="w-full rounded-lg border border-warning/30 bg-warning/10 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <svg
-                className="h-5 w-5 text-warning"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <span className="text-sm font-medium text-warning">
-                Permission Required
-              </span>
-            </div>
-            <p className="mt-2 text-sm text-text-secondary">{message.message}</p>
-            <p className="mt-2 text-xs text-text-muted">
-              Grant permission in the Claude CLI terminal to continue.
-            </p>
-          </div>
-        </div>
-      );
-
-    case "session_start":
-    case "session_end":
-      return null;
-
-    case "error":
-      return (
-        <div className="flex justify-center py-2">
-          <div className="rounded-lg bg-error/10 px-4 py-2">
-            <p className="text-sm text-error">{message.message}</p>
-          </div>
-        </div>
-      );
+  for (const m of messages) {
+    switch (m.kind) {
+      case "session_start":
+      case "session_end":
+        continue;
+      case "user":
+        activeAssistant = null;
+        turns.push({ kind: "user", message: m });
+        continue;
+      case "assistant":
+        activeAssistant = {
+          kind: "assistant",
+          text: m.text,
+          timestamp: m.timestamp,
+          isPartial: m.isPartial,
+          tools: [],
+        };
+        turns.push(activeAssistant);
+        continue;
+      case "tool_call":
+        if (!activeAssistant) {
+          // Tool call before any assistant turn — open a headless assistant
+          // bubble so the tool block has a container.
+          activeAssistant = {
+            kind: "assistant",
+            text: "",
+            timestamp: m.timestamp,
+            tools: [],
+          };
+          turns.push(activeAssistant);
+        }
+        activeAssistant.tools.push({
+          toolName: m.toolName,
+          toolId: m.toolId,
+          input: m.input,
+          state: "pending",
+          timestamp: m.timestamp,
+        });
+        continue;
+      case "tool_result": {
+        const slot = activeAssistant?.tools.find(
+          (t) => t.toolId === m.toolId && t.state === "pending"
+        );
+        if (slot) {
+          slot.result = m.result;
+          slot.state = m.isError ? "error" : "success";
+        }
+        continue;
+      }
+      case "permission_request":
+      case "error":
+        activeAssistant = null;
+        turns.push({ kind: m.kind, message: m });
+        continue;
+    }
   }
-});
+  return turns;
+}
+
+function renderTurn(turn: Turn, key: string): ReactNode {
+  if (turn.kind === "user") {
+    const msg = turn.message as Extract<ChatMessage, { kind: "user" }>;
+    return (
+      <ChatBubble
+        key={key}
+        role="user"
+        author="YOU"
+        timestamp={new Date(msg.timestamp).toLocaleTimeString()}
+      >
+        <MarkdownContent text={msg.text} />
+      </ChatBubble>
+    );
+  }
+
+  if (turn.kind === "assistant") {
+    return (
+      <ChatBubble
+        key={key}
+        role="assistant"
+        author="CLAUDE"
+        timestamp={new Date(turn.timestamp).toLocaleTimeString()}
+        streaming={turn.isPartial}
+      >
+        {turn.text.length > 0 && <MarkdownContent text={turn.text} />}
+        {turn.tools.map((t, i) => (
+          <ToolCallBlock
+            key={`${t.toolId}-${i}`}
+            toolName={t.toolName}
+            state={t.state}
+            input={t.input}
+            result={t.result}
+          />
+        ))}
+      </ChatBubble>
+    );
+  }
+
+  if (turn.kind === "permission_request") {
+    const msg = turn.message as Extract<
+      ChatMessage,
+      { kind: "permission_request" }
+    >;
+    return (
+      <ChatBubble key={key} role="system" author="PERMISSION REQUIRED">
+        <p className="text-sm text-[var(--color-fg-soft)]">{msg.message}</p>
+        <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+          Grant permission in the Claude CLI terminal to continue.
+        </p>
+      </ChatBubble>
+    );
+  }
+
+  // error
+  const msg = turn.message as Extract<ChatMessage, { kind: "error" }>;
+  return (
+    <ChatBubble key={key} role="system" author="ERROR">
+      <p className="text-sm text-[var(--color-err)]">{msg.message}</p>
+    </ChatBubble>
+  );
+}
 
 /**
  * Scope breadcrumb showing current scope with widen control
@@ -242,16 +236,16 @@ function ScopeBreadcrumb({
 }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
-      <span className="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+      <span className="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-accent)]">
         {scopeLabel(scope)}
       </span>
-      <span className="max-w-[150px] truncate text-text-secondary" title={label}>
+      <span className="max-w-[150px] truncate text-[var(--color-fg-soft)]" title={label}>
         {label}
       </span>
       {onWiden && (
         <button
           onClick={onWiden}
-          className="ml-1 rounded p-0.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+          className="ml-1 rounded p-0.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
           title={`Widen scope to ${scopeLabel(getParentScope(scope)!)}`}
         >
           <svg
@@ -332,6 +326,11 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
     );
   }, [session, sessionId, widenScope]);
 
+  const turns = useMemo(
+    () => groupChatMessages(session?.messages ?? []),
+    [session?.messages]
+  );
+
   if (!session) return null;
 
   const canWiden = getParentScope(session.scope) !== null;
@@ -343,7 +342,7 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Scope header */}
-      <div className="flex items-center justify-between border-b border-border bg-bg-primary px-3 py-2">
+      <div className="flex items-center justify-between border-b border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2">
         <ScopeBreadcrumb
           scope={session.scope}
           label={session.label}
@@ -360,16 +359,22 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
           {/* Active indicator */}
           {isActive && (
             <span className="relative flex h-2 w-2">
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+              <span
+                data-testid="chat-active-dot"
+                className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-ok)]"
+              />
             </span>
           )}
           {session.status === "closed" && (
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-text-muted" />
+            <span
+              data-testid="chat-closed-dot"
+              className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-fg-mute)]"
+            />
           )}
           {isActive && (
             <button
               onClick={closeClaudeSession}
-              className="ml-1 rounded p-1 text-error transition-colors hover:bg-error/10"
+              className="ml-1 rounded p-1 text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10"
               title="End session"
             >
               <svg
@@ -389,7 +394,7 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
           )}
           <button
             onClick={() => clearMessages(sessionId)}
-            className="rounded p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+            className="rounded p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
             title="Clear messages"
           >
             <svg
@@ -411,9 +416,9 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
 
       {/* Context summary banner */}
       {session.contextSummary && (
-        <div className="border-b border-border bg-bg-tertiary/50 px-3 py-1.5">
-          <details className="text-xs text-text-muted">
-            <summary className="cursor-pointer select-none hover:text-text-secondary">
+        <div className="border-b border-[var(--color-line)] bg-[var(--color-bg-2)]/50 px-3 py-1.5">
+          <details className="text-xs text-[var(--color-fg-mute)]">
+            <summary className="cursor-pointer select-none hover:text-[var(--color-fg-soft)]">
               Context injected
             </summary>
             <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px]">
@@ -427,9 +432,9 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
       <div className="flex-1 overflow-y-auto p-4">
         {session.messages.length === 0 && !isActive && (
           <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
               <svg
-                className="h-6 w-6 text-primary"
+                className="h-6 w-6 text-[var(--color-accent)]"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -442,26 +447,24 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
                 />
               </svg>
             </div>
-            <p className="text-sm text-text-secondary">
+            <p className="text-sm text-[var(--color-fg-soft)]">
               Chat scoped to {scopeLabel(session.scope).toLowerCase()}
             </p>
-            <p className="mt-1 text-xs text-text-muted">
+            <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
               Type a message and press Enter to begin
             </p>
           </div>
         )}
 
         <div className="flex flex-col gap-3">
-          {session.messages.map((msg, i) => (
-            <ChatMessageItem key={i} message={msg} />
-          ))}
+          {turns.map((turn, i) => renderTurn(turn, `${turn.kind}-${i}`))}
           {isWaiting && <ThinkingIndicator />}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input area */}
-      <div className="border-t border-border bg-bg-secondary p-3">
+      <div className="border-t border-[var(--color-line)] bg-[var(--color-bg-1)] p-3">
         <ChatInput
           ref={inputRef}
           value={inputValue}

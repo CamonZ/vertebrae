@@ -220,11 +220,15 @@ describe("CorridorView", () => {
     const activeCircle = active?.querySelector("circle");
 
     // Failed nodes carry the error stroke class and a thicker border.
-    expect(failedCircle?.getAttribute("class")).toContain("stroke-error");
+    expect(failedCircle?.getAttribute("class")).toContain(
+      "stroke-[var(--color-err)]"
+    );
     expect(failedCircle?.getAttribute("stroke-width")).toBe("2.5");
 
-    // Active nodes have the active fill (white-on-secondary) class.
-    expect(activeCircle?.getAttribute("class")).toContain("fill-bg-primary");
+    // Active nodes have the active fill class (Hearth bg-1 — lit on warm ink).
+    expect(activeCircle?.getAttribute("class")).toContain(
+      "fill-[var(--color-bg-1)]"
+    );
   });
 
   it("clicking a node calls onPinExecution AND scrolls THREAD to that row", () => {

@@ -41,11 +41,11 @@ interface GroupRow {
 function statusClasses(status: ExecutionStatus): string {
   switch (status) {
     case "in_progress":
-      return "bg-warning";
+      return "bg-[var(--color-warn)]";
     case "completed":
-      return "bg-success";
+      return "bg-[var(--color-ok)]";
     case "failed":
-      return "bg-error";
+      return "bg-[var(--color-err)]";
     default:
       return "bg-text-muted";
   }
@@ -136,14 +136,14 @@ function ExecutionRow({
       data-testid="subtree-rail-execution"
       data-execution-id={execution.id ?? ""}
       data-status={execution.status ?? "in_progress"}
-      className="flex items-center gap-2 px-2 py-1 text-[11px] text-text-secondary"
+      className="flex items-center gap-2 px-2 py-1 text-[11px] text-[var(--color-fg-soft)]"
     >
       <StatusPip status={execution.status ?? "in_progress"} />
       <span className="truncate font-mono">
         {(execution.step_name ?? "").replace(/_/g, " ") || "step"}
       </span>
       {displayCost !== null && (
-        <span className="ml-auto font-mono text-[10px] text-text-muted">
+        <span className="ml-auto font-mono text-[10px] text-[var(--color-fg-mute)]">
           {formatCost(displayCost)}
         </span>
       )}
@@ -184,23 +184,23 @@ function GroupSection({
       data-task-id={task.id}
       data-depth={depth}
       data-expanded={expanded}
-      className="border-b border-border last:border-b-0"
+      className="border-b border-[var(--color-line)] last:border-b-0"
     >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         data-testid="subtree-rail-group-toggle"
         aria-expanded={expanded}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-bg-hover"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-3)]"
         style={{ paddingLeft: `${0.5 + depth * 0.75}rem` }}
       >
         <Chevron
           direction="right"
-          className={`h-3 w-3 flex-shrink-0 text-text-muted transition-transform ${
+          className={`h-3 w-3 flex-shrink-0 text-[var(--color-fg-mute)] transition-transform ${
             expanded ? "rotate-90" : ""
           }`}
         />
-        <span className="truncate text-xs font-medium text-text-primary">
+        <span className="truncate text-xs font-medium text-[var(--color-fg)]">
           {task.title}
         </span>
         <span
@@ -226,7 +226,7 @@ function GroupSection({
 
       <div
         data-testid="subtree-rail-group-rollup"
-        className="flex items-center gap-2 px-2 pb-1 font-mono text-[10px] text-text-muted"
+        className="flex items-center gap-2 px-2 pb-1 font-mono text-[10px] text-[var(--color-fg-mute)]"
         style={{ paddingLeft: `${1.75 + depth * 0.75}rem` }}
       >
         <span data-testid="subtree-rail-group-runs">
@@ -250,7 +250,7 @@ function GroupSection({
           style={{ paddingLeft: `${1.5 + depth * 0.75}rem` }}
         >
           {executions.length === 0 ? (
-            <li className="px-2 py-1 text-[11px] italic text-text-muted">
+            <li className="px-2 py-1 text-[11px] italic text-[var(--color-fg-mute)]">
               No executions yet
             </li>
           ) : (
@@ -324,7 +324,7 @@ export function SubtreeRail({
       <aside
         data-testid="subtree-rail"
         data-collapsed="true"
-        className="flex h-full w-8 flex-col items-center border-r border-border bg-bg-secondary py-2"
+        className="flex h-full w-8 flex-col items-center border-r border-[var(--color-line)] bg-[var(--color-bg-1)] py-2"
       >
         {onToggleCollapsed && (
           <button
@@ -332,7 +332,7 @@ export function SubtreeRail({
             onClick={onToggleCollapsed}
             data-testid="subtree-rail-toggle"
             aria-label="Expand subtree rail"
-            className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+            className="rounded p-1 text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
           >
             <Chevron direction="right" className="h-4 w-4" />
           </button>
@@ -345,10 +345,10 @@ export function SubtreeRail({
     <aside
       data-testid="subtree-rail"
       data-collapsed="false"
-      className="flex h-full w-72 flex-col border-r border-border bg-bg-secondary"
+      className="flex h-full w-72 flex-col border-r border-[var(--color-line)] bg-[var(--color-bg-1)]"
     >
-      <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
           Subtree
         </span>
         <div className="flex items-center gap-1">
@@ -358,7 +358,7 @@ export function SubtreeRail({
               onClick={onSwitchTask}
               data-testid="subtree-rail-switch-task"
               aria-label="Switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
             >
               Switch
             </button>
@@ -369,7 +369,7 @@ export function SubtreeRail({
               onClick={onToggleCollapsed}
               data-testid="subtree-rail-toggle"
               aria-label="Collapse subtree rail"
-              className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded p-1 text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
             >
               <Chevron direction="left" className="h-3 w-3" />
             </button>
@@ -381,7 +381,7 @@ export function SubtreeRail({
         {rows.length === 0 ? (
           <div
             data-testid="subtree-rail-empty"
-            className="px-3 py-6 text-center text-xs italic text-text-muted"
+            className="px-3 py-6 text-center text-xs italic text-[var(--color-fg-mute)]"
           >
             No tasks in this subtree.
           </div>

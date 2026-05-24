@@ -46,16 +46,9 @@ vi.mock("../bindings", async () => {
   };
 });
 
-vi.mock("react-router-dom", async () => {
-  const actual =
-    await vi.importActual<typeof import("react-router-dom")>(
-      "react-router-dom"
-    );
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  };
-});
+// useNavigate is intentionally NOT mocked: the new TASKS panel calls
+// `navigate(/traces/<id>)` to switch tasks, and MemoryRouter must perform
+// the route change so the page re-renders against the new :taskId.
 
 let mockRuns: TaskRun[] = [];
 let mockRailRuns: TaskRun[] | null = null;
@@ -445,7 +438,7 @@ describe("TracesPage with TaskRun history", () => {
     await waitFor(() => {
       expect(
         screen
-          .getAllByTestId("run-history-task-group")
+          .getAllByTestId("run-history-task-row")
           .map((group) => group.getAttribute("data-task-id"))
       ).toEqual(["root", "child"]);
     });
@@ -566,19 +559,18 @@ describe("TracesPage with TaskRun history", () => {
     expect(screen.queryByTestId("trace-filter-lineage-scope")).toBeNull();
 
     const segments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(new Set(segments)).toEqual(
       new Set(["exec-child", "exec-grandchild"])
     );
 
+    // RUNS section is scoped to the currently routed task ('child'), so only
+    // run-child appears (depth has no meaning in the per-task list).
     const railRows = screen
       .getAllByTestId("run-history-row")
-      .map((el) => [
-        el.getAttribute("data-run-id"),
-        el.getAttribute("data-depth"),
-      ]);
-    expect(railRows).toEqual([["run-child", "2"]]);
+      .map((el) => el.getAttribute("data-run-id"));
+    expect(railRows).toEqual(["run-child"]);
   });
 
   it("uses runId to select a child run under a parent root", () => {
@@ -624,8 +616,8 @@ describe("TracesPage with TaskRun history", () => {
     expect(currentSearchParams().has("scope")).toBe(false);
     expect(lastTraceRootId).toBe("run-child");
     const segments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(new Set(segments)).toEqual(new Set(["exec-child"]));
   });
 
@@ -716,8 +708,8 @@ describe("TracesPage with TaskRun history", () => {
     expect(screen.getByText(/second step log/)).toBeTruthy();
     expect(currentSearchParams().get("runId")).toBe("run-active");
     const segments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(segments).toContain("trace-ex-1");
     expect(segments).toContain("trace-ex-2");
   });
@@ -768,7 +760,24 @@ describe("TracesPage with TaskRun history", () => {
 
     renderAt("/traces/root?scope=lineage");
 
-    fireEvent.click(screen.getAllByTestId("run-history-row-button")[1]);
+    // First switch tasks to 'child' via the TASKS panel — the RUNS section is
+    // scoped to the currently routed task, so we need to focus 'child' before
+    // its attempts appear.
+    const childTaskRow = screen
+      .getAllByTestId("run-history-task-row")
+      .find((row) => row.getAttribute("data-task-id") === "child");
+    if (!childTaskRow) throw new Error("missing child task row");
+    fireEvent.click(childTaskRow.querySelector("button")!);
+    mockResolve = () => ({ run: childRun, source: "latest" });
+
+    await waitFor(() => {
+      const ids = screen
+        .getAllByTestId("run-history-row")
+        .map((row) => row.getAttribute("data-run-id"));
+      expect(ids).toEqual(["run-child"]);
+    });
+
+    fireEvent.click(screen.getAllByTestId("run-history-row-button")[0]);
 
     await waitFor(() =>
       expect(screen.getByTestId("traces-active-run")).toHaveAttribute(
@@ -787,14 +796,12 @@ describe("TracesPage with TaskRun history", () => {
       source: row.getAttribute("data-active-source"),
     }));
     expect(rowState).toEqual([
-      { id: "run-root", active: "false", source: null },
       { id: "run-child", active: "true", source: "selected" },
-      { id: "run-sibling", active: "false", source: null },
     ]);
 
     const threadSegments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(new Set(threadSegments)).toEqual(new Set(["exec-child"]));
 
     const markers = screen
@@ -803,7 +810,7 @@ describe("TracesPage with TaskRun history", () => {
     expect(new Set(markers)).toEqual(new Set(["exec-child"]));
   });
 
-  it("uses the root run row to restore THREAD, flight strip, and corridor context", () => {
+  it("uses the root run row to restore THREAD, flight strip, and corridor context", async () => {
     const rootRun = makeRun({
       id: "run-root",
       task_id: "root",
@@ -862,8 +869,8 @@ describe("TracesPage with TaskRun history", () => {
     renderAt("/traces/child");
 
     const threadSegments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(new Set(threadSegments)).toEqual(
       new Set(["exec-child", "exec-grandchild"])
     );
@@ -880,8 +887,23 @@ describe("TracesPage with TaskRun history", () => {
       .map((el) => el.getAttribute("data-execution-id"));
     expect(new Set(nodes)).toEqual(new Set(["exec-child", "exec-grandchild"]));
 
-    const runRows = screen.getAllByTestId("run-history-row");
-    expect(runRows[0].getAttribute("data-run-id")).toBe("run-root");
+    // Switch to the 'root' task via the TASKS panel — RUNS is per-task, so
+    // the root run only appears once 'root' is the routed task.
+    const rootTaskRow = screen
+      .getAllByTestId("run-history-task-row")
+      .find((row) => row.getAttribute("data-task-id") === "root");
+    if (!rootTaskRow) throw new Error("missing root task row");
+    fireEvent.click(rootTaskRow.querySelector("button")!);
+    mockResolve = () => ({ run: rootRun, source: "latest" });
+    mockRuns = [rootRun];
+
+    await waitFor(() => {
+      const ids = screen
+        .getAllByTestId("run-history-row")
+        .map((row) => row.getAttribute("data-run-id"));
+      expect(ids).toEqual(["run-root"]);
+    });
+
     fireEvent.click(screen.getAllByTestId("run-history-row-button")[0]);
     expect(currentSearchParams().get("runId")).toBe("run-root");
     expect(currentSearchParams().get("scope")).toBe("lineage");

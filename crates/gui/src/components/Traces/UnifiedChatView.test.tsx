@@ -43,7 +43,7 @@ const makeExec = (
   started_at: overrides.started_at ?? "2024-01-01T10:00:00.000Z",
   completed_at: overrides.completed_at ?? null,
   status: overrides.status ?? "completed",
-  prompt: null,
+  prompt: overrides.prompt ?? null,
   output: null,
   context: null,
   transition_result: null,
@@ -168,24 +168,23 @@ describe("UnifiedChatView", () => {
     expect(containers).toHaveLength(1);
 
     // Both executions' events render inside the same surface
-    const events = within(view).getAllByTestId("unified-chat-event");
+    const events = within(view).getAllByTestId("unified-chat-agent-bubble");
     expect(events).toHaveLength(2);
     expect(events[0]).toHaveAttribute("data-execution-id", "exec-a");
     expect(events[1]).toHaveAttribute("data-execution-id", "exec-b");
     expect(within(view).getByText("planning step")).toBeInTheDocument();
     expect(within(view).getByText("implementing step")).toBeInTheDocument();
 
-    // Two distinct sticky step boundaries — visually distinct, not just <hr>
+    // Two divider boundaries — visually distinct, not just <hr>
     const boundaries = within(view).getAllByTestId(
       "unified-chat-step-boundary"
     );
     expect(boundaries).toHaveLength(2);
     expect(boundaries[0]).toHaveAttribute("data-step-name", "plan");
     expect(boundaries[1]).toHaveAttribute("data-step-name", "implement");
-    // Sticky positioning — the regression test for the per-execution box
-    // anti-pattern. Each boundary is `position: sticky` inside the shared
-    // scroll surface.
-    expect(boundaries[0].className).toContain("sticky");
+    // The chat-style divider does NOT pin to the top — it rides the scroll
+    // surface naturally so the conversation reads as a flowing thread.
+    expect(boundaries[0].className).not.toContain("sticky");
   });
 
   it("renders an inline transition marker between consecutive executions on the same task", () => {
@@ -364,7 +363,7 @@ describe("UnifiedChatView", () => {
         logsByExecutionId={logs}
       />
     );
-    const events = screen.getAllByTestId("unified-chat-event");
+    const events = screen.getAllByTestId("unified-chat-agent-bubble");
     const texts = events.map((e) => e.textContent);
     // Expected order: B-tie-1, B-tie-2 (10:00:10), then A-late (10:00:20)
     expect(texts[0]).toContain("B-tie-1");
@@ -435,9 +434,9 @@ describe("UnifiedChatView", () => {
       "$0.31"
     );
 
-    // Only the thinking event survives in the renderable event list — the
+    // Only the assistant message survives in the renderable event list — the
     // session_start / session_end events were folded out.
-    const events = screen.getAllByTestId("unified-chat-event");
+    const events = screen.getAllByTestId("unified-chat-agent-bubble");
     expect(events).toHaveLength(1);
     expect(events[0].textContent).toContain("doing the thing");
   });
@@ -541,7 +540,7 @@ describe("UnifiedChatView", () => {
     expect(within(view).queryByText(/time before/)).toBeNull();
   });
 
-  it("step boundary is visually distinct from event rows (not a plain hr)", () => {
+  it("step boundary divider chip is visually distinct from event rows (not a plain hr)", () => {
     const tasks = [makeTask({ id: "t-root" })];
     const exec = makeExec({
       id: "exec-a",
@@ -562,9 +561,9 @@ describe("UnifiedChatView", () => {
       />
     );
     const boundary = screen.getByTestId("unified-chat-step-boundary");
-    // Has the workflow + step badges
+    // Has the workflow + step labels (step is prefixed with ▶ glyph)
     expect(within(boundary).getByText("Implementation")).toBeInTheDocument();
-    expect(within(boundary).getByText("plan")).toBeInTheDocument();
+    expect(within(boundary).getByText(/plan/)).toBeInTheDocument();
     // Cost rendered (formatCost — $0.05)
     expect(within(boundary).getByText("$0.05")).toBeInTheDocument();
     // Model rendered
@@ -693,6 +692,155 @@ describe("UnifiedChatView", () => {
     // Without a workflows lookup table, resolution can't map wf-backlog →
     // "Backlog" so we fall back to the task's current workflow name.
     expect(within(boundary).getByText("Implementation")).toBeInTheDocument();
+  });
+
+  it("surfaces the execution prompt as a USER chat bubble before any agent turns", () => {
+    const tasks = [makeTask({ id: "t-root", title: "Root" })];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      step_name: "implement",
+      prompt: "Build the feature, please",
+    });
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", thinking("doing it"), "2024-01-01T10:00:01.000Z", 0),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const userBubble = screen.getByTestId("unified-chat-user-bubble");
+    expect(userBubble).toHaveAttribute("data-execution-id", "exec-a");
+    expect(userBubble).toHaveTextContent("Build the feature, please");
+    expect(within(userBubble).getByText(/USER/)).toBeInTheDocument();
+  });
+
+  it("does not render a USER bubble when the prompt is empty / whitespace", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      prompt: "   \n  ",
+    });
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    expect(screen.queryByTestId("unified-chat-user-bubble")).toBeNull();
+  });
+
+  it("groups assistant_message + trailing tool_call/tool_result into one AGENT bubble", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      step_name: "implement",
+      model: "claude-opus-4-7",
+    });
+    // Three sibling events in the session log: a final assistant reply
+    // (Codex `agent_message`, mapped to assistant_message), then a tool
+    // call + matching tool result. The renderer must collapse the three
+    // into ONE agent bubble with the tool block nested inside it.
+    const agentMessage = {
+      type: "item.completed",
+      item: { type: "agent_message", text: "Reading the file now." },
+    };
+    const toolUse = {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "tool_use", id: "tool-1", name: "Read", input: { path: "x.rs" } },
+        ],
+      },
+    };
+    const toolResult = {
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "tool-1",
+            content: "file contents",
+          },
+        ],
+      },
+    };
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", agentMessage, "2024-01-01T10:00:01.000Z", 0),
+        makeLog("exec-a", toolUse, "2024-01-01T10:00:02.000Z", 1),
+        makeLog("exec-a", toolResult, "2024-01-01T10:00:03.000Z", 2),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    // Exactly one agent bubble — the tool call/result collapsed into it.
+    const bubbles = screen.getAllByTestId("unified-chat-agent-bubble");
+    expect(bubbles).toHaveLength(1);
+    const bubble = bubbles[0];
+    expect(bubble).toHaveAttribute("data-execution-id", "exec-a");
+    // Author line includes the model name
+    expect(within(bubble).getByText(/AGENT · claude-opus-4-7/)).toBeInTheDocument();
+    // Assistant text is inside the bubble
+    expect(within(bubble).getByText("Reading the file now.")).toBeInTheDocument();
+    // Tool block is rendered INSIDE the bubble, not as a sibling event
+    expect(within(bubble).getByText("Read")).toBeInTheDocument();
+    // No sibling event rows for the tool_call / tool_result.
+    expect(screen.queryAllByTestId("unified-chat-event")).toHaveLength(0);
+  });
+
+  it("renders a 'thinking' event as a standalone event row when no assistant_message follows", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const exec = makeExec({ id: "exec-a", task_id: "t-root" });
+    // Codex `reasoning` items map to standalone `thinking` events (Claude
+    // `text` items map to assistant_message and would render as a bubble).
+    const reasoning = (text: string) => ({
+      type: "item.completed",
+      item: { id: "r1", type: "reasoning", text },
+    });
+    const logs = {
+      "exec-a": [
+        makeLog(
+          "exec-a",
+          reasoning("just reasoning, no reply yet"),
+          "2024-01-01T10:00:01.000Z",
+          0
+        ),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const events = screen.getAllByTestId("unified-chat-event");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toHaveTextContent("just reasoning, no reply yet");
+    expect(screen.queryByTestId("unified-chat-agent-bubble")).toBeNull();
   });
 
   describe("waiting human_input gate", () => {

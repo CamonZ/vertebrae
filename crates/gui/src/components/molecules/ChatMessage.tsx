@@ -6,7 +6,7 @@ interface ChatMessageProps {
   role: ChatRole;
   /** Author label rendered above the bubble (e.g. "You", "Claude · sonnet"). */
   author?: ReactNode;
-  /** Absolute timestamp; shown in a hover tooltip. */
+  /** Pre-formatted timestamp; rendered visibly next to the author and also as a hover tooltip on the bubble. */
   timestamp?: string;
   /** Streaming bubbles render a blinking cursor at the end of the content. */
   streaming?: boolean;
@@ -16,7 +16,7 @@ interface ChatMessageProps {
 
 const roleClasses: Record<ChatRole, string> = {
   user:
-    "ml-auto bg-[var(--color-accent-wash)] text-[var(--color-fg)] border-[color-mix(in_oklch,var(--color-accent)_35%,transparent)]",
+    "ml-auto bg-[var(--color-bg-2)] text-[var(--color-fg)] border-[var(--color-line)]",
   assistant:
     "mr-auto bg-[var(--color-bg-2)] text-[var(--color-fg)] border-[var(--color-line)]",
   system:
@@ -38,7 +38,7 @@ export function ChatMessage({
   return (
     <div
       className={[
-        "flex max-w-[78%] flex-col gap-1",
+        "flex min-w-0 max-w-[78%] flex-col gap-1",
         role === "user" ? "items-end" : role === "system" ? "items-center" : "items-start",
         role === "user" ? "ml-auto" : role === "assistant" ? "mr-auto" : "mx-auto",
         className,
@@ -46,15 +46,20 @@ export function ChatMessage({
         .filter(Boolean)
         .join(" ")}
     >
-      {author && (
-        <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)]">
-          {author}
-        </span>
+      {(author || timestamp) && (
+        <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)]">
+          {author && <span>{author}</span>}
+          {timestamp && (
+            <span className="tracking-normal normal-case text-[var(--color-fg-faint)]">
+              {timestamp}
+            </span>
+          )}
+        </div>
       )}
       <div
         title={timestamp}
         className={[
-          "rounded-[var(--radius-lg)] border px-3 py-2 font-sans text-sm leading-relaxed",
+          "min-w-0 max-w-full rounded-[var(--radius-lg)] border px-3 py-2 font-sans text-sm leading-relaxed",
           "whitespace-pre-wrap break-words",
           roleClasses[role],
         ].join(" ")}

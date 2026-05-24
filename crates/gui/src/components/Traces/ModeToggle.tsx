@@ -18,7 +18,7 @@ export function ModeToggle({ mode, onChange }: ModeToggleProps): ReactNode {
   return (
     <div
       data-testid="trace-mode-toggle"
-      className="inline-flex items-center gap-1 rounded-md border border-border bg-bg-tertiary p-0.5"
+      className="inline-flex items-center gap-1 rounded-md border border-[var(--color-line)] bg-[var(--color-bg-2)] p-0.5"
       role="tablist"
       aria-label="Trace visualization mode"
     >
@@ -35,8 +35,8 @@ export function ModeToggle({ mode, onChange }: ModeToggleProps): ReactNode {
             onClick={() => onChange(m)}
             className={`rounded px-3 py-1 text-xs font-medium uppercase tracking-wider transition-colors ${
               isActive
-                ? "bg-primary/10 text-primary"
-                : "text-text-muted hover:text-text-secondary"
+                ? "bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                : "text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
             }`}
           >
             {MODE_LABELS[m]}

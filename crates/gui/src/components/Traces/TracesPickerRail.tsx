@@ -50,7 +50,7 @@ export function TracesPickerRail({
       <aside
         data-testid="traces-picker-rail"
         data-collapsed="true"
-        className="flex h-full w-8 flex-col items-center border-r border-border bg-bg-secondary py-2"
+        className="flex h-full w-8 flex-col items-center border-r border-[var(--color-line)] bg-[var(--color-bg-1)] py-2"
       >
         {onToggleCollapsed && (
           <button
@@ -58,7 +58,7 @@ export function TracesPickerRail({
             onClick={onToggleCollapsed}
             data-testid="traces-picker-rail-toggle"
             aria-label="Expand task picker rail"
-            className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+            className="rounded p-1 text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
           >
             <Chevron direction="right" className="h-4 w-4" />
           </button>
@@ -71,10 +71,10 @@ export function TracesPickerRail({
     <aside
       data-testid="traces-picker-rail"
       data-collapsed="false"
-      className="flex h-full w-80 flex-col border-r border-border bg-bg-secondary"
+      className="flex h-full w-80 flex-col border-r border-[var(--color-line)] bg-[var(--color-bg-1)]"
     >
-      <div className="flex items-center justify-between border-b border-border px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
           Pick a task
         </span>
         <div className="flex items-center gap-1">
@@ -84,7 +84,7 @@ export function TracesPickerRail({
               onClick={onCancel}
               data-testid="traces-picker-rail-cancel"
               aria-label="Cancel switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
             >
               Cancel
             </button>
@@ -95,7 +95,7 @@ export function TracesPickerRail({
               onClick={onToggleCollapsed}
               data-testid="traces-picker-rail-toggle"
               aria-label="Collapse task picker rail"
-              className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+              className="rounded p-1 text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
             >
               <Chevron direction="left" className="h-3 w-3" />
             </button>

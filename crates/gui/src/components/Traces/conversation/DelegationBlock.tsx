@@ -32,7 +32,7 @@ export function DelegationBlock({
 }: DelegationBlockProps): ReactNode {
   const borderClass = thresholdKind
     ? thresholdKindBorderClass(thresholdKind)
-    : "border-primary/40";
+    : "border-[var(--color-accent)]";
   return (
     <div
       data-testid="unified-chat-delegation"
@@ -40,11 +40,11 @@ export function DelegationBlock({
       data-child-task-id={childTaskId}
       data-depth={depth}
       data-threshold-kind={thresholdKind ?? ""}
-      className={`my-2 border-l-2 ${borderClass} bg-bg-tertiary/30 pl-3`}
+      className={`my-2 border-l-2 ${borderClass} bg-[var(--color-bg-1)] pl-3`}
       style={{ marginLeft: (depth - 1) * 16 }}
     >
       {childTaskTitle && (
-        <div className="px-1 py-1 font-mono text-[10px] uppercase tracking-wider text-primary">
+        <div className="px-1 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
           delegated → {childTaskTitle}
         </div>
       )}

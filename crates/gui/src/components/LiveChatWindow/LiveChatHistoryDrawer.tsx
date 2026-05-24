@@ -84,19 +84,19 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
         data-testid="live-chat-history-drawer"
         aria-label="Chat history"
         aria-hidden={!open}
-        className={`absolute inset-y-0 left-0 z-20 flex w-full max-w-[20rem] flex-col border-r border-border bg-bg-primary shadow-xl transition-transform duration-150 ease-out ${
+        className={`absolute inset-y-0 left-0 z-20 flex w-full max-w-[20rem] flex-col border-r border-[var(--color-line)] bg-[var(--color-bg)] shadow-xl transition-transform duration-150 ease-out ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <header className="sticky top-0 flex items-center justify-between border-b border-border bg-bg-primary px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+        <header className="sticky top-0 flex items-center justify-between border-b border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-soft)]">
             Past chats
           </span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close chat history"
-            className="rounded p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+            className="rounded p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
           >
             <svg
               className="h-3.5 w-3.5"
@@ -116,11 +116,11 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto">
           {loadingSessions && sessions.length === 0 && (
-            <div className="px-3 py-4 text-xs text-text-muted">Loading…</div>
+            <div className="px-3 py-4 text-xs text-[var(--color-fg-mute)]">Loading…</div>
           )}
 
           {!loadingSessions && sessions.length === 0 && (
-            <div className="px-3 py-4 text-xs text-text-muted">
+            <div className="px-3 py-4 text-xs text-[var(--color-fg-mute)]">
               No past chats yet.
             </div>
           )}
@@ -140,7 +140,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                     data-testid={`history-row-${session.id}`}
                     className="flex items-center justify-between gap-2 px-3 py-2"
                   >
-                    <span className="truncate text-xs text-text-secondary">
+                    <span className="truncate text-xs text-[var(--color-fg-soft)]">
                       Delete this chat?
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
@@ -149,7 +149,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => void handleConfirmDelete(session.id)}
                         disabled={isDeleting}
                         aria-label={`Confirm delete chat ${session.id}`}
-                        className="rounded border border-error/50 px-2 py-1 text-[11px] text-error transition-colors hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-[var(--color-err)]/50 px-2 py-1 text-[11px] text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -158,7 +158,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => setConfirmDeleteId(null)}
                         disabled={isDeleting}
                         aria-label={`Cancel delete chat ${session.id}`}
-                        className="rounded border border-border px-2 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-[var(--color-line)] px-2 py-1 text-[11px] text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -171,8 +171,8 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                 <li
                   key={session.id}
                   data-testid={`history-row-${session.id}`}
-                  className={`group flex items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-bg-hover ${
-                    isActive ? "bg-primary/10" : ""
+                  className={`group flex items-center justify-between gap-2 px-3 py-2 transition-colors hover:bg-[var(--color-bg-3)] ${
+                    isActive ? "bg-[var(--color-accent)]/10" : ""
                   }`}
                 >
                   <button
@@ -185,14 +185,14 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                     <span
                       className={`truncate text-xs ${
                         isActive
-                          ? "font-medium text-text-primary"
-                          : "text-text-primary"
+                          ? "font-medium text-[var(--color-fg)]"
+                          : "text-[var(--color-fg)]"
                       }`}
                     >
                       {title}
                     </span>
                     {stamp && (
-                      <span className="mt-0.5 text-[10px] text-text-muted">
+                      <span className="mt-0.5 text-[10px] text-[var(--color-fg-mute)]">
                         {stamp}
                       </span>
                     )}
@@ -201,7 +201,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                     type="button"
                     onClick={() => setConfirmDeleteId(session.id)}
                     aria-label={`Delete chat ${session.id}`}
-                    className="shrink-0 rounded p-1 text-text-muted opacity-0 transition-opacity hover:bg-bg-hover hover:text-error focus:opacity-100 group-hover:opacity-100"
+                    className="shrink-0 rounded p-1 text-[var(--color-fg-mute)] opacity-0 transition-opacity hover:bg-[var(--color-bg-3)] hover:text-[var(--color-err)] focus:opacity-100 group-hover:opacity-100"
                   >
                     <svg
                       className="h-3.5 w-3.5"

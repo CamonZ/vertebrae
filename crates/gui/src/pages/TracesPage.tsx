@@ -793,9 +793,11 @@ export function TracesPage({
         ) : showRunHistoryRail ? (
           <RunHistoryRail
             runs={railRuns}
-            tasks={traceTasks}
+            tasks={traceTasks.filter((t) => railTaskIds.includes(t.id))}
+            currentTaskId={safeTaskId}
             activeRunId={activeTraceRun?.id ?? null}
             activeRunSource={activeTraceRunSource}
+            onSelectTask={handlePickTask}
             onSelectRun={handleSelectRun}
             onSwitchTask={() => setPickerInRail(true)}
             collapsed={railCollapsed}

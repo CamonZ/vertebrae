@@ -1,20 +1,19 @@
 /**
- * StepBoundary — sticky-on-scroll divider that marks the start of a
- * (workflow, step, execution) section in the unified chat surface.
+ * StepBoundary — thin centered divider chip ("— STEP · ▶ EXECUTE · 4m ago —")
+ * marking the start of a (workflow, step, execution) section in the chat
+ * surface. Replaces the legacy sticky header: prompts now render as a USER
+ * bubble (see {@link UnifiedChatView}) instead of a collapsible toggle inline
+ * on the boundary, and the chip rides the scroll surface naturally rather
+ * than pinning to the top.
  *
- * Visually distinct from event rows: chip-style label badges, an
- * accent left border, and `position: sticky; top: 0` so the header
- * pins to the top of the scroll surface as the user scrolls past.
- *
- * Session facts (model, duration, turn count, cost) that previously
- * rendered as standalone "Session Started" / "Session Complete" cards
- * inside the conversation are folded into the header here — that's
- * the trio shown right of the timestamp.
+ * The divider still folds the session_start / session_end facts (model,
+ * duration, turn count, cost) into the right-hand metadata slot — they were
+ * previously rendered as standalone "Session Started" / "Session Complete"
+ * cards in the conversation stream.
  */
 
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { formatCost } from "../../../utils/formatCost";
-import { MarkdownContent } from "../../shared/MarkdownContent";
 import {
   thresholdKindBorderClass,
   thresholdKindClass,
@@ -23,18 +22,16 @@ import type { ThresholdMarkerKind } from "../timeline";
 import { formatDurationShort, humanizeStepName } from "./EventRenderer";
 
 /**
- * How the task title is presented in the header.
+ * How the task title is presented on the divider.
  *
- * - `inline`   — title appears on the badge row after the step chip.
- *                Used for descendant tasks in subtree views where
- *                multiple tasks coexist in the same scroll surface.
- * - `subtitle` — title appears on a secondary line under the badge row.
- *                Used for descendant tasks in multi-task subtree views
- *                so they read as "delegated to: ...".
- * - `hidden`   — title is omitted entirely. Used when the Traces view
- *                is scoped to a single task (taskId in URL) — the page
- *                title already shows it, so repeating it on every
- *                boundary is just noise.
+ * - `inline`   — title appears on the divider chip after the step label.
+ *                Used for descendant tasks in subtree views where multiple
+ *                tasks coexist in the same scroll surface.
+ * - `subtitle` — title appears on a second line beneath the divider.
+ *                Used for delegated child tasks so they read as
+ *                "delegated to: ...".
+ * - `hidden`   — title is omitted entirely. Used when the Traces view is
+ *                scoped to a single task (page title already shows it).
  */
 export type TaskTitlePlacement = "inline" | "subtitle" | "hidden";
 
@@ -48,20 +45,17 @@ interface StepBoundaryProps {
   startedAt: string | null;
   model: string | null;
   costUsd: number | null;
-  /** Wall-time of the execution (ms). When set, rendered in the right-side trio. */
+  /** Wall-time of the execution (ms). When set, rendered in the right trio. */
   durationMs?: number | null;
-  /** Total assistant turns in the execution. When set, rendered in the right-side trio. */
+  /** Total assistant turns in the execution. When set, rendered in the trio. */
   numTurns?: number | null;
   /** Indentation level for nested delegation blocks (0 = root). */
   depth?: number;
-  /** Prompt used to drive this step execution. When set, rendered as a collapsible markdown section. */
-  prompt?: string | null;
   /**
    * When this boundary represents a workflow threshold (rejection, approval,
-   * model_fallback, etc.), the kind drives a per-kind tint on the left border
-   * and adds a kind-tagged callout chip. The mapping mirrors FlightStrip's
-   * threshold lane via `thresholdKindClass` so the chat and strip read as one
-   * system. Null = no threshold affordance (vanilla boundary).
+   * model_fallback, etc.), the kind drives a per-kind tint on the chip and
+   * adds a kind-tagged callout. Mirrors FlightStrip's threshold lane via
+   * `thresholdKindClass`. Null = no threshold affordance (vanilla divider).
    */
   thresholdKind?: ThresholdMarkerKind | null;
 }
@@ -96,14 +90,14 @@ export function StepBoundary({
   durationMs,
   numTurns,
   depth = 0,
-  prompt = null,
   thresholdKind = null,
 }: StepBoundaryProps): ReactNode {
   const stepLabel = humanizeStepName(stepName);
   const showTitleInline = !!taskTitle && taskTitlePlacement === "inline";
   const showTitleSubtitle = !!taskTitle && taskTitlePlacement === "subtitle";
-  const hasPrompt = !!prompt && prompt.trim().length > 0;
-  const [promptExpanded, setPromptExpanded] = useState(false);
+  // Border-style intentionally kept on the chip via `thresholdKindBorderClass`
+  // so the divider inherits the same level-tint story as FlightStrip when a
+  // threshold (rejection/approval) is in play.
   const borderClass = thresholdKindBorderClass(thresholdKind);
 
   return (
@@ -115,100 +109,89 @@ export function StepBoundary({
       data-depth={depth}
       data-task-title-placement={taskTitlePlacement}
       data-threshold-kind={thresholdKind ?? ""}
-      className={`sticky top-0 z-10 -mx-2 mb-2 border-l-2 ${borderClass} bg-bg-secondary px-3 py-2 shadow-sm`}
+      className="my-3 flex flex-col items-center gap-1 px-4"
       style={{ marginLeft: depth * 16, marginRight: 0 }}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        {thresholdKind && (
-          <span
-            data-testid="step-boundary-threshold-callout"
-            data-kind={thresholdKind}
-            className={`rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${thresholdKindClass(thresholdKind)}`}
-          >
-            {humanizeStepName(thresholdKind)}
+      <div className="flex w-full items-center gap-2">
+        <div className="h-px flex-1 bg-[var(--color-line)]" />
+        <div
+          className={`flex items-center gap-2 rounded-[var(--radius-full)] border bg-[var(--color-bg-1)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)] ${borderClass}`}
+        >
+          {thresholdKind && (
+            <span
+              data-testid="step-boundary-threshold-callout"
+              data-kind={thresholdKind}
+              className={`rounded-[var(--radius-sm)] border border-current px-1.5 py-0.5 ${thresholdKindClass(thresholdKind)}`}
+            >
+              {humanizeStepName(thresholdKind)}
+            </span>
+          )}
+          <span className="text-[var(--color-fg-soft)]">
+            {workflowName ?? "workflow"}
           </span>
-        )}
-        <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
-          {workflowName ?? "workflow"}
-        </span>
-        <span className="text-text-muted">·</span>
-        <span className="rounded bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-text-secondary">
-          {stepLabel}
-        </span>
-        {model && (
-          <>
-            <span className="text-text-muted">·</span>
-            <span
-              data-testid="step-boundary-model"
-              className="font-mono text-[10px] uppercase tracking-wider text-text-secondary"
-            >
-              {model}
-            </span>
-          </>
-        )}
-        {showTitleInline && (
-          <>
-            <span className="text-text-muted">·</span>
-            <span
-              data-testid="step-boundary-task-title"
-              className="truncate text-xs text-text-primary"
-              title={taskTitle ?? undefined}
-            >
-              {taskTitle}
-            </span>
-          </>
-        )}
-        <span className="ml-auto flex items-center gap-3 text-[11px] text-text-muted">
-          {startedAt && <span className="font-mono">{formatTimestamp(startedAt)}</span>}
+          <span aria-hidden>·</span>
+          <span className="text-[var(--color-accent)]">▶ {stepLabel}</span>
+          {model && (
+            <>
+              <span aria-hidden>·</span>
+              <span data-testid="step-boundary-model">{model}</span>
+            </>
+          )}
+          {showTitleInline && (
+            <>
+              <span aria-hidden>·</span>
+              <span
+                data-testid="step-boundary-task-title"
+                className="max-w-[24ch] truncate text-[var(--color-fg-soft)]"
+                title={taskTitle ?? undefined}
+              >
+                {taskTitle}
+              </span>
+            </>
+          )}
+          {startedAt && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{formatTimestamp(startedAt)}</span>
+            </>
+          )}
           {durationMs != null && durationMs > 0 && (
-            <span data-testid="step-boundary-duration" className="font-mono">
-              {formatDurationShort(durationMs)}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span data-testid="step-boundary-duration">
+                {formatDurationShort(durationMs)}
+              </span>
+            </>
           )}
           {numTurns != null && numTurns > 0 && (
-            <span data-testid="step-boundary-turns" className="font-mono">
-              {numTurns} {numTurns === 1 ? "turn" : "turns"}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span data-testid="step-boundary-turns">
+                {numTurns} {numTurns === 1 ? "turn" : "turns"}
+              </span>
+            </>
           )}
           {costUsd != null && costUsd > 0 && (
-            <span
-              data-testid="step-boundary-cost"
-              className="font-mono text-success"
-            >
-              {formatCost(costUsd)}
-            </span>
+            <>
+              <span aria-hidden>·</span>
+              <span
+                data-testid="step-boundary-cost"
+                className="text-[var(--color-ok)]"
+              >
+                {formatCost(costUsd)}
+              </span>
+            </>
           )}
-        </span>
+        </div>
+        <div className="h-px flex-1 bg-[var(--color-line)]" />
       </div>
       {showTitleSubtitle && (
         <div
           data-testid="step-boundary-task-subtitle"
-          className="mt-1 truncate text-xs text-text-secondary"
+          className="max-w-[60ch] truncate text-xs text-[var(--color-fg-soft)]"
           title={taskTitle ?? undefined}
         >
           {taskTitle}
-        </div>
-      )}
-      {hasPrompt && (
-        <div className="mt-2">
-          <button
-            type="button"
-            data-testid="step-boundary-prompt-toggle"
-            aria-expanded={promptExpanded}
-            onClick={() => setPromptExpanded((v) => !v)}
-            className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary"
-          >
-            <span aria-hidden="true">{promptExpanded ? "▾" : "▸"}</span>
-            <span>Prompt</span>
-          </button>
-          {promptExpanded && (
-            <div
-              data-testid="step-boundary-prompt"
-              className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary"
-            >
-              <MarkdownContent text={prompt as string} />
-            </div>
-          )}
         </div>
       )}
     </div>
