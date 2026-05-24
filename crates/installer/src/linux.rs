@@ -53,7 +53,6 @@ pub fn generate_unit(binary_path: &str, log_dir: &str) -> String {
 #[cfg(target_os = "linux")]
 pub(crate) fn install_service(binary_path: &Path) -> Result<ServiceInstallReport, InstallerError> {
     use std::fs;
-    use std::process::Command;
 
     let unit = unit_path()?;
     let logs = log_dir()?;
