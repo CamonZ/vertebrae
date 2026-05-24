@@ -62,6 +62,17 @@ describe("WelcomeInstallPage", () => {
     mockHasProjectSelected.mockResolvedValue({ status: "ok", data: false });
   });
 
+  it("exposes stable test ids for the page container and heading", async () => {
+    render(<WelcomeInstallPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("welcome-page")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("welcome-heading")).toHaveTextContent(
+      "Welcome to Vertebrae"
+    );
+  });
+
   it("renders the symlink target paths reported by installationStatus", async () => {
     render(<WelcomeInstallPage />);
 
