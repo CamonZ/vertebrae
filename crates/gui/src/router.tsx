@@ -106,6 +106,15 @@ function InstallationGuard({ children }: { children: React.ReactNode }) {
   const [needsWelcome, setNeedsWelcome] = useState(false);
 
   useEffect(() => {
+    // Dev-only escape hatch: launch with VITE_FORCE_WELCOME=1 to always see
+    // the first-run screen, even when vtb is already installed/on PATH.
+    if (import.meta.env.DEV && import.meta.env.VITE_FORCE_WELCOME === "1") {
+      setNeedsWelcome(true);
+      setIsChecking(false);
+      navigate("/welcome", { replace: true });
+      return;
+    }
+
     async function checkInstallation() {
       try {
         const result = await commands.installationStatus();
