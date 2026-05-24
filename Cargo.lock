@@ -6395,6 +6395,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vertebrae-core",
+ "vertebrae-installer",
  "vertebrae-sacrum-client",
 ]
 
@@ -6430,6 +6431,16 @@ dependencies = [
  "url",
  "vertebrae-core",
  "vertebrae-sacrum-client",
+]
+
+[[package]]
+name = "vertebrae-installer"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

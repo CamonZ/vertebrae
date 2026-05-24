@@ -1,71 +1,69 @@
-//! `vtb daemon uninstall` — unload the launchd service and remove the plist.
+//! `vtb daemon uninstall` — unload the daemon service via the shared
+//! [`vertebrae_installer`] crate.
 
 use clap::Args;
+use vertebrae_installer as installer;
 
 use super::DaemonError;
-#[cfg(target_os = "macos")]
-use {super::plist_path, std::fs, std::process::Command};
 
-/// Uninstall the vtb-daemon launchd service.
+/// Uninstall the vtb-daemon launchd / systemd service.
 #[derive(Debug, Args)]
 pub struct DaemonUninstallCommand {}
 
 impl DaemonUninstallCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
-        #[cfg(not(target_os = "macos"))]
-        {
-            Err(DaemonError::UnsupportedPlatform)
+        // Capture the service file path before uninstall so we can report
+        // it the same way the old CLI did ("Removed: <plist>").
+        let service_file = current_service_file()?;
+        let was_installed = service_file.as_ref().is_some_and(|p| p.exists());
+
+        if !was_installed {
+            return Ok(not_installed_message().to_string());
         }
 
-        #[cfg(target_os = "macos")]
-        {
-            self.execute_macos().await
-        }
-    }
+        installer::uninstall_service()?;
 
-    #[cfg(target_os = "macos")]
-    async fn execute_macos(&self) -> Result<String, DaemonError> {
-        let plist = plist_path()?;
-
-        if !plist.exists() {
-            return Ok("vtb-daemon is not installed (no plist found).".to_string());
-        }
-
-        // Unload the service (stops it if running)
-        let output = Command::new("launchctl")
-            .args(["unload", &plist.display().to_string()])
-            .output()
-            .map_err(|e| DaemonError::Launchctl {
-                action: "unload".to_string(),
-                reason: e.to_string(),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            // If the service wasn't loaded, that's fine — we still remove the plist
-            if !stderr.contains("Could not find specified service") {
-                return Err(DaemonError::Launchctl {
-                    action: "unload".to_string(),
-                    reason: stderr.trim().to_string(),
-                });
-            }
-        }
-
-        // Remove the plist file
-        fs::remove_file(&plist).map_err(|e| DaemonError::RemovePlist {
-            path: plist.display().to_string(),
-            reason: e.to_string(),
-        })?;
-
+        let removed = service_file
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         Ok(format!(
             "vtb-daemon uninstalled.\n\
              \n\
-             Removed: {}\n\
+             Removed: {removed}\n\
              \n\
-             The daemon will no longer start on login.",
-            plist.display()
+             The daemon will no longer start on login."
         ))
     }
+}
+
+#[cfg(target_os = "macos")]
+fn current_service_file() -> Result<Option<std::path::PathBuf>, DaemonError> {
+    Ok(Some(installer::macos::plist_path()?))
+}
+
+#[cfg(target_os = "linux")]
+fn current_service_file() -> Result<Option<std::path::PathBuf>, DaemonError> {
+    Ok(Some(installer::linux::unit_path()?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn current_service_file() -> Result<Option<std::path::PathBuf>, DaemonError> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn not_installed_message() -> &'static str {
+    "vtb-daemon is not installed (no plist found)."
+}
+
+#[cfg(target_os = "linux")]
+fn not_installed_message() -> &'static str {
+    "vtb-daemon is not installed (no systemd unit found)."
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn not_installed_message() -> &'static str {
+    "vtb-daemon is not installed."
 }
 
 #[cfg(test)]

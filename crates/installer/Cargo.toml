@@ -1,0 +1,18 @@
+[package]
+name = "vertebrae-installer"
+version = "0.1.0"
+edition = "2024"
+description = "Shared installer logic for staging Vertebrae binaries and registering the daemon service"
+license = "MIT"
+
+[lib]
+name = "vertebrae_installer"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = "2"
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
+serial_test = "3"
