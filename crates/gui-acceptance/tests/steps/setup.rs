@@ -1,12 +1,73 @@
+use std::path::PathBuf;
+
 use fantoccini::Locator;
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::GuiWorld;
 
+/// Resolve the Linux app-config path where the GUI's `InstallationGuard`
+/// reads the "user skipped the installer" flag.
+///
+/// This MUST match `install.rs`'s `app_config_dir()` for the bundle
+/// identifier `com.vertebrae.app`. Tauri uses the XDG config dir on Linux,
+/// so we honor `XDG_CONFIG_HOME` and fall back to `$HOME/.config`, then join
+/// the bundle identifier and the `installer-state.json` file name.
+fn installer_state_path() -> PathBuf {
+    let config_root = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| {
+            let home = std::env::var_os("HOME").expect("HOME must be set");
+            PathBuf::from(home).join(".config")
+        });
+    config_root
+        .join("com.vertebrae.app")
+        .join("installer-state.json")
+}
+
+/// Seed `installer-state.json` with `{"installer_skipped": true}` so the
+/// `InstallationGuard` renders guarded routes instead of redirecting to
+/// `/welcome`. Every non-`@first_run` scenario relies on this — without it
+/// the clean container (vtb not installed, not on PATH, no skip flag) would
+/// be redirected to the welcome screen and every existing scenario would fail.
+fn seed_skip_flag() {
+    let path = installer_state_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("failed to create installer-state config dir");
+    }
+    std::fs::write(&path, br#"{"installer_skipped": true}"#)
+        .expect("failed to seed installer-state.json skip flag");
+}
+
+/// Remove `installer-state.json` so a `@first_run` scenario sees the genuine
+/// first-run state and the guard redirects to `/welcome`.
+fn clear_skip_flag() {
+    let path = installer_state_path();
+    let _ = std::fs::remove_file(&path);
+}
+
 /// Before-hook: create a unique Sacrum project, register it in config.toml,
 /// navigate the GUI to /setup, select the project, and wait for redirect.
-pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str) {
+///
+/// `first_run` is `true` for scenarios tagged `@first_run`. For those we
+/// REMOVE the installer skip flag (so the welcome screen appears) and do NOT
+/// drive the project-selection flow — the first-run scenarios assert on the
+/// welcome screen itself. For every other scenario we SEED the skip flag and
+/// run the usual project selection.
+pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str, first_run: bool) {
     world.scenario_name = scenario_name.to_string();
+
+    if first_run {
+        // Genuine first-run state: no skip flag, so InstallationGuard routes
+        // to /welcome. The scenario steps navigate and assert from there.
+        clear_skip_flag();
+        return;
+    }
+
+    // Default for all other scenarios: pretend the user already dismissed the
+    // installer so guarded routes render normally.
+    seed_skip_flag();
+
     let api_token =
         std::env::var("VTB_TOKEN").expect("VTB_TOKEN must be set for GUI acceptance tests");
     let base_url = std::env::var("VTB_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
@@ -116,8 +177,12 @@ pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str) {
     world.screenshot(&client, "after-setup-select").await;
 }
 
-/// After-hook: unregister the project from config.toml and clean up the temp directory.
-pub async fn after_scenario(world: &mut GuiWorld) {
+/// After-hook: unregister the project from config.toml and clean up the temp
+/// directory. For `@first_run` scenarios, also remove anything the install
+/// flow created on the filesystem so it does not leak into later scenarios:
+/// the `~/.local/bin/vtb` symlink, the `~/.local/share/vertebrae` staging
+/// dir, and the installer-state flag file.
+pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
     // Unregister from config.toml
     if let Some(slug) = &world.project_slug {
         let _ = vertebrae_sacrum_client::unregister_project(slug);
@@ -126,5 +191,15 @@ pub async fn after_scenario(world: &mut GuiWorld) {
     // Remove temp directory
     if let Some(path) = &world.temp_dir {
         let _ = std::fs::remove_dir_all(path);
+    }
+
+    if first_run {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        if let Some(home) = home {
+            let _ = std::fs::remove_file(home.join(".local").join("bin").join("vtb"));
+            let _ = std::fs::remove_file(home.join(".local").join("bin").join("vtb-daemon"));
+            let _ = std::fs::remove_dir_all(home.join(".local").join("share").join("vertebrae"));
+        }
+        clear_skip_flag();
     }
 }

@@ -118,13 +118,19 @@ export function WelcomeInstallPage() {
     status.daemon.installed_at_symlink;
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg-secondary p-8">
+    <div
+      className="flex h-screen w-screen items-center justify-center bg-bg-secondary p-8"
+      data-testid="welcome-page"
+    >
       <div
         className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg"
         style={{ maxWidth: "640px", minWidth: "400px" }}
       >
         <div className="mb-6 text-center">
-          <h1 className="mb-2 text-3xl font-bold text-primary">
+          <h1
+            className="mb-2 text-3xl font-bold text-primary"
+            data-testid="welcome-heading"
+          >
             Welcome to Vertebrae
           </h1>
           <p className="text-text-secondary">
