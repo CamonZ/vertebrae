@@ -139,7 +139,7 @@ describe("KanbanCard", () => {
       render(<KanbanCard task={task} isSelected={true} />);
 
       const card = screen.getByRole("button", { name: /Task: Selected task/i });
-      expect(card.className).toContain("border-primary/50");
+      expect(card.className).toContain("border-[var(--color-accent)]");
     });
 
     it("does not apply selected styling when isSelected is false", () => {
@@ -147,7 +147,7 @@ describe("KanbanCard", () => {
       render(<KanbanCard task={task} isSelected={false} />);
 
       const card = screen.getByRole("button", { name: /Task: Unselected task/i });
-      expect(card.className).not.toContain("border-primary/50");
+      expect(card.className).not.toContain("border-[var(--color-accent)]");
     });
   });
 });

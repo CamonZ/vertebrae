@@ -20,22 +20,44 @@ interface TaskTreeNodeProps {
 }
 
 function getStepStyles(stepName: string | null): { bg: string; text: string } {
-  if (!stepName) return { bg: "bg-bg-tertiary", text: "text-text-muted" };
+  if (!stepName)
+    return {
+      bg: "bg-[var(--color-bg-2)]",
+      text: "text-[var(--color-fg-mute)]",
+    };
   switch (stepName.toLowerCase()) {
     case "todo":
-      return { bg: "bg-primary/10", text: "text-primary" };
+      return {
+        bg: "bg-[var(--color-accent-wash)]",
+        text: "text-[var(--color-accent)]",
+      };
     case "in_progress":
     case "in progress":
-      return { bg: "bg-warning/10", text: "text-warning" };
+      return {
+        bg: "bg-[var(--color-warn-wash)]",
+        text: "text-[var(--color-warn)]",
+      };
     case "pending_review":
     case "review":
-      return { bg: "bg-info/10", text: "text-info" };
+      return {
+        bg: "bg-[var(--color-info-wash)]",
+        text: "text-[var(--color-info)]",
+      };
     case "done":
-      return { bg: "bg-success/10", text: "text-success" };
+      return {
+        bg: "bg-[var(--color-ok-wash)]",
+        text: "text-[var(--color-ok)]",
+      };
     case "rejected":
-      return { bg: "bg-error/10", text: "text-error" };
+      return {
+        bg: "bg-[var(--color-err-wash)]",
+        text: "text-[var(--color-err)]",
+      };
     default:
-      return { bg: "bg-bg-tertiary", text: "text-text-muted" };
+      return {
+        bg: "bg-[var(--color-bg-2)]",
+        text: "text-[var(--color-fg-mute)]",
+      };
   }
 }
 
@@ -52,13 +74,13 @@ function getPriorityIndicator(
   if (!priority) return null;
   switch (priority) {
     case "critical":
-      return { icon: "!!!", color: "text-error" };
+      return { icon: "!!!", color: "text-[var(--color-err)]" };
     case "high":
-      return { icon: "!!", color: "text-warning" };
+      return { icon: "!!", color: "text-[var(--color-warn)]" };
     case "medium":
-      return { icon: "!", color: "text-text-secondary" };
+      return { icon: "!", color: "text-[var(--color-fg-soft)]" };
     case "low":
-      return { icon: "·", color: "text-text-muted" };
+      return { icon: "·", color: "text-[var(--color-fg-mute)]" };
     default:
       return null;
   }
@@ -128,27 +150,29 @@ export function TaskTreeNode({
         role="treeitem"
         aria-expanded={hasChildren ? isExpanded : undefined}
         aria-selected={isSelected}
-        className={`group relative flex h-9 cursor-pointer items-center gap-2 border-b border-border/40 pr-4 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary ${
-          isSelected ? "bg-primary/5" : "hover:bg-bg-hover/60"
+        className={`group relative flex h-9 cursor-pointer items-center gap-2 border-b border-[var(--color-line)]/60 pr-4 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+          isSelected
+            ? "bg-[var(--color-accent-wash)]/40"
+            : "hover:bg-[var(--color-bg-2)]"
         }`}
         style={{ paddingLeft: `${ROW_BASE_PADDING_PX}px` }}
       >
         {isSelected && (
-          <div className="absolute left-0 top-0 h-full w-0.5 bg-primary" />
+          <div className="absolute left-0 top-0 h-full w-0.5 bg-[var(--color-accent)]" />
         )}
 
         {/* Child count + chevron share one aligned gutter across depths. */}
         <div className="flex w-8 shrink-0 items-center justify-end gap-0.5">
           {hasChildren ? (
             <>
-              <span className="w-4 text-right font-mono text-[10px] tabular-nums text-text-muted">
+              <span className="w-4 text-right font-mono text-[10px] tabular-nums text-[var(--color-fg-mute)]">
                 {node.children.length}
               </span>
               <button
                 type="button"
                 onClick={handleToggleExpand}
                 onKeyDown={handleToggleKeyDown}
-                className="flex h-4 w-4 items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-tertiary hover:text-text-primary"
+                className="flex h-4 w-4 items-center justify-center rounded text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
                 aria-label={isExpanded ? "Collapse" : "Expand"}
               >
                 <svg
@@ -186,7 +210,7 @@ export function TaskTreeNode({
         {/* Priority */}
         <span
           className={`w-4 shrink-0 text-center font-mono text-xs font-bold ${
-            priorityIndicator?.color ?? "text-text-muted/40"
+            priorityIndicator?.color ?? "text-[var(--color-fg-faint)]"
           }`}
         >
           {priorityIndicator?.icon ?? "·"}
@@ -216,18 +240,18 @@ export function TaskTreeNode({
               aria-label={`Run state: ${runChip.label}`}
             />
           )}
-          <span className="truncate font-medium text-text-primary">
+          <span className="truncate font-medium text-[var(--color-fg)]">
             {task.title}
           </span>
           {task.needs_human_review && (
-            <span className="inline-flex shrink-0 items-center rounded-full bg-warning/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
+            <span className="inline-flex shrink-0 items-center rounded-[var(--radius-sm)] bg-[var(--color-warn-wash)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--color-warn)]">
               Review
             </span>
           )}
           {runChip && runChipStyles && (
             <span
               data-testid="task-tree-node-run-chip-label"
-              className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+              className={`inline-flex shrink-0 items-center rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] ${runChipStyles.bg} ${runChipStyles.text}`}
             >
               {runChip.label}
             </span>
@@ -238,10 +262,12 @@ export function TaskTreeNode({
         {!hideStatus && (
           <div className="flex shrink-0 items-center gap-2 text-xs">
             {task.workflow_name && (
-              <span className="text-text-muted">{task.workflow_name}</span>
+              <span className="text-[var(--color-fg-mute)]">
+                {task.workflow_name}
+              </span>
             )}
             <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${stepStyles.bg} ${stepStyles.text}`}
+              className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-[10px] font-medium ${stepStyles.bg} ${stepStyles.text}`}
             >
               {formatStepName(task.step_name)}
             </span>
@@ -253,10 +279,12 @@ export function TaskTreeNode({
           {task.created_at ? (
             <RelativeTime
               date={task.created_at}
-              className="font-mono text-[11px] tabular-nums text-text-muted"
+              className="font-mono text-[11px] tabular-nums text-[var(--color-fg-mute)]"
             />
           ) : (
-            <span className="font-mono text-[11px] text-text-muted">—</span>
+            <span className="font-mono text-[11px] text-[var(--color-fg-faint)]">
+              —
+            </span>
           )}
         </div>
       </div>

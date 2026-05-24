@@ -42,12 +42,13 @@ export function NeedsAttentionSection({
 
   return (
     <section aria-label="Needs attention">
-      <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-error">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-error" aria-hidden="true" />
-        Needs Attention
-        <span className="rounded-full bg-error/20 px-2 py-0.5 text-xs font-medium text-error">
-          {items.length}
-        </span>
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-err)]">
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-err)]"
+          aria-hidden="true"
+        />
+        <span>Zone: Attention</span>
+        <span className="ml-auto text-[var(--color-err)]/80">{items.length}</span>
       </h2>
 
       <div className="space-y-1">

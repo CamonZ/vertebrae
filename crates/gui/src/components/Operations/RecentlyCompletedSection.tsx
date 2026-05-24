@@ -34,19 +34,26 @@ export function RecentlyCompletedSection({
 
   return (
     <section aria-label="Recently completed">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-text-muted" aria-hidden="true" />
-          Recently Completed
-          <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs font-medium text-text-muted">
-            {visibleItems.length}
-          </span>
+      <div className="mb-3 flex items-baseline justify-between border-b border-[var(--color-line)] pb-2">
+        <h2 className="flex items-baseline gap-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
+          <svg
+            className="h-2.5 w-2.5"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            aria-hidden
+          >
+            <path d="M1 5l3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span>Recently Completed</span>
+          <span className="text-[var(--color-ok)]/70">{visibleItems.length}</span>
         </h2>
         {visibleItems.length > 1 && (
           <button
             type="button"
             onClick={handleDismissAll}
-            className="text-xs text-text-muted transition-colors hover:text-text-secondary"
+            className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg-soft)]"
           >
             Dismiss all
           </button>
