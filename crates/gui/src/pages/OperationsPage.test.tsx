@@ -8,6 +8,7 @@ import {
 } from "../test/test-utils";
 import { OperationsPage } from "./OperationsPage";
 import type { Task, StepExecution, TaskRun } from "../bindings";
+import { useShellStore } from "../stores/shellStore";
 
 let mockAttentionItems: {
   kind: "failed_run" | "review_request";
@@ -84,16 +85,28 @@ describe("OperationsPage", () => {
     });
   });
 
-  describe("header", () => {
-    it("renders Operations heading", () => {
+  describe("page heading", () => {
+    it("renders an Operations heading for assistive tech and route tests", () => {
       render(<OperationsPage />);
-
       expect(
         screen.getByRole("heading", { name: "Operations" }),
       ).toBeInTheDocument();
     });
+  });
 
-    it("shows live count badge when there are running operations", () => {
+  describe("shell header wiring", () => {
+    function renderActions() {
+      return render(
+        <>{useShellStore.getState().headerActions}</>,
+      );
+    }
+
+    it("publishes the page title to the shell store", () => {
+      render(<OperationsPage />);
+      expect(useShellStore.getState().pageTitle).toBe("Operations");
+    });
+
+    it("publishes a live count chip to the header when runs are active", () => {
       mockLiveItems = [
         {
           task: createMockTask({ id: "t-1", title: "Task" }),
@@ -105,11 +118,11 @@ describe("OperationsPage", () => {
         },
       ];
       render(<OperationsPage />);
-
-      expect(screen.getByText("1 running")).toBeInTheDocument();
+      const actions = renderActions();
+      expect(actions.getByText("1 running")).toBeInTheDocument();
     });
 
-    it("shows attention count badge when items need attention", () => {
+    it("publishes an attention chip to the header when items need attention", () => {
       mockAttentionItems = [
         {
           kind: "review_request",
@@ -117,21 +130,30 @@ describe("OperationsPage", () => {
         },
       ];
       render(<OperationsPage />);
-
-      expect(screen.getByText("1 need attention")).toBeInTheDocument();
+      const actions = renderActions();
+      expect(actions.getByText("1 need attention")).toBeInTheDocument();
     });
 
-    it("does not show live badge when no operations are running", () => {
+    it("omits the live chip when no runs are running", () => {
       render(<OperationsPage />);
-
-      expect(screen.queryByText(/running/)).not.toBeInTheDocument();
+      const actions = renderActions();
+      expect(actions.queryByText(/running/)).not.toBeInTheDocument();
     });
 
-    it("does not show attention badge when no items need attention", () => {
+    it("omits the attention chip when nothing needs attention", () => {
       mockReadyTasks = [createMockTask({ id: "t-1", title: "Task" })];
       render(<OperationsPage />);
+      const actions = renderActions();
+      expect(actions.queryByText(/need attention/)).not.toBeInTheDocument();
+    });
 
-      expect(screen.queryByText(/need attention/)).not.toBeInTheDocument();
+    it("pushes the attention count to the sidebar via shellStore", () => {
+      mockAttentionItems = [
+        { kind: "review_request", task: createMockTask({ id: "t-1", title: "Task" }) },
+        { kind: "failed_run", task: createMockTask({ id: "t-2", title: "Task" }) },
+      ];
+      render(<OperationsPage />);
+      expect(useShellStore.getState().needsAttentionCount).toBe(2);
     });
   });
 

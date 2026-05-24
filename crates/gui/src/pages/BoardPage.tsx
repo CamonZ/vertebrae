@@ -4,6 +4,7 @@ import type { Task, TaskLevel, TaskFilterOptions, WorkflowTransition } from "../
 import { useTasks } from "../hooks/useTasks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
+import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { popOut, stashTask } from "../utils";
@@ -160,6 +161,8 @@ export function BoardPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
   const [search, setSearch] = useState("");
+
+  useShellHeader("Board");
 
   const { tasks, isLoading: tasksLoading, error: tasksError } = useTasks(TASK_FILTER);
   const { workflows, isLoading: workflowsLoading, error: workflowsError } = useWorkflows();
