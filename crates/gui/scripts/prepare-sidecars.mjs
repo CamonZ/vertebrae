@@ -9,11 +9,10 @@
 // source binaries in `target/release/`, the script skips the rebuild and
 // the copy. That keeps `tauri:dev` fast for engineers who run it manually.
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { platform } from "node:os";
 
 const SUPPORTED_TARGETS = new Set([
   "aarch64-apple-darwin",
