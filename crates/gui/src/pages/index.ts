@@ -1,4 +1,5 @@
 export { ProjectSetupPage } from "./ProjectSetupPage";
+export { WelcomeInstallPage } from "./WelcomeInstallPage";
 export { TasksPage } from "./TasksPage";
 export { WorkflowsPage } from "./WorkflowsPage";
 export { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
