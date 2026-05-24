@@ -525,7 +525,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(useTaskStore.getState().tasks).toEqual([]);
     });
 
-    it("renders confirmation before the task content when opened from the header", () => {
+    it("renders confirmation before the scrollable task body when opened from the header", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
@@ -533,10 +533,14 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const confirmationHeading = screen.getByRole("heading", {
         name: "Delete Task?",
       });
-      const idBadge = screen.getByText(mockTaskData.id.slice(0, 8));
+      // The Acceptance Criteria heading is the first element of the
+      // scrollable body, below the static panel header chrome.
+      const bodyAnchor = screen.getByRole("heading", {
+        name: "Acceptance Criteria",
+      });
 
       expect(
-        confirmationHeading.compareDocumentPosition(idBadge) &
+        confirmationHeading.compareDocumentPosition(bodyAnchor) &
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy();
     });
