@@ -72,6 +72,8 @@ import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
 import { UnifiedChatView, projectTaskRunTrace } from "../components/Traces";
 import { popOut } from "../utils";
+import { useShellHeader } from "../hooks/useShellHeader";
+import { CanvasMiniMap } from "../components/WorkflowPipeline/overlays";
 import { isEditableShortcutTarget } from "../utils/keyboard";
 import {
   deriveActiveTaskRuns,
@@ -350,6 +352,8 @@ export function buildRenderableWorkflowTransitions(
 function AllWorkflowsPipelineInner() {
   const addToast = useToastStore((state) => state.addToast);
   const { fitView } = useReactFlow();
+
+  useShellHeader("Design");
 
   const { summary, isLoading, error, refetch } = usePipelineSummary();
 
@@ -1128,6 +1132,7 @@ function AllWorkflowsPipelineInner() {
               color="#57534e"
               bgColor="#0c0c0e"
             />
+            <CanvasMiniMap className="!bottom-12 !right-4" />
           </ReactFlow>
           <ActiveRunsPanelContainer
             onTaskSelect={handleActiveRunTaskSelect}

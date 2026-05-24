@@ -5,6 +5,7 @@ import type { TaskTreeNode } from "../types/ui";
 import { useTasks } from "../hooks/useTasks";
 import { buildTreeFromTasks, collectExpandableIds } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
+import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskFilters, TaskTreeView } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
@@ -41,6 +42,8 @@ export function TasksPage() {
   const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  useShellHeader("Tasks");
 
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
