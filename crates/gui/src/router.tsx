@@ -10,6 +10,7 @@ import { StyleguideShortcut } from "./components/StyleguideShortcut";
 import { useTheme } from "./hooks";
 import {
   ProjectSetupPage,
+  WelcomeInstallPage,
   TasksPage,
   AllWorkflowsPipeline,
   OperationsPage,
@@ -22,6 +23,7 @@ import {
   StandaloneTracesPage,
 } from "./pages";
 import { commands } from "./bindings";
+import { SplashScreen } from "./components";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -82,7 +84,84 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Guard component that decides whether the first-run welcome/consent screen
+ * should be shown. On mount it queries `installationStatus()` and redirects
+ * to `/welcome` only when ALL of these hold:
+ *
+ *   - neither component is installed at the symlink path we manage, AND
+ *   - neither component is resolvable on `$PATH` (so users who already have
+ *     `vtb`/`vtb-daemon` from e.g. `cargo install` are never blocked), AND
+ *   - the user has not previously clicked "Skip" (`skipped === false`).
+ *
+ * Otherwise it renders its children. It sits ABOVE `ProjectGuard` in the tree
+ * so the welcome screen comes before `/setup`.
+ *
+ * While the status query is in flight we render the `SplashScreen` so the
+ * first paint on app boot does not flash an empty screen.
+ */
+function InstallationGuard({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const [isChecking, setIsChecking] = useState(true);
+  const [needsWelcome, setNeedsWelcome] = useState(false);
+
+  useEffect(() => {
+    async function checkInstallation() {
+      try {
+        const result = await commands.installationStatus();
+        if (result.status === "ok") {
+          const s = result.data;
+          const firstRun =
+            !s.cli.installed_at_symlink &&
+            !s.daemon.installed_at_symlink &&
+            !s.cli.on_path &&
+            !s.daemon.on_path &&
+            !s.skipped;
+          if (firstRun) {
+            setNeedsWelcome(true);
+            navigate("/welcome", { replace: true });
+          }
+        }
+        // On error we intentionally do NOT route to /welcome — a failed
+        // status probe should never block an already-working install.
+      } catch {
+        // Same rationale: fall through to children on failure.
+      } finally {
+        setIsChecking(false);
+      }
+    }
+    checkInstallation();
+  }, [navigate]);
+
+  if (isChecking) {
+    return <SplashScreen status="Checking installation..." />;
+  }
+
+  if (needsWelcome) {
+    return null;
+  }
+
+  return <>{children}</>;
+}
+
+/**
+ * Composes the two guards in the required order: installation check first
+ * (may redirect to `/welcome`), then project selection (may redirect to
+ * `/setup`).
+ */
+function GuardedRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <InstallationGuard>
+      <ProjectGuard>{children}</ProjectGuard>
+    </InstallationGuard>
+  );
+}
+
 export const router = createBrowserRouter([
+  {
+    path: "/welcome",
+    element: <WelcomeInstallPage />,
+  },
   {
     path: "/setup",
     element: <ProjectSetupPage />,
@@ -114,57 +193,57 @@ export const router = createBrowserRouter([
       {
         path: "operations",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <OperationsPage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "board",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <BoardPage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "design",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <AllWorkflowsPipeline />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "tasks",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <TasksPage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "traces/:taskId",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <TracesPage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "traces",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <TracesPage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
       {
         path: "styleguide",
         element: (
-          <ProjectGuard>
+          <GuardedRoute>
             <StyleguidePage />
-          </ProjectGuard>
+          </GuardedRoute>
         ),
       },
     ],
