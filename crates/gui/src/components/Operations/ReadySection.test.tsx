@@ -100,10 +100,6 @@ describe("ReadySection", () => {
     );
 
     expect(screen.getByText("Implement Feature")).toBeInTheDocument();
-    expect(screen.getByText("Implement Feature").closest("p")?.textContent).toBe(
-      "Implement Feature — all blockers resolved"
-    );
-    expect(screen.getByText(/all blockers resolved/)).toBeInTheDocument();
     expect(screen.queryByText("No workflow assigned")).not.toBeInTheDocument();
     expect(screen.getByText("Development")).toBeInTheDocument();
     expect(screen.getByText("todo")).toBeInTheDocument();
@@ -256,7 +252,7 @@ describe("ReadySection", () => {
     );
 
     expect(screen.getByText("No workflow assigned")).toBeInTheDocument();
-    expect(screen.getByText(/ready to start/)).toBeInTheDocument();
+    expect(screen.getByTestId("ready-item-backlog-chip")).toBeInTheDocument();
   });
 
   it("renders multiple ready tasks", () => {

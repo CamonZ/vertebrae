@@ -6,7 +6,7 @@ import {
   createMockTaskRun,
 } from "../../test/test-utils";
 import { RunHistoryRail } from "./RunHistoryRail";
-import type { TaskRun } from "../../bindings";
+import type { Task, TaskRun } from "../../bindings";
 
 function run(overrides: Partial<TaskRun> = {}): TaskRun {
   return createMockTaskRun({
@@ -17,363 +17,348 @@ function run(overrides: Partial<TaskRun> = {}): TaskRun {
   });
 }
 
+const NOOP = (): void => undefined;
+
 describe("RunHistoryRail", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
 
-  it("renders one row per run with status pip and short id", () => {
-    const runs = [
-      run({
-        id: "run-active",
-        status: "executing",
-        started_at: "2026-01-02T08:30:00.000Z",
-      }),
-      run({
-        id: "run-done",
-        status: "completed",
-        started_at: "2026-01-01T08:00:00.000Z",
-      }),
-    ];
-    render(
-      <RunHistoryRail
-        runs={runs}
-        activeRunId="run-active"
-        activeRunSource="active"
-        onSelectRun={() => undefined}
-      />
-    );
+  describe("TASKS panel", () => {
+    it("renders the task tree with depth and highlights the current task", () => {
+      const tasks: Task[] = [
+        createMockTask({ id: "ticket-1", title: "Refactor auth", level: "ticket" }),
+        createMockTask({
+          id: "task-jwt",
+          title: "Implement JWT",
+          level: "task",
+          parent_id: "ticket-1",
+        }),
+        createMockTask({
+          id: "task-openapi",
+          title: "Update OpenAPI",
+          level: "task",
+          parent_id: "ticket-1",
+        }),
+      ];
+      render(
+        <RunHistoryRail
+          tasks={tasks}
+          runs={[]}
+          currentTaskId="task-jwt"
+          activeRunId={null}
+          activeRunSource="none"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
 
-    const rows = screen.getAllByTestId("run-history-row");
-    expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
-      "run-active",
-      "run-done",
-    ]);
-    expect(rows[0].getAttribute("data-status")).toBe("executing");
-    expect(rows[0].getAttribute("data-terminal")).toBe("false");
-    expect(rows[1].getAttribute("data-terminal")).toBe("true");
-    expect(rows[0].getAttribute("data-active")).toBe("true");
-    expect(rows[0].getAttribute("data-active-source")).toBe("active");
-    // Short id render appears in the row content.
-    expect(screen.getByText(/run-acti/i)).toBeTruthy();
+      const rows = screen.getAllByTestId("run-history-task-row");
+      expect(rows.map((r) => r.getAttribute("data-task-id"))).toEqual([
+        "ticket-1",
+        "task-jwt",
+        "task-openapi",
+      ]);
+      expect(rows.map((r) => r.getAttribute("data-depth"))).toEqual([
+        "0",
+        "1",
+        "1",
+      ]);
+      expect(rows.map((r) => r.getAttribute("data-active"))).toEqual([
+        "false",
+        "true",
+        "false",
+      ]);
+    });
+
+    it("calls onSelectTask with the row's id when a task is clicked", () => {
+      const onSelectTask = vi.fn();
+      const tasks: Task[] = [
+        createMockTask({ id: "ticket-1", title: "Refactor auth", level: "ticket" }),
+        createMockTask({
+          id: "task-jwt",
+          title: "Implement JWT",
+          level: "task",
+          parent_id: "ticket-1",
+        }),
+      ];
+      render(
+        <RunHistoryRail
+          tasks={tasks}
+          runs={[]}
+          currentTaskId="ticket-1"
+          activeRunId={null}
+          activeRunSource="none"
+          onSelectTask={onSelectTask}
+          onSelectRun={NOOP}
+        />
+      );
+
+      const jwtRow = screen
+        .getAllByTestId("run-history-task-row")
+        .find((row) => row.getAttribute("data-task-id") === "task-jwt");
+      if (!jwtRow) throw new Error("missing jwt row");
+      fireEvent.click(jwtRow.querySelector("button")!);
+      expect(onSelectTask).toHaveBeenCalledWith("task-jwt");
+    });
+
+    it("renders an empty state when there are no tasks", () => {
+      render(
+        <RunHistoryRail
+          tasks={[]}
+          runs={[]}
+          currentTaskId={null}
+          activeRunId={null}
+          activeRunSource="none"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      expect(screen.getByTestId("run-history-tasks-empty")).toBeTruthy();
+    });
   });
 
-  it("invokes onSelectRun with the row's id when clicked", () => {
-    const onSelectRun = vi.fn();
-    render(
-      <RunHistoryRail
-        runs={[
-          run({ id: "run-1", status: "completed" }),
-          run({ id: "run-2", status: "completed" }),
-        ]}
-        activeRunId="run-1"
-        activeRunSource="latest"
-        onSelectRun={onSelectRun}
-      />
-    );
+  describe("RUNS panel", () => {
+    it("only shows runs for the currently selected task", () => {
+      const runs = [
+        run({
+          id: "run-current-a",
+          task_id: "task-1",
+          status: "executing",
+          started_at: "2026-01-02T08:30:00.000Z",
+        }),
+        run({
+          id: "run-current-b",
+          task_id: "task-1",
+          status: "completed",
+          started_at: "2026-01-01T08:00:00.000Z",
+        }),
+        run({
+          id: "run-other",
+          task_id: "task-2",
+          status: "completed",
+          started_at: "2026-01-03T00:00:00.000Z",
+        }),
+      ];
+      render(
+        <RunHistoryRail
+          tasks={[
+            createMockTask({ id: "task-1", title: "First" }),
+            createMockTask({ id: "task-2", title: "Second" }),
+          ]}
+          runs={runs}
+          currentTaskId="task-1"
+          activeRunId="run-current-a"
+          activeRunSource="active"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
 
-    const run2Row = screen
-      .getAllByTestId("run-history-row")
-      .find((row) => row.getAttribute("data-run-id") === "run-2");
-    if (!run2Row) throw new Error("missing run-2 row");
-    fireEvent.click(run2Row.querySelector("button")!);
-    expect(onSelectRun).toHaveBeenCalledWith("run-2");
-  });
+      const rows = screen.getAllByTestId("run-history-row");
+      expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
+        "run-current-a",
+        "run-current-b",
+      ]);
+      expect(rows[0].getAttribute("data-status")).toBe("executing");
+      expect(rows[0].getAttribute("data-terminal")).toBe("false");
+      expect(rows[1].getAttribute("data-terminal")).toBe("true");
+      expect(rows[0].getAttribute("data-active")).toBe("true");
+      expect(rows[0].getAttribute("data-active-source")).toBe("active");
+    });
 
-  it("groups by task id even before task metadata loads", () => {
-    render(
-      <RunHistoryRail
-        runs={[
-          run({
-            id: "run-stopped",
-            task_id: "task-1",
-            status: "stopped",
-            started_at: "2026-01-01T08:00:00.000Z",
-          }),
-          run({
-            id: "run-active",
-            task_id: "task-1",
-            status: "executing",
-            started_at: "2026-01-01T09:00:00.000Z",
-          }),
-          run({
-            id: "run-child",
-            task_id: "task-child",
-            status: "completed",
-            started_at: "2026-01-01T10:00:00.000Z",
-          }),
-        ]}
-        activeRunId="run-active"
-        activeRunSource="selected"
-        onSelectRun={() => undefined}
-      />
-    );
+    it("invokes onSelectRun with the row's id when clicked", () => {
+      const onSelectRun = vi.fn();
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[
+            run({ id: "run-1", task_id: "task-1", status: "completed" }),
+            run({ id: "run-2", task_id: "task-1", status: "completed" }),
+          ]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="latest"
+          onSelectTask={NOOP}
+          onSelectRun={onSelectRun}
+        />
+      );
 
-    const groups = screen.getAllByTestId("run-history-task-group");
-    expect(groups.map((g) => g.getAttribute("data-task-id"))).toEqual([
-      "task-1",
-      "task-child",
-    ]);
-    expect(
-      screen
-        .getAllByTestId("run-history-task-group-id")
-        .map((badge) => badge.getAttribute("data-full-id"))
-    ).toEqual(["task-1", "task-child"]);
-    expect(groups.map((g) => g.getAttribute("data-attempt-count"))).toEqual([
-      "2",
-      "1",
-    ]);
-    const rows = screen.getAllByTestId("run-history-row");
-    expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
-      "run-active",
-      "run-stopped",
-      "run-child",
-    ]);
-  });
-
-  it("groups stopped and restarted attempts under one task node before child task groups", () => {
-    render(
-      <RunHistoryRail
-        tasks={[
-          createMockTask({
-            id: "task-1",
-            title: "Ticket task",
-            level: "ticket",
-          }),
-          createMockTask({
-            id: "task-child",
-            title: "Child task",
-            level: "task",
-            parent_id: "task-1",
-          }),
-        ]}
-        runs={[
-          run({
-            id: "run-stopped",
-            task_id: "task-1",
-            status: "stopped",
-            started_at: "2026-01-01T08:00:00.000Z",
-          }),
-          run({
-            id: "run-active",
-            task_id: "task-1",
-            status: "executing",
-            started_at: "2026-01-01T09:00:00.000Z",
-          }),
-          run({
-            id: "run-child",
-            task_id: "task-child",
-            status: "completed",
-            started_at: "2026-01-01T10:00:00.000Z",
-          }),
-        ]}
-        activeRunId="run-active"
-        activeRunSource="active"
-        onSelectRun={() => undefined}
-      />
-    );
-
-    const groups = screen.getAllByTestId("run-history-task-group");
-    expect(groups.map((g) => g.getAttribute("data-task-id"))).toEqual([
-      "task-1",
-      "task-child",
-    ]);
-    expect(groups.map((g) => g.getAttribute("data-attempt-count"))).toEqual([
-      "2",
-      "1",
-    ]);
-    expect(
-      screen
-        .getAllByTestId("run-history-task-group-id")
-        .map((badge) => badge.getAttribute("data-full-id"))
-    ).toEqual(["task-1", "task-child"]);
-    expect(
-      screen
+      const run2Row = screen
         .getAllByTestId("run-history-row")
-        .map((r) => r.getAttribute("data-run-id"))
-    ).toEqual(["run-active", "run-stopped", "run-child"]);
+        .find((row) => row.getAttribute("data-run-id") === "run-2");
+      if (!run2Row) throw new Error("missing run-2 row");
+      fireEvent.click(run2Row.querySelector("button")!);
+      expect(onSelectRun).toHaveBeenCalledWith("run-2");
+    });
+
+    it("sorts runs newest-first within the selected task", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[
+            run({
+              id: "run-old",
+              task_id: "task-1",
+              status: "completed",
+              started_at: "2026-01-01T00:00:00.000Z",
+            }),
+            run({
+              id: "run-mid",
+              task_id: "task-1",
+              status: "stopped",
+              started_at: "2026-01-02T00:00:00.000Z",
+            }),
+            run({
+              id: "run-new",
+              task_id: "task-1",
+              status: "executing",
+              started_at: "2026-01-03T00:00:00.000Z",
+            }),
+          ]}
+          currentTaskId="task-1"
+          activeRunId="run-new"
+          activeRunSource="active"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+
+      const rows = screen.getAllByTestId("run-history-row");
+      expect(rows.map((r) => r.getAttribute("data-run-id"))).toEqual([
+        "run-new",
+        "run-mid",
+        "run-old",
+      ]);
+    });
+
+    it("renders a source label for non-selected sources", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "executing" })]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="active"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      const source = screen.getByTestId("run-history-row-source");
+      expect(source.textContent).toBe("active");
+    });
+
+    it("hides the source label when the run is explicitly selected", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "completed" })]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="selected"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      expect(screen.queryByTestId("run-history-row-source")).toBeNull();
+    });
+
+    it("shows a 'no runs' empty state when the selected task has no runs", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[]}
+          currentTaskId="task-1"
+          activeRunId={null}
+          activeRunSource="none"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      expect(screen.getByTestId("run-history-rail-empty")).toBeTruthy();
+      expect(screen.queryByTestId("run-history-row")).toBeNull();
+    });
+
+    it("shows a 'select a task' prompt when no task is selected", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "completed" })]}
+          currentTaskId={null}
+          activeRunId={null}
+          activeRunSource="none"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      expect(screen.getByTestId("run-history-rail-empty").textContent).toMatch(
+        /select a task/i
+      );
+      expect(screen.queryByTestId("run-history-row")).toBeNull();
+    });
   });
 
-  it("collapses and expands a task group with its runs and descendants", () => {
-    render(
-      <RunHistoryRail
-        tasks={[
-          createMockTask({
-            id: "task-1",
-            title: "Ticket task",
-            level: "ticket",
-          }),
-          createMockTask({
-            id: "task-child",
-            title: "Child task",
-            level: "task",
-            parent_id: "task-1",
-          }),
-        ]}
-        runs={[
-          run({
-            id: "run-stopped",
-            task_id: "task-1",
-            status: "stopped",
-            started_at: "2026-01-01T08:00:00.000Z",
-          }),
-          run({
-            id: "run-active",
-            task_id: "task-1",
-            status: "executing",
-            started_at: "2026-01-01T09:00:00.000Z",
-          }),
-          run({
-            id: "run-child",
-            task_id: "task-child",
-            status: "completed",
-            started_at: "2026-01-01T10:00:00.000Z",
-          }),
-        ]}
-        activeRunId="run-active"
-        activeRunSource="selected"
-        onSelectRun={() => undefined}
-      />
-    );
+  describe("chrome", () => {
+    it("collapses to a thin rail when collapsed=true", () => {
+      const onToggleCollapsed = vi.fn();
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "executing" })]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="active"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+          collapsed
+          onToggleCollapsed={onToggleCollapsed}
+        />
+      );
+      const rail = screen.getByTestId("run-history-rail");
+      expect(rail.getAttribute("data-collapsed")).toBe("true");
+      fireEvent.click(screen.getByTestId("run-history-rail-toggle"));
+      expect(onToggleCollapsed).toHaveBeenCalled();
+    });
 
-    const rootToggle = screen.getAllByTestId(
-      "run-history-task-group-toggle"
-    )[0];
-    expect(rootToggle).toHaveAttribute("aria-expanded", "true");
+    it("emits onSwitchTask when the switch action is clicked", () => {
+      const onSwitchTask = vi.fn();
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "completed" })]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="latest"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+          onSwitchTask={onSwitchTask}
+        />
+      );
+      fireEvent.click(screen.getByTestId("run-history-rail-switch-task"));
+      expect(onSwitchTask).toHaveBeenCalled();
+    });
 
-    fireEvent.click(rootToggle);
-    expect(rootToggle).toHaveAttribute("aria-expanded", "false");
-    expect(
-      screen
-        .getAllByTestId("run-history-task-group")
-        .map((group) => group.getAttribute("data-task-id"))
-    ).toEqual(["task-1"]);
-    expect(screen.queryAllByTestId("run-history-row")).toHaveLength(0);
+    it("supports keyboard resizing and persists the panel width", () => {
+      render(
+        <RunHistoryRail
+          tasks={[createMockTask({ id: "task-1", title: "Task" })]}
+          runs={[run({ id: "run-1", task_id: "task-1", status: "completed" })]}
+          currentTaskId="task-1"
+          activeRunId="run-1"
+          activeRunSource="latest"
+          onSelectTask={NOOP}
+          onSelectRun={NOOP}
+        />
+      );
+      const rail = screen.getByTestId("run-history-rail");
+      const handle = screen.getByTestId("run-history-rail-resize-handle");
 
-    fireEvent.click(rootToggle);
-    expect(rootToggle).toHaveAttribute("aria-expanded", "true");
-    expect(
-      screen
-        .getAllByTestId("run-history-task-group")
-        .map((group) => group.getAttribute("data-task-id"))
-    ).toEqual(["task-1", "task-child"]);
-    expect(
-      screen
-        .getAllByTestId("run-history-row")
-        .map((row) => row.getAttribute("data-run-id"))
-    ).toEqual(["run-active", "run-stopped", "run-child"]);
-  });
-
-  it("deduplicates repeated runs and does not loop on cyclic parent data", () => {
-    render(
-      <RunHistoryRail
-        runs={[
-          run({ id: "run-root", parent_task_run_id: null }),
-          run({ id: "run-child", parent_task_run_id: "run-root" }),
-          run({ id: "run-child", parent_task_run_id: "run-root" }),
-          run({ id: "run-cycle-a", parent_task_run_id: "run-cycle-b" }),
-          run({ id: "run-cycle-b", parent_task_run_id: "run-cycle-a" }),
-        ]}
-        activeRunId="run-root"
-        activeRunSource="selected"
-        onSelectRun={() => undefined}
-      />
-    );
-
-    const rows = screen.getAllByTestId("run-history-row");
-    expect(new Set(rows.map((r) => r.getAttribute("data-run-id")))).toEqual(
-      new Set(["run-root", "run-child", "run-cycle-a", "run-cycle-b"])
-    );
-  });
-
-  it("renders a source label for non-selected sources", () => {
-    render(
-      <RunHistoryRail
-        runs={[run({ id: "run-1", status: "executing" })]}
-        activeRunId="run-1"
-        activeRunSource="active"
-        onSelectRun={() => undefined}
-      />
-    );
-    const source = screen.getByTestId("run-history-row-source");
-    expect(source.textContent).toBe("active");
-  });
-
-  it("hides the source label when the run is explicitly selected", () => {
-    render(
-      <RunHistoryRail
-        runs={[run({ id: "run-1", status: "completed" })]}
-        activeRunId="run-1"
-        activeRunSource="selected"
-        onSelectRun={() => undefined}
-      />
-    );
-    expect(screen.queryByTestId("run-history-row-source")).toBeNull();
-  });
-
-  it("renders an empty state when there are no runs", () => {
-    render(
-      <RunHistoryRail
-        runs={[]}
-        activeRunId={null}
-        activeRunSource="none"
-        onSelectRun={() => undefined}
-      />
-    );
-    expect(screen.getByTestId("run-history-rail-empty")).toBeTruthy();
-    expect(screen.queryByTestId("run-history-row")).toBeNull();
-  });
-
-  it("collapses to a thin rail when collapsed=true", () => {
-    const onToggleCollapsed = vi.fn();
-    render(
-      <RunHistoryRail
-        runs={[run({ id: "run-1", status: "executing" })]}
-        activeRunId="run-1"
-        activeRunSource="active"
-        onSelectRun={() => undefined}
-        collapsed
-        onToggleCollapsed={onToggleCollapsed}
-      />
-    );
-    const rail = screen.getByTestId("run-history-rail");
-    expect(rail.getAttribute("data-collapsed")).toBe("true");
-    fireEvent.click(screen.getByTestId("run-history-rail-toggle"));
-    expect(onToggleCollapsed).toHaveBeenCalled();
-  });
-
-  it("emits onSwitchTask when the switch action is clicked", () => {
-    const onSwitchTask = vi.fn();
-    render(
-      <RunHistoryRail
-        runs={[run({ id: "run-1", status: "completed" })]}
-        activeRunId="run-1"
-        activeRunSource="latest"
-        onSelectRun={() => undefined}
-        onSwitchTask={onSwitchTask}
-      />
-    );
-    fireEvent.click(screen.getByTestId("run-history-rail-switch-task"));
-    expect(onSwitchTask).toHaveBeenCalled();
-  });
-
-  it("supports keyboard resizing and persists the panel width", () => {
-    render(
-      <RunHistoryRail
-        runs={[run({ id: "run-1", status: "completed" })]}
-        activeRunId="run-1"
-        activeRunSource="latest"
-        onSelectRun={() => undefined}
-      />
-    );
-    const rail = screen.getByTestId("run-history-rail");
-    const handle = screen.getByTestId("run-history-rail-resize-handle");
-
-    expect(rail).toHaveStyle({ width: "288px" });
-    fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(rail).toHaveStyle({ width: "304px" });
-    expect(
-      window.localStorage.getItem("vertebrae.traces.runHistoryRail.width")
-    ).toBe("304");
+      expect(rail).toHaveStyle({ width: "288px" });
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      expect(rail).toHaveStyle({ width: "304px" });
+      expect(
+        window.localStorage.getItem("vertebrae.traces.runHistoryRail.width")
+      ).toBe("304");
+    });
   });
 });

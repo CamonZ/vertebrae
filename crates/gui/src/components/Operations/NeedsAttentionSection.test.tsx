@@ -37,7 +37,7 @@ describe("NeedsAttentionSection", () => {
     ];
     render(<NeedsAttentionSection items={items} />);
 
-    expect(screen.getByText("Needs Attention")).toBeInTheDocument();
+    expect(screen.getByText("Zone: Attention")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 

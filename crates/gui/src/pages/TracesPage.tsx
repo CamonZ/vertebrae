@@ -61,6 +61,7 @@ import { useWorkflows } from "../hooks/useWorkflows";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
 import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTraceFilters } from "../hooks/useTraceFilters";
+import { useShellHeader } from "../hooks/useShellHeader";
 import { useTaskStore } from "../stores/taskStore";
 import type { TaggedConversationEvent } from "../types/conversation";
 import { computeExecutionRollups, popOut } from "../utils";
@@ -304,6 +305,8 @@ export function TracesPage({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const pickerRef = useRef<TaskPickerHandle | null>(null);
   const traceTaskFetchSeqRef = useRef(0);
+
+  useShellHeader("Traces");
 
   const safeTaskId = taskId ?? null;
   const {
@@ -790,9 +793,11 @@ export function TracesPage({
         ) : showRunHistoryRail ? (
           <RunHistoryRail
             runs={railRuns}
-            tasks={traceTasks}
+            tasks={traceTasks.filter((t) => railTaskIds.includes(t.id))}
+            currentTaskId={safeTaskId}
             activeRunId={activeTraceRun?.id ?? null}
             activeRunSource={activeTraceRunSource}
+            onSelectTask={handlePickTask}
             onSelectRun={handleSelectRun}
             onSwitchTask={() => setPickerInRail(true)}
             collapsed={railCollapsed}

@@ -3,6 +3,7 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useLiveChatStore } from "../../stores/liveChatStore";
 import { detachLiveChat } from "../../utils/detachLiveChat";
 import { MarkdownContent } from "../shared/MarkdownContent";
+import { ChatMessage } from "../molecules/ChatMessage";
 import { LiveChatHistoryDrawer } from "./LiveChatHistoryDrawer";
 import { ChatInput } from "../ChatInput";
 
@@ -24,8 +25,8 @@ function LiveChatHeader({
   onClose,
 }: LiveChatHeaderProps) {
   return (
-    <div className="z-30 flex h-12 items-center gap-1 border-b border-border bg-bg-primary px-3">
-      <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
+    <div className="z-30 flex h-12 items-center gap-1 border-b border-[var(--color-line)] bg-[var(--color-bg)] px-3">
+      <span className="shrink-0 rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-accent)]">
         Live
       </span>
       <button
@@ -33,7 +34,7 @@ function LiveChatHeader({
         onClick={onToggleHistory}
         aria-label="Toggle chat history"
         title="Toggle chat history"
-        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
       >
         <svg
           className="h-3.5 w-3.5"
@@ -56,7 +57,7 @@ function LiveChatHeader({
         disabled={!hasLeavableState}
         aria-label="Start new chat"
         title="Start new chat"
-        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+        className="flex items-center gap-1 rounded px-2 py-1 text-xs text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-soft)]"
       >
         <svg
           className="h-3.5 w-3.5"
@@ -80,7 +81,7 @@ function LiveChatHeader({
           onClick={onDetach}
           aria-label="Detach live chat"
           title="Detach into own window"
-          className="rounded p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+          className="rounded p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
         >
           <svg
             className="h-3.5 w-3.5"
@@ -103,7 +104,7 @@ function LiveChatHeader({
           onClick={onClose}
           aria-label="Close live chat"
           title="Close live chat"
-          className="rounded p-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+          className="rounded p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
         >
           <svg
             className="h-3.5 w-3.5"
@@ -233,10 +234,10 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
           {messages.length === 0 && (
             <div className="flex h-full flex-col items-center justify-center text-center">
-              <p className="text-sm text-text-secondary">
+              <p className="text-sm text-[var(--color-fg-soft)]">
                 Start a live chat
               </p>
-              <p className="mt-1 text-xs text-text-muted">
+              <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
                 Type a message and press Enter to begin
               </p>
               {showResumeLink && (
@@ -244,7 +245,7 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
                   type="button"
                   onClick={() => void resumeLastSession()}
                   aria-label="Resume last session"
-                  className="mt-3 text-xs text-primary transition-colors hover:underline"
+                  className="mt-3 text-xs text-[var(--color-accent)] transition-colors hover:underline"
                 >
                   Resume last session →
                 </button>
@@ -252,26 +253,41 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
             </div>
           )}
 
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              data-testid={`live-chat-message-${message.role}`}
-              className={`max-w-[85%] rounded-lg px-4 py-3 ${
-                message.role === "user"
-                  ? "self-end bg-primary/20"
-                  : "self-start bg-bg-tertiary"
-              } ${message.error ? "border border-error/40" : ""}`}
-            >
-              <MarkdownContent text={message.content} />
-              <div className="mt-2 flex items-center justify-end gap-2 text-[11px] text-text-muted">
-                {message.pending && <span>sending…</span>}
-                {message.error && (
-                  <span className="text-error">{message.error}</span>
-                )}
-                <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+          {messages.map((message) => {
+            const role = message.role === "user" ? "user" : "assistant";
+            const author = role === "user" ? "YOU" : "CLAUDE";
+            return (
+              <div
+                key={message.id}
+                data-testid={`live-chat-message-${message.role}`}
+                className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                <ChatMessage
+                  role={role}
+                  author={author}
+                  timestamp={new Date(message.createdAt).toLocaleTimeString()}
+                  streaming={message.pending}
+                  className={
+                    message.error
+                      ? "ring-1 ring-[var(--color-err)]/40 rounded-[var(--radius-lg)]"
+                      : undefined
+                  }
+                >
+                  <MarkdownContent text={message.content} />
+                  {(message.pending || message.error) && (
+                    <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--color-fg-mute)]">
+                      {message.pending && <span>sending…</span>}
+                      {message.error && (
+                        <span className="text-[var(--color-err)]">
+                          {message.error}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </ChatMessage>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
@@ -282,12 +298,12 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
       </div>
 
       {lastError && (
-        <div className="border-t border-error/30 bg-error/10 px-3 py-1.5 text-xs text-error">
+        <div className="border-t border-[var(--color-err)]/30 bg-[var(--color-err)]/10 px-3 py-1.5 text-xs text-[var(--color-err)]">
           {lastError}
         </div>
       )}
 
-      <div className="border-t border-border bg-bg-secondary p-3">
+      <div className="border-t border-[var(--color-line)] bg-[var(--color-bg-1)] p-3">
         <ChatInput
           ref={inputRef}
           value={inputValue}

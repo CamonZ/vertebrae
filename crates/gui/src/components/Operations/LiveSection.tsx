@@ -31,15 +31,13 @@ export function LiveSection({ items }: LiveSectionProps) {
 
   return (
     <section aria-label="Live operations">
-      <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-success">
-        <span className="relative flex h-2.5 w-2.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-sm bg-success" />
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-ok)] opacity-75" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" />
         </span>
-        Live
-        <span className="rounded-full bg-success/20 px-2 py-0.5 text-xs font-medium text-success">
-          {items.length}
-        </span>
+        <span>Live</span>
+        <span className="ml-auto text-[var(--color-ok)]/70">{items.length}</span>
       </h2>
 
       <div className="space-y-1">

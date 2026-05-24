@@ -145,11 +145,11 @@ describe("ChatWindowManager", () => {
 
     // The active tab (div[role=tab]) should have the selected indicator
     const tabA = screen.getByTitle("Task: Task A");
-    expect(tabA.className).toContain("bg-bg-secondary");
+    expect(tabA.className).toContain("bg-[var(--color-bg-1)]");
     expect(tabA.getAttribute("aria-selected")).toBe("true");
 
     const tabB = screen.getByTitle("Workflow: Workflow B");
-    expect(tabB.className).not.toContain("bg-bg-secondary");
+    expect(tabB.className).not.toContain("bg-[var(--color-bg-1)]");
     expect(tabB.getAttribute("aria-selected")).toBe("false");
   });
 
@@ -250,7 +250,9 @@ describe("ChatWindowManager", () => {
 
     // The tab should contain a green dot for active session
     const tab = screen.getByTitle("Task: Active Chat");
-    expect(tab.querySelector(".bg-success")).toBeInTheDocument();
+    expect(
+      tab.querySelector('[data-testid="chat-tab-active-dot"]')
+    ).toBeInTheDocument();
   });
 
   it("shows closed status dot for closed sessions", () => {
@@ -269,7 +271,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     const tab = screen.getByTitle("Task: Closed Chat");
-    expect(tab.querySelector(".bg-text-muted")).toBeInTheDocument();
+    expect(
+      tab.querySelector('[data-testid="chat-tab-closed-dot"]')
+    ).toBeInTheDocument();
   });
 
   // --- E) Active tab indicator exclusivity ---
@@ -295,9 +299,13 @@ describe("ChatWindowManager", () => {
     const inactiveTab = screen.getByTitle("Workflow: Workflow B");
 
     // Active tab has the accent bar
-    expect(activeTab.querySelector(".bg-accent")).toBeInTheDocument();
+    expect(
+      activeTab.querySelector('[data-testid="chat-tab-active-bar"]')
+    ).toBeInTheDocument();
     // Inactive tab does NOT
-    expect(inactiveTab.querySelector(".bg-accent")).not.toBeInTheDocument();
+    expect(
+      inactiveTab.querySelector('[data-testid="chat-tab-active-bar"]')
+    ).not.toBeInTheDocument();
   });
 
   // --- F) Status dot absence ---
@@ -319,8 +327,12 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     const tab = screen.getByTitle("Task: Idle Chat");
-    expect(tab.querySelector(".bg-success")).not.toBeInTheDocument();
-    expect(tab.querySelector(".bg-text-muted")).not.toBeInTheDocument();
+    expect(
+      tab.querySelector('[data-testid="chat-tab-active-dot"]')
+    ).not.toBeInTheDocument();
+    expect(
+      tab.querySelector('[data-testid="chat-tab-closed-dot"]')
+    ).not.toBeInTheDocument();
   });
 
   // --- G) Scope icons per type ---

@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps, type Node } from "@xyflow/react";
 import type { Step } from "../../bindings";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { NODE_SIZING, NODE_SHADOW_STYLE, HANDLE_SIZING } from "./nodeConstants";
+import { stepTypeStyle } from "./stepTypeStyling";
 
 /**
  * Data passed to StepNode
@@ -51,12 +52,15 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
 
   // Use isSelected from data prop if available, otherwise fall back to ReactFlow's selected
   const isNodeSelected = isSelected ?? selected;
+  const typeStyle = stepTypeStyle(step.step_type);
+  const isExecuting = data.isExecuting;
 
   return (
     <button
       type="button"
       onClick={handleClick}
       data-testid={`step-node-${step.name}`}
+      data-step-kind={typeStyle.kind}
       className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
         isFlashing ? "animate-flash-border" : ""
       } ${
@@ -66,8 +70,19 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       }`}
       style={{
         boxShadow: NODE_SHADOW_STYLE.boxShadow,
+        background: `linear-gradient(to bottom, color-mix(in oklch, var(${typeStyle.washVar}) 30%, var(--color-bg-2)), var(--color-bg-2))`,
       }}
     >
+      {/* Top step-type accent bar */}
+      <span
+        aria-hidden
+        data-testid="step-type-bar"
+        className={`pointer-events-none absolute left-0 right-0 top-0 h-[3px] ${
+          isExecuting ? "animate-status-pulse" : ""
+        }`}
+        style={{ backgroundColor: `var(${typeStyle.barVar})` }}
+      />
+
       {/* Subtle inner glow effect */}
       <div
         className={`pointer-events-none absolute inset-0 ${NODE_SIZING.borderRadiusClass} from-primary/5 to-transparent`}
@@ -110,6 +125,15 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
                 Final
               </span>
             )}
+            <span
+              data-testid="step-type-icon"
+              title={typeStyle.label}
+              aria-label={typeStyle.label}
+              className="ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center text-[12px]"
+              style={{ color: `var(${typeStyle.fgVar})` }}
+            >
+              {typeStyle.icon}
+            </span>
           </div>
           {step.goal && (
             <div className="w-2/3">

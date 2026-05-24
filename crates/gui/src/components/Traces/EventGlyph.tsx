@@ -133,9 +133,9 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
 }
 
 const VARIANT_CLASS: Record<ResolvedGlyph["variant"], string> = {
-  default: "text-text-secondary",
-  filled: "text-text-primary",
-  error: "text-error",
+  default: "text-[var(--color-fg-soft)]",
+  filled: "text-[var(--color-fg)]",
+  error: "text-[var(--color-err)]",
 };
 
 interface GlyphDef {
@@ -326,7 +326,7 @@ export interface EventGlyphProps {
   event: GlyphInput;
   size?: number;
   className?: string;
-  /** Overrides the variant's default text color class (e.g. "text-info"). */
+  /** Overrides the variant's default text color class (e.g. "text-[var(--color-info)]"). */
   tintClassName?: string;
   title?: string;
 }

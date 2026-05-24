@@ -27,7 +27,7 @@ function Disclosure({ label, testIdBase, children }: DisclosureProps): ReactNode
         data-testid={`${testIdBase}-toggle`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary"
+        className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
       >
         <span aria-hidden="true">{open ? "▾" : "▸"}</span>
         <span>{label}</span>
@@ -59,7 +59,7 @@ export function HumanInputGate({
   const schemaJson = formatSchema(outputSchema);
 
   const containerClass = [
-    "rounded-lg border border-info/40 bg-info/5 p-4",
+    "rounded-[var(--radius-lg)] border border-[var(--color-info)]/40 bg-[var(--color-info)]/5 p-4 shadow-[var(--shadow-2)]",
     className,
   ]
     .filter(Boolean)
@@ -78,7 +78,7 @@ export function HumanInputGate({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
           <svg
-            className="mt-0.5 h-4 w-4 shrink-0 text-info"
+            className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-info)]"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -92,16 +92,16 @@ export function HumanInputGate({
             />
           </svg>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-text-primary">
+            <p className="text-sm font-medium text-[var(--color-fg)]">
               Waiting on human input
             </p>
-            <p className="mt-0.5 text-xs text-text-secondary">
+            <p className="mt-0.5 text-xs text-[var(--color-fg-soft)]">
               {stepName ? (
                 <>
                   Step{" "}
                   <span
                     data-testid="human-input-gate-step"
-                    className="font-mono text-text-primary"
+                    className="font-mono text-[var(--color-fg)]"
                   >
                     {stepName}
                   </span>{" "}
@@ -119,7 +119,7 @@ export function HumanInputGate({
             data-testid="human-input-gate-stop"
             onClick={onStop}
             disabled={isStopping}
-            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-error px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-error/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-error disabled:cursor-not-allowed disabled:opacity-50"
+            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-err)] disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Stop waiting run"
             title="Stop the orchestrator for this waiting run"
           >
@@ -141,7 +141,7 @@ export function HumanInputGate({
       </div>
       <dl className="mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
         <div>
-          <dt className="font-mono uppercase tracking-wider text-text-muted">
+          <dt className="font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">
             Run
           </dt>
           <dd>
@@ -154,7 +154,7 @@ export function HumanInputGate({
           </dd>
         </div>
         <div>
-          <dt className="font-mono uppercase tracking-wider text-text-muted">
+          <dt className="font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">
             Execution
           </dt>
           <dd>
@@ -174,7 +174,7 @@ export function HumanInputGate({
             <Disclosure label="Prompt" testIdBase="human-input-gate-prompt">
               <div
                 data-testid="human-input-gate-prompt"
-                className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
               >
                 <MarkdownContent text={prompt as string} />
               </div>
@@ -187,7 +187,7 @@ export function HumanInputGate({
             >
               <pre
                 data-testid="human-input-gate-schema"
-                className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 font-mono text-[11px] text-text-primary"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px] text-[var(--color-fg)]"
               >
                 {schemaJson}
               </pre>

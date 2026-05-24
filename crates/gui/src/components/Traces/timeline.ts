@@ -311,7 +311,7 @@ export function buildTimelineProjection(
         toolName: "",
         isError: event.isError,
       });
-    } else if (event.kind === "thinking") {
+    } else if (event.kind === "thinking" || event.kind === "assistant_message") {
       const rowIndex = rowIndexByTaskId.get(t.taskId);
       if (rowIndex !== undefined) {
         const marker: MainMarker = {
@@ -534,7 +534,7 @@ export function buildTimelineProjectionFromProjection(
         toolName: "",
         isError: event.isError,
       });
-    } else if (event.kind === "thinking") {
+    } else if (event.kind === "thinking" || event.kind === "assistant_message") {
       const runId = runIdByExecutionId.get(t.executionId);
       const rowIndex = runId !== undefined ? rowIndexByRunId.get(runId) : undefined;
       if (rowIndex !== undefined) {

@@ -78,11 +78,10 @@ export interface ThinkingEvent extends BaseEvent {
 }
 
 /**
- * Final assistant text intended for the user (distinct from internal
- * reasoning). Codex emits this as `agent_message`; Claude's free-form
- * `text` content items still render through {@link ThinkingEvent} because
- * Claude doesn't separate "reasoning" and "final reply" in the same
- * message stream.
+ * Final assistant text intended for the user. Codex emits this as
+ * `agent_message` (distinct from `reasoning`); Claude `text` content items
+ * map here too since they're the user-facing reply (Claude's extended
+ * thinking lives in a separate content type that --jsonl doesn't surface).
  */
 export interface AssistantMessageEvent extends BaseEvent {
   kind: "assistant_message";
@@ -279,8 +278,12 @@ export function parseClaudeMessage(
       if (raw.message?.content) {
         for (const item of raw.message.content) {
           if (item.type === "text" && item.text) {
+            // Claude's `text` content items are its user-facing reply (extended
+            // thinking has its own separate content type, not surfaced in
+            // --jsonl). Map them to `assistant_message` so they render in the
+            // chat bubble layout the same way Codex's `agent_message` does.
             events.push({
-              kind: "thinking",
+              kind: "assistant_message",
               timestamp,
               text: item.text,
             });

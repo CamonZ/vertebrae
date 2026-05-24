@@ -32,7 +32,7 @@ export function ChatWindowManager() {
       glowColor="from-accent/0 via-accent/30 to-accent/0"
     >
       {/* Tab bar */}
-      <div className="relative flex items-center border-b border-border bg-bg-primary">
+      <div className="relative flex items-center border-b border-[var(--color-line)] bg-[var(--color-bg)]">
         {/* Neural grid background */}
         <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
 
@@ -49,17 +49,20 @@ export function ChatWindowManager() {
                   focusSession(session.id);
                 }
               }}
-              className={`group relative flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-border px-3 py-2 text-xs transition-colors ${
+              className={`group relative flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-[var(--color-line)] px-3 py-2 text-xs transition-colors ${
                 activeSessionId === session.id
-                  ? "bg-bg-secondary text-text-primary"
-                  : "text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+                  ? "bg-[var(--color-bg-1)] text-[var(--color-fg)]"
+                  : "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
               }`}
               title={`${scopeLabel(session.scope)}: ${session.label}`}
               aria-selected={activeSessionId === session.id}
             >
               {/* Active tab indicator */}
               {activeSessionId === session.id && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent" />
+                <span
+                  data-testid="chat-tab-active-bar"
+                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--color-accent)]"
+                />
               )}
 
               {/* Scope icon */}
@@ -70,15 +73,21 @@ export function ChatWindowManager() {
 
               {/* Status dot */}
               {session.status === "open" && session.claudeSessionId && (
-                <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                <span
+                  data-testid="chat-tab-active-dot"
+                  className="h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]"
+                />
               )}
               {session.status === "closed" && (
-                <span className="h-1.5 w-1.5 rounded-full bg-text-muted" />
+                <span
+                  data-testid="chat-tab-closed-dot"
+                  className="h-1.5 w-1.5 rounded-full bg-[var(--color-fg-mute)]"
+                />
               )}
 
               {session.isDetached && (
                 <span
-                  className="rounded bg-accent/15 px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent"
+                  className="rounded bg-[var(--color-accent)]/15 px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-[var(--color-accent)]"
                   title="Detached into pop-out window"
                 >
                   detached
@@ -91,7 +100,7 @@ export function ChatWindowManager() {
                     e.stopPropagation();
                     void detachSession(session.id);
                   }}
-                  className="ml-0.5 rounded p-0.5 text-text-muted opacity-0 transition-all hover:bg-bg-hover hover:text-text-primary group-hover:opacity-100"
+                  className="ml-0.5 rounded p-0.5 text-[var(--color-fg-mute)] opacity-0 transition-all hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] group-hover:opacity-100"
                   title="Detach into pop-out window"
                 >
                   <svg
@@ -116,7 +125,7 @@ export function ChatWindowManager() {
                   e.stopPropagation();
                   closeSession(session.id);
                 }}
-                className="ml-0.5 rounded p-0.5 text-text-muted opacity-0 transition-all hover:bg-bg-hover hover:text-text-primary group-hover:opacity-100"
+                className="ml-0.5 rounded p-0.5 text-[var(--color-fg-mute)] opacity-0 transition-all hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] group-hover:opacity-100"
                 title="Close tab"
               >
                 <svg
@@ -140,7 +149,7 @@ export function ChatWindowManager() {
         {/* Close panel button */}
         <button
           onClick={togglePanel}
-          className="shrink-0 rounded p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+          className="shrink-0 rounded p-1.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
           title="Close chat panel"
         >
           <svg
@@ -191,7 +200,7 @@ function DetachedPlaceholder({
       aria-label="Session detached"
       className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"
     >
-      <span className="rounded-full bg-accent/10 p-3 text-accent">
+      <span className="rounded-full bg-[var(--color-accent)]/10 p-3 text-[var(--color-accent)]">
         <svg
           className="h-6 w-6"
           fill="none"
@@ -206,13 +215,13 @@ function DetachedPlaceholder({
           />
         </svg>
       </span>
-      <p className="text-sm text-text-secondary">
-        <span className="font-medium text-text-primary">{label}</span> is open
+      <p className="text-sm text-[var(--color-fg-soft)]">
+        <span className="font-medium text-[var(--color-fg)]">{label}</span> is open
         in a pop-out window
       </p>
       <button
         onClick={onReattach}
-        className="rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-hover"
+        className="rounded-md border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-1.5 text-xs text-[var(--color-fg)] transition-colors hover:bg-[var(--color-bg-3)]"
       >
         Reattach to panel
       </button>

@@ -24,12 +24,14 @@ function RollupStat({ label, value, testId }: RollupStatProps): ReactNode {
   return (
     <div
       data-testid={testId}
-      className="flex flex-col rounded border border-border bg-bg-tertiary/50 px-3 py-1.5"
+      className="flex flex-col rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)]/50 px-3 py-1.5"
     >
-      <span className="font-mono text-[9px] uppercase tracking-wider text-text-muted">
+      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
         {label}
       </span>
-      <span className="text-sm font-medium text-text-primary">{value}</span>
+      <span className="text-sm font-medium text-[var(--color-fg)]">
+        {value}
+      </span>
     </div>
   );
 }
@@ -52,7 +54,7 @@ export function TracesHeader({
     <header
       data-testid="traces-header"
       data-task-id={taskId ?? ""}
-      className="flex flex-col border-b border-border bg-bg-secondary"
+      className="flex flex-col border-b border-[var(--color-line)] bg-[var(--color-bg-1)]"
     >
       <div className="flex h-12 items-center gap-3 px-6">
         {onBack && (
@@ -60,7 +62,7 @@ export function TracesHeader({
             type="button"
             onClick={onBack}
             data-testid="traces-back-button"
-            className="flex items-center gap-1 rounded border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover"
+            className="flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-xs text-[var(--color-fg-soft)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
             aria-label="Back"
           >
             <svg
@@ -84,7 +86,7 @@ export function TracesHeader({
         <nav
           aria-label="Breadcrumb"
           data-testid="traces-breadcrumb"
-          className="flex items-center gap-1 text-xs text-text-muted"
+          className="flex items-center gap-1 text-xs text-[var(--color-fg-mute)]"
         >
           <span>Traces</span>
           {hasTask && (
@@ -92,7 +94,7 @@ export function TracesHeader({
               <span aria-hidden="true">/</span>
               <span
                 data-testid="traces-breadcrumb-level"
-                className="font-mono uppercase tracking-wider"
+                className="font-mono uppercase tracking-[0.12em]"
               >
                 {displayLevel}
               </span>
@@ -102,7 +104,7 @@ export function TracesHeader({
 
         <h1
           data-testid="traces-title"
-          className="truncate text-sm font-semibold text-text-primary"
+          className="truncate font-serif text-base font-normal text-[var(--color-fg)]"
         >
           {displayTitle}
         </h1>
@@ -112,7 +114,7 @@ export function TracesHeader({
             type="button"
             onClick={onDetach}
             data-testid="traces-detach-button"
-            className="ml-auto flex items-center gap-1 rounded border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover"
+            className="ml-auto flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-xs text-[var(--color-fg-soft)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
             aria-label="Detach traces into a separate window"
             title="Detach into separate window"
           >
@@ -138,7 +140,7 @@ export function TracesHeader({
       {hasTask && (
       <div
         data-testid="traces-rollup"
-        className="flex flex-wrap items-stretch gap-2 border-t border-border px-6 py-2"
+        className="flex flex-wrap items-stretch gap-2 border-t border-[var(--color-line)] px-6 py-2"
       >
         <RollupStat
           testId="traces-rollup-runs"
@@ -168,7 +170,7 @@ export function TracesHeader({
         {isLoading && (
           <span
             data-testid="traces-rollup-loading"
-            className="self-center text-[10px] text-text-muted italic"
+            className="self-center text-[10px] italic text-[var(--color-fg-mute)]"
           >
             Loading...
           </span>
@@ -176,7 +178,7 @@ export function TracesHeader({
         {error && !isLoading && (
           <span
             data-testid="traces-rollup-error"
-            className="self-center rounded border border-error/20 bg-error/5 px-2 py-1 text-[10px] text-error"
+            className="self-center rounded-[var(--radius-sm)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] px-2 py-1 text-[10px] text-[var(--color-err)]"
           >
             {error}
           </span>
