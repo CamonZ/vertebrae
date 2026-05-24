@@ -68,6 +68,150 @@ The Rust backend in `src-tauri/src/` provides:
 - **Claude session manager** (`claude_session.rs`) — JSONL chat/session streaming
 - **Project config** (`project_config.rs`) — multi-project management
 
+## First-Run Installer
+
+On first launch the GUI offers to install Vertebrae's command-line tools so
+users can drive workflows from the terminal and run them in the background.
+The flow is driven by Tauri commands in `src-tauri/src/install.rs`, which are
+thin adapters over the shared [`vertebrae-installer`](../crates/installer)
+crate. The CLI's `vtb daemon install/uninstall/status` are wrappers over the
+same crate, so GUI- and CLI-driven installs land in identical locations.
+
+### Welcome / consent screen
+
+`src/pages/WelcomeInstallPage.tsx` renders the consent screen at `/welcome`.
+It:
+
+- Calls `installation_status` to pre-check the boxes and show each
+  component's symlink target path.
+- Offers two components — **vtb CLI** and **vtb-daemon** (background workflow
+  runner) — each as an opt-out checkbox. A component already installed at our
+  symlink path is shown as "already installed" and its checkbox is disabled;
+  a component found elsewhere on `$PATH` is tagged "found on PATH".
+- **Install** calls `install_components(install_cli, install_daemon)`, which
+  stages the chosen sidecars and (if the daemon was selected) registers the
+  daemon service.
+- **Skip** calls `skip_installation`, which persists a flag so the screen does
+  not reappear.
+
+After either action the user proceeds to `/setup` (or `/` if a project was
+already selected).
+
+### What gets installed
+
+| Component | Purpose | Service registered? |
+|-----------|---------|---------------------|
+| `vtb` | CLI for managing tasks and workflows | No |
+| `vtb-daemon` | Background workflow runner that executes agents | Yes — launchd (macOS) / systemd `--user` (Linux) |
+
+Each binary is copied into a per-OS data dir, set to `0o755`, and symlinked
+into `~/.local/bin`. Installing the daemon additionally writes a service
+definition and loads it so it starts at login. See
+[Install Locations](#install-locations) below.
+
+### Sidecar bundling
+
+`vtb` and `vtb-daemon` ship inside the GUI bundle as Tauri `externalBin`
+sidecars (declared in `src-tauri/tauri.conf.json`). They are produced and
+staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
+`beforeBuildCommand`:
+
+```json
+"beforeBuildCommand": "npm run tauri:prepare-sidecars && npm run build"
+```
+
+`prepare-sidecars.mjs` (run via `npm run tauri:prepare-sidecars`):
+
+1. Detects the build target triple (honoring `TAURI_ENV_TARGET_TRIPLE`, else
+   parsing `rustc -vV`). Supported triples: `aarch64-apple-darwin`,
+   `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`.
+2. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon`.
+3. Copies the release binaries to
+   `src-tauri/binaries/<bin>-<target-triple>` — the naming Tauri's
+   `externalBin` expects.
+
+It is idempotent: if the staged copies already exist and are at least as new
+as the source binaries in `target/release/`, the rebuild and copy are skipped,
+keeping `tauri:dev` fast.
+
+At bundle time `tauri-build` copies each staged sidecar next to the GUI
+executable, stripping the `-<triple>` suffix. At runtime
+`install_components` resolves them relative to the GUI executable using the
+target triple baked in at build time, then hands them to
+`vertebrae_installer::install_binary`.
+
+### When the welcome screen is shown
+
+`InstallationGuard` in `src/router.tsx` decides on mount. It calls
+`installation_status` and redirects to `/welcome` **only when all** of the
+following hold (first-run predicate):
+
+```
+!cli.installed_at_symlink &&
+!daemon.installed_at_symlink &&
+!cli.on_path &&
+!daemon.on_path &&
+!skipped
+```
+
+In words: neither component is installed at the symlink path we manage,
+neither is resolvable anywhere on `$PATH`, and the user has not previously
+clicked "Skip". If the status probe fails, the guard intentionally falls
+through to its children rather than blocking an already-working install.
+`InstallationGuard` sits above `ProjectGuard`, so the welcome screen comes
+before `/setup`.
+
+### Install Locations
+
+| Item | macOS | Linux |
+|------|-------|-------|
+| Staged binaries | `~/Library/Application Support/Vertebrae/bin` | `~/.local/share/vertebrae/bin` |
+| User symlinks | `~/.local/bin` | `~/.local/bin` |
+| Daemon service file | `~/Library/LaunchAgents/com.vertebrae.daemon.plist` | `~/.config/systemd/user/vertebrae-daemon.service` |
+| Service manager / id | launchd label `com.vertebrae.daemon` | systemd `--user` unit `vertebrae-daemon` |
+| Daemon logs | `~/Library/Logs/vertebrae/{daemon.log,daemon.error.log}` | `~/.local/state/vertebrae/logs/{daemon.log,daemon.error.log}` |
+
+The "Skip" flag is persisted as `installer-skipped` in
+`<app_config_dir>/installer-state.json` — on macOS that is
+`~/Library/Application Support/com.vertebrae.app/installer-state.json`.
+
+### Uninstalling
+
+There is no GUI uninstall flow. Undo an install from the terminal:
+
+1. **Remove the daemon service:**
+
+   ```bash
+   vtb daemon uninstall
+   ```
+
+   This unloads the service and removes the plist / systemd unit. It does
+   **not** remove the staged binaries or the `~/.local/bin` symlinks.
+
+2. **Remove the symlinks and staged binaries manually:**
+
+   ```bash
+   # symlinks
+   rm -f ~/.local/bin/vtb ~/.local/bin/vtb-daemon
+
+   # staged binaries (macOS)
+   rm -rf "~/Library/Application Support/Vertebrae/bin"
+   # staged binaries (Linux)
+   rm -rf ~/.local/share/vertebrae/bin
+   ```
+
+3. **Reset the skip flag** to see the welcome screen again on next launch —
+   delete the state file:
+
+   ```bash
+   # macOS
+   rm -f "~/Library/Application Support/com.vertebrae.app/installer-state.json"
+   ```
+
+   (Removing the binaries and symlinks alone is enough to re-trigger the
+   welcome screen, provided neither `vtb` nor `vtb-daemon` is otherwise on
+   `$PATH` and the skip flag is cleared.)
+
 ## Real-Time Sync
 
 The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
