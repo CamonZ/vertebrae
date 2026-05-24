@@ -52,6 +52,7 @@ import {
   transitionEdgeStyle,
 } from "../components/WorkflowPipeline";
 import { STYLEGUIDE_SHORTCUT } from "../utils/styleguideShortcut";
+import { HearthShowcase } from "../components/HearthShowcase";
 
 const workflowPipelineNodeTypes: NodeTypes = {
   stepNode: StepNode,
@@ -823,6 +824,8 @@ export function StyleguidePage() {
             </span>
           </div>
         </header>
+
+        <HearthShowcase />
 
         <Section title="Visual Tokens">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
