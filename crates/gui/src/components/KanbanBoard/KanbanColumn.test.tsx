@@ -70,8 +70,8 @@ describe("KanbanColumn", () => {
 
       const selectedCard = screen.getByRole("button", { name: /Task: Selected One/i });
       const otherCard = screen.getByRole("button", { name: /Task: Other One/i });
-      expect(selectedCard.className).toContain("border-primary/50");
-      expect(otherCard.className).not.toContain("border-primary/50");
+      expect(selectedCard.className).toContain("border-[var(--color-accent)]");
+      expect(otherCard.className).not.toContain("border-[var(--color-accent)]");
     });
 
     it("calls onTaskSelect when a card is clicked", () => {

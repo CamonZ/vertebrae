@@ -56,10 +56,13 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
 
   return (
     <section aria-label="Ready to start">
-      <h2 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-text-muted">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-text-muted" aria-hidden="true" />
-        Ready
-        <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs font-medium text-text-muted">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-fg-faint)]"
+          aria-hidden="true"
+        />
+        <span>Ready</span>
+        <span className="ml-auto text-[var(--color-fg-faint)]">
           {tasks.length}
         </span>
       </h2>
@@ -72,36 +75,30 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
             { hasWorkflow: Boolean(task.workflow_id) }
           );
           const startDisabled = runControls.runDisabled || isPending;
+          const shortId = task.id.slice(0, 8);
           return (
             <div
               key={task.id}
-              className="border-l-2 border-l-border bg-bg-secondary px-4 py-3"
+              className="border-l-2 border-l-[var(--color-line)] bg-[var(--color-bg-1)] px-4 py-2.5 transition-colors hover:bg-[var(--color-bg-2)]"
               data-testid="ready-item"
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <svg
-                    className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-fg-faint)]"
                     aria-hidden="true"
-                  >
-                    <circle cx="12" cy="12" r="9" strokeWidth={2} />
-                  </svg>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-text-primary">
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[var(--color-fg)]">
                       {task.title}
-                      <span className="font-normal text-text-secondary">
-                        {" "}&mdash; {task.workflow_id ? "all blockers resolved" : "ready to start"}
-                      </span>
                     </p>
-                    <p className="mt-0.5 text-xs text-text-muted">
-                      {task.workflow_name && (
-                        <span>{task.workflow_name}</span>
-                      )}
+                    <p className="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-fg-mute)]">
+                      {task.workflow_name && <span>{task.workflow_name}</span>}
                       {task.step_name && (
-                        <> &middot; <span className="font-mono">{task.step_name}</span></>
+                        <>
+                          <span aria-hidden>·</span>
+                          <span className="font-mono">{task.step_name}</span>
+                        </>
                       )}
                       {!task.workflow_name && !task.step_name && (
                         <span>No workflow assigned</span>
@@ -110,7 +107,15 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                   </div>
                 </div>
 
-                {task.workflow_id && task.current_step_id && (
+                <span
+                  className="shrink-0 font-mono text-xs text-[var(--color-fg-faint)]"
+                  data-testid="ready-item-id"
+                  aria-hidden="true"
+                >
+                  {shortId}
+                </span>
+
+                {task.workflow_id && task.current_step_id ? (
                   <button
                     type="button"
                     onClick={() => handleStart(task)}
@@ -126,10 +131,25 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                           : "Run the entire workflow for this task"
                     }
                     aria-label="Run entire workflow"
-                    className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-bg-primary transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-accent)]/40 bg-[var(--color-accent-wash)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)] transition-all hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-wash)] hover:shadow-[0_0_12px_var(--color-accent-glow)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:shadow-none"
                   >
-                    Run Workflow
+                    <svg
+                      className="h-3 w-3"
+                      viewBox="0 0 12 12"
+                      fill="currentColor"
+                      aria-hidden
+                    >
+                      <path d="M3 2l7 4-7 4V2z" />
+                    </svg>
+                    Run
                   </button>
+                ) : (
+                  <span
+                    className="inline-flex shrink-0 items-center rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-0.5 text-xs text-[var(--color-fg-mute)]"
+                    data-testid="ready-item-backlog-chip"
+                  >
+                    Backlog
+                  </span>
                 )}
               </div>
             </div>
