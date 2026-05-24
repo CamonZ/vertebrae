@@ -262,4 +262,144 @@ describe("MarkdownContent", () => {
       expect(screen.getByText("Not done")).toBeInTheDocument();
     });
   });
+
+  describe("inline JSON pretty-printing", () => {
+    function jsonCodeText(): string {
+      const container = screen.getByTestId("markdown-content");
+      // Syntax highlighter splits tokens across spans; flatten to text.
+      const code = container.querySelector("code");
+      return code?.textContent ?? "";
+    }
+
+    it("hoists inline JSON in prose into a pretty-printed code block", () => {
+      const message =
+        'Here is the result: {"key":"value","nested":{"a":1,"b":2}} done.';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"key": "value"');
+      expect(rendered).toContain('"nested": {');
+      // Multi-line indication: more than one newline post-format.
+      expect(rendered.split("\n").length).toBeGreaterThan(2);
+    });
+
+    it("hoists inline JSON arrays from prose", () => {
+      const message = 'Got [{"id":1,"v":"a"},{"id":2,"v":"b"}] back.';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"id": 1');
+      expect(rendered).toContain('"v": "a"');
+    });
+
+    it("leaves prose untouched when no JSON is present", () => {
+      render(<MarkdownContent text="No json here, just words {and braces}." />);
+      // `{and braces}` is not valid JSON; should not become a code block.
+      expect(
+        screen.getByTestId("markdown-content").querySelector("pre")
+      ).toBeNull();
+    });
+
+    it("skips JSON inside existing fenced code blocks", () => {
+      const message =
+        '```json\n{"already":"fenced"}\n```\nFollow-up text.';
+      render(<MarkdownContent text={message} />);
+      // Only one code block — the existing fence — not double-wrapped.
+      const preBlocks =
+        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      expect(preBlocks.length).toBe(1);
+    });
+
+    it("skips JSON inside inline code spans", () => {
+      const message = 'Use `{"raw":"json"}` literally.';
+      render(<MarkdownContent text={message} />);
+      // No code BLOCK (pre) — only the inline code span.
+      const preBlocks =
+        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      expect(preBlocks.length).toBe(0);
+    });
+
+    it("does not wrap empty objects or arrays", () => {
+      render(<MarkdownContent text="Got back {} or []." />);
+      const preBlocks =
+        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      expect(preBlocks.length).toBe(0);
+    });
+
+    it("ignores brace-like prose that isn't valid JSON", () => {
+      render(
+        <MarkdownContent text='Template like {name: "foo", id: bar} is not JSON.' />
+      );
+      const preBlocks =
+        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      expect(preBlocks.length).toBe(0);
+    });
+
+    it("handles JSON containing strings with braces correctly", () => {
+      const message =
+        'Result: {"label":"contains {nested} text","ok":true} after.';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"label": "contains {nested} text"');
+      expect(rendered).toContain('"ok": true');
+    });
+
+    it("hoists multiple inline JSON blocks in the same message", () => {
+      const message =
+        'First {"a":1,"b":2} and second [{"x":10},{"x":20}] done.';
+      render(<MarkdownContent text={message} />);
+      const preBlocks =
+        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      expect(preBlocks.length).toBe(2);
+    });
+
+    it("pretty-prints Elixir map syntax in a json fence", () => {
+      // Sacrum (Elixir) often emits maps with `=>` separators when an
+      // agent quotes a payload back at the user.
+      const message =
+        '```json\n%{"additionalProperties" => false, "properties" => %{"failed" => %{"items" => %{"type" => "string"}}}}\n```';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"additionalProperties": false');
+      expect(rendered).toContain('"properties": {');
+      expect(rendered).toContain('"items": {');
+      // Multi-line: at least one nested key on its own indented line.
+      expect(rendered.split("\n").length).toBeGreaterThan(4);
+    });
+
+    it("pretty-prints Elixir maps that use the unicode ⇒ separator", () => {
+      const message = '```json\n%{"a" ⇒ 1, "b" ⇒ %{"c" ⇒ 2}}\n```';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"a": 1');
+      expect(rendered).toContain('"b": {');
+      expect(rendered).toContain('"c": 2');
+    });
+
+    it("hoists bare Elixir maps just like bare JSON", () => {
+      // No fence: maybeWrapBareJson should pick up `%{...}` content.
+      const message = '%{"id" => "abc-123", "ok" => true, "n" => 42}';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"id": "abc-123"');
+      expect(rendered).toContain('"ok": true');
+      expect(rendered).toContain('"n": 42');
+    });
+
+    it("does not mangle JSON strings that contain => or ⇒", () => {
+      // String value contains `=>` — must NOT be replaced with `:`.
+      const message = '```json\n{"comment": "a => b", "ok": true}\n```';
+      render(<MarkdownContent text={message} />);
+      const rendered = jsonCodeText();
+      expect(rendered).toContain('"comment": "a => b"');
+      expect(rendered).toContain('"ok": true');
+    });
+
+    it("leaves Elixir maps with atom keys untouched", () => {
+      // `%{status: :ok}` uses atom shorthand which we don't translate;
+      // JSON.parse fails on the conversion so the source is preserved.
+      const message = '```json\n%{status: :ok, count: 3}\n```';
+      const { container } = render(<MarkdownContent text={message} />);
+      const code = container.querySelector("code");
+      expect(code?.textContent).toContain("%{status: :ok, count: 3}");
+    });
+  });
 });

@@ -4,7 +4,6 @@ export { TaskCodeRefs } from './TaskCodeRefs';
 export { TaskRelations } from './TaskRelations';
 export { TraceMiniView } from './TraceMiniView';
 export { AcceptanceCriteria } from './AcceptanceCriteria';
-export { CollapsibleSection } from './CollapsibleSection';
 export { DependenciesSummary } from './DependenciesSummary';
 export { CodeRefsSummary } from './CodeRefsSummary';
 export { SpecSection } from './SpecSection';

@@ -27,6 +27,7 @@ import type {
   ToolResultEvent,
 } from "../../../types/conversation";
 import { MarkdownContent } from "../../shared/MarkdownContent";
+import { ToolCallBlock } from "../../molecules/ToolCallBlock";
 import { EventGlyph } from "../EventGlyph";
 import { levelTintClass } from "../levelColors";
 
@@ -210,88 +211,26 @@ export function ThinkingBlock({
   );
 }
 
-function formatInputValue(value: unknown): ReactNode {
-  if (value === null) return <span className="text-text-muted">null</span>;
-  if (value === undefined) return <span className="text-text-muted">undefined</span>;
-  if (typeof value === "boolean") return <span className="text-info">{value.toString()}</span>;
-  if (typeof value === "number") return <span className="text-warning">{value}</span>;
-  if (typeof value === "string") {
-    return <span className="text-success whitespace-pre-wrap break-words">{value}</span>;
-  }
-  if (Array.isArray(value)) {
-    if (value.length === 0) return <span className="text-text-muted">[]</span>;
-    return (
-      <span>
-        {value.map((item, i) => (
-          <div key={i} className="ml-4">
-            <span className="text-text-muted">[{i}]</span> {formatInputValue(item)}
-          </div>
-        ))}
-      </span>
-    );
-  }
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return <span className="text-text-muted">{"{}"}</span>;
-    return (
-      <span>
-        {entries.map(([k, v]) => (
-          <div key={k} className="ml-4">
-            <span className="text-primary">{k}:</span> {formatInputValue(v)}
-          </div>
-        ))}
-      </span>
-    );
-  }
-  return <span>{String(value)}</span>;
-}
-
+/**
+ * Standalone tool_call renderer used when a tool call appears without an
+ * owning assistant turn (orphan tool calls). The bubble grouper in
+ * UnifiedChatView nests paired tool calls INSIDE their owning agent bubble
+ * using molecules/ToolCallBlock; this fallback path uses the same molecule
+ * so the visual story is identical across both paths.
+ */
 export function ToolCall({
   event,
-  previousTimestamp,
 }: {
   event: ToolCallEvent;
   previousTimestamp: string | null;
 }) {
-  const [showInput, setShowInput] = useState(false);
   return (
-    <div className="py-2">
-      <button
-        type="button"
-        className="flex items-start gap-2 w-full text-left group"
-        onClick={() => setShowInput(!showInput)}
-      >
-        <div className="w-6 h-6 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0">
-          <EventGlyph
-            event={event}
-            tintClassName="text-primary"
-            title={event.displayName}
-          />
-        </div>
-        <span className="text-sm font-medium text-text-primary flex-shrink-0">
-          {event.displayName}
-        </span>
-        <span className="text-sm text-text-muted whitespace-pre-wrap break-words flex-1 min-w-0">
-          {event.summary}
-        </span>
-        <span
-          className={`text-text-muted transition-transform flex-shrink-0 ${showInput ? "rotate-90" : ""}`}
-        >
-          <ChevronRightIcon />
-        </span>
-        <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
-      </button>
-      {showInput && (
-        <div className="mt-2 ml-8 p-3 bg-bg-tertiary rounded text-xs font-mono whitespace-pre-wrap break-words">
-          {Object.entries(event.input).map(([key, value]) => (
-            <div key={key} className="py-0.5">
-              <span className="text-primary font-medium">{key}:</span>{" "}
-              {formatInputValue(value)}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    <ToolCallBlock
+      toolName={event.displayName}
+      summary={event.summary}
+      state="pending"
+      input={JSON.stringify(event.input, null, 2)}
+    />
   );
 }
 

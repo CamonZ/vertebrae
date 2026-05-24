@@ -137,12 +137,12 @@ describe("ConversationLogViewer", () => {
       ];
       render(<ConversationLogViewer logs={logs} />);
 
-      // Click to expand
-      fireEvent.click(screen.getByText("Bash"));
+      // Click the disclosure button to expand the ToolCallBlock body.
+      fireEvent.click(screen.getByRole("button", { expanded: false }));
 
-      // Should show pretty-printed input with key and value
-      expect(screen.getByText("timeout:")).toBeInTheDocument();
-      expect(screen.getByText("5000")).toBeInTheDocument();
+      // Body shows the JSON-formatted input arguments.
+      expect(screen.getByText(/"timeout"/)).toBeInTheDocument();
+      expect(screen.getByText(/5000/)).toBeInTheDocument();
     });
   });
 

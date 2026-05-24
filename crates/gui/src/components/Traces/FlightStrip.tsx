@@ -344,16 +344,16 @@ export function FlightStrip({
   return (
     <div
       data-testid="flight-strip"
-      className="relative w-full select-none border-b border-border bg-bg-secondary"
+      className="relative w-full select-none border-b border-[var(--color-line)] bg-[var(--color-bg-1)]"
       style={{ paddingLeft: PADDING_X, paddingRight: PADDING_X }}
     >
       <div className="flex items-center justify-between gap-2 px-1 pt-1">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
           Flight strip
         </span>
         <label
           data-testid="flight-strip-thresholds-only-label"
-          className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
+          className="flex cursor-pointer items-center gap-1 text-[10px] text-[var(--color-fg-soft)]"
         >
           <input
             data-testid="flight-strip-thresholds-only"
@@ -440,7 +440,7 @@ export function FlightStrip({
                     data-task-id={row.taskId}
                     data-task-run-id={row.taskRunId ?? undefined}
                     data-row-index={row.index}
-                    className="absolute left-0 right-0 border-t border-border/40"
+                    className="absolute left-0 right-0 border-t border-[var(--color-line)]/40"
                     style={{
                       top: row.index * LANE_HEIGHT,
                       height: LANE_HEIGHT,
@@ -505,7 +505,7 @@ export function FlightStrip({
           <div
             data-testid="flight-strip-viewport"
             aria-hidden="true"
-            className="pointer-events-none absolute top-0 bottom-0 border border-accent-primary/70 bg-accent-primary/10"
+            className="pointer-events-none absolute top-0 bottom-0 border border-[var(--color-accent)]/70 bg-[var(--color-accent)]/10"
             style={
               {
                 left: xPct(viewport.start),
@@ -559,7 +559,7 @@ function GutterLabel({
   return (
     <div
       data-testid={testId}
-      className="absolute left-0 right-1 flex items-center justify-end pr-2 font-mono text-[9px] uppercase tracking-wider text-text-muted"
+      className="absolute left-0 right-1 flex items-center justify-end pr-2 font-mono text-[9px] uppercase tracking-wider text-[var(--color-fg-mute)]"
       style={{ top, height }}
     >
       {label}
@@ -585,7 +585,7 @@ function LaneGutter({
   return (
     <div
       data-testid="flight-strip-gutter"
-      className="relative flex-shrink-0 border-r border-border/60"
+      className="relative flex-shrink-0 border-r border-[var(--color-line)]/60"
       style={{ width: LANE_LABEL_WIDTH }}
     >
       <GutterLabel
@@ -659,7 +659,7 @@ function ThresholdLane({
                 data-visible={showTitle ? "true" : "false"}
                 aria-hidden={showTitle ? undefined : "true"}
                 className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[8px] uppercase tracking-wider ${
-                  isError ? "text-error" : "text-text-secondary"
+                  isError ? "text-[var(--color-err)]" : "text-[var(--color-fg-soft)]"
                 }`}
                 style={{
                   height: calloutHeight,
@@ -680,7 +680,7 @@ function ThresholdLane({
                 e.stopPropagation();
                 onMarkerClick(m);
               }}
-              className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center rounded-sm hover:bg-bg-tertiary"
+              className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center rounded-sm hover:bg-[var(--color-bg-2)]"
               style={{ top: calloutHeight, width: 16, height: laneHeight }}
             >
               <EventGlyph event={m} size={12} />

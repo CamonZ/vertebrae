@@ -107,10 +107,7 @@ describe("EventRenderer", () => {
     expect(screen.getByText(longText)).toBeInTheDocument();
   });
 
-  it("renders tool_call summary in full with no truncation and toggles input details", () => {
-    // Long string > 200 chars, the legacy mid-string truncation threshold.
-    // Use a continuous string with no trailing whitespace so the
-    // testing-library text matcher (whitespace-normalizing) finds it.
+  it("renders tool_call as a ToolCallBlock with the tool name and summary visible", () => {
     const longArg = "x".repeat(500);
     const longSummary = `ls -la ${longArg}`;
     const event: ToolCallEvent = {
@@ -125,17 +122,12 @@ describe("EventRenderer", () => {
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
     expect(screen.getByText("Bash")).toBeInTheDocument();
-    // Full summary visible; no horizontal truncation marker.
+    // Summary is shown next to the tool name in the collapsed header.
     expect(screen.getByText(longSummary)).toBeInTheDocument();
-    // No legacy mid-string ellipsis '…' or three-dot truncation.
-    expect(screen.queryByText(/…/)).toBeNull();
-
-    expect(screen.queryByText(/command:/)).toBeNull();
-    fireEvent.click(screen.getByText(longSummary));
-    expect(screen.getByText(/command:/)).toBeInTheDocument();
-    // The argument value is also rendered in full inside the input panel —
-    // legacy code chopped string args at 200 chars with '...'.
-    expect(screen.getByText(longArg)).toBeInTheDocument();
+    // Input is rendered as a JSON pre block once expanded.
+    const header = screen.getByRole("button", { expanded: false });
+    fireEvent.click(header);
+    expect(screen.getByText(/"command"/)).toBeInTheDocument();
   });
 
   it("renders tool_result in full and styles errors differently", () => {
@@ -188,7 +180,7 @@ describe("EventRenderer", () => {
     expect(glyph.className).toMatch(/text-info/);
   });
 
-  it("renders EventGlyph for tool_call events with tool-specific glyph (Bash → terminal)", () => {
+  it("renders the tool name as the ToolCallBlock header (Bash)", () => {
     const event: ToolCallEvent = {
       kind: "tool_call",
       timestamp: ts,
@@ -200,11 +192,10 @@ describe("EventRenderer", () => {
       input: { command: "ls" },
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
-    const glyph = screen.getByTestId("event-glyph");
-    expect(glyph.getAttribute("data-glyph")).toBe("terminal");
+    expect(screen.getByText("Bash")).toBeInTheDocument();
   });
 
-  it("renders EventGlyph for tool_call events (Edit → edit glyph)", () => {
+  it("renders the tool name as the ToolCallBlock header (Edit)", () => {
     const event: ToolCallEvent = {
       kind: "tool_call",
       timestamp: ts,
@@ -216,8 +207,7 @@ describe("EventRenderer", () => {
       input: {},
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
-    const glyph = screen.getByTestId("event-glyph");
-    expect(glyph.getAttribute("data-glyph")).toBe("edit");
+    expect(screen.getByText("Edit")).toBeInTheDocument();
   });
 
   it("renders EventGlyph for successful tool_result with filled variant", () => {

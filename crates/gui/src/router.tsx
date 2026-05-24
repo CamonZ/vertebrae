@@ -28,7 +28,7 @@ function RootLayout() {
   useTheme();
 
   return (
-    <AppShell title="Vertebrae" subtitle="Agent Orchestrator">
+    <AppShell>
       <StyleguideShortcut />
       <Outlet />
     </AppShell>

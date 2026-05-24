@@ -242,7 +242,7 @@ describe("EventGlyph component", () => {
   it("uses error variant class for rejection", () => {
     render(<EventGlyph event={threshold("rejection")} />);
     const el = screen.getByTestId("event-glyph");
-    expect(el.className).toContain("text-error");
+    expect(el.className).toContain("text-[var(--color-err)]");
   });
 
   it("allows overriding the title/label", () => {
@@ -261,6 +261,6 @@ describe("EventGlyph component", () => {
     const el = screen.getByTestId("event-glyph");
     expect(el.className).toContain("ml-2");
     expect(el.className).toContain("my-custom");
-    expect(el.className).toContain("text-text-secondary");
+    expect(el.className).toContain("text-[var(--color-fg-soft)]");
   });
 });

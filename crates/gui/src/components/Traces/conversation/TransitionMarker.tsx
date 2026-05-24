@@ -36,7 +36,7 @@ export function TransitionMarker({
 }: TransitionMarkerProps): ReactNode {
   const borderClass = thresholdKind
     ? thresholdKindBorderClass(thresholdKind)
-    : "border-border";
+    : "border-[var(--color-line)]";
   const textClass = thresholdKindClass(thresholdKind);
   return (
     <div
@@ -47,15 +47,15 @@ export function TransitionMarker({
       data-threshold-kind={thresholdKind ?? ""}
       className="my-2 flex items-center gap-2 px-3"
     >
-      <div className="h-px flex-1 bg-border" />
+      <div className="h-px flex-1 bg-[var(--color-line)]" />
       <span
-        className={`inline-flex items-center gap-1 rounded-full border bg-bg-tertiary px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${borderClass} ${textClass}`}
+        className={`inline-flex items-center gap-1 rounded-[var(--radius-full)] border bg-[var(--color-bg-1)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)] ${borderClass} ${textClass}`}
       >
         <span>{clean(fromStep)}</span>
         <span aria-hidden="true">→</span>
         <span>{clean(toStep)}</span>
       </span>
-      <div className="h-px flex-1 bg-border" />
+      <div className="h-px flex-1 bg-[var(--color-line)]" />
     </div>
   );
 }

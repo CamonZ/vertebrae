@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { StepBoundary } from "./StepBoundary";
 
 describe("StepBoundary", () => {
@@ -21,12 +21,13 @@ describe("StepBoundary", () => {
     expect(el.getAttribute("data-step-name")).toBe("in_progress");
     expect(el.getAttribute("data-depth")).toBe("0");
     expect(screen.getByText("Implementation")).toBeInTheDocument();
-    expect(screen.getByText("in progress")).toBeInTheDocument();
+    // Step label is now prefixed with the play glyph
+    expect(screen.getByText(/in progress/)).toBeInTheDocument();
     expect(screen.getByText("Build the thing")).toBeInTheDocument();
     expect(screen.getByText("claude-opus-4-7")).toBeInTheDocument();
   });
 
-  it("renders folded session facts (duration, turns, cost) in the right-side trio", () => {
+  it("renders folded session facts (duration, turns, cost) in the divider", () => {
     render(
       <StepBoundary
         {...baseProps}
@@ -100,7 +101,9 @@ describe("StepBoundary", () => {
       />
     );
     expect(screen.getByText("workflow")).toBeInTheDocument();
-    expect(screen.getByText("step")).toBeInTheDocument();
+    // Step label is humanized to "step" when null, prefixed with the play
+    // glyph in the new divider chip.
+    expect(screen.getByText(/step/)).toBeInTheDocument();
   });
 
   it("omits cost when null or zero", () => {
@@ -112,39 +115,9 @@ describe("StepBoundary", () => {
     expect(screen.queryByText(/\$/)).toBeNull();
   });
 
-  it("does not render a prompt toggle when prompt is null or empty", () => {
-    const { rerender } = render(<StepBoundary {...baseProps} />);
+  it("does not render a prompt toggle inline — prompts surface as user bubbles instead", () => {
+    render(<StepBoundary {...baseProps} />);
     expect(screen.queryByTestId("step-boundary-prompt-toggle")).toBeNull();
-    expect(screen.queryByTestId("step-boundary-prompt")).toBeNull();
-    rerender(<StepBoundary {...baseProps} prompt={null} />);
-    expect(screen.queryByTestId("step-boundary-prompt-toggle")).toBeNull();
-    rerender(<StepBoundary {...baseProps} prompt="" />);
-    expect(screen.queryByTestId("step-boundary-prompt-toggle")).toBeNull();
-    rerender(<StepBoundary {...baseProps} prompt={"   \n  "} />);
-    expect(screen.queryByTestId("step-boundary-prompt-toggle")).toBeNull();
-  });
-
-  it("renders a collapsed prompt toggle when prompt is set, expanding to show markdown content", () => {
-    render(
-      <StepBoundary
-        {...baseProps}
-        prompt={"# Prompt heading\n\nDo **the** thing."}
-      />
-    );
-    const toggle = screen.getByTestId("step-boundary-prompt-toggle");
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("step-boundary-prompt")).toBeNull();
-
-    fireEvent.click(toggle);
-
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    const promptEl = screen.getByTestId("step-boundary-prompt");
-    // MarkdownContent should render a heading and bold for the markdown source.
-    expect(promptEl.querySelector("h1")?.textContent).toBe("Prompt heading");
-    expect(promptEl.querySelector("strong")?.textContent).toBe("the");
-
-    fireEvent.click(toggle);
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByTestId("step-boundary-prompt")).toBeNull();
   });
 
@@ -155,30 +128,25 @@ describe("StepBoundary", () => {
     expect(el.getAttribute("data-depth")).toBe("2");
   });
 
-  it("uses default primary border and no threshold callout when thresholdKind is null", () => {
+  it("uses default neutral line border when thresholdKind is null", () => {
     render(<StepBoundary {...baseProps} />);
     const el = screen.getByTestId("unified-chat-step-boundary");
-    expect(el.className).toMatch(/border-primary/);
     expect(el.getAttribute("data-threshold-kind")).toBe("");
     expect(screen.queryByTestId("step-boundary-threshold-callout")).toBeNull();
   });
 
-  it("tints the left border red and shows a REJECTION callout for thresholdKind='rejection'", () => {
+  it("shows a REJECTION callout for thresholdKind='rejection' with error tint", () => {
     render(<StepBoundary {...baseProps} thresholdKind="rejection" />);
     const el = screen.getByTestId("unified-chat-step-boundary");
     expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
-    expect(el.className).toMatch(/border-error/);
-    expect(el.className).not.toMatch(/border-primary/);
     const callout = screen.getByTestId("step-boundary-threshold-callout");
     expect(callout.getAttribute("data-kind")).toBe("rejection");
     expect(callout.className).toMatch(/text-error/);
     expect(callout.textContent).toBe("rejection");
   });
 
-  it("tints the left border green and shows an APPROVAL callout for thresholdKind='approval'", () => {
+  it("shows an APPROVAL callout for thresholdKind='approval' with success tint", () => {
     render(<StepBoundary {...baseProps} thresholdKind="approval" />);
-    const el = screen.getByTestId("unified-chat-step-boundary");
-    expect(el.className).toMatch(/border-success/);
     const callout = screen.getByTestId("step-boundary-threshold-callout");
     expect(callout.getAttribute("data-kind")).toBe("approval");
     expect(callout.className).toMatch(/text-success/);

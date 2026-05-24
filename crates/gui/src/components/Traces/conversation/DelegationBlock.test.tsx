@@ -33,7 +33,7 @@ describe("DelegationBlock", () => {
     expect(screen.queryByText(/delegated →/)).toBeNull();
   });
 
-  it("uses muted primary border when thresholdKind is null", () => {
+  it("uses the Hearth accent left border when thresholdKind is null", () => {
     render(
       <DelegationBlock parentTaskId="p" childTaskId="c">
         <span>x</span>
@@ -41,7 +41,7 @@ describe("DelegationBlock", () => {
     );
     const el = screen.getByTestId("unified-chat-delegation");
     expect(el.getAttribute("data-threshold-kind")).toBe("");
-    expect(el.className).toMatch(/border-primary\/40/);
+    expect(el.className).toContain("border-[var(--color-accent)]");
   });
 
   it("tints the left border by thresholdKind (rejection → border-error)", () => {
@@ -57,7 +57,7 @@ describe("DelegationBlock", () => {
     const el = screen.getByTestId("unified-chat-delegation");
     expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
     expect(el.className).toMatch(/border-error/);
-    expect(el.className).not.toMatch(/border-primary\/40/);
+    expect(el.className).not.toContain("border-[var(--color-accent)]");
   });
 
   it("indents based on depth (default depth=1 → 0px)", () => {

@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Cover</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Cover layout */
+  .hero { padding: var(--s-12) 0 var(--s-12); position: relative; }
+  .hero .pin {
+    position: absolute; top: var(--s-4); right: 0;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    color: var(--accent); text-transform: uppercase;
+  }
+  .hero .pin .n {
+    font-family: var(--serif); font-style: italic; font-size: 22px;
+    letter-spacing: 0; font-weight: 400;
+  }
+  .hero h1 {
+    margin-top: var(--s-6);
+    font-family: var(--serif);
+    font-size: clamp(88px, 14vw, 184px);
+    line-height: 0.88;
+    letter-spacing: -0.025em;
+    font-weight: 400;
+    color: var(--fg);
+  }
+  .hero h1 .em {
+    font-style: italic;
+    color: var(--accent);
+    text-shadow: 0 0 32px var(--accent-glow);
+  }
+
+  .hero .strap {
+    display: grid; grid-template-columns: 1.5fr 1fr;
+    gap: var(--s-12);
+    margin-top: var(--s-10);
+    align-items: end;
+  }
+
+  /* Cover artwork — abstract spine with ember glow */
+  .art {
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--bg-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .art .marker {
+    position: absolute; top: 12px; right: 12px;
+    padding: 3px 8px;
+    background: var(--accent);
+    color: var(--bg);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    font-weight: 600;
+  }
+  .art .marker .n {
+    font-family: var(--serif); font-style: italic; font-size: 13px;
+    letter-spacing: 0; margin-right: 4px;
+  }
+  .art .glow {
+    position: absolute;
+    width: 200px; height: 200px;
+    left: 50%; top: 70%;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, var(--accent) 0%, transparent 60%);
+    opacity: 0.35;
+    border-radius: 50%;
+    filter: blur(8px);
+  }
+  .art .footer {
+    position: absolute; bottom: 16px; left: 0; right: 0;
+    text-align: center;
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+    color: var(--fg-faint); text-transform: uppercase;
+  }
+
+  /* Color strip */
+  .strip {
+    display: grid; grid-template-columns: repeat(10, 1fr);
+    gap: 1px;
+    margin-top: var(--s-10);
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+  }
+  .strip > div {
+    aspect-ratio: 1 / 1.4;
+    padding: var(--s-3);
+    display: flex; flex-direction: column; justify-content: space-between;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    border-right: 1px solid var(--bg);
+  }
+  .strip > div:last-child { border-right: none; }
+  .strip > div .nm { font-weight: 500; }
+  .strip > div .hx { opacity: 0.7; }
+
+  /* Stats */
+  .stats {
+    margin-top: var(--s-12);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .stats .stat {
+    padding: var(--s-6) var(--s-6) var(--s-6) 0;
+    border-right: 1px solid var(--line);
+  }
+  .stats .stat:last-child { border-right: none; }
+  .stats .stat .n {
+    font-family: var(--serif); font-size: 56px; font-weight: 400;
+    line-height: 1; letter-spacing: -0.025em; color: var(--fg);
+  }
+  .stats .stat .n .em { font-style: italic; color: var(--accent); }
+  .stats .stat .n small { font-family: var(--sans); font-size: 18px; color: var(--fg-mute); font-weight: 400; letter-spacing: 0; }
+  .stats .stat .lbl {
+    margin-top: var(--s-2);
+    font-family: var(--mono); font-size: 10px; color: var(--fg-mute);
+    letter-spacing: 0.14em; text-transform: uppercase;
+  }
+
+  /* Manifesto */
+  .manifesto {
+    margin-top: var(--s-16);
+    display: grid; grid-template-columns: 1fr 2fr;
+    gap: var(--s-12);
+  }
+  .manifesto .key { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  .manifesto h2 {
+    margin-top: var(--s-3);
+    font-family: var(--serif); font-size: 40px; line-height: 1; font-weight: 400;
+    letter-spacing: -0.015em; color: var(--fg);
+  }
+  .manifesto h2 .em { font-style: italic; color: var(--accent); }
+  .manifesto .body {
+    font-family: var(--serif); font-size: 22px; line-height: 1.5; color: var(--fg-soft); font-weight: 300;
+  }
+  .manifesto .body p { margin-bottom: var(--s-5); }
+  .manifesto .body em { color: var(--fg); font-style: italic; }
+  .manifesto .body p:first-child::first-letter {
+    font-family: var(--serif); font-size: 88px;
+    float: left; line-height: 0.85;
+    padding-right: var(--s-3); padding-top: 8px;
+    color: var(--accent);
+    font-style: italic;
+  }
+
+  /* Step types preview — front-and-center because they're new */
+  .steps-intro {
+    margin-top: var(--s-16);
+    border-top: 1px solid var(--accent);
+    padding-top: var(--s-6);
+  }
+  .steps-intro .lead {
+    display: grid; grid-template-columns: 1fr 2fr; gap: var(--s-12);
+    align-items: baseline;
+  }
+  .steps-intro .lead .key { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  .steps-intro .lead h2 { font-family: var(--serif); font-size: 36px; font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-3); }
+  .steps-intro .lead h2 .em { font-style: italic; color: var(--accent); }
+  .steps-intro .lead .desc { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); line-height: 1.5; }
+
+  .step-row {
+    margin-top: var(--s-6);
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: var(--s-3);
+  }
+  .step-card {
+    background: var(--bg-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
+    position: relative;
+    overflow: hidden;
+  }
+  .step-card .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .step-card .ico {
+    margin-top: var(--s-2);
+    font-family: var(--mono); font-size: 14px;
+  }
+  .step-card .nm {
+    margin-top: var(--s-2);
+    font-family: var(--serif); font-size: 22px; font-weight: 400; line-height: 1.1;
+    letter-spacing: -0.01em;
+  }
+  .step-card .nm .it { font-style: italic; }
+  .step-card .desc { margin-top: var(--s-2); font-family: var(--sans); font-size: 12px; color: var(--fg-mute); line-height: 1.5; }
+  .step-card .tok { margin-top: var(--s-3); font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.06em; }
+  .step-card .tint {
+    position: absolute; bottom: 0; left: 0; right: 0; height: 40%;
+    background: linear-gradient(to top, var(--c-wash), transparent);
+    opacity: 0.5; pointer-events: none;
+  }
+
+  /* TOC */
+  .toc {
+    margin-top: var(--s-16);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .toc-item {
+    display: grid; grid-template-columns: 80px 1fr 220px 70px;
+    gap: var(--s-6);
+    padding: var(--s-5) 0;
+    border-bottom: 1px solid var(--line);
+    align-items: baseline;
+    transition: all var(--t-fast) var(--ease);
+  }
+  .toc-item:last-child { border-bottom: none; }
+  .toc-item:hover { background: var(--bg-1); padding-left: var(--s-3); padding-right: var(--s-3); margin-left: calc(var(--s-3) * -1); margin-right: calc(var(--s-3) * -1); }
+  .toc-item .ix { font-family: var(--serif); font-style: italic; font-size: 24px; color: var(--accent); }
+  .toc-item .ti { font-family: var(--serif); font-size: 28px; line-height: 1.05; font-weight: 400; letter-spacing: -0.01em; }
+  .toc-item .ti .it { font-style: italic; color: var(--fg-mute); }
+  .toc-item .desc { font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--fg-mute); line-height: 1.4; }
+  .toc-item .pg { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); text-align: right; }
+
+  /* CTA */
+  .cta {
+    margin-top: var(--s-10);
+    padding: var(--s-6);
+    border: 1px solid var(--line-strong);
+    background: var(--bg-1);
+    border-radius: var(--r-md);
+    display: flex; gap: var(--s-3); align-items: center;
+  }
+  .cta .lbl { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.12em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- Masthead -->
+    <header class="masthead">
+      <span class="wordmark">Vertebrae<span class="ember"></span></span>
+      <span class="crumb">Hearth · the synthesis</span>
+      <span class="meta">May 2026<br>Identity proposal D</span>
+    </header>
+
+    <nav class="chapters">
+      <a href="index.html" class="current">§ 01 · Cover</a>
+      <a href="foundations.html">§ 02 · Foundations</a>
+      <a href="components.html">§ 03 · Components</a>
+      <a href="patterns.html">§ 04 · Patterns</a>
+      <a href="panels.html">＋ Panels</a>
+      <a href="../../Vertebrae Style Guide.html" style="margin-left: auto; border-right: none;">← All directions</a>
+    </nav>
+
+    <!-- Hero -->
+    <section class="hero">
+      <div class="pin">Proposal <span class="n">D</span> · synthesis</div>
+      <div class="eyebrow">Identity proposal · D · for review</div>
+
+      <h1>Work by<br><span class="em">firelight</span>.</h1>
+
+      <div class="strap">
+        <p class="lede">
+          Console's dark-first orientation, warmed up. Imprint's serif
+          moments, brought into the night. A single copper accent &mdash; the
+          colour of low embers in a workshop &mdash; for the things that
+          matter <em>right now</em>.
+        </p>
+        <div class="art">
+          <span class="marker"><span class="n">D</span> Hearth</span>
+          <div class="glow"></div>
+          <svg viewBox="0 0 400 400" preserveAspectRatio="xMidYMid meet" style="position: relative; z-index: 2;">
+            <g stroke="var(--fg-soft)" stroke-width="0.6" fill="none" opacity="0.7">
+              <!-- Stack of warm vertebral shapes -->
+              <ellipse cx="200" cy="80" rx="44" ry="18"/>
+              <ellipse cx="200" cy="125" rx="50" ry="20"/>
+              <ellipse cx="200" cy="170" rx="54" ry="20"/>
+              <ellipse cx="200" cy="215" rx="58" ry="22"/>
+              <ellipse cx="200" cy="262" rx="60" ry="22"/>
+              <ellipse cx="200" cy="310" rx="56" ry="22"/>
+              <line x1="200" y1="40" x2="200" y2="345" stroke-dasharray="2 4"/>
+            </g>
+            <!-- Active ember at center -->
+            <circle cx="200" cy="215" r="4" fill="var(--accent)"/>
+            <circle cx="200" cy="215" r="14" fill="var(--accent)" opacity="0.18"/>
+            <circle cx="200" cy="215" r="28" fill="var(--accent)" opacity="0.08"/>
+            <!-- Callout labels -->
+            <g font-family="Newsreader, serif" font-style="italic" font-size="13" fill="var(--fg-mute)">
+              <text x="270" y="170" >tasks</text>
+              <text x="270" y="218" fill="var(--accent)">running</text>
+              <text x="270" y="265">queued</text>
+              <text x="125" y="125" text-anchor="end">workflow</text>
+              <text x="125" y="310" text-anchor="end">finished</text>
+            </g>
+            <g stroke="var(--fg-ghost)" stroke-width="0.5" fill="none">
+              <line x1="244" y1="170" x2="265" y2="166"/>
+              <line x1="258" y1="215" x2="265" y2="213"/>
+              <line x1="260" y1="262" x2="265" y2="260"/>
+              <line x1="150" y1="125" x2="130" y2="123"/>
+              <line x1="144" y1="310" x2="130" y2="307"/>
+            </g>
+          </svg>
+          <div class="footer">VERTEBRAE · WARM DARK STUDY · D</div>
+        </div>
+      </div>
+
+      <!-- Palette specimen -->
+      <div class="strip">
+        <div style="background: var(--bg); color: var(--fg-mute);"><span class="nm">bg</span><span class="hx">#14110f</span></div>
+        <div style="background: var(--bg-1); color: var(--fg-mute);"><span class="nm">bg-1</span><span class="hx">#1a1614</span></div>
+        <div style="background: var(--bg-2); color: var(--fg-mute);"><span class="nm">bg-2</span><span class="hx">#221d1a</span></div>
+        <div style="background: var(--bg-3); color: var(--fg-mute);"><span class="nm">bg-3</span><span class="hx">#2c2622</span></div>
+        <div style="background: var(--bg-4); color: var(--fg-mute);"><span class="nm">bg-4</span><span class="hx">#38312c</span></div>
+        <div style="background: var(--fg-mute); color: var(--bg);"><span class="nm">fg-mute</span><span class="hx">#a3987f</span></div>
+        <div style="background: var(--fg-soft); color: var(--bg);"><span class="nm">fg-soft</span><span class="hx">#d6cebc</span></div>
+        <div style="background: var(--fg); color: var(--bg);"><span class="nm">fg</span><span class="hx">#ede6d6</span></div>
+        <div style="background: var(--accent); color: var(--bg); box-shadow: inset 0 0 24px var(--accent-glow);"><span class="nm">accent</span><span class="hx">copper</span></div>
+        <div style="background: var(--accent-deep); color: var(--bg);"><span class="nm">accent-deep</span><span class="hx">hover</span></div>
+      </div>
+    </section>
+
+    <!-- Stats -->
+    <section class="stats">
+      <div class="stat"><div class="n">44<small> components</small></div><div class="lbl">In this issue</div></div>
+      <div class="stat"><div class="n">3<small> typefaces</small></div><div class="lbl">Newsreader · Geist · JetBrains Mono</div></div>
+      <div class="stat"><div class="n">1<small> accent</small></div><div class="lbl">Copper · oklch(0.78 0.13 65)</div></div>
+      <div class="stat"><div class="n">5<small> step types</small></div><div class="lbl">Execute · Eval · Route · Review · Wait</div></div>
+    </section>
+
+    <!-- Manifesto -->
+    <section class="manifesto">
+      <div>
+        <div class="key">Note from the editor</div>
+        <h2>The <span class="em">synthesis</span>.</h2>
+      </div>
+      <div class="body">
+        <p>
+          The three earlier proposals each picked a corner: <em>Imprint</em> took the
+          paper, <em>Specimen</em> took the scientific labels, <em>Console</em> took
+          the terminal. Each was honest about a single thing it wanted to be.
+        </p>
+        <p>
+          Hearth is the synthesis. It keeps Console's <em>dark-first</em>
+          discipline &mdash; engineers run their tools in dark mode and Vertebrae
+          is no exception &mdash; but pulls the colour temperature warm, away
+          from the blue cast of clinical software and toward a workshop
+          lamp at <em>11pm</em>.
+        </p>
+        <p>
+          Display moments are set in <em>Newsreader</em>, the same humanist
+          serif from Imprint, so that page titles and section headings
+          read like writing and not like UI. Body copy stays in <em>Geist</em>.
+          Code stays in mono, where it always belongs.
+        </p>
+        <p>
+          The five step types &mdash; <em>execute</em>, <em>eval</em>, <em>route</em>,
+          <em>human review</em>, <em>wait for children</em> &mdash; finally get
+          colours that match what they <em>do</em>, not arbitrary buckets.
+          The vocabulary is shown overleaf and used everywhere after.
+        </p>
+      </div>
+    </section>
+
+    <!-- Step types preview -->
+    <section class="steps-intro">
+      <div class="lead">
+        <div>
+          <div class="key">Fig. 1.1</div>
+          <h2>The five <span class="em">step types</span></h2>
+        </div>
+        <p class="desc">
+          A step in a Vertebrae workflow is one of five kinds. Each owns a hue;
+          the hue is used as a top accent bar on workflow nodes, a left border on
+          board columns, and a small icon in dense lists.
+        </p>
+      </div>
+
+      <div class="step-row">
+        <div class="step-card" style="--c-wash: var(--step-execute-wash);">
+          <div class="bar" style="background: var(--step-execute);"></div>
+          <div class="ico" style="color: var(--step-execute-fg);">▶ execute</div>
+          <div class="nm">Agent <span class="it">runs</span></div>
+          <p class="desc">An AI agent executes the step &mdash; the place where work actually happens.</p>
+          <div class="tok">step-execute · violet 285°</div>
+          <span class="tint"></span>
+        </div>
+
+        <div class="step-card" style="--c-wash: var(--step-eval-wash);">
+          <div class="bar" style="background: var(--step-eval);"></div>
+          <div class="ico" style="color: var(--step-eval-fg);">⊙ eval</div>
+          <div class="nm">Agent <span class="it">evaluates</span></div>
+          <p class="desc">An agent scores or checks a previous step's output. No new artifact &mdash; just a judgement.</p>
+          <div class="tok">step-eval · cyan 200°</div>
+          <span class="tint"></span>
+        </div>
+
+        <div class="step-card" style="--c-wash: var(--step-route-wash);">
+          <div class="bar" style="background: var(--step-route);"></div>
+          <div class="ico" style="color: var(--step-route-fg);">⤳ route</div>
+          <div class="nm">Decision <span class="it">point</span></div>
+          <p class="desc">Conditional fork. The task moves to one of several next steps based on a rule.</p>
+          <div class="tok">step-route · lime 135°</div>
+          <span class="tint"></span>
+        </div>
+
+        <div class="step-card" style="--c-wash: var(--step-human-wash);">
+          <div class="bar" style="background: var(--step-human);"></div>
+          <div class="ico" style="color: var(--step-human-fg);">👁 review</div>
+          <div class="nm">Human <span class="it">review</span></div>
+          <p class="desc">A person must approve or reject. The system waits indefinitely.</p>
+          <div class="tok">step-human · amber 70°</div>
+          <span class="tint"></span>
+        </div>
+
+        <div class="step-card" style="--c-wash: var(--step-wait-wash);">
+          <div class="bar" style="background: var(--step-wait);"></div>
+          <div class="ico" style="color: var(--step-wait-fg);">⏸ wait</div>
+          <div class="nm">Wait for <span class="it">children</span></div>
+          <p class="desc">Paused on subtask completion. Passive &mdash; will resume automatically.</p>
+          <div class="tok">step-wait · slate 250°</div>
+          <span class="tint"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- TOC -->
+    <section class="toc">
+      <a class="toc-item" href="index.html">
+        <span class="ix">§ 01</span>
+        <span class="ti">Cover &amp; <span class="it">synthesis</span></span>
+        <span class="desc">Identity, palette, step-type vocabulary, table of contents.</span>
+        <span class="pg">p. 01</span>
+      </a>
+      <a class="toc-item" href="foundations.html">
+        <span class="ix">§ 02</span>
+        <span class="ti"><span class="it">Foundations</span></span>
+        <span class="desc">Warm ink &amp; copper, status hues, the five step types, type, space, motion.</span>
+        <span class="pg">p. 09</span>
+      </a>
+      <a class="toc-item" href="components.html">
+        <span class="ix">§ 03</span>
+        <span class="ti">Components <span class="it">— 44</span></span>
+        <span class="desc">Atoms, molecules, organisms. Every variant and meaningful state, rendered live.</span>
+        <span class="pg">p. 23</span>
+      </a>
+      <a class="toc-item" href="patterns.html">
+        <span class="ix">§ 04</span>
+        <span class="ti">Patterns <span class="it">in situ</span></span>
+        <span class="desc">Six page templates: Operations, Board, Design, Tasks, Traces, Setup &mdash; fully composed.</span>
+        <span class="pg">p. 47</span>
+      </a>
+    </section>
+
+    <!-- CTA -->
+    <div class="cta">
+      <span class="lbl">Begin reading</span>
+      <a href="foundations.html" class="btn primary">§ 02 · Foundations →</a>
+      <a href="components.html" class="btn">§ 03 · Components</a>
+      <a href="patterns.html" class="btn">§ 04 · Patterns</a>
+      <span style="margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--fg-faint);">esc · close</span>
+    </div>
+
+    <!-- Colophon -->
+    <footer class="colophon">
+      <div>
+        <h4>Colophon</h4>
+        <p>Display in <em>Newsreader</em> (Production Type), body in <em>Geist</em> (Vercel), monospaced annotations in <em>JetBrains Mono</em>. Ink is <span class="mono" style="font-size: 11px;">#14110f</span>, accent a warm copper <span class="mono" style="font-size: 11px;">oklch(.78 .13 65)</span>.</p>
+      </div>
+      <div>
+        <h4>Sibling proposals</h4>
+        <p>
+          <a href="../imprint/index.html">A · Imprint</a> &mdash; editorial publication, paper.<br>
+          <a href="../specimen/index.html">B · Specimen</a> &mdash; anatomical atlas, oxblood.<br>
+          <a href="../console/index.html">C · Console</a> &mdash; engineering terminal, phosphor.
+        </p>
+      </div>
+      <div>
+        <h4>Issued</h4>
+        <p>Vertebrae Design System &middot; Hearth &middot; May 2026<br>For Vertebrae &mdash; AI workflow orchestration. Internal review draft.</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Theme toggle (Hearth) -->
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+  <script>
+    (function(){
+      var key='hearth-theme';
+      var html=document.documentElement;
+      try { if(localStorage.getItem(key)==='light') html.classList.add('theme-light'); } catch(e){}
+      var btn=document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight=html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+
+
+  <!-- Tweaks panel (Hearth — shared across all pages) -->
+  <script>
+    window.HEARTH_TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "mood": "ember",
+      "voice": "editorial",
+      "atmosphere": 15
+    }/*EDITMODE-END*/;
+  </script>
+  <script src="tweaks-panel.js"></script>
+</body>
+</html>

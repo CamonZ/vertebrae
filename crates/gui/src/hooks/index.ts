@@ -41,3 +41,8 @@ export type {
 export { useScopedChat, useOpenChat } from "./useScopedChat";
 export { usePipelineSummary } from "./usePipelineSummary";
 export { useWebSocketStatus } from "./useWebSocketStatus";
+export { useShellHeader } from "./useShellHeader";
+export {
+  useCurrentProject,
+  projectAvatarBucket,
+} from "./useCurrentProject";
