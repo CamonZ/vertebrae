@@ -240,10 +240,12 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
+    // Tool name is the collapsed header label.
     expect(screen.getByText("Read")).toBeInTheDocument();
+    // Input is hidden until the block is expanded.
     expect(
-      screen.getByText('{"file_path": "/test.ts"}')
-    ).toBeInTheDocument();
+      screen.queryByText('{"file_path": "/test.ts"}')
+    ).toBeNull();
   });
 
   it("shows context summary when present", () => {
@@ -371,8 +373,7 @@ describe("ChatWindow", () => {
     // The scope header should have a muted dot for closed status
     screen.getByText("Test Task");
     // Closed session indicator is a sibling of the header content
-    const closedDot = document.querySelector(".bg-text-muted");
-    expect(closedDot).toBeInTheDocument();
+    expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
   });
 
   // --- A) User interaction flow ---
@@ -584,7 +585,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(document.querySelector(".bg-success")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-active-dot")).toBeInTheDocument();
   });
 
   it("does not show active green dot when session has no claude backend", () => {
@@ -597,7 +598,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(document.querySelector(".bg-success")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chat-active-dot")).toBeNull();
   });
 
   it("does not show closed dot for open sessions", () => {
@@ -610,7 +611,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(document.querySelector(".bg-text-muted")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chat-closed-dot")).toBeNull();
   });
 
   it("hides empty state when there are messages", () => {

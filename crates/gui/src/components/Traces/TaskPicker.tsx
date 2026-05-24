@@ -153,19 +153,19 @@ export const TaskPicker = forwardRef<TaskPickerHandle, TaskPickerProps>(
             setHighlightIndex(0);
           }}
           onKeyDown={handleKeyDown}
-          className="w-full rounded border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          className="w-full rounded border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         />
 
         <ul
           id="task-picker-listbox"
           role="listbox"
           data-testid="task-picker-list"
-          className="min-h-0 flex-1 overflow-y-auto rounded border border-border bg-bg-secondary"
+          className="min-h-0 flex-1 overflow-y-auto rounded border border-[var(--color-line)] bg-[var(--color-bg-1)]"
         >
           {filtered.length === 0 && (
             <li
               data-testid="task-picker-empty"
-              className="px-3 py-2 text-xs text-text-muted"
+              className="px-3 py-2 text-xs text-[var(--color-fg-mute)]"
             >
               {tasks.length === 0
                 ? "No tasks available."
@@ -184,14 +184,14 @@ export const TaskPicker = forwardRef<TaskPickerHandle, TaskPickerProps>(
                 data-highlighted={isHighlighted ? "true" : undefined}
                 onMouseEnter={() => setHighlightIndex(i)}
                 onClick={() => onSelect(t.id)}
-                className={`flex cursor-pointer flex-col gap-0.5 border-b border-border/40 px-3 py-2 text-sm last:border-b-0 ${
+                className={`flex cursor-pointer flex-col gap-0.5 border-b border-[var(--color-line)]/40 px-3 py-2 text-sm last:border-b-0 ${
                   isHighlighted
-                    ? "bg-primary/10 text-primary"
-                    : "text-text-primary hover:bg-bg-hover"
+                    ? "bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+                    : "text-[var(--color-fg)] hover:bg-[var(--color-bg-3)]"
                 }`}
               >
                 <span className="truncate font-medium">{t.title}</span>
-                <span className="flex items-center gap-1 font-mono text-[10px] text-text-muted">
+                <span className="flex items-center gap-1 font-mono text-[10px] text-[var(--color-fg-mute)]">
                   <ScanIdentifier
                     id={t.id}
                     kind="task"

@@ -64,15 +64,15 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
     return (
       <div
         data-testid="trace-filter-bar"
-        className="flex flex-wrap items-center gap-2 border-b border-border bg-bg-secondary px-3 py-2 text-xs"
+        className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-xs"
       >
-        <label className="flex items-center gap-1 text-text-secondary">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
             Status
           </span>
           <select
             data-testid="trace-filter-status"
-            className="rounded border border-border bg-bg-primary px-1 py-0.5 text-xs text-text-primary"
+            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
             value={filters.status ?? ""}
             onChange={handleSelect(onStatusChange)}
           >
@@ -85,13 +85,13 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
           </select>
         </label>
 
-        <label className="flex items-center gap-1 text-text-secondary">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
             Step
           </span>
           <select
             data-testid="trace-filter-step"
-            className="rounded border border-border bg-bg-primary px-1 py-0.5 text-xs text-text-primary"
+            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
             value={filters.stepName ?? ""}
             onChange={handleSelect(onStepNameChange)}
           >
@@ -104,13 +104,13 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
           </select>
         </label>
 
-        <label className="flex items-center gap-1 text-text-secondary">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
             Model
           </span>
           <select
             data-testid="trace-filter-model"
-            className="rounded border border-border bg-bg-primary px-1 py-0.5 text-xs text-text-primary"
+            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
             value={filters.model ?? ""}
             onChange={handleSelect(onModelChange)}
           >
@@ -128,14 +128,14 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
           data-testid="trace-filter-search"
           type="text"
           placeholder="Search events… (press / to focus)"
-          className="min-w-[180px] flex-1 rounded border border-border bg-bg-primary px-2 py-0.5 text-xs text-text-primary placeholder:text-text-muted"
+          className="min-w-[180px] flex-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-2 py-0.5 text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
           value={filters.search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
 
         <label
           data-testid="trace-filter-root-only-label"
-          className="flex cursor-pointer items-center gap-1 text-text-secondary"
+          className="flex cursor-pointer items-center gap-1 text-[var(--color-fg-soft)]"
         >
           <input
             data-testid="trace-filter-root-only"

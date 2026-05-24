@@ -795,7 +795,10 @@ describe("FlightStrip", () => {
       expect(m.querySelector("svg")).toBeTruthy();
     }
 
-    const errored = markers.filter((m) => m.querySelector(".text-error"));
+    const errored = markers.filter((m) => {
+      const glyph = m.querySelector("[data-testid='event-glyph']");
+      return glyph?.className.includes("text-[var(--color-err)]");
+    });
     expect(errored).toHaveLength(1);
     expect(errored[0]).toHaveAttribute("data-kind", "tool_result");
   });

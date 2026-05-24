@@ -42,7 +42,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     );
 
     return (
-      <div className="relative rounded-lg border border-border bg-bg-primary focus-within:border-primary focus-within:ring-1 focus-within:ring-primary">
+      <div className="relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)] focus-within:border-[var(--color-accent)] focus-within:ring-1 focus-within:ring-[var(--color-accent)]">
         <textarea
           ref={ref}
           value={value}
@@ -52,7 +52,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           placeholder={placeholder}
           disabled={disabled}
           rows={1}
-          className="block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          className="block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         />
         <button
           type="button"
@@ -60,7 +60,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           disabled={disabled || !canSubmit}
           title={buttonTitle}
           aria-label={buttonAriaLabel}
-          className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-text-muted transition-colors hover:bg-bg-secondary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted"
+          className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-1)] hover:text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
         >
           <svg
             className="h-4 w-4"

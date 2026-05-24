@@ -19,10 +19,10 @@ export function OpenLiveChatButton({
       onClick={togglePanel}
       aria-pressed={panelOpen}
       title={panelOpen ? "Close live chat" : "Open live chat"}
-      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-bg-hover ${
+      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-[var(--color-bg-3)] ${
         panelOpen
-          ? "bg-primary/10 text-primary"
-          : "text-text-secondary hover:text-text-primary"
+          ? "bg-[var(--color-accent)]/10 text-[var(--color-accent)]"
+          : "text-[var(--color-fg-soft)] hover:text-[var(--color-fg)]"
       } ${className}`}
     >
       <svg

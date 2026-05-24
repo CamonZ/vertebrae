@@ -208,8 +208,8 @@ describe("TracesPage filters narrow all three modes", () => {
     renderAt("/traces/root?status=failed");
     // Only the failed execution's segment should remain.
     const segments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(new Set(segments)).toEqual(new Set(["exec-root-2"]));
   });
 
@@ -236,8 +236,8 @@ describe("TracesPage filters narrow all three modes", () => {
   it("rootOnly toggle drops descendant executions across THREAD", () => {
     renderAt("/traces/root?rootOnly=1");
     const segments = screen
-      .queryAllByTestId("unified-chat-event")
-      .map((el) => el.getAttribute("data-execution-id"));
+      .queryAllByTestId("unified-chat-segment")
+      .map((el) => el.getAttribute("data-segment-execution-id"));
     expect(segments).not.toContain("exec-child-1");
     expect(new Set(segments)).toEqual(
       new Set(["exec-root-1", "exec-root-2"])
@@ -276,7 +276,7 @@ describe("TracesPage live-tail", () => {
     });
 
     // New event is in the DOM
-    const events = screen.queryAllByTestId("unified-chat-event");
+    const events = screen.queryAllByTestId("unified-chat-agent-bubble");
     expect(events.some((e) => e.textContent?.includes("live tail event"))).toBe(
       true
     );

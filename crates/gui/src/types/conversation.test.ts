@@ -45,7 +45,7 @@ describe("parseClaudeMessage", () => {
   });
 
   describe("assistant messages", () => {
-    it("parses text content into thinking event", () => {
+    it("parses text content into assistant_message event", () => {
       const raw: ClaudeRawMessage = {
         type: "assistant",
         message: {
@@ -57,7 +57,7 @@ describe("parseClaudeMessage", () => {
 
       expect(events).toHaveLength(1);
       expect(events[0]).toEqual({
-        kind: "thinking",
+        kind: "assistant_message",
         timestamp,
         text: "Let me analyze this...",
       });
@@ -110,7 +110,7 @@ describe("parseClaudeMessage", () => {
       const events = parseClaudeMessage(raw, timestamp);
 
       expect(events).toHaveLength(2);
-      expect(events[0].kind).toBe("thinking");
+      expect(events[0].kind).toBe("assistant_message");
       expect(events[1].kind).toBe("tool_call");
     });
   });
@@ -250,7 +250,7 @@ describe("parseSessionLogs", () => {
 
     expect(events).toHaveLength(2);
     expect(events[0].kind).toBe("session_start");
-    expect(events[1].kind).toBe("thinking");
+    expect(events[1].kind).toBe("assistant_message");
   });
 
   it("skips non-JSON logs", () => {
@@ -268,7 +268,7 @@ describe("parseSessionLogs", () => {
     const events = parseSessionLogs(logs);
 
     expect(events).toHaveLength(1);
-    expect(events[0].kind).toBe("thinking");
+    expect(events[0].kind).toBe("assistant_message");
   });
 
   it("returns empty array for empty input", () => {
@@ -844,11 +844,11 @@ describe("parseSessionLogs provider dispatch", () => {
     const events = parseSessionLogs(logs);
 
     // Codex: session_start, assistant_message (agent_message → final reply)
-    // Claude: thinking (Claude's `text` content stays on the thinking kind)
+    // Claude: assistant_message (Claude's `text` content is the user-facing reply)
     expect(events.map((e) => e.kind)).toEqual([
       "session_start",
       "assistant_message",
-      "thinking",
+      "assistant_message",
     ]);
     expect(events[0]).toMatchObject({
       kind: "session_start",
@@ -856,7 +856,7 @@ describe("parseSessionLogs provider dispatch", () => {
       model: "codex",
     });
     expect(events[1]).toMatchObject({ kind: "assistant_message", text: "ok" });
-    expect(events[2]).toMatchObject({ kind: "thinking", text: "Hello" });
+    expect(events[2]).toMatchObject({ kind: "assistant_message", text: "Hello" });
   });
 
   it("isolates Codex turn-count state per step_execution_id so concurrent executions don't bleed into each other", () => {

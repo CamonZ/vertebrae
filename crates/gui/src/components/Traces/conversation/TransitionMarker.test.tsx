@@ -27,13 +27,13 @@ describe("TransitionMarker", () => {
     expect(qmarks).toHaveLength(2);
   });
 
-  it("uses neutral border + text when thresholdKind is null", () => {
+  it("uses neutral Hearth line border + muted fg when thresholdKind is null", () => {
     render(<TransitionMarker fromStep="a" toStep="b" taskId="t" />);
     const marker = screen.getByTestId("unified-chat-transition");
     expect(marker.getAttribute("data-threshold-kind")).toBe("");
     const chip = marker.querySelector("span.inline-flex");
-    expect(chip?.className).toMatch(/border-border/);
-    expect(chip?.className).toMatch(/text-text-secondary/);
+    expect(chip?.className).toContain("border-[var(--color-line)]");
+    expect(chip?.className).toContain("text-[var(--color-fg-mute)]");
   });
 
   it("tints the chip red for thresholdKind='rejection'", () => {

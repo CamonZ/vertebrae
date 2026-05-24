@@ -55,22 +55,22 @@ const MAX_SCALE = 4;
 function statusBorderClass(status: CorridorNodeStatus): string {
   switch (status) {
     case "failed":
-      return "stroke-error";
+      return "stroke-[var(--color-err)]";
     case "active":
-      return "stroke-text-primary";
+      return "stroke-[var(--color-accent)]";
     default:
-      return "stroke-border";
+      return "stroke-[var(--color-line)]";
   }
 }
 
 function statusFillClass(status: CorridorNodeStatus): string {
   switch (status) {
     case "active":
-      return "fill-bg-primary";
+      return "fill-[var(--color-bg-1)]";
     case "failed":
-      return "fill-bg-secondary";
+      return "fill-[var(--color-bg-1)]";
     default:
-      return "fill-bg-tertiary";
+      return "fill-[var(--color-bg-2)]";
   }
 }
 
@@ -208,9 +208,9 @@ export function CorridorView({
         data-pan-x="0.00"
         data-pan-y="0.00"
         data-scale="1.000"
-        className="relative flex h-full w-full items-center justify-center bg-bg-secondary"
+        className="relative flex h-full w-full items-center justify-center bg-[var(--color-bg-1)]"
       >
-        <div data-testid="corridor-empty" className="text-xs text-text-muted">
+        <div data-testid="corridor-empty" className="text-xs text-[var(--color-fg-mute)]">
           No executions to graph yet.
         </div>
       </div>
@@ -223,7 +223,7 @@ export function CorridorView({
       data-pan-x={pan.x.toFixed(2)}
       data-pan-y={pan.y.toFixed(2)}
       data-scale={scale.toFixed(3)}
-      className="relative h-full w-full overflow-hidden bg-bg-secondary touch-none"
+      className="relative h-full w-full overflow-hidden bg-[var(--color-bg-1)] touch-none"
       onWheel={handleWheel}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -252,7 +252,7 @@ export function CorridorView({
               x={lane.x}
               y={16}
               textAnchor="middle"
-              className="fill-text-muted font-mono text-[10px] uppercase tracking-wider"
+              className="fill-[var(--color-fg-mute)] font-mono text-[10px] uppercase tracking-wider"
             >
               {lane.title ?? lane.taskId.slice(0, 8)}
             </text>
@@ -275,7 +275,7 @@ export function CorridorView({
                 x2={to.x}
                 y2={to.y}
                 className={
-                  isDelegation ? "stroke-accent-primary" : "stroke-text-muted"
+                  isDelegation ? "stroke-[var(--color-accent)]" : "stroke-[var(--color-fg-mute)]"
                 }
                 strokeWidth={isDelegation ? 1.5 : 1}
                 strokeOpacity={isDelegation ? 0.8 : 0.6}
@@ -312,7 +312,7 @@ export function CorridorView({
               <text
                 textAnchor="middle"
                 y={4}
-                className="pointer-events-none fill-text-primary font-mono text-[10px]"
+                className="pointer-events-none fill-[var(--color-accent)] font-mono text-[10px]"
               >
                 {(node.stepName ?? "step").slice(0, 8)}
               </text>
