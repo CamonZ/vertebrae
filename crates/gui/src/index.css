@@ -19,12 +19,12 @@
      HEARTH PRIMITIVES — warm dark by default. .light overrides below.
      --------------------------------------------------------------------------- */
 
-  /* Surfaces — cool charcoal with faint warmth, six steps */
-  --color-bg: #131318;
-  --color-bg-1: #19191f;
-  --color-bg-2: #21212a;
-  --color-bg-3: #2b2b34;
-  --color-bg-4: #36363f;
+  /* Surfaces — warm ink, six steps. Never blue, never gray. */
+  --color-bg: #100e0c;
+  --color-bg-1: #181513;
+  --color-bg-2: #221d1a;
+  --color-bg-3: #2c2622;
+  --color-bg-4: #38312c;
 
   /* Text — warm neutral cream, five steps to ghost */
   --color-fg: #e8e5dd;
@@ -34,48 +34,48 @@
   --color-fg-ghost: #45413c;
 
   /* Lines */
-  --color-line: #2b2b34;
-  --color-line-soft: #21212a;
-  --color-line-strong: #45434e;
+  --color-line: #2c2622;
+  --color-line-soft: #221d1a;
+  --color-line-strong: #463f38;
 
-  /* Accent — warm copper / firelight gold (oklch for perceptual stability) */
-  --color-accent: oklch(0.78 0.13 70);
-  --color-accent-deep: oklch(0.62 0.15 55);
-  --color-accent-mute: oklch(0.55 0.10 65);
-  --color-accent-wash: oklch(0.32 0.10 60);
-  --color-accent-glow: rgba(232, 188, 110, 0.20);
+  /* Accent — one copper, four stops, anchored at 40° hue (oklch) */
+  --color-accent: oklch(0.74 0.18 40);
+  --color-accent-deep: oklch(0.58 0.18 35);
+  --color-accent-mute: oklch(0.52 0.12 38);
+  --color-accent-wash: oklch(0.3 0.13 38);
+  --color-accent-glow: rgba(217, 124, 70, 0.22);
 
   /* Status — four semantic states, each with a wash background variant */
   --color-ok: oklch(0.78 0.15 145);
-  --color-ok-wash: oklch(0.32 0.10 145);
+  --color-ok-wash: oklch(0.32 0.1 145);
   --color-warn: oklch(0.78 0.15 75);
-  --color-warn-wash: oklch(0.32 0.10 70);
+  --color-warn-wash: oklch(0.32 0.1 70);
   --color-err: oklch(0.72 0.18 25);
   --color-err-wash: oklch(0.32 0.12 25);
   --color-info: oklch(0.78 0.13 220);
-  --color-info-wash: oklch(0.32 0.10 220);
+  --color-info-wash: oklch(0.32 0.1 220);
 
   /* Step types — FIVE Vertebrae step kinds, each with bar / wash / fg variants.
      bar  = top accent strip on a step node
      wash = subtle background tint on tinted surfaces
      fg   = readable foreground on the wash background */
-  --color-step-execute: oklch(0.72 0.16 285);      /* violet — agent runs code */
+  --color-step-execute: oklch(0.72 0.16 285); /* violet — agent runs code */
   --color-step-execute-wash: oklch(0.32 0.12 285);
   --color-step-execute-fg: oklch(0.82 0.14 285);
 
-  --color-step-eval: oklch(0.78 0.13 200);         /* cyan — agent evaluates */
-  --color-step-eval-wash: oklch(0.32 0.10 200);
+  --color-step-eval: oklch(0.78 0.13 200); /* cyan — agent evaluates */
+  --color-step-eval-wash: oklch(0.32 0.1 200);
   --color-step-eval-fg: oklch(0.85 0.12 200);
 
-  --color-step-route: oklch(0.82 0.18 135);        /* lime — routing decision */
+  --color-step-route: oklch(0.82 0.18 135); /* lime — routing decision */
   --color-step-route-wash: oklch(0.32 0.12 135);
   --color-step-route-fg: oklch(0.88 0.16 135);
 
-  --color-step-human: oklch(0.80 0.15 70);         /* warm amber — human acts */
-  --color-step-human-wash: oklch(0.32 0.10 70);
+  --color-step-human: oklch(0.8 0.15 70); /* warm amber — human acts */
+  --color-step-human-wash: oklch(0.32 0.1 70);
   --color-step-human-fg: oklch(0.85 0.14 70);
 
-  --color-step-wait: oklch(0.62 0.04 250);         /* slate — paused on children */
+  --color-step-wait: oklch(0.62 0.04 250); /* slate — paused on children */
   --color-step-wait-wash: oklch(0.28 0.02 250);
   --color-step-wait-fg: oklch(0.75 0.04 250);
 
@@ -87,34 +87,34 @@
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
   /* Type scale — matches docs/test_goal/tokens.css */
-  --text-eyebrow: 0.6875rem;     /* 11px */
-  --text-2xs: 0.625rem;          /* 10px */
-  --text-xs: 0.75rem;            /* 12px */
-  --text-sm: 0.8125rem;          /* 13px */
-  --text-base: 0.9375rem;        /* 15px — Hearth body */
-  --text-lg: 1rem;               /* 16px */
-  --text-xl: 1.125rem;           /* 18px */
-  --text-2xl: 1.25rem;           /* 20px */
-  --text-3xl: 1.5rem;            /* 24px */
-  --text-4xl: 2.25rem;           /* 36px — h2 */
-  --text-5xl: 3.5rem;            /* 56px — h1 */
+  --text-eyebrow: 0.6875rem; /* 11px */
+  --text-2xs: 0.625rem; /* 10px */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.8125rem; /* 13px */
+  --text-base: 0.9375rem; /* 15px — Hearth body */
+  --text-lg: 1rem; /* 16px */
+  --text-xl: 1.125rem; /* 18px */
+  --text-2xl: 1.25rem; /* 20px */
+  --text-3xl: 1.5rem; /* 24px */
+  --text-4xl: 2.25rem; /* 36px — h2 */
+  --text-5xl: 3.5rem; /* 56px — h1 */
   --text-display: clamp(72px, 11vw, 140px);
 
   /* ---------------------------------------------------------------------------
      SPACING — 4px base unit, Hearth scale
      --------------------------------------------------------------------------- */
-  --spacing-1: 0.25rem;   /* 4 */
-  --spacing-2: 0.5rem;    /* 8 */
-  --spacing-3: 0.75rem;   /* 12 */
-  --spacing-4: 1rem;      /* 16 */
-  --spacing-5: 1.25rem;   /* 20 */
-  --spacing-6: 1.5rem;    /* 24 */
-  --spacing-8: 2rem;      /* 32 */
-  --spacing-10: 2.5rem;   /* 40 */
-  --spacing-12: 3rem;     /* 48 */
-  --spacing-16: 4rem;     /* 64 */
-  --spacing-20: 5rem;     /* 80 */
-  --spacing-24: 6rem;     /* 96 */
+  --spacing-1: 0.25rem; /* 4 */
+  --spacing-2: 0.5rem; /* 8 */
+  --spacing-3: 0.75rem; /* 12 */
+  --spacing-4: 1rem; /* 16 */
+  --spacing-5: 1.25rem; /* 20 */
+  --spacing-6: 1.5rem; /* 24 */
+  --spacing-8: 2rem; /* 32 */
+  --spacing-10: 2.5rem; /* 40 */
+  --spacing-12: 3rem; /* 48 */
+  --spacing-16: 4rem; /* 64 */
+  --spacing-20: 5rem; /* 80 */
+  --spacing-24: 6rem; /* 96 */
 
   /* ---------------------------------------------------------------------------
      RADII — between sharp Console and soft Imprint
@@ -128,11 +128,22 @@
   --radius-full: 9999px;
 
   /* ---------------------------------------------------------------------------
-     ELEVATION — dark theme leans on surface shifts; occasional warm glow
+     ELEVATION — dark theme: combine a contact + ambient shadow with a warm
+     inset top-light so panels read as "lit from above" on near-black surfaces.
      --------------------------------------------------------------------------- */
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-line-strong);
-  --shadow-3: 0 24px 56px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--color-line-strong);
+  --shadow-1:
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 0 rgba(255, 240, 220, 0.03);
+  --shadow-2:
+    0 1px 2px rgba(0, 0, 0, 0.6),
+    0 12px 28px rgba(0, 0, 0, 0.55),
+    0 0 0 1px var(--color-line-strong),
+    inset 0 1px 0 0 rgba(255, 240, 220, 0.05);
+  --shadow-3:
+    0 2px 4px rgba(0, 0, 0, 0.65),
+    0 32px 64px rgba(0, 0, 0, 0.65),
+    0 0 0 1px var(--color-line-strong),
+    inset 0 1px 0 0 rgba(255, 240, 220, 0.07);
   --shadow-glow: 0 0 20px var(--color-accent-glow);
   --shadow-glow-sm: 0 0 10px var(--color-accent-glow);
   --shadow-inner-glow: inset 0 0 20px var(--color-accent-glow);
@@ -218,11 +229,11 @@
    LIGHT THEME — applied to <html> via the .light class (see hooks/useTheme.ts)
    ============================================================================= */
 .light {
-  --color-bg: #f4f3ee;       /* cool cream paper */
-  --color-bg-1: #ecebe5;
-  --color-bg-2: #e3e2db;
-  --color-bg-3: #d6d5cc;
-  --color-bg-4: #c4c3b9;
+  --color-bg: #faf6ec; /* warm cream paper */
+  --color-bg-1: #f2ede0;
+  --color-bg-2: #e9e3d3;
+  --color-bg-3: #dcd4c1;
+  --color-bg-4: #cac0a8;
 
   --color-fg: #1a1a20;
   --color-fg-soft: #3a3a44;
@@ -230,22 +241,22 @@
   --color-fg-faint: #8e8e83;
   --color-fg-ghost: #b6b5aa;
 
-  --color-line: #d6d5cc;
-  --color-line-soft: #e3e2db;
-  --color-line-strong: #b6b5aa;
+  --color-line: #dcd4c1;
+  --color-line-soft: #e9e3d3;
+  --color-line-strong: #b9b09c;
 
-  /* Accent — deeper, more saturated against light paper */
-  --color-accent: oklch(0.55 0.14 55);
-  --color-accent-deep: oklch(0.42 0.14 45);
-  --color-accent-mute: oklch(0.78 0.10 60);
-  --color-accent-wash: oklch(0.91 0.04 60);
-  --color-accent-glow: rgba(180, 110, 50, 0.18);
+  /* Accent — same copper across both themes (FIG. II — One copper) */
+  --color-accent: oklch(0.74 0.18 40);
+  --color-accent-deep: oklch(0.58 0.18 35);
+  --color-accent-mute: oklch(0.52 0.12 38);
+  --color-accent-wash: oklch(0.3 0.13 38);
+  --color-accent-glow: rgba(217, 124, 70, 0.2);
 
-  --color-ok: oklch(0.50 0.15 145);
+  --color-ok: oklch(0.5 0.15 145);
   --color-ok-wash: oklch(0.92 0.05 145);
   --color-warn: oklch(0.55 0.15 70);
   --color-warn-wash: oklch(0.93 0.06 75);
-  --color-err: oklch(0.50 0.18 25);
+  --color-err: oklch(0.5 0.18 25);
   --color-err-wash: oklch(0.93 0.05 25);
   --color-info: oklch(0.48 0.13 220);
   --color-info-wash: oklch(0.93 0.04 220);
@@ -256,7 +267,7 @@
 
   --color-step-eval: oklch(0.52 0.13 200);
   --color-step-eval-wash: oklch(0.93 0.05 200);
-  --color-step-eval-fg: oklch(0.40 0.13 200);
+  --color-step-eval-fg: oklch(0.4 0.13 200);
 
   --color-step-route: oklch(0.55 0.18 135);
   --color-step-route-wash: oklch(0.93 0.07 135);
@@ -266,14 +277,16 @@
   --color-step-human-wash: oklch(0.93 0.06 75);
   --color-step-human-fg: oklch(0.45 0.15 70);
 
-  --color-step-wait: oklch(0.50 0.04 250);
+  --color-step-wait: oklch(0.5 0.04 250);
   --color-step-wait-wash: oklch(0.92 0.02 250);
   --color-step-wait-fg: oklch(0.42 0.04 250);
 
   /* Light-mode shadows carry visible elevation */
   --shadow-1: 0 1px 2px rgba(20, 20, 20, 0.08);
-  --shadow-2: 0 6px 18px rgba(20, 20, 20, 0.10), 0 0 0 1px rgba(20, 20, 20, 0.06);
-  --shadow-3: 0 18px 44px rgba(20, 20, 20, 0.14), 0 0 0 1px rgba(20, 20, 20, 0.06);
+  --shadow-2:
+    0 6px 18px rgba(20, 20, 20, 0.1), 0 0 0 1px rgba(20, 20, 20, 0.06);
+  --shadow-3:
+    0 18px 44px rgba(20, 20, 20, 0.14), 0 0 0 1px rgba(20, 20, 20, 0.06);
 
   /* Hover wash needs a darker ink-on-paper feel */
   --color-bg-hover: rgba(26, 26, 32, 0.04);
