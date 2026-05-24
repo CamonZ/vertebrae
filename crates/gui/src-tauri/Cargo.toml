@@ -46,6 +46,7 @@ futures = "0.3"
 # Workspace dependencies
 vertebrae-core = { path = "../../core" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
+vertebrae-installer = { path = "../../installer" }
 slug = "0.1"
 
 # Async trait support for testing
@@ -70,3 +71,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 tauri = { version = "2.9.5", features = ["test"] }
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
+serial_test = "3"
