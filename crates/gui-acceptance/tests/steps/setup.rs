@@ -59,8 +59,11 @@ pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str, first_ru
 
     if first_run {
         // Genuine first-run state: no skip flag, so InstallationGuard routes
-        // to /welcome. The scenario steps navigate and assert from there.
+        // to /welcome. The scenario steps navigate and assert from there, so we
+        // still need the shared WebDriver session — just not the project flow.
         clear_skip_flag();
+        let wd = gui_acceptance::webdriver().await;
+        world.webdriver = Some(wd);
         return;
     }
 
