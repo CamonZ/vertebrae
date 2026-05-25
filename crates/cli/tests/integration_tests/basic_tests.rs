@@ -25,7 +25,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = cmd.execute(&services).await.unwrap();
@@ -47,7 +46,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         });
 
@@ -79,7 +77,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         });
 
@@ -101,7 +98,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let task_id = add.execute(&services).await.unwrap();
@@ -158,7 +154,6 @@ mod lifecycle_tests {
             tags: vec!["backend".to_string(), "api".to_string()],
             parent: None,
             depends_on: vec![],
-            needs_review: true,
             workflow: None,
         };
         let id = cmd.execute(&services).await.unwrap();
@@ -168,7 +163,6 @@ mod lifecycle_tests {
         assert_eq!(task.description, Some("Detailed description".to_string()));
         assert_eq!(task.priority, Some(vertebrae_core::Priority::High));
         assert_eq!(task.tags, vec!["backend", "api"]);
-        assert_eq!(task.needs_human_review, Some(true));
     }
 
     #[tokio::test]
@@ -184,7 +178,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -198,7 +191,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: Some(parent_id.clone()),
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
@@ -222,7 +214,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let result = cmd.execute(&services).await;
@@ -242,7 +233,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -300,7 +290,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -331,7 +320,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let parent_id = parent.execute(&services).await.unwrap();
@@ -345,7 +333,6 @@ mod lifecycle_tests {
             tags: vec![],
             parent: Some(parent_id.clone()),
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let child_id = child.execute(&services).await.unwrap();
@@ -398,7 +385,6 @@ mod query_tests {
                 tags: vec![],
                 parent: None,
                 depends_on: vec![],
-                needs_review: false,
                 workflow: None,
             };
             cmd.execute(&services).await.unwrap();
@@ -436,7 +422,6 @@ mod query_tests {
                 tags: vec![],
                 parent: None,
                 depends_on: vec![],
-                needs_review: false,
                 workflow: None,
             };
             ids.push(cmd.execute(&services).await.unwrap());
@@ -518,7 +503,6 @@ mod query_tests {
             tags: vec!["ui".to_string()],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -556,7 +540,6 @@ mod query_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let parent_id = parent_add.execute(&services).await.unwrap();
@@ -570,7 +553,6 @@ mod query_tests {
             tags: vec![],
             parent: Some(parent_id.clone()),
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let child_id = child_add.execute(&services).await.unwrap();
@@ -605,7 +587,6 @@ mod query_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let a_id = a.execute(&services).await.unwrap();
@@ -618,7 +599,6 @@ mod query_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![a_id.clone()],
-            needs_review: false,
             workflow: None,
         };
         let _b_id = b.execute(&services).await.unwrap();
@@ -649,7 +629,6 @@ mod relationship_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -857,7 +836,6 @@ mod section_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -1006,7 +984,6 @@ mod workflow_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -1121,7 +1098,6 @@ mod command_dispatch_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         });
         let result = cmd.execute(&services).await.unwrap();
@@ -1142,7 +1118,6 @@ mod command_dispatch_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -1166,7 +1141,6 @@ mod command_dispatch_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -1193,7 +1167,6 @@ mod command_dispatch_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();

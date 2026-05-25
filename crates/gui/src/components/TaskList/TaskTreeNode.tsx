@@ -245,11 +245,6 @@ export function TaskTreeNode({
           <span className="truncate font-medium text-[var(--color-fg)]">
             {task.title}
           </span>
-          {task.needs_human_review && (
-            <span className="inline-flex shrink-0 items-center rounded-[var(--radius-sm)] bg-[var(--color-warn-wash)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-[var(--color-warn)]">
-              Review
-            </span>
-          )}
           {runChip && runChipStyles && (
             <span
               data-testid="task-tree-node-run-chip-label"

@@ -37,6 +37,7 @@ function createStep(overrides?: Partial<Step>): Step {
     updated_at: null,
     agent_config: {
       model: null,
+      codex_model_provider: null,
       fallback_model: null,
       reasoning_effort: null,
       system_prompt: null,
@@ -224,6 +225,7 @@ describe("WorkflowDetailPanel", () => {
           agent_config: {
             ...createStep().agent_config!,
             model: "sonnet",
+            codex_model_provider: null,
           },
         }),
       ];
@@ -241,6 +243,7 @@ describe("WorkflowDetailPanel", () => {
           agent_config: {
             ...createStep().agent_config!,
             model: "gpt-5.5",
+            codex_model_provider: null,
             reasoning_effort: "medium",
           },
         }),

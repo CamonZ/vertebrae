@@ -9,14 +9,6 @@ import {
 import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import type { AttentionItem } from "./NeedsAttentionSection";
 
-vi.mock("../../bindings", () => ({
-  commands: {
-    updateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-  },
-}));
-
-import { commands } from "../../bindings";
-
 describe("NeedsAttentionSection", () => {
   it("renders nothing when items array is empty", () => {
     const { container } = render(<NeedsAttentionSection items={[]} />);
@@ -64,25 +56,6 @@ describe("NeedsAttentionSection", () => {
     expect(screen.getByText("Retry")).toBeInTheDocument();
   });
 
-  it("displays review request with task title and Approve/Reject buttons", () => {
-    const items: AttentionItem[] = [
-      {
-        kind: "review_request",
-        task: createMockTask({
-          id: "t-2",
-          title: "Needs Review Task",
-          needs_human_review: true,
-        }),
-      },
-    ];
-    render(<NeedsAttentionSection items={items} />);
-
-    expect(screen.getByText("Needs Review Task")).toBeInTheDocument();
-    expect(screen.getByText("Waiting for human review")).toBeInTheDocument();
-    expect(screen.getByText("Approve")).toBeInTheDocument();
-    expect(screen.getByText("Reject")).toBeInTheDocument();
-  });
-
   it("calls onViewLogs with the failed TaskRun id when View Logs is clicked", () => {
     const onViewLogs = vi.fn();
     const items: AttentionItem[] = [
@@ -121,44 +94,7 @@ describe("NeedsAttentionSection", () => {
     expect(onRetry).toHaveBeenCalledWith("t-1");
   });
 
-  it("calls updateTask to clear needs_human_review when Approve is clicked", () => {
-    const items: AttentionItem[] = [
-      {
-        kind: "review_request",
-        task: createMockTask({ id: "t-3", title: "Review Me" }),
-      },
-    ];
-    render(<NeedsAttentionSection items={items} />);
-
-    fireEvent.click(screen.getByText("Approve"));
-    expect(commands.updateTask).toHaveBeenCalledWith(
-      "t-3",
-      expect.objectContaining({
-        needs_human_review: false,
-      })
-    );
-  });
-
-  it("calls updateTask with revision_feedback when Reject is clicked", () => {
-    const items: AttentionItem[] = [
-      {
-        kind: "review_request",
-        task: createMockTask({ id: "t-4", title: "Reject Me" }),
-      },
-    ];
-    render(<NeedsAttentionSection items={items} />);
-
-    fireEvent.click(screen.getByText("Reject"));
-    expect(commands.updateTask).toHaveBeenCalledWith(
-      "t-4",
-      expect.objectContaining({
-        needs_human_review: false,
-        revision_feedback: "Rejected during review",
-      })
-    );
-  });
-
-  it("renders multiple items of mixed kinds", () => {
+  it("renders multiple failed run items", () => {
     const items: AttentionItem[] = [
       {
         kind: "failed_run",
@@ -170,8 +106,13 @@ describe("NeedsAttentionSection", () => {
         }),
       },
       {
-        kind: "review_request",
-        task: createMockTask({ id: "t-2", title: "Pending Review" }),
+        kind: "failed_run",
+        task: createMockTask({ id: "t-2", title: "Failed Deploy" }),
+        taskRun: createMockTaskRun({
+          id: "run-deploy",
+          task_id: "t-2",
+          status: "failed",
+        }),
       },
     ];
     render(<NeedsAttentionSection items={items} />);
@@ -180,6 +121,6 @@ describe("NeedsAttentionSection", () => {
     const attentionItems = screen.getAllByTestId("attention-item");
     expect(attentionItems).toHaveLength(2);
     expect(screen.getByText("Failed Build")).toBeInTheDocument();
-    expect(screen.getByText("Pending Review")).toBeInTheDocument();
+    expect(screen.getByText("Failed Deploy")).toBeInTheDocument();
   });
 });

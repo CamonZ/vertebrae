@@ -10,13 +10,16 @@ import { DeleteConfirmation } from "../DeleteConfirmation";
 import { ResizablePanel } from "../ResizablePanel";
 import { Spinner } from "../Spinner";
 import { InlineEditField } from "./InlineEditField";
-import { Toggle } from "../Toggle";
 import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
 import { OpenChatButton } from "../OpenChatButton";
-import { deriveRunControlsState, deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
+import {
+  deriveRunControlsState,
+  deriveRunStateChip,
+  getRunChipStyles,
+} from "../../utils/runState";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
@@ -258,7 +261,9 @@ export function TaskDetailPanel({
     void Promise.all(
       missing.map(async (id) => {
         const result = await commands.getTask(id);
-        return result.status === "ok" ? ([id, result.data.level] as const) : null;
+        return result.status === "ok"
+          ? ([id, result.data.level] as const)
+          : null;
       })
     ).then((entries) => {
       if (cancelled) return;
@@ -389,10 +394,8 @@ export function TaskDetailPanel({
           add_tags: [],
           remove_tags: [],
           level: fieldName === "level" ? editValues.level : taskData.level,
-          needs_human_review: taskData.needs_human_review,
           archived: null as boolean | null,
           worktree: null as string | null,
-          revision_feedback: taskData.revision_feedback,
         };
 
         const result = await commands.updateTask(taskData.id, options);
@@ -442,10 +445,8 @@ export function TaskDetailPanel({
         add_tags: string[];
         remove_tags: string[];
         level: string | null;
-        needs_human_review: boolean;
         archived: boolean | null;
         worktree: string | null;
-        revision_feedback: string | null;
       } = {
         title: taskData.title,
         description: taskData.description,
@@ -453,10 +454,8 @@ export function TaskDetailPanel({
         add_tags: [],
         remove_tags: [],
         level: taskData.level,
-        needs_human_review: taskData.needs_human_review ?? false,
         archived: null,
         worktree: null,
-        revision_feedback: taskData.revision_feedback,
       };
 
       switch (field) {
@@ -470,12 +469,6 @@ export function TaskDetailPanel({
           options.remove_tags = currentTags.filter((t) => !newTags.includes(t));
           break;
         }
-        case "needs_human_review":
-          options.needs_human_review = value as boolean;
-          break;
-        case "revision_feedback":
-          options.revision_feedback = (value as string) || null;
-          break;
       }
 
       const result = await commands.updateTask(taskData.id, options);
@@ -544,8 +537,7 @@ export function TaskDetailPanel({
     : null;
   const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
   const isExecuting = runControlsState.hasActiveRun;
-  const runWorkflowDisabled =
-    isRunningWorkflow || runControlsState.runDisabled;
+  const runWorkflowDisabled = isRunningWorkflow || runControlsState.runDisabled;
   const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
     isStoppingWorkflow || runControlsState.stopDisabled;
@@ -1255,42 +1247,6 @@ export function TaskDetailPanel({
                   </p>
                 </div>
               )}
-
-              <div className="py-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-                    Human Review
-                  </h4>
-                  <Toggle
-                    checked={taskData.needs_human_review ?? false}
-                    onChange={(checked) =>
-                      onUpdateField("needs_human_review", checked)
-                    }
-                    label="Toggle human review requirement"
-                    activeColor="warning"
-                  />
-                </div>
-                {taskData.needs_human_review && (
-                  <p className="mt-1 text-xs text-[var(--color-warn)]">
-                    This task requires human review before completion
-                  </p>
-                )}
-              </div>
-
-              <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-                  Revision Feedback
-                </h4>
-                <InlineEditField
-                  value={taskData.revision_feedback || ""}
-                  placeholder="Click to add revision feedback"
-                  multiline
-                  rows={4}
-                  onSave={async (value) => {
-                    await onUpdateField("revision_feedback", value);
-                  }}
-                />
-              </div>
             </div>
           </SectionGroup>
         </div>

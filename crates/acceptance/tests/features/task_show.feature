@@ -56,13 +56,6 @@ Feature: Show task details
     Then the output should contain "Blocked by:"
     And the output should contain "<blocker_id>"
 
-  Scenario: Show task displays human review flag
-    Given I create a task with:
-      | title        | Review task |
-      | needs_review | true        |
-    When I show the task
-    Then the output should contain "Human Review: True"
-
   Scenario: Show task displays sections
     Given I create a task with:
       | title | Section show task |

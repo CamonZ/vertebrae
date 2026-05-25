@@ -919,6 +919,10 @@ export type AgentConfig = {
  */
 model: string | null; 
 /**
+ * Codex upstream model provider configured in ~/.codex/config.toml
+ */
+codex_model_provider: string | null; 
+/**
  * Fallback model when default model is overloaded
  */
 fallback_model: string | null; 
@@ -1533,10 +1537,6 @@ step_name: string | null;
  */
 run_controls?: TaskRunControls | null; 
 /**
- * Whether this task needs human review
- */
-needs_human_review: boolean | null; 
-/**
  * Whether this task is archived
  */
 archived?: boolean; 
@@ -1544,14 +1544,6 @@ archived?: boolean;
  * Optional worktree path
  */
 worktree: string | null; 
-/**
- * Review comment
- */
-review_comment: string | null; 
-/**
- * Feedback to address when a validation gate fails
- */
-revision_feedback: string | null; 
 /**
  * Reason why the task was rejected
  */
@@ -1797,17 +1789,9 @@ remove_tags?: string[];
  */
 level: string | null; 
 /**
- * Human review flag
- */
-needs_human_review: boolean | null; 
-/**
  * Whether the task is archived
  */
 archived: boolean | null; 
-/**
- * Revision feedback text
- */
-revision_feedback: string | null; 
 /**
  * Worktree path (if provided, null clears it)
  */

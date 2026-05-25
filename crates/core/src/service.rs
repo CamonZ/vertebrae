@@ -48,8 +48,6 @@ pub struct CreateTaskOptions {
     pub workflow_id: Option<String>,
     /// IDs of tasks this task depends on
     pub depends_on: Vec<String>,
-    /// Whether task needs human review
-    pub needs_review: bool,
     /// Optional custom ID (for testing) - if not provided, ID is auto-generated
     pub id: Option<String>,
 }
@@ -105,12 +103,6 @@ impl CreateTaskOptions {
         self
     }
 
-    /// Set the needs review flag
-    pub fn with_needs_review(mut self, needs_review: bool) -> Self {
-        self.needs_review = needs_review;
-        self
-    }
-
     /// Set a custom ID (primarily for testing)
     pub fn with_id(mut self, id: impl Into<String>) -> Self {
         self.id = Some(id.into());
@@ -133,14 +125,10 @@ pub struct UpdateTaskOptions {
     pub remove_tags: Vec<String>,
     /// New parent ID (Some(Some(x)) to set, Some(None) to remove)
     pub parent_id: Option<Option<String>>,
-    /// Human review flag
-    pub needs_human_review: Option<bool>,
     /// Whether the task is archived
     pub archived: Option<bool>,
     /// New task level (epic, ticket, task)
     pub level: Option<String>,
-    /// Revision feedback text
-    pub revision_feedback: Option<Option<String>>,
     /// Worktree path (Some(Some(x)) to set, Some(None) to clear)
     pub worktree: Option<Option<String>>,
 }
@@ -205,12 +193,6 @@ impl UpdateTaskOptions {
         self
     }
 
-    /// Set the needs human review flag
-    pub fn with_needs_human_review(mut self, value: bool) -> Self {
-        self.needs_human_review = Some(value);
-        self
-    }
-
     /// Set the archived flag
     pub fn with_archived(mut self, value: bool) -> Self {
         self.archived = Some(value);
@@ -236,7 +218,6 @@ impl UpdateTaskOptions {
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
-            || self.needs_human_review.is_some()
             || self.archived.is_some()
             || self.worktree.is_some()
     }

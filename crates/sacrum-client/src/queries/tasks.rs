@@ -23,10 +23,7 @@ pub const TASK_FIELDS: &str = r#"
                 latest_step_execution_id
             }
         }
-        needs_human_review
-        review_comment
         rejection_reason
-        revision_feedback
         archived
         worktree
         parent_id
@@ -204,8 +201,6 @@ pub const UPDATE_TASK: &str = r#"
         $level: String,
         $priority: String,
         $tags: [String!],
-        $needs_human_review: Boolean,
-        $revision_feedback: String,
         $parent_id: Uuid4,
         $depends_on_ids: [Uuid4!],
         $archived: Boolean,
@@ -218,8 +213,6 @@ pub const UPDATE_TASK: &str = r#"
             level: $level,
             priority: $priority,
             tags: $tags,
-            needs_human_review: $needs_human_review,
-            revision_feedback: $revision_feedback,
             parent_id: $parent_id,
             depends_on_ids: $depends_on_ids,
             archived: $archived,
