@@ -10,6 +10,16 @@ echo "Running pre-commit checks..."
 echo "==> Checking Rust code formatting..."
 cargo fmt --check
 
+# The gui crate declares vtb/vtb-daemon as Tauri externalBin sidecars; Tauri's
+# build script fails if those files are missing for the host triple. Stage them
+# before the clippy/coverage phase, which compiles the gui crate.
+echo "==> Staging Tauri sidecars..."
+cargo build -p vertebrae-cli -p vertebrae-daemon --quiet
+triple="$(rustc -vV | sed -n 's/^host: //p')"
+mkdir -p crates/gui/src-tauri/binaries
+cp "target/debug/vtb" "crates/gui/src-tauri/binaries/vtb-${triple}"
+cp "target/debug/vtb-daemon" "crates/gui/src-tauri/binaries/vtb-daemon-${triple}"
+
 # Phase 1: Rust checks in parallel (heavy compilation — keep CPU for these)
 echo "==> Running clippy and coverage in parallel..."
 

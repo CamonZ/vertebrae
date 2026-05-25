@@ -289,13 +289,16 @@ async fn main() {
         .before(|feature, _rule, scenario, world| {
             let scenario_name = scenario.name.clone();
             let feature_name = feature.name.clone();
+            // `@first_run` may live on either the scenario or the feature.
+            let first_run = is_first_run(feature, scenario);
             Box::pin(async move {
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
-                steps::setup::before_scenario(world, &scenario_name).await;
+                steps::setup::before_scenario(world, &scenario_name, first_run).await;
             })
         })
-        .after(|_feature, _rule, _scenario, ev, world| {
+        .after(|feature, _rule, scenario, ev, world| {
+            let first_run = is_first_run(feature, scenario);
             let prefix = match ev {
                 cucumber::event::ScenarioFinished::StepFailed(..)
                 | cucumber::event::ScenarioFinished::BeforeHookFailed(..) => "F",
@@ -349,7 +352,7 @@ async fn main() {
                                 .await;
                         }
                     }
-                    steps::setup::after_scenario(world).await;
+                    steps::setup::after_scenario(world, first_run).await;
                 }
             })
         })
@@ -361,6 +364,18 @@ async fn main() {
     if summary.execution_has_failed() {
         std::process::exit(1);
     }
+}
+
+/// `true` when the scenario (or its feature) carries the `@first_run` tag.
+/// cucumber-rs strips the leading `@`, so we match the bare `first_run`.
+/// First-run scenarios skip the project-selection setup and instead exercise
+/// the install welcome screen, so the before/after hooks branch on this.
+fn is_first_run(
+    feature: &cucumber::gherkin::Feature,
+    scenario: &cucumber::gherkin::Scenario,
+) -> bool {
+    const TAG: &str = "first_run";
+    scenario.tags.iter().any(|t| t == TAG) || feature.tags.iter().any(|t| t == TAG)
 }
 
 fn slugify(input: &str) -> String {

@@ -1,16 +1,16 @@
-//! `vtb daemon install` — write the launchd plist and load the service.
+//! `vtb daemon install` — install the daemon service via the shared
+//! [`vertebrae_installer`] crate.
+
+use std::path::PathBuf;
+use std::process::Command;
 
 use clap::Args;
+use vertebrae_installer as installer;
 
 use super::DaemonError;
-#[cfg(target_os = "macos")]
-use {
-    super::{generate_plist, log_dir, plist_path},
-    std::fs,
-    std::process::Command,
-};
 
-/// Install vtb-daemon as a launchd service.
+/// Install vtb-daemon as a launchd (macOS) or systemd `--user` (Linux)
+/// service.
 #[derive(Debug, Args)]
 pub struct DaemonInstallCommand {
     /// Explicit path to the vtb-daemon binary (auto-detected from PATH if omitted)
@@ -20,90 +20,30 @@ pub struct DaemonInstallCommand {
 
 impl DaemonInstallCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
-        #[cfg(not(target_os = "macos"))]
-        {
-            Err(DaemonError::UnsupportedPlatform)
-        }
-
-        #[cfg(target_os = "macos")]
-        {
-            self.execute_macos().await
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    async fn execute_macos(&self) -> Result<String, DaemonError> {
         let binary_path = self.resolve_binary()?;
-        let plist = plist_path()?;
-        let logs = log_dir()?;
-
-        // Ensure ~/Library/LaunchAgents exists
-        if let Some(parent) = plist.parent() {
-            fs::create_dir_all(parent).map_err(|e| DaemonError::CreateDir {
-                path: parent.display().to_string(),
-                reason: e.to_string(),
-            })?;
-        }
-
-        // Ensure log directory exists
-        fs::create_dir_all(&logs).map_err(|e| DaemonError::CreateDir {
-            path: logs.display().to_string(),
-            reason: e.to_string(),
-        })?;
-
-        // If the service is already loaded, unload it first so we can update the plist
-        if plist.exists() {
-            let _ = Command::new("launchctl")
-                .args(["unload", &plist.display().to_string()])
-                .output();
-        }
-
-        // Write the plist file
-        let content = generate_plist(&binary_path);
-        fs::write(&plist, &content).map_err(|e| DaemonError::WritePlist {
-            path: plist.display().to_string(),
-            reason: e.to_string(),
-        })?;
-
-        // Load the service
-        let output = Command::new("launchctl")
-            .args(["load", &plist.display().to_string()])
-            .output()
-            .map_err(|e| DaemonError::Launchctl {
-                action: "load".to_string(),
-                reason: e.to_string(),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(DaemonError::Launchctl {
-                action: "load".to_string(),
-                reason: stderr.trim().to_string(),
-            });
-        }
+        let report = installer::install_service(&binary_path)?;
 
         Ok(format!(
             "vtb-daemon installed and loaded.\n\
              \n\
              Plist:   {}\n\
              Binary:  {}\n\
-             Logs:    {}/daemon.log\n\
-             Errors:  {}/daemon.error.log\n\
+             Logs:    {}\n\
+             Errors:  {}\n\
              \n\
              The daemon will start automatically on login.",
-            plist.display(),
-            binary_path,
-            logs.display(),
-            logs.display(),
+            report.service_file.display(),
+            report.binary_path.display(),
+            report.stdout_log.display(),
+            report.stderr_log.display(),
         ))
     }
 
     /// Resolve the vtb-daemon binary path.
     ///
-    /// If `--binary` was provided, validate it exists. Otherwise look it up
-    /// via `which vtb-daemon`.
-    #[cfg(target_os = "macos")]
-    fn resolve_binary(&self) -> Result<String, DaemonError> {
+    /// If `--binary` was provided, validate it exists and canonicalise it.
+    /// Otherwise look it up via `which vtb-daemon`.
+    fn resolve_binary(&self) -> Result<PathBuf, DaemonError> {
         if let Some(ref explicit) = self.binary {
             let path = std::path::Path::new(explicit);
             if !path.exists() {
@@ -111,14 +51,12 @@ impl DaemonInstallCommand {
                     "Specified path does not exist: {explicit}"
                 )));
             }
-            // Canonicalize to get the absolute path
             let canonical = path
                 .canonicalize()
                 .map_err(|e| DaemonError::BinaryResolution(e.to_string()))?;
-            return Ok(canonical.display().to_string());
+            return Ok(canonical);
         }
 
-        // Auto-detect via `which`
         let output = Command::new("which")
             .arg("vtb-daemon")
             .output()
@@ -140,12 +78,10 @@ impl DaemonInstallCommand {
             ));
         }
 
-        // Canonicalize to resolve any symlinks
         let canonical = std::path::Path::new(&path)
             .canonicalize()
             .map_err(|e| DaemonError::BinaryResolution(e.to_string()))?;
-
-        Ok(canonical.display().to_string())
+        Ok(canonical)
     }
 }
 
@@ -175,7 +111,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn resolve_binary_rejects_nonexistent_explicit_path() {
         let cmd = DaemonInstallCommand {

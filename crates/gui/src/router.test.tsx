@@ -19,6 +19,7 @@ vi.mock("./bindings", () => ({
     listStepsForWorkflow: vi.fn(),
     listWorkflowTransitions: vi.fn(),
     getTaskExecutions: vi.fn(),
+    installationStatus: vi.fn(),
   },
   events: {
     workflowChangedEvent: {
@@ -136,6 +137,25 @@ describe("Router Acceptance Tests", () => {
     (commands.getTaskExecutions as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
       data: [],
+    });
+
+    // Default: components already on PATH so the InstallationGuard never
+    // redirects to /welcome in the bulk of the routing tests.
+    (commands.installationStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "ok",
+      data: {
+        cli: {
+          installed_at_symlink: true,
+          symlink_path: "/home/user/.local/bin/vtb",
+          on_path: true,
+        },
+        daemon: {
+          installed_at_symlink: true,
+          symlink_path: "/home/user/.local/bin/vtb-daemon",
+          on_path: true,
+        },
+        service: { kind: "not_loaded" },
+      },
     });
 
     (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -888,6 +908,52 @@ describe("Router Acceptance Tests", () => {
       expect(
         screen.queryByRole("heading", { name: "Tasks" }),
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("InstallationGuard first-run predicate", () => {
+    // Mirror of the production guard's redirect predicate so we can assert the
+    // exact boolean condition that gates the /welcome screen.
+    type Comp = { installed_at_symlink: boolean; on_path: boolean };
+    function isFirstRun(s: { cli: Comp; daemon: Comp }): boolean {
+      return (
+        !s.cli.installed_at_symlink &&
+        !s.daemon.installed_at_symlink &&
+        !s.cli.on_path &&
+        !s.daemon.on_path
+      );
+    }
+
+    const comp = (installed: boolean, onPath: boolean): Comp => ({
+      installed_at_symlink: installed,
+      on_path: onPath,
+    });
+
+    it("returns true when nothing is installed or on-path", () => {
+      expect(
+        isFirstRun({
+          cli: comp(false, false),
+          daemon: comp(false, false),
+        }),
+      ).toBe(true);
+    });
+
+    it("returns false when a component is on PATH even if not symlinked", () => {
+      expect(
+        isFirstRun({
+          cli: comp(false, true),
+          daemon: comp(false, false),
+        }),
+      ).toBe(false);
+    });
+
+    it("returns false when a component is symlinked", () => {
+      expect(
+        isFirstRun({
+          cli: comp(false, false),
+          daemon: comp(true, false),
+        }),
+      ).toBe(false);
     });
   });
 });

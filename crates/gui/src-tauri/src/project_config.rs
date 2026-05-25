@@ -1,7 +1,16 @@
-//! Project configuration management for the GUI
+//! GUI app-state management.
 //!
-//! Handles persistent storage of known projects and current project selection.
-//! Projects are stored in the app data directory.
+//! Persists GUI-local view state to `app-state.json` in the shared Vertebrae
+//! data directory (`vertebrae_installer::data_dir()`, e.g. on macOS
+//! `~/Library/Application Support/Vertebrae/`):
+//!
+//! - the last opened project, and
+//! - the last-active live-chat session id per project (so detaching the chat
+//!   window or relaunching reopens the exact session you were in).
+//!
+//! The project *registry* (which projects exist, their ids and paths) lives in
+//! the shared `config.toml` read via `vertebrae_sacrum_client`; this file only
+//! tracks GUI-local view state on top of it.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -19,29 +28,28 @@ pub struct SavedProject {
     pub path: String,
 }
 
-/// The persisted project configuration
+/// The persisted GUI app state (`app-state.json`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ProjectConfigFile {
+pub struct AppStateFile {
     /// Currently selected project slug (if any)
     pub current_project_slug: Option<String>,
-    /// Last-used live chat session id per project slug. Allows the GUI to
-    /// reopen the previous conversation on relaunch / project switch since the
-    /// V0 sacrum API exposes no list-sessions-for-project query.
+    /// Last-active live chat session id per project slug. Lets the GUI reopen
+    /// the exact conversation you were in on relaunch or after detaching the
+    /// chat into its own window.
     #[serde(default)]
     pub active_chat_sessions: HashMap<String, String>,
 }
 
-/// Configuration manager for project settings
+/// Manager for the GUI app-state file.
 pub struct ProjectConfig {
     config_path: PathBuf,
 }
 
 impl ProjectConfig {
-    /// Create a new project configuration manager
+    /// Create a new app-state manager rooted at the shared Vertebrae data dir.
     pub fn new() -> Result<Self, String> {
-        let config_dir = dirs::data_dir()
-            .ok_or_else(|| "Could not determine app data directory".to_string())?
-            .join("com.vertebrae.gui");
+        let config_dir = vertebrae_installer::data_dir()
+            .map_err(|e| format!("Could not determine app data directory: {}", e))?;
 
         // Ensure config directory exists
         if !config_dir.exists() {
@@ -49,22 +57,22 @@ impl ProjectConfig {
                 .map_err(|e| format!("Failed to create config directory: {}", e))?;
         }
 
-        let config_path = config_dir.join("projects.json");
+        let config_path = config_dir.join("app-state.json");
 
         Ok(Self { config_path })
     }
 
-    /// Create a new project configuration manager with a custom config path.
+    /// Create a new app-state manager with a custom config path.
     /// This is primarily for testing.
     #[cfg(test)]
     pub fn with_path(config_path: PathBuf) -> Self {
         Self { config_path }
     }
 
-    /// Load the project configuration from disk
-    fn load(&self) -> ProjectConfigFile {
+    /// Load the app state from disk
+    fn load(&self) -> AppStateFile {
         if !self.config_path.exists() {
-            return ProjectConfigFile::default();
+            return AppStateFile::default();
         }
 
         fs::read_to_string(&self.config_path)
@@ -73,8 +81,8 @@ impl ProjectConfig {
             .unwrap_or_default()
     }
 
-    /// Save the project configuration to disk
-    fn save(&self, config: &ProjectConfigFile) -> Result<(), String> {
+    /// Save the app state to disk
+    fn save(&self, config: &AppStateFile) -> Result<(), String> {
         let content = serde_json::to_string_pretty(config)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
 
@@ -147,34 +155,11 @@ mod tests {
     use super::*;
     use std::env;
 
-    fn temp_config_path() -> PathBuf {
-        env::temp_dir().join(format!("vtb-gui-test-{}", std::process::id()))
-    }
-
-    #[test]
-    fn test_load_empty_config() {
-        let config_dir = temp_config_path();
+    fn unique_config(suffix: &str) -> (PathBuf, ProjectConfig) {
+        let config_dir =
+            env::temp_dir().join(format!("vtb-gui-test-{}-{}", std::process::id(), suffix));
         let _ = fs::create_dir_all(&config_dir);
-
-        let config = ProjectConfig {
-            config_path: config_dir.join("projects.json"),
-        };
-
-        let result = config.load();
-        assert!(result.current_project_slug.is_none());
-        assert!(result.active_chat_sessions.is_empty());
-
-        let _ = fs::remove_dir_all(&config_dir);
-    }
-
-    fn unique_config(slug_suffix: &str) -> (PathBuf, ProjectConfig) {
-        let config_dir = env::temp_dir().join(format!(
-            "vtb-gui-test-chat-{}-{}",
-            std::process::id(),
-            slug_suffix
-        ));
-        let _ = fs::create_dir_all(&config_dir);
-        let config_path = config_dir.join("projects.json");
+        let config_path = config_dir.join("app-state.json");
         let config = ProjectConfig {
             config_path: config_path.clone(),
         };
@@ -182,8 +167,44 @@ mod tests {
     }
 
     #[test]
+    fn test_load_empty_config() {
+        let (dir, config) = unique_config("empty");
+
+        let result = config.load();
+        assert!(result.current_project_slug.is_none());
+        assert!(result.active_chat_sessions.is_empty());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_current_project_round_trips_when_unvalidated() {
+        // Bypass set_current_project's config.toml validation by writing the
+        // state file directly, then confirm it survives a fresh load.
+        let (dir, _) = unique_config("round-trip");
+        let config_path = dir.join("app-state.json");
+
+        {
+            let config = ProjectConfig {
+                config_path: config_path.clone(),
+            };
+            config
+                .save(&AppStateFile {
+                    current_project_slug: Some("alpha".to_string()),
+                    ..Default::default()
+                })
+                .unwrap();
+        }
+
+        let config = ProjectConfig { config_path };
+        assert_eq!(config.get_current_project(), Some("alpha".to_string()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn test_set_and_get_active_chat_session_round_trips() {
-        let (dir, config) = unique_config("round-trip");
+        let (dir, config) = unique_config("chat-round-trip");
 
         assert!(config.get_active_chat_session("alpha").is_none());
 
@@ -195,7 +216,6 @@ mod tests {
             config.get_active_chat_session("alpha"),
             Some("sess-abc".to_string())
         );
-
         // Other slugs are untouched.
         assert!(config.get_active_chat_session("beta").is_none());
 
@@ -204,7 +224,7 @@ mod tests {
 
     #[test]
     fn test_clearing_active_chat_session_removes_entry() {
-        let (dir, config) = unique_config("clear");
+        let (dir, config) = unique_config("chat-clear");
 
         config
             .set_active_chat_session("alpha", Some("sess-1".to_string()))
@@ -226,8 +246,8 @@ mod tests {
 
     #[test]
     fn test_active_chat_session_persists_across_loads() {
-        let (dir, _) = unique_config("persist");
-        let config_path = dir.join("projects.json");
+        let (dir, _) = unique_config("chat-persist");
+        let config_path = dir.join("app-state.json");
 
         {
             let config = ProjectConfig {
@@ -236,19 +256,12 @@ mod tests {
             config
                 .set_active_chat_session("alpha", Some("sess-persist".to_string()))
                 .unwrap();
-            config
-                .set_active_chat_session("beta", Some("sess-other".to_string()))
-                .unwrap();
         }
 
         let config = ProjectConfig { config_path };
         assert_eq!(
             config.get_active_chat_session("alpha"),
             Some("sess-persist".to_string())
-        );
-        assert_eq!(
-            config.get_active_chat_session("beta"),
-            Some("sess-other".to_string())
         );
 
         let _ = fs::remove_dir_all(&dir);

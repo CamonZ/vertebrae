@@ -4,6 +4,7 @@ pub mod claude_session;
 pub mod commands;
 pub mod events;
 pub mod helpers;
+pub mod install;
 pub mod project_config;
 pub mod types;
 pub mod websocket_client;
@@ -136,6 +137,11 @@ fn create_builder() -> Builder {
             commands::set_active_chat_session_id,
             // WebSocket status command
             commands::get_websocket_status,
+            // Application lifecycle
+            commands::quit_application,
+            // Installer flow commands (first-run welcome screen)
+            install::installation_status,
+            install::install_components,
         ])
         .events(collect_events![
             TaskChangedEvent,

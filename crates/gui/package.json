@@ -18,7 +18,8 @@
     "generate:types": "cd src-tauri && cargo run --bin generate-types",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:prepare-sidecars": "node scripts/prepare-sidecars.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
