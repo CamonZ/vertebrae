@@ -62,13 +62,6 @@ Feature: Short ID resolution across all commands
     When I run vtb "sections <s>"
     Then the command should succeed
 
-  Scenario: review resolves task short ID
-    Given I create a task with:
-      | title | Review target |
-    And I store the task short ID as "s"
-    When I run vtb "review <s>"
-    Then the command should succeed
-
   Scenario: blockers resolves task short ID
     Given I create a task with:
       | title | Blockers target |

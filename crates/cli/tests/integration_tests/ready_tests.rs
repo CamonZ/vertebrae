@@ -19,7 +19,6 @@ async fn test_ready_returns_unblocked_tasks() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let unblocked_id = unblocked.execute(&services).await.unwrap();
@@ -32,7 +31,6 @@ async fn test_ready_returns_unblocked_tasks() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let blocker_id = blocker.execute(&services).await.unwrap();
@@ -45,7 +43,6 @@ async fn test_ready_returns_unblocked_tasks() {
         tags: vec![],
         parent: None,
         depends_on: vec![blocker_id.clone()],
-        needs_review: false,
         workflow: None,
     };
     let blocked_id = blocked.execute(&services).await.unwrap();
@@ -87,7 +84,6 @@ async fn test_ready_with_all_tasks_blocked() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let blocker_id = blocker.execute(&services).await.unwrap();
@@ -102,7 +98,6 @@ async fn test_ready_with_all_tasks_blocked() {
             tags: vec![],
             parent: None,
             depends_on: vec![blocker_id.clone()],
-            needs_review: false,
             workflow: None,
         };
         task.execute(&services).await.unwrap();
@@ -128,7 +123,6 @@ async fn test_ready_command_display_format() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let id1 = task1.execute(&services).await.unwrap();
@@ -141,7 +135,6 @@ async fn test_ready_command_display_format() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let id2 = task2.execute(&services).await.unwrap();
@@ -184,7 +177,6 @@ async fn test_ready_with_multiple_dependency_levels() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let a_id = a.execute(&services).await.unwrap();
@@ -197,7 +189,6 @@ async fn test_ready_with_multiple_dependency_levels() {
         tags: vec![],
         parent: None,
         depends_on: vec![a_id.clone()],
-        needs_review: false,
         workflow: None,
     };
     let b_id = b.execute(&services).await.unwrap();
@@ -210,7 +201,6 @@ async fn test_ready_with_multiple_dependency_levels() {
         tags: vec![],
         parent: None,
         depends_on: vec![b_id.clone()],
-        needs_review: false,
         workflow: None,
     };
     let c_id = c.execute(&services).await.unwrap();
@@ -223,7 +213,6 @@ async fn test_ready_with_multiple_dependency_levels() {
         tags: vec![],
         parent: None,
         depends_on: vec![c_id.clone()],
-        needs_review: false,
         workflow: None,
     };
     let _d_id = d.execute(&services).await.unwrap();
@@ -250,7 +239,6 @@ async fn test_ready_task_properties() {
         tags: vec!["frontend".to_string(), "urgent".to_string()],
         parent: None,
         depends_on: vec![],
-        needs_review: true,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -265,5 +253,4 @@ async fn test_ready_task_properties() {
     assert_eq!(ready_task.level, vertebrae_core::Level::Ticket);
     assert_eq!(ready_task.priority, Some(vertebrae_core::Priority::High));
     assert_eq!(ready_task.tags, vec!["frontend", "urgent"]);
-    assert_eq!(ready_task.needs_human_review, Some(true));
 }

@@ -116,7 +116,7 @@ The primary operator view. Combines mission control with an attention feed. Calm
 
 **Layout:**
 - Main area with priority-ordered sections:
-  1. **NEEDS ATTENTION** — failed executions, human review requests. Each item has inline actions (View Logs, Retry, Approve, Reject). Red-tinted backgrounds.
+  1. **NEEDS ATTENTION** — failed executions. Each item has inline actions (View Logs, Retry). Red-tinted backgrounds.
   2. **LIVE** — currently executing operations. Task name → workflow/step, duration, progress. Green-tinted. For fan-out tasks, shows parallel steps side-by-side with fan-in status bar.
   3. **RECENTLY COMPLETED** — dismissible. What finished, duration, what it auto-triggered.
   4. **READY** — unblocked tasks not yet started. Start buttons.
@@ -124,7 +124,6 @@ The primary operator view. Combines mission control with an attention feed. Calm
 **Data sources (all existing):**
 - `StepExecution.status == in_progress` → Live
 - `StepExecution.status == failed` → Needs Attention
-- `task.needs_human_review == true` → Needs Attention
 - Tasks with all `dependency_ids` resolved but not started → Ready (existing `list_ready` query)
 - Recent `StepExecution.status == completed` → Recently Completed
 
@@ -407,7 +406,7 @@ New page. Data available from Step 1.
 
 New page. Built entirely from existing data sources.
 
-- Needs Attention: `StepExecution.status == failed` + `task.needs_human_review == true`
+- Needs Attention: `StepExecution.status == failed`
 - Live: `StepExecution.status == in_progress` with duration, workflow/step info
 - Recently Completed: recent completed executions, dismissible
 - Ready: `list_ready` query (tasks with all deps resolved, not started)

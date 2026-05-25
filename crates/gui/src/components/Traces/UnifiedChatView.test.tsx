@@ -18,11 +18,8 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   current_step_id: null,
   workflow_name: overrides.workflow_name ?? "Implementation",
   step_name: null,
-  needs_human_review: null,
   archived: false,
   worktree: null,
-  review_comment: null,
-  revision_feedback: null,
   rejection_reason: null,
   parent_id: overrides.parent_id ?? null,
   dependency_ids: [],
@@ -764,7 +761,12 @@ describe("UnifiedChatView", () => {
       type: "assistant",
       message: {
         content: [
-          { type: "tool_use", id: "tool-1", name: "Read", input: { path: "x.rs" } },
+          {
+            type: "tool_use",
+            id: "tool-1",
+            name: "Read",
+            input: { path: "x.rs" },
+          },
         ],
       },
     };
@@ -801,9 +803,13 @@ describe("UnifiedChatView", () => {
     const bubble = bubbles[0];
     expect(bubble).toHaveAttribute("data-execution-id", "exec-a");
     // Author line includes the model name
-    expect(within(bubble).getByText(/AGENT · claude-opus-4-7/)).toBeInTheDocument();
+    expect(
+      within(bubble).getByText(/AGENT · claude-opus-4-7/)
+    ).toBeInTheDocument();
     // Assistant text is inside the bubble
-    expect(within(bubble).getByText("Reading the file now.")).toBeInTheDocument();
+    expect(
+      within(bubble).getByText("Reading the file now.")
+    ).toBeInTheDocument();
     // Tool block is rendered INSIDE the bubble, not as a sibling event
     expect(within(bubble).getByText("Read")).toBeInTheDocument();
     // No sibling event rows for the tool_call / tool_result.

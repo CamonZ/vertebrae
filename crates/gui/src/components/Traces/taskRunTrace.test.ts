@@ -18,11 +18,8 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   current_step_id: null,
   workflow_name: "Implementation",
   step_name: null,
-  needs_human_review: null,
   archived: false,
   worktree: null,
-  review_comment: null,
-  revision_feedback: null,
   rejection_reason: null,
   parent_id: overrides.parent_id ?? null,
   dependency_ids: [],
@@ -193,9 +190,10 @@ describe("projectTaskRunTrace", () => {
 
     const proj = projectTaskRunTrace(runs, [], tasks);
 
-    expect(proj.orderedTaskGroups.map((group) => group.taskId).sort()).toEqual(
-      ["t-a", "t-b"]
-    );
+    expect(proj.orderedTaskGroups.map((group) => group.taskId).sort()).toEqual([
+      "t-a",
+      "t-b",
+    ]);
   });
 
   it("orders runs DFS from root using parent_task_run_id", () => {

@@ -34,7 +34,6 @@ async fn seed_task(services: &vertebrae_core::VertebraeServices, id: &str, title
             parent_id: None,
             workflow_id: None,
             depends_on: vec![],
-            needs_review: false,
         })
         .await
         .unwrap();

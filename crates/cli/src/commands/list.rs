@@ -30,8 +30,6 @@ pub struct TaskSummary {
     pub priority: Option<String>,
     /// Tags for categorization
     pub tags: Vec<String>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
     /// Whether this task is archived
     pub archived: bool,
     /// Parent task ID (if any)
@@ -139,7 +137,6 @@ impl From<&Task> for TaskSummary {
             latest_step_execution_id,
             priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
             tags: task.tags.clone(),
-            needs_human_review: task.needs_human_review,
             archived: task.archived,
             parent_id: task.parent_id.clone(),
         }
@@ -269,7 +266,6 @@ mod tests {
             latest_step_execution_id: Some("exec-1".to_string()),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
-            needs_human_review: Some(false),
             archived: false,
             parent_id: Some("parent-0000-4000-8000-000000000001".to_string()),
         };
@@ -285,7 +281,6 @@ mod tests {
         assert_eq!(json["latest_step_execution_id"], "exec-1");
         assert_eq!(json["priority"], "high");
         assert_eq!(json["tags"][0], "backend");
-        assert_eq!(json["needs_human_review"], false);
         assert_eq!(json["archived"], false);
         assert_eq!(json["parent_id"], "parent-0000-4000-8000-000000000001");
     }
@@ -304,7 +299,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -319,7 +313,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -345,7 +338,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         };
@@ -357,7 +349,6 @@ mod tests {
         assert!(json["active_task_run_id"].is_null());
         assert!(json["latest_step_execution_id"].is_null());
         assert!(json["priority"].is_null());
-        assert!(json["needs_human_review"].is_null());
         assert!(json["parent_id"].is_null());
         assert!(json["tags"].as_array().unwrap().is_empty());
     }

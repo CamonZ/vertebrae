@@ -10,6 +10,7 @@ import type { AgentConfig, Step, PermissionMode } from "../../bindings";
 function createAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
   return {
     model: null,
+    codex_model_provider: null,
     fallback_model: null,
     reasoning_effort: null,
     system_prompt: null,
@@ -130,6 +131,7 @@ describe("StepNode", () => {
           goal: null,
           agent_config: createAgentConfig({
             model: "gpt-5.5",
+            codex_model_provider: null,
             reasoning_effort: "medium",
           }),
         }),

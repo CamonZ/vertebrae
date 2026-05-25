@@ -18,6 +18,7 @@ function createStep(id: string, name: string, order: number): Step {
     prompt: null,
     agent_config: {
       model: "haiku",
+      codex_model_provider: null,
       fallback_model: null,
       reasoning_effort: null,
       system_prompt: null,
@@ -118,9 +119,7 @@ describe("groupTasksByStep", () => {
   });
 
   it("falls back to first step when step ID does not match", () => {
-    const tasks: Task[] = [
-      createTaskWithStep("task1", "unknown_random_id"),
-    ];
+    const tasks: Task[] = [createTaskWithStep("task1", "unknown_random_id")];
 
     const groups = groupTasksByStep(tasks, stepsWithRandomIds);
 
@@ -222,9 +221,7 @@ describe("groupTasksByStep", () => {
   });
 
   it("prefers direct ID match over suffix match", () => {
-    const tasks: Task[] = [
-      createTaskWithStep("task1", "abc123xyz"),
-    ];
+    const tasks: Task[] = [createTaskWithStep("task1", "abc123xyz")];
 
     const groups = groupTasksByStep(tasks, stepsWithRandomIds);
 

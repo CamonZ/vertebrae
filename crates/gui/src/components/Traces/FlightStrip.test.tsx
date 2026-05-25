@@ -1,12 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useRef, type ReactNode } from "react";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FlightStrip, computeCalloutVisibility } from "./FlightStrip";
 import type { ThresholdMarker } from "./timeline";
@@ -27,11 +21,8 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   current_step_id: null,
   workflow_name: "Implementation",
   step_name: null,
-  needs_human_review: null,
   archived: false,
   worktree: null,
-  review_comment: null,
-  revision_feedback: null,
   rejection_reason: null,
   parent_id: overrides.parent_id ?? null,
   dependency_ids: [],
@@ -234,7 +225,9 @@ describe("FlightStrip", () => {
     );
 
     expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
-    expect(screen.getByTestId("flight-strip-lane-threshold")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("flight-strip-lane-threshold")
+    ).toBeInTheDocument();
     expect(screen.getByTestId("flight-strip-lane-tool")).toBeInTheDocument();
     const mainLane = screen.getByTestId("flight-strip-lane-main");
     const rows = within(mainLane).getAllByTestId("flight-strip-main-row");
@@ -250,9 +243,9 @@ describe("FlightStrip", () => {
     expect(screen.getAllByTestId("flight-strip-marker-tool").length).toBe(2);
 
     // Delegation edge exists
-    expect(
-      screen.getAllByTestId("flight-strip-delegation-edge")
-    ).toHaveLength(1);
+    expect(screen.getAllByTestId("flight-strip-delegation-edge")).toHaveLength(
+      1
+    );
   });
 
   it("click on a threshold marker scrolls the THREAD pane to the matching execution row", async () => {
@@ -385,7 +378,9 @@ describe("FlightStrip", () => {
     expect(toggle.checked).toBe(true);
 
     // THRESHOLD remains
-    expect(screen.getByTestId("flight-strip-lane-threshold")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("flight-strip-lane-threshold")
+    ).toBeInTheDocument();
     expect(
       screen.getAllByTestId("flight-strip-marker-threshold").length
     ).toBeGreaterThan(0);
@@ -421,8 +416,9 @@ describe("FlightStrip", () => {
     }
     const originalRO = (globalThis as unknown as { ResizeObserver: unknown })
       .ResizeObserver;
-    (globalThis as unknown as { ResizeObserver: typeof FakeRO }).ResizeObserver =
-      FakeRO;
+    (
+      globalThis as unknown as { ResizeObserver: typeof FakeRO }
+    ).ResizeObserver = FakeRO;
 
     const tasks = [makeTask({ id: "t-root" })];
     const e1 = makeExec({
@@ -649,12 +645,8 @@ describe("FlightStrip", () => {
     expect(
       screen.getByTestId("flight-strip-gutter-label-threshold")
     ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("flight-strip-gutter-label-tool")
-    ).toBeNull();
-    expect(
-      screen.queryByTestId("flight-strip-gutter-label-main")
-    ).toBeNull();
+    expect(screen.queryByTestId("flight-strip-gutter-label-tool")).toBeNull();
+    expect(screen.queryByTestId("flight-strip-gutter-label-main")).toBeNull();
   });
 
   it("renders an EventGlyph and uppercase title call-out for each titled threshold", () => {

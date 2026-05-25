@@ -1744,10 +1744,6 @@ pub(crate) async fn update_task_inner(
         update_opts.level = Some(new_level);
     }
 
-    if let Some(review_flag) = options.needs_human_review {
-        update_opts.needs_human_review = Some(review_flag);
-    }
-
     if let Some(archived) = options.archived {
         update_opts.archived = Some(archived);
     }
@@ -2669,25 +2665,6 @@ mod tests {
 
         let task = services.tasks().get_task(&id).await.unwrap();
         assert_eq!(task.priority, None);
-    }
-
-    #[tokio::test]
-    async fn update_task_inner_sets_needs_human_review() {
-        let services = mock_services();
-        let id = services
-            .tasks()
-            .create_task(vertebrae_core::CreateTaskOptions::new("Task".to_string()))
-            .await
-            .unwrap();
-
-        let opts = crate::types::UpdateTaskOptions {
-            needs_human_review: Some(true),
-            ..Default::default()
-        };
-        update_task_inner(&services, &id, opts).await.unwrap();
-
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.needs_human_review, Some(true));
     }
 
     #[tokio::test]

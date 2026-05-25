@@ -34,6 +34,7 @@ function createStep(overrides?: Partial<Step>): Step {
     updated_at: null,
     agent_config: {
       model: null,
+      codex_model_provider: null,
       fallback_model: null,
       reasoning_effort: null,
       system_prompt: null,
@@ -65,11 +66,8 @@ function createTask(overrides?: Partial<Task>): Task {
     current_step_id: null,
     workflow_name: null,
     step_name: "todo",
-    needs_human_review: null,
     archived: false,
     worktree: null,
-    review_comment: null,
-    revision_feedback: null,
     rejection_reason: null,
     parent_id: null,
     sections: [],
@@ -93,14 +91,18 @@ describe("FilteredTasksPanel", () => {
 
     it("renders step name in panel", () => {
       const step = createStep({ name: "Development" });
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       expect(screen.getByText("Development")).toBeInTheDocument();
     });
 
     it("renders step order badge (1-indexed)", () => {
       const step = createStep({ order: 2 });
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       // Order 2 displays as "3" (1-indexed)
       expect(screen.getByText("3")).toBeInTheDocument();
@@ -112,7 +114,9 @@ describe("FilteredTasksPanel", () => {
         createTask({ id: "task-1" }),
         createTask({ id: "task-2" }),
       ];
-      render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />
+      );
 
       const matches = screen.getAllByText("2 tasks");
       expect(matches.length).toBeGreaterThanOrEqual(1);
@@ -155,7 +159,9 @@ describe("FilteredTasksPanel", () => {
         }),
         createTask({ id: "task-3", step_name: "todo" }),
       ];
-      render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />
+      );
 
       expect(screen.getByText("(1 active)")).toBeInTheDocument();
     });
@@ -164,7 +170,9 @@ describe("FilteredTasksPanel", () => {
   describe("search functionality", () => {
     it("renders search input", () => {
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
     });
@@ -174,7 +182,14 @@ describe("FilteredTasksPanel", () => {
     it("renders close button when onClose is provided", () => {
       const step = createStep();
       const onClose = vi.fn();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
+      render(
+        <FilteredTasksPanel
+          step={step}
+          tasks={[]}
+          workflowId="workflow-1"
+          onClose={onClose}
+        />
+      );
 
       expect(screen.getByLabelText("Close panel")).toBeInTheDocument();
     });
@@ -183,7 +198,14 @@ describe("FilteredTasksPanel", () => {
       const user = userEvent.setup();
       const step = createStep();
       const onClose = vi.fn();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
+      render(
+        <FilteredTasksPanel
+          step={step}
+          tasks={[]}
+          workflowId="workflow-1"
+          onClose={onClose}
+        />
+      );
 
       await user.click(screen.getByLabelText("Close panel"));
 
@@ -192,7 +214,9 @@ describe("FilteredTasksPanel", () => {
 
     it("does not render close button when onClose is not provided", () => {
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       expect(screen.queryByLabelText("Close panel")).not.toBeInTheDocument();
     });
@@ -202,9 +226,7 @@ describe("FilteredTasksPanel", () => {
     it("calls onTaskSelect when task is clicked", async () => {
       const user = userEvent.setup();
       const step = createStep();
-      const tasks = [
-        createTask({ id: "task-1", title: "Test Task" }),
-      ];
+      const tasks = [createTask({ id: "task-1", title: "Test Task" })];
       const onTaskSelect = vi.fn();
       render(
         <FilteredTasksPanel
@@ -229,7 +251,9 @@ describe("FilteredTasksPanel", () => {
 
     it("renders create task button with pointer cursor", () => {
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       const createButton = screen.getByLabelText("Create task");
       expect(createButton).toBeInTheDocument();
@@ -239,7 +263,14 @@ describe("FilteredTasksPanel", () => {
     it("renders close button with pointer cursor", () => {
       const step = createStep();
       const onClose = vi.fn();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
+      render(
+        <FilteredTasksPanel
+          step={step}
+          tasks={[]}
+          workflowId="workflow-1"
+          onClose={onClose}
+        />
+      );
 
       const closeButton = screen.getByLabelText("Close panel");
       expect(closeButton).toBeInTheDocument();
@@ -249,34 +280,48 @@ describe("FilteredTasksPanel", () => {
     it("shows create form when add button is clicked", async () => {
       const user = userEvent.setup();
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
 
       expect(screen.getByPlaceholderText("Task title...")).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("Description (optional)...")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Description (optional)...")
+      ).toBeInTheDocument();
       expect(screen.getByText("Level:")).toBeInTheDocument();
       expect(screen.getByRole("combobox")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Cancel" })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Create" })
+      ).toBeInTheDocument();
     });
 
     it("hides form when cancel is clicked", async () => {
       const user = userEvent.setup();
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       expect(screen.getByPlaceholderText("Task title...")).toBeInTheDocument();
 
       await user.click(screen.getByRole("button", { name: "Cancel" }));
-      expect(screen.queryByPlaceholderText("Task title...")).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText("Task title...")
+      ).not.toBeInTheDocument();
     });
 
     it("disables create button when title is empty", async () => {
       const user = userEvent.setup();
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
 
@@ -287,7 +332,9 @@ describe("FilteredTasksPanel", () => {
     it("enables create button when title is entered", async () => {
       const user = userEvent.setup();
       const step = createStep();
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
@@ -320,8 +367,14 @@ describe("FilteredTasksPanel", () => {
       );
 
       await user.click(screen.getByLabelText("Create task"));
-      await user.type(screen.getByPlaceholderText("Task title..."), "My New Task");
-      await user.type(screen.getByPlaceholderText("Description (optional)..."), "Task description");
+      await user.type(
+        screen.getByPlaceholderText("Task title..."),
+        "My New Task"
+      );
+      await user.type(
+        screen.getByPlaceholderText("Description (optional)..."),
+        "Task description"
+      );
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => {
@@ -334,7 +387,10 @@ describe("FilteredTasksPanel", () => {
       });
 
       await waitFor(() => {
-        expect(commands.assignWorkflow).toHaveBeenCalledWith("new-task-id", "workflow-1");
+        expect(commands.assignWorkflow).toHaveBeenCalledWith(
+          "new-task-id",
+          "workflow-1"
+        );
       });
 
       await waitFor(() => {
@@ -342,7 +398,9 @@ describe("FilteredTasksPanel", () => {
       });
 
       // Form should be hidden after success
-      expect(screen.queryByPlaceholderText("Task title...")).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText("Task title...")
+      ).not.toBeInTheDocument();
     });
 
     it("creates task with selected level", async () => {
@@ -358,7 +416,9 @@ describe("FilteredTasksPanel", () => {
         data: null,
       });
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Epic");
@@ -384,7 +444,9 @@ describe("FilteredTasksPanel", () => {
         error: { message: "Failed to create task" },
       });
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
@@ -411,14 +473,18 @@ describe("FilteredTasksPanel", () => {
         error: { message: "Workflow not found" },
       });
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => {
-        expect(screen.getByText(/Task created but workflow assignment failed/)).toBeInTheDocument();
+        expect(
+          screen.getByText(/Task created but workflow assignment failed/)
+        ).toBeInTheDocument();
       });
     });
 
@@ -431,17 +497,25 @@ describe("FilteredTasksPanel", () => {
       const createTaskPromise = new Promise((resolve) => {
         resolveCreateTask = resolve;
       });
-      vi.mocked(commands.createTask).mockReturnValue(createTaskPromise as Promise<{ status: "ok"; data: string }>);
+      vi.mocked(commands.createTask).mockReturnValue(
+        createTaskPromise as Promise<{ status: "ok"; data: string }>
+      );
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       // Should show loading state
-      expect(screen.getByRole("button", { name: "Creating..." })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
+      expect(
+        screen.getByRole("button", { name: "Creating..." })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Creating..." })
+      ).toBeDisabled();
 
       // Resolve the promise
       resolveCreateTask!({ status: "ok", data: "new-task-id" });
@@ -455,9 +529,13 @@ describe("FilteredTasksPanel", () => {
       const createTaskPromise = new Promise((resolve) => {
         resolveCreateTask = resolve;
       });
-      vi.mocked(commands.createTask).mockReturnValue(createTaskPromise as Promise<{ status: "ok"; data: string }>);
+      vi.mocked(commands.createTask).mockReturnValue(
+        createTaskPromise as Promise<{ status: "ok"; data: string }>
+      );
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
       await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
@@ -465,7 +543,9 @@ describe("FilteredTasksPanel", () => {
 
       // Inputs should be disabled
       expect(screen.getByPlaceholderText("Task title...")).toBeDisabled();
-      expect(screen.getByPlaceholderText("Description (optional)...")).toBeDisabled();
+      expect(
+        screen.getByPlaceholderText("Description (optional)...")
+      ).toBeDisabled();
       expect(screen.getByRole("combobox")).toBeDisabled();
       expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
 
@@ -486,10 +566,15 @@ describe("FilteredTasksPanel", () => {
         data: null,
       });
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
-      await user.type(screen.getByPlaceholderText("Task title..."), "  Trimmed Title  ");
+      await user.type(
+        screen.getByPlaceholderText("Task title..."),
+        "  Trimmed Title  "
+      );
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => {
@@ -515,10 +600,15 @@ describe("FilteredTasksPanel", () => {
         data: null,
       });
 
-      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+      render(
+        <FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />
+      );
 
       await user.click(screen.getByLabelText("Create task"));
-      await user.type(screen.getByPlaceholderText("Task title..."), "Task without description");
+      await user.type(
+        screen.getByPlaceholderText("Task title..."),
+        "Task without description"
+      );
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() => {
@@ -531,5 +621,4 @@ describe("FilteredTasksPanel", () => {
       });
     });
   });
-
 });

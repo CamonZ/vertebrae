@@ -1041,10 +1041,6 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_controls: Option<TaskRunControls>,
 
-    /// Whether this task needs human review
-    #[serde(default)]
-    pub needs_human_review: Option<bool>,
-
     /// Whether this task is archived
     #[serde(default)]
     pub archived: bool,
@@ -1052,14 +1048,6 @@ pub struct Task {
     /// Optional worktree path for this task
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
-
-    /// Review comment
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review_comment: Option<String>,
-
-    /// Feedback for revision
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revision_feedback: Option<String>,
 
     /// Rejection reason
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1125,11 +1113,8 @@ impl Task {
             workflow_name: None,
             step_name: None,
             run_controls: None,
-            needs_human_review: None,
             archived: false,
             worktree: None,
-            review_comment: None,
-            revision_feedback: None,
             rejection_reason: None,
             parent_id: None,
             dependency_ids: Vec::new(),
@@ -1181,12 +1166,6 @@ impl Task {
         self
     }
 
-    /// Mark as needing human review
-    pub fn with_needs_human_review(mut self, needs_review: bool) -> Self {
-        self.needs_human_review = Some(needs_review);
-        self
-    }
-
     /// Assign to a workflow with a step
     pub fn with_workflow(mut self, workflow_id: String, step_id: String) -> Self {
         self.workflow_id = Some(workflow_id);
@@ -1217,7 +1196,6 @@ impl PartialEq for Task {
             && self.tags == other.tags
             && self.sections == other.sections
             && self.code_refs == other.code_refs
-            && self.needs_human_review == other.needs_human_review
             && self.workflow_id == other.workflow_id
             && self.current_step_id == other.current_step_id
             && self.run_controls == other.run_controls
@@ -2033,8 +2011,6 @@ pub struct TaskUpdate {
     pub level: Option<String>,
     /// Whether to set completed_at to now
     pub set_completed_at: bool,
-    /// Revision feedback (Some(Some(x)) to set, Some(None) to clear)
-    pub revision_feedback: Option<Option<String>>,
     /// Rejection reason (Some(Some(x)) to set, Some(None) to clear)
     pub rejection_reason: Option<Option<String>>,
 }
@@ -2162,7 +2138,6 @@ mod tests {
         assert!(task.dependency_ids.is_empty());
         assert!(task.workflow_name.is_none());
         assert!(task.step_name.is_none());
-        assert!(task.review_comment.is_none());
         assert!(!task.archived);
     }
 
@@ -2173,14 +2148,12 @@ mod tests {
             .with_priority(Priority::High)
             .with_tag("rust")
             .with_tags(vec!["cli", "core"])
-            .with_needs_human_review(true)
             .with_workflow("wf1".into(), "s1".into())
             .with_current_step_id("s2".into());
 
         assert_eq!(task.description.as_deref(), Some("desc"));
         assert_eq!(task.priority, Some(Priority::High));
         assert_eq!(task.tags, vec!["rust", "cli", "core"]);
-        assert_eq!(task.needs_human_review, Some(true));
         assert_eq!(task.workflow_id.as_deref(), Some("wf1"));
         assert_eq!(task.current_step_id.as_deref(), Some("s2"));
     }

@@ -17,7 +17,6 @@ async fn create_task(services: &vertebrae_core::VertebraeServices, title: &str) 
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     cmd.execute(services).await.unwrap()
@@ -657,7 +656,6 @@ async fn test_update_clear_description() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = cmd.execute(&services).await.unwrap();
@@ -706,7 +704,6 @@ async fn test_update_tags_combined() {
         tags: vec!["tag1".to_string(), "tag2".to_string()],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = cmd.execute(&services).await.unwrap();

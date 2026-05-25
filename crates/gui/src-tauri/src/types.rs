@@ -176,17 +176,11 @@ pub struct Task {
     /// Server-derived TaskRun controls for Run/Stop surfaces
     #[serde(default)]
     pub run_controls: Option<TaskRunControls>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
     /// Whether this task is archived
     #[serde(default)]
     pub archived: bool,
     /// Optional worktree path
     pub worktree: Option<String>,
-    /// Review comment
-    pub review_comment: Option<String>,
-    /// Feedback to address when a validation gate fails
-    pub revision_feedback: Option<String>,
     /// Reason why the task was rejected
     pub rejection_reason: Option<String>,
     /// Parent task ID (if any)
@@ -225,11 +219,8 @@ impl From<vertebrae_core::Task> for Task {
             workflow_name: task.workflow_name,
             step_name: task.step_name,
             run_controls: task.run_controls.map(Into::into),
-            needs_human_review: task.needs_human_review,
             archived: task.archived,
             worktree: task.worktree,
-            review_comment: task.review_comment,
-            revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             parent_id: task.parent_id,
             dependency_ids: task.dependency_ids,
@@ -342,12 +333,8 @@ pub struct UpdateTaskOptions {
     pub remove_tags: Vec<String>,
     /// New task level (epic, ticket, task)
     pub level: Option<String>,
-    /// Human review flag
-    pub needs_human_review: Option<bool>,
     /// Whether the task is archived
     pub archived: Option<bool>,
-    /// Revision feedback text
-    pub revision_feedback: Option<Option<String>>,
     /// Worktree path (if provided, null clears it)
     pub worktree: Option<Option<String>>,
 }
@@ -2059,7 +2046,6 @@ mod tests {
             "current_step_id": "step-001",
             "workflow_name": "Development",
             "step_name": "in_progress",
-            "needs_human_review": false,
             "archived": false,
             "parent_id": null,
             "inserted_at": "2026-03-15T10:00:00.000000Z",
