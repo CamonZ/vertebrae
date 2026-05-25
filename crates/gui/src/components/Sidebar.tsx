@@ -9,6 +9,8 @@ import {
   useCurrentProject,
   projectAvatarBucket,
 } from "../hooks/useCurrentProject";
+import { resetProjectScopedStores } from "../stores";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Tooltip } from "./atoms/Tooltip";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -71,10 +73,12 @@ function ProjectAvatar({
   name,
   path,
   onClick,
+  buttonRef,
 }: {
   name: string;
   path: string;
   onClick: () => void;
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }) {
   const bucket = projectAvatarBucket(name);
   const palette = [
@@ -90,6 +94,7 @@ function ProjectAvatar({
   return (
     <Tooltip label={path} placement="right" delay={400}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={onClick}
         aria-label={`Switch project · ${name}`}
@@ -217,29 +222,38 @@ function LogoMark() {
 }
 
 interface ProjectListEntry {
-  name: string;
+  slug: string;
   path: string;
 }
 
 /**
- * Popover anchored to the project avatar. Lists known projects and offers
- * "Open directory…" as the final action.
+ * Popover anchored to the project avatar. Lists known projects — clicking an
+ * entry switches the active project — and offers a "+" affordance to add a new
+ * project via the directory picker.
  */
 function ProjectPopover({
   current,
+  anchorRef,
   onClose,
-  onSelect,
+  onSwitched,
 }: {
   current: string | null;
+  /** Anchor (the project avatar) — clicks on it are ignored so it can toggle. */
+  anchorRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
-  onSelect: () => void;
+  /** Called after the active project changed, so the host can refresh + close. */
+  onSwitched: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [projects, setProjects] = useState<ProjectListEntry[]>([]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      // Ignore clicks inside the popover or on the anchor (the anchor toggles).
+      if (ref.current && ref.current.contains(target)) return;
+      if (anchorRef.current && anchorRef.current.contains(target)) return;
+      onClose();
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -250,28 +264,69 @@ function ProjectPopover({
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };
-  }, [onClose]);
+  }, [onClose, anchorRef]);
+
+  const loadProjects = useCallback(async () => {
+    try {
+      const result = await commands.getProjects();
+      if (result.status === "ok") {
+        setProjects(
+          result.data.map((p) => ({ slug: p.slug, path: p.path })),
+        );
+      }
+    } catch {
+      setProjects([]);
+    }
+  }, []);
 
   useEffect(() => {
-    (async () => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  const handleSelect = useCallback(
+    async (entry: ProjectListEntry) => {
+      // Selecting the active project is a no-op — just close.
+      if (entry.slug === current) {
+        onClose();
+        return;
+      }
       try {
-        const result = await commands.getProjects();
+        const result = await commands.setCurrentProject(entry.slug);
         if (result.status === "ok") {
-          setProjects(
-            result.data.map((p) => ({ name: p.slug, path: p.path })),
-          );
+          resetProjectScopedStores();
+          onSwitched();
         }
       } catch {
-        setProjects([]);
+        // Swallow — leave the popover open so the user can retry.
       }
-    })();
-  }, []);
+    },
+    [current, onClose, onSwitched],
+  );
+
+  const handleAddProject = useCallback(async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "Select Project Directory",
+      });
+      if (selected && typeof selected === "string") {
+        const result = await commands.addProject(selected);
+        if (result.status === "ok") {
+          await loadProjects();
+        }
+      }
+    } catch {
+      // Swallow — leave the popover open so the user can retry.
+    }
+  }, [loadProjects]);
 
   return (
     <div
       ref={ref}
       role="dialog"
       aria-label="Switch project"
+      data-testid="sidebar-project-switcher"
       className={[
         "absolute left-12 top-14 z-50 w-[220px]",
         "rounded-[var(--radius-lg)] border border-[var(--color-line-strong)]",
@@ -283,25 +338,49 @@ function ProjectPopover({
           No recent projects
         </div>
       ) : (
-        projects.map((p) => (
-          <div
-            key={p.path}
-            className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-[var(--color-fg)]"
-          >
-            <span className="min-w-0 truncate font-sans">{p.name}</span>
-            {p.name === current && (
-              <span className="text-[var(--color-accent)]">✓</span>
-            )}
-          </div>
-        ))
+        projects.map((p) => {
+          const isActive = p.slug === current;
+          return (
+            <button
+              key={p.path}
+              type="button"
+              onClick={() => handleSelect(p)}
+              aria-current={isActive ? "true" : undefined}
+              data-testid={`sidebar-project-entry-${p.slug}`}
+              className={[
+                "flex w-full items-center justify-between gap-2 px-3 py-2",
+                "text-left text-sm text-[var(--color-fg)]",
+                isActive ? "cursor-default" : "hover:bg-[var(--color-bg-2)]",
+              ].join(" ")}
+            >
+              <span className="min-w-0 truncate font-sans">{p.slug}</span>
+              {isActive && (
+                <span
+                  aria-label="Active project"
+                  className="text-[var(--color-accent)]"
+                >
+                  ✓
+                </span>
+              )}
+            </button>
+          );
+        })
       )}
       <div className="my-1 h-px bg-[var(--color-line)]" />
       <button
         type="button"
-        onClick={onSelect}
+        onClick={handleAddProject}
+        aria-label="Add a project"
+        data-testid="sidebar-add-project"
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)]"
       >
-        + Open directory…
+        <span
+          aria-hidden
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] text-[var(--color-fg-mute)]"
+        >
+          +
+        </span>
+        Add project…
       </button>
     </div>
   );
@@ -315,11 +394,19 @@ export function Sidebar() {
   const project = useCurrentProject();
   const navigate = useNavigate();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const avatarRef = useRef<HTMLButtonElement | null>(null);
   const needsAttention = useShellStore((s) => s.needsAttentionCount > 0);
 
-  function handleOpenSetup() {
+  function handleSwitched() {
     setSwitcherOpen(false);
-    navigate("/setup");
+    // Switching projects must re-initialize every project-scoped surface — the
+    // sidebar avatar (useCurrentProject polls only once on mount), websocket
+    // subscriptions, and page data. The old flow got that remount for free by
+    // routing through the top-level /setup page; an in-place switch from the
+    // already-mounted shell does not remount anything, so a client-side
+    // navigate("/") would leave the avatar stuck on the previous project.
+    // Force a full reload to the root instead.
+    window.location.assign("/");
   }
 
   return (
@@ -340,6 +427,7 @@ export function Sidebar() {
             name={project.name}
             path={project.path ?? project.name}
             onClick={() => setSwitcherOpen((v) => !v)}
+            buttonRef={avatarRef}
           />
         ) : (
           <button
@@ -354,8 +442,9 @@ export function Sidebar() {
         {switcherOpen && (
           <ProjectPopover
             current={project.name}
+            anchorRef={avatarRef}
             onClose={() => setSwitcherOpen(false)}
-            onSelect={handleOpenSetup}
+            onSwitched={handleSwitched}
           />
         )}
       </div>

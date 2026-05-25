@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.vertebrae.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run tauri:prepare-sidecars && npm run dev",
     "beforeBuildCommand": "npm run tauri:prepare-sidecars && npm run build",
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420"
