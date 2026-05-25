@@ -67,7 +67,7 @@ describe("StyleguideShortcut", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("/styleguide");
   });
 
-  it("hides the chrome shortcuts and leaves the current page when toggled from /styleguide", async () => {
+  it("hides the chrome shortcuts and returns to /board when toggled from /styleguide", async () => {
     useStyleguideStore.getState().revealChromeShortcuts();
     render(<HarnessOnStyleguide />);
 
@@ -77,7 +77,7 @@ describe("StyleguideShortcut", () => {
 
     expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
     expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
+    expect(screen.getByTestId("location")).toHaveTextContent("/board");
   });
 
   it("hides the chrome shortcuts without navigating when toggled from another page", async () => {

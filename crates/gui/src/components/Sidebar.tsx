@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
-import { useShellStore } from "../stores/shellStore";
 import { useOpenChat } from "../hooks/useScopedChat";
 import { useStyleguideStore } from "../stores/styleguideStore";
 import {
@@ -272,9 +271,7 @@ function ProjectPopover({
     try {
       const result = await commands.getProjects();
       if (result.status === "ok") {
-        setProjects(
-          result.data.map((p) => ({ slug: p.slug, path: p.path })),
-        );
+        setProjects(result.data.map((p) => ({ slug: p.slug, path: p.path })));
       }
     } catch {
       setProjects([]);
@@ -302,7 +299,7 @@ function ProjectPopover({
         // Swallow — leave the popover open so the user can retry.
       }
     },
-    [current, onClose, onSwitched],
+    [current, onClose, onSwitched]
   );
 
   const handleAddProject = useCallback(async () => {
@@ -397,7 +394,6 @@ export function Sidebar() {
   const navigate = useNavigate();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const avatarRef = useRef<HTMLButtonElement | null>(null);
-  const needsAttention = useShellStore((s) => s.needsAttentionCount > 0);
 
   function handleSwitched() {
     setSwitcherOpen(false);
@@ -453,25 +449,9 @@ export function Sidebar() {
       <div className="h-px w-7 bg-[var(--color-line)]" aria-hidden />
       <nav aria-label="Main navigation" className="flex-1">
         <ul role="list" className="flex flex-col items-center gap-1">
-          <NavItem
-            to="/operations"
-            label="Operations"
-            withDot={needsAttention}
-            icon={
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                aria-hidden
-              >
-                <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            }
-          />
+          {/* Operations is hidden for now — the page needs more work before
+              it is ready for users. Route + page code are preserved; see
+              router.tsx (the default landing redirects to /board instead). */}
           <NavItem
             to="/board"
             label="Board"

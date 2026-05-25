@@ -19,7 +19,7 @@ export function StyleguideShortcut() {
       if (styleguideStore.isStyleguideNavVisible) {
         styleguideStore.hideChromeShortcuts();
         if (location.pathname === "/styleguide") {
-          navigate("/operations");
+          navigate("/board");
         }
       } else {
         styleguideStore.revealChromeShortcuts();
