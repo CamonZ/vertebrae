@@ -138,7 +138,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           {step.goal && (
             <div className="w-2/3">
               <p
-                className="mt-0.5 truncate text-[10px] text-text-secondary"
+                className="mt-0.5 truncate text-2xs text-text-secondary"
                 title={step.goal}
               >
                 {step.goal}
@@ -146,7 +146,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             </div>
           )}
           {!step.goal && agentConfig?.model && (
-            <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
+            <p className="mt-0.5 truncate font-mono text-2xs text-text-muted">
               {formatAgentModelLabel(agentConfig)}
             </p>
           )}
@@ -157,7 +157,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       <div className="relative flex flex-wrap gap-1.5">
         {hasSystemPrompt && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-info/30 bg-info/10 px-2 py-0.5 text-[10px] font-medium text-info"
+            className="inline-flex items-center gap-1 rounded-full border border-info/30 bg-info/10 px-2 py-0.5 text-2xs font-medium text-info"
             title="Has system prompt configured"
           >
             <svg
@@ -178,7 +178,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         )}
         {toolCount > 0 && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success"
+            className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-2xs font-medium text-success"
             title={`${toolCount} tool(s) configured`}
           >
             <svg
@@ -205,7 +205,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         )}
         {agentConfig?.permission_mode && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning"
+            className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning"
             title={`Permission mode: ${agentConfig.permission_mode}`}
           >
             <svg
@@ -229,7 +229,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       {/* Step type indicators */}
       <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
         {isFirst && (
-          <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-accent">
+          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-accent">
             <svg
               className="h-3 w-3"
               fill="none"
@@ -247,7 +247,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </span>
         )}
         {isLast && (
-          <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-success">
+          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-success">
             <svg
               className="h-3 w-3"
               fill="none"
@@ -265,7 +265,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </span>
         )}
         {!isFirst && !isLast && (
-          <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-text-muted">
             <svg
               className="h-3 w-3"
               fill="none"
@@ -290,7 +290,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             <div className="ml-auto flex items-center gap-2">
               {taskCounts.epic > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-text-muted"
                   title={`${taskCounts.epic} epic(s)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-info" />
@@ -299,7 +299,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               )}
               {taskCounts.ticket > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-text-muted"
                   title={`${taskCounts.ticket} ticket(s)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-primary" />
@@ -308,7 +308,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               )}
               {taskCounts.task > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-text-muted"
                   title={`${taskCounts.task} task(s)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-text-secondary" />
@@ -325,13 +325,13 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           executionCounts.completed > 0 ||
           executionCounts.failed > 0) && (
           <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+            <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
               Run
             </span>
             <div className="flex items-center gap-1.5 ml-auto">
               {executionCounts.active > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-success"
+                  className="flex items-center gap-1 text-2xs text-success"
                   title={`${executionCounts.active} active`}
                 >
                   <span className="w-2 h-2 rounded-full bg-success" />
@@ -340,7 +340,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               )}
               {executionCounts.completed > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-success"
+                  className="flex items-center gap-1 text-2xs text-success"
                   title={`${executionCounts.completed} completed`}
                 >
                   <span className="w-2 h-2 rounded-full bg-success" />
@@ -349,7 +349,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               )}
               {executionCounts.failed > 0 && (
                 <span
-                  className="flex items-center gap-1 text-[10px] text-error"
+                  className="flex items-center gap-1 text-2xs text-error"
                   title={`${executionCounts.failed} failed`}
                 >
                   <span className="w-2 h-2 rounded-full bg-error" />

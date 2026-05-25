@@ -222,7 +222,7 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
           {showCharCount && (
             <div
               id={`${inputId}-charcount`}
-              className={`absolute right-3 bottom-3 text-[10px] font-medium ${
+              className={`absolute right-3 bottom-3 text-2xs font-medium ${
                 charCountValid ? "text-text-muted" : "text-error"
               }`}
               aria-live="polite"

@@ -70,6 +70,7 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
+import { Count } from "../components/atoms";
 import { UnifiedChatView, projectTaskRunTrace } from "../components/Traces";
 import { popOut } from "../utils";
 import { useShellHeader } from "../hooks/useShellHeader";
@@ -1488,7 +1489,7 @@ function ActiveRunsPanel({
                 : "text-text-muted hover:text-text-primary"
             }`}
           >
-            Ready <span className="font-mono">{readyTasks.length}</span>
+            Ready <Count value={readyTasks.length} />
           </button>
           <button
             type="button"
@@ -1501,7 +1502,7 @@ function ActiveRunsPanel({
                 : "text-text-muted hover:text-text-primary"
             }`}
           >
-            Running <span className="font-mono">{items.length}</span>
+            Running <Count value={items.length} />
           </button>
         </div>
       </div>
@@ -1595,7 +1596,7 @@ function ActiveRunsPanel({
                         <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
                           {childTask.title}
                         </span>
-                        <span className="min-w-0 max-w-32 shrink truncate text-[10px] text-text-muted">
+                        <span className="min-w-0 max-w-32 shrink truncate text-2xs text-text-muted">
                           {childTask.workflow_name ?? "No workflow"}{" "}
                           <span aria-hidden="true">&middot;</span>{" "}
                           {childTask.step_name ?? "No step"}

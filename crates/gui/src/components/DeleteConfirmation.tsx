@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EmWord } from "./atoms";
 
 interface DeleteConfirmationProps {
   /** Type of item being deleted (e.g., "Task", "Step") */
@@ -34,22 +35,24 @@ export function DeleteConfirmation({
   testId,
 }: DeleteConfirmationProps) {
   return (
-    <div className="border-t border-error/20 bg-error/5 p-4" data-testid={testId}>
+    <div
+      className="border-t border-error/20 bg-error/5 p-4"
+      data-testid={testId}
+    >
       <div className="space-y-3">
         <div>
-          <h4 className="text-sm font-semibold text-error">Delete {itemType}?</h4>
+          <h4 className="text-sm font-semibold text-error">
+            Delete {itemType}?
+          </h4>
           <p className="mt-1 text-sm text-text-secondary">
-            Are you sure you want to delete{" "}
-            <span className="font-medium">{itemName}</span>?
+            Are you sure you want to delete <EmWord>{itemName}</EmWord>?
           </p>
         </div>
 
         {children}
 
         {error && (
-          <p className="text-xs text-error bg-error/10 p-2 rounded">
-            {error}
-          </p>
+          <p className="text-xs text-error bg-error/10 p-2 rounded">{error}</p>
         )}
 
         <div className="flex gap-2">

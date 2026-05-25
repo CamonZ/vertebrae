@@ -348,12 +348,12 @@ export function FlightStrip({
       style={{ paddingLeft: PADDING_X, paddingRight: PADDING_X }}
     >
       <div className="flex items-center justify-between gap-2 px-1 pt-1">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+        <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
           Flight strip
         </span>
         <label
           data-testid="flight-strip-thresholds-only-label"
-          className="flex cursor-pointer items-center gap-1 text-[10px] text-[var(--color-fg-soft)]"
+          className="flex cursor-pointer items-center gap-1 text-2xs text-[var(--color-fg-soft)]"
         >
           <input
             data-testid="flight-strip-thresholds-only"

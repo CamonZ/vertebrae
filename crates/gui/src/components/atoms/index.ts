@@ -8,6 +8,10 @@
 export { Text } from "./Text";
 export type { TextVariant, TextColor } from "./Text";
 
+export { EmWord } from "./EmWord";
+
+export { Count } from "./Count";
+
 export { Icon } from "./Icon";
 export type { IconSize } from "./Icon";
 

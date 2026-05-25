@@ -276,7 +276,7 @@ function MiniNavExample() {
               {index === 0 && (
                 <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-primary shadow-glow-sm" />
               )}
-              <span className="font-mono text-[10px]">{item.slice(0, 2)}</span>
+              <span className="font-mono text-2xs">{item.slice(0, 2)}</span>
             </div>
           </li>
         ))}
@@ -297,11 +297,11 @@ function ProductFrameExample() {
               <p className="text-sm font-semibold text-text-primary">
                 Workflow Pipelines
               </p>
-              <p className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+              <p className="font-mono text-2xs uppercase tracking-wider text-text-muted">
                 App shell content header
               </p>
             </div>
-            <div className="relative rounded-md border border-border bg-bg-secondary px-2 py-1 font-mono text-[10px] text-text-muted">
+            <div className="relative rounded-md border border-border bg-bg-secondary px-2 py-1 font-mono text-2xs text-text-muted">
               Side panel open
             </div>
           </div>
@@ -524,7 +524,7 @@ function TaskTraceExample() {
               Step <span className="font-mono text-text-primary">review</span>{" "}
               is parked until an operator resumes it.
             </p>
-            <dl className="mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+            <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
               <div>
                 <dt className="font-mono uppercase tracking-wider text-text-muted">
                   Run

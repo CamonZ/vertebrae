@@ -33,6 +33,19 @@ describe("MarkdownContent", () => {
       expect(em.tagName).toBe("EM");
     });
 
+    it("renders inline emphasis as serif italic at full --fg (not copper)", () => {
+      // Cursive role B: inline prose <em> is Newsreader serif italic at full
+      // --fg. It must be visually distinct from a heading accent word (copper).
+      render(<MarkdownContent text="This is *emphasised* text" />);
+      const em = screen.getByText("emphasised");
+      expect(em.tagName).toBe("EM");
+      expect(em.className).toContain("font-serif");
+      expect(em.className).toContain("italic");
+      expect(em.className).toContain("text-[var(--color-fg)]");
+      // Explicitly NOT the copper accent used for heading accent words.
+      expect(em.className).not.toContain("var(--color-accent)");
+    });
+
     it("renders inline code with code tag and mono font", () => {
       render(<MarkdownContent text="Use `console.log()` here" />);
       const code = screen.getByText("console.log()");
@@ -74,9 +87,7 @@ describe("MarkdownContent", () => {
 
   describe("lists", () => {
     it("renders unordered lists with disc style", () => {
-      render(
-        <MarkdownContent text={"- Item one\n- Item two\n- Item three"} />
-      );
+      render(<MarkdownContent text={"- Item one\n- Item two\n- Item three"} />);
       expect(screen.getByText("Item one")).toBeInTheDocument();
       expect(screen.getByText("Item two")).toBeInTheDocument();
       expect(screen.getByText("Item three")).toBeInTheDocument();
@@ -87,9 +98,7 @@ describe("MarkdownContent", () => {
     });
 
     it("renders ordered lists with decimal style", () => {
-      render(
-        <MarkdownContent text={"1. First\n2. Second\n3. Third"} />
-      );
+      render(<MarkdownContent text={"1. First\n2. Second\n3. Third"} />);
       expect(screen.getByText("First")).toBeInTheDocument();
       const list = screen.getByText("First").closest("ol");
       expect(list).not.toBeNull();
@@ -99,9 +108,7 @@ describe("MarkdownContent", () => {
 
   describe("links", () => {
     it("renders links with target=_blank and rel attributes", () => {
-      render(
-        <MarkdownContent text="Visit [Example](https://example.com)" />
-      );
+      render(<MarkdownContent text="Visit [Example](https://example.com)" />);
       const link = screen.getByText("Example");
       expect(link.tagName).toBe("A");
       expect(link).toHaveAttribute("href", "https://example.com");
@@ -137,7 +144,9 @@ describe("MarkdownContent", () => {
       const { container } = render(<MarkdownContent text={markdown} />);
       expect(screen.getByText("plain code")).toBeInTheDocument();
       // Should not render a language label bar
-      const languageLabel = container.querySelector(".font-mono.text-\\[11px\\]");
+      const languageLabel = container.querySelector(
+        ".font-mono.text-\\[11px\\]"
+      );
       expect(languageLabel).toBeNull();
     });
 
@@ -189,7 +198,9 @@ describe("MarkdownContent", () => {
     it("renders unclosed code fence without breaking", () => {
       const partial = "Here is code:\n```python\ndef hello():";
       const { container } = render(<MarkdownContent text={partial} />);
-      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
       // Syntax highlighter splits tokens, so check via code element text content
       const codeEl = container.querySelector("code");
       expect(codeEl).not.toBeNull();
@@ -200,20 +211,26 @@ describe("MarkdownContent", () => {
     it("renders partial bold syntax without breaking", () => {
       const partial = "This is **bold but not clo";
       const { container } = render(<MarkdownContent text={partial} />);
-      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
     });
 
     it("renders partial list without breaking", () => {
       const partial = "Items:\n- First\n- Second\n- ";
       const { container } = render(<MarkdownContent text={partial} />);
-      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
       expect(screen.getByText("First")).toBeInTheDocument();
       expect(screen.getByText("Second")).toBeInTheDocument();
     });
 
     it("renders empty text without breaking", () => {
       const { container } = render(<MarkdownContent text="" />);
-      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
     });
   });
 
@@ -299,12 +316,12 @@ describe("MarkdownContent", () => {
     });
 
     it("skips JSON inside existing fenced code blocks", () => {
-      const message =
-        '```json\n{"already":"fenced"}\n```\nFollow-up text.';
+      const message = '```json\n{"already":"fenced"}\n```\nFollow-up text.';
       render(<MarkdownContent text={message} />);
       // Only one code block — the existing fence — not double-wrapped.
-      const preBlocks =
-        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      const preBlocks = screen
+        .getByTestId("markdown-content")
+        .querySelectorAll("pre");
       expect(preBlocks.length).toBe(1);
     });
 
@@ -312,15 +329,17 @@ describe("MarkdownContent", () => {
       const message = 'Use `{"raw":"json"}` literally.';
       render(<MarkdownContent text={message} />);
       // No code BLOCK (pre) — only the inline code span.
-      const preBlocks =
-        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      const preBlocks = screen
+        .getByTestId("markdown-content")
+        .querySelectorAll("pre");
       expect(preBlocks.length).toBe(0);
     });
 
     it("does not wrap empty objects or arrays", () => {
       render(<MarkdownContent text="Got back {} or []." />);
-      const preBlocks =
-        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      const preBlocks = screen
+        .getByTestId("markdown-content")
+        .querySelectorAll("pre");
       expect(preBlocks.length).toBe(0);
     });
 
@@ -328,8 +347,9 @@ describe("MarkdownContent", () => {
       render(
         <MarkdownContent text='Template like {name: "foo", id: bar} is not JSON.' />
       );
-      const preBlocks =
-        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      const preBlocks = screen
+        .getByTestId("markdown-content")
+        .querySelectorAll("pre");
       expect(preBlocks.length).toBe(0);
     });
 
@@ -346,8 +366,9 @@ describe("MarkdownContent", () => {
       const message =
         'First {"a":1,"b":2} and second [{"x":10},{"x":20}] done.';
       render(<MarkdownContent text={message} />);
-      const preBlocks =
-        screen.getByTestId("markdown-content").querySelectorAll("pre");
+      const preBlocks = screen
+        .getByTestId("markdown-content")
+        .querySelectorAll("pre");
       expect(preBlocks.length).toBe(2);
     });
 
@@ -396,7 +417,7 @@ describe("MarkdownContent", () => {
     it("leaves Elixir maps with atom keys untouched", () => {
       // `%{status: :ok}` uses atom shorthand which we don't translate;
       // JSON.parse fails on the conversion so the source is preserved.
-      const message = '```json\n%{status: :ok, count: 3}\n```';
+      const message = "```json\n%{status: :ok, count: 3}\n```";
       const { container } = render(<MarkdownContent text={message} />);
       const code = container.querySelector("code");
       expect(code?.textContent).toContain("%{status: :ok, count: 3}");

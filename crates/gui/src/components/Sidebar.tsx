@@ -101,7 +101,9 @@ function ProjectAvatar({
         data-testid="sidebar-project-avatar"
         className={[
           "flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
-          "font-mono text-[12px] font-medium text-white",
+          // Project monogram is part of the Hearth wordmark family — serif
+          // italic (Newsreader), not the mono UI numerals.
+          "font-serif text-[15px] italic text-white",
           "ring-0 transition-shadow duration-[var(--t-fast)] hover:ring-2 hover:ring-[var(--color-accent-wash)]",
           palette[bucket],
         ].join(" ")}

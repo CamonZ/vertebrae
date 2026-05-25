@@ -37,7 +37,7 @@ const intentClasses: Record<BadgeIntent, string> = {
 };
 
 const sizeClasses: Record<BadgeSize, string> = {
-  sm: "h-[18px] px-1.5 text-[10px]",
+  sm: "h-[18px] px-1.5 text-2xs",
   md: "h-[22px] px-2 text-xs",
 };
 
@@ -57,7 +57,7 @@ export function Badge({
       <span
         className={[
           "inline-flex min-w-[18px] h-[18px] px-1.5 items-center justify-center",
-          "rounded-full font-mono text-[10px] font-medium",
+          "rounded-full font-mono text-2xs font-medium",
           intentClasses[intent],
           "border max-w-full truncate",
           className,

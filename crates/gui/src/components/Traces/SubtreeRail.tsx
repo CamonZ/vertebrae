@@ -136,14 +136,14 @@ function ExecutionRow({
       data-testid="subtree-rail-execution"
       data-execution-id={execution.id ?? ""}
       data-status={execution.status ?? "in_progress"}
-      className="flex items-center gap-2 px-2 py-1 text-[11px] text-[var(--color-fg-soft)]"
+      className="flex items-center gap-2 px-2 py-1 text-eyebrow text-[var(--color-fg-soft)]"
     >
       <StatusPip status={execution.status ?? "in_progress"} />
       <span className="truncate font-mono">
         {(execution.step_name ?? "").replace(/_/g, " ") || "step"}
       </span>
       {displayCost !== null && (
-        <span className="ml-auto font-mono text-[10px] text-[var(--color-fg-mute)]">
+        <span className="ml-auto font-mono text-2xs text-[var(--color-fg-mute)]">
           {formatCost(displayCost)}
         </span>
       )}
@@ -226,7 +226,7 @@ function GroupSection({
 
       <div
         data-testid="subtree-rail-group-rollup"
-        className="flex items-center gap-2 px-2 pb-1 font-mono text-[10px] text-[var(--color-fg-mute)]"
+        className="flex items-center gap-2 px-2 pb-1 font-mono text-2xs text-[var(--color-fg-mute)]"
         style={{ paddingLeft: `${1.75 + depth * 0.75}rem` }}
       >
         <span data-testid="subtree-rail-group-runs">
@@ -250,7 +250,7 @@ function GroupSection({
           style={{ paddingLeft: `${1.5 + depth * 0.75}rem` }}
         >
           {executions.length === 0 ? (
-            <li className="px-2 py-1 text-[11px] italic text-[var(--color-fg-mute)]">
+            <li className="px-2 py-1 text-eyebrow italic text-[var(--color-fg-mute)]">
               No executions yet
             </li>
           ) : (
@@ -348,7 +348,7 @@ export function SubtreeRail({
       className="flex h-full w-72 flex-col border-r border-[var(--color-line)] bg-[var(--color-bg-1)]"
     >
       <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+        <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
           Subtree
         </span>
         <div className="flex items-center gap-1">
@@ -358,7 +358,7 @@ export function SubtreeRail({
               onClick={onSwitchTask}
               data-testid="subtree-rail-switch-task"
               aria-label="Switch task"
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
+              className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
             >
               Switch
             </button>

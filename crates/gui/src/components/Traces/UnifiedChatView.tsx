@@ -652,7 +652,7 @@ export function UnifiedChatView({
         className="relative h-full overflow-x-hidden overflow-y-auto bg-[var(--color-bg)]"
       >
         <div className="flex justify-end px-4 pt-2">
-          <span className="text-[10px] text-[var(--color-fg-mute)]">
+          <span className="text-2xs text-[var(--color-fg-mute)]">
             Click timestamps to toggle:{" "}
             {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time after"}
           </span>
