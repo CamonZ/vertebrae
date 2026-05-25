@@ -797,6 +797,21 @@ async getWebsocketStatus() : Promise<Result<string, CommandError>> {
 }
 },
 /**
+ * Quit the application.
+ * 
+ * Used by the first-run install screen's Cancel button so a user who does not
+ * want to install the bundled tools can exit cleanly rather than being routed
+ * into an app that can't function without them.
+ */
+async quitApplication() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("quit_application") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Probe the current install state without making any changes.
  * 
  * Safe to call on every app launch — performs only filesystem lookups and a
@@ -831,22 +846,6 @@ async installationStatus() : Promise<Result<InstallationStatus, CommandError>> {
 async installComponents(installCli: boolean, installDaemon: boolean) : Promise<Result<InstallationStatus, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("install_components", { installCli, installDaemon }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Persist a "user dismissed the installer" flag so the welcome screen
- * does not reappear on next launch.
- * 
- * We only ever write `true`. There is no UI to un-skip, by design — if the
- * user later wants to install components, they go through the explicit
- * install flow which will recompute the real status anyway.
- */
-async skipInstallation() : Promise<Result<null, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("skip_installation") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1108,12 +1107,7 @@ export type ExecutionStatus = "in_progress" | "completed" | "failed"
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
  */
-export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; service: ServiceState; 
-/**
- * `true` once the user clicked "Skip" on the welcome screen. Persisted
- * in `installer-state.json` under the app config dir.
- */
-skipped: boolean }
+export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Generic chat event for types not covered by the typed channel events

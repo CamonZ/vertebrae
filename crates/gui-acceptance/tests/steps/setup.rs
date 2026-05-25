@@ -5,71 +5,62 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::GuiWorld;
 
-/// Resolve the Linux app-config path where the GUI's `InstallationGuard`
-/// reads the "user skipped the installer" flag.
-///
-/// This MUST match `install.rs`'s `app_config_dir()` for the bundle
-/// identifier `com.vertebrae.app`. Tauri uses the XDG config dir on Linux,
-/// so we honor `XDG_CONFIG_HOME` and fall back to `$HOME/.config`, then join
-/// the bundle identifier and the `installer-state.json` file name.
-fn installer_state_path() -> PathBuf {
-    let config_root = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").expect("HOME must be set");
-            PathBuf::from(home).join(".config")
-        });
-    config_root
-        .join("com.vertebrae.app")
-        .join("installer-state.json")
+/// Paths of the managed `~/.local/bin` symlinks the `InstallationGuard`
+/// probes (`installed_at_symlink`). MUST match `vertebrae_installer::symlink_path`.
+fn installed_marker_paths() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").expect("HOME must be set");
+    let bin = PathBuf::from(home).join(".local").join("bin");
+    vec![bin.join("vtb"), bin.join("vtb-daemon")]
 }
 
-/// Seed `installer-state.json` with `{"installer_skipped": true}` so the
-/// `InstallationGuard` renders guarded routes instead of redirecting to
-/// `/welcome`. Every non-`@first_run` scenario relies on this — without it
-/// the clean container (vtb not installed, not on PATH, no skip flag) would
-/// be redirected to the welcome screen and every existing scenario would fail.
-fn seed_skip_flag() {
-    let path = installer_state_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).expect("failed to create installer-state config dir");
+/// Seed dummy `vtb`/`vtb-daemon` files at the managed symlink path so the
+/// `InstallationGuard` sees the components as installed and renders guarded
+/// routes instead of redirecting to `/welcome`. Every non-`@first_run`
+/// scenario relies on this — without it the clean container (vtb not
+/// installed, not on PATH) would be redirected to the welcome screen and
+/// every existing scenario would fail.
+fn seed_installed_markers() {
+    for path in installed_marker_paths() {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create ~/.local/bin");
+        }
+        std::fs::write(&path, b"#!/bin/sh\n").expect("failed to seed installed marker binary");
     }
-    std::fs::write(&path, br#"{"installer_skipped": true}"#)
-        .expect("failed to seed installer-state.json skip flag");
 }
 
-/// Remove `installer-state.json` so a `@first_run` scenario sees the genuine
-/// first-run state and the guard redirects to `/welcome`.
-fn clear_skip_flag() {
-    let path = installer_state_path();
-    let _ = std::fs::remove_file(&path);
+/// Remove the dummy marker files so a `@first_run` scenario sees the genuine
+/// first-run state (nothing installed) and the guard redirects to `/welcome`.
+fn clear_installed_markers() {
+    for path in installed_marker_paths() {
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 /// Before-hook: create a unique Sacrum project, register it in config.toml,
 /// navigate the GUI to /setup, select the project, and wait for redirect.
 ///
 /// `first_run` is `true` for scenarios tagged `@first_run`. For those we
-/// REMOVE the installer skip flag (so the welcome screen appears) and do NOT
+/// REMOVE the installed markers (so the welcome screen appears) and do NOT
 /// drive the project-selection flow — the first-run scenarios assert on the
-/// welcome screen itself. For every other scenario we SEED the skip flag and
-/// run the usual project selection.
+/// welcome screen itself. For every other scenario we SEED the installed
+/// markers and run the usual project selection.
 pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str, first_run: bool) {
     world.scenario_name = scenario_name.to_string();
 
     if first_run {
-        // Genuine first-run state: no skip flag, so InstallationGuard routes
-        // to /welcome. The scenario steps navigate and assert from there, so we
-        // still need the shared WebDriver session — just not the project flow.
-        clear_skip_flag();
+        // Genuine first-run state: nothing installed, so InstallationGuard
+        // routes to /welcome. The scenario steps navigate and assert from
+        // there, so we still need the shared WebDriver session — just not the
+        // project flow.
+        clear_installed_markers();
         let wd = gui_acceptance::webdriver().await;
         world.webdriver = Some(wd);
         return;
     }
 
-    // Default for all other scenarios: pretend the user already dismissed the
-    // installer so guarded routes render normally.
-    seed_skip_flag();
+    // Default for all other scenarios: pretend the components are already
+    // installed so guarded routes render normally.
+    seed_installed_markers();
 
     let api_token =
         std::env::var("VTB_TOKEN").expect("VTB_TOKEN must be set for GUI acceptance tests");
@@ -181,10 +172,10 @@ pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str, first_ru
 }
 
 /// After-hook: unregister the project from config.toml and clean up the temp
-/// directory. For `@first_run` scenarios, also remove anything the install
-/// flow created on the filesystem so it does not leak into later scenarios:
-/// the `~/.local/bin/vtb` symlink, the `~/.local/share/vertebrae` staging
-/// dir, and the installer-state flag file.
+/// directory. Always remove the `~/.local/bin` markers (seeded for non-first-run
+/// scenarios, or staged by the real install flow in a `@first_run` scenario) so
+/// they never leak into a later scenario. For `@first_run` scenarios also remove
+/// the staged binaries the install flow drops into the data dir's `bin/` subdir.
 pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
     // Unregister from config.toml
     if let Some(slug) = &world.project_slug {
@@ -196,13 +187,23 @@ pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
         let _ = std::fs::remove_dir_all(path);
     }
 
+    clear_installed_markers();
+
     if first_run {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        if let Some(home) = home {
-            let _ = std::fs::remove_file(home.join(".local").join("bin").join("vtb"));
-            let _ = std::fs::remove_file(home.join(".local").join("bin").join("vtb-daemon"));
-            let _ = std::fs::remove_dir_all(home.join(".local").join("share").join("vertebrae"));
+        // The install flow stages binaries into `data_dir()/bin`
+        // (vertebrae_installer::data_bin_dir(), here `~/.local/share/vertebrae/bin`).
+        // Remove ONLY that subdir — NOT the whole `~/.local/share/vertebrae`
+        // data dir, which is shared with the long-lived GUI process's
+        // `app-state.json`. Wiping the data dir out from under the running GUI
+        // makes its next app-state write fail (the parent dir vanishes), which
+        // breaks project selection for every subsequent scenario.
+        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+            let _ = std::fs::remove_dir_all(
+                home.join(".local")
+                    .join("share")
+                    .join("vertebrae")
+                    .join("bin"),
+            );
         }
-        clear_skip_flag();
     }
 }

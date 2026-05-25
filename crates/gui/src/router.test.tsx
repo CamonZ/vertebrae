@@ -155,7 +155,6 @@ describe("Router Acceptance Tests", () => {
           on_path: true,
         },
         service: { kind: "not_loaded" },
-        skipped: false,
       },
     });
 
@@ -916,17 +915,12 @@ describe("Router Acceptance Tests", () => {
     // Mirror of the production guard's redirect predicate so we can assert the
     // exact boolean condition that gates the /welcome screen.
     type Comp = { installed_at_symlink: boolean; on_path: boolean };
-    function isFirstRun(s: {
-      cli: Comp;
-      daemon: Comp;
-      skipped: boolean;
-    }): boolean {
+    function isFirstRun(s: { cli: Comp; daemon: Comp }): boolean {
       return (
         !s.cli.installed_at_symlink &&
         !s.daemon.installed_at_symlink &&
         !s.cli.on_path &&
-        !s.daemon.on_path &&
-        !s.skipped
+        !s.daemon.on_path
       );
     }
 
@@ -935,12 +929,11 @@ describe("Router Acceptance Tests", () => {
       on_path: onPath,
     });
 
-    it("returns true only when nothing is installed/on-path and not skipped", () => {
+    it("returns true when nothing is installed or on-path", () => {
       expect(
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(false, false),
-          skipped: false,
         }),
       ).toBe(true);
     });
@@ -950,7 +943,6 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, true),
           daemon: comp(false, false),
-          skipped: false,
         }),
       ).toBe(false);
     });
@@ -960,17 +952,6 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(true, false),
-          skipped: false,
-        }),
-      ).toBe(false);
-    });
-
-    it("returns false once the user has skipped", () => {
-      expect(
-        isFirstRun({
-          cli: comp(false, false),
-          daemon: comp(false, false),
-          skipped: true,
         }),
       ).toBe(false);
     });

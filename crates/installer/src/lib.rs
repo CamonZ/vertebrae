@@ -37,7 +37,7 @@ pub mod macos;
 
 pub use binary::{install_binary, uninstall_binary};
 pub use error::InstallerError;
-pub use paths::{bin_dir, data_bin_dir, log_dir, symlink_path};
+pub use paths::{bin_dir, data_bin_dir, data_dir, log_dir, symlink_path};
 pub use service::{
     LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, ServiceInstallReport, ServiceStatus, install_service,
     service_status, uninstall_service,

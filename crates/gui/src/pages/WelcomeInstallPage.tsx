@@ -93,18 +93,12 @@ export function WelcomeInstallPage() {
     }
   };
 
-  const handleSkip = async () => {
+  const handleCancel = async () => {
     setError(null);
     try {
-      const result = await commands.skipInstallation();
-      if (result.status === "ok") {
-        await proceedAfterDecision();
-      } else {
-        setError(result.error.message);
-        setPhase("error");
-      }
+      await commands.quitApplication();
     } catch (e) {
-      setError(`Skip failed: ${e}`);
+      setError(`Failed to quit: ${e}`);
       setPhase("error");
     }
   };
@@ -134,9 +128,11 @@ export function WelcomeInstallPage() {
             Welcome to Vertebrae
           </h1>
           <p className="text-text-secondary">
-            Vertebrae can install its command-line tools on your system so you
-            can drive workflows from the terminal and run them in the
-            background. You can do this now, or skip and install them later.
+            Vertebrae needs to install its command-line tools — the{" "}
+            <span className="font-mono">vtb</span> CLI and the{" "}
+            <span className="font-mono">vtb-daemon</span> background runner — on
+            your system before you can continue. Review what will be installed
+            below and choose Install to proceed.
           </p>
         </div>
 
@@ -205,12 +201,12 @@ export function WelcomeInstallPage() {
 
         <div className="flex items-center justify-end gap-3">
           <button
-            onClick={handleSkip}
+            onClick={handleCancel}
             disabled={isBusy}
             className="rounded-lg border border-border bg-bg-tertiary px-4 py-2 text-text-secondary transition-colors hover:border-accent-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-            data-testid="welcome-skip"
+            data-testid="welcome-cancel"
           >
-            Skip
+            Cancel
           </button>
           <button
             onClick={handleInstall}

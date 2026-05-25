@@ -1,7 +1,8 @@
 //! Per-OS location helpers used by the installer.
 //!
-//! - **Staged binary location** (`data_bin_dir`) is OS-specific so we follow
-//!   each platform's data-dir convention.
+//! - **Data directory** (`data_dir`) is the single per-OS root every client
+//!   shares for app data: staged binaries, GUI app state, etc.
+//! - **Staged binary location** (`data_bin_dir`) is `data_dir()/bin`.
 //! - **User-facing symlink location** (`bin_dir`) is `~/.local/bin` on every
 //!   Unix so the same `PATH` setup works everywhere.
 //! - **Daemon log directory** (`log_dir`) is fixed at
@@ -16,13 +17,15 @@ fn home() -> Result<PathBuf, InstallerError> {
     dirs::home_dir().ok_or(InstallerError::HomeDir)
 }
 
-/// Return the per-OS directory where we stage Vertebrae binaries before
-/// symlinking them into `~/.local/bin`.
+/// Return the single per-OS data directory shared by every Vertebrae client.
 ///
-/// - macOS: `~/Library/Application Support/Vertebrae/bin`
-/// - Linux: `~/.local/share/vertebrae/bin`
-/// - Other Unix-likes: `~/.local/share/vertebrae/bin` (fallback)
-pub fn data_bin_dir() -> Result<PathBuf, InstallerError> {
+/// This is the one place app data (staged binaries, GUI state, ...) lives, so
+/// the CLI, daemon, and GUI all agree on it instead of each rolling their own
+/// (bundle-id) directory.
+///
+/// - macOS: `~/Library/Application Support/Vertebrae`
+/// - Linux / other Unix: `~/.local/share/vertebrae`
+pub fn data_dir() -> Result<PathBuf, InstallerError> {
     let home = home()?;
 
     #[cfg(target_os = "macos")]
@@ -30,18 +33,19 @@ pub fn data_bin_dir() -> Result<PathBuf, InstallerError> {
         Ok(home
             .join("Library")
             .join("Application Support")
-            .join("Vertebrae")
-            .join("bin"))
+            .join("Vertebrae"))
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        Ok(home
-            .join(".local")
-            .join("share")
-            .join("vertebrae")
-            .join("bin"))
+        Ok(home.join(".local").join("share").join("vertebrae"))
     }
+}
+
+/// Return the directory where we stage Vertebrae binaries before symlinking
+/// them into `~/.local/bin`. Always `data_dir()/bin`.
+pub fn data_bin_dir() -> Result<PathBuf, InstallerError> {
+    Ok(data_dir()?.join("bin"))
 }
 
 /// Return the user-facing `bin` directory we symlink binaries into.
@@ -105,6 +109,28 @@ mod tests {
                 .expect("symlink has parent")
                 .ends_with(".local/bin"),
             "symlink_path parent should be .local/bin, got {path:?}"
+        );
+    }
+
+    #[test]
+    fn data_bin_dir_is_data_dir_plus_bin() {
+        let data = data_dir().expect("home dir resolvable in tests");
+        let bin = data_bin_dir().expect("home dir resolvable in tests");
+        assert_eq!(
+            bin,
+            data.join("bin"),
+            "data_bin_dir should be data_dir()/bin"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn data_dir_is_under_application_support_on_macos() {
+        let dir = data_dir().expect("home dir resolvable in tests");
+        let s = dir.to_string_lossy();
+        assert!(
+            s.ends_with("Library/Application Support/Vertebrae"),
+            "data_dir on macOS should be ~/Library/Application Support/Vertebrae, got {s}"
         );
     }
 

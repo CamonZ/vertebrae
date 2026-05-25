@@ -5,13 +5,13 @@ import type { InstallationStatus } from "../bindings";
 const {
   mockInstallationStatus,
   mockInstallComponents,
-  mockSkipInstallation,
+  mockQuitApplication,
   mockHasProjectSelected,
   mockNavigate,
 } = vi.hoisted(() => ({
   mockInstallationStatus: vi.fn(),
   mockInstallComponents: vi.fn(),
-  mockSkipInstallation: vi.fn(),
+  mockQuitApplication: vi.fn(),
   mockHasProjectSelected: vi.fn(),
   mockNavigate: vi.fn(),
 }));
@@ -28,7 +28,7 @@ vi.mock("../bindings", () => ({
   commands: {
     installationStatus: (...args: unknown[]) => mockInstallationStatus(...args),
     installComponents: (...args: unknown[]) => mockInstallComponents(...args),
-    skipInstallation: (...args: unknown[]) => mockSkipInstallation(...args),
+    quitApplication: (...args: unknown[]) => mockQuitApplication(...args),
     hasProjectSelected: (...args: unknown[]) => mockHasProjectSelected(...args),
   },
 }));
@@ -48,7 +48,6 @@ function makeStatus(overrides?: Partial<InstallationStatus>): InstallationStatus
       on_path: false,
     },
     service: { kind: "not_loaded" },
-    skipped: false,
     ...overrides,
   };
 }
@@ -58,7 +57,7 @@ describe("WelcomeInstallPage", () => {
     vi.clearAllMocks();
     mockInstallationStatus.mockResolvedValue({ status: "ok", data: makeStatus() });
     mockInstallComponents.mockResolvedValue({ status: "ok", data: makeStatus() });
-    mockSkipInstallation.mockResolvedValue({ status: "ok", data: null });
+    mockQuitApplication.mockResolvedValue({ status: "ok", data: null });
     mockHasProjectSelected.mockResolvedValue({ status: "ok", data: false });
   });
 
@@ -166,19 +165,19 @@ describe("WelcomeInstallPage", () => {
     );
   });
 
-  it("persists the skip flag and proceeds to /setup on Skip", async () => {
+  it("quits the application on Cancel without navigating", async () => {
     const user = userEvent.setup();
     render(<WelcomeInstallPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("welcome-skip")).toBeInTheDocument();
+      expect(screen.getByTestId("welcome-cancel")).toBeInTheDocument();
     });
-    await user.click(screen.getByTestId("welcome-skip"));
+    await user.click(screen.getByTestId("welcome-cancel"));
 
     await waitFor(() => {
-      expect(mockSkipInstallation).toHaveBeenCalledTimes(1);
+      expect(mockQuitApplication).toHaveBeenCalledTimes(1);
     });
-    expect(mockNavigate).toHaveBeenCalledWith("/setup", { replace: true });
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it("renders install errors inline without navigating", async () => {
