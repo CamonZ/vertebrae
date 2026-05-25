@@ -149,6 +149,59 @@ async fn when_add_step_with_provider_model_reasoning_effort(
     store_step_id_if_created(world, &name);
 }
 
+#[when(
+    expr = "I add a step {string} to the workflow with provider {string}, codex model provider {string}, and model {string}"
+)]
+async fn when_add_step_with_provider_codex_model_provider_and_model(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    codex_model_provider: String,
+    model: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--codex-model-provider",
+            &codex_model_provider,
+            "--model",
+            &model,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
+#[when(expr = "I add a step {string} to the workflow with provider {string}, model {string}")]
+async fn when_add_step_with_provider_and_model(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    model: String,
+) {
+    let wf_id = workflow_id(world);
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            &name,
+            "--workflow",
+            &wf_id,
+            "--provider",
+            &provider,
+            "--model",
+            &model,
+        ])
+        .await;
+    store_step_id_if_created(world, &name);
+}
+
 /// Tests that invalid JSON produces a clear error message.
 #[when(expr = "I add a step {string} to the workflow with invalid --agent-config JSON")]
 async fn when_add_step_with_invalid_agent_config(world: &mut SmokeWorld, name: String) {
@@ -180,6 +233,36 @@ async fn when_update_step_with_flag(
         .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
     world
         .run_vtb(&["step", "update", &step_id, &flag, &value])
+        .await;
+}
+
+#[when(
+    expr = "I update the step {string} in the workflow with provider {string}, codex model provider {string}, and model {string}"
+)]
+async fn when_update_step_with_provider_codex_model_provider_and_model(
+    world: &mut SmokeWorld,
+    name: String,
+    provider: String,
+    codex_model_provider: String,
+    model: String,
+) {
+    let step_id = world
+        .stored_ids
+        .get(&format!("step:{}", name))
+        .cloned()
+        .unwrap_or_else(|| panic!("no stored ID for step '{}'", name));
+    world
+        .run_vtb(&[
+            "step",
+            "update",
+            &step_id,
+            "--provider",
+            &provider,
+            "--codex-model-provider",
+            &codex_model_provider,
+            "--model",
+            &model,
+        ])
         .await;
 }
 

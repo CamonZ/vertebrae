@@ -57,7 +57,8 @@ pub use execution_service::{
 pub use model_catalog::{
     Provider, ProviderModelMismatch, ProviderReasoningEffortMismatch,
     SUPPORTED_OPENAI_REASONING_EFFORTS, classify_model, normalize_provider_reasoning_effort,
-    validate_provider_model, validate_provider_reasoning_effort,
+    validate_provider_model, validate_provider_model_with_codex_provider,
+    validate_provider_reasoning_effort,
 };
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
