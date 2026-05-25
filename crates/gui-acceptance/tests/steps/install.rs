@@ -22,8 +22,8 @@ fn cli_symlink_path(name: &str) -> PathBuf {
     PathBuf::from(home).join(".local").join("bin").join(name)
 }
 
-/// Navigate to the app root. On a `@first_run` scenario the skip flag has been
-/// removed, so `InstallationGuard` redirects to `/welcome`.
+/// Navigate to the app root. On a `@first_run` scenario the installed markers
+/// have been removed, so `InstallationGuard` redirects to `/welcome`.
 #[given("the GUI is on the welcome install screen")]
 async fn gui_on_welcome_screen(world: &mut GuiWorld) {
     navigate_to(world, "/welcome", "nav-welcome").await;
@@ -84,7 +84,7 @@ async fn uncheck_install_component(world: &mut GuiWorld, test_id: String) {
 }
 
 /// Assert the URL no longer contains `needle` within `timeout` seconds. Used to
-/// confirm Skip/Install navigated the app away from `/welcome`.
+/// confirm a successful install navigated the app away from `/welcome`.
 #[then(expr = "the URL should not contain {string} within {int} seconds")]
 async fn url_should_not_contain_within(world: &mut GuiWorld, needle: String, timeout: u64) {
     let wd = world

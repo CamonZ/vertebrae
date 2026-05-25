@@ -137,10 +137,11 @@ fn create_builder() -> Builder {
             commands::set_active_chat_session_id,
             // WebSocket status command
             commands::get_websocket_status,
+            // Application lifecycle
+            commands::quit_application,
             // Installer flow commands (first-run welcome screen)
             install::installation_status,
             install::install_components,
-            install::skip_installation,
         ])
         .events(collect_events![
             TaskChangedEvent,

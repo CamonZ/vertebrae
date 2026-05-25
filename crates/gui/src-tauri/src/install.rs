@@ -5,14 +5,12 @@
 //! 2. Stage the bundled `vtb` and `vtb-daemon` sidecars into `~/.local/bin`
 //!    and (optionally) register the daemon with the OS service manager
 //!    (`install_components`).
-//! 3. Persist a "user dismissed the installer" flag so the welcome screen
-//!    does not reappear (`skip_installation`).
 //!
 //! All heavy lifting (copying binaries, writing plist/systemd unit files,
 //! invoking `launchctl`/`systemctl`) lives in the shared
 //! [`vertebrae_installer`] crate. This module is the thin Tauri-side
-//! adapter: it resolves bundled sidecar paths, persists UI-only state, and
-//! shapes results into types that tauri-specta can export to TypeScript.
+//! adapter: it resolves bundled sidecar paths and shapes results into types
+//! that tauri-specta can export to TypeScript.
 //!
 //! # Sidecar path resolution
 //!
@@ -23,21 +21,12 @@
 //! directory as the GUI executable itself, so we resolve sidecars relative
 //! to [`std::env::current_exe`] using the target triple baked in by
 //! `tauri-build` (`TAURI_ENV_TARGET_TRIPLE`).
-//!
-//! # Skipped-flag persistence
-//!
-//! [`skip_installation`] writes a tiny JSON document
-//! (`{"installer_skipped": true}`) to
-//! `<app_config_dir>/installer-state.json`. `app_config_dir()` resolves to
-//! the OS-conventional config dir joined with this app's bundle identifier
-//! (e.g. on macOS: `~/Library/Application Support/com.vertebrae.app/`).
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
 use vertebrae_installer::{
     install_binary, install_service, service_status, symlink_path, InstallerError, ServiceStatus,
 };
@@ -52,10 +41,6 @@ const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 /// `tauri.conf.json` (without the target-triple suffix Tauri appends).
 const CLI_BIN: &str = "vtb";
 const DAEMON_BIN: &str = "vtb-daemon";
-
-/// File inside `app_config_dir()` we use to persist the "user clicked
-/// Skip on the installer screen" flag.
-const INSTALLER_STATE_FILE: &str = "installer-state.json";
 
 // ---------------------------------------------------------------------------
 // Response types — these are auto-exported to TypeScript via tauri-specta.
@@ -112,9 +97,6 @@ pub struct InstallationStatus {
     pub cli: ComponentStatus,
     pub daemon: ComponentStatus,
     pub service: ServiceState,
-    /// `true` once the user clicked "Skip" on the welcome screen. Persisted
-    /// in `installer-state.json` under the app config dir.
-    pub skipped: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -127,10 +109,8 @@ pub struct InstallationStatus {
 /// single OS service-manager status query (no `launchctl load`, no copy).
 #[tauri::command]
 #[specta::specta]
-pub async fn installation_status(
-    app_handle: AppHandle,
-) -> Result<InstallationStatus, CommandError> {
-    compute_status(&app_handle)
+pub async fn installation_status() -> Result<InstallationStatus, CommandError> {
+    compute_status()
 }
 
 /// Install the selected components from the bundled sidecars.
@@ -152,7 +132,6 @@ pub async fn installation_status(
 #[tauri::command]
 #[specta::specta]
 pub async fn install_components(
-    app_handle: AppHandle,
     install_cli: bool,
     install_daemon: bool,
 ) -> Result<InstallationStatus, CommandError> {
@@ -169,35 +148,21 @@ pub async fn install_components(
         install_service(&staged).map_err(installer_error)?;
     }
 
-    compute_status(&app_handle)
-}
-
-/// Persist a "user dismissed the installer" flag so the welcome screen
-/// does not reappear on next launch.
-///
-/// We only ever write `true`. There is no UI to un-skip, by design — if the
-/// user later wants to install components, they go through the explicit
-/// install flow which will recompute the real status anyway.
-#[tauri::command]
-#[specta::specta]
-pub async fn skip_installation(app_handle: AppHandle) -> Result<(), CommandError> {
-    write_skipped_flag(&app_handle, true)
+    compute_status()
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn compute_status(app_handle: &AppHandle) -> Result<InstallationStatus, CommandError> {
+fn compute_status() -> Result<InstallationStatus, CommandError> {
     let cli = component_status(CLI_BIN)?;
     let daemon = component_status(DAEMON_BIN)?;
     let service = service_status().map_err(installer_error)?.into();
-    let skipped = read_skipped_flag(app_handle);
     Ok(InstallationStatus {
         cli,
         daemon,
         service,
-        skipped,
     })
 }
 
@@ -299,57 +264,6 @@ fn sidecar_path_in(exe_dir: &Path, name: &str, target_triple: &str) -> PathBuf {
         ""
     };
     exe_dir.join(format!("{name}{exe_suffix}"))
-}
-
-fn installer_state_path(app_handle: &AppHandle) -> Result<PathBuf, CommandError> {
-    let dir = app_handle
-        .path()
-        .app_config_dir()
-        .map_err(|e| CommandError {
-            message: format!("Failed to resolve app config directory: {e}"),
-        })?;
-    Ok(dir.join(INSTALLER_STATE_FILE))
-}
-
-#[derive(Serialize, Deserialize, Default)]
-struct InstallerStateFile {
-    installer_skipped: bool,
-}
-
-fn read_skipped_flag(app_handle: &AppHandle) -> bool {
-    let Ok(path) = installer_state_path(app_handle) else {
-        return false;
-    };
-    let Ok(bytes) = fs::read(&path) else {
-        return false;
-    };
-    serde_json::from_slice::<InstallerStateFile>(&bytes)
-        .map(|s| s.installer_skipped)
-        .unwrap_or(false)
-}
-
-fn write_skipped_flag(app_handle: &AppHandle, skipped: bool) -> Result<(), CommandError> {
-    let path = installer_state_path(app_handle)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| CommandError {
-            message: format!(
-                "Failed to create installer state directory {}: {e}",
-                parent.display()
-            ),
-        })?;
-    }
-    let state = InstallerStateFile {
-        installer_skipped: skipped,
-    };
-    let bytes = serde_json::to_vec_pretty(&state).map_err(|e| CommandError {
-        message: format!("Failed to serialize installer state: {e}"),
-    })?;
-    fs::write(&path, bytes).map_err(|e| CommandError {
-        message: format!(
-            "Failed to write installer state file {}: {e}",
-            path.display()
-        ),
-    })
 }
 
 /// Render an [`InstallerError`] into the structured [`CommandError`] the
@@ -487,28 +401,6 @@ mod tests {
             cmd_err.message.contains("Source binary not found"),
             "CommandError should include the installer error display, got: {}",
             cmd_err.message
-        );
-    }
-
-    #[test]
-    fn installer_state_file_round_trips_skipped_flag() {
-        let state = InstallerStateFile {
-            installer_skipped: true,
-        };
-        let bytes = serde_json::to_vec(&state).expect("serialize");
-        let parsed: InstallerStateFile = serde_json::from_slice(&bytes).expect("deserialize");
-        assert!(
-            parsed.installer_skipped,
-            "installer_skipped flag should survive a JSON round trip"
-        );
-    }
-
-    #[test]
-    fn installer_state_file_defaults_to_not_skipped() {
-        let state = InstallerStateFile::default();
-        assert!(
-            !state.installer_skipped,
-            "default state must treat the installer as not skipped so we still show the welcome screen on first run"
         );
     }
 

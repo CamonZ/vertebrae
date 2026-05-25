@@ -90,12 +90,10 @@ It:
   a component found elsewhere on `$PATH` is tagged "found on PATH".
 - **Install** calls `install_components(install_cli, install_daemon)`, which
   stages the chosen sidecars and (if the daemon was selected) registers the
-  daemon service.
-- **Skip** calls `skip_installation`, which persists a flag so the screen does
-  not reappear.
-
-After either action the user proceeds to `/setup` (or `/` if a project was
-already selected).
+  daemon service. The user then proceeds to `/setup` (or `/` if a project was
+  already selected).
+- **Cancel** calls `quit_application`, which exits the app. Installation is
+  required to continue — there is no "skip and install later".
 
 ### What gets installed
 
@@ -150,30 +148,31 @@ following hold (first-run predicate):
 !cli.installed_at_symlink &&
 !daemon.installed_at_symlink &&
 !cli.on_path &&
-!daemon.on_path &&
-!skipped
+!daemon.on_path
 ```
 
-In words: neither component is installed at the symlink path we manage,
-neither is resolvable anywhere on `$PATH`, and the user has not previously
-clicked "Skip". If the status probe fails, the guard intentionally falls
-through to its children rather than blocking an already-working install.
-`InstallationGuard` sits above `ProjectGuard`, so the welcome screen comes
-before `/setup`.
+In words: neither component is installed at the symlink path we manage and
+neither is resolvable anywhere on `$PATH`. If the status probe fails, the
+guard intentionally falls through to its children rather than blocking an
+already-working install. `InstallationGuard` sits above `ProjectGuard`, so the
+welcome screen comes before `/setup`.
 
 ### Install Locations
 
 | Item | macOS | Linux |
 |------|-------|-------|
-| Staged binaries | `~/Library/Application Support/Vertebrae/bin` | `~/.local/share/vertebrae/bin` |
+| Data dir (shared root) | `~/Library/Application Support/Vertebrae` | `~/.local/share/vertebrae` |
+| Staged binaries | `<data dir>/bin` | `<data dir>/bin` |
+| GUI app state | `<data dir>/app-state.json` | `<data dir>/app-state.json` |
 | User symlinks | `~/.local/bin` | `~/.local/bin` |
 | Daemon service file | `~/Library/LaunchAgents/com.vertebrae.daemon.plist` | `~/.config/systemd/user/vertebrae-daemon.service` |
 | Service manager / id | launchd label `com.vertebrae.daemon` | systemd `--user` unit `vertebrae-daemon` |
 | Daemon logs | `~/Library/Logs/vertebrae/{daemon.log,daemon.error.log}` | `~/.local/state/vertebrae/logs/{daemon.log,daemon.error.log}` |
 
-The "Skip" flag is persisted as `installer-skipped` in
-`<app_config_dir>/installer-state.json` — on macOS that is
-`~/Library/Application Support/com.vertebrae.app/installer-state.json`.
+`app-state.json` holds GUI-local view state (currently the last opened
+project). The project registry itself lives in the shared
+`~/.config/vertebrae/config.toml`. All client data dirs are derived from
+`vertebrae_installer::data_dir()`.
 
 ### Uninstalling
 
@@ -200,17 +199,9 @@ There is no GUI uninstall flow. Undo an install from the terminal:
    rm -rf ~/.local/share/vertebrae/bin
    ```
 
-3. **Reset the skip flag** to see the welcome screen again on next launch —
-   delete the state file:
-
-   ```bash
-   # macOS
-   rm -f "~/Library/Application Support/com.vertebrae.app/installer-state.json"
-   ```
-
-   (Removing the binaries and symlinks alone is enough to re-trigger the
-   welcome screen, provided neither `vtb` nor `vtb-daemon` is otherwise on
-   `$PATH` and the skip flag is cleared.)
+   Removing the binaries and symlinks is enough to re-trigger the welcome
+   screen on next launch, provided neither `vtb` nor `vtb-daemon` is otherwise
+   resolvable on `$PATH`.
 
 ## Real-Time Sync
 
