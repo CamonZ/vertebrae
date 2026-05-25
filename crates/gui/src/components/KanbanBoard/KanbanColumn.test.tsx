@@ -33,6 +33,15 @@ describe("KanbanColumn", () => {
 
       expect(screen.getByRole("region", { name: "Review column, 1 tasks" })).toBeInTheDocument();
     });
+
+    it("renders a non-empty count as a serif-italic copper accent numeral", () => {
+      const tasks = [createMockTask({ id: "task-1", title: "Task A" })];
+      render(<KanbanColumn columnName="Review" tasks={tasks} />);
+
+      const count = screen.getByTestId("kanban-column-count");
+      expect(count).toHaveTextContent("1");
+      expect(count).toHaveClass("font-serif", "italic", "text-[var(--color-accent)]");
+    });
   });
 
   describe("empty state", () => {

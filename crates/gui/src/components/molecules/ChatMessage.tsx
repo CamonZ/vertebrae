@@ -47,7 +47,7 @@ export function ChatMessage({
         .join(" ")}
     >
       {(author || timestamp) && (
-        <div className="flex items-baseline gap-2 font-mono text-[11px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)]">
+        <div className="flex items-baseline gap-2 font-mono text-eyebrow uppercase tracking-[0.08em] text-[var(--color-fg-mute)]">
           {author && <span>{author}</span>}
           {timestamp && (
             <span className="tracking-normal normal-case text-[var(--color-fg-faint)]">

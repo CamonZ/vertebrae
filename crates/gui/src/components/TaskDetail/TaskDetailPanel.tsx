@@ -134,7 +134,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+      <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
         {label}
       </span>
       <span className="text-sm text-[var(--color-fg)]">{children}</span>
@@ -784,7 +784,7 @@ export function TaskDetailPanel({
       )}
       {taskData.step_name && (
         <span
-          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
+          className={`rounded-full px-2 py-0.5 text-2xs font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
           data-testid="status-badge"
         >
           {taskData.step_name.replace("_", " ")}
@@ -802,7 +802,7 @@ export function TaskDetailPanel({
         <span
           data-testid="task-detail-run-chip"
           data-run-status={runChip.status}
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
           aria-label={`Run state: ${runChip.label}`}
         >
           {runChip.label}
@@ -956,7 +956,7 @@ export function TaskDetailPanel({
             ariaLabel="Toggle Progress section"
             badge={
               checklistItems.length > 0 ? (
-                <span className="font-mono text-[10px] text-[var(--color-fg-mute)]">
+                <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
                   {checklistItems.filter((c) => c.done).length}/
                   {checklistItems.length}
                 </span>
@@ -973,7 +973,7 @@ export function TaskDetailPanel({
                       className="flex items-start gap-2 py-1"
                     >
                       <span
-                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[10px] ${
+                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-2xs ${
                           item.done
                             ? "bg-[var(--color-ok-wash)] text-[var(--color-ok)]"
                             : "bg-[var(--color-bg-2)] text-[var(--color-fg-mute)]"
@@ -1069,7 +1069,7 @@ export function TaskDetailPanel({
                         {child.title}
                       </span>
                       {childStepName && (
-                        <span className="flex-shrink-0 rounded-full bg-[var(--color-bg-2)] px-1.5 py-0.5 text-[10px] text-[var(--color-fg-mute)]">
+                        <span className="flex-shrink-0 rounded-full bg-[var(--color-bg-2)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-mute)]">
                           {childStepName}
                         </span>
                       )}
@@ -1105,7 +1105,7 @@ export function TaskDetailPanel({
             ariaLabel="Toggle Code section"
             badge={
               (taskData.code_refs?.length ?? 0) > 0 ? (
-                <span className="font-mono text-[10px] text-[var(--color-fg-mute)]">
+                <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
                   {taskData.code_refs?.length}
                 </span>
               ) : undefined
@@ -1121,7 +1121,7 @@ export function TaskDetailPanel({
           >
             <div className="divide-y divide-[var(--color-line)] py-2">
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Priority
                 </h4>
                 {editingField === "priority" ? (
@@ -1160,7 +1160,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Level
                 </h4>
                 {editingField === "level" ? (
@@ -1205,7 +1205,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Tags
                 </h4>
                 <InlineEditField
@@ -1222,7 +1222,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Timeline
                 </h4>
                 <div className="space-y-1">
@@ -1247,7 +1247,7 @@ export function TaskDetailPanel({
 
               {taskData.worktree && (
                 <div className="py-3">
-                  <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                     Worktree
                   </h4>
                   <p className="break-all font-mono text-xs text-[var(--color-fg-soft)]">
@@ -1258,7 +1258,7 @@ export function TaskDetailPanel({
 
               <div className="py-3">
                 <div className="flex items-center justify-between">
-                  <h4 className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <h4 className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                     Human Review
                   </h4>
                   <Toggle
@@ -1278,7 +1278,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Revision Feedback
                 </h4>
                 <InlineEditField

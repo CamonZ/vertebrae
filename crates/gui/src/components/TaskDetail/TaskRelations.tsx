@@ -189,7 +189,7 @@ function ParentPicker({
                   <ScanIdentifier
                     id={task.id}
                     kind="task"
-                    className="text-[10px]"
+                    className="text-2xs"
                     testId="parent-picker-task-id"
                   />
                   <div className="truncate">{task.title}</div>
@@ -309,7 +309,7 @@ function DependencyPicker({
                     <ScanIdentifier
                       id={task.id}
                       kind="task"
-                      className="text-[10px]"
+                      className="text-2xs"
                       testId="dependency-picker-task-id"
                     />
                     <div className="truncate text-xs text-text-primary">{task.title}</div>

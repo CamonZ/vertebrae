@@ -19,7 +19,7 @@ function SectionList({
 
   return (
     <div className="space-y-2">
-      <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+      <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
         {label}
       </h4>
       <ul className="space-y-1">
@@ -74,7 +74,7 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
     <div className="space-y-5 px-4 py-2" data-testid="spec-section">
       {grouped.goals.length > 0 && (
         <div className="space-y-2">
-          <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
             Goal
           </h4>
           {grouped.goals.map((goal, i) => (
@@ -89,7 +89,7 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
       )}
 
       <div className="space-y-2">
-        <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
           Description
         </h4>
         {onDescriptionChange ? (

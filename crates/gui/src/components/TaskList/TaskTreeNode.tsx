@@ -5,6 +5,7 @@ import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
 import { deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
 import { IdentityBadge } from "../shared/EntityId";
+import { Count } from "../atoms";
 
 const ROW_BASE_PADDING_PX = 6;
 const ROW_DEPTH_INDENT_PX = 10;
@@ -165,9 +166,10 @@ export function TaskTreeNode({
         <div className="flex w-8 shrink-0 items-center justify-end gap-0.5">
           {hasChildren ? (
             <>
-              <span className="w-4 text-right font-mono text-[10px] tabular-nums text-[var(--color-fg-mute)]">
-                {node.children.length}
-              </span>
+              <Count
+                value={node.children.length}
+                className="w-4 text-right text-2xs"
+              />
               <button
                 type="button"
                 onClick={handleToggleExpand}
@@ -267,7 +269,7 @@ export function TaskTreeNode({
               </span>
             )}
             <span
-              className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-[10px] font-medium ${stepStyles.bg} ${stepStyles.text}`}
+              className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-2xs font-medium ${stepStyles.bg} ${stepStyles.text}`}
             >
               {formatStepName(task.step_name)}
             </span>
@@ -279,10 +281,10 @@ export function TaskTreeNode({
           {task.created_at ? (
             <RelativeTime
               date={task.created_at}
-              className="font-mono text-[11px] tabular-nums text-[var(--color-fg-mute)]"
+              className="font-mono text-eyebrow tabular-nums text-[var(--color-fg-mute)]"
             />
           ) : (
-            <span className="font-mono text-[11px] text-[var(--color-fg-faint)]">
+            <span className="font-mono text-eyebrow text-[var(--color-fg-faint)]">
               —
             </span>
           )}

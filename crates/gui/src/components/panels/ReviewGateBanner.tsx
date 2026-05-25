@@ -70,7 +70,7 @@ export function ReviewGateBanner({
             </span>
           </div>
           {description && (
-            <div className="mt-1 text-sm text-[var(--color-fg-soft)]">
+            <div className="mt-1 font-serif text-sm font-light italic text-[var(--color-fg-soft)]">
               {description}
             </div>
           )}

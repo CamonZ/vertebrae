@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
 import { deriveRunControlsState } from "../../utils/runState";
+import { Count } from "../atoms";
 
 interface ReadySectionProps {
   tasks: Task[];
@@ -10,7 +11,7 @@ interface ReadySectionProps {
 
 export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
   const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set()
   );
   const pendingTaskIdsRef = useRef<Set<string>>(new Set());
 
@@ -49,22 +50,20 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
         setTaskPending(task.id, false);
       }
     },
-    [onTaskStarted, setTaskPending],
+    [onTaskStarted, setTaskPending]
   );
 
   if (tasks.length === 0) return null;
 
   return (
     <section aria-label="Ready to start">
-      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
         <span
           className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-fg-faint)]"
           aria-hidden="true"
         />
         <span>Ready</span>
-        <span className="ml-auto text-[var(--color-fg-faint)]">
-          {tasks.length}
-        </span>
+        <Count value={tasks.length} className="ml-auto" />
       </h2>
 
       <div className="space-y-1">
@@ -126,8 +125,8 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                       runControls.hasActiveRun
                         ? "Run is already active"
                         : !runControls.runnable && task.run_controls
-                          ? task.run_controls.disabled_reason ??
-                            "Not runnable right now"
+                          ? (task.run_controls.disabled_reason ??
+                            "Not runnable right now")
                           : "Run the entire workflow for this task"
                     }
                     aria-label="Run entire workflow"

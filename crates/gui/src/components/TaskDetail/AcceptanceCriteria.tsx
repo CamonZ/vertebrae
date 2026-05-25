@@ -71,7 +71,7 @@ function StatusIndicator({ status }: { status: CriterionStatus }) {
 function ValidationBadge({ type }: { type: ValidationType }) {
   if (type === "machine") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-[10px] font-medium text-info">
+      <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-2xs font-medium text-info">
         <svg
           className="h-2.5 w-2.5"
           fill="none"
@@ -91,7 +91,7 @@ function ValidationBadge({ type }: { type: ValidationType }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning">
+    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning">
       <svg
         className="h-2.5 w-2.5"
         fill="none"
@@ -131,7 +131,7 @@ function CriterionRefsList({ refs }: { refs: CodeRef[] }) {
         return (
           <span
             key={`${ref.path}-${i}`}
-            className="inline-flex items-center gap-1 rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px] text-text-muted"
+            className="inline-flex items-center gap-1 rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-2xs text-text-muted"
             title={ref.description ?? ref.path}
           >
             {ref.path.split("/").pop()}
@@ -248,7 +248,7 @@ export function AcceptanceCriteria({
     <div className="space-y-3 px-4 py-3" data-testid="acceptance-criteria">
       {/* Summary bar */}
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
           {metCount}/{totalCount} met
         </span>
         <div className="flex items-center gap-2">
@@ -258,7 +258,7 @@ export function AcceptanceCriteria({
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <span className="font-mono text-[10px] text-text-muted">
+          <span className="font-mono text-2xs text-text-muted">
             {progressPercent}%
           </span>
         </div>

@@ -26,7 +26,7 @@ function RollupStat({ label, value, testId }: RollupStatProps): ReactNode {
       data-testid={testId}
       className="flex flex-col rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)]/50 px-3 py-1.5"
     >
-      <span className="font-mono text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
+      <span className="font-mono text-2xs font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
         {label}
       </span>
       <span className="text-sm font-medium text-[var(--color-fg)]">
@@ -170,7 +170,7 @@ export function TracesHeader({
         {isLoading && (
           <span
             data-testid="traces-rollup-loading"
-            className="self-center text-[10px] italic text-[var(--color-fg-mute)]"
+            className="self-center text-2xs italic text-[var(--color-fg-mute)]"
           >
             Loading...
           </span>
@@ -178,7 +178,7 @@ export function TracesHeader({
         {error && !isLoading && (
           <span
             data-testid="traces-rollup-error"
-            className="self-center rounded-[var(--radius-sm)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] px-2 py-1 text-[10px] text-[var(--color-err)]"
+            className="self-center rounded-[var(--radius-sm)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] px-2 py-1 text-2xs text-[var(--color-err)]"
           >
             {error}
           </span>

@@ -107,7 +107,10 @@ const components = {
       {children}
     </li>
   ),
-  blockquote: ({ children, ...props }: ComponentPropsWithoutRef<"blockquote">) => (
+  blockquote: ({
+    children,
+    ...props
+  }: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
       className="mb-2 border-l-2 border-primary/50 pl-3 text-text-secondary italic"
       {...props}
@@ -127,10 +130,7 @@ const components = {
   ),
   table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
     <div className="mb-2 overflow-x-auto">
-      <table
-        className="w-full border-collapse text-sm"
-        {...props}
-      >
+      <table className="w-full border-collapse text-sm" {...props}>
         {children}
       </table>
     </div>
@@ -165,7 +165,9 @@ const components = {
     </strong>
   ),
   em: ({ children, ...props }: ComponentPropsWithoutRef<"em">) => (
-    <em className="text-text-secondary" {...props}>
+    // Inline prose emphasis (cursive role b): Newsreader serif italic at full
+    // --fg — NOT copper. Distinct from a heading's copper accent word.
+    <em className="font-serif italic text-[var(--color-fg)]" {...props}>
       {children}
     </em>
   ),
@@ -184,7 +186,7 @@ const components = {
         <div className="group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-md border border-border/50 bg-bg-primary">
           {match && (
             <div className="flex items-center border-b border-border/50 px-3 py-1">
-              <span className="font-mono text-[11px] text-text-muted">
+              <span className="font-mono text-eyebrow text-text-muted">
                 {match[1]}
               </span>
             </div>
