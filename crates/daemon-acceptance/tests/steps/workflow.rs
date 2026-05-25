@@ -24,6 +24,25 @@ pub async fn given_workflow_with_codex_step_and_reasoning_effort(
     world.assert_vtb_ok("step update --provider openai --reasoning-effort");
 }
 
+#[given(
+    expr = "a workflow with one execute step using openai, codex model provider {string}, and model {string}"
+)]
+pub async fn given_workflow_with_codex_step_model_provider_and_model(
+    world: &mut DaemonWorld,
+    codex_model_provider: String,
+    model: String,
+) {
+    create_workflow_and_step(world, None).await;
+    update_current_step_openai_with_codex_model_provider(
+        world,
+        &model,
+        &codex_model_provider,
+        None,
+    )
+    .await;
+    world.assert_vtb_ok("step update --provider openai --codex-model-provider");
+}
+
 #[given("a workflow with one execute step and an output schema")]
 pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
@@ -71,6 +90,31 @@ async fn update_current_step_openai(
         step_id.as_str(),
         "--provider",
         "openai",
+        "--model",
+        model,
+    ];
+    if let Some(reasoning_effort) = reasoning_effort {
+        args.push("--reasoning-effort");
+        args.push(reasoning_effort);
+    }
+    world.run_vtb(&args).await;
+}
+
+async fn update_current_step_openai_with_codex_model_provider(
+    world: &mut DaemonWorld,
+    model: &str,
+    codex_model_provider: &str,
+    reasoning_effort: Option<&str>,
+) {
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    let mut args = vec![
+        "step",
+        "update",
+        step_id.as_str(),
+        "--provider",
+        "openai",
+        "--codex-model-provider",
+        codex_model_provider,
         "--model",
         model,
     ];

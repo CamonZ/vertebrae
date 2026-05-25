@@ -25,6 +25,16 @@ Feature: Codex JSONL step execution
     Then the execution status is "completed"
     And the Codex mock argv contains model "gpt-5.5" and reasoning effort "high"
 
+  Scenario: Codex upstream model provider reaches the CLI before the prompt
+    Given a configured daemon test environment
+    And a workflow with one execute step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
+    And a task assigned to the workflow
+    When the codex mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the execution status is "completed"
+    And the Codex mock argv contains model "deepseek/deepseek-v4-flash" and model provider "openrouter"
+
   Scenario: Codex completed without an agent_message
     Given a configured daemon test environment
     And a workflow with one execute step using openai
