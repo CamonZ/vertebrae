@@ -149,7 +149,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => void handleConfirmDelete(session.id)}
                         disabled={isDeleting}
                         aria-label={`Confirm delete chat ${session.id}`}
-                        className="rounded border border-[var(--color-err)]/50 px-2 py-1 text-[11px] text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-[var(--color-err)]/50 px-2 py-1 text-eyebrow text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Delete
                       </button>
@@ -158,7 +158,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                         onClick={() => setConfirmDeleteId(null)}
                         disabled={isDeleting}
                         aria-label={`Cancel delete chat ${session.id}`}
-                        className="rounded border border-[var(--color-line)] px-2 py-1 text-[11px] text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded border border-[var(--color-line)] px-2 py-1 text-eyebrow text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -192,7 +192,7 @@ export function LiveChatHistoryDrawer({ open, onClose }: Props) {
                       {title}
                     </span>
                     {stamp && (
-                      <span className="mt-0.5 text-[10px] text-[var(--color-fg-mute)]">
+                      <span className="mt-0.5 text-2xs text-[var(--color-fg-mute)]">
                         {stamp}
                       </span>
                     )}

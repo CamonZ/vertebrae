@@ -229,14 +229,14 @@ describe("FormField", () => {
       expect(helpText).toHaveClass("text-text-muted");
     });
 
-    it("applies text-[10px] size to help text", () => {
+    it("renders help text as small muted serif italic (field-hint role)", () => {
       render(
         <FormField label="Title" helpText="Help text">
           <input type="text" />
         </FormField>
       );
       const helpText = screen.getByText("Help text");
-      expect(helpText).toHaveClass("text-[10px]");
+      expect(helpText).toHaveClass("font-serif", "italic", "text-[13px]");
     });
   });
 
@@ -251,14 +251,14 @@ describe("FormField", () => {
       expect(errorContainer).toHaveClass("text-error");
     });
 
-    it("applies text-[10px] size to error message", () => {
+    it("applies the 2xs token size to error message", () => {
       render(
         <FormField label="Title" error="Error message">
           <input type="text" />
         </FormField>
       );
       const errorContainer = screen.getByRole("alert");
-      expect(errorContainer).toHaveClass("text-[10px]");
+      expect(errorContainer).toHaveClass("text-2xs");
     });
 
     it("applies flex and items-center to error container", () => {

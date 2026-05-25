@@ -115,7 +115,7 @@ export function StepBoundary({
       <div className="flex w-full items-center gap-2">
         <div className="h-px flex-1 bg-[var(--color-line)]" />
         <div
-          className={`flex items-center gap-2 rounded-[var(--radius-full)] border bg-[var(--color-bg-1)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-fg-mute)] ${borderClass}`}
+          className={`flex items-center gap-2 rounded-[var(--radius-full)] border bg-[var(--color-bg-1)] px-3 py-1 font-mono text-2xs uppercase tracking-[0.08em] text-[var(--color-fg-mute)] ${borderClass}`}
         >
           {thresholdKind && (
             <span

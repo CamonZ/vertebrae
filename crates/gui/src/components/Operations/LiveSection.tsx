@@ -31,7 +31,7 @@ export function LiveSection({ items }: LiveSectionProps) {
 
   return (
     <section aria-label="Live operations">
-      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
         <span className="relative flex h-1.5 w-1.5">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-ok)] opacity-75" />
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" />

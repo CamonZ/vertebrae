@@ -53,7 +53,7 @@ export function ConversationLogViewer({
     <TimeModeContext.Provider value={{ mode: timeMode, toggle: toggleTimeMode }}>
       <div className="space-y-1">
         <div className="flex justify-end mb-2">
-          <span className="text-[10px] text-text-muted">
+          <span className="text-2xs text-text-muted">
             Click timestamps to toggle:{" "}
             {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time before"}
           </span>

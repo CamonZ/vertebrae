@@ -29,4 +29,10 @@ describe("ReviewGateBanner", () => {
     expect(screen.getByRole("button", { name: "Accept" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Reject" })).toBeDisabled();
   });
+
+  it("renders the description as a muted weight-300 serif italic lede", () => {
+    render(<ReviewGateBanner description="Run 3 finished implementing." />);
+    const desc = screen.getByText("Run 3 finished implementing.");
+    expect(desc).toHaveClass("font-serif", "font-light", "italic");
+  });
 });

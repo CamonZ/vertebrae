@@ -84,7 +84,7 @@ export function TaskFilters({
       <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-tertiary/50 px-1">
         <label
           htmlFor="level-filter"
-          className="px-2 font-mono text-[10px] uppercase tracking-wider text-text-muted"
+          className="px-2 font-mono text-2xs uppercase tracking-wider text-text-muted"
         >
           Level
         </label>

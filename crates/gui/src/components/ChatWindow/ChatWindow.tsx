@@ -37,7 +37,7 @@ function ContextUtilizationBadge({
 
   return (
     <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${LEVEL_CLASSES[level]}`}
+      className={`rounded border px-1.5 py-0.5 font-mono text-eyebrow ${LEVEL_CLASSES[level]}`}
       title={`${used.toLocaleString()} / ${max.toLocaleString()} input tokens (${pct}%)`}
     >
       {modelLabel ? `${modelLabel} · ` : ""}
@@ -236,7 +236,7 @@ function ScopeBreadcrumb({
 }) {
   return (
     <div className="flex items-center gap-1.5 text-xs">
-      <span className="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-accent)]">
+      <span className="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-wider text-[var(--color-accent)]">
         {scopeLabel(scope)}
       </span>
       <span className="max-w-[150px] truncate text-[var(--color-fg-soft)]" title={label}>
@@ -421,7 +421,7 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
             <summary className="cursor-pointer select-none hover:text-[var(--color-fg-soft)]">
               Context injected
             </summary>
-            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px]">
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-eyebrow">
               {session.contextSummary}
             </pre>
           </details>

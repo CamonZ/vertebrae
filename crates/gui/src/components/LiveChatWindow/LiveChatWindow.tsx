@@ -26,7 +26,7 @@ function LiveChatHeader({
 }: LiveChatHeaderProps) {
   return (
     <div className="z-30 flex h-12 items-center gap-1 border-b border-[var(--color-line)] bg-[var(--color-bg)] px-3">
-      <span className="shrink-0 rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-accent)]">
+      <span className="shrink-0 rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-wider text-[var(--color-accent)]">
         Live
       </span>
       <button
@@ -275,7 +275,7 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
                 >
                   <MarkdownContent text={message.content} />
                   {(message.pending || message.error) && (
-                    <div className="mt-2 flex items-center gap-2 text-[11px] text-[var(--color-fg-mute)]">
+                    <div className="mt-2 flex items-center gap-2 text-eyebrow text-[var(--color-fg-mute)]">
                       {message.pending && <span>sending…</span>}
                       {message.error && (
                         <span className="text-[var(--color-err)]">

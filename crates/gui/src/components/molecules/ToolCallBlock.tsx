@@ -67,12 +67,12 @@ export function ToolCallBlock({
       {open && (
         <div className="grid gap-2 border-t border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2">
           {input !== undefined && (
-            <pre className="max-h-40 overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-[11px] text-[var(--color-fg-soft)]">
+            <pre className="max-h-40 overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-eyebrow text-[var(--color-fg-soft)]">
               {input}
             </pre>
           )}
           {result !== undefined && (
-            <pre className="max-h-[200px] overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-[11px] text-[var(--color-fg)]">
+            <pre className="max-h-[200px] overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-eyebrow text-[var(--color-fg)]">
               {result}
             </pre>
           )}

@@ -74,9 +74,12 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
           )}
         </label>
 
-        {/* Optional help text */}
+        {/* Optional help text — Hearth field hint: small muted serif italic
+            (cursive role C). */}
         {helpText && (
-          <small className="text-[10px] text-text-muted">{helpText}</small>
+          <small className="font-serif text-[13px] italic text-text-muted">
+            {helpText}
+          </small>
         )}
 
         {/* The wrapped input component */}
@@ -85,7 +88,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
 
         {/* Error message */}
         {error && (
-          <small className="flex items-center gap-1 text-[10px] text-error" role="alert">
+          <small className="flex items-center gap-1 text-2xs text-error" role="alert">
             <svg
               className="h-3 w-3 flex-shrink-0"
               fill="none"

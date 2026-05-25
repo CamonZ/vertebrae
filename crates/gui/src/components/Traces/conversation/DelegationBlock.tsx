@@ -44,7 +44,7 @@ export function DelegationBlock({
       style={{ marginLeft: (depth - 1) * 16 }}
     >
       {childTaskTitle && (
-        <div className="px-1 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-[var(--color-accent)]">
+        <div className="px-1 py-1 font-mono text-2xs uppercase tracking-[0.08em] text-[var(--color-accent)]">
           delegated → {childTaskTitle}
         </div>
       )}

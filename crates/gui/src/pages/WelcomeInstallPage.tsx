@@ -122,17 +122,17 @@ export function WelcomeInstallPage() {
       >
         <div className="mb-6 text-center">
           <h1
-            className="mb-2 text-3xl font-bold text-primary"
+            className="mb-2 font-serif text-5xl italic text-[var(--color-fg)]"
             data-testid="welcome-heading"
           >
             Welcome to Vertebrae
           </h1>
-          <p className="text-text-secondary">
+          <p className="font-serif text-lg font-light italic text-[var(--color-fg-soft)]">
             Vertebrae needs to install its command-line tools — the{" "}
-            <span className="font-mono">vtb</span> CLI and the{" "}
-            <span className="font-mono">vtb-daemon</span> background runner — on
-            your system before you can continue. Review what will be installed
-            below and choose Install to proceed.
+            <span className="font-mono not-italic">vtb</span> CLI and the{" "}
+            <span className="font-mono not-italic">vtb-daemon</span> background
+            runner — on your system before you can continue. Review what will be
+            installed below and choose Install to proceed.
           </p>
         </div>
 
