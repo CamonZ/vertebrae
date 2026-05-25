@@ -5,7 +5,8 @@
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
     AgentConfig, Provider, ServiceError, Step, StepService, StepType, StepUpdate,
-    VertebraeServices, normalize_provider_reasoning_effort, validate_provider_model,
+    VertebraeServices, normalize_provider_reasoning_effort,
+    validate_provider_model_with_codex_provider,
 };
 
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
@@ -108,6 +109,13 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// Codex upstream model provider from ~/.codex/config.toml.
+    ///
+    /// Convenience shortcut for `agent_config.codex_model_provider`. Only
+    /// valid with `--provider openai`.
+    #[arg(long, alias = "codex-provider", value_name = "PROVIDER")]
+    pub codex_model_provider: Option<String>,
+
     /// OpenAI/Codex reasoning effort (low, medium, high, xhigh).
     ///
     /// Convenience shortcut for `agent_config.reasoning_effort`. Only valid
@@ -152,6 +160,7 @@ fn build_overlayed_agent_config(
     json: Option<&str>,
     provider: Option<Provider>,
     model: Option<&str>,
+    codex_model_provider: Option<&str>,
     reasoning_effort: Option<&str>,
 ) -> Result<AgentConfig, ServiceError> {
     let mut config = match json {
@@ -169,12 +178,20 @@ fn build_overlayed_agent_config(
     if let Some(model) = model {
         config = config.with_model(model);
     }
+    if let Some(codex_model_provider) = codex_model_provider {
+        config = config.with_codex_model_provider(codex_model_provider);
+    }
     if let Some(reasoning_effort) = reasoning_effort {
         config = config.with_reasoning_effort(reasoning_effort);
     }
-    if let Some(provider) = config.provider {
-        validate_provider_model(provider, config.model.as_deref())
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+    if config.provider.is_some() || config.codex_model_provider.is_some() {
+        let provider = config.provider.unwrap_or(Provider::Anthropic);
+        validate_provider_model_with_codex_provider(
+            provider,
+            config.model.as_deref(),
+            config.codex_model_provider.as_deref(),
+        )
+        .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
     }
     if config.reasoning_effort.is_some() {
         let provider = config.provider.unwrap_or(Provider::Anthropic);
@@ -194,6 +211,7 @@ impl StepAddCommand {
             self.agent_config.as_deref(),
             self.provider,
             self.model.as_deref(),
+            self.codex_model_provider.as_deref(),
             self.reasoning_effort.as_deref(),
         )?;
 
@@ -485,6 +503,13 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// New Codex upstream model provider from ~/.codex/config.toml.
+    ///
+    /// Convenience shortcut for `agent_config.codex_model_provider`. Only
+    /// valid with `--provider openai`.
+    #[arg(long, alias = "codex-provider", value_name = "PROVIDER")]
+    pub codex_model_provider: Option<String>,
+
     /// New OpenAI/Codex reasoning effort (low, medium, high, xhigh).
     ///
     /// Convenience shortcut for `agent_config.reasoning_effort`. Only valid
@@ -599,6 +624,7 @@ impl StepUpdateCommand {
         if self.agent_config.is_some()
             || self.model.is_some()
             || self.provider.is_some()
+            || self.codex_model_provider.is_some()
             || self.reasoning_effort.is_some()
         {
             let agent_config = build_overlayed_agent_config(
@@ -606,6 +632,7 @@ impl StepUpdateCommand {
                 self.agent_config.as_deref(),
                 self.provider,
                 self.model.as_deref(),
+                self.codex_model_provider.as_deref(),
                 self.reasoning_effort.as_deref(),
             )?;
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
@@ -777,6 +804,32 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_codex_model_provider_alias_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Coding",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000007",
+            "--provider",
+            "openai",
+            "--model",
+            "deepseek/deepseek-v4-flash",
+            "--codex-provider",
+            "openrouter",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.model.as_deref(), Some("deepseek/deepseek-v4-flash"));
+                assert_eq!(cmd.codex_model_provider.as_deref(), Some("openrouter"));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_with_orchestration_fields() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -927,6 +980,24 @@ mod tests {
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
                 assert_eq!(cmd.reasoning_effort.as_deref(), Some("xhigh"));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_codex_model_provider_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--codex-model-provider",
+            "zai",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.codex_model_provider.as_deref(), Some("zai"));
             }
             _ => panic!("Expected Update command"),
         }

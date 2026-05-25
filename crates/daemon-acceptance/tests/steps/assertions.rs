@@ -142,6 +142,44 @@ pub async fn codex_argv_contains_model_and_reasoning_effort(
     );
 }
 
+#[then(expr = "the Codex mock argv contains model {string} and model provider {string}")]
+pub async fn codex_argv_contains_model_and_model_provider(
+    world: &mut DaemonWorld,
+    model: String,
+    model_provider: String,
+) {
+    let argv = world.captured_argv();
+
+    let model_idx = argv
+        .iter()
+        .position(|a| a == "--model")
+        .unwrap_or_else(|| panic!("--model not in argv: {argv:?}"));
+    assert_eq!(
+        argv.get(model_idx + 1),
+        Some(&model),
+        "expected model {model:?} after --model in argv: {argv:?}"
+    );
+
+    let config_value = format!("model_provider=\"{model_provider}\"");
+    let provider_config_idx = argv
+        .windows(2)
+        .position(|pair| pair[0] == "-c" && pair[1] == config_value)
+        .unwrap_or_else(|| panic!("model_provider config not in argv: {argv:?}"));
+
+    let prompt_idx = argv
+        .len()
+        .checked_sub(1)
+        .expect("mock argv should include program name and prompt");
+    assert!(
+        model_idx < provider_config_idx,
+        "expected --model before model_provider config, got model_idx={model_idx}, provider_config_idx={provider_config_idx}, argv={argv:?}"
+    );
+    assert!(
+        provider_config_idx + 1 < prompt_idx,
+        "expected model_provider config before trailing prompt, got provider_config_idx={provider_config_idx}, prompt_idx={prompt_idx}, argv={argv:?}"
+    );
+}
+
 #[then(expr = "the mock argv contains {string} exactly {int} time(s)")]
 pub async fn argv_contains_n(world: &mut DaemonWorld, needle: String, expected: usize) {
     let argv = world.captured_argv();

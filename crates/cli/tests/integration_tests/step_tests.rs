@@ -40,6 +40,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -77,6 +78,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -124,6 +126,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -171,6 +174,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 5,
             r#final: false,
             transitions_to: vec![],
@@ -210,6 +214,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: true,
             transitions_to: vec![],
@@ -257,6 +262,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -309,6 +315,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -350,6 +357,7 @@ mod step_create_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![
@@ -401,6 +409,7 @@ mod step_create_tests {
             model: Some("sonnet".to_string()),
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -455,6 +464,7 @@ mod step_list_tests {
                 model: None,
                 provider: None,
                 reasoning_effort: None,
+                codex_model_provider: None,
                 order: i,
                 r#final: i == 2,
                 transitions_to: vec![],
@@ -525,6 +535,7 @@ mod step_list_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -576,6 +587,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 1,
             r#final: false,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
@@ -623,6 +635,7 @@ mod step_show_tests {
             model: Some("opus".to_string()),
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -667,6 +680,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 10,
             r#final: true,
             transitions_to: vec![],
@@ -721,6 +735,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -761,6 +776,7 @@ mod step_show_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 2,
             r#final: false,
             transitions_to: vec![],
@@ -824,6 +840,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -846,6 +863,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -884,6 +902,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -906,6 +925,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -944,6 +964,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -966,6 +987,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: Some(5),
             r#final: Some(true),
             transitions_to: vec![],
@@ -1004,6 +1026,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1026,6 +1049,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1072,6 +1096,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1094,6 +1119,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1132,6 +1158,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1154,6 +1181,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
@@ -1205,6 +1233,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec!["old".to_string()],
@@ -1227,6 +1256,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1264,6 +1294,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1285,6 +1316,7 @@ mod step_update_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1344,6 +1376,7 @@ mod step_dispatcher_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1393,6 +1426,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1456,6 +1490,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1498,6 +1533,7 @@ mod step_delete_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1549,6 +1585,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1588,6 +1625,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1626,6 +1664,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("opus".to_string()),
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1676,6 +1715,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1716,6 +1756,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("sonnet".to_string()),
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1737,6 +1778,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1773,6 +1815,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1795,6 +1838,7 @@ mod step_prompt_and_agent_config_tests {
             model: Some("opus".to_string()),
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1831,6 +1875,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1852,6 +1897,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1894,6 +1940,7 @@ mod step_prompt_and_agent_config_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 2,
             r#final: false,
             transitions_to: vec![],
@@ -1943,6 +1990,7 @@ mod route_step_schema_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1965,6 +2013,7 @@ mod route_step_schema_tests {
             model: None,
             provider: None,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -2101,6 +2150,7 @@ mod provider_tests {
             model,
             provider,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -2128,6 +2178,7 @@ mod provider_tests {
             model,
             provider,
             reasoning_effort: None,
+            codex_model_provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -2210,6 +2261,39 @@ mod provider_tests {
         assert_eq!(step.agent_config.provider, Some(Provider::Openai));
         assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[tokio::test]
+    async fn add_persists_codex_model_provider_with_provider_scoped_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Codex",
+            workflow_id,
+            "codex-provider-1",
+            None,
+            Some("deepseek/deepseek-v4-flash".to_string()),
+            Some(Provider::Openai),
+        );
+        cmd.codex_model_provider = Some(" OpenRouter ".to_string());
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("codex-provider-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
+        assert_eq!(
+            step.agent_config.model.as_deref(),
+            Some("deepseek/deepseek-v4-flash")
+        );
+        assert_eq!(
+            step.agent_config.codex_model_provider.as_deref(),
+            Some("openrouter")
+        );
     }
 
     #[tokio::test]
@@ -2336,6 +2420,45 @@ mod provider_tests {
         assert_eq!(step.agent_config.provider, Some(Provider::Openai));
         assert_eq!(step.agent_config.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(step.agent_config.reasoning_effort.as_deref(), Some("xhigh"));
+    }
+
+    #[tokio::test]
+    async fn update_persists_codex_model_provider_and_provider_scoped_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "Codex",
+            workflow_id,
+            "codex-provider-upd-1",
+            Some(r#"{"provider":"openai","model":"gpt-5.5"}"#.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let mut cmd = update_cmd_with(
+            "codex-provider-upd-1",
+            None,
+            Some("glm-5.1".to_string()),
+            Some(Provider::Openai),
+        );
+        cmd.codex_model_provider = Some("zai".to_string());
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("codex-provider-upd-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
+        assert_eq!(step.agent_config.model.as_deref(), Some("glm-5.1"));
+        assert_eq!(
+            step.agent_config.codex_model_provider.as_deref(),
+            Some("zai")
+        );
     }
 
     #[tokio::test]
@@ -2503,6 +2626,64 @@ mod provider_tests {
         );
 
         assert!(services.steps().get_step("bad-2").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn add_rejects_anthropic_provider_with_codex_model_provider() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-codex-provider-1",
+            None,
+            Some("opus".to_string()),
+            Some(Provider::Anthropic),
+        );
+        cmd.codex_model_provider = Some("openrouter".to_string());
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("openrouter"), "got: {msg}");
+        assert!(msg.contains("openai"), "got: {msg}");
+        assert!(msg.contains("anthropic"), "got: {msg}");
+        assert!(
+            services
+                .steps()
+                .get_step("bad-codex-provider-1")
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn add_rejects_codex_model_provider_without_openai_provider() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let mut cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-codex-provider-2",
+            None,
+            Some("deepseek/deepseek-v4-flash".to_string()),
+            None,
+        );
+        cmd.codex_model_provider = Some("openrouter".to_string());
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("openrouter"), "got: {msg}");
+        assert!(msg.contains("openai"), "got: {msg}");
+        assert!(msg.contains("anthropic"), "got: {msg}");
+        assert!(
+            services
+                .steps()
+                .get_step("bad-codex-provider-2")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]

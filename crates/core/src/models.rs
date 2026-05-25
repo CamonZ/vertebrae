@@ -677,6 +677,8 @@ pub struct AgentConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub codex_model_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
@@ -716,6 +718,11 @@ impl AgentConfig {
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
+        self
+    }
+
+    pub fn with_codex_model_provider(mut self, provider: impl Into<String>) -> Self {
+        self.codex_model_provider = Some(provider.into().trim().to_ascii_lowercase());
         self
     }
 
@@ -848,6 +855,7 @@ impl AgentConfig {
     pub fn is_empty(&self) -> bool {
         self.provider.is_none()
             && self.model.is_none()
+            && self.codex_model_provider.is_none()
             && self.reasoning_effort.is_none()
             && self.fallback_model.is_none()
             && self.system_prompt.is_none()
@@ -869,6 +877,9 @@ impl AgentConfig {
         }
         if other.model.is_some() {
             self.model = other.model;
+        }
+        if other.codex_model_provider.is_some() {
+            self.codex_model_provider = other.codex_model_provider;
         }
         if other.reasoning_effort.is_some() {
             self.reasoning_effort = other.reasoning_effort;
@@ -917,6 +928,7 @@ impl PartialEq for AgentConfig {
     fn eq(&self, other: &Self) -> bool {
         self.provider == other.provider
             && self.model == other.model
+            && self.codex_model_provider == other.codex_model_provider
             && self.reasoning_effort == other.reasoning_effort
             && self.fallback_model == other.fallback_model
             && self.system_prompt == other.system_prompt
@@ -3306,6 +3318,20 @@ mod tests {
     }
 
     #[test]
+    fn agent_config_codex_model_provider_round_trips_json() {
+        let config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("deepseek/deepseek-v4-flash")
+            .with_codex_model_provider(" OpenRouter ");
+        let json = serde_json::to_string(&config).expect("serialize agent config");
+        assert!(json.contains(r#""codex_model_provider":"openrouter""#));
+
+        let parsed: AgentConfig = serde_json::from_str(&json).expect("deserialize agent config");
+        assert_eq!(parsed, config);
+        assert_eq!(parsed.codex_model_provider.as_deref(), Some("openrouter"));
+    }
+
+    #[test]
     fn agent_config_omits_absent_reasoning_effort() {
         let config = AgentConfig::new().with_model("gpt-5.5");
         let json = serde_json::to_value(&config).expect("serialize agent config");
@@ -3452,6 +3478,20 @@ mod tests {
         let merged = config1.merge(config2);
         assert_eq!(merged.model.as_deref(), Some("gpt-5.5"));
         assert_eq!(merged.reasoning_effort.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn agent_config_merge_overlays_codex_model_provider() {
+        let config1 = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5.5")
+            .with_codex_model_provider("openrouter");
+        let config2 = AgentConfig::new().with_codex_model_provider("zai");
+
+        let merged = config1.merge(config2);
+        assert_eq!(merged.provider, Some(Provider::Openai));
+        assert_eq!(merged.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(merged.codex_model_provider.as_deref(), Some("zai"));
     }
 
     #[test]

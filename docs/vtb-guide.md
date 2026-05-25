@@ -445,8 +445,9 @@ checking the provider-specific env var first, then the user's login-shell
 #### Setting the provider on a step
 
 `vtb step add` and `vtb step update` accept `--provider` (alias:
-`--model-provider`), `--model`, and `--reasoning-effort` as convenience
-shortcuts that overlay the step's `agent_config`:
+`--model-provider`), `--model`, `--codex-model-provider` (alias:
+`--codex-provider`), and `--reasoning-effort` as convenience shortcuts that
+overlay the step's `agent_config`:
 
 ```bash
 # Default behavior — provider unset, daemon uses Anthropic / Claude Code
@@ -463,6 +464,18 @@ vtb step add "Coding" -w <wf-id> \
   --model gpt-5.5 \
   --reasoning-effort high
 
+# Codex harness with an OpenRouter upstream provider configured in ~/.codex/config.toml
+vtb step add "Coding" -w <wf-id> \
+  --provider openai \
+  --codex-model-provider openrouter \
+  --model deepseek/deepseek-v4-flash
+
+# Codex harness with a Z.ai upstream provider configured in ~/.codex/config.toml
+vtb step add "Coding" -w <wf-id> \
+  --provider openai \
+  --codex-provider zai \
+  --model glm-5.1
+
 # Switch an existing step over to Codex
 vtb step update <step-id> --provider openai --model o3-mini --reasoning-effort high
 
@@ -472,6 +485,13 @@ vtb step update <step-id> --provider anthropic --model opus
 
 Accepted provider names (case-insensitive): `anthropic` / `claude`,
 `openai` / `codex`.
+
+For Codex steps, `provider=openai` selects the local Codex harness. It does not
+necessarily mean the upstream model API is OpenAI. Set
+`codex_model_provider` with `--codex-model-provider` when Codex should use a
+custom upstream provider from `~/.codex/config.toml`; Vertebrae passes it as
+`codex exec -c model_provider="<value>" ...`. Keep API keys and bearer tokens
+in Codex config or environment, not in Vertebrae task data.
 
 Reasoning effort is OpenAI/Codex-only. Valid values are `low`, `medium`,
 `high`, and `xhigh`; unsupported values such as `minimal` are rejected. A step
@@ -490,13 +510,16 @@ catalog before persisting the step:
 
 Mismatched pairs (e.g. `--provider openai --model claude-opus-4-5`) are
 rejected at the CLI with an actionable error. Unknown model names are also
-rejected; if you genuinely need a model name the catalog doesn't recognize,
-add catalog support before using it. `--agent-config` is still useful when you
+rejected unless `--provider openai` is paired with `--codex-model-provider`,
+which tells Vertebrae to leave provider-scoped model IDs such as
+`deepseek/deepseek-v4-flash` or `glm-5.1` to Codex. `codex_model_provider` is
+rejected with `--provider anthropic` because Claude Code does not understand
+Codex upstream provider profiles. `--agent-config` is still useful when you
 need to set provider/model together with lower-level config fields:
 
 ```bash
 vtb step update <step-id> \
-  --agent-config '{"provider":"openai","model":"gpt-5.5","reasoning_effort":"high","max_budget_usd":5.0}'
+  --agent-config '{"provider":"openai","codex_model_provider":"openrouter","model":"deepseek/deepseek-v4-flash","reasoning_effort":"high","max_budget_usd":5.0}'
 ```
 
 #### Local smoke test
