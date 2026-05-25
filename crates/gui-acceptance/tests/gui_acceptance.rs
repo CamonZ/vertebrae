@@ -31,6 +31,14 @@ pub struct GuiWorld {
     /// Temporary directory used as the project path in config.toml.
     temp_dir: Option<PathBuf>,
 
+    /// Slug of a second project provisioned for `@multi_project` scenarios.
+    /// Registered in config.toml but NOT selected — the test switches to it
+    /// via the sidebar popover. `None` for single-project scenarios.
+    second_project_slug: Option<String>,
+
+    /// Temp directory backing the second project's config.toml entry.
+    second_temp_dir: Option<PathBuf>,
+
     /// Path to the vtb binary used for CLI mutations.
     vtb_binary: PathBuf,
 
@@ -106,6 +114,8 @@ impl GuiWorld {
             project_slug: None,
             project_id: None,
             temp_dir: None,
+            second_project_slug: None,
+            second_temp_dir: None,
             vtb_binary: PathBuf::new(),
             env: HashMap::new(),
             task_id: None,
@@ -291,10 +301,13 @@ async fn main() {
             let feature_name = feature.name.clone();
             // `@first_run` may live on either the scenario or the feature.
             let first_run = is_first_run(feature, scenario);
+            // `@multi_project` provisions a second project for switcher tests.
+            let multi_project = is_multi_project(feature, scenario);
             Box::pin(async move {
                 world.feature_slug = slugify(&feature_name);
                 world.scenario_slug = slugify(&scenario_name);
-                steps::setup::before_scenario(world, &scenario_name, first_run).await;
+                steps::setup::before_scenario(world, &scenario_name, first_run, multi_project)
+                    .await;
             })
         })
         .after(|feature, _rule, scenario, ev, world| {
@@ -375,6 +388,19 @@ fn is_first_run(
     scenario: &cucumber::gherkin::Scenario,
 ) -> bool {
     const TAG: &str = "first_run";
+    scenario.tags.iter().any(|t| t == TAG) || feature.tags.iter().any(|t| t == TAG)
+}
+
+/// `true` when the scenario (or its feature) carries the `@multi_project` tag.
+/// cucumber-rs strips the leading `@`, so we match the bare `multi_project`.
+/// Multi-project scenarios provision a SECOND project (registered in
+/// config.toml but not selected) so the sidebar project switcher has another
+/// project to switch to.
+fn is_multi_project(
+    feature: &cucumber::gherkin::Feature,
+    scenario: &cucumber::gherkin::Scenario,
+) -> bool {
+    const TAG: &str = "multi_project";
     scenario.tags.iter().any(|t| t == TAG) || feature.tags.iter().any(|t| t == TAG)
 }
 
