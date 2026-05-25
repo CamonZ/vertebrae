@@ -19,7 +19,6 @@ pub mod path;
 pub mod ready;
 pub mod r#ref;
 pub mod refs;
-pub mod review;
 pub mod run;
 pub mod run_workflow;
 pub mod section;
@@ -50,7 +49,6 @@ pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
-pub use review::ReviewCommand;
 pub use run::RunCommand;
 pub use run_workflow::RunWorkflowCommand;
 pub use section::SectionCommand;
@@ -159,8 +157,6 @@ pub enum Command {
     Ref(RefCommand),
     /// List all code references for a task
     Refs(RefsCommand),
-    /// Toggle or set the needs_human_review flag on a task
-    Review(ReviewCommand),
     /// Run the current step for a task
     Run(RunCommand),
     /// Start a TaskRun for a task's assigned workflow
@@ -496,7 +492,6 @@ impl Command {
             }
             Command::Ref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Refs(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
-            Command::Review(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Run(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::RunWorkflow(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -674,10 +669,6 @@ impl Command {
             Command::Refs(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Review(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(result))
             }
             Command::Run(cmd) => {
                 let result = cmd.execute(services).await?;
@@ -873,10 +864,6 @@ impl Command {
                 )
             }
             Command::Refs(cmd) => json_value(cmd.execute(services).await?)?,
-            Command::Review(cmd) => {
-                let result = cmd.execute_result(services).await?;
-                operation_result("review", "updated", json_value(result)?)
-            }
             Command::Run(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::RunWorkflow(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::Section(cmd) => json_value(cmd.execute(services).await?)?,

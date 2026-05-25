@@ -51,17 +51,11 @@ pub struct TaskResponse {
     #[serde(default)]
     pub run_controls: Option<TaskRunControlsResponse>,
     #[serde(default)]
-    pub needs_human_review: Option<bool>,
-    #[serde(default)]
     pub archived: bool,
     #[serde(default)]
     pub worktree: Option<String>,
     #[serde(default)]
-    pub review_comment: Option<String>,
-    #[serde(default)]
     pub rejection_reason: Option<String>,
-    #[serde(default)]
-    pub revision_feedback: Option<String>,
     #[serde(default)]
     pub parent_id: Option<String>,
     #[serde(default)]
@@ -669,7 +663,6 @@ mod tests {
             "tags": ["rust", "cli"],
             "workflow_id": "wf-1",
             "current_step_id": "step-1",
-            "needs_human_review": true,
             "parent_id": "epic-456",
             "project_id": "proj-789",
             "dependency_ids": ["dep-1", "dep-2"],
@@ -690,7 +683,6 @@ mod tests {
         assert_eq!(task.tags, vec!["rust", "cli"]);
         assert_eq!(task.workflow_id.as_deref(), Some("wf-1"));
         assert_eq!(task.current_step_id.as_deref(), Some("step-1"));
-        assert_eq!(task.needs_human_review, Some(true));
         assert_eq!(task.parent_id.as_deref(), Some("epic-456"));
         assert_eq!(task.project_id, "proj-789");
         assert_eq!(task.dependency_ids, vec!["dep-1", "dep-2"]);

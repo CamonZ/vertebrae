@@ -37,10 +37,6 @@ pub struct AddCommand {
     #[arg(long = "depends-on", value_parser = crate::commands::parse_uuid("dependency ID"))]
     pub depends_on: Vec<String>,
 
-    /// Mark task as needing human review before completion
-    #[arg(long = "needs-review")]
-    pub needs_review: bool,
-
     /// Workflow ID to assign task to (defaults to 'default')
     #[arg(long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
@@ -131,11 +127,6 @@ impl AddCommand {
         // Add dependencies
         for dep_id in &self.depends_on {
             options = options.with_dependency(dep_id);
-        }
-
-        // Set needs review
-        if self.needs_review {
-            options = options.with_needs_review(true);
         }
 
         // Assign to custom workflow if specified — done in the same mutation

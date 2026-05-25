@@ -45,11 +45,8 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   current_step_id: null,
   workflow_name: "Implementation",
   step_name: null,
-  needs_human_review: null,
   archived: false,
   worktree: null,
-  review_comment: null,
-  revision_feedback: null,
   rejection_reason: null,
   parent_id: overrides.parent_id ?? null,
   dependency_ids: [],
@@ -91,9 +88,21 @@ describe("computeCorridorLayout", () => {
       makeTask({ id: "child", title: "Child", parent_id: "root" }),
     ];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "e2", task_id: "root", started_at: "2024-01-01T00:00:30Z" }),
-      makeExec({ id: "e3", task_id: "child", started_at: "2024-01-01T00:00:15Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeExec({
+        id: "e3",
+        task_id: "child",
+        started_at: "2024-01-01T00:00:15Z",
+      }),
     ];
 
     const layout = computeCorridorLayout("root", executions, tasks);
@@ -130,9 +139,21 @@ describe("computeCorridorLayout", () => {
   it("emits transition edges between consecutive executions of the same task", () => {
     const tasks = [makeTask({ id: "root" })];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "e2", task_id: "root", started_at: "2024-01-01T00:00:30Z" }),
-      makeExec({ id: "e3", task_id: "root", started_at: "2024-01-01T00:01:00Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeExec({
+        id: "e3",
+        task_id: "root",
+        started_at: "2024-01-01T00:01:00Z",
+      }),
     ];
 
     const layout = computeCorridorLayout("root", executions, tasks);
@@ -157,10 +178,26 @@ describe("computeCorridorLayout", () => {
       makeTask({ id: "child", parent_id: "root" }),
     ];
     const executions = [
-      makeExec({ id: "p1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "p2", task_id: "root", started_at: "2024-01-01T00:00:20Z" }),
-      makeExec({ id: "c1", task_id: "child", started_at: "2024-01-01T00:00:30Z" }),
-      makeExec({ id: "c2", task_id: "child", started_at: "2024-01-01T00:00:45Z" }),
+      makeExec({
+        id: "p1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "child",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeExec({
+        id: "c2",
+        task_id: "child",
+        started_at: "2024-01-01T00:00:45Z",
+      }),
     ];
 
     const layout = computeCorridorLayout("root", executions, tasks);
@@ -248,7 +285,11 @@ describe("computeCorridorLayout", () => {
   });
 
   it("returns an empty layout when there are no executions", () => {
-    const layout = computeCorridorLayout("root", [], [makeTask({ id: "root" })]);
+    const layout = computeCorridorLayout(
+      "root",
+      [],
+      [makeTask({ id: "root" })]
+    );
     expect(layout.nodes).toEqual([]);
     expect(layout.edges).toEqual([]);
     expect(layout.lanes).toEqual([]);
@@ -257,10 +298,7 @@ describe("computeCorridorLayout", () => {
 
 describe("computeCorridorLayoutFromProjection", () => {
   it("orders lanes by TaskRun lineage and groups executions under their owning run", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -301,10 +339,7 @@ describe("computeCorridorLayoutFromProjection", () => {
     );
 
     expect(layout.lanes.map((l) => l.laneId)).toEqual(["r-root", "r-child"]);
-    expect(layout.lanes.map((l) => l.taskRunId)).toEqual([
-      "r-root",
-      "r-child",
-    ]);
+    expect(layout.lanes.map((l) => l.taskRunId)).toEqual(["r-root", "r-child"]);
 
     const p1 = layout.nodes.find((n) => n.executionId === "p1");
     const p2 = layout.nodes.find((n) => n.executionId === "p2");
@@ -325,10 +360,7 @@ describe("computeCorridorLayoutFromProjection", () => {
   });
 
   it("draws the delegation edge from the explicit triggering execution even when it is not the most recent", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -370,14 +402,14 @@ describe("computeCorridorLayoutFromProjection", () => {
     const delegations = layout.edges.filter((e) => e.kind === "delegation");
     // p1 is the explicit trigger even though p2 is more recent — explicit
     // lineage wins over chronological inference.
-    expect(delegations[0]).toMatchObject({ fromNodeId: "n-p1", toNodeId: "n-c1" });
+    expect(delegations[0]).toMatchObject({
+      fromNodeId: "n-p1",
+      toNodeId: "n-c1",
+    });
   });
 
   it("places run-aware lanes/nodes at exact pixel positions and computes width/height", () => {
-    const tasks = [
-      makeTask({ id: "t-root" }),
-      makeTask({ id: "t-child" }),
-    ];
+    const tasks = [makeTask({ id: "t-root" }), makeTask({ id: "t-child" })];
     const runs = [
       makeRun({
         id: "r-root",
@@ -512,8 +544,18 @@ describe("computeCorridorLayoutFromProjection", () => {
     );
     const transitions = layout.edges.filter((e) => e.kind === "transition");
     expect(transitions).toEqual([
-      { id: "e-tr-a-b", kind: "transition", fromNodeId: "n-a", toNodeId: "n-b" },
-      { id: "e-tr-b-c", kind: "transition", fromNodeId: "n-b", toNodeId: "n-c" },
+      {
+        id: "e-tr-a-b",
+        kind: "transition",
+        fromNodeId: "n-a",
+        toNodeId: "n-b",
+      },
+      {
+        id: "e-tr-b-c",
+        kind: "transition",
+        fromNodeId: "n-b",
+        toNodeId: "n-c",
+      },
     ]);
   });
 

@@ -21,7 +21,6 @@ async fn create_task_with_checked_items(
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task.execute(services).await.unwrap();
@@ -228,7 +227,6 @@ async fn test_uncheck_item_on_task_without_items_fails() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -298,7 +296,6 @@ async fn test_uncheck_item_with_mixed_section_types() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -428,7 +425,6 @@ async fn test_uncheck_item_already_unchecked_fails() {
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();

@@ -138,13 +138,6 @@ async fn task_field_should_be(world: &mut SmokeWorld, field: String, expected: S
                 "false".to_string()
             }
         }
-        "needs_human_review" => {
-            if json["needs_human_review"].as_bool().unwrap_or(false) {
-                "true".to_string()
-            } else {
-                "false".to_string()
-            }
-        }
         other => panic!("unsupported task field for assertion: '{}'", other),
     };
 

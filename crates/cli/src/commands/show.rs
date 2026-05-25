@@ -43,12 +43,8 @@ pub struct TaskDetail {
     pub updated_at: Option<String>,
     /// Completed timestamp
     pub completed_at: Option<String>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
     /// Optional worktree path
     pub worktree: Option<String>,
-    /// Feedback to address when a validation gate fails
-    pub revision_feedback: Option<String>,
     /// Reason why the task was rejected
     pub rejection_reason: Option<String>,
     /// Whether this task is archived
@@ -89,10 +85,8 @@ struct TaskRow {
     created_at: Option<chrono::DateTime<chrono::Utc>>,
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
-    needs_human_review: Option<bool>,
     archived: bool,
     worktree: Option<String>,
-    revision_feedback: Option<String>,
     rejection_reason: Option<String>,
     workflow_id: Option<String>,
     current_step_id: Option<String>,
@@ -136,7 +130,6 @@ struct RelatedTaskRow {
     step_name: Option<String>,
     priority: Option<String>,
     tags: Vec<String>,
-    needs_human_review: Option<bool>,
 }
 
 impl From<RelatedTaskRow> for TaskSummary {
@@ -152,7 +145,6 @@ impl From<RelatedTaskRow> for TaskSummary {
             latest_step_execution_id: None,
             priority: row.priority,
             tags: row.tags,
-            needs_human_review: row.needs_human_review,
             archived: false,
             parent_id: None,
         }
@@ -304,11 +296,9 @@ impl ShowCommand {
             created_at: task.created_at.map(|dt| dt.to_string()),
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
-            needs_human_review: task.needs_human_review,
             archived: task.archived,
             parent_id: task.parent_id,
             worktree: task.worktree,
-            revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow,
             run_controls,
@@ -344,10 +334,8 @@ impl ShowCommand {
             created_at: task.created_at,
             updated_at: task.updated_at,
             completed_at: task.completed_at,
-            needs_human_review: task.needs_human_review,
             archived: task.archived,
             worktree: task.worktree,
-            revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
             current_step_id: task.current_step_id,
@@ -467,24 +455,10 @@ impl std::fmt::Display for TaskDetail {
                 self.tags.join(", ")
             }
         )?;
-        let review_status = match self.needs_human_review {
-            Some(true) => "True",
-            Some(false) => "False",
-            None => "False",
-        };
-        writeln!(f, "Human Review: {}", review_status)?;
         if let Some(ref worktree) = self.worktree {
             writeln!(f, "Worktree: {}", worktree)?;
         }
         writeln!(f, "\n")?;
-
-        // Revision feedback (prominently displayed when present)
-        if let Some(ref feedback) = self.revision_feedback {
-            writeln!(f, "!! REVISION REQUIRED !!")?;
-            writeln!(f, "{}", "-".repeat(40))?;
-            writeln!(f, "{}", feedback)?;
-            writeln!(f)?;
-        }
 
         // Rejection reason (prominently displayed when present)
         if let Some(ref reason) = self.rejection_reason {
@@ -773,11 +747,9 @@ mod tests {
             created_at: Some("2026-01-01T00:00:00Z".to_string()),
             updated_at: Some("2026-01-02T00:00:00Z".to_string()),
             completed_at: None,
-            needs_human_review: Some(false),
             archived: false,
             parent_id: None,
             worktree: None,
-            revision_feedback: None,
             rejection_reason: None,
             workflow: None,
             run_controls: None,
@@ -822,7 +794,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -837,7 +808,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];

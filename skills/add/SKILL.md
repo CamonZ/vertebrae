@@ -25,9 +25,6 @@ vtb add "Task" --depends-on <blocker-id>
 # With priority and tags
 vtb add "Urgent fix" -p critical -t bug -t backend
 
-# Mark as needing human review
-vtb add "Sensitive change" --needs-review
-
 # Assign to a workflow on creation
 vtb add "Task" --workflow <workflow-id>
 ```
@@ -42,7 +39,6 @@ vtb add "Task" --workflow <workflow-id>
 | `-t, --tag` | Add tag (repeatable) |
 | `--parent` | Parent task ID |
 | `--depends-on` | Blocker task ID (repeatable) |
-| `--needs-review` | Mark as needing human review |
 | `--workflow` | Workflow ID to assign task to |
 
 ## Hierarchy (use in order)

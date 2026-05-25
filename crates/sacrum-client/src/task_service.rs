@@ -164,11 +164,8 @@ impl SacrumTaskService {
                 .run_controls
                 .as_ref()
                 .map(task_run_controls_response_to_controls),
-            needs_human_review: response.needs_human_review,
             archived: response.archived,
             worktree: response.worktree.clone(),
-            review_comment: response.review_comment.clone(),
-            revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
             parent_id: response.parent_id.clone(),
             dependency_ids,
@@ -368,18 +365,6 @@ impl TaskService for SacrumTaskService {
                 .await?;
         }
 
-        // If needs_review is set, update via separate call
-        // (CREATE_TASK mutation doesn't accept needs_human_review)
-        if options.needs_review {
-            let update_vars = json!({
-                "id": task_id,
-                "needs_human_review": true,
-            });
-            self.client
-                .execute_void(tasks::UPDATE_TASK, update_vars)
-                .await?;
-        }
-
         Ok(task_id)
     }
 
@@ -432,19 +417,8 @@ impl TaskService for SacrumTaskService {
             variables["level"] = json!(level);
         }
 
-        if let Some(needs_review) = options.needs_human_review {
-            variables["needs_human_review"] = json!(needs_review);
-        }
-
         if let Some(archived) = options.archived {
             variables["archived"] = json!(archived);
-        }
-
-        if let Some(ref revision_feedback_opt) = options.revision_feedback {
-            match revision_feedback_opt {
-                Some(feedback) => variables["revision_feedback"] = json!(feedback),
-                None => variables["revision_feedback"] = Value::Null,
-            }
         }
 
         if let Some(ref parent_opt) = options.parent_id {
@@ -974,12 +948,9 @@ mod tests {
             workflow_id: None,
             current_step_id: None,
             run_controls: None,
-            needs_human_review: None,
             archived: false,
             worktree: None,
-            review_comment: None,
             rejection_reason: None,
-            revision_feedback: None,
             parent_id: None,
             dependency_ids: vec![],
             sections: vec![],
@@ -1169,16 +1140,12 @@ mod tests {
         let mut response = make_task_response("task-wf", "Workflow Task");
         response.workflow_id = Some("wf-123".to_string());
         response.current_step_id = Some("step-456".to_string());
-        response.needs_human_review = Some(false);
-        response.revision_feedback = Some("feedback".to_string());
         response.rejection_reason = Some("reason".to_string());
 
         let task = service.response_to_task(&response).unwrap();
 
         assert_eq!(task.workflow_id.as_deref(), Some("wf-123"));
         assert_eq!(task.current_step_id.as_deref(), Some("step-456"));
-        assert_eq!(task.needs_human_review, Some(false));
-        assert_eq!(task.revision_feedback.as_deref(), Some("feedback"));
         assert_eq!(task.rejection_reason.as_deref(), Some("reason"));
     }
 

@@ -50,12 +50,12 @@ fn format_run_state_display(task: &TaskSummary) -> String {
 ///
 /// Produces output in the format:
 /// ```text
-/// ID      Level   Workflow     Run   Priority  Title                  Tags      [R]
+/// ID      Level   Workflow     Run   Priority  Title                  Tags      [A]
 /// ------  ------  -----------  ----  --------  ---------------------  --------  ---
-/// a1b2c3  epic    Planning:do  idle  high      Authentication system  backend   [R]
+/// a1b2c3  epic    Planning:do  idle  high      Authentication system  backend
 /// ```
 ///
-/// The [R] column indicates tasks that need human review.
+/// The [A] column indicates archived tasks.
 ///
 /// # Arguments
 ///
@@ -71,7 +71,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
 
     // Column headers
     let headers = [
-        "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[R]", "[A]",
+        "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[A]",
     ];
 
     // Calculate column widths based on content
@@ -124,17 +124,14 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         .unwrap_or(0)
         .max(headers[6].len());
 
-    // Review column is fixed width (3 chars for "[R]")
-    let review_width = headers[7].len();
-
     // Archived column is fixed width (3 chars for "[A]")
-    let archived_width = headers[8].len();
+    let archived_width = headers[7].len();
 
     let mut output = String::new();
 
     // Header row
     output.push_str(&format!(
-        "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
+        "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<archived_w$}\n",
         headers[0],
         headers[1],
         headers[2],
@@ -143,7 +140,6 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         headers[5],
         headers[6],
         headers[7],
-        headers[8],
         id_w = id_width,
         level_w = level_width,
         workflow_w = workflow_width,
@@ -151,14 +147,12 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
-        review_w = review_width,
         archived_w = archived_width,
     ));
 
     // Separator row using Unicode box-drawing character
     output.push_str(&format!(
-        "{:->id_w$}  {:->level_w$}  {:->workflow_w$}  {:->run_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}  {:->archived_w$}\n",
-        "",
+        "{:->id_w$}  {:->level_w$}  {:->workflow_w$}  {:->run_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->archived_w$}\n",
         "",
         "",
         "",
@@ -174,7 +168,6 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
-        review_w = review_width,
         archived_w = archived_width,
     ));
 
@@ -183,13 +176,12 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         let priority_display = task.priority.as_deref().unwrap_or("-");
         let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
         let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
-        let review_display = format_review_status(task.needs_human_review);
         let archived_display = format_archived_status(task.archived);
         let workflow_display = format_workflow_position_display(task);
         let run_display = format_run_state_display(task);
 
         output.push_str(&format!(
-            "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
+            "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<archived_w$}\n",
             task.id,
             task.level,
             workflow_display,
@@ -197,7 +189,6 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
             priority_display,
             title_display,
             tags_display,
-            review_display,
             archived_display,
             id_w = id_width,
             level_w = level_width,
@@ -206,7 +197,6 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
             priority_w = priority_width,
             title_w = title_width,
             tags_w = tags_width,
-            review_w = review_width,
             archived_w = archived_width,
         ));
     }
@@ -375,16 +365,11 @@ fn render_node(
     let workflow_display = format!("{:14}", format_workflow_position_display(task));
     let run_display = format!("{:10}", format_run_state_display(task));
     let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
-    let review_display = if task.needs_human_review == Some(true) {
-        " [R]"
-    } else {
-        ""
-    };
     let archived_display = if task.archived { " [A]" } else { "" };
 
     // Write the line
     output.push_str(&format!(
-        "{}{}{:<8} {} {} {} {}{}{}",
+        "{}{}{:<8} {} {} {} {}{}",
         prefix,
         connector,
         task.id,
@@ -392,7 +377,6 @@ fn render_node(
         workflow_display,
         run_display,
         title_display,
-        review_display,
         archived_display
     ));
     output.push('\n');
@@ -428,16 +412,6 @@ fn render_node(
             child_is_last,
             false,
         );
-    }
-}
-
-/// Format the review status indicator.
-///
-/// Returns "[R]" if needs_human_review is true, otherwise returns an empty string.
-fn format_review_status(needs_human_review: Option<bool>) -> &'static str {
-    match needs_human_review {
-        Some(true) => "[R]",
-        _ => "",
     }
 }
 
@@ -481,7 +455,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -497,7 +470,7 @@ mod tests {
         assert_eq!(
             header_parts,
             vec![
-                "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[R]", "[A]"
+                "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[A]"
             ]
         );
 
@@ -530,7 +503,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
-                needs_human_review: Some(true),
                 archived: false,
                 parent_id: None,
             },
@@ -545,7 +517,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -586,7 +557,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -612,7 +582,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: Some("low".to_string()),
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -685,7 +654,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -731,7 +699,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: tags_input.clone(),
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -762,7 +729,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -777,7 +743,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
-                needs_human_review: Some(true),
                 archived: false,
                 parent_id: None,
             },
@@ -829,7 +794,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             }];
@@ -854,7 +818,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             }];
@@ -879,82 +842,12 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: Some(priority.to_string()),
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             }];
             let result = format_task_table(&tasks);
             assert!(result.contains(priority));
         }
-    }
-
-    #[test]
-    fn test_format_review_status() {
-        // Test the format_review_status function
-        assert_eq!(format_review_status(Some(true)), "[R]");
-        assert_eq!(format_review_status(Some(false)), "");
-        assert_eq!(format_review_status(None), "");
-    }
-
-    #[test]
-    fn test_format_task_with_review_indicator() {
-        let tasks = vec![TaskSummary {
-            id: "abc123".to_string(),
-            title: "Needs Review".to_string(),
-            level: "task".to_string(),
-            workflow_name: Some("default".to_string()),
-            step_name: Some("in_progress".to_string()),
-            run_state: None,
-            active_task_run_id: None,
-            latest_step_execution_id: None,
-            priority: None,
-            tags: vec![],
-            needs_human_review: Some(true),
-            archived: false,
-            parent_id: None,
-        }];
-
-        let result = format_task_table(&tasks);
-
-        // Verify [R] indicator appears in data row
-        assert!(
-            result.contains("[R]"),
-            "Output should contain [R] indicator for task needing review"
-        );
-    }
-
-    #[test]
-    fn test_format_task_without_review_indicator() {
-        let tasks = vec![TaskSummary {
-            id: "abc123".to_string(),
-            title: "No Review".to_string(),
-            level: "task".to_string(),
-            workflow_name: Some("default".to_string()),
-            step_name: Some("in_progress".to_string()),
-            run_state: None,
-            active_task_run_id: None,
-            latest_step_execution_id: None,
-            priority: None,
-            tags: vec![],
-            needs_human_review: Some(false),
-            archived: false,
-            parent_id: None,
-        }];
-
-        let result = format_task_table(&tasks);
-        let lines: Vec<&str> = result.lines().collect();
-
-        // The header has [R], but data row should not have [R] indicator
-        // Check that line 2 (data row) does NOT end with [R]
-        let data_row = lines[2];
-        let data_parts: Vec<&str> = data_row.split_whitespace().collect();
-
-        // Data parts should not contain [R] as the last element
-        let has_review_indicator = data_parts.last().is_some_and(|&s| s == "[R]");
-        assert!(
-            !has_review_indicator,
-            "Data row should not have [R] indicator when needs_human_review is false"
-        );
     }
 
     // ========================================
@@ -982,7 +875,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -1012,7 +904,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1027,7 +918,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1064,7 +954,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1079,7 +968,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1094,7 +982,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1130,7 +1017,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1145,7 +1031,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1160,7 +1045,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1194,7 +1078,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1209,7 +1092,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1241,7 +1123,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -1260,7 +1141,7 @@ mod tests {
     }
 
     #[test]
-    fn test_format_task_tree_with_review_indicator() {
+    fn test_format_task_tree_includes_task_title() {
         let tasks = vec![TaskSummary {
             id: "task1".to_string(),
             title: "Needs Review".to_string(),
@@ -1272,7 +1153,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: Some(true),
             archived: false,
             parent_id: None,
         }];
@@ -1280,7 +1160,7 @@ mod tests {
         let parent_map = HashMap::new();
 
         let result = format_task_tree(&tasks, &parent_map);
-        assert!(result.contains("[R]"), "Should show review indicator");
+        assert!(result.contains("Needs Review"));
     }
 
     #[test]
@@ -1305,7 +1185,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1331,7 +1210,6 @@ mod tests {
                 latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
-                needs_human_review: None,
                 archived: false,
                 parent_id: None,
             },
@@ -1362,7 +1240,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: true,
             parent_id: None,
         }];
@@ -1387,7 +1264,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: false,
             parent_id: None,
         }];
@@ -1416,7 +1292,6 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: None,
             archived: true,
             parent_id: None,
         }];
@@ -1442,17 +1317,12 @@ mod tests {
             latest_step_execution_id: None,
             priority: None,
             tags: vec![],
-            needs_human_review: Some(true),
             archived: true,
             parent_id: None,
         }];
 
         let parent_map = HashMap::new();
         let result = format_task_tree(&tasks, &parent_map);
-        assert!(
-            result.contains("[R]"),
-            "Tree output should show [R] indicator"
-        );
         assert!(
             result.contains("[A]"),
             "Tree output should show [A] indicator"

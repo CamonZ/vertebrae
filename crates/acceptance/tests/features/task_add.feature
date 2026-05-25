@@ -53,12 +53,6 @@ Feature: Add tasks
       | tags  | backend, database, urgent |
     Then the task should have tags "backend, database, urgent"
 
-  Scenario: Create task with needs-review flag
-    When I create a task with:
-      | title        | Needs review |
-      | needs_review | true         |
-    Then the task needs_human_review should be "true"
-
   Scenario: Create child task with parent
     Given I create a task with:
       | title | Parent epic |

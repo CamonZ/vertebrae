@@ -43,6 +43,7 @@ export function createMockAgentConfig(
 ): AgentConfig {
   return {
     model: null,
+    codex_model_provider: null,
     fallback_model: null,
     reasoning_effort: null,
     system_prompt: null,
@@ -196,11 +197,8 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     workflow_name: null,
     step_name: null,
     run_controls: null,
-    needs_human_review: null,
     archived: false,
     worktree: null,
-    review_comment: null,
-    revision_feedback: null,
     rejection_reason: null,
     parent_id: null,
     dependency_ids: [],

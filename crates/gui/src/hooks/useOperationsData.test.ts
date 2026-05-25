@@ -29,7 +29,7 @@ function withActiveRun(
   });
   return {
     runnable: overrides.runnable ?? false,
-    stoppable: overrides.stoppable ?? (status === "executing"),
+    stoppable: overrides.stoppable ?? status === "executing",
     disabled_reason_code: null,
     disabled_reason: null,
     active_run: activeRun,
@@ -296,7 +296,9 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.readyTasks.map((t) => t.id)).not.toContain("t-blocked");
+    expect(result.current.readyTasks.map((t) => t.id)).not.toContain(
+      "t-blocked"
+    );
   });
 
   it("includes a task whose blocker has a completed run", async () => {
@@ -332,25 +334,5 @@ describe("useOperationsData", () => {
     });
 
     expect(result.current.readyTasks.map((t) => t.id)).toContain("t-blocked");
-  });
-
-  it("includes review-request tasks in attention items from store", async () => {
-    const reviewTask = createMockTask({
-      id: "t-review",
-      title: "Needs Review",
-      needs_human_review: true,
-    });
-
-    mockListTasks.mockResolvedValue({ status: "ok", data: [reviewTask] });
-
-    const { result } = renderHook(() => useOperationsData());
-
-    await waitFor(() => {
-      expect(result.current.isLoading).toBe(false);
-    });
-
-    expect(result.current.attentionItems).toHaveLength(1);
-    expect(result.current.attentionItems[0].kind).toBe("review_request");
-    expect(result.current.attentionItems[0].task.id).toBe("t-review");
   });
 });

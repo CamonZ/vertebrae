@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, createMockTask } from "../../test/test-utils";
+import {
+  render,
+  screen,
+  fireEvent,
+  createMockTask,
+} from "../../test/test-utils";
 import { KanbanCard } from "./KanbanCard";
 
 describe("KanbanCard", () => {
@@ -12,10 +17,14 @@ describe("KanbanCard", () => {
     });
 
     it("renders the 8-digit short task ID", () => {
-      const task = createMockTask({ id: "860cde1b-9093-42ff-a19d-7453f3b7891b" });
+      const task = createMockTask({
+        id: "860cde1b-9093-42ff-a19d-7453f3b7891b",
+      });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByTestId("kanban-card-id")).toHaveTextContent("860cde1b");
+      expect(screen.getByTestId("kanban-card-id")).toHaveTextContent(
+        "860cde1b"
+      );
       expect(screen.queryByText(task.id)).not.toBeInTheDocument();
     });
 
@@ -76,22 +85,6 @@ describe("KanbanCard", () => {
 
       expect(screen.getByText("No step")).toBeInTheDocument();
     });
-
-    it("renders review indicator when needs_human_review is true", () => {
-      const task = createMockTask({ needs_human_review: true });
-      render(<KanbanCard task={task} />);
-
-      expect(screen.getByText("Review")).toBeInTheDocument();
-    });
-
-    it("does not render review indicator when needs_human_review is false", () => {
-      const task = createMockTask({ needs_human_review: false });
-      render(<KanbanCard task={task} />);
-
-      // The "Review" text for review indicator should not be present
-      // (step name "Review" badge is a different case)
-      expect(screen.queryByText("Review")).not.toBeInTheDocument();
-    });
   });
 
   describe("interactions", () => {
@@ -129,7 +122,9 @@ describe("KanbanCard", () => {
       const task = createMockTask({ title: "Accessible task" });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByRole("button", { name: "Task: Accessible task" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Task: Accessible task" })
+      ).toBeInTheDocument();
     });
   });
 
@@ -146,7 +141,9 @@ describe("KanbanCard", () => {
       const task = createMockTask({ title: "Unselected task" });
       render(<KanbanCard task={task} isSelected={false} />);
 
-      const card = screen.getByRole("button", { name: /Task: Unselected task/i });
+      const card = screen.getByRole("button", {
+        name: /Task: Unselected task/i,
+      });
       expect(card.className).not.toContain("border-[var(--color-accent)]");
     });
   });

@@ -1,5 +1,5 @@
 Feature: Task state management
-  Archive/unarchive tasks, toggle review flags, and query actionable items.
+  Archive/unarchive tasks and query actionable items.
 
   Background:
     Given a configured Sacrum client
@@ -54,37 +54,6 @@ Feature: Task state management
 
   Scenario: Archive non-existent task fails
     When I archive task "00000000-0000-4000-8000-000000000000"
-    Then the command should fail with "Task not found:"
-
-  # --- review ---
-
-  Scenario: Toggle review flag on
-    Given I create a task with:
-      | title | Review toggle |
-    When I run review for the task
-    Then the output should contain "marked as needing review"
-    And the task needs_human_review should be "true"
-
-  Scenario: Toggle review flag off
-    Given I create a task with:
-      | title        | Review toggle |
-      | needs_review | true          |
-    When I run review for the task
-    Then the output should contain "marked as not needing review"
-    And the task needs_human_review should be "false"
-
-  Scenario: Set review flag explicitly
-    Given I create a task with:
-      | title | Review set |
-    When I run review for the task with --set true
-    Then the output should contain "marked as needing review"
-    And the task needs_human_review should be "true"
-    When I run review for the task with --set false
-    Then the output should contain "marked as not needing review"
-    And the task needs_human_review should be "false"
-
-  Scenario: Review non-existent task fails
-    When I run review for task "00000000-0000-4000-8000-000000000000"
     Then the command should fail with "Task not found:"
 
   # --- ready ---
