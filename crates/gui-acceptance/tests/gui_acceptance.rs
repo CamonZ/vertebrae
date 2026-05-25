@@ -369,7 +369,11 @@ async fn main() {
                 }
             })
         })
-        .run("tests/features")
+        .filter_run("tests/features", |feature, _rule, scenario| {
+            // `@skip` features/scenarios are excluded from the run (e.g. the
+            // Operations-view realtime tests while that page is hidden).
+            !is_skipped(feature, scenario)
+        })
         .await;
 
     gui_acceptance::close_webdriver().await;
@@ -388,6 +392,18 @@ fn is_first_run(
     scenario: &cucumber::gherkin::Scenario,
 ) -> bool {
     const TAG: &str = "first_run";
+    scenario.tags.iter().any(|t| t == TAG) || feature.tags.iter().any(|t| t == TAG)
+}
+
+/// `true` when the scenario (or its feature) carries the `@skip` tag.
+/// cucumber-rs strips the leading `@`, so we match the bare `skip`.
+/// Skipped scenarios are filtered out of the run entirely (no setup, no
+/// WebDriver) — used to park tests whose surface is temporarily disabled.
+fn is_skipped(
+    feature: &cucumber::gherkin::Feature,
+    scenario: &cucumber::gherkin::Scenario,
+) -> bool {
+    const TAG: &str = "skip";
     scenario.tags.iter().any(|t| t == TAG) || feature.tags.iter().any(|t| t == TAG)
 }
 

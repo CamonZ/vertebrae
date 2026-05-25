@@ -195,7 +195,8 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <Navigate to="/operations" replace />,
+        // Operations is hidden for now (needs more work); land on the board.
+        element: <Navigate to="/board" replace />,
       },
       {
         path: "operations",
