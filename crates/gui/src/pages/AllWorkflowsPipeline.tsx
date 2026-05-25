@@ -95,6 +95,7 @@ const edgeTypes: EdgeTypes = {
 
 const EMPTY_AGENT_CONFIG: AgentConfig = {
   model: null,
+  codex_model_provider: null,
   fallback_model: null,
   reasoning_effort: null,
   system_prompt: null,

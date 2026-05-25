@@ -91,9 +91,6 @@ vtb add "Create sign() function" --parent <ticket-id>
 # With priority and tags
 vtb add "Fix login bug" -p critical -t bug -t backend
 
-# Mark as needing human review
-vtb add "Sensitive security change" --needs-review
-
 # With a dependency (this task is blocked by another)
 vtb add "Write integration tests" --depends-on <blocker-id>
 
@@ -817,18 +814,6 @@ Archived tasks are excluded from `vtb list` by default. Use `--include-archived`
 
 ---
 
-## Human Review
-
-```bash
-vtb review <id>                       # Toggle needs_human_review flag
-vtb review <id> --set true            # Explicitly set
-vtb review <id> --set false           # Clear
-```
-
-Tasks with `needs_human_review: true` pause automated workflow advancement.
-
----
-
 ## Daemon Management
 
 The daemon (`vtb-daemon`) is a background service that executes workflow steps by spawning a local harness CLI — Claude Code (`claude`) for `anthropic` provider steps and Codex CLI (`codex`) for `openai` provider steps. See [Provider Selection](#provider-selection-anthropic--openai) for how to pick a harness per step. It runs as a macOS launchd service.
@@ -1032,5 +1017,4 @@ vtb ready
 ### Other
 | Command | Description |
 |---------|-------------|
-| `vtb review <id>` | Toggle human review flag |
 | `vtb init` | Initialize project |

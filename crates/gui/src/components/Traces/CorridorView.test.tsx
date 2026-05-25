@@ -15,11 +15,8 @@ const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   current_step_id: null,
   workflow_name: "Implementation",
   step_name: null,
-  needs_human_review: null,
   archived: false,
   worktree: null,
-  review_comment: null,
-  revision_feedback: null,
   rejection_reason: null,
   parent_id: overrides.parent_id ?? null,
   dependency_ids: [],
@@ -109,14 +106,24 @@ describe("CorridorView", () => {
       makeTask({ id: "child", parent_id: "root" }),
     ];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "e2", task_id: "root", started_at: "2024-01-01T00:00:30Z" }),
-      makeExec({ id: "e3", task_id: "child", started_at: "2024-01-01T00:01:00Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+      makeExec({
+        id: "e3",
+        task_id: "child",
+        started_at: "2024-01-01T00:01:00Z",
+      }),
     ];
 
-    render(
-      <Harness rootTaskId="root" executions={executions} tasks={tasks} />
-    );
+    render(<Harness rootTaskId="root" executions={executions} tasks={tasks} />);
 
     const nodes = screen.getAllByTestId("corridor-node");
     expect(nodes).toHaveLength(3);
@@ -140,13 +147,19 @@ describe("CorridorView", () => {
   it("renders transition edges between consecutive executions of a task", () => {
     const tasks = [makeTask({ id: "root" })];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "e2", task_id: "root", started_at: "2024-01-01T00:00:30Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
     ];
 
-    render(
-      <Harness rootTaskId="root" executions={executions} tasks={tasks} />
-    );
+    render(<Harness rootTaskId="root" executions={executions} tasks={tasks} />);
 
     const transitions = screen.getAllByTestId("corridor-edge-transition");
     expect(transitions).toHaveLength(1);
@@ -160,14 +173,24 @@ describe("CorridorView", () => {
       makeTask({ id: "child", parent_id: "root" }),
     ];
     const executions = [
-      makeExec({ id: "p1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "p2", task_id: "root", started_at: "2024-01-01T00:00:20Z" }),
-      makeExec({ id: "c1", task_id: "child", started_at: "2024-01-01T00:00:30Z" }),
+      makeExec({
+        id: "p1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "child",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
     ];
 
-    render(
-      <Harness rootTaskId="root" executions={executions} tasks={tasks} />
-    );
+    render(<Harness rootTaskId="root" executions={executions} tasks={tasks} />);
 
     const delegations = screen.getAllByTestId("corridor-edge-delegation");
     expect(delegations).toHaveLength(1);
@@ -198,9 +221,7 @@ describe("CorridorView", () => {
       }),
     ];
 
-    render(
-      <Harness rootTaskId="root" executions={executions} tasks={tasks} />
-    );
+    render(<Harness rootTaskId="root" executions={executions} tasks={tasks} />);
 
     const failed = screen
       .getAllByTestId("corridor-node")
@@ -234,8 +255,16 @@ describe("CorridorView", () => {
   it("clicking a node calls onPinExecution AND scrolls THREAD to that row", () => {
     const tasks = [makeTask({ id: "root" })];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
-      makeExec({ id: "e2", task_id: "root", started_at: "2024-01-01T00:00:30Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e2",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
     ];
 
     const onPin = vi.fn();
@@ -267,7 +296,11 @@ describe("CorridorView", () => {
   it("pan-on-drag updates the SVG transform offset", () => {
     const tasks = [makeTask({ id: "root" })];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
     ];
 
     const { container } = render(
@@ -296,7 +329,11 @@ describe("CorridorView", () => {
   it("Ctrl+wheel zoom scales the canvas, clamped to allowed range", () => {
     const tasks = [makeTask({ id: "root" })];
     const executions = [
-      makeExec({ id: "e1", task_id: "root", started_at: "2024-01-01T00:00:00Z" }),
+      makeExec({
+        id: "e1",
+        task_id: "root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
     ];
 
     render(<Harness rootTaskId="root" executions={executions} tasks={tasks} />);
@@ -317,7 +354,11 @@ describe("CorridorView", () => {
 
   it("renders an empty state when there are no executions", () => {
     render(
-      <Harness rootTaskId="root" executions={[]} tasks={[makeTask({ id: "root" })]} />
+      <Harness
+        rootTaskId="root"
+        executions={[]}
+        tasks={[makeTask({ id: "root" })]}
+      />
     );
     expect(screen.getByTestId("corridor-empty")).toBeInTheDocument();
   });

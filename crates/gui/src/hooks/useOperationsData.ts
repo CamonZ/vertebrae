@@ -112,12 +112,6 @@ export function useOperationsData(): OperationsData {
       }
     }
 
-    for (const task of tasks) {
-      if (task.needs_human_review) {
-        items.push({ kind: "review_request", task });
-      }
-    }
-
     return items;
   }, [tasks]);
 

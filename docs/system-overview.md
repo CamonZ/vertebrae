@@ -83,7 +83,6 @@ The central entity. A task is a unit of work at any level of abstraction.
 | `parent_id` | UUID? | Parent task in hierarchy |
 | `workflow_id` | UUID? | Assigned workflow |
 | `current_step_id` | UUID? | Current position in workflow |
-| `needs_human_review` | bool? | Flag for human gate |
 | `worktree` | string? | Git worktree path for isolated execution |
 | `archived` | bool | Soft-delete |
 | `started_at` | datetime? | When work began |
@@ -415,7 +414,7 @@ The `ExecutionPool` limits how many step executions run simultaneously, preventi
 
 ### 6. Human-in-the-Loop Gates
 
-Tasks can be flagged `needs_human_review`. Workflows can include steps that wait for human confirmation before proceeding. The `transition-to` operation can send a task backward in the workflow, allowing humans to override AI decisions.
+Workflows can include steps that wait for human confirmation before proceeding. The `transition-to` operation can send a task backward in the workflow, allowing humans to override AI decisions.
 
 ### 7. Multi-Agent Coordination
 

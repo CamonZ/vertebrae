@@ -41,11 +41,6 @@ pub async fn do_create_task(world: &mut SmokeWorld, step: &cucumber::gherkin::St
                 args.push("--depends-on".to_string());
                 args.push(value);
             }
-            "needs_review" => {
-                if value == "true" {
-                    args.push("--needs-review".to_string());
-                }
-            }
             other => panic!("unsupported table key in create task: '{}'", other),
         }
     }

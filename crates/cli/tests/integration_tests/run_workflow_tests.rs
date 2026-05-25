@@ -22,7 +22,6 @@ async fn create_task_with_workflow(
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task_cmd.execute(services).await.unwrap();
@@ -88,7 +87,6 @@ mod run_workflow_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();

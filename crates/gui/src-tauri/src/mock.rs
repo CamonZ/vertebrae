@@ -76,16 +76,9 @@ impl TaskService for MockTaskService {
             blockers: vec![],
             dependents: vec![],
             children: vec![],
-            needs_human_review: if options.needs_review {
-                Some(true)
-            } else {
-                None
-            },
             archived: false,
             worktree: None,
-            revision_feedback: None,
             rejection_reason: None,
-            review_comment: None,
             workflow_id: options.workflow_id.clone(),
             current_step_id: None,
             parent_id: None,
@@ -180,9 +173,6 @@ impl TaskService for MockTaskService {
         }
         if let Some(pri) = &options.priority {
             task.priority = pri.clone();
-        }
-        if let Some(review) = options.needs_human_review {
-            task.needs_human_review = Some(review);
         }
         if let Some(archived) = options.archived {
             task.archived = archived;

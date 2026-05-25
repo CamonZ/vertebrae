@@ -61,9 +61,6 @@ const { mockTaskData } = vi.hoisted(() => {
     tags: ["tag1", "tag2"],
     sections: sections,
     code_refs: [],
-    needs_human_review: false,
-    review_comment: null,
-    revision_feedback: "Some revision feedback",
     workflow_id: null,
     current_step_id: null,
     workflow_name: null,
@@ -187,9 +184,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
-      expect(
-        screen.getByRole("button", { name: /save/i })
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: /cancel/i })
       ).toBeInTheDocument();
@@ -218,9 +213,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
-      expect(
-        screen.getByRole("button", { name: /save/i })
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: /cancel/i })
       ).toBeInTheDocument();
@@ -295,9 +288,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     it("displays acceptance criteria with met/pending indicators", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      expect(
-        screen.getByText("Feature works end to end")
-      ).toBeInTheDocument();
+      expect(screen.getByText("Feature works end to end")).toBeInTheDocument();
       expect(screen.getByText("No regressions")).toBeInTheDocument();
     });
 

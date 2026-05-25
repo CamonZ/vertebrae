@@ -24,7 +24,6 @@ async fn create_task_with_workflow(
         tags: vec![],
         parent: None,
         depends_on: vec![],
-        needs_review: false,
         workflow: None,
     };
     let task_id = task_cmd.execute(services).await.unwrap();
@@ -90,7 +89,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -127,7 +125,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -209,7 +206,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -243,7 +239,6 @@ mod run_command_tests {
             tags: vec!["epic".to_string()],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let epic_id = epic_cmd.execute(&services).await.unwrap();
@@ -315,7 +310,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let blocker_id = blocker_cmd.execute(&services).await.unwrap();
@@ -328,7 +322,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![blocker_id],
-            needs_review: false,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -371,7 +364,6 @@ mod run_command_tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -384,7 +376,6 @@ mod run_command_tests {
             tags: vec![],
             parent: Some(parent_id.clone()),
             depends_on: vec![],
-            needs_review: false,
             workflow: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
