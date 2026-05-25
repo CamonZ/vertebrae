@@ -8,7 +8,9 @@
 
 use tokio::process::Command;
 use vertebrae_core::Provider;
-use vertebrae_core::model_catalog::{normalize_provider_reasoning_effort, validate_provider_model};
+use vertebrae_core::model_catalog::{
+    normalize_provider_reasoning_effort, validate_provider_model_with_codex_provider,
+};
 use vertebrae_core::models::AgentConfig;
 
 use crate::actors::step_executor::{
@@ -129,10 +131,15 @@ pub fn resolve_provider_command(
 ) -> Result<ResolvedProviderCommand, ProviderResolutionError> {
     let provider = resolve_provider(config);
 
-    if let Some(model) = config.step_config.agent_config.model.as_deref()
-        && !model.trim().is_empty()
-        && let Err(mismatch) = validate_provider_model(provider, Some(model))
-    {
+    if let Err(mismatch) = validate_provider_model_with_codex_provider(
+        provider,
+        config.step_config.agent_config.model.as_deref(),
+        config
+            .step_config
+            .agent_config
+            .codex_model_provider
+            .as_deref(),
+    ) {
         return Err(ProviderResolutionError::InvalidProviderModel(
             mismatch.to_string(),
         ));
@@ -203,6 +210,16 @@ fn build_codex_command(
     if let Some(reasoning_effort) = reasoning_effort {
         cmd.arg("-c")
             .arg(format!("model_reasoning_effort=\"{reasoning_effort}\""));
+    }
+
+    if let Some(codex_model_provider) = agent_config
+        .codex_model_provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        cmd.arg("-c")
+            .arg(format!("model_provider=\"{codex_model_provider}\""));
     }
 
     let deny_tools = SELF_TRANSITION_DENY_TOOLS
@@ -584,6 +601,42 @@ mod tests {
             "--output-schema must remain before prompt"
         );
         assert_eq!(argv.last().map(String::as_str), Some("Reason deeply"));
+    }
+
+    #[test]
+    fn openai_provider_includes_codex_model_provider_config_before_prompt() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("deepseek/deepseek-v4-flash")
+            .with_codex_model_provider("openrouter");
+        let config = make_config(agent_config, "Use OpenRouter", "/usr/local/bin/codex");
+
+        let resolved = resolve_provider_command(&config, None).expect("openai resolution succeeds");
+        let argv = argv_strings(&resolved.command);
+
+        let model_idx = argv
+            .iter()
+            .position(|a| a == "--model")
+            .expect("--model must be present");
+        let provider_config_idx = argv
+            .windows(2)
+            .position(|pair| pair[0] == "-c" && pair[1] == "model_provider=\"openrouter\"")
+            .expect("model_provider config override must be present");
+        let prompt_idx = argv
+            .iter()
+            .position(|a| a == "Use OpenRouter")
+            .expect("prompt must be present");
+
+        assert_eq!(argv[model_idx + 1], "deepseek/deepseek-v4-flash");
+        assert!(
+            model_idx < provider_config_idx,
+            "--model should remain before Codex config override"
+        );
+        assert!(
+            provider_config_idx < prompt_idx,
+            "model_provider config must appear before prompt"
+        );
+        assert_eq!(argv.last().map(String::as_str), Some("Use OpenRouter"));
     }
 
     #[test]

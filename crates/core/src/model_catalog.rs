@@ -128,6 +128,34 @@ pub fn validate_provider_model(
     provider: Provider,
     model: Option<&str>,
 ) -> Result<(), ProviderModelMismatch> {
+    validate_provider_model_with_codex_provider(provider, model, None)
+}
+
+/// Validate a `(provider, model)` pair, allowing arbitrary Codex upstream
+/// model IDs only when the built-in provider is OpenAI/Codex and an explicit
+/// Codex model provider override is configured.
+pub fn validate_provider_model_with_codex_provider(
+    provider: Provider,
+    model: Option<&str>,
+    codex_model_provider: Option<&str>,
+) -> Result<(), ProviderModelMismatch> {
+    if let Some(codex_model_provider) = codex_model_provider
+        && !codex_model_provider.trim().is_empty()
+    {
+        if provider != Provider::Openai {
+            return Err(ProviderModelMismatch::UnsupportedCodexModelProvider {
+                requested: provider,
+                codex_model_provider: codex_model_provider.trim().to_string(),
+            });
+        }
+        if let Some(model) = model
+            && let Some(err) = wrong_provider_error(provider, model)
+        {
+            return Err(err);
+        }
+        return Ok(());
+    }
+
     let Some(model) = model else {
         return Ok(());
     };
@@ -137,16 +165,23 @@ pub fn validate_provider_model(
     }
     match classify_model(trimmed) {
         Some(detected) if detected == provider => Ok(()),
-        Some(detected) => Err(ProviderModelMismatch::WrongProvider {
-            requested: provider,
-            detected,
-            model: trimmed.to_string(),
-        }),
+        Some(_) => Err(wrong_provider_error(provider, trimmed).expect("detected wrong provider")),
         None => Err(ProviderModelMismatch::UnknownModel {
             requested: provider,
             model: trimmed.to_string(),
         }),
     }
+}
+
+fn wrong_provider_error(provider: Provider, model: &str) -> Option<ProviderModelMismatch> {
+    let trimmed = model.trim();
+    classify_model(trimmed).and_then(|detected| {
+        (detected != provider).then(|| ProviderModelMismatch::WrongProvider {
+            requested: provider,
+            detected,
+            model: trimmed.to_string(),
+        })
+    })
 }
 
 /// Validate that a reasoning effort is supported by the provider.
@@ -196,6 +231,11 @@ pub enum ProviderModelMismatch {
     },
     /// The model is not recognized by the built-in catalog at all.
     UnknownModel { requested: Provider, model: String },
+    /// Codex upstream provider overrides are only valid on the Codex harness.
+    UnsupportedCodexModelProvider {
+        requested: Provider,
+        codex_model_provider: String,
+    },
 }
 
 impl fmt::Display for ProviderModelMismatch {
@@ -215,6 +255,14 @@ impl fmt::Display for ProviderModelMismatch {
                 "Model '{}' is not recognized by the built-in {} catalog. \
                  If this is a valid {} model, update the model catalog before using it.",
                 model, requested, requested
+            ),
+            ProviderModelMismatch::UnsupportedCodexModelProvider {
+                requested,
+                codex_model_provider,
+            } => write!(
+                f,
+                "codex_model_provider '{}' is only valid with --provider openai / Codex. Current provider is {}.",
+                codex_model_provider, requested
             ),
         }
     }
@@ -391,6 +439,65 @@ mod tests {
         let msg = format!("{}", err);
         assert!(msg.contains("kimi2.6"));
         assert!(msg.contains("catalog"));
+    }
+
+    #[test]
+    fn validate_accepts_openai_unknown_model_with_codex_provider_override() {
+        assert!(
+            validate_provider_model_with_codex_provider(
+                Provider::Openai,
+                Some("deepseek/deepseek-v4-flash"),
+                Some("openrouter"),
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_provider_model_with_codex_provider(
+                Provider::Openai,
+                Some("glm-5.1"),
+                Some("zai"),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn validate_rejects_codex_provider_override_with_anthropic() {
+        let err = validate_provider_model_with_codex_provider(
+            Provider::Anthropic,
+            Some("claude-opus-4-5"),
+            Some("openrouter"),
+        )
+        .expect_err("anthropic codex provider override must fail");
+        assert!(matches!(
+            err,
+            ProviderModelMismatch::UnsupportedCodexModelProvider {
+                requested: Provider::Anthropic,
+                ..
+            }
+        ));
+        let msg = err.to_string();
+        assert!(msg.contains("openrouter"));
+        assert!(msg.contains("openai"));
+        assert!(msg.contains("anthropic"));
+    }
+
+    #[test]
+    fn validate_rejects_wrong_provider_even_with_codex_provider_override() {
+        let err = validate_provider_model_with_codex_provider(
+            Provider::Openai,
+            Some("claude-opus-4-5"),
+            Some("openrouter"),
+        )
+        .expect_err("recognized Anthropic model must still fail");
+        assert!(matches!(
+            err,
+            ProviderModelMismatch::WrongProvider {
+                requested: Provider::Openai,
+                detected: Provider::Anthropic,
+                ..
+            }
+        ));
     }
 
     #[test]

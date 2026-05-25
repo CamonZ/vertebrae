@@ -26,6 +26,21 @@ Feature: Step fields: prompt and agent-config
     And the step "Codex" in the workflow should have agent model "gpt-5.5"
     And the step "Codex" in the workflow should have agent_config field "reasoning_effort" equal to "high"
 
+  Scenario: Create a Codex step with an upstream model provider
+    When I add a step "OpenRouterCodex" to the workflow with provider "openai", codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
+    Then the command should succeed
+    And the step "OpenRouterCodex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "OpenRouterCodex" in the workflow should have agent_config field "codex_model_provider" equal to "openrouter"
+    And the step "OpenRouterCodex" in the workflow should have agent model "deepseek/deepseek-v4-flash"
+
+  Scenario: Update a Codex step with an upstream model provider
+    When I add a step "ZaiCodex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "medium"
+    And I update the step "ZaiCodex" in the workflow with provider "openai", codex model provider "zai", and model "glm-5.1"
+    Then the command should succeed
+    And the step "ZaiCodex" in the workflow should have agent_config field "provider" equal to "openai"
+    And the step "ZaiCodex" in the workflow should have agent_config field "codex_model_provider" equal to "zai"
+    And the step "ZaiCodex" in the workflow should have agent model "glm-5.1"
+
   Scenario: Update a Codex step with reasoning effort preserves provider and model
     When I add a step "TunedCodex" to the workflow with provider "openai", model "gpt-5.5", and reasoning effort "medium"
     And I update the step "TunedCodex" in the workflow with flag "--reasoning-effort" and value "xhigh"
@@ -41,6 +56,14 @@ Feature: Step fields: prompt and agent-config
   Scenario: Anthropic step with reasoning effort is rejected
     When I add a step "BadClaude" to the workflow with provider "anthropic", model "opus", and reasoning effort "high"
     Then the command should fail with "only supported with --provider openai"
+
+  Scenario: Anthropic step with Codex upstream model provider is rejected
+    When I add a step "BadCodexProvider" to the workflow with provider "anthropic", codex model provider "openrouter", and model "opus"
+    Then the command should fail with "only valid with --provider openai"
+
+  Scenario: Codex provider-scoped model without upstream provider is rejected
+    When I add a step "BadScopedModel" to the workflow with provider "openai", model "deepseek/deepseek-v4-flash"
+    Then the command should fail with "not recognized by the built-in openai catalog"
 
   Scenario: Invalid --agent-config JSON fails with clear error
     When I add a step "Bad" to the workflow with invalid --agent-config JSON

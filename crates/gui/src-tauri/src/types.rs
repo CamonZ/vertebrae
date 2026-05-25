@@ -386,6 +386,8 @@ impl From<vertebrae_core::PermissionMode> for PermissionMode {
 pub struct AgentConfig {
     /// Model for the current session
     pub model: Option<String>,
+    /// Codex upstream model provider configured in ~/.codex/config.toml
+    pub codex_model_provider: Option<String>,
     /// Fallback model when default model is overloaded
     pub fallback_model: Option<String>,
     /// OpenAI/Codex reasoning effort for the configured model
@@ -423,6 +425,7 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
     fn from(config: vertebrae_core::AgentConfig) -> Self {
         AgentConfig {
             model: config.model,
+            codex_model_provider: config.codex_model_provider,
             fallback_model: config.fallback_model,
             reasoning_effort: config.reasoning_effort,
             system_prompt: config.system_prompt,
