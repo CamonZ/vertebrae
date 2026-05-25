@@ -132,16 +132,13 @@
      inset top-light so panels read as "lit from above" on near-black surfaces.
      --------------------------------------------------------------------------- */
   --shadow-1:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 0 rgba(255, 240, 220, 0.03);
+    0 1px 2px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 240, 220, 0.03);
   --shadow-2:
-    0 1px 2px rgba(0, 0, 0, 0.6),
-    0 12px 28px rgba(0, 0, 0, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.6), 0 12px 28px rgba(0, 0, 0, 0.55),
     0 0 0 1px var(--color-line-strong),
     inset 0 1px 0 0 rgba(255, 240, 220, 0.05);
   --shadow-3:
-    0 2px 4px rgba(0, 0, 0, 0.65),
-    0 32px 64px rgba(0, 0, 0, 0.65),
+    0 2px 4px rgba(0, 0, 0, 0.65), 0 32px 64px rgba(0, 0, 0, 0.65),
     0 0 0 1px var(--color-line-strong),
     inset 0 1px 0 0 rgba(255, 240, 220, 0.07);
   --shadow-glow: 0 0 20px var(--color-accent-glow);
@@ -422,6 +419,82 @@ body {
   line-height: 0.92;
   letter-spacing: -0.025em;
   color: var(--color-fg);
+}
+
+/* Canonical typographic primitives. Declared in @layer base so a heading's
+   own Tailwind utilities (text-xl, font-mono, text-eyebrow, …) still win —
+   an unlayered rule here would beat every layered utility and break the many
+   h1/h2/h3 that style themselves through utility classes. */
+@layer base {
+  .italic {
+    font-style: italic;
+  }
+
+  /* Headings — three-families-one-scale: serif for h1/h2 display moments,
+     sans for h3 functional section headings. Mirrors docs/test_goal/tokens.css
+     but uses the app-standardised --font-* / --text-* tokens (ticket 7e7c5c7d)
+     and semantic fg colors so both themes stay correct. */
+  h1,
+  .h1 {
+    font-family: var(--font-serif);
+    font-size: var(--text-5xl); /* 56px */
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--color-fg);
+  }
+
+  h2,
+  .h2 {
+    font-family: var(--font-serif);
+    font-size: var(--text-4xl); /* 36px */
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: -0.015em;
+    color: var(--color-fg);
+  }
+
+  h3,
+  .h3 {
+    font-family: var(--font-sans);
+    font-size: var(--text-2xl); /* 20px */
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--color-fg);
+  }
+
+  .caption {
+    font-size: var(--text-xs); /* 12px */
+    color: var(--color-fg-mute);
+  }
+
+  /* Lede / subtitle — muted, light-weight serif italic (cursive role c). */
+  .lede {
+    font-family: var(--font-serif);
+    font-size: 1.375rem; /* 22px */
+    font-weight: 300;
+    font-style: italic;
+    line-height: 1.45;
+    color: var(--color-fg-soft);
+    max-width: 60ch;
+  }
+
+  /* Plate / figure marker — mono eyebrow with a serif-italic numeral. */
+  .plate-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-eyebrow); /* 11px */
+    color: var(--color-accent);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .plate-num .n {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-size: var(--text-xl); /* 18px */
+    letter-spacing: 0;
+    color: var(--color-accent);
+  }
 }
 
 /* =============================================================================

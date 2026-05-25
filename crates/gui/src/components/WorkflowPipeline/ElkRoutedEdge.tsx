@@ -209,7 +209,7 @@ export function ElkRoutedEdge({
               transform: `translate(-50%, -50%) translate(${labelPosition.x}px, ${labelPosition.y}px)`,
               pointerEvents: "all",
             }}
-            className={`rounded bg-bg-primary/90 px-1.5 py-0.5 text-[11px] font-medium ${highlighted ? "text-primary" : "text-text-muted"}`}
+            className={`rounded bg-bg-primary/90 px-1.5 py-0.5 text-eyebrow font-medium ${highlighted ? "text-primary" : "text-text-muted"}`}
           >
             {label}
           </div>

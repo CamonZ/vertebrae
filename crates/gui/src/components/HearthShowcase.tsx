@@ -83,8 +83,8 @@ function Plate({
   return (
     <section className="mt-12 grid grid-cols-1 gap-8 border-t border-[var(--color-accent)] pt-8 md:grid-cols-[220px_1fr]">
       <header className="md:sticky md:top-6">
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)]">
-          Plate <span className="font-serif italic text-base">{number}</span>
+        <div className="plate-num">
+          Plate <span className="n">{number}</span>
         </div>
         <h2 className="mt-2 font-serif text-3xl text-[var(--color-fg)]">
           {title}
@@ -107,7 +107,7 @@ function ColorChip({ name, hex }: { name: string; hex: string }) {
       />
       <div className="flex flex-col">
         <span className="font-mono text-xs text-[var(--color-fg)]">{name}</span>
-        <span className="font-mono text-[10px] text-[var(--color-fg-mute)]">
+        <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
           {hex}
         </span>
       </div>
@@ -130,7 +130,7 @@ function StepTypePlate({ kind }: { kind: (typeof STEP_KINDS)[number] }) {
         style={{ backgroundColor: `var(${style.barVar})` }}
       />
       <div
-        className="font-mono text-[10px] uppercase tracking-[0.14em]"
+        className="font-mono text-2xs uppercase tracking-[0.14em]"
         style={{ color: `var(${style.fgVar})` }}
       >
         {style.kind}
@@ -150,7 +150,7 @@ function StepTypePlate({ kind }: { kind: (typeof STEP_KINDS)[number] }) {
           {style.icon}
         </span>
       </div>
-      <div className="mt-2 font-mono text-[10px] text-[var(--color-fg-mute)]">
+      <div className="mt-2 font-mono text-2xs text-[var(--color-fg-mute)]">
         bar · wash · fg
       </div>
     </div>
@@ -174,7 +174,7 @@ export function HearthShowcase() {
   return (
     <div className="space-y-2">
       <header>
-        <div className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-accent)]">
+        <div className="font-mono text-eyebrow uppercase tracking-[0.16em] text-[var(--color-accent)]">
           Hearth · Design System
         </div>
         <h1 className="mt-2 font-serif text-5xl leading-none text-[var(--color-fg)]">
@@ -192,7 +192,7 @@ export function HearthShowcase() {
         description="Surfaces step in equal value-shifts; text drifts from cream to ghost. Status reserves chroma for meaning."
       >
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+          <div className="font-mono text-2xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
             Surfaces
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -202,7 +202,7 @@ export function HearthShowcase() {
           </div>
         </div>
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+          <div className="font-mono text-2xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
             Text
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
@@ -212,7 +212,7 @@ export function HearthShowcase() {
           </div>
         </div>
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+          <div className="font-mono text-2xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
             Status
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -225,10 +225,10 @@ export function HearthShowcase() {
                   className="block h-1 w-full rounded-full"
                   style={{ backgroundColor: `var(${s.token})` }}
                 />
-                <div className="mt-2 font-mono text-[10px] text-[var(--color-fg-mute)]">
+                <div className="mt-2 font-mono text-2xs text-[var(--color-fg-mute)]">
                   {s.label}
                 </div>
-                <div className="mt-1 font-mono text-[10px] text-[var(--color-fg-faint)]">
+                <div className="mt-1 font-mono text-2xs text-[var(--color-fg-faint)]">
                   {s.token}
                 </div>
               </div>

@@ -27,7 +27,7 @@ function Disclosure({ label, testIdBase, children }: DisclosureProps): ReactNode
         data-testid={`${testIdBase}-toggle`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
+        className="flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
       >
         <span aria-hidden="true">{open ? "▾" : "▸"}</span>
         <span>{label}</span>
@@ -139,7 +139,7 @@ export function HumanInputGate({
           </button>
         )}
       </div>
-      <dl className="mt-3 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
         <div>
           <dt className="font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">
             Run
@@ -148,7 +148,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={run.id}
               kind="task run"
-              className="text-[11px]"
+              className="text-eyebrow"
               testId="human-input-gate-run-id"
             />
           </dd>
@@ -161,7 +161,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={execution?.id}
               kind="step execution"
-              className="text-[11px]"
+              className="text-eyebrow"
               testId="human-input-gate-execution-id"
               emptyValue="—"
             />
@@ -187,7 +187,7 @@ export function HumanInputGate({
             >
               <pre
                 data-testid="human-input-gate-schema"
-                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 font-mono text-[11px] text-[var(--color-fg)]"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 font-mono text-eyebrow text-[var(--color-fg)]"
               >
                 {schemaJson}
               </pre>

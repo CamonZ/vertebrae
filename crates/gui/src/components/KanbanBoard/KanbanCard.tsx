@@ -98,12 +98,12 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
       {/* Workflow name and step indicator */}
       <div className="flex flex-wrap items-center gap-1.5">
         {task.workflow_name && (
-          <span className="inline-flex items-center rounded-[var(--radius-xs)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-fg-soft)]">
+          <span className="inline-flex items-center rounded-[var(--radius-xs)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-1.5 py-0.5 text-2xs font-medium text-[var(--color-fg-soft)]">
             {task.workflow_name}
           </span>
         )}
         <span
-          className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-[10px] font-medium ${stepStyles.bg} ${stepStyles.text} ${stepStyles.glow ?? ""}`}
+          className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-2xs font-medium ${stepStyles.bg} ${stepStyles.text} ${stepStyles.glow ?? ""}`}
         >
           {formatStepName(task.step_name)}
         </span>
@@ -111,7 +111,7 @@ export function KanbanCard({ task, isSelected = false, onClick }: KanbanCardProp
 
       {/* Review indicator */}
       {task.needs_human_review && (
-        <span className="mt-2 inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-warn-wash)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--color-warn)]">
+        <span className="mt-2 inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-warn-wash)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[0.12em] text-[var(--color-warn)]">
           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />

@@ -67,7 +67,7 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
         className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-xs"
       >
         <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
             Status
           </span>
           <select
@@ -86,7 +86,7 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
         </label>
 
         <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
             Step
           </span>
           <select
@@ -105,7 +105,7 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
         </label>
 
         <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
             Model
           </span>
           <select

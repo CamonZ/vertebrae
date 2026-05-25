@@ -68,7 +68,7 @@ export function TreeNode({
       >
         <span
           className={[
-            "inline-block text-[10px] transition-transform duration-[var(--t-fast)]",
+            "inline-block text-2xs transition-transform duration-[var(--t-fast)]",
             expanded ? "rotate-90" : "",
           ].join(" ")}
           aria-hidden
@@ -81,7 +81,7 @@ export function TreeNode({
         {children}
       </span>
       {right && (
-        <span className="shrink-0 font-mono text-[11px] text-[var(--color-fg-mute)]">
+        <span className="shrink-0 font-mono text-eyebrow text-[var(--color-fg-mute)]">
           {right}
         </span>
       )}

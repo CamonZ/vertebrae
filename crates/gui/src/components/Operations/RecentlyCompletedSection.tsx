@@ -35,7 +35,7 @@ export function RecentlyCompletedSection({
   return (
     <section aria-label="Recently completed">
       <div className="mb-3 flex items-baseline justify-between border-b border-[var(--color-line)] pb-2">
-        <h2 className="flex items-baseline gap-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
+        <h2 className="flex items-baseline gap-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-ok)]">
           <svg
             className="h-2.5 w-2.5"
             viewBox="0 0 10 10"
@@ -53,7 +53,7 @@ export function RecentlyCompletedSection({
           <button
             type="button"
             onClick={handleDismissAll}
-            className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg-soft)]"
+            className="font-mono text-eyebrow uppercase tracking-[0.12em] text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg-soft)]"
           >
             Dismiss all
           </button>

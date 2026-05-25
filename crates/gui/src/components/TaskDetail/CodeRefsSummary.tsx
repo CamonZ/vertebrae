@@ -62,16 +62,16 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
           />
         </svg>
-        <code className="truncate font-mono text-[11px] text-text-secondary">
+        <code className="truncate font-mono text-eyebrow text-text-secondary">
           {codeRef.path.split("/").pop() ?? codeRef.path}
         </code>
         {lineRange && (
-          <span className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-[10px] text-primary">
+          <span className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-2xs text-primary">
             {lineRange}
           </span>
         )}
         {codeRef.name && (
-          <span className="truncate text-[10px] text-text-muted">
+          <span className="truncate text-2xs text-text-muted">
             {codeRef.name}
           </span>
         )}

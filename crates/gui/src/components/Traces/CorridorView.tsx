@@ -252,7 +252,7 @@ export function CorridorView({
               x={lane.x}
               y={16}
               textAnchor="middle"
-              className="fill-[var(--color-fg-mute)] font-mono text-[10px] uppercase tracking-wider"
+              className="fill-[var(--color-fg-mute)] font-mono text-2xs uppercase tracking-wider"
             >
               {lane.title ?? lane.taskId.slice(0, 8)}
             </text>
@@ -312,7 +312,7 @@ export function CorridorView({
               <text
                 textAnchor="middle"
                 y={4}
-                className="pointer-events-none fill-[var(--color-accent)] font-mono text-[10px]"
+                className="pointer-events-none fill-[var(--color-accent)] font-mono text-2xs"
               >
                 {(node.stepName ?? "step").slice(0, 8)}
               </text>

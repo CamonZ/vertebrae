@@ -106,10 +106,12 @@ export function ProjectSetupPage() {
         className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg"
         style={{ maxWidth: "640px", minWidth: "400px" }}
       >
-        {/* Header */}
+        {/* Header — serif-italic Hearth wordmark over a muted lede subtitle. */}
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-3xl font-bold text-primary">Vertebrae</h1>
-          <p className="text-text-secondary">
+          <h1 className="mb-2 font-serif text-5xl italic text-[var(--color-fg)]">
+            Vertebrae
+          </h1>
+          <p className="font-serif text-lg font-light italic text-[var(--color-fg-soft)]">
             Select a project to get started, or add a new one.
           </p>
         </div>

@@ -267,14 +267,14 @@ function RunRow({
           data-testid="run-history-row-pip"
           data-status={run.status}
           title={label}
-          className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-[10px] leading-none text-[var(--color-bg-0)] ${statusClasses(
+          className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-2xs leading-none text-[var(--color-bg-0)] ${statusClasses(
             run.status
           )}`}
         >
           {glyph}
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex items-center gap-2 truncate font-mono text-[11px] text-[var(--color-fg)]">
+          <span className="flex items-center gap-2 truncate font-mono text-eyebrow text-[var(--color-fg)]">
             <span className="truncate">{label}</span>
             {isActive && activeRunSource !== "selected" && (
               <span
@@ -285,12 +285,12 @@ function RunRow({
               </span>
             )}
           </span>
-          <span className="flex items-center gap-1 truncate font-mono text-[10px] text-[var(--color-fg-mute)]">
+          <span className="flex items-center gap-1 truncate font-mono text-2xs text-[var(--color-fg-mute)]">
             <span>{formatStartedAt(run.started_at)} ·</span>
             <ScanIdentifier
               id={run.id}
               kind="task run"
-              className="text-[10px]"
+              className="text-2xs"
               testId="run-history-row-id"
             />
           </span>
@@ -513,7 +513,7 @@ export function RunHistoryRail({
         <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
           <span
             data-testid="run-history-rail-title"
-            className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]"
+            className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]"
           >
             Tasks
           </span>
@@ -524,7 +524,7 @@ export function RunHistoryRail({
                 onClick={onSwitchTask}
                 data-testid="run-history-rail-switch-task"
                 aria-label="Switch task"
-                className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
+                className="rounded px-1.5 py-0.5 text-2xs uppercase tracking-wider text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg-soft)]"
               >
                 Switch
               </button>
@@ -596,7 +596,7 @@ export function RunHistoryRail({
         <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
           <span
             data-testid="run-history-runs-title"
-            className="font-mono text-[10px] uppercase tracking-wider text-[var(--color-fg-mute)]"
+            className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]"
           >
             Runs
           </span>
