@@ -420,7 +420,7 @@ async fn gui_element_with_test_id_should_have_text_within(
     let poll_interval = std::time::Duration::from_millis(250);
 
     loop {
-        if let Ok(element) = client.find(locator.clone()).await {
+        if let Ok(element) = client.find(locator).await {
             let actual_text = element.text().await.unwrap_or_default();
             if actual_text.trim() == expected_text {
                 world
@@ -478,7 +478,7 @@ async fn gui_element_with_test_id_should_contain_text_within(
     let poll_interval = std::time::Duration::from_millis(250);
 
     loop {
-        if let Ok(element) = client.find(locator.clone()).await {
+        if let Ok(element) = client.find(locator).await {
             let element_json = serde_json::to_value(&element).expect("serialize element");
             let actual_text = client
                 .execute("return arguments[0].textContent || '';", vec![element_json])
