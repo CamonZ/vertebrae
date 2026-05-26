@@ -24,8 +24,22 @@ import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
 import { Button } from "../atoms/Button";
+import { Text } from "../atoms/Text";
+import { Badge } from "../atoms/Badge";
 import { PanelHeader, ReviewGateBanner } from "../panels";
 import { SectionGroup } from "../molecules/SectionGroup";
+import { SegmentedControl } from "../molecules/SegmentedControl";
+import { StatusBadge } from "../molecules/StatusBadge";
+import { StepBadge } from "../molecules/StepBadge";
+
+/** Canonical uppercase mono eyebrow used for every collapsible section header. */
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <Text variant="eyebrow" color="accent">
+      {children}
+    </Text>
+  );
+}
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -39,58 +53,6 @@ interface TaskDetailPanelProps {
   onDetach?: () => void;
   /** Skip the ResizablePanel wrapper and fill the area — used by the pop-out window. */
   standalone?: boolean;
-}
-
-/**
- * Step-name styling for the inline breadcrumb badge. We keep the raw step
- * label here (rather than mapping through StatusBadge's canonical vocabulary)
- * because operators read the breadcrumb as "workflow / step".
- */
-function getStatusStyles(status: string): {
-  bg: string;
-  text: string;
-} {
-  const stepName = status.includes(":")
-    ? (status.split(":").pop() ?? status)
-    : status;
-
-  switch (stepName) {
-    case "backlog":
-      return {
-        bg: "bg-[var(--color-bg-2)]",
-        text: "text-[var(--color-fg-mute)]",
-      };
-    case "todo":
-      return {
-        bg: "bg-[var(--color-accent-wash)]",
-        text: "text-[var(--color-accent)]",
-      };
-    case "in_progress":
-      return {
-        bg: "bg-[var(--color-warn-wash)]",
-        text: "text-[var(--color-warn)]",
-      };
-    case "pending_review":
-      return {
-        bg: "bg-[var(--color-info-wash)]",
-        text: "text-[var(--color-info)]",
-      };
-    case "done":
-      return {
-        bg: "bg-[var(--color-ok-wash)]",
-        text: "text-[var(--color-ok)]",
-      };
-    case "rejected":
-      return {
-        bg: "bg-[var(--color-err-wash)]",
-        text: "text-[var(--color-err)]",
-      };
-    default:
-      return {
-        bg: "bg-[var(--color-bg-2)]",
-        text: "text-[var(--color-fg-mute)]",
-      };
-  }
 }
 
 function getPriorityStyles(
@@ -140,7 +102,7 @@ function DetailRow({
       <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
         {label}
       </span>
-      <span className="text-sm text-[var(--color-fg)]">{children}</span>
+      <span className="font-mono text-xs text-[var(--color-fg)]">{children}</span>
     </div>
   );
 }
@@ -524,9 +486,6 @@ export function TaskDetailPanel({
     return null;
   }
 
-  const statusStyles = taskData
-    ? getStatusStyles(taskData.step_name ?? "unassigned")
-    : null;
   const priorityStyles = taskData ? getPriorityStyles(taskData.priority) : null;
   const runControlsState = deriveRunControlsState(
     taskData?.run_controls ?? null,
@@ -555,35 +514,21 @@ export function TaskDetailPanel({
         testId="task-delete-confirmation"
       >
         {childrenIds.length > 0 && (
-          <div className="rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-warn)_30%,transparent)] bg-[var(--color-warn-wash)] p-2.5">
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-3)] p-2.5">
             <p className="mb-2 text-xs font-medium text-[var(--color-warn)]">
               This task has {childrenIds.length} child task
               {childrenIds.length !== 1 ? "s" : ""}
             </p>
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={cascade}
-                onChange={(e) => setCascade(e.target.checked)}
-                disabled={isDeleting}
-                className="rounded border border-[var(--color-line)]"
-              />
-              <span className="text-xs text-[var(--color-fg-soft)]">
-                Delete all child tasks
-              </span>
-            </label>
-            <label className="mt-1.5 flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={!cascade}
-                onChange={(e) => setCascade(!e.target.checked)}
-                disabled={isDeleting}
-                className="rounded border border-[var(--color-line)]"
-              />
-              <span className="text-xs text-[var(--color-fg-soft)]">
-                Keep child tasks without parent
-              </span>
-            </label>
+            <SegmentedControl
+              ariaLabel="What happens to child tasks"
+              options={[
+                { value: "delete", label: "Delete all child tasks" },
+                { value: "keep", label: "Keep child tasks without parent" },
+              ]}
+              value={cascade ? "delete" : "keep"}
+              onChange={(value) => setCascade(value === "delete")}
+              disabled={isDeleting}
+            />
           </div>
         )}
       </DeleteConfirmation>
@@ -764,22 +709,22 @@ export function TaskDetailPanel({
         level={taskData.level}
         testId="task-detail-id"
       />
-      {taskData.workflow_name && (
-        <span className="font-medium text-[var(--color-fg-soft)]">
-          {taskData.workflow_name}
-        </span>
-      )}
-      {taskData.workflow_name && taskData.step_name && (
-        <span aria-hidden className="text-[var(--color-fg-faint)]">
-          ›
-        </span>
-      )}
-      {taskData.step_name && (
+      {(taskData.workflow_name || taskData.step_name) && (
         <span
-          className={`rounded-full px-2 py-0.5 text-2xs font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
           data-testid="status-badge"
+          className={`inline-flex rounded-[var(--radius-sm)] ${isExecuting ? "animate-pulse-glow" : ""}`}
         >
-          {taskData.step_name.replace("_", " ")}
+          {taskData.workflow_name ? (
+            <StatusBadge
+              state={{
+                kind: "workflow",
+                workflow: taskData.workflow_name,
+                step: taskData.step_name ?? "",
+              }}
+            />
+          ) : (
+            <StepBadge stepName={taskData.step_name} />
+          )}
         </span>
       )}
       {priorityStyles && (
@@ -929,10 +874,11 @@ export function TaskDetailPanel({
                     d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg)]">
-                  Acceptance Criteria
-                </h3>
+                <Text variant="eyebrow" color="accent" as="h3">
+                  Test Criteria
+                </Text>
               </div>
+              <Badge count={acceptanceCriteria.length} intent="neutral" />
             </div>
             <AcceptanceCriteria
               criteria={acceptanceCriteria}
@@ -942,17 +888,14 @@ export function TaskDetailPanel({
           </div>
 
           <SectionGroup
-            label="Progress"
+            label={<SectionLabel>Progress</SectionLabel>}
             defaultOpen
             testId="progress-section"
             ariaLabel="Toggle Progress section"
-            badge={
-              checklistItems.length > 0 ? (
-                <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
-                  {checklistItems.filter((c) => c.done).length}/
-                  {checklistItems.length}
-                </span>
-              ) : undefined
+            count={
+              checklistItems.length > 0
+                ? `${checklistItems.filter((c) => c.done).length}/${checklistItems.length}`
+                : undefined
             }
           >
             {checklistItems.length > 0 && (
@@ -1015,7 +958,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
-            label="Spec"
+            label={<SectionLabel>Spec</SectionLabel>}
             defaultOpen
             testId="spec-section-wrapper"
             ariaLabel="Toggle Spec section"
@@ -1029,51 +972,56 @@ export function TaskDetailPanel({
             />
           </SectionGroup>
 
-          {children.length > 0 && (
-            <SectionGroup
-              label="Children"
-              defaultOpen
-              testId="children-section"
-              ariaLabel="Toggle Children section"
-              count={children.length}
-            >
+          <SectionGroup
+            label={<SectionLabel>Children</SectionLabel>}
+            defaultOpen={children.length > 0}
+            testId="children-section"
+            ariaLabel="Toggle Children section"
+            count={children.length}
+          >
+            {children.length === 0 ? (
+              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
+                No child tasks
+              </p>
+            ) : (
               <div className="space-y-1 py-2">
-                {children.map((child) => {
-                  const childStepName =
-                    child.step_name?.replace("_", " ") ?? null;
-
-                  return (
-                    <button
-                      key={child.id}
-                      type="button"
-                      onClick={() => onTaskSelect?.(child.id)}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-2)]"
-                      data-testid={`child-task-${child.id}`}
-                    >
-                      <IdentityBadge
-                        id={child.id}
-                        kind="task"
-                        level={child.level}
-                        copyable={false}
-                        testId={`child-task-id-${child.id}`}
-                      />
-                      <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-soft)]">
-                        {child.title}
+                {children.map((child) => (
+                  <button
+                    key={child.id}
+                    type="button"
+                    onClick={() => onTaskSelect?.(child.id)}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left transition-colors hover:bg-[var(--color-bg-2)]"
+                    data-testid={`child-task-${child.id}`}
+                  >
+                    <IdentityBadge
+                      id={child.id}
+                      kind="task"
+                      level={child.level}
+                      copyable={false}
+                      testId={`child-task-id-${child.id}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-soft)]">
+                      {child.title}
+                    </span>
+                    {(child.workflow_name || child.step_name) && (
+                      <span className="flex-shrink-0">
+                        <StatusBadge
+                          state={{
+                            kind: "workflow",
+                            workflow: child.workflow_name ?? "",
+                            step: child.step_name ?? "",
+                          }}
+                        />
                       </span>
-                      {childStepName && (
-                        <span className="flex-shrink-0 rounded-full bg-[var(--color-bg-2)] px-1.5 py-0.5 text-2xs text-[var(--color-fg-mute)]">
-                          {childStepName}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                    )}
+                  </button>
+                ))}
               </div>
-            </SectionGroup>
-          )}
+            )}
+          </SectionGroup>
 
           <SectionGroup
-            label="Dependencies"
+            label={<SectionLabel>Dependencies</SectionLabel>}
             testId="dependencies-section"
             ariaLabel="Toggle Dependencies section"
             count={
@@ -1092,22 +1040,16 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
-            label="Code"
+            label={<SectionLabel>Code</SectionLabel>}
             testId="code-section"
             ariaLabel="Toggle Code section"
-            badge={
-              (taskData.code_refs?.length ?? 0) > 0 ? (
-                <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
-                  {taskData.code_refs?.length}
-                </span>
-              ) : undefined
-            }
+            count={taskData.code_refs?.length ?? 0}
           >
             <CodeRefsSummary codeRefs={taskData.code_refs ?? []} />
           </SectionGroup>
 
           <SectionGroup
-            label="Details"
+            label={<SectionLabel>Details</SectionLabel>}
             testId="details-section"
             ariaLabel="Toggle Details section"
           >

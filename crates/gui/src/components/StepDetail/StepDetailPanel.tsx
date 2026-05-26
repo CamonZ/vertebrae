@@ -1,32 +1,28 @@
-import { useState, useCallback, useMemo, type ReactNode } from "react";
-import type { Step, StepType, Task, JsonValue } from "../../bindings";
+import { useState, useCallback, type ReactNode } from "react";
+import type { Step, StepType, JsonValue } from "../../bindings";
 import { commands } from "../../bindings";
-import { useStep, useStepChangeListener, useExpandedNodes } from "../../hooks";
+import { useStep, useStepChangeListener } from "../../hooks";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { EditableList } from "../EditableList";
 import { ResizablePanel } from "../ResizablePanel";
 import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
 import { OpenChatButton } from "../OpenChatButton";
-import { TaskTreeView, ExpandCollapseAllButton } from "../TaskList";
-import { buildTreeFromTasks, collectExpandableIds } from "../../utils/buildTreeFromTasks";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { LiquidHighlight } from "./LiquidHighlight";
 import { IdentityBadge } from "../shared/EntityId";
+import { Text } from "../atoms/Text";
+import { Chip } from "../atoms/Chip";
+import { Badge } from "../atoms/Badge";
 
 interface StepDetailPanelProps {
   stepId: string | null;
   allSteps: Step[];
-  tasks?: Task[];
-  onTaskSelect?: (taskId: string) => void;
-  selectedTaskId?: string | null;
   onClose?: () => void;
   onUpdated?: () => void;
   onDeleted?: () => void;
   onBack?: () => void;
 }
-
-type TabType = "config" | "tasks";
 
 /**
  * Detail row component for displaying key-value pairs
@@ -40,31 +36,76 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2">
-      <span className="flex-shrink-0 font-mono text-2xs uppercase tracking-wider text-text-muted">
+      <Text variant="eyebrow" color="tertiary" className="flex-shrink-0">
         {label}
+      </Text>
+      <span className="text-right text-sm text-[var(--color-fg)]">
+        {children}
       </span>
-      <span className="text-right text-sm text-text-primary">{children}</span>
     </div>
   );
 }
 
 /**
- * Section header component
+ * Section-level header. Accent-colored to match the Task detail panel's
+ * section labels. Every top-level section (Goal, Prompt, Overview, …) uses it;
+ * the muted eyebrow (`color="tertiary"`) is reserved for DetailRow keys. An
+ * optional `count` renders as a neutral Badge, mirroring the Task panel's
+ * collapsible section counts.
  */
-function SectionHeader({ title }: { title: string }) {
+function SectionHeader({ title, count }: { title: string; count?: number }) {
   return (
-    <h3 className="mb-2 font-mono text-2xs uppercase tracking-wider text-text-muted">
-      {title}
-    </h3>
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <Text variant="eyebrow" color="accent" as="h3">
+        {title}
+      </Text>
+      {count !== undefined && <Badge count={count} intent="neutral" />}
+    </div>
   );
 }
 
+/** Neutral icon button matching the Hearth detail-panel header affordance. */
+function IconButton({
+  onClick,
+  ariaLabel,
+  title,
+  disabled,
+  children,
+}: {
+  onClick: () => void;
+  ariaLabel: string;
+  title?: string;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      title={title}
+      disabled={disabled}
+      className="cursor-pointer rounded-[var(--radius-sm)] p-1.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
+  );
+}
+
+// Step type → Hearth token vocabulary. Step *types* (execute/evaluate/...) are a
+// distinct vocabulary from workflow/execution states, so they keep their own map
+// rather than reusing StatusBadge/StepBadge.
 const STEP_TYPE_STYLES: Record<Extract<StepType, string>, string> = {
-  execute: "border-text-muted/30 bg-text-muted/10 text-text-secondary",
-  evaluate: "border-info/30 bg-info/10 text-info",
-  route: "border-warning/30 bg-warning/10 text-warning",
-  wait_children: "border-accent/30 bg-accent/10 text-accent",
-  human_input: "border-success/30 bg-success/10 text-success",
+  execute:
+    "border-[var(--color-line-strong)] bg-[var(--color-bg-2)] text-[var(--color-fg-soft)]",
+  evaluate:
+    "border-[color-mix(in_oklch,var(--color-info)_35%,transparent)] bg-[var(--color-info-wash)] text-[var(--color-info)]",
+  route:
+    "border-[color-mix(in_oklch,var(--color-warn)_35%,transparent)] bg-[var(--color-warn-wash)] text-[var(--color-warn)]",
+  wait_children:
+    "border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[var(--color-accent-wash)] text-[var(--color-accent)]",
+  human_input:
+    "border-[color-mix(in_oklch,var(--color-ok)_35%,transparent)] bg-[var(--color-ok-wash)] text-[var(--color-ok)]",
 };
 
 function formatStepType(stepType: StepType) {
@@ -76,10 +117,10 @@ function StepTypeBadge({ stepType }: { stepType: StepType }) {
   const style =
     typeof stepType === "string"
       ? STEP_TYPE_STYLES[stepType]
-      : "border-danger/30 bg-danger/10 text-danger";
+      : "border-[color-mix(in_oklch,var(--color-err)_40%,transparent)] bg-[var(--color-err-wash)] text-[var(--color-err)]";
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-xs ${style}`}
+      className={`inline-flex items-center rounded-[var(--radius-sm)] border px-2 py-0.5 font-mono text-xs ${style}`}
       data-testid="step-type-badge"
     >
       {formatStepType(stepType)}
@@ -89,18 +130,20 @@ function StepTypeBadge({ stepType }: { stepType: StepType }) {
 
 // JSON Schema type → color mapping
 const SCHEMA_TYPE_COLORS: Record<string, string> = {
-  string: "text-success",
-  number: "text-info",
-  integer: "text-info",
-  boolean: "text-warning",
-  object: "text-primary",
-  array: "text-accent",
-  null: "text-text-muted",
+  string: "text-[var(--color-ok)]",
+  number: "text-[var(--color-info)]",
+  integer: "text-[var(--color-info)]",
+  boolean: "text-[var(--color-warn)]",
+  object: "text-[var(--color-accent)]",
+  array: "text-[var(--color-accent)]",
+  null: "text-[var(--color-fg-mute)]",
 };
 
 function SchemaTypeBadge({ type }: { type: string }) {
   return (
-    <span className={`font-mono text-xs ${SCHEMA_TYPE_COLORS[type] ?? "text-text-secondary"}`}>
+    <span
+      className={`font-mono text-xs ${SCHEMA_TYPE_COLORS[type] ?? "text-[var(--color-fg-soft)]"}`}
+    >
       {type}
     </span>
   );
@@ -138,7 +181,9 @@ function SchemaNode({
     typeDisplay = (
       <>
         <SchemaTypeBadge type={itemType} />
-        <span className="font-mono text-xs text-text-muted">{"[]"}</span>
+        <span className="font-mono text-xs text-[var(--color-fg-mute)]">
+          {"[]"}
+        </span>
       </>
     );
   } else {
@@ -153,7 +198,7 @@ function SchemaNode({
       {/* Node row */}
       <div className="flex items-baseline gap-1 py-px">
         {depth > 0 && (
-          <span className="select-none whitespace-pre font-mono text-xs text-text-muted/40">
+          <span className="select-none whitespace-pre font-mono text-xs text-[var(--color-fg-faint)]">
             {connector}
           </span>
         )}
@@ -163,11 +208,11 @@ function SchemaNode({
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="inline-flex cursor-pointer items-center text-text-muted hover:text-text-primary"
+            className="inline-flex cursor-pointer items-center text-[var(--color-fg-mute)] hover:text-[var(--color-fg)]"
             aria-label={expanded ? "Collapse" : "Expand"}
           >
             <svg
-              className={`h-3 w-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+              className={`h-3 w-3 transition-transform duration-[var(--t-base)] ease-[var(--ease-default)] ${expanded ? "rotate-90" : ""}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -181,28 +226,41 @@ function SchemaNode({
 
         {/* Property name */}
         {name && (
-          <span className="font-mono text-xs font-medium text-text-primary">{name}</span>
+          <span className="font-mono text-xs font-medium text-[var(--color-fg)]">
+            {name}
+          </span>
         )}
-        {name && <span className="font-mono text-xs text-text-muted/60">:</span>}
+        {name && (
+          <span className="font-mono text-xs text-[var(--color-fg-mute)]">:</span>
+        )}
 
         {/* Type */}
         {typeDisplay}
 
         {/* Required marker */}
         {required && (
-          <span className="font-mono text-2xs text-error/70" title="required">*</span>
+          <span
+            className="font-mono text-2xs text-[var(--color-err)]"
+            title="required"
+          >
+            *
+          </span>
         )}
 
         {/* Root title */}
         {title && depth === 0 && (
-          <span className="ml-1 text-xs text-text-muted">— {title}</span>
+          <span className="ml-1 text-xs text-[var(--color-fg-mute)]">
+            — {title}
+          </span>
         )}
       </div>
 
       {/* Description */}
       {description && depth > 0 && (
         <div className="ml-8 pl-1">
-          <span className="text-2xs italic leading-tight text-text-muted/70">{description}</span>
+          <span className="text-2xs italic leading-tight text-[var(--color-fg-mute)]">
+            {description}
+          </span>
         </div>
       )}
 
@@ -227,7 +285,10 @@ function SchemaNode({
 
 function SchemaTree({ schema }: { schema: Record<string, unknown> }) {
   return (
-    <div className="overflow-auto rounded-lg border border-border bg-bg-tertiary p-3" data-testid="schema-tree">
+    <div
+      className="overflow-auto rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3"
+      data-testid="schema-tree"
+    >
       <SchemaNode schema={schema} />
     </div>
   );
@@ -240,52 +301,17 @@ function SchemaTree({ schema }: { schema: Record<string, unknown> }) {
 export function StepDetailPanel({
   stepId,
   allSteps,
-  tasks = [],
-  onTaskSelect,
-  selectedTaskId = null,
   onClose,
   onUpdated,
   onDeleted,
   onBack,
 }: StepDetailPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabType>("config");
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
-  const [search, setSearch] = useState<string | null>(null);
 
   // Fetch step data on mount; applyUpdate lets us apply WS payloads without a round-trip
   const { step, applyUpdate } = useStep(stepId);
-
-  // Use expanded nodes hook for task tree
-  const expandedNodes = useExpandedNodes();
-
-  // Build task hierarchy
-  const taskHierarchy = useMemo(() => {
-    const filtered = search
-      ? tasks.filter(
-          (t) =>
-            t.title.toLowerCase().includes(search.toLowerCase()) ||
-            t.id.toLowerCase().includes(search.toLowerCase())
-        )
-      : tasks;
-    return buildTreeFromTasks(filtered);
-  }, [tasks, search]);
-
-  const expandableIds = useMemo(
-    () => collectExpandableIds(taskHierarchy),
-    [taskHierarchy]
-  );
-  const allExpanded =
-    expandableIds.length > 0 &&
-    expandableIds.every((id) => expandedNodes.isNodeExpanded(id));
-  const handleToggleExpandAll = useCallback(() => {
-    if (allExpanded) {
-      expandedNodes.resetExpandedNodes();
-    } else {
-      expandedNodes.expandAll(expandableIds);
-    }
-  }, [allExpanded, expandableIds, expandedNodes]);
 
   // Apply WS payloads directly — no round-trip needed since the payload is the full entity
   useStepChangeListener({
@@ -451,33 +477,6 @@ export function StepDetailPanel({
     return null;
   }
 
-  // Render tab bar button
-  function TabButton({ tab, label }: { tab: TabType; label: string }) {
-    const isActive = activeTab === tab;
-    return (
-      <button
-        type="button"
-        onClick={() => setActiveTab(tab)}
-        data-testid={`step-detail-tab-${tab}`}
-        className={`flex items-center gap-2 px-3 py-2 text-xs font-medium transition-colors ${
-          isActive
-            ? "border-b-2 border-primary text-primary"
-            : "border-b-2 border-transparent text-text-muted hover:text-text-primary"
-        }`}
-      >
-        {label}
-        {tab === "tasks" && (
-          <span
-            className="ml-1 inline-flex items-center justify-center rounded-full bg-primary/20 px-2 py-0.5 text-xs font-semibold text-primary"
-            data-testid="step-detail-tab-tasks-count"
-          >
-            {tasks.length}
-          </span>
-        )}
-      </button>
-    );
-  }
-
   return (
     <ResizablePanel
       storageKey="step-detail-panel-width"
@@ -485,23 +484,18 @@ export function StepDetailPanel({
       testId="step-detail-panel"
     >
       {/* Header */}
-      <div className="flex h-12 items-center justify-between border-b border-border px-4">
+      <div className="flex h-12 items-center justify-between border-b border-[var(--color-line)] px-4">
         <div className="flex items-center gap-2">
           {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label="Go back"
-            >
+            <IconButton onClick={onBack} ariaLabel="Go back">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
               </svg>
-            </button>
+            </IconButton>
           )}
-          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+          <Text variant="eyebrow" color="tertiary" as="h2">
             Step Configuration
-          </h2>
+          </Text>
         </div>
         <div className="flex items-center gap-2">
           {/* Open Chat button */}
@@ -513,59 +507,48 @@ export function StepDetailPanel({
             />
           )}
           {/* Delete button */}
-          <button
-            type="button"
+          <IconButton
             onClick={handleShowDeleteConfirmation}
             disabled={isDeleting || showDeleteConfirmation}
-            className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error disabled:opacity-50"
-            aria-label="Delete step"
+            ariaLabel="Delete step"
             title="Delete this step"
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A1 1 0 0016.138 21H7.862a1 1 0 00-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A1 1 0 0116.138 21H7.862a1 1 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
-            <span>Delete</span>
-          </button>
+          </IconButton>
           {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label="Close panel"
-            >
+            <IconButton onClick={onClose} ariaLabel="Close panel">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </IconButton>
           )}
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="border-b border-border px-4">
-        <div className="flex gap-1">
-          <TabButton tab="config" label="Configuration" />
-          <TabButton tab="tasks" label="Tasks" />
-        </div>
-      </div>
-
-      {/* Delete error */}
-      {deleteError && (
-        <div className="border-b border-border px-4 py-3 bg-error/5">
-          <p className="text-xs text-error">{deleteError}</p>
-        </div>
+      {/* Delete confirmation — rendered at the top so it stays visible,
+          matching the Task detail panel. */}
+      {showDeleteConfirmation && (
+        <DeleteConfirmation
+          itemType="Step"
+          itemName={step.name}
+          isDeleting={isDeleting}
+          error={deleteError}
+          onConfirm={handleConfirmDelete}
+          onCancel={handleCancelDelete}
+        />
       )}
 
-      {/* Configuration Tab Content */}
-      {activeTab === "config" && (
-        <div
-          className="flex-1 divide-y divide-border overflow-auto"
-          data-testid="step-config-scroll"
-        >
-          {/* Step title + Goal + Prompt scroll with the rest of the config. */}
+      {/* Step configuration */}
+      <div
+        className="flex-1 divide-y divide-[var(--color-line)] overflow-auto"
+        data-testid="step-config-scroll"
+      >
+        {/* Step title + Goal + Prompt scroll with the rest of the config. */}
           <div className="px-4 py-3">
             <div className="flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-sm font-bold text-primary">
+              <span className="flex h-8 w-8 items-center justify-center rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-accent)_30%,transparent)] bg-[var(--color-accent-wash)] font-mono text-sm font-bold text-[var(--color-accent)]">
                 {(step.order ?? 0) + 1}
               </span>
               <div className="min-w-0 flex-1">
@@ -579,7 +562,7 @@ export function StepDetailPanel({
                 <IdentityBadge
                   id={step.id}
                   kind="step"
-                  className="mt-1 text-xs text-text-muted"
+                  className="mt-1 text-xs text-[var(--color-fg-mute)]"
                   testId="step-detail-id"
                 />
               </div>
@@ -587,9 +570,7 @@ export function StepDetailPanel({
 
             {/* Goal - inline editable */}
             <div className="mt-3">
-              <h3 className="mb-2 font-mono text-2xs uppercase tracking-wider text-text-muted">
-                Goal
-              </h3>
+              <SectionHeader title="Goal" />
               <InlineEditField
                 value={step.goal || ""}
                 placeholder="Click to add goal..."
@@ -604,7 +585,7 @@ export function StepDetailPanel({
             {/* Prompt */}
             <div className="mt-3">
               <SectionHeader title="Prompt" />
-              <div className="rounded-lg border border-border bg-bg-tertiary p-3">
+              <div className="rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
                 <InlineEditField
                   value={step.prompt || ""}
                   placeholder="Click to add prompt..."
@@ -640,7 +621,7 @@ export function StepDetailPanel({
                       void handleOrderChange(newOrder);
                     }
                   }}
-                  className="w-20 rounded border border-border bg-bg-tertiary px-2 py-1 font-mono text-xs text-right focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  className="w-20 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1 font-mono text-xs text-right text-[var(--color-fg)] focus:border-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
                 />
               </DetailRow>
               <DetailRow label="Final Step">
@@ -663,7 +644,7 @@ export function StepDetailPanel({
 
           {/* Agents */}
           <div className="p-4">
-            <SectionHeader title={`Agents (${(step.agents || []).length})`} />
+            <SectionHeader title="Agents" count={(step.agents || []).length} />
             <EditableList
               items={step.agents || []}
               emptyText="No agents"
@@ -677,7 +658,7 @@ export function StepDetailPanel({
 
           {/* Skills */}
           <div className="p-4">
-            <SectionHeader title={`Skills (${(step.skills || []).length})`} />
+            <SectionHeader title="Skills" count={(step.skills || []).length} />
             <EditableList
               items={step.skills || []}
               emptyText="No skills"
@@ -692,10 +673,13 @@ export function StepDetailPanel({
           {/* Transitions */}
           <div className="p-4">
             <SectionHeader
-              title={`Transitions (${(step.transitions_to ?? []).length})`}
+              title="Transitions"
+              count={(step.transitions_to ?? []).length}
             />
             {(step.transitions_to ?? []).length === 0 ? (
-              <p className="text-xs italic text-text-muted">No transitions</p>
+              <p className="text-xs italic text-[var(--color-fg-mute)]">
+                No transitions
+              </p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {(step.transitions_to ?? []).map((targetId, index) => {
@@ -703,12 +687,21 @@ export function StepDetailPanel({
                   return (
                     <span
                       key={`${targetId}-${index}`}
-                      className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_45%,transparent)] bg-[var(--color-accent-wash)] px-2 py-1 font-mono text-2xs font-medium text-[var(--color-accent)]"
+                      title={targetStep?.name || targetId.replace(/^step:/, "")}
                     >
-                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <svg
+                        className="h-3 w-3 flex-shrink-0 opacity-70"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                      >
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                       </svg>
-                      {targetStep?.name || targetId.replace(/^step:/, "")}
+                      <span className="truncate">
+                        {targetStep?.name || targetId.replace(/^step:/, "")}
+                      </span>
                     </span>
                   );
                 })}
@@ -722,18 +715,20 @@ export function StepDetailPanel({
             <div className="space-y-1">
               <DetailRow label="Primary">
                 {step.agent_config?.model ? (
-                  <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                  <Chip variant="static" className="font-mono">
                     {formatAgentModelLabel(step.agent_config)}
-                  </code>
+                  </Chip>
                 ) : (
-                  <span className="text-xs italic text-text-muted">Default</span>
+                  <span className="text-xs italic text-[var(--color-fg-mute)]">
+                    Default
+                  </span>
                 )}
               </DetailRow>
               {step.agent_config?.fallback_model && (
                 <DetailRow label="Fallback">
-                  <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                  <Chip variant="static" className="font-mono">
                     {step.agent_config.fallback_model}
-                  </code>
+                  </Chip>
                 </DetailRow>
               )}
             </div>
@@ -756,87 +751,7 @@ export function StepDetailPanel({
             </div>
           </div>
 
-          {/* Delete Confirmation Section */}
-          {showDeleteConfirmation && (
-            <DeleteConfirmation
-              itemType="Step"
-              itemName={step.name}
-              isDeleting={isDeleting}
-              error={deleteError}
-              onConfirm={handleConfirmDelete}
-              onCancel={handleCancelDelete}
-            />
-          )}
         </div>
-      )}
-
-      {/* Tasks Tab Content */}
-      {activeTab === "tasks" && (
-        <>
-          {/* Search and view toggle */}
-          <div className="border-b border-border px-3 py-2">
-            <div className="flex items-center gap-2">
-              {/* Search input */}
-              <div className="relative flex-1 min-w-0">
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={search ?? ""}
-                  onChange={(e) =>
-                    setSearch(e.target.value || null)
-                  }
-                  className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 pl-7 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  aria-label="Search tasks"
-                />
-                <svg
-                  className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-              </div>
-
-              <ExpandCollapseAllButton
-                allExpanded={allExpanded}
-                onToggle={handleToggleExpandAll}
-                disabled={expandableIds.length === 0}
-              />
-            </div>
-          </div>
-
-          {/* Task tree section */}
-          <div className="flex-1 overflow-auto" data-testid="step-detail-tasks-content">
-            {tasks.length === 0 ? (
-              <div className="flex items-center justify-center h-full">
-                <p
-                  className="text-sm text-text-muted"
-                  data-testid="step-detail-tasks-empty"
-                >
-                  No tasks assigned to this step
-                </p>
-              </div>
-            ) : (
-              <TaskTreeView
-                hierarchy={taskHierarchy}
-                isLoading={false}
-                error={null}
-                selectedTaskId={selectedTaskId}
-                onTaskSelect={(task) => onTaskSelect?.(task.id)}
-                expandedNodes={expandedNodes}
-                hideStatus
-              />
-            )}
-          </div>
-        </>
-      )}
     </ResizablePanel>
   );
 }

@@ -79,11 +79,15 @@ describe("KanbanCard", () => {
       expect(screen.getByText("In progress")).toBeInTheDocument();
     });
 
-    it("renders 'No step' when step_name is null", () => {
-      const task = createMockTask({ step_name: null });
+    it("renders the workflow segment alone when step_name is null", () => {
+      const task = createMockTask({
+        workflow_name: "CI Pipeline",
+        step_name: null,
+      });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("No step")).toBeInTheDocument();
+      expect(screen.getByText("CI Pipeline")).toBeInTheDocument();
+      expect(screen.queryByText("No step")).not.toBeInTheDocument();
     });
   });
 

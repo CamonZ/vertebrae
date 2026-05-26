@@ -102,7 +102,7 @@ describe("ReadySection", () => {
     expect(screen.getByText("Implement Feature")).toBeInTheDocument();
     expect(screen.queryByText("No workflow assigned")).not.toBeInTheDocument();
     expect(screen.getByText("Development")).toBeInTheDocument();
-    expect(screen.getByText("todo")).toBeInTheDocument();
+    expect(screen.getByText("Todo")).toBeInTheDocument();
   });
 
   it("shows Start button enabled when runControls.runnable is true and current_step_id is set", () => {

@@ -171,10 +171,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("displays workflow -> step breadcrumb when task has workflow", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      // "Implementation" + "in progress" appear both in the header breadcrumb
-      // and inside TraceMiniView — assert presence rather than uniqueness.
+      // "Implementation" + "In progress" appear both in the header breadcrumb
+      // and inside TraceMiniView (both via the shared StepBadge formatting) —
+      // assert presence rather than uniqueness.
       expect(screen.getAllByText("Implementation").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("in progress").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
     });
 
     it("renders the task side panel ID as an eight-character short ID", () => {
@@ -367,7 +368,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("is the first section after the title badges", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      expect(screen.getByText("Acceptance Criteria")).toBeInTheDocument();
+      expect(screen.getByText("Test Criteria")).toBeInTheDocument();
       const criteriaSection = screen.getByTestId("acceptance-criteria");
       expect(criteriaSection).toBeInTheDocument();
     });
@@ -388,11 +389,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(screen.getByText("50%")).toBeInTheDocument();
     });
 
-    it("shows human/machine validation badges", () => {
+    it("does not render a fabricated 'human' validation badge", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      const humanBadges = screen.getAllByText("human");
-      expect(humanBadges.length).toBeGreaterThan(0);
+      // Criteria without code refs get no badge — "human" was never real data.
+      expect(screen.queryByText("human")).not.toBeInTheDocument();
     });
 
     it("met criteria have line-through styling", () => {
@@ -533,10 +534,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const confirmationHeading = screen.getByRole("heading", {
         name: "Delete Task?",
       });
-      // The Acceptance Criteria heading is the first element of the
+      // The Test Criteria heading is the first element of the
       // scrollable body, below the static panel header chrome.
       const bodyAnchor = screen.getByRole("heading", {
-        name: "Acceptance Criteria",
+        name: "Test Criteria",
       });
 
       expect(
@@ -562,7 +563,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
       expect(screen.getByText("This task has 1 child task")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByLabelText("Delete all child tasks"));
+      fireEvent.click(screen.getByRole("radio", { name: "Delete all child tasks" }));
       fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
 
       await waitFor(() => {
@@ -813,14 +814,14 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         child1Element.querySelector('[data-testid="child-task-id-child-001"]')
       ).toHaveAttribute("title", `Task ID: ${childTask1.id}`);
       expect(child1Element).toHaveTextContent("First child task");
-      expect(child1Element).toHaveTextContent("in progress");
+      expect(child1Element).toHaveTextContent("In progress");
 
       const child2Element = screen.getByTestId("child-task-child-002");
       expect(
         child2Element.querySelector('[data-testid="child-task-id-child-002"]')
       ).toHaveAttribute("title", `Ticket ID: ${childTask2.id}`);
       expect(child2Element).toHaveTextContent("Second child task");
-      expect(child2Element).toHaveTextContent("todo");
+      expect(child2Element).toHaveTextContent("Todo");
     });
 
     it("calls onTaskSelect when a child task is clicked", () => {
@@ -842,12 +843,16 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(mockOnTaskSelect).toHaveBeenCalledWith("child-001");
     });
 
-    it("does not render Children section when task has no children", () => {
+    it("renders Children section with a 0 count badge when task has no children", () => {
       useTaskStore.getState().setTasks([]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      expect(screen.queryByTestId("children-section")).not.toBeInTheDocument();
+      const childrenSection = screen.getByTestId("children-section");
+      expect(childrenSection).toBeInTheDocument();
+      expect(childrenSection).toHaveTextContent("Children");
+      expect(childrenSection).toHaveTextContent("0");
+      expect(childrenSection).toHaveTextContent("No child tasks");
     });
 
     it("renders Children toggle button for accessibility", () => {

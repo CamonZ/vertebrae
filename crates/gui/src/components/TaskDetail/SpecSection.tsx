@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Section } from "../../bindings";
 import { InlineEditField } from "./InlineEditField";
+import { Text } from "../atoms/Text";
 
 interface SpecSectionProps {
   description: string | null;
@@ -19,16 +20,16 @@ function SectionList({
 
   return (
     <div className="space-y-2">
-      <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+      <Text variant="eyebrow" color="tertiary" as="h4">
         {label}
-      </h4>
+      </Text>
       <ul className="space-y-1">
         {items.map((item, i) => (
           <li
             key={`${item.type}-${item.order ?? i}`}
-            className="flex items-start gap-2 text-sm text-text-secondary"
+            className="flex items-start gap-2 text-sm text-[var(--color-fg-soft)]"
           >
-            <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-text-muted/40" />
+            <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--color-fg-faint)]" />
             <span>{item.content}</span>
           </li>
         ))}
@@ -74,13 +75,13 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
     <div className="space-y-5 px-4 py-2" data-testid="spec-section">
       {grouped.goals.length > 0 && (
         <div className="space-y-2">
-          <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+          <Text variant="eyebrow" color="tertiary" as="h4">
             Goal
-          </h4>
+          </Text>
           {grouped.goals.map((goal, i) => (
             <p
               key={`goal-${goal.order ?? i}`}
-              className="text-sm text-text-primary leading-relaxed"
+              className="text-sm text-[var(--color-fg)] leading-relaxed"
             >
               {goal.content}
             </p>
@@ -89,9 +90,9 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
       )}
 
       <div className="space-y-2">
-        <h4 className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+        <Text variant="eyebrow" color="tertiary" as="h4">
           Description
-        </h4>
+        </Text>
         {onDescriptionChange ? (
           <InlineEditField
             value={description || ""}
@@ -101,8 +102,12 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
             onSave={onDescriptionChange}
           />
         ) : (
-          <p className="whitespace-pre-wrap text-sm text-text-secondary leading-relaxed">
-            {description || <span className="italic text-text-muted">No description</span>}
+          <p className="whitespace-pre-wrap text-sm text-[var(--color-fg-soft)] leading-relaxed">
+            {description || (
+              <span className="italic text-[var(--color-fg-mute)]">
+                No description
+              </span>
+            )}
           </p>
         )}
       </div>

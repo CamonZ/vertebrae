@@ -129,7 +129,7 @@ describe("TraceMiniView", () => {
     );
 
     expect(screen.getByText("Implementation")).toBeInTheDocument();
-    expect(screen.getByText("in progress")).toBeInTheDocument();
+    expect(screen.getByText("In progress")).toBeInTheDocument();
   });
 
   it("renders the last execution status pill from the most recent execution", () => {
@@ -188,9 +188,9 @@ describe("TraceMiniView", () => {
     ).toHaveTextContent("7 attempts");
     expect(subtreeRollup).toHaveTextContent("$1.25");
 
-    // Visually distinguished: subtree card uses primary accent
-    expect(subtreeRollup.className).toContain("primary");
-    expect(taskRollup.className).not.toContain("primary");
+    // Visually distinguished: subtree card uses the canonical accent token
+    expect(subtreeRollup.className).toContain("var(--color-accent)");
+    expect(taskRollup.className).not.toContain("var(--color-accent)");
   });
 
   it("singularizes the run/attempt labels when the counts are exactly one", () => {

@@ -206,7 +206,7 @@ describe("TaskRelations", () => {
 
       await userEvent.click(screen.getByText("No parent (root task)"));
 
-      const warningDot = document.querySelector(".bg-warning");
+      const warningDot = document.querySelector('[class*="--color-warn"]');
       expect(warningDot).toBeInTheDocument();
     });
 

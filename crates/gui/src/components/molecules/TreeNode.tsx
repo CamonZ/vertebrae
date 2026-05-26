@@ -15,6 +15,18 @@ interface TreeNodeProps {
   right?: ReactNode;
   children: ReactNode;
   className?: string;
+  /** Makes the row focusable; the tree controller / consumer owns keyboard. */
+  tabIndex?: number;
+  /** Keyboard handler for the row (e.g. Enter/Space to select). */
+  onKeyDown?: (event: React.KeyboardEvent) => void;
+  /** Optional test id forwarded to the row element. */
+  testId?: string;
+  /**
+   * Two-line rows: let the row grow to fit a title + metadata line instead of
+   * the dense single-line `h-8`. The chevron and icon align to the top so they
+   * track the title line.
+   */
+  multiline?: boolean;
 }
 
 /**
@@ -32,6 +44,10 @@ export function TreeNode({
   right,
   children,
   className,
+  tabIndex,
+  onKeyDown,
+  testId,
+  multiline,
 }: TreeNodeProps) {
   return (
     <div
@@ -40,12 +56,22 @@ export function TreeNode({
       aria-expanded={hasChildren ? expanded : undefined}
       aria-selected={selected || undefined}
       onClick={onSelect}
+      onKeyDown={onKeyDown}
+      tabIndex={tabIndex}
+      data-testid={testId}
+      data-selected={selected || undefined}
       className={[
-        "group flex h-8 cursor-pointer items-center gap-1.5 pr-2 text-sm",
+        "group relative flex cursor-pointer gap-1.5 pr-2 text-sm",
+        multiline ? "min-h-[3.25rem] items-start py-2" : "h-8 items-center",
         "transition-[background-color] duration-[var(--t-fast)]",
+        "focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]",
+        // Selected rows: a solid accent bar pinned to the left edge plus a calm
+        // tint. The bar is an inset pseudo-replacement so it never shifts the
+        // content the way a left border would, and the tint reads as selection
+        // rather than the heavy accent-wash fill used previously.
         selected
-          ? "bg-[var(--color-accent-wash)] border-l-2 border-[var(--color-accent)]"
-          : "border-l-2 border-transparent hover:bg-[var(--color-bg-1)]",
+          ? "bg-[color-mix(in_oklch,var(--color-accent)_8%,var(--color-bg))] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"
+          : "hover:bg-[var(--color-bg-1)]",
         className,
       ]
         .filter(Boolean)
@@ -60,15 +86,16 @@ export function TreeNode({
         }}
         aria-label={expanded ? "Collapse" : "Expand"}
         className={[
-          "flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-xs)]",
+          "flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-xs)]",
+          multiline ? "mt-px" : "",
           hasChildren
-            ? "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)]"
+            ? "text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)]"
             : "invisible",
         ].join(" ")}
       >
         <span
           className={[
-            "inline-block text-2xs transition-transform duration-[var(--t-fast)]",
+            "inline-block text-2xl leading-none transition-transform duration-[var(--t-fast)]",
             expanded ? "rotate-90" : "",
           ].join(" ")}
           aria-hidden
@@ -76,12 +103,32 @@ export function TreeNode({
           ▸
         </span>
       </button>
-      {icon && <span className="shrink-0 text-[var(--color-fg-mute)]">{icon}</span>}
+      {icon && (
+        <span
+          className={[
+            "shrink-0 text-[var(--color-fg-mute)]",
+            // Match the chevron's top offset so the leading glyph and the
+            // chevron sit on the same line as the title in multiline rows.
+            multiline ? "mt-px" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {icon}
+        </span>
+      )}
       <span className="min-w-0 flex-1 truncate text-[var(--color-fg)]">
         {children}
       </span>
       {right && (
-        <span className="shrink-0 font-mono text-eyebrow text-[var(--color-fg-mute)]">
+        <span
+          className={[
+            "shrink-0 font-mono text-eyebrow text-[var(--color-fg-mute)]",
+            multiline ? "mt-0.5" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           {right}
         </span>
       )}

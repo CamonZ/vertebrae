@@ -41,7 +41,6 @@ import {
   type LayoutEdge,
   usePipelineSummary,
   useTaskRunTrace,
-  useStepTasks,
   useTasks,
 } from "../hooks";
 import type {
@@ -70,6 +69,8 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
+import { LevelMark } from "../components/shared/LevelMark";
+import { StatusBadge } from "../components/molecules/StatusBadge";
 import { Count } from "../components/atoms";
 import { UnifiedChatView, projectTaskRunTrace } from "../components/Traces";
 import { popOut } from "../utils";
@@ -467,10 +468,6 @@ function AllWorkflowsPipelineInner() {
   // Selection state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-
-  // On-demand per-step task fetch — only triggers when a step is selected.
-  // Keeps the page from doing a project-wide listTasks on mount.
-  const { tasks: stepTasks } = useStepTasks(selectedStepId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
     null
   );
@@ -1195,9 +1192,6 @@ function AllWorkflowsPipelineInner() {
         <StepDetailPanel
           stepId={selectedStepId}
           allSteps={allSteps}
-          tasks={stepTasks}
-          onTaskSelect={handleRelatedTaskSelect}
-          selectedTaskId={selectedTaskId}
           onClose={handleCloseStepPanel}
           onDeleted={handleCloseStepPanel}
           onBack={panelHistory.length > 0 ? handleBack : undefined}
@@ -1597,10 +1591,14 @@ function ActiveRunsPanel({
                         <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
                           {childTask.title}
                         </span>
-                        <span className="min-w-0 max-w-32 shrink truncate text-2xs text-text-muted">
-                          {childTask.workflow_name ?? "No workflow"}{" "}
-                          <span aria-hidden="true">&middot;</span>{" "}
-                          {childTask.step_name ?? "No step"}
+                        <span className="flex min-w-0 max-w-40 shrink items-center text-2xs text-text-muted">
+                          <StatusBadge
+                            state={{
+                              kind: "workflow",
+                              workflow: childTask.workflow_name ?? "",
+                              step: childTask.step_name ?? "",
+                            }}
+                          />
                         </span>
                       </div>
                     ))}
@@ -1638,8 +1636,6 @@ function TaskPanelRow({
   stepTypeById?: StepTypeById;
   pending?: boolean;
 }) {
-  const workflowName = task.workflow_name ?? "No workflow";
-  const stepName = task.step_name ?? "Unknown step";
   return (
     <div className="flex items-start justify-between gap-3 px-3 py-2 hover:bg-bg-secondary">
       <div className="flex min-w-0 flex-1 items-start gap-2">
@@ -1686,8 +1682,21 @@ function TaskPanelRow({
             <DetailsIcon />
           </IconButton>
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-text-primary">
+            <LevelMark level={task.level} className="h-5 w-4" />
+            <span className="min-w-0 truncate">{task.title}</span>
+            {(task.workflow_name || task.step_name) && (
+              <StatusBadge
+                state={{
+                  kind: "workflow",
+                  workflow: task.workflow_name ?? "",
+                  step: task.step_name ?? "",
+                }}
+              />
+            )}
+          </p>
+          <p className="mt-1 flex min-w-0 items-center text-xs text-text-muted">
             <IdentityBadge
               id={task.id}
               kind="task"
@@ -1695,10 +1704,6 @@ function TaskPanelRow({
               className="shrink-0"
               testId={testId}
             />
-            <span className="truncate">{task.title}</span>
-          </p>
-          <p className="mt-1 truncate text-xs text-text-muted">
-            {workflowName} <span aria-hidden="true">&middot;</span> {stepName}
           </p>
         </div>
       </div>

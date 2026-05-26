@@ -6,6 +6,9 @@ import { ResizablePanel } from "../ResizablePanel";
 import { OpenChatButton } from "../OpenChatButton";
 import { Toggle } from "../Toggle";
 import { IdentityBadge } from "../shared/EntityId";
+import { Text } from "../atoms/Text";
+import { Chip } from "../atoms/Chip";
+import { Badge } from "../atoms/Badge";
 
 interface WorkflowDetailPanelProps {
   workflow: Workflow | null;
@@ -29,22 +32,51 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2">
-      <span className="flex-shrink-0 font-mono text-2xs uppercase tracking-wider text-text-muted">
+      <Text variant="eyebrow" color="tertiary" className="flex-shrink-0">
         {label}
+      </Text>
+      <span className="text-right text-sm text-[var(--color-fg)]">
+        {children}
       </span>
-      <span className="text-right text-sm text-text-primary">{children}</span>
     </div>
   );
 }
 
 /**
- * Section header component
+ * Section-level header. Accent-colored to match the Task detail panel's
+ * section labels; the muted eyebrow (`color="tertiary"`) is reserved for
+ * sub-headings and DetailRow keys.
  */
 function SectionHeader({ title }: { title: string }) {
   return (
-    <h3 className="mb-2 font-mono text-2xs uppercase tracking-wider text-text-muted">
+    <Text variant="eyebrow" color="accent" as="h3" className="mb-2 block">
       {title}
-    </h3>
+    </Text>
+  );
+}
+
+/** Neutral icon button matching the Hearth detail-panel header affordance. */
+function IconButton({
+  onClick,
+  ariaLabel,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  ariaLabel: string;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={ariaLabel}
+      title={title}
+      className="cursor-pointer rounded-[var(--radius-sm)] p-1.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -121,23 +153,18 @@ export function WorkflowDetailPanel({
       glowColor="from-primary/0 via-primary/30 to-primary/0"
     >
       {/* Header */}
-      <div className="flex h-12 items-center justify-between border-b border-border px-4">
+      <div className="flex h-12 items-center justify-between border-b border-[var(--color-line)] px-4">
         <div className="flex items-center gap-2">
           {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label="Go back"
-            >
+            <IconButton onClick={onBack} ariaLabel="Go back">
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
               </svg>
-            </button>
+            </IconButton>
           )}
-          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+          <Text variant="eyebrow" color="tertiary" as="h2">
             Workflow Details
-          </h2>
+          </Text>
         </div>
         <div className="flex items-center gap-2">
           <OpenChatButton
@@ -146,12 +173,7 @@ export function WorkflowDetailPanel({
             label={workflow.name}
           />
           {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-              aria-label="Close panel"
-            >
+            <IconButton onClick={onClose} ariaLabel="Close panel">
               <svg
                 className="h-4 w-4"
                 fill="none"
@@ -165,31 +187,31 @@ export function WorkflowDetailPanel({
                   d="M6 18L18 6M6 6l12 12"
                 />
               </svg>
-            </button>
+            </IconButton>
           )}
         </div>
       </div>
 
       {/* Workflow title */}
-      <div className="border-b border-border px-4 py-3">
-        <h3 className="text-lg font-semibold text-text-primary">
+      <div className="border-b border-[var(--color-line)] px-4 py-3">
+        <h3 className="font-serif text-lg leading-snug text-[var(--color-fg)]">
           {workflow.name}
         </h3>
         <IdentityBadge
           id={workflow.id}
           kind="workflow"
-          className="mt-1 text-xs text-text-muted"
+          className="mt-1 text-xs text-[var(--color-fg-mute)]"
           testId="workflow-detail-id"
         />
       </div>
 
       {/* Content */}
-      <div className="flex-1 divide-y divide-border overflow-auto">
+      <div className="flex-1 divide-y divide-[var(--color-line)] overflow-auto">
         {/* Description */}
         {workflow.description && (
           <div className="p-4">
             <SectionHeader title="Description" />
-            <p className="text-sm leading-relaxed text-text-secondary">
+            <p className="text-sm leading-relaxed text-[var(--color-fg-soft)]">
               {workflow.description}
             </p>
           </div>
@@ -201,25 +223,23 @@ export function WorkflowDetailPanel({
           <div className="space-y-1">
             {workflow.is_default && (
               <DetailRow label="Default">
-                <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-primary">
-                  Yes
-                </span>
+                <Badge intent="accent">Yes</Badge>
               </DetailRow>
             )}
             {workflow.kanban_column && (
               <DetailRow label="Kanban Column">
-                <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                <Chip variant="static" className="font-mono">
                   {workflow.kanban_column}
-                </code>
+                </Chip>
               </DetailRow>
             )}
             <DetailRow label="Steps">{steps.length}</DetailRow>
             <DetailRow label="Tasks">{taskCount}</DetailRow>
             {initialStep && (
               <DetailRow label="Initial Step">
-                <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                <Chip variant="static" className="font-mono">
                   {initialStep.name}
-                </code>
+                </Chip>
               </DetailRow>
             )}
             <DetailRow label="Final">
@@ -230,7 +250,9 @@ export function WorkflowDetailPanel({
               />
             </DetailRow>
             {isFinalError && (
-              <p className="mt-1 text-right text-xs text-error">{isFinalError}</p>
+              <p className="mt-1 text-right text-xs text-[var(--color-err)]">
+                {isFinalError}
+              </p>
             )}
           </div>
         </div>
@@ -241,8 +263,7 @@ export function WorkflowDetailPanel({
             <div className="mb-2 flex items-center justify-between">
               <SectionHeader title={`Steps (${steps.length})`} />
               {onStepCreated && (
-                <button
-                  type="button"
+                <IconButton
                   onClick={() => {
                     // Create a new step with the next order number
                     const nextOrder = Math.max(...steps.map((s) => s.order ?? 0), -1) + 1;
@@ -269,14 +290,13 @@ export function WorkflowDetailPanel({
                         }
                       });
                   }}
-                  className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-success focus:outline-none focus-visible:ring-2 focus-visible:ring-success"
-                  aria-label="Create step"
+                  ariaLabel="Create step"
                   title="Create new step"
                 >
                   <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
                   </svg>
-                </button>
+                </IconButton>
               )}
             </div>
             <div className="space-y-2">
@@ -288,27 +308,27 @@ export function WorkflowDetailPanel({
                     <div
                       key={step.id || step.name}
                       onClick={() => onStepSelect?.(step)}
-                      className={`flex items-center gap-3 rounded-lg border border-border bg-bg-tertiary p-2 transition-colors ${
+                      className={`flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-2 transition-[border-color,background-color] duration-[var(--t-base)] ease-[var(--ease-default)] ${
                         onStepSelect
-                          ? "cursor-pointer hover:border-primary/50 hover:bg-bg-hover"
+                          ? "cursor-pointer hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-2)]"
                           : ""
                       }`}
                     >
-                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
+                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_30%,transparent)] bg-[var(--color-accent-wash)] font-mono text-xs font-bold text-[var(--color-accent)]">
                         {(step.order ?? 0) + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-text-primary">
+                        <p className="truncate text-sm font-medium text-[var(--color-fg)]">
                           {step.name}
                         </p>
                         {step.goal && (
-                          <p className="truncate text-xs text-text-muted">
+                          <p className="truncate text-xs text-[var(--color-fg-mute)]">
                             {step.goal}
                           </p>
                         )}
                       </div>
                       <code
-                        className="max-w-[10rem] shrink truncate rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-2xs text-text-muted"
+                        className="max-w-[10rem] shrink truncate rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-2xs text-[var(--color-fg-mute)]"
                         title={modelLabel}
                       >
                         {modelLabel}
@@ -327,9 +347,9 @@ export function WorkflowDetailPanel({
             <div className="space-y-1">
               {Object.entries(workflow.metadata ?? {}).map(([key, value]) => (
                 <DetailRow key={key} label={key}>
-                  <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                  <Chip variant="static" className="font-mono">
                     {value}
-                  </code>
+                  </Chip>
                 </DetailRow>
               ))}
             </div>
