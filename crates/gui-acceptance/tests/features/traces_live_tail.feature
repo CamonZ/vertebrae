@@ -14,15 +14,12 @@ Feature: Traces THREAD mode polish — live-tail and shared filters
     Given I create a workflow with:
       | name | Live Tail Workflow |
     And I create a step "Live Tail Step" in the workflow "Live Tail Workflow" via the CLI
-    And the GUI is on the pipeline view
+    And the GUI is showing the task list
     When I create a task with:
       | title    | Live Tail Root Task |
       | workflow | Live Tail Workflow  |
-    Then the GUI should show an element with title "1 task(s)" within 10 seconds
-    When I click on the element containing text "Live Tail Step"
-    Then the GUI should show "Tasks" within 5 seconds
-    When I click on the element containing text "Tasks"
-    And I click on the element containing text "Live Tail Root Task"
+    Then the GUI should show "Live Tail Root Task" within 10 seconds
+    When I click on the element containing text "Live Tail Root Task"
     Then the GUI should show "Live Tail Root Task" within 5 seconds
     When I click on the element with test id "trace-mini-explore"
     Then the GUI should show "Σ Runs" within 10 seconds

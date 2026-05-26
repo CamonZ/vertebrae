@@ -7,15 +7,12 @@ Feature: Traces CORRIDOR mode renders the subtree as a DAG
     Given I create a workflow with:
       | name | Corridor Mode Workflow |
     And I create a step "Corridor Mode Step" in the workflow "Corridor Mode Workflow" via the CLI
-    And the GUI is on the pipeline view
+    And the GUI is showing the task list
     When I create a task with:
       | title    | Corridor Mode Root Task |
       | workflow | Corridor Mode Workflow  |
-    Then the GUI should show an element with title "1 task(s)" within 10 seconds
-    When I click on the element containing text "Corridor Mode Step"
-    Then the GUI should show "Tasks" within 5 seconds
-    When I click on the element containing text "Tasks"
-    And I click on the element containing text "Corridor Mode Root Task"
+    Then the GUI should show "Corridor Mode Root Task" within 10 seconds
+    When I click on the element containing text "Corridor Mode Root Task"
     Then the GUI should show "Corridor Mode Root Task" within 5 seconds
     When I click on the element with test id "trace-mini-explore"
     Then the GUI should show "Σ Runs" within 10 seconds

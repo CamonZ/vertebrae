@@ -7,7 +7,24 @@ import {
   userEvent,
 } from "../test/test-utils";
 import { TasksPage } from "./TasksPage";
+import { useShellStore } from "../stores/shellStore";
 import type { Task } from "../bindings";
+
+/**
+ * The visible page title and status pills (active count, task counts, and the
+ * selected-task short ID) live in the shell header now, surfaced via
+ * useShellHeader. The shell chrome isn't mounted in this isolated render, so we
+ * mount the stored header actions alongside the page to assert on them.
+ */
+function TasksPageWithHeader() {
+  const headerActions = useShellStore((s) => s.headerActions);
+  return (
+    <>
+      <TasksPage />
+      <div data-testid="shell-header-actions">{headerActions}</div>
+    </>
+  );
+}
 
 let mockTasks: Task[] = [];
 
@@ -54,8 +71,8 @@ describe("TasksPage", () => {
       }),
     ];
 
-    render(<TasksPage />);
-    fireEvent.click(screen.getByRole("treeitem"));
+    render(<TasksPageWithHeader />);
+    fireEvent.click(screen.getAllByRole("treeitem")[0]);
 
     expect(screen.getByTestId("tasks-page-selected-task-id")).toHaveTextContent(
       "860cde1b"
@@ -74,8 +91,8 @@ describe("TasksPage", () => {
       }),
     ];
 
-    render(<TasksPage />);
-    fireEvent.click(screen.getByRole("treeitem"));
+    render(<TasksPageWithHeader />);
+    fireEvent.click(screen.getAllByRole("treeitem")[0]);
 
     const selectedTaskId = screen.getByTestId("tasks-page-selected-task-id");
     const copyButton = selectedTaskId.querySelector('[role="button"]');

@@ -1,6 +1,9 @@
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { TaskLevel, TaskFilterOptions } from '../../bindings';
 import { ExpandCollapseAllButton } from './ExpandCollapseAllButton';
+import { FilterBar, type ActiveFilter } from '../molecules/FilterBar';
+import { SearchInput } from '../molecules/SearchInput';
+import { Select } from '../atoms/Select';
 
 interface TaskFiltersProps {
   filters: TaskFilterOptions;
@@ -14,6 +17,11 @@ const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
   { value: 'epic', label: 'Epic' },
   { value: 'ticket', label: 'Ticket' },
   { value: 'task', label: 'Task' },
+];
+
+const LEVEL_SELECT_OPTIONS = [
+  { value: '', label: 'All levels' },
+  ...LEVEL_OPTIONS,
 ];
 
 export function TaskFilters({
@@ -33,9 +41,8 @@ export function TaskFilters({
   );
 
   const handleSearchChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const search = event.target.value || null;
-      onFiltersChange({ ...filters, search });
+    (value: string) => {
+      onFiltersChange({ ...filters, search: value || null });
     },
     [filters, onFiltersChange]
   );
@@ -48,96 +55,66 @@ export function TaskFilters({
     });
   }, [filters, onFiltersChange]);
 
-  const hasActiveFilters = filters.levels || filters.search;
   const selectedLevel = filters.levels?.[0] ?? '';
 
+  // Active-filter chips rendered by FilterBar below the control row. Each is
+  // individually dismissible; FilterBar also renders the clear-all affordance.
+  const activeFilters = useMemo<ActiveFilter[]>(() => {
+    const chips: ActiveFilter[] = [];
+    if (filters.search) {
+      chips.push({
+        id: 'search',
+        label: `Search: ${filters.search}`,
+        onClear: () => onFiltersChange({ ...filters, search: null }),
+      });
+    }
+    if (filters.levels?.[0]) {
+      const level = filters.levels[0];
+      const label =
+        LEVEL_OPTIONS.find((o) => o.value === level)?.label ?? level;
+      chips.push({
+        id: 'level',
+        label: `Level: ${label}`,
+        onClear: () => onFiltersChange({ ...filters, levels: null }),
+      });
+    }
+    return chips;
+  }, [filters, onFiltersChange]);
+
   return (
-    <div className="flex w-full flex-wrap items-center gap-3">
-      {/* Search input */}
-      <div className="relative min-w-48 flex-1">
-        <input
-          type="text"
-          placeholder="Search tasks by title or ID..."
+    <FilterBar
+      search={
+        <SearchInput
           value={filters.search ?? ''}
           onChange={handleSearchChange}
-          className="h-8 w-full rounded-md border border-border bg-bg-tertiary px-3 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          debounceMs={0}
+          placeholder="Search tasks by title or ID..."
           aria-label="Search tasks by title or ID"
           data-testid="task-search-input"
         />
-        <svg
-          className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-          />
-        </svg>
-      </div>
-
-      {/* Level filter */}
-      <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-tertiary/50 px-1">
-        <label
-          htmlFor="level-filter"
-          className="px-2 font-mono text-2xs uppercase tracking-wider text-text-muted"
-        >
-          Level
-        </label>
-        <select
-          id="level-filter"
-          value={selectedLevel}
-          onChange={handleLevelChange}
-          className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        >
-          <option value="">All</option>
-          {LEVEL_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Clear filters button */}
-      {hasActiveFilters && (
-        <button
-          type="button"
-          onClick={handleClearFilters}
-          className="flex h-8 items-center gap-1.5 rounded-md border border-border bg-bg-tertiary/50 px-3 text-xs text-text-muted transition-all hover:border-error/30 hover:bg-error/10 hover:text-error focus:outline-none focus:ring-2 focus:ring-error/20"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M6 18L18 6M6 6l12 12"
+      }
+      filters={
+        <>
+          <div className="w-40">
+            <Select
+              options={LEVEL_SELECT_OPTIONS}
+              value={selectedLevel}
+              onChange={handleLevelChange}
+              aria-label="Filter by level"
+              id="level-filter"
             />
-          </svg>
-          Clear
-        </button>
-      )}
-
-      {/* Expand/Collapse all */}
-      {onToggleExpandAll && (
-        <div className="ml-auto">
-          <ExpandCollapseAllButton
-            allExpanded={allExpanded}
-            onToggle={onToggleExpandAll}
-            disabled={expandAllDisabled}
-          />
-        </div>
-      )}
-    </div>
+          </div>
+          {onToggleExpandAll && (
+            <ExpandCollapseAllButton
+              allExpanded={allExpanded}
+              onToggle={onToggleExpandAll}
+              disabled={expandAllDisabled}
+            />
+          )}
+        </>
+      }
+      active={activeFilters}
+      onClearAll={handleClearFilters}
+    />
   );
 }

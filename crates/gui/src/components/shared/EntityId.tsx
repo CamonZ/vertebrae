@@ -213,7 +213,10 @@ export function IdentityBadge({
   copyable,
   level,
 }: BaseEntityIdProps): ReactNode {
-  const textColor = taskLevelColor(kind, level) ?? "text-text-muted";
+  // The level is conveyed by surrounding affordances (e.g. the tree's level
+  // mark), so the badge renders in a single neutral tone rather than a
+  // per-level tint. `level` is still used for the accessible label/title.
+  const textColor = "text-text-muted";
   return (
     <EntityIdShell
       id={id}

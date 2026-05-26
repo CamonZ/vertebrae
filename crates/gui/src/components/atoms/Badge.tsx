@@ -15,9 +15,11 @@ interface BadgeProps {
   size?: BadgeSize;
   /** Show a leading colored dot (or only the dot when there is no label). */
   dot?: boolean | "only";
-  /** Render a numeric count badge (small pill on a nav item). */
-  count?: number;
+  /** Render a count badge (small pill). Accepts a ratio string like "5/13". */
+  count?: number | string;
   className?: string;
+  /** Stable selector for integration/acceptance tests; sets data-testid. */
+  testId?: string;
   children?: ReactNode;
 }
 
@@ -50,11 +52,13 @@ export function Badge({
   dot,
   count,
   className,
+  testId,
   children,
 }: BadgeProps) {
-  if (typeof count === "number") {
+  if (count !== undefined) {
     return (
       <span
+        data-testid={testId}
         className={[
           "inline-flex min-w-[18px] h-[18px] px-1.5 items-center justify-center",
           "rounded-full font-mono text-2xs font-medium",
@@ -81,7 +85,7 @@ export function Badge({
     .join(" ");
 
   return (
-    <span className={classes}>
+    <span data-testid={testId} className={classes}>
       {dot && (
         <span
           className="inline-block h-1.5 w-1.5 rounded-full bg-current"

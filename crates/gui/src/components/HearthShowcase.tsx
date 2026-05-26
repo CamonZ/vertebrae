@@ -23,6 +23,7 @@ import {
   Panel,
   SearchInput,
   SectionGroup,
+  SegmentedControl,
   StatusBadge,
   ToolCallBlock,
   TreeNode,
@@ -165,6 +166,7 @@ function StepTypePlate({ kind }: { kind: (typeof STEP_KINDS)[number] }) {
 export function HearthShowcase() {
   const [filterActive, setFilterActive] = useState(false);
   const [toggleOn, setToggleOn] = useState(true);
+  const [segment, setSegment] = useState<"delete" | "keep">("keep");
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -415,6 +417,17 @@ export function HearthShowcase() {
               }}
             />
           </div>
+        </Card>
+        <Card header="Segmented control">
+          <SegmentedControl
+            ariaLabel="Cascade choice"
+            options={[
+              { value: "delete", label: "Delete all child tasks" },
+              { value: "keep", label: "Keep child tasks without parent" },
+            ]}
+            value={segment}
+            onChange={setSegment}
+          />
         </Card>
         <Card header="Tree nodes">
           <div className="overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)]">

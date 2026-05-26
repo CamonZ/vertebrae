@@ -391,12 +391,12 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
       within(rows[0]).getByText("Review pipeline events")
     ).toBeInTheDocument();
     expect(rows[0]).toHaveTextContent("Review");
-    expect(rows[0]).toHaveTextContent("human_check");
+    expect(rows[0]).toHaveTextContent("Human check");
     expect(
       within(rows[1]).getByText("Implement trace rail")
     ).toBeInTheDocument();
     expect(rows[1]).toHaveTextContent("Implementation");
-    expect(rows[1]).toHaveTextContent("code");
+    expect(rows[1]).toHaveTextContent("Code");
     expect(rows).toHaveLength(2);
     expect(
       screen.getAllByTestId("pipeline-active-run-task-id")[0]
@@ -406,7 +406,7 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
     expect(childRows[0]).toHaveTextContent("child-al");
     expect(childRows[0]).toHaveTextContent("Child implementation task");
     expect(childRows[0]).toHaveTextContent("Implementation");
-    expect(childRows[0]).toHaveTextContent("todo");
+    expect(childRows[0]).toHaveTextContent("Todo");
     expect(within(childRows[0]).getByLabelText("Running")).toBeInTheDocument();
     expect(screen.queryByText("Completed child task")).not.toBeInTheDocument();
   });
