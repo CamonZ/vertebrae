@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { commands } from '../../bindings';
 import { NavigableReference, ScanIdentifier } from '../shared/EntityId';
+import { Badge } from '../atoms/Badge';
 
 interface TaskRelationsProps {
   taskId?: string;
@@ -13,6 +14,15 @@ interface TaskRelationsProps {
   onTaskSelect?: (taskId: string) => void;
   onRelationshipChange?: () => void;
 }
+
+const pickerInputClasses =
+  'w-full rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none';
+
+const cancelButtonClasses =
+  'p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] transition-colors cursor-pointer';
+
+const editableRowClasses =
+  'cursor-pointer rounded-[var(--radius-sm)] p-2 hover:bg-[var(--color-bg-2)] transition-colors';
 
 interface RelationSectionProps {
   title: string;
@@ -53,7 +63,7 @@ function TaskLink({
       tabIndex={0}
       onClick={() => onClick?.(taskId)}
       onKeyDown={handleKeyDown}
-      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-1 font-mono text-xs text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary focus:outline-none focus:ring-2 focus:ring-border-focus cursor-pointer"
+      className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2 py-1 font-mono text-xs text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] cursor-pointer"
       title={`View task ${taskId}`}
     >
       <NavigableReference id={taskId} kind="task" testId="task-relation-id" />
@@ -72,13 +82,11 @@ function RelationSection({
   onTaskSelect,
 }: RelationSectionProps) {
   return (
-    <div className="border-b border-border pb-3 last:border-b-0 last:pb-0">
+    <div className="border-b border-[var(--color-line)] pb-3 last:border-b-0 last:pb-0">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-text-muted">{icon}</span>
-        <span className="text-sm font-medium text-text-primary">{title}</span>
-        <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs text-text-muted">
-          {taskIds.length}
-        </span>
+        <span className="text-[var(--color-fg-mute)]">{icon}</span>
+        <span className="text-sm font-medium text-[var(--color-fg)]">{title}</span>
+        <Badge count={taskIds.length} intent="neutral" />
       </div>
       {taskIds.length > 0 ? (
         <div className="flex flex-wrap gap-2">
@@ -87,7 +95,7 @@ function RelationSection({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-text-muted">{emptyMessage}</p>
+        <p className="text-xs text-[var(--color-fg-mute)]">{emptyMessage}</p>
       )}
     </div>
   );
@@ -157,7 +165,7 @@ function ParentPicker({
     <div className="space-y-2">
       <div className="flex items-start gap-2">
         {/* Warning dot indicator */}
-        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-warning" />
+        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-[var(--color-warn)]" />
         
         <div className="flex-1 min-w-0 space-y-2">
           <input
@@ -166,25 +174,25 @@ function ParentPicker({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoFocus
-            className="w-full rounded border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
+            className={pickerInputClasses}
           />
 
           {error && (
-            <div className="rounded bg-error/10 p-2 text-xs text-error">{error}</div>
+            <div className="rounded-[var(--radius-sm)] bg-[var(--color-err-wash)] p-2 text-xs text-[var(--color-err)]">{error}</div>
           )}
 
           {isLoading ? (
-            <div className="text-center text-xs text-text-muted py-4">Loading tasks...</div>
+            <div className="text-center text-xs text-[var(--color-fg-mute)] py-4">Loading tasks...</div>
           ) : filteredTasks.length === 0 ? (
-            <div className="text-center text-xs text-text-muted py-4">No tasks found</div>
+            <div className="text-center text-xs text-[var(--color-fg-mute)] py-4">No tasks found</div>
           ) : (
-            <div className="max-h-48 overflow-y-auto space-y-1 rounded border border-border bg-bg-tertiary p-1">
+            <div className="max-h-48 overflow-y-auto space-y-1 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] p-1">
               {filteredTasks.map((task) => (
                 <button
                   key={task.id}
                   type="button"
                   onClick={() => onParentChange(task.id)}
-                  className="block w-full rounded px-3 py-2 text-left text-xs text-text-primary hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+                  className="block w-full rounded-[var(--radius-sm)] px-3 py-2 text-left text-xs text-[var(--color-fg)] hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
                 >
                   <ScanIdentifier
                     id={task.id}
@@ -204,7 +212,7 @@ function ParentPicker({
           <button
             type="button"
             onClick={onCancel}
-            className="p-1.5 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
+            className={cancelButtonClasses}
             title="Cancel (Esc)"
             aria-label="Cancel"
           >
@@ -216,7 +224,7 @@ function ParentPicker({
             <button
               type="button"
               onClick={onRemove}
-              className="p-1.5 rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors cursor-pointer"
+              className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-err-wash)] hover:text-[var(--color-err)] transition-colors cursor-pointer"
               title="Remove parent"
               aria-label="Remove parent"
             >
@@ -272,7 +280,7 @@ function DependencyPicker({
     <div className="space-y-2">
       <div className="flex items-start gap-2">
         {/* Warning dot indicator */}
-        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-warning" />
+        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-[var(--color-warn)]" />
         
         <div className="flex-1 min-w-0 space-y-2">
           <input
@@ -281,29 +289,29 @@ function DependencyPicker({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             autoFocus
-            className="w-full rounded border border-border bg-bg-secondary px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30"
+            className={pickerInputClasses}
           />
 
           {error && (
-            <div className="rounded bg-error/10 p-2 text-xs text-error">{error}</div>
+            <div className="rounded-[var(--radius-sm)] bg-[var(--color-err-wash)] p-2 text-xs text-[var(--color-err)]">{error}</div>
           )}
 
           {isLoading ? (
-            <div className="text-center text-xs text-text-muted py-4">Loading tasks...</div>
+            <div className="text-center text-xs text-[var(--color-fg-mute)] py-4">Loading tasks...</div>
           ) : filteredTasks.length === 0 ? (
-            <div className="text-center text-xs text-text-muted py-4">No tasks found</div>
+            <div className="text-center text-xs text-[var(--color-fg-mute)] py-4">No tasks found</div>
           ) : (
-            <div className="max-h-48 overflow-y-auto space-y-1 rounded border border-border bg-bg-tertiary p-1">
+            <div className="max-h-48 overflow-y-auto space-y-1 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] p-1">
               {filteredTasks.map((task) => (
                 <label
                   key={task.id}
-                  className="flex items-start gap-2 rounded px-3 py-2 cursor-pointer hover:bg-primary/10 transition-colors"
+                  className="flex items-start gap-2 rounded-[var(--radius-sm)] px-3 py-2 cursor-pointer hover:bg-[var(--color-accent-wash)] transition-colors"
                 >
                   <input
                     type="checkbox"
                     checked={selectedDeps.includes(task.id)}
                     onChange={() => toggleDependency(task.id)}
-                    className="mt-0.5 rounded border-border cursor-pointer"
+                    className="mt-0.5 rounded-[var(--radius-xs)] border-[var(--color-line)] cursor-pointer"
                   />
                   <div className="flex-1 min-w-0">
                     <ScanIdentifier
@@ -312,7 +320,7 @@ function DependencyPicker({
                       className="text-2xs"
                       testId="dependency-picker-task-id"
                     />
-                    <div className="truncate text-xs text-text-primary">{task.title}</div>
+                    <div className="truncate text-xs text-[var(--color-fg)]">{task.title}</div>
                   </div>
                 </label>
               ))}
@@ -326,7 +334,7 @@ function DependencyPicker({
             type="button"
             onClick={() => onDependenciesChange(selectedDeps)}
             disabled={!hasChanges}
-            className="p-1.5 rounded text-warning hover:bg-warning/10 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+            className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-warn)] hover:bg-[var(--color-warn-wash)] transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             title="Save changes"
             aria-label="Save"
           >
@@ -337,7 +345,7 @@ function DependencyPicker({
           <button
             type="button"
             onClick={onCancel}
-            className="p-1.5 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
+            className={cancelButtonClasses}
             title="Cancel (Esc)"
             aria-label="Cancel"
           >
@@ -468,26 +476,26 @@ export function TaskRelations({
   }, [isEditingParent, isEditingDeps]);
 
   if (!taskId) {
-    return <div className="p-4 text-xs text-text-muted">No task selected</div>;
+    return <div className="p-4 text-xs text-[var(--color-fg-mute)]">No task selected</div>;
   }
 
   return (
     <div className="space-y-4 p-4">
       {/* Error message */}
       {error && (
-        <div className="rounded bg-error/10 p-3 text-xs text-error">
+        <div className="rounded-[var(--radius-sm)] bg-[var(--color-err-wash)] p-3 text-xs text-[var(--color-err)]">
           <div className="font-medium">Error:</div>
           <div>{error}</div>
         </div>
       )}
 
       {/* Parent */}
-      <div className="border-b border-border pb-3">
+      <div className="border-b border-[var(--color-line)] pb-3">
         <div className="mb-2 flex items-center gap-2">
-          <svg className="h-4 w-4 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 text-[var(--color-fg-mute)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l7-7m0 0l7 7m-7-7v18" />
           </svg>
-          <span className="text-sm font-medium text-text-primary">Parent</span>
+          <span className="text-sm font-medium text-[var(--color-fg)]">Parent</span>
         </div>
 
         {isEditingParent ? (
@@ -501,13 +509,13 @@ export function TaskRelations({
         ) : (
           <div
             onClick={() => !isSaving && setIsEditingParent(true)}
-            className="cursor-pointer rounded p-2 hover:bg-bg-hover transition-colors"
+            className={editableRowClasses}
             title="Click to edit"
           >
             {parentId ? (
               <TaskLink taskId={parentId} onClick={onTaskSelect} />
             ) : (
-              <p className="text-xs text-text-muted italic">No parent (root task)</p>
+              <p className="text-xs text-[var(--color-fg-mute)] italic">No parent (root task)</p>
             )}
           </div>
         )}
@@ -527,15 +535,13 @@ export function TaskRelations({
       />
 
       {/* Blocked by (depends_on) */}
-      <div className="border-b border-border pb-3 last:border-b-0 last:pb-0">
+      <div className="border-b border-[var(--color-line)] pb-3 last:border-b-0 last:pb-0">
         <div className="mb-2 flex items-center gap-2">
-          <svg className="h-4 w-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 text-[var(--color-warn)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
-          <span className="text-sm font-medium text-text-primary">Blocked By</span>
-          <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs text-text-muted">
-            {dependsOnIds.length}
-          </span>
+          <span className="text-sm font-medium text-[var(--color-fg)]">Blocked By</span>
+          <Badge count={dependsOnIds.length} intent="neutral" />
         </div>
 
         {isEditingDeps ? (
@@ -548,7 +554,7 @@ export function TaskRelations({
         ) : (
           <div
             onClick={() => !isSaving && setIsEditingDeps(true)}
-            className="cursor-pointer rounded p-2 hover:bg-bg-hover transition-colors"
+            className={editableRowClasses}
             title="Click to edit"
           >
             {dependsOnIds.length > 0 ? (
@@ -558,7 +564,7 @@ export function TaskRelations({
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-text-muted italic">No blockers</p>
+              <p className="text-xs text-[var(--color-fg-mute)] italic">No blockers</p>
             )}
           </div>
         )}
@@ -568,7 +574,7 @@ export function TaskRelations({
       <RelationSection
         title="Blocks"
         icon={
-          <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 text-[var(--color-info)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
           </svg>
         }

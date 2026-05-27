@@ -20,6 +20,8 @@ export { EmptyState } from "./EmptyState";
 export { StatusBadge } from "./StatusBadge";
 export type { StatusBadgeState, TaskExecutionState } from "./StatusBadge";
 
+export { StepBadge } from "./StepBadge";
+
 export { ChatMessage } from "./ChatMessage";
 export type { ChatRole } from "./ChatMessage";
 
@@ -32,6 +34,9 @@ export { FilterBar } from "./FilterBar";
 export type { ActiveFilter } from "./FilterBar";
 
 export { SectionGroup } from "./SectionGroup";
+
+export { SegmentedControl } from "./SegmentedControl";
+export type { SegmentedOption } from "./SegmentedControl";
 
 // Existing project molecules that already match Hearth — re-export for one-stop import.
 export { IdentityBadge } from "../shared/EntityId";

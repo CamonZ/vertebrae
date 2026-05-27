@@ -11,15 +11,12 @@ Feature: Stop a running workflow from the GUI
     And I create a step "run" in the workflow "Stop GUI Workflow" via the CLI
     And the step is marked final via the CLI
     And the step prompt is set to a mock that sleeps 15000 milliseconds
-    And the GUI is on the pipeline view
+    And the GUI is showing the task list
     When I create a task with:
       | title    | Stop GUI Task     |
       | workflow | Stop GUI Workflow |
-    Then the GUI should show an element with title "1 task(s)" within 10 seconds
-    When I click on the element with test id "step-node-run"
-    Then the GUI should show "Tasks" within 5 seconds
-    When I click on the element containing text "Tasks"
-    And I click on the element containing text "Stop GUI Task"
+    Then the GUI should show "Stop GUI Task" within 10 seconds
+    When I click on the element containing text "Stop GUI Task"
     Then the GUI should show "Stop GUI Task" within 5 seconds
     When I click on the element with title "Run the entire workflow for this task"
     Then the GUI should show an element with title "Stop the running orchestrator for this task" within 15 seconds

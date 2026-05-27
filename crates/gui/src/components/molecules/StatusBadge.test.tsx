@@ -16,11 +16,19 @@ describe("StatusBadge", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 
-  it("composes a workflow:step label", () => {
+  it("renders workflow and step as two segments of one breadcrumb", () => {
     render(
-      <StatusBadge state={{ kind: "workflow", workflow: "Implementation", step: "In Progress" }} />,
+      <StatusBadge state={{ kind: "workflow", workflow: "Implementation", step: "in_progress" }} />,
     );
-    expect(screen.getByText("Implementation / In Progress")).toBeInTheDocument();
+    expect(screen.getByText("Implementation")).toBeInTheDocument();
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+  });
+
+  it("omits the step segment when the step is empty", () => {
+    render(
+      <StatusBadge state={{ kind: "workflow", workflow: "Implementation", step: "" }} />,
+    );
+    expect(screen.getByText("Implementation")).toBeInTheDocument();
   });
 
   it("becomes interactive when onClick is provided", async () => {

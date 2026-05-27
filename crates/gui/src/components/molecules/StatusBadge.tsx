@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Badge } from "../atoms/Badge";
 import { Spinner } from "../Spinner";
 
@@ -25,13 +26,12 @@ interface Display {
   spinner?: boolean;
 }
 
-function displayFor(state: StatusBadgeState): Display {
-  if (typeof state === "object") {
-    return {
-      label: `${state.workflow} / ${state.step}`,
-      intent: "neutral",
-    };
-  }
+function formatStep(step: string): string {
+  if (!step) return "";
+  return step.charAt(0).toUpperCase() + step.slice(1).replace(/_/g, " ");
+}
+
+function displayFor(state: Exclude<StatusBadgeState, { kind: "workflow" }>): Display {
   switch (state) {
     case "queued":
       return { label: "Queued", intent: "neutral" };
@@ -53,16 +53,44 @@ function displayFor(state: StatusBadgeState): Display {
  * Badge for task surfaces so the vocabulary stays consistent.
  */
 export function StatusBadge({ state, size = "sm", onClick }: StatusBadgeProps) {
-  const { label, intent, spinner } = displayFor(state);
+  let badge: ReactNode;
 
-  const badge = (
-    <Badge intent={intent} size={size} dot={!spinner}>
-      <span className="inline-flex items-center gap-1.5">
-        {spinner && <Spinner className="h-3 w-3" />}
-        {label}
+  if (typeof state === "object") {
+    // Workflow breadcrumb: a single two-tone segmented pill reading
+    // "Workflow / Step", so the assignment and current step are one object.
+    // Either segment may be omitted (unassigned task, or workflow with no
+    // current step) and the divider only appears when both are present.
+    const workflow = state.workflow;
+    const step = formatStep(state.step);
+    badge = (
+      <span className="inline-flex max-w-full items-center overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] text-2xs font-medium">
+        {workflow && (
+          <span className="truncate bg-[var(--color-bg-2)] px-2 py-0.5 text-[var(--color-fg-soft)]">
+            {workflow}
+          </span>
+        )}
+        {step && (
+          <span
+            className={`truncate bg-[var(--color-bg-3)] px-2 py-0.5 text-[var(--color-fg-mute)] ${
+              workflow ? "border-l border-[var(--color-line-strong)]" : ""
+            }`}
+          >
+            {step}
+          </span>
+        )}
       </span>
-    </Badge>
-  );
+    );
+  } else {
+    const { label, intent, spinner } = displayFor(state);
+    badge = (
+      <Badge intent={intent} size={size} dot={!spinner}>
+        <span className="inline-flex items-center gap-1.5">
+          {spinner && <Spinner className="h-3 w-3" />}
+          {label}
+        </span>
+      </Badge>
+    );
+  }
 
   if (onClick) {
     return (

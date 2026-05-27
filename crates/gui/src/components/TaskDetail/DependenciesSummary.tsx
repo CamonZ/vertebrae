@@ -1,5 +1,6 @@
 import type { TaskLevel } from "../../bindings";
 import { NavigableReference } from "../shared/EntityId";
+import { Text } from "../atoms/Text";
 
 interface DependenciesSummaryProps {
   parentId: string | null;
@@ -31,7 +32,7 @@ function TaskLink({
       tabIndex={0}
       onClick={() => onClick?.(taskId)}
       onKeyDown={handleKeyDown}
-      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-0.5 transition-colors hover:bg-primary/10 cursor-pointer"
+      className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2 py-0.5 transition-colors hover:bg-[var(--color-accent-wash)] cursor-pointer"
     >
       <NavigableReference
         id={taskId}
@@ -61,11 +62,13 @@ function RelationRow({
 
   return (
     <div className="flex items-start gap-2 py-1.5">
-      <span className="mt-0.5 flex-shrink-0 text-text-muted">{icon}</span>
+      <span className="mt-0.5 flex-shrink-0 text-[var(--color-fg-mute)]">
+        {icon}
+      </span>
       <div className="min-w-0">
-        <span className="text-2xs font-medium uppercase tracking-wider text-text-muted">
+        <Text variant="eyebrow" color="tertiary">
           {label}
-        </span>
+        </Text>
         <div className="mt-1 flex flex-wrap gap-1.5">
           {taskIds.map((id) => (
             <TaskLink
@@ -94,7 +97,9 @@ export function DependenciesSummary({
   if (!hasAnyRelation) {
     return (
       <div className="px-4 py-3">
-        <p className="text-xs text-text-muted italic">No dependencies</p>
+        <p className="text-xs text-[var(--color-fg-mute)] italic">
+          No dependencies
+        </p>
       </div>
     );
   }

@@ -36,7 +36,7 @@ describe("AcceptanceCriteria", () => {
       );
 
       expect(
-        screen.getByText("No acceptance criteria defined")
+        screen.getByText("No test criteria defined")
       ).toBeInTheDocument();
     });
   });
@@ -154,7 +154,7 @@ describe("AcceptanceCriteria", () => {
 
       const text = screen.getByText("Met criterion");
       expect(text.className).toContain("line-through");
-      expect(text.className).toContain("text-text-muted");
+      expect(text.className).toContain("text-[var(--color-fg-mute)]");
     });
 
     it("pending criteria do not have line-through styling", () => {
@@ -177,7 +177,7 @@ describe("AcceptanceCriteria", () => {
 
       const text = screen.getByText("Pending criterion");
       expect(text.className).not.toContain("line-through");
-      expect(text.className).toContain("text-text-primary");
+      expect(text.className).toContain("text-[var(--color-fg)]");
     });
 
     it("not-met criteria (done=false, done_at set) do not have line-through", () => {
@@ -202,7 +202,7 @@ describe("AcceptanceCriteria", () => {
       expect(text.className).not.toContain("line-through");
     });
 
-    it("met criteria row has success background", () => {
+    it("met criterion has a transparent row and struck-through text", () => {
       const criteria = [
         createCriterion({
           content: "Met one",
@@ -220,8 +220,12 @@ describe("AcceptanceCriteria", () => {
         />
       );
 
-      const row = screen.getByText("Met one").closest("div[class*='rounded-lg']");
-      expect(row?.className).toContain("bg-success/5");
+      // Met state is conveyed by the accent checkbox + strikethrough text,
+      // not a tinted row background (canonical Hearth styling).
+      const text = screen.getByText("Met one");
+      expect(text.className).toContain("line-through");
+      const row = text.closest("div[class*='rounded-']");
+      expect(row?.className).toContain("bg-transparent");
     });
 
     it("not-met criteria row has error background", () => {
@@ -244,16 +248,16 @@ describe("AcceptanceCriteria", () => {
 
       const row = screen
         .getByText("Failed one")
-        .closest("div[class*='rounded-lg']");
-      expect(row?.className).toContain("bg-error/5");
+        .closest("div[class*='rounded-']");
+      expect(row?.className).toContain("bg-[var(--color-err-wash)]");
     });
   });
 
   describe("validation badges", () => {
-    it("shows human badge when criterion has no refs", () => {
+    it("shows no validation badge when criterion has no refs", () => {
       const criteria = [
         createCriterion({
-          content: "Human validated",
+          content: "No refs",
           order: 0,
         }),
       ];
@@ -266,7 +270,9 @@ describe("AcceptanceCriteria", () => {
         />
       );
 
-      expect(screen.getByText("human")).toBeInTheDocument();
+      // "human" was a fabricated label (absence of refs ≠ human validation).
+      expect(screen.queryByText("human")).not.toBeInTheDocument();
+      expect(screen.queryByText("machine")).not.toBeInTheDocument();
     });
 
     it("shows machine badge when criterion has refs", () => {

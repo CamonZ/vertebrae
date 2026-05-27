@@ -43,8 +43,6 @@ export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  useShellHeader("Tasks");
-
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
 
@@ -124,28 +122,69 @@ export function TasksPage() {
 
   const taskCount = countHierarchyTasks(hierarchy);
 
+  // Surface live/count/selection state in the shell header actions slot,
+  // mirroring how OperationsPage passes pill badges as the 2nd useShellHeader
+  // arg. This removes the redundant in-page title bar + footer.
+  const headerActions = useMemo(
+    () => (
+      <div className="flex items-center gap-2 text-xs">
+        {activeCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-ok-wash)] px-2.5 py-0.5 font-medium text-[var(--color-ok)]">
+            <span className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-ok)] opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" />
+            </span>
+            {activeCount} active
+          </span>
+        )}
+        {!currentIsLoading && !currentError && taskCount > 0 && (
+          <span className="rounded-full bg-[var(--color-bg-2)] px-2.5 py-0.5 font-mono font-medium text-[var(--color-fg-mute)]">
+            {taskCount} task{taskCount !== 1 ? "s" : ""}
+            {hierarchy.length > 0 && (
+              <span className="ml-1.5 text-[var(--color-fg-faint)]">
+                ({hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""})
+              </span>
+            )}
+          </span>
+        )}
+        {selectedTaskId && (
+          <span className="inline-flex items-center gap-1 font-mono text-[var(--color-fg-mute)]">
+            Selected{" "}
+            <IdentityBadge
+              id={selectedTaskId}
+              kind="task"
+              className="text-[var(--color-accent)]"
+              testId="tasks-page-selected-task-id"
+            />
+          </span>
+        )}
+      </div>
+    ),
+    [
+      activeCount,
+      currentIsLoading,
+      currentError,
+      taskCount,
+      hierarchy.length,
+      selectedTaskId,
+    ],
+  );
+
+  useShellHeader("Tasks", headerActions);
+
   return (
     <div className="flex min-h-0 flex-1">
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Title + filters bar */}
-        <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg-primary px-6">
-          <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative flex shrink-0 items-center gap-3">
-            <h1 className="text-sm font-semibold text-text-primary">Tasks</h1>
-            {activeCount > 0 && (
-              <div className="flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-warning" />
-                </span>
-                <span className="text-xs font-medium text-warning">
-                  {activeCount} active
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="relative flex flex-1 items-center">
+        {/* Visually-hidden heading: the visible page title lives in the shell
+            header via useShellHeader above. We keep an in-page <h1> so screen
+            readers and route/page-isolation tests see a stable heading even
+            when the AppShell wrapper isn't mounted in a test environment. */}
+        <h1 className="sr-only">Tasks</h1>
+        <div className="flex flex-1 flex-col overflow-hidden bg-[var(--color-bg)]">
+          {/* Filters live at the top of the content area, on the Hearth
+              FilterBar molecule. */}
+          <div className="border-b border-[var(--color-line)] px-6 py-3">
             <TaskFilters
               filters={filters}
               onFiltersChange={handleFiltersChange}
@@ -154,44 +193,19 @@ export function TasksPage() {
               expandAllDisabled={expandableIds.length === 0}
             />
           </div>
-        </div>
 
-        {/* Task tree section */}
-        <div className="flex-1 overflow-auto bg-bg-secondary">
-          <TaskTreeView
-            hierarchy={hierarchy}
-            isLoading={isLoading && tasks.length === 0}
-            error={error}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={handleTaskSelect}
-            expandedNodes={expandedNodes}
-          />
-        </div>
-
-        {/* Footer with task count */}
-        {!currentIsLoading && !currentError && taskCount > 0 && (
-          <div className="flex items-center justify-between border-t border-border bg-bg-primary px-6 py-2">
-            <p className="font-mono text-xs text-text-muted">
-              {taskCount} task{taskCount !== 1 ? "s" : ""}
-              {hierarchy.length > 0 && (
-                <span className="ml-2 text-text-muted/70">
-                  ({hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""})
-                </span>
-              )}
-            </p>
-            {selectedTaskId && (
-              <p className="flex items-center gap-1 font-mono text-xs text-text-muted">
-                Selected:{" "}
-                <IdentityBadge
-                  id={selectedTaskId}
-                  kind="task"
-                  className="text-primary"
-                  testId="tasks-page-selected-task-id"
-                />
-              </p>
-            )}
+          {/* Task tree section */}
+          <div className="flex-1 overflow-auto">
+            <TaskTreeView
+              hierarchy={hierarchy}
+              isLoading={isLoading && tasks.length === 0}
+              error={error}
+              selectedTaskId={selectedTaskId}
+              onTaskSelect={handleTaskSelect}
+              expandedNodes={expandedNodes}
+            />
           </div>
-        )}
+        </div>
       </div>
 
       {/* Task detail side panel */}

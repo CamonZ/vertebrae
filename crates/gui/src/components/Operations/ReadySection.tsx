@@ -3,6 +3,7 @@ import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
 import { deriveRunControlsState } from "../../utils/runState";
 import { Count } from "../atoms";
+import { StepBadge } from "../molecules/StepBadge";
 
 interface ReadySectionProps {
   tasks: Task[];
@@ -93,12 +94,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                     </p>
                     <p className="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-fg-mute)]">
                       {task.workflow_name && <span>{task.workflow_name}</span>}
-                      {task.step_name && (
-                        <>
-                          <span aria-hidden>·</span>
-                          <span className="font-mono">{task.step_name}</span>
-                        </>
-                      )}
+                      {task.step_name && <StepBadge stepName={task.step_name} />}
                       {!task.workflow_name && !task.step_name && (
                         <span>No workflow assigned</span>
                       )}
