@@ -47,10 +47,10 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
   );
 
   return (
-    <div className="group flex items-center justify-between gap-2 rounded bg-bg-tertiary px-2.5 py-1.5">
+    <div className="group flex items-center justify-between gap-2 rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2.5 py-1.5">
       <div className="min-w-0 flex-1 flex items-center gap-2">
         <svg
-          className="h-3 w-3 flex-shrink-0 text-text-muted"
+          className="h-3 w-3 flex-shrink-0 text-[var(--color-fg-mute)]"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -62,16 +62,16 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
           />
         </svg>
-        <code className="truncate font-mono text-eyebrow text-text-secondary">
+        <code className="truncate font-mono text-eyebrow text-[var(--color-fg-soft)]">
           {codeRef.path.split("/").pop() ?? codeRef.path}
         </code>
         {lineRange && (
-          <span className="flex-shrink-0 rounded bg-primary/10 px-1 py-0.5 font-mono text-2xs text-primary">
+          <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
             {lineRange}
           </span>
         )}
         {codeRef.name && (
-          <span className="truncate text-2xs text-text-muted">
+          <span className="truncate text-2xs text-[var(--color-fg-mute)]">
             {codeRef.name}
           </span>
         )}
@@ -79,13 +79,13 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
       <button
         type="button"
         onClick={handleCopy}
-        className="flex-shrink-0 rounded p-1 text-text-muted opacity-0 transition-opacity hover:text-text-primary group-hover:opacity-100 cursor-pointer"
+        className="flex-shrink-0 rounded-[var(--radius-sm)] p-1 text-[var(--color-fg-mute)] opacity-0 transition-opacity hover:text-[var(--color-fg)] group-hover:opacity-100 cursor-pointer"
         title="Copy path"
         aria-label={copied ? "Copied!" : "Copy path to clipboard"}
       >
         {copied ? (
           <svg
-            className="h-3 w-3 text-success"
+            className="h-3 w-3 text-[var(--color-ok)]"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -121,7 +121,9 @@ export function CodeRefsSummary({ codeRefs }: CodeRefsSummaryProps) {
   if (codeRefs.length === 0) {
     return (
       <div className="px-4 py-3">
-        <p className="text-xs text-text-muted italic">No code references</p>
+        <p className="text-xs text-[var(--color-fg-mute)] italic">
+          No code references
+        </p>
       </div>
     );
   }

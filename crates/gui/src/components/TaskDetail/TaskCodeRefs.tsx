@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { CodeRef } from '../../bindings';
 import { commands } from '../../bindings';
+import { Chip } from '../atoms/Chip';
+import { Button } from '../atoms/Button';
 
 interface TaskCodeRefsProps {
   codeRefs: CodeRef[];
@@ -47,6 +49,9 @@ function parseCodeRefString(input: string): { path: string; lineStart: number | 
   }
   return { path: input, lineStart: null, lineEnd: null };
 }
+
+const inputClasses =
+  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50';
 
 interface CodeRefFormProps {
   initialData?: CodeRef;
@@ -110,10 +115,10 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
   const disabled = isSubmitting || isDeleting;
 
   return (
-    <div className="space-y-3 rounded-md bg-bg-tertiary p-3" onKeyDown={handleKeyDown}>
+    <div className="space-y-3 rounded-[var(--radius-md)] bg-[var(--color-bg-2)] p-3" onKeyDown={handleKeyDown}>
       {/* Path input with indicator */}
       <div className="flex items-start gap-2">
-        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-warning" />
+        <span className="mt-2.5 h-2 w-2 flex-shrink-0 rounded-full bg-[var(--color-warn)]" />
         <div className="flex-1 space-y-2">
           <input
             ref={pathInputRef}
@@ -122,7 +127,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
             onChange={(e) => handleChange('path', e.target.value)}
             placeholder="File path (e.g., src/main.rs or src/main.rs:L42)"
             disabled={disabled}
-            className="w-full rounded border border-border bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+            className={`w-full ${inputClasses}`}
           />
 
           {/* Optional fields in a row */}
@@ -133,7 +138,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
               onChange={(e) => handleChange('lineStart', e.target.value.replace(/\D/g, ''))}
               placeholder="Start line"
               disabled={disabled}
-              className="w-24 rounded border border-border bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+              className={`w-24 ${inputClasses}`}
             />
             <input
               type="text"
@@ -141,7 +146,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
               onChange={(e) => handleChange('lineEnd', e.target.value.replace(/\D/g, ''))}
               placeholder="End line"
               disabled={disabled}
-              className="w-24 rounded border border-border bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+              className={`w-24 ${inputClasses}`}
             />
             <input
               type="text"
@@ -149,7 +154,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
               onChange={(e) => handleChange('name', e.target.value)}
               placeholder="Name (optional)"
               disabled={disabled}
-              className="flex-1 rounded border border-border bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+              className={`flex-1 ${inputClasses}`}
             />
           </div>
 
@@ -159,13 +164,13 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
             onChange={(e) => handleChange('description', e.target.value)}
             placeholder="Description (optional)"
             disabled={disabled}
-            className="w-full rounded border border-border bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/30 disabled:opacity-50"
+            className={`w-full ${inputClasses}`}
           />
         </div>
       </div>
 
       {error && (
-        <p className="text-xs text-error ml-4">{error}</p>
+        <p className="text-xs text-[var(--color-err)] ml-4">{error}</p>
       )}
 
       {/* Action buttons */}
@@ -174,7 +179,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
           type="button"
           onClick={handleSubmit}
           disabled={disabled}
-          className="p-1.5 rounded text-warning hover:bg-warning/10 transition-colors disabled:opacity-50 cursor-pointer"
+          className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-warn)] hover:bg-[var(--color-warn-wash)] transition-colors disabled:opacity-50 cursor-pointer"
           title="Save (Ctrl+Enter)"
           aria-label="Save"
         >
@@ -193,7 +198,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
           type="button"
           onClick={onCancel}
           disabled={disabled}
-          className="p-1.5 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors disabled:opacity-50 cursor-pointer"
+          className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] transition-colors disabled:opacity-50 cursor-pointer"
           title="Cancel (Esc)"
           aria-label="Cancel"
         >
@@ -206,7 +211,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
             type="button"
             onClick={onDelete}
             disabled={disabled}
-            className="p-1.5 rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50 cursor-pointer"
+            className="p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-err-wash)] hover:text-[var(--color-err)] transition-colors disabled:opacity-50 cursor-pointer"
             title="Delete"
             aria-label="Delete"
           >
@@ -254,37 +259,37 @@ function CodeRefItem({ codeRef, onEdit }: CodeRefItemProps) {
 
   return (
     <div
-      className="group flex items-start justify-between gap-2 rounded-md bg-bg-tertiary px-3 py-2 cursor-pointer hover:bg-bg-hover transition-colors"
+      className="group flex cursor-pointer items-start justify-between gap-2 rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 transition-[border-color,background-color] duration-[var(--t-base)] ease-[var(--ease-default)] hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-2)]"
       onClick={onEdit}
       title="Click to edit"
     >
       <div className="min-w-0 flex-1">
         {codeRef.name && (
-          <p className="text-sm font-medium text-text-primary">{codeRef.name}</p>
+          <p className="text-sm font-medium text-[var(--color-fg)]">{codeRef.name}</p>
         )}
         <div className="flex items-center gap-2">
-          <code className="truncate font-mono text-xs text-text-secondary">
+          <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
             {codeRef.path}
           </code>
           {lineRange && (
-            <span className="flex-shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary">
+            <Chip variant="static" className="flex-shrink-0 font-mono text-[var(--color-accent)]">
               {lineRange}
-            </span>
+            </Chip>
           )}
         </div>
         {codeRef.description && (
-          <p className="mt-1 text-xs text-text-muted">{codeRef.description}</p>
+          <p className="mt-1 text-xs text-[var(--color-fg-mute)]">{codeRef.description}</p>
         )}
       </div>
       <button
         type="button"
         onClick={handleCopy}
-        className="flex-shrink-0 rounded p-1 text-text-muted opacity-0 transition-opacity hover:bg-bg-secondary hover:text-text-primary focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-border-focus group-hover:opacity-100 cursor-pointer"
+        className="flex-shrink-0 rounded-[var(--radius-sm)] p-1 text-[var(--color-fg-mute)] opacity-0 transition-opacity hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] group-hover:opacity-100 cursor-pointer"
         title="Copy path"
         aria-label={copied ? 'Copied!' : 'Copy path to clipboard'}
       >
         {copied ? (
-          <svg className="h-4 w-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg className="h-4 w-4 text-[var(--color-ok)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         ) : (
@@ -379,31 +384,33 @@ export function TaskCodeRefs({ codeRefs, taskId, onCodeRefsChanged }: TaskCodeRe
   return (
     <div className="flex flex-col h-full">
       {/* Add code ref button */}
-      <div className="border-b border-border p-4">
+      <div className="border-b border-[var(--color-line)] p-4">
         {isAdding ? (
           <CodeRefForm
             onSave={handleAdd}
             onCancel={() => setIsAdding(false)}
           />
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            fullWidth
             onClick={() => setIsAdding(true)}
             disabled={editingIndex !== null}
-            className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            iconLeft={
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            }
           >
-            <svg className="inline h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
             Add Code Reference
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Code refs list */}
       <div className="flex-1 overflow-auto p-4">
         {codeRefs.length === 0 && !isAdding ? (
-          <div className="text-center text-sm text-text-muted py-6">
+          <div className="text-center text-sm text-[var(--color-fg-mute)] py-6">
             No code references
           </div>
         ) : (

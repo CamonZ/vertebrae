@@ -126,13 +126,13 @@ function tokenizeInner(inner: string, isOutput: boolean): LiquidToken[] {
 
 const TOKEN_CLASSES: Record<LiquidTokenKind, string> = {
   text: "",
-  delimiter: "text-accent font-semibold",
-  filter: "text-accent",
-  string: "text-success",
-  number: "text-info",
-  keyword: "text-warning",
-  identifier: "text-text-primary",
-  operator: "text-text-muted",
+  delimiter: "text-[var(--color-accent)] font-semibold",
+  filter: "text-[var(--color-accent)]",
+  string: "text-[var(--color-ok)]",
+  number: "text-[var(--color-info)]",
+  keyword: "text-[var(--color-warn)]",
+  identifier: "text-[var(--color-fg)]",
+  operator: "text-[var(--color-fg-mute)]",
 };
 
 interface LiquidHighlightProps {

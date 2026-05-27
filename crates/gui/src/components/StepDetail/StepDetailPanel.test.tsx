@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StepDetailPanel } from "./StepDetailPanel";
-import type { Step, Task } from "../../bindings";
+import type { Step } from "../../bindings";
 import * as hooks from "../../hooks";
 import * as bindings from "../../bindings";
 
@@ -10,7 +10,6 @@ import * as bindings from "../../bindings";
 vi.mock("../../hooks", () => ({
   useStep: vi.fn(),
   useStepChangeListener: vi.fn(),
-  useExpandedNodes: vi.fn(),
 }));
 
 // Mock the bindings commands
@@ -65,34 +64,6 @@ function createStep(overrides?: Partial<Step>): Step {
   };
 }
 
-// Helper to create a task with defaults
-function createTask(overrides?: Partial<Task>): Task {
-  return {
-    id: "task-test",
-    title: "Test Task",
-    description: null,
-    level: "task",
-    priority: null,
-    tags: [],
-    workflow_id: null,
-    current_step_id: null,
-    workflow_name: null,
-    step_name: null,
-    archived: false,
-    worktree: null,
-    rejection_reason: null,
-    parent_id: null,
-    dependency_ids: [],
-    sections: [],
-    code_refs: [],
-    created_at: null,
-    updated_at: null,
-    started_at: null,
-    completed_at: null,
-    ...overrides,
-  };
-}
-
 describe("StepDetailPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,14 +76,6 @@ describe("StepDetailPanel", () => {
       applyUpdate: vi.fn(),
     });
     vi.mocked(hooks.useStepChangeListener).mockReturnValue(undefined);
-    vi.mocked(hooks.useExpandedNodes).mockReturnValue({
-      expandedNodeIds: new Set(),
-      toggleNode: vi.fn(),
-      setNodeExpanded: vi.fn(),
-      isNodeExpanded: vi.fn(),
-      resetExpandedNodes: vi.fn(),
-      expandAll: vi.fn(),
-    });
   });
 
   describe("rendering", () => {
@@ -233,7 +196,7 @@ describe("StepDetailPanel", () => {
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.getByText("Agents (1)")).toBeInTheDocument();
+      expect(screen.getByText("Agents")).toBeInTheDocument();
       expect(
         screen.getByText(".claude/agents/reviewer.md")
       ).toBeInTheDocument();
@@ -250,7 +213,7 @@ describe("StepDetailPanel", () => {
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.getByText("Skills (2)")).toBeInTheDocument();
+      expect(screen.getByText("Skills")).toBeInTheDocument();
       expect(screen.getByText("code-review")).toBeInTheDocument();
       expect(screen.getByText("security-audit")).toBeInTheDocument();
     });
@@ -284,7 +247,7 @@ describe("StepDetailPanel", () => {
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[step1, step2]} />);
-      expect(screen.getByText("Transitions (2)")).toBeInTheDocument();
+      expect(screen.getByText("Transitions")).toBeInTheDocument();
       expect(screen.getByText("Step 1")).toBeInTheDocument();
       expect(screen.getByText("Step 2")).toBeInTheDocument();
     });
@@ -509,94 +472,7 @@ describe("StepDetailPanel", () => {
     });
   });
 
-  describe("tabbed interface", () => {
-    it("renders Configuration and Tasks tabs", () => {
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.getByText("Configuration")).toBeInTheDocument();
-      expect(screen.getByText("Tasks")).toBeInTheDocument();
-    });
-
-    it("shows task count badge on Tasks tab", () => {
-      const tasks = [
-        createTask({ id: "task-1" }),
-        createTask({ id: "task-2" }),
-        createTask({ id: "task-3" }),
-      ];
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      // Find the badge with the count (3)
-      const badge = screen.getByText("3");
-      expect(badge).toBeInTheDocument();
-    });
-
-    it("displays 0 count when no tasks provided", () => {
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} tasks={[]} />);
-
-      // Should still show badge with 0
-      const badge = screen.getByText("0");
-      expect(badge).toBeInTheDocument();
-    });
-
-    it("starts with Configuration tab active", () => {
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-
-      // Configuration tab content should be visible (step name)
-      const step = createStep({ name: "Test Step" });
-      vi.mocked(hooks.useStep).mockReturnValue({
-        step,
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-        applyUpdate: vi.fn(),
-      });
-
-      // Re-render to pick up the new mock
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.getAllByText("Test Step")[0]).toBeInTheDocument();
-    });
-
-    it("switches to Tasks tab when clicked", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1", title: "Task One" })];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      // Click Tasks tab
-      const tasksTab = screen.getByText("Tasks");
-      await user.click(tasksTab);
-
-      // Configuration content should not be visible (no agents/skills section)
-      expect(screen.queryByText("Agents")).not.toBeInTheDocument();
-
-      // Tasks tab content should be visible (search input)
-      expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
-    });
-
-    it("switches back to Configuration tab when clicked", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1" })];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      // Switch to Tasks tab
-      await user.click(screen.getByText("Tasks"));
-      expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
-
-      // Switch back to Configuration tab
-      await user.click(screen.getByText("Configuration"));
-
-      // Configuration content should be visible again
-      expect(screen.getByText("Overview")).toBeInTheDocument();
-    });
-  });
-
-  describe("Configuration tab", () => {
+  describe("configuration", () => {
     it("displays all step configuration sections", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
 
@@ -736,7 +612,7 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       const badge = screen.getByTestId("step-type-badge");
       expect(badge).toHaveTextContent("evaluate");
-      expect(badge.className).toContain("info");
+      expect(badge.className).toContain("--color-info");
     });
 
     it("displays step type badge with 'route' for route steps", () => {
@@ -752,7 +628,7 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       const badge = screen.getByTestId("step-type-badge");
       expect(badge).toHaveTextContent("route");
-      expect(badge.className).toContain("warning");
+      expect(badge.className).toContain("--color-warn");
     });
 
     it("displays step type badge with 'human_input' for human input steps", () => {
@@ -769,7 +645,7 @@ describe("StepDetailPanel", () => {
       const badge = screen.getByTestId("step-type-badge");
       expect(badge).toHaveTextContent("human_input");
       expect(badge).not.toHaveTextContent("execute");
-      expect(badge.className).toContain("success");
+      expect(badge.className).toContain("--color-ok");
     });
 
     it("displays unsupported step types without falling back to execute", () => {
@@ -786,7 +662,7 @@ describe("StepDetailPanel", () => {
       const badge = screen.getByTestId("step-type-badge");
       expect(badge).toHaveTextContent("unsupported:manual_gate");
       expect(badge).not.toHaveTextContent("execute");
-      expect(badge.className).toContain("danger");
+      expect(badge.className).toContain("--color-err");
     });
 
     it("displays output schema as a type tree when present", () => {
@@ -849,478 +725,6 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       const badge = screen.getByTestId("step-type-badge");
       expect(badge).toHaveTextContent("execute");
-    });
-  });
-
-  describe("Tasks tab", () => {
-    it("displays empty state when no tasks", async () => {
-      const user = userEvent.setup();
-
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} tasks={[]} />);
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(
-        screen.getByText("No tasks assigned to this step")
-      ).toBeInTheDocument();
-    });
-
-    it("displays search input in Tasks tab", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1" })];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
-    });
-
-    it("filters tasks by search query", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        createTask({ id: "task-1", title: "Deploy Frontend" }),
-        createTask({ id: "task-2", title: "Write Tests" }),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      // Switch to Tasks tab
-      await user.click(screen.getByText("Tasks"));
-
-      // Search for "Deploy"
-      const searchInput = screen.getByPlaceholderText("Search...");
-      await user.type(searchInput, "Deploy");
-
-      // Should filter the tasks (implementation detail verified via integration)
-      expect(searchInput).toHaveValue("Deploy");
-    });
-
-    it("calls onTaskSelect when a task is selected", () => {
-      const onTaskSelect = vi.fn();
-      const tasks = [createTask({ id: "task-1", title: "Test Task" })];
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          onTaskSelect={onTaskSelect}
-        />
-      );
-
-      // This is verified through the prop being passed to TaskList/TaskTreeView
-      // The actual task selection behavior is tested in those components
-      expect(onTaskSelect).not.toHaveBeenCalled();
-    });
-
-    it("highlights selected task when selectedTaskId is provided", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        createTask({ id: "task-1", title: "Task One" }),
-        createTask({ id: "task-2", title: "Task Two" }),
-      ];
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          selectedTaskId="task-1"
-        />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      // Verify selectedTaskId is passed to the task components
-      expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
-    });
-  });
-
-  describe("step tasks integration", () => {
-    it("displays correct number of tasks in Tasks tab badge", () => {
-      const tasks = [
-        createTask({ id: "task-1", title: "Task 1" }),
-        createTask({ id: "task-2", title: "Task 2" }),
-        createTask({ id: "task-3", title: "Task 3" }),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      // Should display task count in badge
-      const badge = screen.getByText("3");
-      expect(badge).toBeInTheDocument();
-    });
-
-    it("updates task count when tasks prop changes", async () => {
-      const user = userEvent.setup();
-      const { rerender } = render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={[createTask({ id: "task-1" })]}
-        />
-      );
-
-      // Click Tasks tab to see the badge
-      await user.click(screen.getByText("Tasks"));
-
-      // Initial render shows 1 task in the badge
-      const badges = screen.getAllByText("1");
-      expect(badges.length).toBeGreaterThan(0); // Step order and task count
-
-      // Rerender with more tasks
-      rerender(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={[
-            createTask({ id: "task-1" }),
-            createTask({ id: "task-2" }),
-            createTask({ id: "task-3" }),
-          ]}
-        />
-      );
-
-      // Should now show 3 tasks (check for specific badge)
-      const taskCountBadges = screen.getAllByText("3");
-      expect(taskCountBadges.length).toBeGreaterThan(0);
-    });
-
-    it("allows task selection from step's task list", async () => {
-      const user = userEvent.setup();
-      const onTaskSelect = vi.fn();
-      const tasks = [
-        createTask({ id: "task-1", title: "Deploy Frontend" }),
-        createTask({ id: "task-2", title: "Write Tests" }),
-      ];
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          onTaskSelect={onTaskSelect}
-        />
-      );
-
-      // Switch to Tasks tab to view task list
-      await user.click(screen.getByText("Tasks"));
-
-      // Verify search input is available for task filtering
-      const searchInput = screen.getByPlaceholderText("Search...");
-      expect(searchInput).toBeInTheDocument();
-    });
-
-    it("displays selected task highlight in task list", () => {
-      const tasks = [
-        createTask({ id: "task-1", title: "Task One" }),
-        createTask({ id: "task-2", title: "Task Two" }),
-      ];
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          selectedTaskId="task-1"
-        />
-      );
-
-      // Component should accept selectedTaskId prop
-      expect(screen.getByText("Configuration")).toBeInTheDocument();
-    });
-
-    it("handles empty task list gracefully", async () => {
-      const user = userEvent.setup();
-
-      render(<StepDetailPanel stepId="step-test" allSteps={[]} tasks={[]} />);
-
-      // Switch to Tasks tab
-      await user.click(screen.getByText("Tasks"));
-
-      // Should show empty state
-      expect(
-        screen.getByText("No tasks assigned to this step")
-      ).toBeInTheDocument();
-    });
-
-    it("calls onTaskSelect callback when provided", () => {
-      const onTaskSelect = vi.fn();
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={[]}
-          onTaskSelect={onTaskSelect}
-        />
-      );
-
-      // Callback should be registered but not called until user interacts with tasks
-      expect(onTaskSelect).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("fetched task list rendering (per-step on-demand fetch)", () => {
-    it("renders each fetched task title in the Tasks tab", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        createTask({
-          id: "t-a",
-          title: "Implement feature A",
-          current_step_id: "step-test",
-        }),
-        createTask({
-          id: "t-b",
-          title: "Investigate bug B",
-          current_step_id: "step-test",
-        }),
-        createTask({
-          id: "t-c",
-          title: "Document API C",
-          current_step_id: "step-test",
-        }),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      // Every fetched task title is rendered exactly once.
-      expect(screen.getByText("Implement feature A")).toBeInTheDocument();
-      expect(screen.getByText("Investigate bug B")).toBeInTheDocument();
-      expect(screen.getByText("Document API C")).toBeInTheDocument();
-
-      // The badge reflects the fetched count.
-      expect(screen.getByText("3")).toBeInTheDocument();
-    });
-
-    it("re-renders the visible task list when the tasks prop changes (move-in)", async () => {
-      const user = userEvent.setup();
-      const initial = [
-        createTask({
-          id: "t-1",
-          title: "Original task",
-          current_step_id: "step-test",
-        }),
-      ];
-
-      const { rerender } = render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={initial} />
-      );
-      await user.click(screen.getByText("Tasks"));
-
-      expect(screen.getByText("Original task")).toBeInTheDocument();
-      expect(screen.queryByText("New arrival")).not.toBeInTheDocument();
-
-      const updated = [
-        ...initial,
-        createTask({
-          id: "t-2",
-          title: "New arrival",
-          current_step_id: "step-test",
-        }),
-      ];
-      rerender(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={updated} />
-      );
-
-      expect(screen.getByText("Original task")).toBeInTheDocument();
-      expect(screen.getByText("New arrival")).toBeInTheDocument();
-    });
-
-    it("removes a task title from the list when the prop drops it (move-out)", async () => {
-      const user = userEvent.setup();
-      const initial = [
-        createTask({
-          id: "t-1",
-          title: "Stays put",
-          current_step_id: "step-test",
-        }),
-        createTask({
-          id: "t-2",
-          title: "About to leave",
-          current_step_id: "step-test",
-        }),
-      ];
-
-      const { rerender } = render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={initial} />
-      );
-      await user.click(screen.getByText("Tasks"));
-
-      expect(screen.getByText("About to leave")).toBeInTheDocument();
-
-      rerender(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={[initial[0]]}
-        />
-      );
-
-      expect(screen.getByText("Stays put")).toBeInTheDocument();
-      expect(screen.queryByText("About to leave")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("run state surfacing (run_controls source of truth)", () => {
-    function withActiveRun(
-      task: Task,
-      status: "queued" | "executing" | "waiting" | "stopping"
-    ): Task {
-      return {
-        ...task,
-        run_controls: {
-          runnable: false,
-          stoppable: status !== "stopping",
-          disabled_reason_code: null,
-          disabled_reason: null,
-          active_run: {
-            id: `run-${task.id}`,
-            task_id: task.id,
-            project_id: "project-1",
-            user_id: null,
-            status,
-            started_at: "2025-01-01T00:00:00Z",
-            ended_at: null,
-            stop_requested_at: null,
-            latest_step_execution_id: null,
-            outcome_kind: null,
-            outcome_context: null,
-            parent_task_run_id: null,
-            root_task_run_id: null,
-            triggered_by_step_execution_id: null,
-            inserted_at: "2025-01-01T00:00:00Z",
-            updated_at: "2025-01-01T00:00:00Z",
-          },
-        },
-      };
-    }
-
-    it("renders Running run chip in tree view when active_run is executing", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        withActiveRun(
-          createTask({ id: "task-1", title: "Running Task" }),
-          "executing"
-        ),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      const chip = screen.getByTestId("task-tree-node-run-chip");
-      expect(chip).toHaveAttribute("data-run-status", "executing");
-      expect(chip).toHaveAttribute("aria-label", "Run state: Running");
-      expect(
-        screen.getByTestId("task-tree-node-run-chip-label")
-      ).toHaveTextContent("Running");
-    });
-
-    it("renders Waiting run chip when active_run status is waiting", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        withActiveRun(
-          createTask({ id: "task-1", title: "Waiting Task" }),
-          "waiting"
-        ),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(screen.getByTestId("task-tree-node-run-chip")).toHaveAttribute(
-        "data-run-status",
-        "waiting"
-      );
-      expect(
-        screen.getByTestId("task-tree-node-run-chip-label")
-      ).toHaveTextContent("Waiting");
-    });
-
-    it("renders Stopping run chip when active_run status is stopping", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        withActiveRun(
-          createTask({ id: "task-1", title: "Stopping Task" }),
-          "stopping"
-        ),
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(
-        screen.getByTestId("task-tree-node-run-chip-label")
-      ).toHaveTextContent("Stopping");
-    });
-
-    it("does not render a run chip for idle tasks (no run_controls)", async () => {
-      const user = userEvent.setup();
-      const tasks = [createTask({ id: "task-1", title: "Idle Task" })];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(
-        screen.queryByTestId("task-tree-node-run-chip")
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByTestId("task-tree-node-run-chip-label")
-      ).not.toBeInTheDocument();
-    });
-
-    it("does not render a run chip for terminal completed runs", async () => {
-      const user = userEvent.setup();
-      const completedRun = withActiveRun(
-        createTask({ id: "task-1", title: "Done Task" }),
-        "executing"
-      );
-      const tasks = [
-        {
-          ...completedRun,
-          run_controls: {
-            ...completedRun.run_controls!,
-            stoppable: false,
-            active_run: {
-              ...completedRun.run_controls!.active_run!,
-              status: "completed" as const,
-            },
-          },
-        },
-      ];
-
-      render(
-        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-
-      expect(
-        screen.queryByTestId("task-tree-node-run-chip")
-      ).not.toBeInTheDocument();
     });
   });
 });

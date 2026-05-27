@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { runStatusLabel, type ActiveTaskRun } from "../../utils/runState";
 import { formatDuration } from "./formatDuration";
+import { StepBadge } from "../molecules/StepBadge";
 
 export type LiveItem = ActiveTaskRun;
 
@@ -73,7 +74,7 @@ export function LiveSection({ items }: LiveSectionProps) {
                       </span>
                     )}
                   </p>
-                  <p className="mt-0.5 text-xs text-text-muted">
+                  <p className="mt-0.5 flex items-center gap-2 text-xs text-text-muted">
                     {item.task.workflow_name && (
                       <span>{item.task.workflow_name}</span>
                     )}
@@ -81,11 +82,7 @@ export function LiveSection({ items }: LiveSectionProps) {
                       <span className="font-mono">{statusLabel}</span>
                     )}
                     {item.task.step_name && (
-                      <span>
-                        {" "}
-                        &middot; Step{" "}
-                        <span className="font-mono">{item.task.step_name}</span>
-                      </span>
+                      <StepBadge stepName={item.task.step_name} />
                     )}
                   </p>
                 </div>

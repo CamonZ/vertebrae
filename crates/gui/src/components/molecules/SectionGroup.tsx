@@ -5,8 +5,8 @@ interface SectionGroupProps {
   label: ReactNode;
   /** Optional leading icon rendered before the label. */
   icon?: ReactNode;
-  /** Item count shown as a badge in the header. */
-  count?: number;
+  /** Item count shown as a badge in the header. Accepts a ratio like "5/13". */
+  count?: number | string;
   /** Custom trailing badge (rendered instead of `count`). */
   badge?: ReactNode;
   /** Initial open state. Use `open` for fully controlled behaviour. */

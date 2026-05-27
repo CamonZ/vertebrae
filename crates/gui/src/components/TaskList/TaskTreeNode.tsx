@@ -3,12 +3,12 @@ import type { Task, TaskPriority } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
-import { deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
+import { deriveRunStateChip } from "../../utils/runState";
 import { IdentityBadge } from "../shared/EntityId";
-import { Count } from "../atoms";
-
-const ROW_BASE_PADDING_PX = 6;
-const ROW_DEPTH_INDENT_PX = 10;
+import { LevelMark } from "../shared/LevelMark";
+import { TreeNode } from "../molecules/TreeNode";
+import { StatusBadge } from "../molecules/StatusBadge";
+import { RunStateBadge } from "./RunStateBadge";
 
 interface TaskTreeNodeProps {
   node: TaskTreeNodeType;
@@ -20,71 +20,48 @@ interface TaskTreeNodeProps {
   hideStatus?: boolean;
 }
 
-function getStepStyles(stepName: string | null): { bg: string; text: string } {
-  if (!stepName)
-    return {
-      bg: "bg-[var(--color-bg-2)]",
-      text: "text-[var(--color-fg-mute)]",
-    };
-  switch (stepName.toLowerCase()) {
-    case "todo":
-      return {
-        bg: "bg-[var(--color-accent-wash)]",
-        text: "text-[var(--color-accent)]",
-      };
-    case "in_progress":
-    case "in progress":
-      return {
-        bg: "bg-[var(--color-warn-wash)]",
-        text: "text-[var(--color-warn)]",
-      };
-    case "pending_review":
-    case "review":
-      return {
-        bg: "bg-[var(--color-info-wash)]",
-        text: "text-[var(--color-info)]",
-      };
-    case "done":
-      return {
-        bg: "bg-[var(--color-ok-wash)]",
-        text: "text-[var(--color-ok)]",
-      };
-    case "rejected":
-      return {
-        bg: "bg-[var(--color-err-wash)]",
-        text: "text-[var(--color-err)]",
-      };
-    default:
-      return {
-        bg: "bg-[var(--color-bg-2)]",
-        text: "text-[var(--color-fg-mute)]",
-      };
-  }
-}
-
-function formatStepName(stepName: string | null): string {
-  if (!stepName) return "—";
-  return (
-    stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, " ")
-  );
-}
-
+/**
+ * Priority surfaces as a directional arrow on the right edge: high points up,
+ * medium points right, low points down. `critical` reuses the up arrow with the
+ * error tone so it still reads as "most urgent". Unset priority renders nothing.
+ */
 function getPriorityIndicator(
   priority: TaskPriority | null
-): { icon: string; color: string } | null {
-  if (!priority) return null;
+): { glyph: string; color: string; label: string } | null {
   switch (priority) {
     case "critical":
-      return { icon: "!!!", color: "text-[var(--color-err)]" };
+      return { glyph: "↑", color: "text-[var(--color-err)]", label: "Critical priority" };
     case "high":
-      return { icon: "!!", color: "text-[var(--color-warn)]" };
+      return { glyph: "↑", color: "text-[var(--color-warn)]", label: "High priority" };
     case "medium":
-      return { icon: "!", color: "text-[var(--color-fg-soft)]" };
+      return { glyph: "→", color: "text-[var(--color-fg-soft)]", label: "Medium priority" };
     case "low":
-      return { icon: "·", color: "text-[var(--color-fg-mute)]" };
+      return { glyph: "↓", color: "text-[var(--color-fg-mute)]", label: "Low priority" };
     default:
       return null;
   }
+}
+
+/**
+ * Pluralized child-level summary for the metadata line. The label reflects the
+ * level *of the children* (one below this node), e.g. an epic with four tickets
+ * reads "4 tickets". Falls back to the generic "items" when the child level is
+ * unknown.
+ */
+function childSummary(node: TaskTreeNodeType): string | null {
+  const count = node.children.length;
+  if (count === 0) return null;
+
+  const childLevel = node.children[0]?.task.level ?? null;
+  const noun =
+    childLevel === "epic"
+      ? "epic"
+      : childLevel === "ticket"
+        ? "ticket"
+        : childLevel === "task"
+          ? "task"
+          : "item";
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 export function TaskTreeNode({
@@ -102,7 +79,7 @@ export function TaskTreeNode({
     ? expandedNodes.isNodeExpanded(task.id)
     : true;
 
-  const handleClick = useCallback(() => {
+  const handleSelect = useCallback(() => {
     onTaskSelect?.(task);
   }, [onTaskSelect, task]);
 
@@ -116,109 +93,34 @@ export function TaskTreeNode({
     [onTaskSelect, task]
   );
 
-  const handleToggleExpand = useCallback(
-    (event: React.MouseEvent) => {
-      event.stopPropagation();
-      expandedNodes?.toggleNode(task.id);
-    },
-    [expandedNodes, task.id]
-  );
+  const handleToggleExpand = useCallback(() => {
+    expandedNodes?.toggleNode(task.id);
+  }, [expandedNodes, task.id]);
 
-  const handleToggleKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        event.stopPropagation();
-        expandedNodes?.toggleNode(task.id);
-      }
-    },
-    [expandedNodes, task.id]
-  );
-
-  const stepStyles = getStepStyles(task.step_name);
-  const priorityIndicator = getPriorityIndicator(task.priority);
+  const priority = getPriorityIndicator(task.priority);
   const runChip = deriveRunStateChip(task);
-  const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
+  const tags = task.tags ?? [];
+  const childLine = childSummary(node);
 
-  const indentPx = depth * ROW_DEPTH_INDENT_PX;
+  // Leading slot: the per-level mark sits between the chevron and the title so
+  // the hierarchy is legible without reading the ID. It matches the chevron's
+  // box (h-6) so the two leading icons sit on one tidy line.
+  const leading = (
+    <LevelMark
+      level={task.level}
+      className="h-6 w-5"
+      testId="task-tree-node-level-glyph"
+    />
+  );
 
-  return (
-    <div>
-      <div
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        tabIndex={0}
-        role="treeitem"
-        aria-expanded={hasChildren ? isExpanded : undefined}
-        aria-selected={isSelected}
-        className={`group relative flex h-9 cursor-pointer items-center gap-2 border-b border-[var(--color-line)]/60 pr-4 text-sm transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
-          isSelected
-            ? "bg-[var(--color-accent-wash)]/40"
-            : "hover:bg-[var(--color-bg-2)]"
-        }`}
-        style={{ paddingLeft: `${ROW_BASE_PADDING_PX}px` }}
-      >
-        {isSelected && (
-          <div className="absolute left-0 top-0 h-full w-0.5 bg-[var(--color-accent)]" />
-        )}
-
-        {/* Child count + chevron share one aligned gutter across depths. */}
-        <div className="flex w-8 shrink-0 items-center justify-end gap-0.5">
-          {hasChildren ? (
-            <>
-              <Count
-                value={node.children.length}
-                className="w-4 text-right text-2xs"
-              />
-              <button
-                type="button"
-                onClick={handleToggleExpand}
-                onKeyDown={handleToggleKeyDown}
-                className="flex h-4 w-4 items-center justify-center rounded text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
-                aria-label={isExpanded ? "Collapse" : "Expand"}
-              >
-                <svg
-                  className={`h-3 w-3 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 5l7 7-7 7"
-                  />
-                </svg>
-              </button>
-            </>
-          ) : (
-            <>
-              <span className="w-4" />
-              <span className="h-4 w-4" />
-            </>
-          )}
-        </div>
-
-        {depth > 0 && (
-          <span
-            aria-hidden="true"
-            className="shrink-0"
-            style={{ width: `${indentPx}px` }}
-          />
-        )}
-
-        {/* Priority */}
-        <span
-          className={`w-4 shrink-0 text-center font-mono text-xs font-bold ${
-            priorityIndicator?.color ?? "text-[var(--color-fg-faint)]"
-          }`}
-        >
-          {priorityIndicator?.icon ?? "·"}
-        </span>
-
-        {/* ID + copy */}
+  // Two-line body: title on the first line, a metadata line beneath it carrying
+  // the short ID (with copy), tags, and the child-count summary.
+  const body = (
+    <span className="flex min-w-0 flex-col gap-1">
+      <span className="truncate font-medium text-[var(--color-fg)]">
+        {task.title}
+      </span>
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-sans text-2xs text-[var(--color-fg-mute)]">
         <IdentityBadge
           id={task.id}
           kind="task"
@@ -226,65 +128,92 @@ export function TaskTreeNode({
           className="shrink-0"
           testId="task-tree-node-id"
         />
-
-        {/* Title */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {runChip && runChipStyles && (
-            <span
-              data-testid="task-tree-node-run-chip"
-              data-run-status={runChip.status}
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${runChipStyles.dot} ${
-                runChipStyles.pulse
-                  ? "animate-pulse [animation-duration:3s]"
-                  : ""
-              }`}
-              title={`Run: ${runChip.label}`}
-              aria-label={`Run state: ${runChip.label}`}
-            />
-          )}
-          <span className="truncate font-medium text-[var(--color-fg)]">
-            {task.title}
+        {childLine && (
+          <span
+            className="shrink-0 tabular-nums"
+            data-testid="task-tree-node-child-summary"
+          >
+            {childLine}
           </span>
-          {runChip && runChipStyles && (
-            <span
-              data-testid="task-tree-node-run-chip-label"
-              className={`inline-flex shrink-0 items-center rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] ${runChipStyles.bg} ${runChipStyles.text}`}
-            >
-              {runChip.label}
-            </span>
-          )}
-        </div>
-
-        {/* Workflow · Step */}
-        {!hideStatus && (
-          <div className="flex shrink-0 items-center gap-2 text-xs">
-            {task.workflow_name && (
-              <span className="text-[var(--color-fg-mute)]">
-                {task.workflow_name}
-              </span>
-            )}
-            <span
-              className={`inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-2xs font-medium ${stepStyles.bg} ${stepStyles.text}`}
-            >
-              {formatStepName(task.step_name)}
-            </span>
-          </div>
         )}
+        {tags.map((tag) => (
+          <span
+            key={tag}
+            data-testid="task-tree-node-tag"
+            className="inline-flex h-4 max-w-[10rem] shrink-0 items-center truncate rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-1.5 text-[10px] font-medium text-[var(--color-fg-soft)]"
+          >
+            {tag}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 
-        {/* Timestamp */}
-        <div className="w-16 shrink-0 text-right">
-          {task.created_at ? (
-            <RelativeTime
-              date={task.created_at}
-              className="font-mono text-eyebrow tabular-nums text-[var(--color-fg-mute)]"
-            />
-          ) : (
-            <span className="font-mono text-eyebrow text-[var(--color-fg-faint)]">
-              —
-            </span>
-          )}
-        </div>
-      </div>
+  // Trailing slot: the live run-state badge (only while running), the neutral
+  // workflow|step breadcrumb, priority arrow, and the created-at timestamp.
+  const right = (
+    <span className="flex items-center gap-2">
+      {runChip && (
+        <RunStateBadge
+          chip={runChip}
+          stepName={task.step_name}
+          startedAt={task.run_controls?.active_run?.started_at ?? null}
+        />
+      )}
+      {!hideStatus && (task.workflow_name || task.step_name) && (
+        <StatusBadge
+          state={{
+            kind: "workflow",
+            workflow: task.workflow_name ?? "",
+            step: task.step_name ?? "",
+          }}
+        />
+      )}
+      {priority && (
+        <span
+          className={`w-4 shrink-0 text-center text-sm font-bold leading-none ${priority.color}`}
+          title={priority.label}
+          aria-label={priority.label}
+          data-testid="task-tree-node-priority"
+          data-priority={task.priority}
+        >
+          {priority.glyph}
+        </span>
+      )}
+      <span className="w-16 text-right">
+        {task.created_at ? (
+          <RelativeTime
+            date={task.created_at}
+            className="font-mono text-eyebrow tabular-nums text-[var(--color-fg-mute)]"
+          />
+        ) : (
+          <span className="font-mono text-eyebrow text-[var(--color-fg-faint)]">
+            —
+          </span>
+        )}
+      </span>
+    </span>
+  );
+
+  return (
+    <div>
+      <TreeNode
+        depth={depth}
+        hasChildren={hasChildren}
+        expanded={isExpanded}
+        selected={isSelected}
+        onSelect={handleSelect}
+        onToggle={handleToggleExpand}
+        onKeyDown={handleKeyDown}
+        tabIndex={0}
+        icon={leading}
+        right={right}
+        multiline
+        testId="task-tree-node-row"
+        className="border-b border-[var(--color-line)]/60"
+      >
+        {body}
+      </TreeNode>
 
       {/* Children */}
       {hasChildren && isExpanded && (
@@ -305,3 +234,4 @@ export function TaskTreeNode({
     </div>
   );
 }
+

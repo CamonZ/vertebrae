@@ -86,7 +86,7 @@ describe('TaskCodeRefs', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /add code reference/i }));
 
-      const warningDot = document.querySelector('.bg-warning');
+      const warningDot = document.querySelector('[class*="--color-warn"]');
       expect(warningDot).toBeInTheDocument();
     });
 

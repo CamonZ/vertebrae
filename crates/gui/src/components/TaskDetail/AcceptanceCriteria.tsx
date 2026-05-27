@@ -16,18 +16,11 @@ function deriveCriterionStatus(section: Section): CriterionStatus {
   return "pending";
 }
 
-type ValidationType = "machine" | "human";
-
-function deriveValidationType(section: Section): ValidationType {
-  const refs = section.refs ?? [];
-  return refs.length > 0 ? "machine" : "human";
-}
-
 function StatusIndicator({ status }: { status: CriterionStatus }) {
   switch (status) {
     case "met":
       return (
-        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-success/20 text-success">
+        <div className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-xs)] bg-[var(--color-accent)] text-[var(--color-bg)]">
           <svg
             className="h-3 w-3"
             fill="none"
@@ -45,7 +38,7 @@ function StatusIndicator({ status }: { status: CriterionStatus }) {
       );
     case "not_met":
       return (
-        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-error/20 text-error">
+        <div className="flex h-5 w-5 items-center justify-center rounded-[var(--radius-xs)] bg-[var(--color-err-wash)] text-[var(--color-err)]">
           <svg
             className="h-3 w-3"
             fill="none"
@@ -63,35 +56,19 @@ function StatusIndicator({ status }: { status: CriterionStatus }) {
       );
     case "pending":
       return (
-        <div className="h-5 w-5 rounded-full border border-border-strong" />
+        <div className="h-5 w-5 rounded-[var(--radius-xs)] border border-[var(--color-line-strong)]" />
       );
   }
 }
 
-function ValidationBadge({ type }: { type: ValidationType }) {
-  if (type === "machine") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-info/10 px-2 py-0.5 text-2xs font-medium text-info">
-        <svg
-          className="h-2.5 w-2.5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-          />
-        </svg>
-        machine
-      </span>
-    );
-  }
-
+/**
+ * Marks a criterion as machine-verifiable. Shown only when the criterion has
+ * code refs (real data) — there is no validation-type field, so we don't
+ * fabricate a "human" counterpart for criteria that simply lack refs.
+ */
+function ValidationBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-info-wash)] px-2 py-0.5 text-2xs font-medium text-[var(--color-info)]">
       <svg
         className="h-2.5 w-2.5"
         fill="none"
@@ -102,16 +79,10 @@ function ValidationBadge({ type }: { type: ValidationType }) {
           strokeLinecap="round"
           strokeLinejoin="round"
           strokeWidth={2}
-          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+          d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
         />
       </svg>
-      human
+      machine
     </span>
   );
 }
@@ -131,12 +102,12 @@ function CriterionRefsList({ refs }: { refs: CodeRef[] }) {
         return (
           <span
             key={`${ref.path}-${i}`}
-            className="inline-flex items-center gap-1 rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-2xs text-text-muted"
+            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-2xs text-[var(--color-fg-mute)]"
             title={ref.description ?? ref.path}
           >
             {ref.path.split("/").pop()}
             {lineRange && (
-              <span className="text-primary">{lineRange}</span>
+              <span className="text-[var(--color-accent)]">{lineRange}</span>
             )}
           </span>
         );
@@ -153,16 +124,14 @@ function CriterionItem({
   onToggle: () => void;
 }) {
   const status = deriveCriterionStatus(section);
-  const validationType = deriveValidationType(section);
+  const refs = section.refs ?? [];
 
   return (
     <div
-      className={`flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors ${
-        status === "met"
-          ? "bg-success/5"
-          : status === "not_met"
-            ? "bg-error/5"
-            : "bg-bg-secondary"
+      className={`flex items-start gap-3 rounded-[var(--radius-lg)] px-3 py-2.5 transition-colors ${
+        status === "not_met"
+          ? "bg-[var(--color-err-wash)]"
+          : "bg-transparent"
       }`}
     >
       <button
@@ -183,15 +152,15 @@ function CriterionItem({
           <p
             className={`text-sm leading-relaxed ${
               status === "met"
-                ? "text-text-muted line-through"
-                : "text-text-primary"
+                ? "text-[var(--color-fg-mute)] line-through"
+                : "text-[var(--color-fg)]"
             }`}
           >
             {section.content}
           </p>
-          <ValidationBadge type={validationType} />
+          {refs.length > 0 && <ValidationBadge />}
         </div>
-        <CriterionRefsList refs={section.refs ?? []} />
+        <CriterionRefsList refs={refs} />
       </div>
     </div>
   );
@@ -235,8 +204,8 @@ export function AcceptanceCriteria({
   if (totalCount === 0) {
     return (
       <div className="px-4 py-3">
-        <p className="text-xs text-text-muted italic">
-          No acceptance criteria defined
+        <p className="text-xs text-[var(--color-fg-mute)] italic">
+          No test criteria defined
         </p>
       </div>
     );
@@ -248,17 +217,17 @@ export function AcceptanceCriteria({
     <div className="space-y-3 px-4 py-3" data-testid="acceptance-criteria">
       {/* Summary bar */}
       <div className="flex items-center justify-between">
-        <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+        <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
           {metCount}/{totalCount} met
         </span>
         <div className="flex items-center gap-2">
-          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-bg-tertiary">
+          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-[var(--color-bg-2)]">
             <div
-              className="h-full rounded-full bg-success transition-all duration-300"
+              className="h-full rounded-full bg-[var(--color-accent)] transition-all duration-300"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <span className="font-mono text-2xs text-text-muted">
+          <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
             {progressPercent}%
           </span>
         </div>

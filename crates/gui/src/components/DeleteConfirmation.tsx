@@ -36,7 +36,7 @@ export function DeleteConfirmation({
 }: DeleteConfirmationProps) {
   return (
     <div
-      className="border-t border-error/20 bg-error/5 p-4"
+      className="m-4 rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3"
       data-testid={testId}
     >
       <div className="space-y-3">
@@ -59,7 +59,7 @@ export function DeleteConfirmation({
           <button
             onClick={onConfirm}
             disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-error/10 text-error hover:bg-error/20 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-[var(--color-err-wash)] text-[var(--color-err)] hover:bg-[color-mix(in_oklch,var(--color-err)_25%,transparent)] disabled:opacity-50 cursor-pointer"
           >
             {isDeleting ? (
               <>
@@ -91,7 +91,7 @@ export function DeleteConfirmation({
           <button
             onClick={onCancel}
             disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-[var(--color-bg-3)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-4)] hover:text-[var(--color-fg)] disabled:opacity-50 cursor-pointer"
           >
             Cancel
           </button>

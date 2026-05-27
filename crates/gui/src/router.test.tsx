@@ -385,7 +385,7 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Level")).toBeInTheDocument();
+        expect(screen.getByLabelText("Filter by level")).toBeInTheDocument();
       });
       expect(screen.getByLabelText("Search tasks by title or ID")).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
@@ -432,7 +432,7 @@ describe("Router Acceptance Tests", () => {
         }),
       );
 
-      fireEvent.change(screen.getByLabelText("Level"), {
+      fireEvent.change(screen.getByLabelText("Filter by level"), {
         target: { value: "ticket" },
       });
 

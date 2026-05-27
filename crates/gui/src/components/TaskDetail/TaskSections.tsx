@@ -3,6 +3,9 @@ import type { Section, SectionType } from '../../bindings';
 import { commands } from '../../bindings';
 import { EditableList } from '../EditableList';
 import { InlineEditField } from './InlineEditField';
+import { SectionGroup as SharedSectionGroup } from '../molecules/SectionGroup';
+import { Chip } from '../atoms/Chip';
+import { Button } from '../atoms/Button';
 
 interface TaskSectionsProps {
   sections: Section[];
@@ -197,85 +200,57 @@ function SectionGroup({
   const itemStates = sections.map(s => ({ done: s.done ?? false }));
 
   return (
-    <div className="border-b border-border last:border-b-0">
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-border-focus cursor-pointer"
-        aria-expanded={isOpen}
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-sm" aria-hidden="true">
-            {getSectionIcon(type)}
-          </span>
-          <span className="text-sm font-medium text-text-primary">
-            {formatSectionType(type)}
-          </span>
-          <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-xs text-text-muted">
-            {sections.length}
-          </span>
-        </div>
-        <svg
-          className={`h-4 w-4 text-text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M19 9l-7 7-7-7"
+    <SharedSectionGroup
+      open={isOpen}
+      onOpenChange={setIsOpen}
+      ariaLabel={`Toggle ${formatSectionType(type)} section`}
+      icon={<span aria-hidden="true">{getSectionIcon(type)}</span>}
+      label={formatSectionType(type)}
+      count={sections.length}
+    >
+      {/* Only mount section content while open so collapsed sections stay out
+          of the accessibility tree (matches the prior conditional render). */}
+      {!isOpen ? null : isAddingNew ? (
+        <>
+          <EditableList
+            items={items}
+            emptyText={`No ${formatSectionType(type).toLowerCase()}`}
+            placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
+            onAdd={handleAddSection}
+            onEdit={handleEditSection}
+            onDelete={handleDeleteSection}
+            variant={type === 'checklist_item' ? 'step' : 'bullet'}
+            itemStates={itemStates}
+            onToggleDone={handleToggleDone}
           />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div className="bg-bg-secondary px-4 pb-3">
-          {isAddingNew ? (
-            <>
-              <EditableList
-                items={items}
-                emptyText={`No ${formatSectionType(type).toLowerCase()}`}
-                placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
-                onAdd={handleAddSection}
-                onEdit={handleEditSection}
-                onDelete={handleDeleteSection}
-                variant={type === 'checklist_item' ? 'step' : 'bullet'}
-                itemStates={itemStates}
-                onToggleDone={handleToggleDone}
-              />
-              {/* Show the add form when isAddingNew */}
-              <div className="mt-2 p-2 bg-bg-tertiary rounded-md">
-                <InlineEditField
-                  value=""
-                  placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
-                  onSave={handleAddSection}
-                  onCancel={onAddComplete}
-                  allowEmpty={false}
-                  startInEditMode
-                  clearOnSave
-                  compact
-                />
-              </div>
-            </>
-          ) : (
-            <EditableList
-              items={items}
-              emptyText={`No ${formatSectionType(type).toLowerCase()}`}
+          {/* Show the add form when isAddingNew */}
+          <div className="mt-2 p-2 bg-[var(--color-bg-2)] rounded-[var(--radius-md)]">
+            <InlineEditField
+              value=""
               placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
-              onAdd={handleAddSection}
-              onEdit={handleEditSection}
-              onDelete={handleDeleteSection}
-              variant={type === 'checklist_item' ? 'step' : 'bullet'}
-              itemStates={itemStates}
-              onToggleDone={handleToggleDone}
+              onSave={handleAddSection}
+              onCancel={onAddComplete}
+              allowEmpty={false}
+              startInEditMode
+              clearOnSave
+              compact
             />
-          )}
-        </div>
+          </div>
+        </>
+      ) : (
+        <EditableList
+          items={items}
+          emptyText={`No ${formatSectionType(type).toLowerCase()}`}
+          placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
+          onAdd={handleAddSection}
+          onEdit={handleEditSection}
+          onDelete={handleDeleteSection}
+          variant={type === 'checklist_item' ? 'step' : 'bullet'}
+          itemStates={itemStates}
+          onToggleDone={handleToggleDone}
+        />
       )}
-    </div>
+    </SharedSectionGroup>
   );
 }
 
@@ -353,15 +328,15 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
   return (
     <div className="flex flex-col h-full">
       {/* Add section area */}
-      <div className="border-b border-border p-4">
+      <div className="border-b border-[var(--color-line)] p-4">
         {showTypeSelector ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-text-primary">Select type:</span>
+              <span className="text-sm font-medium text-[var(--color-fg)]">Select type:</span>
               <button
                 type="button"
                 onClick={() => setShowTypeSelector(false)}
-                className="p-1 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
+                className="p-1 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] transition-colors cursor-pointer"
                 title="Cancel"
               >
                 <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -371,40 +346,41 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
             </div>
             <div className="flex flex-wrap gap-1.5">
               {ALL_SECTION_TYPES.map((type) => (
-                <button
+                <Chip
                   key={type}
-                  type="button"
+                  variant="filter"
                   onClick={() => handleTypeSelect(type)}
-                  className="px-2.5 py-1.5 text-xs font-medium rounded-md border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-primary transition-colors cursor-pointer"
                 >
                   {getShortLabel(type)}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            fullWidth
             onClick={() => setShowTypeSelector(true)}
             disabled={addingToType !== null}
-            className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            iconLeft={
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+            }
           >
-            <svg className="inline h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
             Add Section
-          </button>
+          </Button>
         )}
       </div>
 
       {/* Sections list */}
       <div className="flex-1 overflow-auto">
         {displayTypes.length === 0 && !addingToType ? (
-          <div className="px-4 py-6 text-center text-sm text-text-muted">
+          <div className="px-4 py-6 text-center text-sm text-[var(--color-fg-mute)]">
             No sections defined
           </div>
         ) : (
-          <div className="divide-y divide-border">
+          <div>
             {displayTypes.map((type) => (
               <SectionGroup
                 key={type}
