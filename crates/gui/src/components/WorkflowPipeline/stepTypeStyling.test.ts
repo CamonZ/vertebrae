@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { stepTypeStyle, normalizeStepType } from "./stepTypeStyling";
+import {
+  hearthStepStyle,
+  hearthStepKind,
+  stepTypeStyle,
+  normalizeStepType,
+} from "./stepTypeStyling";
 
 describe("normalizeStepType", () => {
   it.each([
@@ -31,6 +36,30 @@ describe("stepTypeStyle", () => {
   it("falls back to a neutral style for unknown kinds", () => {
     const style = stepTypeStyle(null);
     expect(style.kind).toBe("unknown");
+    expect(style.hearthKind).toBe("unknown");
     expect(style.barVar).toBe("--color-line-strong");
+  });
+});
+
+describe("hearthStepKind", () => {
+  it.each([
+    ["execute", "execute"],
+    ["evaluate", "eval"],
+    ["route", "route"],
+    ["human_input", "human"],
+    ["wait_children", "wait"],
+  ] as const)("maps production %s to Hearth %s", (input, expected) => {
+    expect(hearthStepKind(input)).toBe(expected);
+  });
+});
+
+describe("hearthStepStyle", () => {
+  it("reuses the canonical step palette for v2 Hearth kinds", () => {
+    expect(hearthStepStyle("eval")).toMatchObject({
+      label: "Evaluate",
+      barVar: "--color-step-eval",
+      washVar: "--color-step-eval-wash",
+      fgVar: "--color-step-eval-fg",
+    });
   });
 });
