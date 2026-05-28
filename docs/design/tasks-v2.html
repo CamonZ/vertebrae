@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Tasks (v2 · components)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+  #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ── List column ── */
+  .list-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); }
+  .list-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; gap: var(--s-3); }
+  .list-head .search-bar { width: auto; }
+  .scope-row { display: flex; align-items: center; gap: 2px; }
+  .scope-row .secondary { margin-left: auto; display: flex; align-items: center; gap: var(--s-2); }
+  .scope-row .secondary select { background: transparent; border: 1px solid var(--line-strong); color: var(--fg-mute); padding: 3px 8px; border-radius: var(--r-sm); font-family: var(--mono); font-size: 11px; cursor: pointer; }
+  .list { flex: 1; overflow-y: auto; padding: var(--s-2) 0 var(--s-6); position: relative; }
+  .list::-webkit-scrollbar { width: 6px; }
+  .list::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+  /* ── Task row (app composition; chips/pipeline come from the library) ── */
+  .t-row { position: relative; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--s-3); padding: 0 var(--s-5); cursor: pointer; transition: background var(--t-fast) var(--ease); }
+  .t-row:hover { background: color-mix(in oklch, var(--bg-1) 60%, var(--bg)); }
+  .t-row.sel { background: var(--accent-wash); }
+  .t-row.sel::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); border-radius: 0 2px 2px 0; }
+  .t-indent { display: flex; align-items: stretch; flex-shrink: 0; }
+  .t-indent .g { width: 18px; align-self: stretch; border-right: 1px dashed transparent; }
+  .t-row.l1 .t-indent .g.l1, .t-row.l2 .t-indent .g.l1, .t-row.l2 .t-indent .g.l2 { border-right-color: var(--line); }
+  .t-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .t-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .t-chev { width: 10px; font-size: 9px; color: var(--fg-faint); flex-shrink: 0; text-align: center; cursor: pointer; }
+  .t-glyph { width: 14px; flex-shrink: 0; text-align: center; font-family: var(--mono); color: var(--fg-mute); font-size: 13px; line-height: 1; }
+  .t-row.l0 { padding-top: 10px; padding-bottom: 8px; }
+  .t-row.l0 .t-title { font-family: var(--serif); font-style: italic; font-size: 18px; font-weight: 400; color: var(--fg); letter-spacing: -0.01em; line-height: 1.15; }
+  .t-row.l0 .t-glyph { color: var(--fg); font-size: 14px; }
+  .t-row.l1 { padding-top: 7px; padding-bottom: 6px; }
+  .t-row.l1 .t-title { font-family: var(--sans); font-size: 13.5px; font-weight: 500; color: var(--fg); letter-spacing: -0.005em; }
+  .t-row.l1 .t-glyph { color: var(--fg-soft); }
+  .t-row.l2 { padding-top: 5px; padding-bottom: 5px; }
+  .t-row.l2 .t-title { font-family: var(--sans); font-size: 13px; font-weight: 400; color: var(--fg-soft); }
+  .t-row.l2 .t-glyph { font-size: 16px; color: var(--fg-faint); line-height: 0.6; }
+  .t-row.l2.sel .t-title { color: var(--fg); }
+  .t-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
+  .t-title.done { color: var(--fg-faint); }
+  .t-row.l0 .t-title.done { font-style: italic; }
+  .t-meta { margin-top: 1px; display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.02em; flex-wrap: wrap; row-gap: 2px; }
+  .t-meta > span, .t-meta .c-breakdown, .t-meta .c-pipeline { white-space: nowrap; }
+  .t-meta .sep { color: var(--fg-ghost); }
+  .t-meta .tag { color: var(--fg-mute); border-bottom: 1px dotted var(--fg-ghost); }
+  .t-pri { font-family: var(--mono); font-size: 12px; font-weight: 700; flex-shrink: 0; opacity: 0.6; }
+  .t-pri.hi { color: var(--err); opacity: 0.9; }
+  .t-pri.md { color: var(--warn); }
+  .t-pri.lo { color: var(--fg-faint); }
+  .t-right { display: flex; align-items: center; gap: var(--s-3); justify-content: flex-end; flex-shrink: 0; }
+  .t-right .chip-slot { display: flex; justify-content: flex-end; }
+  .t-right .when { min-width: 50px; text-align: right; color: var(--fg-faint); font-family: var(--mono); font-size: 10px; white-space: nowrap; }
+
+  .caption-strip { flex-shrink: 0; border-top: 1px solid var(--line); padding: 5px var(--s-5); font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.06em; background: var(--bg); display: flex; align-items: center; gap: var(--s-3); }
+  .caption-strip .plate { color: var(--accent); }
+  .caption-strip em { font-style: italic; color: var(--fg-mute); }
+
+  /* ── Detail panel (frame; sections use the Accordion component) ── */
+  .detail { width: 580px; flex-shrink: 0; background: var(--bg-1); border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  .t-detail-head { flex-shrink: 0; padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, color-mix(in oklch, var(--accent-wash) 25%, var(--bg-1)), var(--bg-1)); position: relative; }
+  .t-detail-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, var(--accent), transparent 60%); opacity: 0.5; }
+  .t-detail-top { display: flex; gap: var(--s-3); align-items: flex-start; }
+  .t-detail-head .dh-title { font-size: 22px; }
+  .t-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .t-actions .icon-btn { border-color: transparent; }
+  .t-detail-body { flex: 1; overflow-y: auto; min-height: 0; }
+  .t-detail-body::-webkit-scrollbar { width: 6px; }
+  .t-detail-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+  /* Make library Accordions read as flush detail sections */
+  .t-detail-body .accordion { border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .t-detail-body .accordion .acc-hd { padding: 10px var(--s-5); }
+  .t-detail-body .accordion.open .acc-hd { border-bottom: none; }
+  .t-detail-body .accordion .acc-bd { padding: 0 var(--s-5) var(--s-4); }
+
+  .t-child { display: grid; grid-template-columns: 10px 1fr auto; gap: var(--s-3); align-items: center; padding: 6px 8px; margin: 0 -8px; border-radius: var(--r-sm); cursor: pointer; transition: background var(--t-fast) var(--ease); }
+  .t-child:hover { background: var(--bg-2); }
+  .t-child .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); justify-self: center; }
+  .t-child .cname { font-size: 13px; color: var(--fg-soft); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-child .cright { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+  .t-dep { display: flex; align-items: center; gap: var(--s-2); padding: 6px 8px; margin: 0 -8px; border-radius: var(--r-sm); cursor: pointer; }
+  .t-dep:hover { background: var(--bg-2); }
+  .t-dep .dep-title { font-family: var(--sans); font-size: 12px; color: var(--fg-soft); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-sublbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); margin-top: var(--s-4); margin-bottom: 6px; }
+  .t-sublbl:first-child { margin-top: 0; }
+  .t-prose { font-family: var(--sans); font-size: 13px; line-height: 1.6; color: var(--fg-soft); }
+  .t-prose p + p { margin-top: var(--s-2); }
+  .t-prose ul { list-style: none; display: flex; flex-direction: column; gap: 6px; padding: 0; margin: 0; }
+  .t-prose ul li { display: flex; gap: 10px; }
+  .t-prose ul li::before { content: ''; width: 3px; height: 3px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 9px; opacity: 0.7; }
+  .t-empty { font-family: var(--sans); font-style: italic; color: var(--fg-faint); font-size: 13px; }
+  .t-traces { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 8px var(--s-3); background: transparent; border: 1px dashed var(--line-strong); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); cursor: pointer; transition: all var(--t-fast) var(--ease); }
+  .t-traces:hover { border-style: solid; border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+  .t-traces em { color: var(--fg); font-family: var(--serif); font-style: italic; }
+  .t-detail-foot { flex-shrink: 0; padding: var(--s-3) var(--s-5); border-top: 1px solid var(--line); background: var(--bg-2); display: flex; align-items: center; gap: var(--s-2); }
+</style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+
+  <script src="tasks-data.js"></script>
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- Component library -->
+  <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-detail.jsx"></script>
+  <script type="text/babel" src="lib/lib-controls.jsx"></script>
+  <script type="text/babel" src="lib/lib-shell.jsx"></script>
+  <!-- Tasks app -->
+  <script type="text/babel" src="lib/tasks-detail.jsx"></script>
+  <script type="text/babel" src="lib/tasks-app.jsx"></script>
+
+  <script>
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
+      var btn = document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight = html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+</body>
+</html>

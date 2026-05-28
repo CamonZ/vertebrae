@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Foundations</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Fig layout */
+  .fig {
+    margin-top: var(--s-10);
+    display: grid; grid-template-columns: 220px 1fr;
+    gap: var(--s-8); align-items: start;
+  }
+  .fig-key { position: sticky; top: var(--s-6); }
+  .fig-key .plate { font-family: var(--serif); font-style: italic; font-size: 56px; line-height: 1; color: var(--accent); }
+  .fig-key h3 {
+    margin-top: var(--s-3);
+    font-family: var(--serif); font-size: 28px; line-height: 1; font-weight: 400;
+    letter-spacing: -0.01em; color: var(--fg);
+  }
+  .fig-key h3 .em { font-style: italic; color: var(--fg-mute); }
+  .fig-key .desc { margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--fg-mute); line-height: 1.5; }
+  .fig-key .meta { margin-top: var(--s-4); font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; }
+
+  /* Palette */
+  .palette {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .palette.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .palette > div {
+    aspect-ratio: 1/1.35;
+    padding: var(--s-3);
+    display: flex; flex-direction: column; justify-content: space-between;
+    border-right: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px;
+    position: relative;
+  }
+  .palette > div:last-child { border-right: none; }
+  .palette > div .ix { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--accent); line-height: 1; }
+  .palette > div.dark .ix { color: var(--accent-mute); }
+  .palette > div .meta .nm { display: block; font-weight: 500; }
+  .palette > div .meta .hx { display: block; color: var(--fg-mute); margin-top: 1px; }
+  .palette > div.dark .meta .hx { color: inherit; opacity: 0.78; }
+  .palette > div.dark { color: var(--fg); }
+
+  /* Status row */
+  .status-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-3); }
+  .status-cell {
+    background: var(--bg-1); border: 1px solid var(--line-strong);
+    padding: var(--s-4); border-radius: var(--r-md);
+    position: relative; min-height: 110px;
+  }
+  .status-cell::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; }
+  .status-cell.ok::before { background: var(--ok); }
+  .status-cell.warn::before { background: var(--warn); }
+  .status-cell.err::before { background: var(--err); }
+  .status-cell.info::before { background: var(--info); }
+  .status-cell .h { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.14em; text-transform: uppercase; }
+  .status-cell .b { margin-top: var(--s-3); }
+  .status-cell .v { margin-top: var(--s-3); font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.04em; }
+
+  /* Step type plate — 5 columns, the centerpiece */
+  .steps-table {
+    display: grid; grid-template-columns: repeat(5, 1fr);
+    gap: var(--s-3);
+  }
+  .step-cell {
+    background: var(--bg-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    padding: var(--s-4);
+    position: relative;
+    overflow: hidden;
+    min-height: 220px;
+  }
+  .step-cell .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+  .step-cell .ix { font-family: var(--serif); font-style: italic; font-size: 32px; line-height: 1; }
+  .step-cell .icon {
+    margin-top: var(--s-3); font-family: var(--mono); font-size: 14px;
+  }
+  .step-cell .nm {
+    margin-top: var(--s-2);
+    font-family: var(--serif); font-size: 24px; font-weight: 400; line-height: 1.05;
+    letter-spacing: -0.01em; color: var(--fg);
+  }
+  .step-cell .nm .it { font-style: italic; }
+  .step-cell .what {
+    margin-top: var(--s-2);
+    font-family: var(--serif); font-style: italic; font-size: 13px;
+    color: var(--fg-mute); line-height: 1.45;
+  }
+  .step-cell .tokens {
+    margin-top: var(--s-4);
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px; color: var(--fg-faint);
+    line-height: 1.7;
+  }
+  .step-cell .tokens .k { color: var(--fg-mute); }
+  .step-cell .glow {
+    position: absolute; right: -40px; top: -40px;
+    width: 160px; height: 160px;
+    border-radius: 50%; opacity: 0.15;
+    pointer-events: none;
+  }
+
+  /* Theme split */
+  .themes {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--line); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .themes .pane { padding: var(--s-5); }
+  .themes .pane.dark { background: var(--bg); }
+  .themes .pane.lite { background: #f5efe2; color: #1d1814; }
+  .themes .pane .lab { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.65; }
+  .themes .pane .h {
+    margin-top: var(--s-3);
+    font-family: var(--serif); font-size: 32px; line-height: 1; letter-spacing: -0.015em;
+  }
+  .themes .pane.dark .h em { color: var(--accent); font-style: italic; }
+  .themes .pane.lite .h em { color: oklch(0.55 0.14 50); font-style: italic; }
+  .themes .strip {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; margin-top: var(--s-3);
+    background: var(--line);
+  }
+  .themes .strip > div { height: 28px; padding: 4px; font-family: var(--mono); font-size: 8px; display: flex; align-items: flex-end; }
+
+  /* Type plate */
+  .type-plate {
+    background: var(--bg-1); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md); padding: var(--s-5);
+  }
+  .type-plate .r {
+    display: grid; grid-template-columns: 200px 1fr; gap: var(--s-6);
+    padding: var(--s-4) 0; border-bottom: 1px solid var(--line); align-items: baseline;
+  }
+  .type-plate .r:last-child { border-bottom: none; }
+  .type-plate .meta { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.04em; }
+  .type-plate .meta .nm { display: block; color: var(--fg); font-size: 12px; margin-bottom: 4px; font-weight: 500; }
+  .type-plate .sample { color: var(--fg); }
+
+  /* Scale */
+  .scale { background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; }
+  .scale .r {
+    display: grid; grid-template-columns: 80px 100px 1fr;
+    gap: var(--s-4); padding: var(--s-3) var(--s-4);
+    border-bottom: 1px solid var(--line); align-items: baseline;
+  }
+  .scale .r:last-child { border-bottom: none; }
+  .scale .px { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.04em; }
+  .scale .nm { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+
+  /* Space */
+  .space-table { background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; }
+  .space-table .r {
+    display: grid; grid-template-columns: 80px 80px 1fr; gap: var(--s-3);
+    padding: 6px var(--s-4); border-bottom: 1px solid var(--line); align-items: center;
+  }
+  .space-table .r:last-child { border-bottom: none; }
+  .space-table .nm { font-family: var(--mono); font-size: 12px; color: var(--fg); }
+  .space-table .px { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .space-table .bar { height: 12px; background: var(--accent); border-radius: 1px; }
+
+  /* Radii */
+  .rad-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-4); }
+  .rad-grid .item { display: flex; flex-direction: column; gap: var(--s-2); }
+  .rad-grid .demo { aspect-ratio: 1.4; background: var(--bg-2); border: 1px solid var(--line-strong); }
+  .rad-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .rad-grid .lbl .nm { color: var(--fg); }
+
+  /* Elevation — dark uses bg shifts */
+  .elev-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-4); }
+  .elev-grid .item { display: flex; flex-direction: column; gap: var(--s-2); }
+  .elev-grid .demo {
+    aspect-ratio: 1.5;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-mute);
+    border-radius: var(--r-md);
+  }
+  .elev-grid .e0 { background: var(--bg); }
+  .elev-grid .e1 { background: var(--bg-1); border: 1px solid var(--line); }
+  .elev-grid .e2 { background: var(--bg-2); box-shadow: var(--shadow-2); }
+  .elev-grid .e3 { background: var(--bg-3); box-shadow: var(--shadow-3); }
+  .elev-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .elev-grid .lbl .nm { color: var(--fg); }
+
+  /* Motion */
+  .motion-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-3); }
+  .motion-grid .m {
+    background: var(--bg-1); border: 1px solid var(--line-strong);
+    padding: var(--s-4); position: relative; overflow: hidden; height: 96px;
+    cursor: pointer; border-radius: var(--r-md);
+  }
+  .motion-grid .m .lbl { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .motion-grid .m .lbl .nm { color: var(--fg); }
+  .motion-grid .m .val { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+  .motion-grid .m .puck {
+    position: absolute; bottom: var(--s-4); left: var(--s-4);
+    width: 14px; height: 14px; background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .motion-grid .m:hover .puck { left: calc(100% - 30px); }
+  .motion-grid .m.fast .puck { transition: left 100ms var(--ease); }
+  .motion-grid .m.base .puck { transition: left 180ms var(--ease); }
+  .motion-grid .m.slow .puck { transition: left 280ms var(--ease); }
+  .motion-grid .m.linear .puck { transition: left 180ms linear; }
+
+  /* Super header */
+  .super {
+    margin-top: var(--s-16);
+    padding-bottom: var(--s-3);
+    border-bottom: 1px solid var(--accent);
+    display: flex; align-items: baseline; gap: var(--s-4);
+  }
+  .super .num { font-family: var(--serif); font-style: italic; font-size: 32px; color: var(--accent); }
+  .super .t { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg); }
+  .super .right { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header class="masthead">
+      <span class="wordmark">Vertebrae<span class="ember"></span></span>
+      <span class="crumb">Hearth · Foundations</span>
+      <span class="meta">§ 02 &middot; pp. 09–22</span>
+    </header>
+
+    <nav class="chapters">
+      <a href="index.html">§ 01 · Cover</a>
+      <a href="foundations.html" class="current">§ 02 · Foundations</a>
+      <a href="components.html">§ 03 · Components</a>
+      <a href="patterns.html">§ 04 · Patterns</a>
+      <a href="panels.html">＋ Panels</a>
+      <a href="../../Vertebrae Style Guide.html" style="margin-left: auto; border-right: none;">← All directions</a>
+    </nav>
+
+    <section class="section-head">
+      <div>
+        <div class="plate-num"><span class="n">§ 02</span> · Foundations</div>
+        <h1 class="title" style="margin-top: var(--s-3);">The<br><span class="em">primitives</span>.</h1>
+      </div>
+      <div>
+        <p class="blurb">
+          Warm ink, one copper accent, five step-type hues, two body
+          typefaces and one display serif. Everything visible in
+          Hearth is composed from <em class="italic">these primitives</em>.
+        </p>
+      </div>
+    </section>
+
+    <!-- ── 2.1 Ink & Cream ────────────────────────────── -->
+    <div class="super"><span class="num">i.</span><span class="t">Warm ink &amp; cream / fig. 1</span><span class="right">12 neutral stops</span></div>
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>i</em></span></div>
+        <h3>Warm <span class="em">ink</span> &amp; cream</h3>
+        <p class="desc">A warm neutral scale &mdash; never blue, never gray. Surface stacking expressed through value, not shadow.</p>
+        <div class="meta">12 stops &middot; warm</div>
+      </div>
+      <div class="palette">
+        <div style="background: var(--bg);"><span class="ix">a</span><div class="meta"><span class="nm">bg</span><span class="hx" data-dark="#100e0c" data-light="#faf6ec"></span></div></div>
+        <div style="background: var(--bg-1);"><span class="ix">b</span><div class="meta"><span class="nm">bg-1</span><span class="hx" data-dark="#181513" data-light="#f2ede0"></span></div></div>
+        <div style="background: var(--bg-2);"><span class="ix">c</span><div class="meta"><span class="nm">bg-2</span><span class="hx" data-dark="#221d1a" data-light="#e9e3d3"></span></div></div>
+        <div style="background: var(--bg-3);"><span class="ix">d</span><div class="meta"><span class="nm">bg-3</span><span class="hx" data-dark="#2c2622" data-light="#dcd4c1"></span></div></div>
+        <div style="background: var(--bg-4);"><span class="ix">e</span><div class="meta"><span class="nm">bg-4</span><span class="hx" data-dark="#38312c" data-light="#cac0a8"></span></div></div>
+        <div style="background: var(--line-strong);"><span class="ix">f</span><div class="meta"><span class="nm">line-strong</span><span class="hx" data-dark="#463f38" data-light="#b9b09c"></span></div></div>
+        <div class="dark" style="background: var(--fg-faint);"><span class="ix">g</span><div class="meta"><span class="nm">fg-faint</span><span class="hx" data-dark="#645f57" data-light="#8e8e83"></span></div></div>
+        <div class="dark" style="background: var(--fg-mute);"><span class="ix">h</span><div class="meta"><span class="nm">fg-mute</span><span class="hx" data-dark="#9c988e" data-light="#66665e"></span></div></div>
+        <div class="dark" style="background: var(--fg-soft);"><span class="ix">i</span><div class="meta"><span class="nm">fg-soft</span><span class="hx" data-dark="#ccc8c0" data-light="#3a3a44"></span></div></div>
+        <div class="dark" style="background: var(--fg);"><span class="ix">j</span><div class="meta"><span class="nm">fg</span><span class="hx" data-dark="#e8e5dd" data-light="#1a1a20"></span></div></div>
+        <div style="background: var(--fg-ghost);"><span class="ix">k</span><div class="meta"><span class="nm">fg-ghost</span><span class="hx" data-dark="#45413c" data-light="#b6b5aa"></span></div></div>
+        <div style="background: var(--line);"><span class="ix">l</span><div class="meta"><span class="nm">line</span><span class="hx" data-dark="#2c2622" data-light="#dcd4c1"></span></div></div>
+      </div>
+    </div>
+
+    <!-- ── 2.2 Copper accent ────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>ii</em></span></div>
+        <h3>One <span class="em">copper</span></h3>
+        <p class="desc">A warm gold drawn from low embers in a workshop &mdash; never bright like a citrus, never dull like brass. Four stops cover wash, mute, primary, and pressed.</p>
+        <div class="meta">4 stops &middot; oklch · <span class="hx" data-dark="40°" data-light="48°"></span></div>
+      </div>
+      <div class="palette cols-4">
+        <div style="background: var(--accent-wash);"><span class="ix">m</span><div class="meta"><span class="nm">accent-wash</span><span class="hx" data-dark="oklch(.22 .05 38)" data-light="oklch(.95 .03 50)"></span></div></div>
+        <div style="background: var(--accent-mute);"><span class="ix">n</span><div class="meta"><span class="nm">accent-mute</span><span class="hx" data-dark="oklch(.52 .12 38)" data-light="oklch(.76 .12 50)"></span></div></div>
+        <div class="dark" style="background: var(--accent);"><span class="ix">o</span><div class="meta" style="color: var(--bg);"><span class="nm">accent</span><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></div></div>
+        <div class="dark" style="background: var(--accent-deep);"><span class="ix">p</span><div class="meta" style="color: var(--bg);"><span class="nm">accent-deep</span><span class="hx" data-dark="oklch(.58 .18 35)" data-light="oklch(.48 .18 40)"></span></div></div>
+      </div>
+
+      <!-- Accent alternatives — UI snippets to compare -->
+      <div style="grid-column: 1 / -1; margin-top: var(--s-6);">
+        <div class="eyebrow" style="font-size: 10px; margin-bottom: var(--s-3); display: flex; align-items: baseline; gap: var(--s-3);">
+          <span>// alternatives to consider</span>
+          <span style="font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--fg-mute); letter-spacing: 0; text-transform: none;">same UI, five candidate hues &mdash; pick the one that <em>belongs</em>.</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-3);">
+          <!-- 1. Hearthfire (current — live tokens) -->
+          <div style="--alt: var(--accent); --alt-wash: var(--accent-wash); --alt-deep: var(--accent-deep); --alt-glow: var(--accent-glow); padding: var(--s-4); background: var(--bg-1); border: 2px solid var(--alt); border-radius: var(--r-md); position: relative; box-shadow: 0 0 24px var(--alt-glow);">
+            <div style="position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: 9px; color: var(--alt); letter-spacing: 0.12em;">CURRENT</div>
+            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Hearthfire <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ copper</span></div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;"><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600; box-shadow: 0 0 12px var(--alt-glow);">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            </div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Live tokens. Warmest of the set &mdash; the chosen direction.</div>
+          </div>
+
+          <!-- 2. Steel blue -->
+          <div style="--alt: oklch(0.80 0.09 230); --alt-wash: oklch(0.30 0.08 230); --alt-deep: oklch(0.62 0.11 230); --alt-glow: rgba(120, 170, 220, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Steel blue</div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.80 .09 230)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            </div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cool, technical &mdash; close to the original indigo but lighter and more breathable.</div>
+          </div>
+
+          <!-- 3. Glacier teal -->
+          <div style="--alt: oklch(0.78 0.10 200); --alt-wash: oklch(0.30 0.09 200); --alt-deep: oklch(0.60 0.12 200); --alt-glow: rgba(100, 190, 200, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Glacier</div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.78 .10 200)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            </div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cooler, aquatic. Could collide with step-eval (cyan) &mdash; would need that shifted.</div>
+          </div>
+
+          <!-- 4. Periwinkle -->
+          <div style="--alt: oklch(0.76 0.11 270); --alt-wash: oklch(0.30 0.09 270); --alt-deep: oklch(0.60 0.13 270); --alt-glow: rgba(150, 150, 230, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Periwinkle</div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.76 .11 270)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            </div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cool indigo-leaning. Distinct from step-execute (violet 285&deg;) but in the same family.</div>
+          </div>
+
+          <!-- 5. Grayscale (no hue) -->
+          <div style="--alt: oklch(0.86 0 0); --alt-wash: oklch(0.30 0 0); --alt-deep: oklch(0.65 0 0); --alt-glow: rgba(220, 220, 220, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Bone <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ no-hue</span></div>
+            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.86 .00 0)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            </div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">No-accent option. The interface speaks entirely through value &amp; the five step-type hues. Most disciplined; loses ember warmth entirely.</div>
+          </div>
+        </div>
+
+        <p style="margin-top: var(--s-4); font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--fg-mute); line-height: 1.5; max-width: 72ch;">
+          Colder candidates plus a true grayscale. <em style="color: var(--fg);">Steel blue</em> reads most natural with the cool neutrals and stays distinct from every step-type hue. <em style="color: var(--fg);">Glacier</em> and <em style="color: var(--fg);">periwinkle</em> are more characterful but each crowds an existing step token. <em style="color: var(--fg);">Bone</em> is the disciplined choice &mdash; the interface speaks through the five workflow hues alone.
+        </p>
+      </div>
+    </div>
+
+    <!-- ── 2.3 Status ───────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>iii</em></span></div>
+        <h3>Semantic <span class="em">status</span></h3>
+        <p class="desc">Four channels for execution state. Each pairs a luminous foreground with a deep wash for backgrounds.</p>
+        <div class="meta">4 channels &middot; oklch</div>
+      </div>
+      <div class="status-row">
+        <div class="status-cell ok"><span class="h">ok</span><div class="b"><span class="badge ok"><span class="dot"></span>Done</span></div><div class="v"><span class="hx" data-dark="oklch(.78 .15 145)" data-light="oklch(.50 .15 145)"></span></div></div>
+        <div class="status-cell warn"><span class="h">warn</span><div class="b"><span class="badge warn"><span class="dot"></span>Needs review</span></div><div class="v"><span class="hx" data-dark="oklch(.78 .15 75)" data-light="oklch(.55 .15 70)"></span></div></div>
+        <div class="status-cell err"><span class="h">err</span><div class="b"><span class="badge err"><span class="dot"></span>Failed</span></div><div class="v"><span class="hx" data-dark="oklch(.72 .18 25)" data-light="oklch(.50 .18 25)"></span></div></div>
+        <div class="status-cell info"><span class="h">info</span><div class="b"><span class="badge info"><span class="dot"></span>Running</span></div><div class="v"><span class="hx" data-dark="oklch(.78 .13 220)" data-light="oklch(.48 .13 220)"></span></div></div>
+      </div>
+    </div>
+
+    <!-- ── 2.4 STEP TYPES (the centerpiece — 5 types) ──────────── -->
+    <div class="super"><span class="num">ii.</span><span class="t">The five step types / fig. 4</span><span class="right">execute &middot; eval &middot; route &middot; review &middot; wait</span></div>
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>iv</em></span></div>
+        <h3>Five <span class="em">step</span> types</h3>
+        <p class="desc">Vertebrae has five step characters in its workflow vocabulary &mdash; each owning one hue. The hue appears as a top bar on workflow nodes, a left border on board columns, and a small dot in lists.</p>
+        <div class="meta">5 types &middot; shared with DAG &amp; Board</div>
+      </div>
+      <div class="steps-table">
+        <div class="step-cell">
+          <div class="bar" style="background: var(--step-execute);"></div>
+          <div class="glow" style="background: var(--step-execute);"></div>
+          <span class="ix">i</span>
+          <div class="icon" style="color: var(--step-execute-fg);">▶ execute</div>
+          <div class="nm">Agent <span class="it">runs</span></div>
+          <p class="what">An AI agent executes the step &mdash; where work actually happens. The place that costs tokens.</p>
+          <div class="tokens">
+            <span class="k">bar </span><span style="color: var(--step-execute);">●</span> step-execute<br>
+            <span class="k">wash </span>step-execute-wash<br>
+            <span class="k">hue  </span>violet · 285°
+          </div>
+        </div>
+
+        <div class="step-cell">
+          <div class="bar" style="background: var(--step-eval);"></div>
+          <div class="glow" style="background: var(--step-eval);"></div>
+          <span class="ix">ii</span>
+          <div class="icon" style="color: var(--step-eval-fg);">⊙ eval</div>
+          <div class="nm">Agent <span class="it">judges</span></div>
+          <p class="what">An agent scores or checks an output from a previous step. No artifact &mdash; just a verdict.</p>
+          <div class="tokens">
+            <span class="k">bar </span><span style="color: var(--step-eval);">●</span> step-eval<br>
+            <span class="k">wash </span>step-eval-wash<br>
+            <span class="k">hue  </span>cyan · 200°
+          </div>
+        </div>
+
+        <div class="step-cell">
+          <div class="bar" style="background: var(--step-route);"></div>
+          <div class="glow" style="background: var(--step-route);"></div>
+          <span class="ix">iii</span>
+          <div class="icon" style="color: var(--step-route-fg);">⤳ route</div>
+          <div class="nm">Decision <span class="it">point</span></div>
+          <p class="what">Conditional fork &mdash; the task moves to one of several next steps based on a rule.</p>
+          <div class="tokens">
+            <span class="k">bar </span><span style="color: var(--step-route);">●</span> step-route<br>
+            <span class="k">wash </span>step-route-wash<br>
+            <span class="k">hue  </span>lime · 135°
+          </div>
+        </div>
+
+        <div class="step-cell">
+          <div class="bar" style="background: var(--step-human);"></div>
+          <div class="glow" style="background: var(--step-human);"></div>
+          <span class="ix">iv</span>
+          <div class="icon" style="color: var(--step-human-fg);">👁 review</div>
+          <div class="nm">Human <span class="it">review</span></div>
+          <p class="what">A person must approve or reject. The system waits indefinitely &mdash; no timeout.</p>
+          <div class="tokens">
+            <span class="k">bar </span><span style="color: var(--step-human);">●</span> step-human<br>
+            <span class="k">wash </span>step-human-wash<br>
+            <span class="k">hue  </span>amber · 70°
+          </div>
+        </div>
+
+        <div class="step-cell">
+          <div class="bar" style="background: var(--step-wait);"></div>
+          <div class="glow" style="background: var(--step-wait);"></div>
+          <span class="ix">v</span>
+          <div class="icon" style="color: var(--step-wait-fg);">⏸ wait</div>
+          <div class="nm">Wait for <span class="it">children</span></div>
+          <p class="what">Paused on subtask completion. Passive &mdash; will resume automatically when children finish.</p>
+          <div class="tokens">
+            <span class="k">bar </span><span style="color: var(--step-wait);">●</span> step-wait<br>
+            <span class="k">wash </span>step-wait-wash<br>
+            <span class="k">hue  </span>slate · 250°
+          </div>
+        </div>
+      </div>
+
+      <!-- Token reference table -->
+      <div style="grid-column: 1 / -1; margin-top: var(--s-6); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+        <div class="eyebrow" style="font-size: 10px; margin-bottom: var(--s-3);">// step-type token reference</div>
+        <div style="display: grid; grid-template-columns: 140px repeat(5, 1fr); gap: var(--s-3); font-family: var(--mono); font-size: 11px;">
+          <div style="color: var(--fg-mute);">type</div>
+          <div style="color: var(--step-execute-fg);">execute</div>
+          <div style="color: var(--step-eval-fg);">eval</div>
+          <div style="color: var(--step-route-fg);">route</div>
+          <div style="color: var(--step-human-fg);">human</div>
+          <div style="color: var(--step-wait-fg);">wait</div>
+
+          <div style="color: var(--fg-mute);">--bar</div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.72 .16 285)" data-light="oklch(.52 .18 285)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.78 .13 200)" data-light="oklch(.52 .13 200)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.82 .18 135)" data-light="oklch(.55 .18 135)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.80 .15 70)" data-light="oklch(.55 .15 70)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.62 .04 250)" data-light="oklch(.50 .04 250)"></span></div>
+
+          <div style="color: var(--fg-mute);">--wash (bg)</div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .12 285)" data-light="oklch(.93 .05 285)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .10 200)" data-light="oklch(.93 .05 200)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .12 135)" data-light="oklch(.93 .07 135)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .10 70)" data-light="oklch(.93 .06 75)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.28 .02 250)" data-light="oklch(.92 .02 250)"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 2.5 Themes ────────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>v</em></span></div>
+        <h3>Two <span class="em">themes</span></h3>
+        <p class="desc">Dark is primary &mdash; engineers run their tools dark, and Vertebrae is no exception. A warm light theme exists for projection and side-by-side reading.</p>
+        <div class="meta">Dark · Warm light</div>
+      </div>
+      <div class="themes">
+        <div class="pane dark">
+          <div class="lab">A &middot; dark (primary)</div>
+          <div class="h">Implement <em>JWT</em> service</div>
+          <div class="row" style="margin-top: var(--s-3);"><span class="id-badge">i9j0k1l2</span><span class="badge info"><span class="dot"></span>Running · 4m</span></div>
+          <div class="strip">
+            <div style="background: var(--bg); color: var(--fg-mute);">bg</div>
+            <div style="background: var(--bg-1); color: var(--fg-mute);">bg-1</div>
+            <div style="background: var(--bg-2); color: var(--fg-mute);">bg-2</div>
+            <div style="background: var(--bg-3); color: var(--fg-mute);">bg-3</div>
+            <div style="background: var(--fg-mute); color: var(--bg);">mute</div>
+            <div style="background: var(--accent); color: var(--bg);">accent</div>
+          </div>
+        </div>
+        <div class="pane lite">
+          <div class="lab" style="color: #5c5040;">B &middot; warm light (alternate)</div>
+          <div class="h">Implement <em>JWT</em> service</div>
+          <div class="row" style="margin-top: var(--s-3);"><span class="id-badge" style="color: #8a7c68;">i9j0k1l2</span><span class="badge" style="background: rgba(80,120,180,0.12); color: oklch(0.50 0.14 220); border: 1px solid rgba(80,120,180,0.3);"><span class="dot"></span>Running · 4m</span></div>
+          <div class="strip">
+            <div style="background: #fcf8ee; color: #1d1814;">pure</div>
+            <div style="background: #f7f1e2; color: #1d1814;">light</div>
+            <div style="background: #f0e9d6; color: #1d1814;">paper</div>
+            <div style="background: #e6dec8; color: #1d1814;">deep</div>
+            <div style="background: #8a7c68; color: #fcf8ee;">mute</div>
+            <div style="background: oklch(0.55 0.14 50); color: #fcf8ee;">accent</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 2.6 Type ─────────────────────────────────── -->
+    <div class="super"><span class="num">iii.</span><span class="t">Typography / fig. 6–7</span><span class="right">Three families &middot; one scale</span></div>
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>vi</em></span></div>
+        <h3>Three <span class="em">typefaces</span></h3>
+        <p class="desc">Display serif for moments that matter; humanist sans for everything functional; monospace for code, IDs and labels.</p>
+        <div class="meta">Display · Body · Code</div>
+      </div>
+      <div class="type-plate">
+        <div class="r">
+          <div class="meta"><span class="nm">Newsreader</span>Production Type · 2020<br>Display serif, italic emphasis<br>Variable · 6–72 opsz</div>
+          <div class="sample" style="font-family: var(--serif); font-size: 64px; line-height: 0.95; letter-spacing: -0.02em;">By <em class="italic" style="color: var(--accent);">firelight</em></div>
+        </div>
+        <div class="r">
+          <div class="meta"><span class="nm">Geist</span>Vercel · 2024<br>Body sans · 300–700<br>OpenType ss01, cv11</div>
+          <div class="sample" style="font-family: var(--sans); font-size: 22px; line-height: 1.45; max-width: 480px;">A geometric sans designed for screens. Used on every functional surface &mdash; buttons, body, lists, navigation, settings.</div>
+        </div>
+        <div class="r">
+          <div class="meta"><span class="nm">JetBrains Mono</span>JetBrains · open source<br>Code &middot; IDs &middot; paths<br>400 &middot; 500</div>
+          <div class="sample" style="font-family: var(--mono); font-size: 15px; line-height: 1.55;">task &gt; i9j0k1l2 &nbsp; <span style="color: var(--accent);">▶ execute</span> &nbsp; 4m12s</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 2.7 Scale ──────────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>vii</em></span></div>
+        <h3>Type <span class="em">scale</span></h3>
+        <p class="desc">Eight sizes from caption to display. Display reserved for cover plates; in-product copy lives between body-sm and h3.</p>
+        <div class="meta">8 sizes &middot; 4 px grid</div>
+      </div>
+      <div class="scale">
+        <div class="r"><span class="px">140 px</span><span class="nm">display</span><span style="font-family: var(--serif); font-size: 96px; letter-spacing: -0.025em; line-height: 1;">Aa</span></div>
+        <div class="r"><span class="px">56 px</span><span class="nm">h1</span><span style="font-family: var(--serif); font-size: 56px; letter-spacing: -0.02em; line-height: 1;">By firelight</span></div>
+        <div class="r"><span class="px">36 px</span><span class="nm">h2</span><span style="font-family: var(--serif); font-style: italic; font-size: 36px; line-height: 1.05;">Foundations</span></div>
+        <div class="r"><span class="px">20 px</span><span class="nm">h3</span><span style="font-family: var(--sans); font-size: 20px; font-weight: 500;">Section heading</span></div>
+        <div class="r"><span class="px">15 px</span><span class="nm">body</span><span style="font-family: var(--sans); font-size: 15px;">Default reading size for body copy.</span></div>
+        <div class="r"><span class="px">13 px</span><span class="nm">body-sm</span><span style="font-family: var(--sans); font-size: 13px;">Secondary text &mdash; metadata, lists.</span></div>
+        <div class="r"><span class="px">12 px</span><span class="nm">caption</span><span style="font-family: var(--sans); font-size: 12px;">Footnotes, timestamps.</span></div>
+        <div class="r"><span class="px">11 px</span><span class="nm">eyebrow</span><span class="eyebrow">SECTION &middot; LABEL &middot; MARKER</span></div>
+      </div>
+    </div>
+
+    <!-- ── 2.8 Space ─────────────────────────────────── -->
+    <div class="super"><span class="num">iv.</span><span class="t">Space · Radii · Elevation · Motion / fig. 8–11</span><span class="right">Infrastructure</span></div>
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>viii</em></span></div>
+        <h3>The <span class="em">grid</span></h3>
+        <p class="desc">All spacing is a multiple of four &mdash; no exceptions. Eleven named stops for layout gaps and component internals.</p>
+        <div class="meta">11 stops &middot; 4 px base</div>
+      </div>
+      <div class="space-table">
+        <div class="r"><span class="nm">s-1</span><span class="px">4 px</span><div class="bar" style="width: 4px;"></div></div>
+        <div class="r"><span class="nm">s-2</span><span class="px">8 px</span><div class="bar" style="width: 8px;"></div></div>
+        <div class="r"><span class="nm">s-3</span><span class="px">12 px</span><div class="bar" style="width: 12px;"></div></div>
+        <div class="r"><span class="nm">s-4</span><span class="px">16 px</span><div class="bar" style="width: 16px;"></div></div>
+        <div class="r"><span class="nm">s-5</span><span class="px">20 px</span><div class="bar" style="width: 20px;"></div></div>
+        <div class="r"><span class="nm">s-6</span><span class="px">24 px</span><div class="bar" style="width: 24px;"></div></div>
+        <div class="r"><span class="nm">s-8</span><span class="px">32 px</span><div class="bar" style="width: 32px;"></div></div>
+        <div class="r"><span class="nm">s-10</span><span class="px">40 px</span><div class="bar" style="width: 40px;"></div></div>
+        <div class="r"><span class="nm">s-12</span><span class="px">48 px</span><div class="bar" style="width: 48px;"></div></div>
+        <div class="r"><span class="nm">s-16</span><span class="px">64 px</span><div class="bar" style="width: 64px;"></div></div>
+        <div class="r"><span class="nm">s-24</span><span class="px">96 px</span><div class="bar" style="width: 96px;"></div></div>
+      </div>
+    </div>
+
+    <!-- ── 2.9 Radii ─────────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>ix</em></span></div>
+        <h3>Corner <span class="em">radii</span></h3>
+        <p class="desc">Between Imprint's softness and Console's terminal sharpness &mdash; lean architectural, never glassy.</p>
+      </div>
+      <div class="rad-grid">
+        <div class="item"><div class="demo" style="border-radius: var(--r-xs);"></div><div class="lbl"><span class="nm">r-xs</span><span>2 px</span></div></div>
+        <div class="item"><div class="demo" style="border-radius: var(--r-sm);"></div><div class="lbl"><span class="nm">r-sm</span><span>3 px</span></div></div>
+        <div class="item"><div class="demo" style="border-radius: var(--r-md);"></div><div class="lbl"><span class="nm">r-md</span><span>5 px</span></div></div>
+        <div class="item"><div class="demo" style="border-radius: var(--r-lg);"></div><div class="lbl"><span class="nm">r-lg</span><span>8 px</span></div></div>
+        <div class="item"><div class="demo" style="border-radius: var(--r-xl);"></div><div class="lbl"><span class="nm">r-xl</span><span>12 px</span></div></div>
+      </div>
+    </div>
+
+    <!-- ── 2.10 Elevation ─────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>x</em></span></div>
+        <h3><span class="em">Elevation</span></h3>
+        <p class="desc">Dark theme uses background value shifts plus a single dark shadow for the truly floating things. Warmth is preserved everywhere.</p>
+      </div>
+      <div class="elev-grid">
+        <div class="item"><div class="demo e0">e-0 / base</div><div class="lbl"><span class="nm">e-0</span><span>bg</span></div></div>
+        <div class="item"><div class="demo e1">e-1 / card</div><div class="lbl"><span class="nm">e-1</span><span>bg-1 + line</span></div></div>
+        <div class="item"><div class="demo e2">e-2 / panel</div><div class="lbl"><span class="nm">e-2</span><span>bg-2 + shadow</span></div></div>
+        <div class="item"><div class="demo e3">e-3 / modal</div><div class="lbl"><span class="nm">e-3</span><span>bg-3 + deep shadow</span></div></div>
+      </div>
+    </div>
+
+    <!-- ── 2.11 Motion ───────────────────────────────── -->
+    <div class="fig">
+      <div class="fig-key">
+        <div class="plate-num"><span class="n">fig. <em>xi</em></span></div>
+        <h3><span class="em">Motion</span></h3>
+        <p class="desc">Animation is reserved for information &mdash; state changes, panel entry, streaming text. Four durations; one shared easing curve; linear for streams.</p>
+        <div class="meta">Hover to play</div>
+      </div>
+      <div>
+        <div class="motion-grid">
+          <div class="m fast"><div class="lbl"><span class="nm">fast</span><br>hover &middot; micro</div><span class="puck"></span><div class="val" style="position: absolute; bottom: 16px; right: 16px;">100 ms</div></div>
+          <div class="m base"><div class="lbl"><span class="nm">base</span><br>panel &middot; modal</div><span class="puck"></span><div class="val" style="position: absolute; bottom: 16px; right: 16px;">180 ms</div></div>
+          <div class="m slow"><div class="lbl"><span class="nm">slow</span><br>page transitions</div><span class="puck"></span><div class="val" style="position: absolute; bottom: 16px; right: 16px;">280 ms</div></div>
+          <div class="m linear"><div class="lbl"><span class="nm">linear</span><br>streaming &middot; progress</div><span class="puck"></span><div class="val" style="position: absolute; bottom: 16px; right: 16px;">linear</div></div>
+        </div>
+        <div style="margin-top: var(--s-4); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div><div class="eyebrow">Easing</div><code class="mono" style="font-size: 13px; color: var(--accent); margin-top: 4px; display: block;">cubic-bezier(0.16, 1, 0.3, 1)</code></div>
+            <span style="font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--fg-mute);">Snappy ease-out &mdash; fast in, soft out.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="colophon">
+      <div><h4>This chapter</h4><p>11 figures across color, type, space, radii, elevation, motion. Every token is on this page.</p></div>
+      <div><h4>Continue</h4><p><a href="components.html">→ § 03 · Components</a><br><a href="patterns.html">→ § 04 · Patterns</a></p></div>
+      <div><h4>Implementation</h4><p>Every value is also defined in <em>tokens.css</em> as a CSS custom property. Reference tokens, never literals.</p></div>
+    </footer>
+  </div>
+
+  <!-- Theme toggle (Hearth) -->
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+  <script>
+    (function(){
+      var key='hearth-theme';
+      var html=document.documentElement;
+      try { if(localStorage.getItem(key)==='light') html.classList.add('theme-light'); } catch(e){}
+      var btn=document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight=html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+
+  <script src="tweaks-panel.js"></script>
+</body>
+</html>

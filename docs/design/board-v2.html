@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Board (v2 · components)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+  #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ── Board area ── */
+  .board { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .board-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-3); }
+  .board-head .board-search { flex: 1; max-width: 480px; }
+  .board-head .board-search .search-bar { width: 100%; }
+
+  .columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(280px, 1fr)); gap: var(--s-3); padding: var(--s-4); overflow-x: auto; }
+  .columns::-webkit-scrollbar { height: 8px; }
+  .columns::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 4px; }
+
+  .col { display: flex; flex-direction: column; min-height: 0; background: color-mix(in oklch, var(--bg-1) 50%, var(--bg)); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+  .col-head { flex-shrink: 0; padding: var(--s-3) var(--s-4); display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); position: relative; background: var(--bg); }
+  .col-head .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-ghost); flex-shrink: 0; }
+  .col-head .name { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-mute); font-weight: 500; }
+  .col-head .count { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg); line-height: 1; padding-right: 2px; }
+  .col.running .col-head .name, .col.running .col-head .count { color: var(--accent); }
+  .col.running .col-head .lamp { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: app-pulse 1.6s ease-in-out infinite; }
+  .col.running .col-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, var(--accent), transparent 70%); }
+  .col.waiting .col-head .name { color: var(--warn); }
+  .col.waiting .col-head .lamp { background: var(--warn); }
+  .col.done .col-head .name { color: var(--ok); }
+  .col.done .col-head .lamp { background: var(--ok); }
+
+  .col-body { flex: 1; overflow-y: auto; padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-2); }
+  .col-body::-webkit-scrollbar { width: 6px; }
+  .col-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+  .col-body.empty { align-items: center; justify-content: center; color: var(--fg-faint); font-family: var(--serif); font-style: italic; font-size: 13px; padding: var(--s-6) var(--s-4); }
+  /* board cards are clickable */
+  .col-body .board-card { cursor: pointer; transition: all var(--t-fast) var(--ease); }
+  .col-body .board-card:hover { background: var(--bg-1); transform: translateY(-1px); }
+  .col-body .board-card.running:hover { background: linear-gradient(135deg, var(--accent-wash), var(--bg-1) 40%); }
+
+  .add-stub { border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: var(--s-3); text-align: center; color: var(--fg-faint); font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all var(--t-fast) var(--ease); }
+  .add-stub:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+</style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+
+  <script src="tasks-data.js"></script>
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- Component library -->
+  <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
+  <script type="text/babel" src="lib/lib-controls.jsx"></script>
+  <script type="text/babel" src="lib/lib-shell.jsx"></script>
+  <!-- Board app -->
+  <script type="text/babel" src="lib/board-app.jsx"></script>
+
+  <script>
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
+      var btn = document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight = html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+</body>
+</html>

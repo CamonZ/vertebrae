@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Design (v2 · components)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+  #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ── Design main: 3 panes ── */
+  .design-main { flex: 1; display: flex; min-width: 0; }
+
+  /* Workflow list (left rail) */
+  .wf-list { width: 320px; flex-shrink: 0; border-right: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; min-height: 0; }
+  .wf-list-head { padding: var(--s-4) var(--s-4) var(--s-3); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--s-3); }
+  .wf-list-head .h-title { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); }
+  .wf-list-head .h-meta { font-family: var(--serif); font-size: 15px; font-style: italic; color: var(--fg); line-height: 1; display: flex; align-items: baseline; gap: 8px; }
+  .wf-list-head .h-meta b { font-weight: 400; color: var(--accent); font-family: var(--mono); font-style: normal; font-size: 22px; }
+  .wf-list-head .search-bar { width: auto; }
+  .wf-list-body { flex: 1; overflow-y: auto; padding: var(--s-2); display: flex; flex-direction: column; gap: 2px; }
+  .wf-list-body::-webkit-scrollbar { width: 6px; }
+  .wf-list-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+  /* Flush list styling for WorkflowRailItem inside the rail */
+  .wf-list-body .wf-rail-item { border: none; background: transparent; min-width: 0; padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4); }
+  .wf-list-body .wf-rail-item:hover { background: var(--bg-1); }
+  .wf-list-body .wf-rail-item.selected { background: var(--accent-wash); }
+  .wf-list-body .wf-rail-item .name { font-size: 15px; }
+
+  /* Canvas */
+  .canvas-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); }
+  .canvas-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: var(--s-4); }
+  .wf-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+  .wf-name .crumb { font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.1em; text-transform: uppercase; }
+  .wf-name h1 { font-family: var(--serif); font-size: 22px; font-style: italic; font-weight: 400; color: var(--fg); letter-spacing: -0.015em; line-height: 1.1; margin: 0; }
+  .wf-name h1 em { color: var(--accent); }
+  .canvas-controls { display: flex; align-items: center; gap: var(--s-2); }
+  .canvas-controls .icon-btn { border-color: transparent; }
+
+  .canvas { flex: 1; min-height: 0; position: relative; overflow: auto; background: radial-gradient(circle at center, var(--bg-1) 0%, var(--bg) 100%); }
+  .canvas-inner { position: relative; width: 1280px; height: 480px; }
+  .canvas-inner::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle, var(--line) 0.7px, transparent 1px); background-size: 24px 24px; opacity: 0.6; pointer-events: none; }
+  .edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* Active runs strip */
+  .runs-strip { flex-shrink: 0; padding: var(--s-3) var(--s-5); border-top: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: var(--s-3); overflow-x: auto; }
+  .runs-strip .lbl { font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.14em; text-transform: uppercase; flex-shrink: 0; }
+  .strip-run { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-sm); cursor: pointer; transition: all var(--t-fast) var(--ease); max-width: 380px; }
+  .strip-run:hover { background: var(--bg-2); border-color: var(--fg-faint); }
+  .strip-run.sel { background: var(--accent-wash); border-color: color-mix(in oklch, var(--accent) 35%, transparent); }
+  .strip-run .run-title { font-family: var(--sans); font-size: 12px; color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .strip-run .at-step { font-family: var(--mono); font-size: 10px; color: var(--fg-faint); flex-shrink: 0; border-left: 1px solid var(--line); padding-left: 8px; white-space: nowrap; }
+  .strip-run .at-step em { font-style: normal; color: var(--step-wait-fg); }
+
+  /* Inspector */
+  .inspector { width: 360px; flex-shrink: 0; border-left: 1px solid var(--line); background: var(--bg-1); display: flex; flex-direction: column; min-height: 0; transition: width var(--t-base) var(--ease); }
+  .inspector.closed { width: 0; border-left: none; overflow: hidden; }
+  .inspector.closed > * { display: none; }
+  .inspector-head { padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, color-mix(in oklch, var(--accent-wash) 25%, var(--bg-1)), var(--bg-1)); position: relative; }
+  .inspector-head .pre { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); margin-bottom: 6px; }
+  .inspector-head .title { font-family: var(--serif); font-size: 19px; font-style: italic; font-weight: 400; color: var(--fg); letter-spacing: -0.01em; line-height: 1.15; }
+  .inspector-head .kind-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .inspector-body { flex: 1; overflow-y: auto; padding: var(--s-4) var(--s-5) var(--s-5); }
+  .inspector-body::-webkit-scrollbar { width: 6px; }
+  .inspector-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+  .inspector-body .sub-lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); margin-top: var(--s-4); margin-bottom: 6px; }
+  .inspector-body .sub-lbl:first-child { margin-top: 0; }
+  .inspector-body .prose { font-family: var(--sans); font-size: 13px; line-height: 1.55; color: var(--fg-soft); }
+</style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+
+  <script src="tasks-data.js"></script>
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- Component library -->
+  <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
+  <script type="text/babel" src="lib/lib-detail.jsx"></script>
+  <script type="text/babel" src="lib/lib-graph.jsx"></script>
+  <script type="text/babel" src="lib/lib-controls.jsx"></script>
+  <script type="text/babel" src="lib/lib-shell.jsx"></script>
+  <!-- Design app -->
+  <script type="text/babel" src="lib/design-app.jsx"></script>
+
+  <script>
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
+      var btn = document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight = html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+</body>
+</html>

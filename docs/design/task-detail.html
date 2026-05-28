@@ -1,0 +1,927 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Task Detail Panel</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Chapter nav (consistent with other Hearth pages) ── */
+  .masthead {
+    padding: var(--s-3) var(--s-5);
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    gap: var(--s-6);
+    align-items: baseline;
+    flex-shrink: 0;
+    background: var(--bg);
+  }
+  .wordmark {
+    font-family: var(--serif); font-size: 18px; font-style: italic;
+    font-weight: 400; letter-spacing: -0.01em;
+  }
+  .wordmark .ember {
+    display: inline-block; width: 6px; height: 6px;
+    background: var(--accent); border-radius: 50%;
+    vertical-align: 3px; margin-left: 3px;
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+  .chapters {
+    display: flex; gap: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .chapters a {
+    padding: 4px var(--s-3);
+    color: var(--fg-mute);
+    border-right: 1px solid var(--line);
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.06em; white-space: nowrap;
+    transition: all var(--t-fast) var(--ease);
+  }
+  .chapters a:last-child { border-right: none; }
+  .chapters a:hover { background: var(--bg-1); color: var(--fg); }
+  .chapters a.current { background: var(--bg-1); color: var(--accent); }
+
+  /* ── App frame ── */
+  .frame {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* Left sidebar */
+  .side {
+    width: 44px; background: var(--bg);
+    border-right: 1px solid var(--line);
+    padding: var(--s-2) 0;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    flex-shrink: 0;
+  }
+  .side .logo {
+    width: 28px; height: 28px;
+    background: var(--accent); color: var(--bg);
+    border-radius: var(--r-md);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-style: italic; font-size: 16px; font-weight: 500;
+  }
+  .side .avatar {
+    width: 28px; height: 28px; border-radius: var(--r-md);
+    background: var(--step-route); color: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+  }
+  .side hr { width: 20px; border: none; border-top: 1px solid var(--line); margin: 2px 0; }
+  .side .item {
+    width: 28px; height: 28px; border-radius: var(--r-sm);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-mute); transition: all var(--t-fast) var(--ease);
+  }
+  .side .item.active { background: var(--accent-wash); color: var(--accent); }
+  .side .item:hover { background: var(--bg-1); color: var(--fg); }
+
+  /* App main area */
+  .app-main {
+    flex: 1; background: var(--bg);
+    background-image: radial-gradient(circle, var(--line-strong) 0.7px, transparent 0.7px);
+    background-size: 20px 20px;
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  .app-head {
+    height: 40px; padding: 0 var(--s-4);
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: var(--s-3);
+    background: var(--bg); flex-shrink: 0;
+  }
+  .app-crumb {
+    font-family: var(--sans); font-size: 13px; color: var(--fg-mute);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .app-crumb .sep { color: var(--fg-ghost); }
+  .app-crumb .page { font-family: var(--serif); font-size: 18px; color: var(--fg); letter-spacing: -0.01em; }
+
+  /* DAG nodes (dimmed, just for context) */
+  .dag-area { flex: 1; position: relative; opacity: 0.6; }
+  .wf-node {
+    width: 150px; border: 1px solid var(--line-strong);
+    background: var(--bg-2); position: absolute;
+    border-radius: var(--r-sm); overflow: hidden;
+  }
+  .wf-node .bar { height: 3px; }
+  .wf-node .body { padding: 6px 10px; font-size: 12px; font-weight: 500; color: var(--fg); }
+  .wf-node .ico { float: right; font-size: 11px; }
+  .wf-node .ftr { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .wf-node.selected { border-color: var(--accent); box-shadow: 0 0 14px var(--accent-glow); opacity: 1 !important; }
+
+  /* ────────────────────────────────────────────────────────
+     TASK DETAIL PANEL
+  ──────────────────────────────────────────────────────── */
+  .task-panel {
+    width: 540px; flex-shrink: 0;
+    background: var(--bg-1);
+    border-left: 3px solid var(--accent);
+    box-shadow: -6px 0 40px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;
+    height: 100%; overflow: hidden;
+  }
+
+  /* Header */
+  .ph {
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line-strong);
+    padding: var(--s-3) var(--s-4);
+    flex-shrink: 0;
+  }
+
+  .ph-top {
+    display: flex; align-items: flex-start;
+    gap: var(--s-3); justify-content: space-between;
+  }
+
+  .ph-title {
+    font-family: var(--serif);
+    font-size: 16px; font-weight: 400;
+    line-height: 1.3; letter-spacing: -0.01em;
+    color: var(--fg); flex: 1; padding-top: 1px;
+  }
+
+  .ph-actions {
+    display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+  }
+
+  .ctrl {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-mute); border-radius: var(--r-sm);
+    cursor: pointer; transition: all var(--t-fast) var(--ease);
+    border: none; background: transparent;
+  }
+  .ctrl:hover { background: var(--bg-3); color: var(--fg); }
+
+  .ph-meta {
+    display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  }
+
+  .hash-id {
+    font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .hash-id .ember {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--accent); opacity: 0.5; display: inline-block;
+  }
+
+  .crumb-sep { color: var(--fg-ghost); font-size: 10px; }
+
+  .chip-done {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--ok); background: var(--ok-wash);
+    border: 1px solid color-mix(in oklch, var(--ok) 28%, transparent);
+    border-radius: var(--r-xs);
+  }
+
+  /* Body */
+  .pb {
+    flex: 1; overflow-y: auto; overflow-x: hidden;
+  }
+  .pb::-webkit-scrollbar { width: 5px; }
+  .pb::-webkit-scrollbar-track { background: transparent; }
+  .pb::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+  .pb::-webkit-scrollbar-thumb:hover { background: var(--line-strong); }
+
+  /* Section */
+  .sec { border-bottom: 1px solid var(--line); }
+
+  .sec-hd {
+    display: flex; align-items: center; gap: var(--s-2);
+    padding: 9px var(--s-4);
+    cursor: pointer; user-select: none;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .sec-hd:hover { background: color-mix(in oklch, var(--bg-2) 60%, var(--bg-1)); }
+
+  .sec-chev {
+    font-size: 9px; color: var(--fg-faint); width: 10px; flex-shrink: 0;
+    transition: transform var(--t-fast) var(--ease); line-height: 1;
+  }
+  .sec.collapsed .sec-chev { transform: rotate(-90deg); }
+
+  .sec-name {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-mute);
+    line-height: 1;
+  }
+
+  .sec-count {
+    margin-left: auto;
+    font-family: var(--mono); font-size: 10px; color: var(--fg-faint);
+    width: 18px; height: 18px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-full);
+  }
+
+  .sec-body { padding: var(--s-1) var(--s-4) var(--s-4); }
+  .sec.collapsed .sec-body { display: none; }
+
+  /* ── Acceptance criteria ── */
+  .ac-meta {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+    margin-bottom: var(--s-2);
+  }
+
+  .ac-track {
+    height: 2px; background: var(--bg-4);
+    border-radius: 9999px; margin-bottom: var(--s-3); overflow: hidden;
+  }
+  .ac-fill {
+    height: 100%; border-radius: 9999px;
+    background: linear-gradient(to right, var(--accent-deep), var(--accent));
+    width: 0%;
+    transition: width 0.5s var(--ease);
+  }
+
+  .ac-list { display: flex; flex-direction: column; gap: var(--s-3); }
+
+  .ac-row { display: flex; gap: var(--s-3); align-items: flex-start; }
+
+  .ac-box {
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--line-strong);
+    border-radius: var(--r-xs); flex-shrink: 0; margin-top: 2px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 8px; color: transparent;
+    transition: all var(--t-fast) var(--ease);
+  }
+  .ac-box:hover { border-color: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+  .ac-box.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+  .ac-text {
+    flex: 1; font-size: 13px; color: var(--fg-soft); line-height: 1.55;
+  }
+  .ac-box.on ~ .ac-text { color: var(--fg-faint); text-decoration: line-through; }
+
+  .human-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 0 6px; height: 18px;
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--step-human-fg);
+    background: color-mix(in oklch, var(--step-human-wash) 55%, var(--bg));
+    border: 1px solid color-mix(in oklch, var(--step-human) 35%, transparent);
+    border-radius: var(--r-xs);
+    white-space: nowrap; flex-shrink: 0; margin-top: 2px;
+  }
+  .human-tag .dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--step-human); opacity: 0.8;
+  }
+
+  /* ── Progress ── */
+  .prog-card {
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md); overflow: hidden; margin-bottom: var(--s-3);
+  }
+
+  .prog-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line);
+  }
+
+  .prog-crumb {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-mute);
+  }
+  .prog-chip {
+    padding: 1px 7px;
+    background: var(--bg-3); border: 1px solid var(--line-strong);
+    border-radius: var(--r-xs); font-size: 10px; color: var(--fg-mute);
+  }
+  .prog-sep { color: var(--fg-ghost); font-size: 10px; }
+
+  .prog-done {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ok); background: var(--ok-wash);
+    border: 1px solid color-mix(in oklch, var(--ok) 28%, transparent);
+    border-radius: var(--r-xs);
+  }
+
+  .prog-duration {
+    padding: 5px var(--s-3);
+    font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .prog-stats { display: grid; grid-template-columns: 1fr 1fr; }
+
+  .prog-col { padding: var(--s-3); }
+
+  .prog-col.subtree {
+    border-left: 1px solid var(--line);
+    background: color-mix(in oklch, var(--accent-wash) 45%, var(--bg-2));
+  }
+
+  .prog-lbl {
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--fg-faint); margin-bottom: 6px;
+  }
+  .prog-col.subtree .prog-lbl { color: var(--accent-mute); }
+
+  .prog-n {
+    font-family: var(--serif); font-size: 20px; font-weight: 400;
+    letter-spacing: -0.01em; color: var(--fg); line-height: 1;
+    display: inline;
+  }
+  .prog-row {
+    display: flex; align-items: baseline; gap: 5px;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-soft);
+    margin-bottom: 3px;
+  }
+  .prog-row .k { color: var(--fg-faint); }
+  .prog-cost { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); margin-top: 2px; }
+
+  /* Traces button */
+  .traces-btn {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 9px var(--s-4);
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    font-family: var(--sans); font-size: 13px; color: var(--fg-mute);
+    cursor: pointer; transition: all var(--t-fast) var(--ease);
+    text-align: left;
+  }
+  .traces-btn:hover {
+    border-color: var(--accent); color: var(--accent);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .traces-arr {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-3); border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm); color: var(--fg-mute); font-size: 12px;
+    flex-shrink: 0; transition: all var(--t-fast) var(--ease);
+  }
+  .traces-btn:hover .traces-arr { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+  /* ── Spec ── */
+  .sub-lbl {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--fg-faint);
+    margin-top: var(--s-4); margin-bottom: 6px;
+  }
+  .sub-lbl:first-child { margin-top: 0; }
+
+  .ph-text {
+    font-family: var(--serif); font-style: italic;
+    font-size: 13px; color: var(--fg-ghost); cursor: text;
+  }
+
+  .bullets { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .bullets li {
+    display: flex; gap: 10px;
+    font-size: 13px; color: var(--fg-soft); line-height: 1.55;
+  }
+  .bullets li::before {
+    content: '';
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent); opacity: 0.65;
+    flex-shrink: 0; margin-top: 8px;
+  }
+
+  /* ── Dependencies ── */
+  .dep-group { margin-bottom: var(--s-3); }
+  .dep-group:last-child { margin-bottom: 0; }
+
+  .dep-lbl {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--fg-faint);
+    margin-bottom: 6px;
+  }
+
+  .dep-chips { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+
+  .dep-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 8px;
+    font-family: var(--mono); font-size: 11px; color: var(--fg-soft);
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-xs); cursor: pointer;
+    transition: all var(--t-fast) var(--ease);
+  }
+  .dep-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .dep-chip .cp { color: var(--fg-ghost); font-size: 10px; }
+
+  /* ── Code ── */
+  .code-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px var(--s-3);
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm); margin-bottom: var(--s-2);
+    cursor: pointer; transition: all var(--t-fast) var(--ease);
+  }
+  .code-row:last-child { margin-bottom: 0; }
+  .code-row:hover {
+    border-color: color-mix(in oklch, var(--step-execute) 50%, var(--line-strong));
+    background: color-mix(in oklch, var(--step-execute-wash) 25%, var(--bg-2));
+  }
+
+  .code-ico { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); flex-shrink: 0; }
+  .code-file { font-family: var(--mono); font-size: 12px; color: var(--fg-soft); }
+
+  .code-range {
+    padding: 1px 5px;
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    color: var(--step-execute-fg);
+    background: color-mix(in oklch, var(--step-execute-wash) 65%, var(--bg));
+    border: 1px solid color-mix(in oklch, var(--step-execute) 28%, transparent);
+    border-radius: var(--r-xs); flex-shrink: 0;
+  }
+
+  .code-desc { font-family: var(--sans); font-size: 12px; color: var(--fg-mute); }
+
+  /* ── Details fields ── */
+  .field {
+    display: flex; align-items: baseline;
+    justify-content: space-between; gap: var(--s-3);
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .field:last-child { border-bottom: none; }
+
+  .fk {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--fg-faint); flex-shrink: 0;
+  }
+
+  .fv { font-size: 13px; color: var(--fg-soft); text-align: right; }
+  .fv.mono { font-family: var(--mono); font-size: 11px; }
+  .fv.faint { color: var(--fg-faint); }
+  .fv.ok { color: var(--ok); }
+
+  .tl-head {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--accent);
+    padding: var(--s-3) 0 var(--s-2);
+    border-top: 1px solid var(--line);
+    margin-top: var(--s-1);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tl-head::before {
+    content: '';
+    display: inline-block; width: 4px; height: 4px;
+    background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 4px var(--accent-glow);
+  }
+
+  /* Toggle */
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .toggle-k {
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--fg-faint);
+  }
+  .toggle {
+    width: 36px; height: 20px;
+    background: var(--bg-4); border: 1px solid var(--line-strong);
+    border-radius: 9999px; position: relative;
+    cursor: pointer; transition: all var(--t-base) var(--ease);
+  }
+  .toggle::after {
+    content: ''; position: absolute;
+    width: 14px; height: 14px; background: var(--fg-faint);
+    border-radius: 50%; top: 2px; left: 2px;
+    transition: all var(--t-base) var(--ease);
+  }
+  .toggle.on {
+    background: var(--accent-wash); border-color: var(--accent-mute);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  .toggle.on::after {
+    background: var(--accent); transform: translateX(16px);
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+
+  /* Annotation strip */
+  .annotation {
+    position: absolute; left: var(--s-5); top: var(--s-5);
+    max-width: 260px;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--fg-faint);
+    border-radius: var(--r-md);
+    padding: var(--s-3) var(--s-4);
+    box-shadow: var(--shadow-2);
+  }
+  .annotation .plate {
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 4px;
+  }
+  .annotation h4 {
+    font-family: var(--serif); font-size: 18px; font-weight: 400;
+    letter-spacing: -0.01em; color: var(--fg);
+  }
+  .annotation h4 em { font-style: italic; color: var(--accent); }
+  .annotation p {
+    font-family: var(--serif); font-style: italic;
+    font-size: 12px; color: var(--fg-mute); line-height: 1.5;
+    margin-top: 4px;
+  }
+  .annotation ul {
+    margin-top: var(--s-3); list-style: none;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .annotation ul li {
+    font-family: var(--mono); font-size: 10px; color: var(--fg-mute);
+    display: flex; gap: 6px; align-items: flex-start;
+  }
+  .annotation ul li .k { color: var(--accent); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+  <!-- ── Top nav ── -->
+  <div class="masthead">
+    <span class="wordmark">Vertebrae<span class="ember"></span></span>
+    <nav class="chapters">
+      <a href="index.html">§ 01 · Cover</a>
+      <a href="foundations.html">§ 02 · Foundations</a>
+      <a href="components.html">§ 03 · Components</a>
+      <a href="patterns.html">§ 04 · Patterns</a>
+      <a href="panels.html">＋ Panels</a>
+      <a href="task-detail.html" class="current">⊹ Task Detail</a>
+      <a href="../../Vertebrae Style Guide.html" style="border-left: 1px solid var(--line);">← All directions</a>
+    </nav>
+  </div>
+
+  <!-- ── App frame ── -->
+  <div class="frame">
+
+    <!-- Sidebar -->
+    <div class="side">
+      <div class="logo">V</div>
+      <hr>
+      <div class="avatar">A</div>
+      <hr>
+      <div class="item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div class="item">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg>
+      </div>
+      <div class="item active">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="app-main">
+      <div class="app-head">
+        <span class="app-crumb">
+          acme
+          <span class="sep">›</span>
+          <span class="page">Design</span>
+          <span class="sep">›</span>
+          <span style="font-family: var(--mono); font-size: 11px; color: var(--fg-faint);">03ae9f60</span>
+        </span>
+      </div>
+
+      <!-- DAG context (dimmed) -->
+      <div class="dag-area">
+        <div class="wf-node" style="left: 80px; top: 80px; border-top: 3px solid var(--step-execute);">
+          <div class="body">Persist authoring<span class="ico" style="color: var(--step-execute-fg);">▶</span><div class="ftr"><span>2 runs</span><span style="color: var(--ok);">✓</span></div></div>
+        </div>
+        <div class="wf-node" style="left: 280px; top: 80px; border-top: 3px solid var(--step-eval);">
+          <div class="body">Score quality<span class="ico" style="color: var(--step-eval-fg);">⊙</span><div class="ftr"><span>1 run</span></div></div>
+        </div>
+        <div class="wf-node" style="left: 80px; top: 200px; border-top: 3px solid var(--step-human);">
+          <div class="body">Review draft<span class="ico" style="color: var(--step-human-fg);">👁</span><div class="ftr"><span>wait</span></div></div>
+        </div>
+        <div class="wf-node selected" style="left: 80px; top: 80px; opacity: 1;">
+          <!-- invisible overlay to show selected state on first node -->
+        </div>
+
+        <!-- Annotation card -->
+        <div class="annotation">
+          <div class="plate">⊹ Task detail · Hearth treatment</div>
+          <h4>Task <em>detail</em> panel.</h4>
+          <p>The same content as the current spec, re-skinned in the Hearth vocabulary.</p>
+          <ul>
+            <li><span class="k">title</span> Newsreader serif, 16px</li>
+            <li><span class="k">edge</span> 3px hearthfire accent</li>
+            <li><span class="k">labels</span> JetBrains Mono, 10px / 0.18em</li>
+            <li><span class="k">done</span> ok-green wash chips</li>
+            <li><span class="k">human</span> step-human amber</li>
+            <li><span class="k">code L#</span> step-execute violet</li>
+            <li><span class="k">subtree</span> accent-wash column tint</li>
+            <li><span class="k">bullets</span> ember dot, 4px</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Task Detail Panel ── -->
+    <div class="task-panel">
+
+      <!-- Header -->
+      <div class="ph">
+        <div class="ph-top">
+          <div class="ph-title">Persist authoring draft artifacts and revisions</div>
+          <div class="ph-actions">
+            <button class="btn primary sm" style="gap: 5px; padding: 0 12px; font-size: 12px;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Run Workflow
+            </button>
+            <button class="btn ghost sm" style="gap: 4px; font-size: 12px; padding: 0 10px;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              Chat
+            </button>
+            <button class="ctrl" title="Delete">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            </button>
+            <button class="ctrl" title="Open in new tab">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </button>
+            <button class="ctrl" title="Close">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="ph-meta">
+          <span class="hash-id"><span class="ember"></span>03ae9f60</span>
+          <span class="crumb-sep">›</span>
+          <span class="chip-done">done</span>
+          <span class="crumb-sep">›</span>
+          <span class="chip-done">done</span>
+        </div>
+      </div>
+
+      <!-- Scrollable body -->
+      <div class="pb">
+
+        <!-- ACCEPTANCE CRITERIA -->
+        <div class="sec" id="sec-ac">
+          <div class="sec-hd" onclick="tog('sec-ac')">
+            <span class="sec-chev">▾</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.5" style="flex-shrink:0;margin-top:1px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            <span class="sec-name" style="color: var(--ok);">Acceptance Criteria</span>
+          </div>
+          <div class="sec-body">
+            <div class="ac-meta">
+              <span>0/2 MET</span>
+              <span>0%</span>
+            </div>
+            <div class="ac-track"><div class="ac-fill" id="ac-fill"></div></div>
+            <div class="ac-list">
+              <div class="ac-row">
+                <span class="ac-box" onclick="togAC(this)"></span>
+                <span class="ac-text">Unit tests create an authoring draft artifact for a chat session and conversational state machine, then verify the stored data contains assumptions, open questions, proposed approach, candidate work units, apply targets, current state, and source chat metadata.</span>
+                <span class="human-tag"><span class="dot"></span>human</span>
+              </div>
+              <div class="ac-row">
+                <span class="ac-box" onclick="togAC(this)"></span>
+                <span class="ac-text">Revision tests update an existing draft from structured patch data without dropping prior fields that were not mentioned in the latest user response.</span>
+                <span class="human-tag"><span class="dot"></span>human</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PROGRESS -->
+        <div class="sec" id="sec-prog">
+          <div class="sec-hd" onclick="tog('sec-prog')">
+            <span class="sec-chev">▾</span>
+            <span class="sec-name">Progress</span>
+          </div>
+          <div class="sec-body">
+            <div class="prog-card">
+              <div class="prog-top">
+                <div class="prog-crumb">
+                  <span class="prog-chip">done</span>
+                  <span class="prog-sep">›</span>
+                  <span class="prog-chip">done</span>
+                </div>
+                <span class="prog-done">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+                  Completed
+                </span>
+              </div>
+              <div class="prog-duration">7s</div>
+              <div class="prog-stats">
+                <div class="prog-col">
+                  <div class="prog-lbl">This Task</div>
+                  <div class="prog-row"><span class="prog-n">2</span><span class="k">runs</span></div>
+                  <div class="prog-row">17 attempts</div>
+                  <div class="prog-cost">$0</div>
+                </div>
+                <div class="prog-col subtree">
+                  <div class="prog-lbl">Subtree</div>
+                  <div class="prog-row"><span class="prog-n">2</span><span class="k">runs</span></div>
+                  <div class="prog-row">17 attempts</div>
+                  <div class="prog-cost">$0</div>
+                </div>
+              </div>
+            </div>
+            <button class="traces-btn">
+              <span>Explore traces</span>
+              <span class="traces-arr">→</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- SPEC -->
+        <div class="sec" id="sec-spec">
+          <div class="sec-hd" onclick="tog('sec-spec')">
+            <span class="sec-chev">▾</span>
+            <span class="sec-name">Spec</span>
+          </div>
+          <div class="sec-body">
+            <div class="sub-lbl">Description</div>
+            <div class="ph-text">Click to add description</div>
+
+            <div class="sub-lbl">Constraints</div>
+            <ul class="bullets">
+              <li>Keep this task to draft artifact mutation and merge semantics; do not implement template lookup or the chat loop decision policy here.</li>
+              <li>Use the existing artifact/link boundary for durable chat outputs unless implementation proves a small dedicated draft table is required; do not store drafts as markdown-only content.</li>
+              <li>A draft must not be treated as a free-floating chat artifact; it must identify the conversational state machine and state/revision it belongs to so later turns can resume and validate the correct draft.</li>
+            </ul>
+
+            <div class="sub-lbl">Desired Behavior</div>
+            <ul class="bullets">
+              <li>Add the domain service for structured authoring drafts: create or update a draft artifact linked to a chat session and a specific conversational state machine, merge new assumptions/open questions/proposed approach/candidate work units/apply targets after each state transition or user turn, and keep the artifact usable by later validation and apply flows.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- DEPENDENCIES -->
+        <div class="sec" id="sec-deps">
+          <div class="sec-hd" onclick="tog('sec-deps')">
+            <span class="sec-chev">▾</span>
+            <span class="sec-name">Dependencies</span>
+            <span class="sec-count">3</span>
+          </div>
+          <div class="sec-body">
+            <div class="dep-group">
+              <div class="dep-lbl">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 5 5 12"/></svg>
+                Parent
+              </div>
+              <div class="dep-chips">
+                <span class="dep-chip">80f8d4a2 <span class="cp">⎘</span></span>
+              </div>
+            </div>
+            <div class="dep-group">
+              <div class="dep-lbl">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                Blocked by
+              </div>
+              <div class="dep-chips">
+                <span class="dep-chip">bf68e7ac <span class="cp">⎘</span></span>
+                <span class="dep-chip">ceaa0b0f <span class="cp">⎘</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CODE -->
+        <div class="sec" id="sec-code">
+          <div class="sec-hd" onclick="tog('sec-code')">
+            <span class="sec-chev">▾</span>
+            <span class="sec-name">Code</span>
+            <span class="sec-count">2</span>
+          </div>
+          <div class="sec-body">
+            <div class="code-row">
+              <span class="code-ico">&lt;/&gt;</span>
+              <span class="code-file">chat_types.ex</span>
+              <span class="code-range">L31–35</span>
+              <span class="code-desc">Chat session artifact resolver</span>
+            </div>
+            <div class="code-row">
+              <span class="code-ico">&lt;/&gt;</span>
+              <span class="code-file">artifacts.ex</span>
+              <span class="code-range">L14–31</span>
+              <span class="code-desc">Create and link artifact service</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- DETAILS -->
+        <div class="sec" id="sec-details" style="border-bottom: none;">
+          <div class="sec-hd" onclick="tog('sec-details')">
+            <span class="sec-chev">▾</span>
+            <span class="sec-name">Details</span>
+          </div>
+          <div class="sec-body">
+            <div class="field">
+              <span class="fk">Priority</span>
+              <span class="fv faint">None</span>
+            </div>
+            <div class="field">
+              <span class="fk">Level</span>
+              <span class="fv">Task</span>
+            </div>
+            <div class="field">
+              <span class="fk">Tags</span>
+              <span class="fv ph-text" style="font-size: 12px;">Click to add tags (comma-separated)</span>
+            </div>
+
+            <div class="tl-head">Timeline</div>
+
+            <div class="field">
+              <span class="fk">Created</span>
+              <span class="fv mono">May 20 at 12:14 AM</span>
+            </div>
+            <div class="field">
+              <span class="fk">Updated</span>
+              <span class="fv mono">May 23 at 01:23 PM</span>
+            </div>
+            <div class="field">
+              <span class="fk">Started</span>
+              <span class="fv mono">May 21 at 07:06 PM</span>
+            </div>
+            <div class="field">
+              <span class="fk">Completed</span>
+              <span class="fv mono ok">May 21 at 10:17 PM</span>
+            </div>
+
+            <div class="toggle-row">
+              <span class="toggle-k">Human Review</span>
+              <span class="toggle" id="hrToggle" onclick="this.classList.toggle('on')"></span>
+            </div>
+
+            <div style="padding: var(--s-3) 0 var(--s-2);">
+              <div class="sub-lbl" style="margin-top: 0;">Revision Feedback</div>
+              <div class="ph-text">Click to add revision feedback</div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /pb -->
+    </div><!-- /task-panel -->
+  </div><!-- /frame -->
+
+  <!-- Theme toggle -->
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+
+  <script>
+    // Section collapse
+    function tog(id) {
+      document.getElementById(id).classList.toggle('collapsed');
+    }
+
+    // AC checkbox
+    function togAC(box) {
+      box.classList.toggle('on');
+      box.textContent = box.classList.contains('on') ? '✓' : '';
+      updateAC();
+    }
+
+    function updateAC() {
+      var boxes = document.querySelectorAll('.ac-box');
+      var checked = document.querySelectorAll('.ac-box.on').length;
+      var total = boxes.length;
+      var pct = Math.round((checked / total) * 100);
+      document.getElementById('ac-fill').style.width = pct + '%';
+      var meta = document.querySelector('.ac-meta');
+      meta.children[0].textContent = checked + '/' + total + ' MET';
+      meta.children[1].textContent = pct + '%';
+    }
+
+    // Theme
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
+      var btn = document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight = html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+</body>
+</html>

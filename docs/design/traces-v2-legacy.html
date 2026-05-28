@@ -1,0 +1,1191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Traces (v2)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html, body { height: 100%; }
+  body {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* ───── Top status strip (consistent) ───── */
+  .topbar {
+    flex-shrink: 0;
+    height: 38px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+    display: flex; align-items: center; gap: var(--s-4);
+    padding: 0 var(--s-4) 0 var(--s-3);
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.04em; color: var(--fg-mute);
+  }
+  .topbar .brand {
+    font-family: var(--serif); font-style: italic; font-size: 15px;
+    letter-spacing: -0.01em; color: var(--fg);
+    display: flex; align-items: center; gap: 5px;
+  }
+  .topbar .brand .ember {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 6px var(--accent-glow);
+  }
+  .topbar .crumb { color: var(--fg-faint); }
+  .topbar .crumb .sep { margin: 0 6px; color: var(--fg-ghost); }
+  .topbar .crumb .page {
+    font-family: var(--serif); font-style: italic; font-size: 15px;
+    color: var(--fg); letter-spacing: -0.01em; padding-left: 2px;
+  }
+  .topbar .activity { margin-left: auto; display: flex; align-items: center; gap: var(--s-3); white-space: nowrap; }
+  .topbar .activity > * { white-space: nowrap; }
+  .topbar .activity .live {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--accent); font-weight: 500;
+  }
+  .topbar .activity .live .pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 8px var(--accent-glow);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--accent-glow); }
+    50% { opacity: 0.4; box-shadow: 0 0 2px var(--accent-glow); }
+  }
+  .topbar .activity .total b { color: var(--fg); font-weight: 600; }
+
+  /* ───── Frame ───── */
+  .frame { flex: 1; display: flex; min-height: 0; }
+  .side {
+    width: 44px; flex-shrink: 0;
+    background: var(--bg);
+    border-right: 1px solid var(--line);
+    padding: var(--s-2) 0;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .side .logo {
+    width: 28px; height: 28px;
+    background: var(--accent); color: var(--bg);
+    border-radius: var(--r-md);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-style: italic; font-size: 16px; font-weight: 500;
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .side hr { width: 20px; border: none; border-top: 1px solid var(--line); margin: 2px 0; }
+  .side .item {
+    width: 28px; height: 28px; border-radius: var(--r-sm);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--fg-mute); cursor: pointer;
+    transition: all var(--t-fast) var(--ease);
+    text-decoration: none;
+  }
+  .side .item:hover { background: var(--bg-1); color: var(--fg); }
+  .side .item.active { background: var(--accent-wash); color: var(--accent); position: relative; }
+  .side .item.active::before {
+    content: ''; position: absolute; left: -8px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+    border-radius: 0 2px 2px 0;
+  }
+  .side .sys {
+    margin-top: auto;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding-bottom: var(--s-2);
+    font-family: var(--mono); font-size: 9px; color: var(--fg-faint);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    writing-mode: vertical-rl; transform: rotate(180deg);
+  }
+  .side .sys .conn {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--ok) 60%, transparent);
+    writing-mode: horizontal-tb; transform: rotate(180deg);
+  }
+
+  /* ───── Traces main ───── */
+  .traces-main {
+    flex: 1; display: flex; min-width: 0;
+  }
+
+  /* ── Left rail ── */
+  .rail {
+    width: 300px; flex-shrink: 0;
+    border-right: 1px solid var(--line);
+    background: var(--bg);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .rail-sec {
+    border-bottom: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .rail-sec.tasks-sec { flex: 1.4; min-height: 240px; }
+  .rail-sec.runs-sec { flex: 1; min-height: 200px; }
+  .rail-hd {
+    padding: var(--s-3) var(--s-4) var(--s-3);
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .rail-hd .name {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--fg-mute);
+  }
+  .rail-hd .meta {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint);
+  }
+  .rail-body {
+    flex: 1; overflow-y: auto; padding: 4px;
+  }
+  .rail-body::-webkit-scrollbar { width: 6px; }
+  .rail-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+  .task-row {
+    display: grid;
+    grid-template-columns: 12px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 5px 8px;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--t-fast) var(--ease);
+    position: relative;
+  }
+  .task-row:hover { background: var(--bg-1); }
+  .task-row.sel { background: var(--accent-wash); }
+  .task-row.sel::before {
+    content: ''; position: absolute; left: 0; top: 6px; bottom: 6px;
+    width: 2px; background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+    border-radius: 0 2px 2px 0;
+  }
+  .task-row.l2 { padding-left: 22px; }
+  .task-row .glyph {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--fg-mute); justify-self: center;
+  }
+  .task-row.sel .glyph { color: var(--accent); }
+  .task-row .ttext {
+    font-family: var(--sans); font-size: 12px;
+    color: var(--fg-soft); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .task-row.sel .ttext { color: var(--fg); }
+  .task-row.l2 .ttext { color: var(--fg-mute); font-size: 12px; }
+
+  /* ── Run card ── */
+  .run-card {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 8px 10px;
+    margin: 0 4px 4px;
+    background: var(--bg-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: all var(--t-fast) var(--ease);
+    position: relative;
+  }
+  .run-card:hover { background: var(--bg-2); }
+  .run-card.sel {
+    background: linear-gradient(135deg, var(--accent-wash), var(--bg-1) 60%);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--line-strong));
+  }
+  .run-card.sel::before {
+    content: ''; position: absolute; left: 0; top: 8px; bottom: 8px;
+    width: 3px;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+    border-radius: 0 2px 2px 0;
+  }
+  .run-card .head {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .run-card .when {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint);
+  }
+
+  /* ── Center column ── */
+  .center {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    background: var(--bg-1);
+  }
+
+  /* Header with title + hero state */
+  .center-head {
+    flex-shrink: 0;
+    padding: var(--s-4) var(--s-5) var(--s-3);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+  }
+  .center-head .crumb-row {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint); letter-spacing: 0.1em;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .center-head .crumb-row .back {
+    color: var(--fg-mute);
+    text-decoration: none;
+    border-bottom: 1px dotted var(--fg-faint);
+    cursor: pointer;
+  }
+  .center-head .crumb-row .back:hover { color: var(--fg); }
+  .center-head .title-row {
+    display: flex; align-items: flex-start; gap: var(--s-3);
+  }
+  .center-head .title {
+    flex: 1; min-width: 0;
+    font-family: var(--serif); font-size: 19px; font-style: italic;
+    font-weight: 400; line-height: 1.2;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .center-head .title em { color: var(--accent); }
+  .center-head .actions {
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+  }
+  .ctrl {
+    width: 26px; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-mute); border-radius: var(--r-sm);
+    cursor: pointer; background: transparent; border: 1px solid transparent;
+    transition: all var(--t-fast) var(--ease);
+  }
+  .ctrl:hover { background: var(--bg-1); color: var(--fg); border-color: var(--line-strong); }
+
+  /* ── Hero status (run summary) ── */
+  .hero-status {
+    margin-top: var(--s-3);
+    padding: var(--s-3) var(--s-4);
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--step-wait);
+    border-radius: var(--r-md);
+    display: flex; align-items: center; gap: var(--s-3);
+    flex-wrap: wrap;
+  }
+  .hero-line {
+    display: flex; align-items: center; gap: var(--s-2);
+    font-family: var(--mono); font-size: 12px;
+    color: var(--fg-soft);
+    flex-wrap: wrap;
+  }
+  .hero-line > * { white-space: nowrap; }
+  .hero-line .state {
+    color: var(--warn);
+    font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 11px;
+  }
+  .hero-line .ico { display: inline-flex; color: var(--warn); }
+  .hero-line .sep { color: var(--fg-ghost); }
+  .hero-line .runtime { color: var(--accent); font-weight: 500; }
+  .hero-stats {
+    margin-left: auto;
+    display: flex; align-items: center; gap: var(--s-3);
+    font-family: var(--mono); font-size: 11px;
+    color: var(--fg-faint);
+    white-space: nowrap;
+  }
+  .hero-stats > * { white-space: nowrap; }
+  .hero-stats b { color: var(--fg); font-weight: 500; }
+
+  /* ── Flight strip ── */
+  .flight {
+    flex-shrink: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    padding: var(--s-3) var(--s-5);
+    position: relative;
+  }
+  .flight-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: var(--s-3);
+    gap: var(--s-3);
+  }
+  .flight-head .lbl {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--fg-faint);
+    display: flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .flight-head .lbl b { color: var(--fg-mute); }
+  .flight-controls {
+    display: flex; align-items: center; gap: var(--s-3);
+  }
+  .auto-scroll {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px;
+    color: var(--fg-mute);
+    cursor: pointer;
+    background: transparent; border: none;
+    white-space: nowrap;
+  }
+  .auto-scroll .sw {
+    width: 24px; height: 14px;
+    background: var(--bg-3);
+    border-radius: 7px;
+    position: relative;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .auto-scroll .sw::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--fg-mute);
+    transition: transform var(--t-fast) var(--ease);
+  }
+  .auto-scroll.on .sw { background: var(--accent-wash); }
+  .auto-scroll.on .sw::after {
+    transform: translateX(10px);
+    background: var(--accent);
+    box-shadow: 0 0 4px var(--accent-glow);
+  }
+
+  /* Strip canvas */
+  .flight-canvas {
+    position: relative;
+    height: 110px;
+    background: var(--bg-1);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+  }
+  /* Lanes — 3 horizontal rows */
+  .lane {
+    position: absolute; left: 0; right: 0;
+    height: 26px;
+    border-bottom: 1px dashed color-mix(in oklch, var(--line) 50%, transparent);
+  }
+  .lane.l1 { top: 0; }
+  .lane.l2 { top: 26px; }
+  .lane.l3 { top: 52px; border-bottom: none; }
+  .lane-label {
+    position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--fg-faint);
+    pointer-events: none;
+    background: var(--bg-1);
+    padding: 1px 4px; border-radius: 2px;
+    z-index: 2;
+  }
+  /* Time ruler at bottom */
+  .ruler {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 28px;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+    display: flex;
+    font-family: var(--mono); font-size: 9px;
+    color: var(--fg-faint);
+  }
+  .ruler .tick {
+    flex: 1;
+    border-left: 1px solid var(--line);
+    padding: 6px 0 0 5px;
+    position: relative;
+  }
+  .ruler .tick:first-child { border-left: none; }
+
+  /* Markers */
+  .mark {
+    position: absolute;
+    height: 16px;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: filter var(--t-fast) var(--ease);
+    top: 5px;
+  }
+  .mark.kind-execute { background: var(--step-execute); }
+  .mark.kind-eval { background: var(--step-eval); }
+  .mark.kind-route { background: var(--step-route); }
+  .mark.kind-human { background: var(--step-human); }
+  .mark.kind-wait { background: var(--step-wait); }
+  .mark:hover {
+    filter: brightness(1.3);
+  }
+  .mark.live {
+    box-shadow: 0 0 8px var(--accent-glow);
+    border: 1px solid var(--accent);
+  }
+
+  /* Pip markers — small dots for tool/agent */
+  .pip {
+    position: absolute;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--fg-faint);
+    cursor: pointer;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    transition: all var(--t-fast) var(--ease);
+  }
+  .pip:hover { transform: translate(-50%, -50%) scale(1.6); }
+  .pip.tool { background: color-mix(in oklch, var(--step-execute) 80%, var(--bg)); }
+  .pip.agent { background: var(--fg-mute); }
+  .pip.error {
+    background: var(--err); width: 7px; height: 7px;
+    box-shadow: 0 0 4px var(--err-wash);
+  }
+
+  /* Viewport indicator on flight strip */
+  .viewport-range {
+    position: absolute;
+    top: 0; bottom: 28px;
+    background: color-mix(in oklch, var(--accent-wash) 60%, transparent);
+    border-left: 1.5px solid var(--accent);
+    border-right: 1.5px solid var(--accent);
+    pointer-events: none;
+    box-shadow: 0 0 16px var(--accent-glow);
+    z-index: 1;
+  }
+
+  /* Selected event marker on strip */
+  .play-head {
+    position: absolute;
+    top: 0; bottom: 28px;
+    width: 1.5px;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+    pointer-events: none;
+    z-index: 3;
+  }
+  .play-head::before {
+    content: ''; position: absolute; top: -3px; left: -3px;
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+  }
+
+  /* ── Filters bar ── */
+  .filters {
+    flex-shrink: 0;
+    padding: var(--s-3) var(--s-5);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg);
+    display: flex; align-items: center; gap: var(--s-2);
+    flex-wrap: wrap;
+  }
+  .scope {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px;
+    font-family: var(--sans); font-size: 11.5px;
+    color: var(--fg-mute);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: all var(--t-fast) var(--ease);
+    border: 1px solid transparent;
+  }
+  .scope:hover { background: var(--bg-1); color: var(--fg); }
+  .scope.active {
+    background: var(--accent-wash);
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  }
+  .scope .n {
+    font-family: var(--mono); font-size: 10px;
+    padding: 1px 5px;
+    background: var(--bg-3);
+    border-radius: var(--r-xs);
+    color: var(--fg-faint);
+  }
+  .scope.active .n {
+    background: color-mix(in oklch, var(--accent) 25%, var(--bg));
+    color: var(--accent);
+  }
+  .scope.err.active {
+    background: var(--err-wash);
+    color: var(--err);
+    border-color: color-mix(in oklch, var(--err) 35%, transparent);
+  }
+  .filters-sep { width: 1px; height: 14px; background: var(--line); margin: 0 var(--s-1); }
+  .filters .search {
+    margin-left: auto;
+    flex: 1; max-width: 360px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px var(--s-3);
+    background: var(--bg-1);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+  }
+  .filters .search:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-wash);
+  }
+  .filters .search svg { color: var(--fg-faint); flex-shrink: 0; }
+  .filters .search input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--fg); font-family: var(--sans); font-size: 12.5px;
+  }
+  .filters .search input::placeholder { color: var(--fg-faint); }
+  .filters .search .hint {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint);
+  }
+  .filters .search .hint kbd {
+    padding: 1px 5px; background: var(--bg-2);
+    border: 1px solid var(--line-strong); border-radius: var(--r-xs);
+    color: var(--fg-mute);
+  }
+
+  /* ── Event stream ── */
+  .stream {
+    flex: 1; overflow-y: auto;
+    padding: var(--s-3) var(--s-5) var(--s-6);
+  }
+  .stream::-webkit-scrollbar { width: 8px; }
+  .stream::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 4px; }
+
+  /* Time gutter + event card */
+  .event {
+    display: grid;
+    grid-template-columns: 90px 1fr;
+    gap: var(--s-3);
+    padding: var(--s-2) 0;
+    position: relative;
+  }
+  .event .when {
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint);
+    padding-top: 4px;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .event .when .abs { color: var(--fg-faint); }
+  .event .when .rel { color: var(--fg-mute); display: block; font-size: 9px; margin-top: 1px; }
+  .event .when .id-chip { margin-top: 4px; display: inline-flex; }
+  .event .body { min-width: 0; }
+
+  /* Step transition — full-width pill */
+  .event.step .body {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    border-left: 3px solid var(--fg-ghost);
+  }
+  .event.step.kind-execute .body { border-left-color: var(--step-execute); }
+  .event.step.kind-eval .body { border-left-color: var(--step-eval); }
+  .event.step.kind-route .body { border-left-color: var(--step-route); }
+  .event.step.kind-human .body { border-left-color: var(--step-human); }
+  .event.step.kind-wait .body { border-left-color: var(--step-wait); }
+  .event.step .body .step-arrow {
+    color: var(--fg-faint); font-family: var(--mono);
+  }
+  .event.step .body .from, .event.step .body .to {
+    font-family: var(--sans); font-size: 12.5px;
+    color: var(--fg-mute);
+  }
+  .event.step .body .to { color: var(--fg); font-weight: 500; }
+  .event.step .body .kind-tag {
+    font-family: var(--mono); font-size: 9px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: var(--r-xs);
+    background: var(--bg);
+    margin-left: auto;
+  }
+  .event.step.kind-execute .body .kind-tag { color: var(--step-execute-fg); }
+  .event.step.kind-eval .body .kind-tag { color: var(--step-eval-fg); }
+  .event.step.kind-route .body .kind-tag { color: var(--step-route-fg); }
+  .event.step.kind-human .body .kind-tag { color: var(--step-human-fg); }
+  .event.step.kind-wait .body .kind-tag { color: var(--step-wait-fg); }
+
+  /* Agent turn */
+  .event.agent .body {
+    border-left: 2px solid var(--line-strong);
+    padding: 4px 0 6px 14px;
+  }
+  .event.agent .speaker {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--fg-faint);
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+    white-space: nowrap;
+  }
+  .event.agent .speaker > * { white-space: nowrap; }
+  .event.agent .speaker .name {
+    color: var(--fg-mute);
+    font-weight: 500;
+  }
+  .event.agent .speaker .model {
+    color: var(--fg-faint);
+    font-size: 9px;
+    padding: 1px 5px;
+    border: 1px solid var(--line);
+    border-radius: 2px;
+  }
+  .event.agent .prose {
+    font-family: var(--sans); font-size: 13px;
+    line-height: 1.6;
+    color: var(--fg-soft);
+  }
+  .event.agent .prose p + p { margin-top: 8px; }
+  .event.agent .prose code {
+    font-family: var(--mono); font-size: 11px;
+    background: var(--bg-2);
+    padding: 1px 5px;
+    border-radius: var(--r-xs);
+    color: var(--accent);
+  }
+
+  /* Tool call — compact code line */
+  .event.tool .body {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 8px 4px 6px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+    font-family: var(--mono); font-size: 11.5px;
+    cursor: pointer;
+    transition: background var(--t-fast) var(--ease);
+  }
+  .event.tool .body:hover { background: var(--bg-3); }
+  .event.tool .body .prompt {
+    color: var(--fg-faint); flex-shrink: 0;
+  }
+  .event.tool .body .cmd {
+    color: var(--fg-soft);
+    flex: 1; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .event.tool .body .cmd .tk { color: var(--fg-mute); }
+  .event.tool .body .cmd em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .event.tool .body .dur {
+    color: var(--fg-faint); font-size: 10px;
+    flex-shrink: 0;
+  }
+  .event.tool .body .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    flex-shrink: 0;
+  }
+  .event.tool.err .body { border-color: color-mix(in oklch, var(--err) 30%, transparent); }
+  .event.tool.err .body .status-dot { background: var(--err); }
+
+  /* Wait event */
+  .event.wait .body {
+    padding: 10px 14px;
+    background: color-mix(in oklch, var(--step-wait-wash) 25%, var(--bg-2));
+    border: 1px solid color-mix(in oklch, var(--step-wait) 30%, transparent);
+    border-left: 3px solid var(--step-wait);
+    border-radius: var(--r-md);
+    font-family: var(--sans); font-size: 12.5px;
+    color: var(--step-wait-fg);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .event.wait .body .pulse-bar {
+    flex: 1;
+    height: 3px;
+    background: linear-gradient(to right, var(--step-wait) 40%, transparent);
+    border-radius: 2px;
+    background-size: 200% 100%;
+    animation: wait-flow 2.4s ease-in-out infinite;
+  }
+  @keyframes wait-flow {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  /* Error event */
+  .event.error .body {
+    padding: 10px 14px;
+    background: color-mix(in oklch, var(--err-wash) 30%, var(--bg-2));
+    border: 1px solid color-mix(in oklch, var(--err) 30%, transparent);
+    border-left: 3px solid var(--err);
+    border-radius: var(--r-md);
+    color: var(--err);
+    font-family: var(--sans); font-size: 12.5px;
+  }
+  .event.error .body .ttl {
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .event.error .body .detail {
+    font-family: var(--mono); font-size: 11px;
+    color: var(--fg-mute);
+  }
+
+  /* Currently selected event */
+  .event.sel .body {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 12px var(--accent-glow);
+  }
+
+  /* ── Run-chip vocab ── */
+  .run-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 19px; padding: 0 8px 0 9px;
+    font-family: var(--sans); font-size: 11px; font-weight: 500;
+    background: var(--bg-2); color: var(--fg-mute);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--r-xs);
+    white-space: nowrap;
+    position: relative;
+  }
+  .run-chip::before {
+    content: ''; position: absolute; left: 0; top: -1px; bottom: -1px;
+    width: 2px; border-radius: 2px 0 0 2px;
+    background: var(--fg-faint);
+  }
+  .run-chip.running { color: var(--accent); background: var(--accent-wash);
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent); }
+  .run-chip.running::before { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+  .run-chip.waiting { color: var(--warn); background: color-mix(in oklch, var(--warn-wash) 40%, var(--bg-2));
+    border-color: color-mix(in oklch, var(--warn) 30%, transparent); }
+  .run-chip.waiting::before { background: var(--warn); }
+  .run-chip.failed { color: var(--err); background: color-mix(in oklch, var(--err-wash) 40%, var(--bg-2));
+    border-color: color-mix(in oklch, var(--err) 30%, transparent); }
+  .run-chip.failed::before { background: var(--err); }
+  .run-chip.completed { color: var(--ok); background: color-mix(in oklch, var(--ok-wash) 35%, var(--bg-2));
+    border-color: color-mix(in oklch, var(--ok) 30%, transparent); }
+  .run-chip.completed::before { background: var(--ok); }
+  .run-chip .spinner {
+    width: 7px; height: 7px;
+    border: 1.5px solid currentColor; border-right-color: transparent;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .run-chip .runtime { color: inherit; opacity: 0.8; font-weight: 400; }
+
+  /* ── ID chip ── */
+  .id-chip {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-family: var(--mono); font-size: 10px;
+    color: var(--fg-faint);
+    padding: 2px 5px;
+    border-radius: var(--r-xs);
+    cursor: pointer;
+    user-select: none;
+    transition: all var(--t-fast) var(--ease);
+    line-height: 1; white-space: nowrap;
+  }
+  .id-chip:hover { background: var(--bg-2); color: var(--fg-mute); }
+  .id-chip:active { background: var(--bg-3); }
+  .id-chip .copy-mark { opacity: 0; transition: opacity var(--t-fast) var(--ease); flex-shrink: 0; }
+  .id-chip:hover .copy-mark { opacity: 1; }
+  .id-chip .ok-mark { display: none; color: var(--ok); flex-shrink: 0; }
+  .id-chip.copied { background: color-mix(in oklch, var(--ok-wash) 40%, transparent); color: var(--ok); }
+  .id-chip.copied .copy-mark { display: none; }
+  .id-chip.copied .ok-mark { display: inline-block; opacity: 1; }
+
+  /* Center-head ID chip — slightly bigger */
+  .center-head .id-chip { font-size: 11px; padding: 3px 7px; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">Vertebrae<span class="ember"></span></span>
+    <span class="crumb">sacrum <span class="sep">›</span> <span class="page">Traces</span></span>
+    <div class="activity">
+      <span class="live"><span class="pulse"></span>1 waiting</span>
+      <span class="total"><b>97</b> attempts <span style="color:var(--fg-ghost);">·</span> 2h 57m</span>
+    </div>
+  </div>
+
+  <div class="frame">
+    <aside class="side">
+      <div class="logo">s</div>
+      <hr>
+      <div class="item" title="Operations">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <a class="item" href="board-v2.html" title="Board">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg>
+      </a>
+      <a class="item" href="tasks-v2.html" title="Tasks">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+      </a>
+      <a class="item" href="design-v2.html" title="Design">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg>
+      </a>
+      <div class="item active" title="Traces">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-9 4 18 3-9h4"/></svg>
+      </div>
+      <div class="sys">
+        <span class="conn" title="Connected"></span>
+        <span>connected</span>
+      </div>
+    </aside>
+
+    <main class="traces-main">
+
+      <!-- Left rail: tasks + runs -->
+      <aside class="rail">
+        <section class="rail-sec tasks-sec">
+          <header class="rail-hd">
+            <span class="name">Tasks</span>
+            <span class="meta">7</span>
+          </header>
+          <div class="rail-body" id="tasksList"></div>
+        </section>
+
+        <section class="rail-sec runs-sec">
+          <header class="rail-hd">
+            <span class="name">Runs</span>
+            <span class="meta">2</span>
+          </header>
+          <div class="rail-body" id="runsList"></div>
+        </section>
+      </aside>
+
+      <!-- Center -->
+      <section class="center">
+        <header class="center-head">
+          <div class="crumb-row">
+            <span class="back">← Back</span>
+            <span style="color:var(--fg-ghost);">·</span>
+            <span>ticket</span>
+          </div>
+          <div class="title-row">
+            <div class="title">
+              Emit chat runner activity events and replace single-shot <em>live chat runner</em> lifecycle
+            </div>
+            <span class="id-chip" data-id="40628099">
+              <span class="id-text">40628099</span>
+              <svg class="copy-mark" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="ok-mark" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+            </span>
+            <div class="actions">
+              <button class="ctrl" title="Detach">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </button>
+              <button class="ctrl" title="More">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="hero-status">
+            <div class="hero-line">
+              <span class="ico"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+              <span class="state">Waiting · for children</span>
+              <span class="sep">·</span>
+              <span class="runtime">7h 36m running</span>
+              <span class="sep">·</span>
+              <span>at step <em style="font-family:var(--serif);font-style:italic;color:var(--step-wait-fg);">5 · wait</em></span>
+            </div>
+            <div class="hero-stats">
+              <span><b>6</b> runs</span>
+              <span style="color:var(--fg-ghost);">·</span>
+              <span><b>97</b> attempts</span>
+              <span style="color:var(--fg-ghost);">·</span>
+              <span><b>67M</b> tokens</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- Flight strip -->
+        <section class="flight">
+          <div class="flight-head">
+            <div class="lbl">Flight strip <b style="color:var(--fg-mute);">·</b> run <span class="id-chip" data-id="43abee9d" style="display:inline-flex;"><span class="id-text">43abee9d</span><svg class="copy-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="ok-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span></div>
+            <div class="flight-controls">
+              <button class="auto-scroll on" id="autoScroll" type="button"><span class="sw"></span>Auto-scroll</button>
+            </div>
+          </div>
+
+          <div class="flight-canvas" id="flightCanvas">
+            <div class="lane l1"><span class="lane-label">Steps</span></div>
+            <div class="lane l2"><span class="lane-label">Tools</span></div>
+            <div class="lane l3"><span class="lane-label">Turns</span></div>
+
+            <!-- Step transitions (lane 1) — width = duration proportional, hued by kind -->
+            <!-- execute_a (0-12%): -->
+            <div class="mark kind-execute" style="left: 2%; width: 8%;" title="execute · accept_user_turn (1m 24s)"></div>
+            <div class="mark kind-eval" style="left: 11%; width: 6%;" title="eval · classify_intent (38s)"></div>
+            <div class="mark kind-route" style="left: 18%; width: 4%;" title="route · route_to_tools (22s)"></div>
+            <div class="mark kind-execute" style="left: 23%; width: 14%;" title="execute · tool fan-out (4m 12s)"></div>
+            <div class="mark kind-wait live" style="left: 38%; width: 56%;" title="wait · for children (7h 36m, currently running)"></div>
+
+            <!-- Tool pips (lane 2) — at y=39 (lane 2 center) -->
+            <div class="pip tool" style="left: 3.5%; top: 39px;" title="tool · search_tracker"></div>
+            <div class="pip tool" style="left: 5%; top: 39px;" title="tool · read_file (lib/sacrum/chat_session_runner.ex)"></div>
+            <div class="pip tool" style="left: 7%; top: 39px;" title="tool · read_file (lib/sacrum/accounts/live_chat.ex)"></div>
+            <div class="pip tool" style="left: 9%; top: 39px;" title="tool · grep (sendChatMessage)"></div>
+            <div class="pip tool" style="left: 14%; top: 39px;" title="tool · vtb show"></div>
+            <div class="pip tool" style="left: 24%; top: 39px;" title="tool · write_file"></div>
+            <div class="pip tool" style="left: 27%; top: 39px;" title="tool · write_file"></div>
+            <div class="pip tool" style="left: 30%; top: 39px;" title="tool · run_tests"></div>
+            <div class="pip error" style="left: 33%; top: 39px;" title="error · test failure"></div>
+            <div class="pip tool" style="left: 36%; top: 39px;" title="tool · write_file"></div>
+            <div class="pip tool" style="left: 41%; top: 39px;" title="tool · child_task.spawn (suspends)"></div>
+
+            <!-- Agent turn pips (lane 3) -->
+            <div class="pip agent" style="left: 3%; top: 65px;" title="agent codex · turn 1"></div>
+            <div class="pip agent" style="left: 6%; top: 65px;" title="agent codex · turn 2"></div>
+            <div class="pip agent" style="left: 11%; top: 65px;" title="agent codex · turn 3"></div>
+            <div class="pip agent" style="left: 16%; top: 65px;" title="agent codex · turn 4"></div>
+            <div class="pip agent" style="left: 23%; top: 65px;" title="agent codex · turn 5"></div>
+            <div class="pip agent" style="left: 28%; top: 65px;" title="agent codex · turn 6"></div>
+            <div class="pip agent" style="left: 32%; top: 65px;" title="agent codex · turn 7"></div>
+            <div class="pip agent" style="left: 37%; top: 65px;" title="agent codex · turn 8"></div>
+
+            <!-- Viewport range (current scroll position in event stream) -->
+            <div class="viewport-range" style="left: 5%; width: 8%;"></div>
+            <!-- Play head — newest event -->
+            <div class="play-head" style="left: 94%;"></div>
+
+            <!-- Time ruler -->
+            <div class="ruler">
+              <div class="tick">+0s</div>
+              <div class="tick">+18m</div>
+              <div class="tick">+36m</div>
+              <div class="tick">+54m</div>
+              <div class="tick">+1h 12m</div>
+              <div class="tick">+1h 30m</div>
+              <div class="tick">+1h 48m</div>
+              <div class="tick">+2h 06m</div>
+              <div class="tick">+2h 24m</div>
+              <div class="tick">+2h 42m</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Filter facets -->
+        <section class="filters">
+          <span class="scope active">All <span class="n">52</span></span>
+          <span class="scope">Steps <span class="n">5</span></span>
+          <span class="scope">Tools <span class="n">31</span></span>
+          <span class="scope">Turns <span class="n">14</span></span>
+          <span class="scope">Waits <span class="n">1</span></span>
+          <span class="scope err">Errors <span class="n">1</span></span>
+          <span class="filters-sep"></span>
+          <span class="scope">codex <span class="n">12</span></span>
+          <span class="scope">claude <span class="n">2</span></span>
+
+          <div class="search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input placeholder="Search events…">
+            <span class="hint"><kbd>/</kbd></span>
+          </div>
+        </section>
+
+        <!-- Event stream -->
+        <section class="stream" id="stream">
+
+          <!-- step: enter execute -->
+          <div class="event step kind-execute" data-evt="s1">
+            <div class="when">
+              <div class="abs">01:13:42.483</div>
+              <div class="rel">+0s</div>
+            </div>
+            <div class="body">
+              <span class="step-arrow">→</span>
+              <span class="to">accept_user_turn</span>
+              <span class="kind-tag">execute</span>
+            </div>
+          </div>
+
+          <!-- agent turn 1 -->
+          <div class="event agent" data-evt="a1">
+            <div class="when">
+              <div class="abs">01:13:54.033</div>
+              <div class="rel">+11.5s</div>
+              <span class="id-chip" data-id="t1.codex"><span class="id-text">t1.codex</span><svg class="copy-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="ok-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="body">
+              <div class="speaker">
+                <span class="name">Agent · Codex</span>
+                <span class="model">claude-sonnet-4.5</span>
+              </div>
+              <div class="prose">
+                <p>I'll ground this in the live tracker record and nearby Sacrum code paths first, then create only direct child tasks in dependency order. I'm also going to use the Vertebrae task skills because this is tracker-native decomposition work.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- tool calls -->
+          <div class="event tool" data-evt="t1">
+            <div class="when">
+              <div class="abs">01:14:01.110</div>
+              <div class="rel">+18.6s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">rg <span class="tk">-n</span> <em>"chat runner activity|live chat runner|hydrate_session|Ji…"</em></span>
+              <span class="dur">142ms</span>
+            </div>
+          </div>
+          <div class="event tool" data-evt="t2">
+            <div class="when">
+              <div class="abs">01:14:01.310</div>
+              <div class="rel">+18.8s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">rg <span class="tk">-n</span> <em>"chat runner|ChatRunner|sendChatMessage|send_message_and_…"</em></span>
+              <span class="dur">98ms</span>
+            </div>
+          </div>
+          <div class="event tool" data-evt="t3">
+            <div class="when">
+              <div class="abs">01:14:01.512</div>
+              <div class="rel">+19.0s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">vtb show <em>40628099-b155-45e8-8cee-f8621738138b</em></span>
+              <span class="dur">87ms</span>
+            </div>
+          </div>
+
+          <!-- agent turn 2 -->
+          <div class="event agent" data-evt="a2">
+            <div class="when">
+              <div class="abs">01:14:03.645</div>
+              <div class="rel">+21.2s</div>
+              <span class="id-chip" data-id="t2.codex"><span class="id-text">t2.codex</span><svg class="copy-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="ok-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="body">
+              <div class="speaker">
+                <span class="name">Agent · Codex</span>
+                <span class="model">claude-sonnet-4.5</span>
+              </div>
+              <div class="prose">
+                <p>The parent already has the intended checklist items, so I won't rewrite it. I'm narrowing child tasks around the actual runner modules, event/checkpoint layer, LiveChat ingress, GraphQL/channel projection, and hydration/recovery so the work stays exactly one level down.</p>
+                <p>Reading the modules now to anchor each child to a real <code>vtb section</code> and code ref.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- More tool calls (folded into one if many — but show a few) -->
+          <div class="event tool" data-evt="t4">
+            <div class="when">
+              <div class="abs">01:14:08.220</div>
+              <div class="rel">+25.7s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">sed <span class="tk">-n</span> <em>'1,180p'</em> lib/sacrum/chat_session_runner.ex</span>
+              <span class="dur">42ms</span>
+            </div>
+          </div>
+          <div class="event tool" data-evt="t5">
+            <div class="when">
+              <div class="abs">01:14:08.401</div>
+              <div class="rel">+25.9s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">sed <span class="tk">-n</span> <em>'1,180p'</em> lib/sacrum/accounts/live_chat.ex</span>
+              <span class="dur">38ms</span>
+            </div>
+          </div>
+
+          <!-- Step transition to next step -->
+          <div class="event step kind-eval" data-evt="s2">
+            <div class="when">
+              <div class="abs">01:18:11.022</div>
+              <div class="rel">+4m 28s</div>
+            </div>
+            <div class="body">
+              <span class="from">accept_user_turn</span>
+              <span class="step-arrow">→</span>
+              <span class="to">classify_intent</span>
+              <span class="kind-tag">eval</span>
+            </div>
+          </div>
+
+          <!-- Error event -->
+          <div class="event error" data-evt="err1">
+            <div class="when">
+              <div class="abs">01:22:48.150</div>
+              <div class="rel">+9m 06s</div>
+              <span class="id-chip" data-id="err.4a82"><span class="id-text">err.4a82</span><svg class="copy-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="ok-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="body">
+              <div class="ttl">tool · run_tests failed (exit 1)</div>
+              <div class="detail">2 of 41 tests failed in <span style="color:var(--fg);">lib/sacrum/chat_session_runner_test.exs</span>. Retrying with isolated runner.</div>
+            </div>
+          </div>
+
+          <!-- Continue with more events -->
+          <div class="event tool err" data-evt="t6">
+            <div class="when">
+              <div class="abs">01:22:48.300</div>
+              <div class="rel">+9m 06s</div>
+            </div>
+            <div class="body">
+              <span class="status-dot"></span>
+              <span class="prompt">$</span>
+              <span class="cmd">mix test <em>lib/sacrum/chat_session_runner_test.exs --max-failures 1</em></span>
+              <span class="dur">2.4s</span>
+            </div>
+          </div>
+
+          <!-- Step transition into wait -->
+          <div class="event step kind-wait" data-evt="s3">
+            <div class="when">
+              <div class="abs">01:50:14.847</div>
+              <div class="rel">+36m 32s</div>
+            </div>
+            <div class="body">
+              <span class="from">tool fan-out</span>
+              <span class="step-arrow">→</span>
+              <span class="to">wait_for_children</span>
+              <span class="kind-tag">wait</span>
+            </div>
+          </div>
+
+          <!-- Wait event — currently active -->
+          <div class="event wait sel" data-evt="w1">
+            <div class="when">
+              <div class="abs">01:50:15.012</div>
+              <div class="rel">+36m 32s</div>
+              <span class="id-chip" data-id="wait.c794"><span class="id-text">wait.c794</span><svg class="copy-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="1"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><svg class="ok-mark" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg></span>
+            </div>
+            <div class="body">
+              <span>Waiting on 3 child tasks · running for 7h 36m</span>
+              <span class="pulse-bar"></span>
+              <span style="color: var(--accent); font-family: var(--mono); font-size: 11px;">c794b783 still running</span>
+            </div>
+          </div>
+
+        </section>
+      </section>
+
+    </main>
+  </div>
+
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+
+  <script src="traces-v2.js"></script>
+  <script>
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
+      var btn = document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight = html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+</body>
+</html>

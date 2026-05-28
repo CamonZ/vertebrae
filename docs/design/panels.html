@@ -1,0 +1,812 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Floating Panels (supplement)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Supplement supplement layout */
+  .option {
+    margin-top: var(--s-10);
+    padding-top: var(--s-6);
+    border-top: 1px solid var(--accent);
+  }
+  .option .head {
+    display: grid; grid-template-columns: 1fr 2fr;
+    gap: var(--s-8); align-items: baseline;
+    padding-bottom: var(--s-4);
+  }
+  .option .head .id {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.16em; color: var(--accent); text-transform: uppercase;
+  }
+  .option .head h2 {
+    margin-top: var(--s-2);
+    font-family: var(--serif); font-size: 40px; font-weight: 400; line-height: 1.05; letter-spacing: -0.015em;
+  }
+  .option .head h2 .em { font-style: italic; color: var(--accent); }
+  .option .head .desc {
+    font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); line-height: 1.45;
+  }
+  .option .pro-con {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: var(--s-4);
+    margin-top: var(--s-4);
+    font-family: var(--mono); font-size: 11px; line-height: 1.7;
+  }
+  .option .pro-con .col { background: var(--bg-1); padding: var(--s-3) var(--s-4); border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+  .option .pro-con .col h4 { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: var(--s-2); }
+  .option .pro-con .pro h4 { color: var(--ok); }
+  .option .pro-con .con h4 { color: var(--warn); }
+  .option .pro-con .col ul { list-style: none; }
+  .option .pro-con .col li { padding-left: 14px; position: relative; color: var(--fg-soft); }
+  .option .pro-con .col li::before { content: '·'; position: absolute; left: 4px; color: var(--fg-faint); }
+
+  /* Frame (app canvas) */
+  .frame {
+    margin-top: var(--s-5);
+    border: 1px solid var(--line-strong);
+    background: var(--bg-1);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-2);
+  }
+  .frame-head {
+    background: var(--bg-2); padding: 6px var(--s-4);
+    display: flex; align-items: center; gap: var(--s-3);
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11px; color: var(--fg-mute);
+  }
+  .frame-head .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .frame-head .label { color: var(--fg); }
+  .frame-head .meta { margin-left: auto; }
+  .frame-body { display: flex; height: 560px; position: relative; overflow: hidden; }
+
+  /* Reusable: sidebar */
+  .side { width: 48px; background: var(--bg); border-right: 1px solid var(--line); padding: var(--s-2) 0; display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+  .side .item { width: 32px; height: 32px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: var(--fg-mute); }
+  .side .item.active { background: var(--accent-wash); color: var(--accent); }
+  .side .logo { width: 32px; height: 32px; background: var(--accent); color: var(--bg); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-style: italic; font-size: 18px; font-weight: 500; }
+  .side .avatar { width: 32px; height: 32px; border-radius: var(--r-md); background: var(--step-route); color: var(--bg); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .side hr { width: 24px; border: none; border-top: 1px solid var(--line); margin: 2px 0; }
+
+  /* Main canvas (the page underneath panels) */
+  .app-main { flex: 1; display: flex; flex-direction: column; background: var(--bg); position: relative; }
+  .app-head { height: 44px; padding: 0 var(--s-4); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-3); }
+  .crumb { font-family: var(--sans); font-size: 13px; color: var(--fg-mute); }
+  .crumb .sep { color: var(--fg-faint); margin: 0 var(--s-2); }
+  .crumb .page { font-family: var(--serif); font-size: 20px; color: var(--fg); letter-spacing: -0.01em; }
+  .app-body { flex: 1; padding: var(--s-4); overflow: auto; position: relative; }
+
+  /* DAG canvas behind panels */
+  .dag-bg {
+    background-image: radial-gradient(circle, var(--line-strong) 0.8px, transparent 0.8px);
+    background-size: 20px 20px;
+    background-color: var(--bg);
+    width: 100%; min-height: 100%;
+    position: relative;
+  }
+  .wf-node { width: 160px; border: 1px solid var(--line-strong); background: var(--bg-2); position: absolute; border-radius: var(--r-sm); overflow: hidden; }
+  .wf-node .bar { height: 3px; }
+  .wf-node .body { padding: 6px 10px; font-size: 12px; font-weight: 500; color: var(--fg); }
+  .wf-node .ico { float: right; }
+  .wf-node .ftr { display: flex; justify-content: space-between; margin-top: 4px; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .wf-node.execute .bar { background: var(--step-execute); }
+  .wf-node.eval .bar { background: var(--step-eval); }
+  .wf-node.route .bar { background: var(--step-route); }
+  .wf-node.human .bar { background: var(--step-human); }
+  .wf-node.wait .bar { background: var(--step-wait); }
+  .wf-node.selected { border-color: var(--accent); box-shadow: 0 0 16px var(--accent-glow); }
+  .wf-node.dim { opacity: 0.4; }
+
+  /* Panel primitives — shared */
+  .pnl {
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-2);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .pnl .ph {
+    padding: var(--s-3) var(--s-4);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .pnl .ph-top { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s-2); }
+  .pnl .ph-top .t {
+    font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em; color: var(--fg);
+    line-height: 1.2;
+  }
+  .pnl .ph-top .t .em { font-style: italic; color: var(--accent); }
+  .pnl .ph-top .controls { display: flex; gap: 2px; flex-shrink: 0; }
+  .pnl .ph-top .ctrl { width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--fg-mute); cursor: pointer; border-radius: var(--r-xs); font-size: 12px; }
+  .pnl .ph-top .ctrl:hover { background: var(--bg-3); color: var(--fg); }
+  .pnl .ph-meta { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; align-items: center; }
+  .pnl .pb { padding: var(--s-3) var(--s-4); flex: 1; overflow: auto; font-size: 12px; color: var(--fg-soft); line-height: 1.5; }
+  .pnl .pb .lbl { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .pnl .pb hr { border: none; border-top: 1px solid var(--line); margin: var(--s-3) 0; }
+  .pnl .pb .field { padding: 6px 0; display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); }
+  .pnl .pb .field + .field { border-top: 1px solid var(--line); }
+  .pnl .pb .field .k { color: var(--fg-mute); font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .pnl .pb .field .v { color: var(--fg); font-size: 12px; }
+  .pnl .pf { padding: var(--s-2) var(--s-3); border-top: 1px solid var(--line); background: var(--bg-1); display: flex; gap: 6px; }
+
+  /* Panel kinds — color-coded left edge */
+  .pnl.workflow { border-left: 3px solid var(--fg-mute); }
+  .pnl.step.execute { border-left: 3px solid var(--step-execute); }
+  .pnl.step.eval { border-left: 3px solid var(--step-eval); }
+  .pnl.step.route { border-left: 3px solid var(--step-route); }
+  .pnl.step.human { border-left: 3px solid var(--step-human); }
+  .pnl.step.wait { border-left: 3px solid var(--step-wait); }
+  .pnl.task { border-left: 3px solid var(--accent); }
+
+  .id-badge { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 6px;
+    font-size: 10px; font-weight: 500;
+    border-radius: var(--r-xs);
+    border: 1px solid var(--line-strong);
+    background: var(--bg);
+    color: var(--fg-mute);
+    white-space: nowrap;
+    font-family: var(--mono); letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  .pill.execute { color: var(--step-execute-fg); border-color: color-mix(in oklch, var(--step-execute) 40%, transparent); background: color-mix(in oklch, var(--step-execute-wash) 60%, var(--bg)); }
+  .pill.eval { color: var(--step-eval-fg); border-color: color-mix(in oklch, var(--step-eval) 40%, transparent); background: color-mix(in oklch, var(--step-eval-wash) 60%, var(--bg)); }
+  .pill.route { color: var(--step-route-fg); border-color: color-mix(in oklch, var(--step-route) 40%, transparent); background: color-mix(in oklch, var(--step-route-wash) 60%, var(--bg)); }
+  .pill.human { color: var(--step-human-fg); border-color: color-mix(in oklch, var(--step-human) 40%, transparent); background: color-mix(in oklch, var(--step-human-wash) 60%, var(--bg)); }
+  .pill.running { color: var(--info); background: var(--info-wash); border-color: color-mix(in oklch, var(--info) 40%, transparent); }
+  .spinner { width: 9px; height: 9px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* OPTION A — Single docked panel (current) */
+  .opt-a .pnl { width: 360px; height: 100%; border-radius: 0; border-top: none; border-right: none; border-bottom: none; border-left: 1px solid var(--line); }
+  .opt-a .pnl.task { border-left: 3px solid var(--accent); }
+
+  /* OPTION B — Multi-pane stack */
+  .opt-b .panel-stack { display: flex; height: 100%; }
+  .opt-b .panel-stack .pnl { width: 320px; height: 100%; border-radius: 0; border-top: none; border-bottom: none; border-right: 1px solid var(--line); flex-shrink: 0; }
+  .opt-b .panel-stack .pnl:first-child { border-left: 1px solid var(--line); }
+  .opt-b .panel-stack .pnl.task { border-left: 3px solid var(--accent); }
+  .opt-b .panel-stack .pnl.step.execute { border-left: 3px solid var(--step-execute); }
+  .opt-b .panel-stack .pnl.workflow { border-left: 3px solid var(--fg-mute); }
+  .opt-b .crumb-trail {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: var(--s-2);
+    padding: 4px 10px; background: var(--bg-3); border: 1px solid var(--line-strong);
+    border-radius: 9999px; box-shadow: var(--shadow-2);
+    font-family: var(--mono); font-size: 11px; color: var(--fg-mute);
+    z-index: 10;
+  }
+  .opt-b .crumb-trail .seg { padding: 2px 8px; border-radius: var(--r-xs); }
+  .opt-b .crumb-trail .seg.workflow { color: var(--fg-mute); }
+  .opt-b .crumb-trail .seg.step { color: var(--step-execute-fg); background: color-mix(in oklch, var(--step-execute-wash) 50%, transparent); }
+  .opt-b .crumb-trail .seg.task { color: var(--accent); background: var(--accent-wash); }
+  .opt-b .crumb-trail .sep { color: var(--fg-faint); }
+
+  /* OPTION C — Tabbed inspector */
+  .opt-c .pnl { width: 380px; height: 100%; border-radius: 0; border-top: none; border-right: none; border-bottom: none; border-left: 3px solid var(--accent); }
+  .opt-c .tabs {
+    display: flex; gap: 2px; padding: 6px 8px 0;
+    background: var(--bg-1); border-bottom: 1px solid var(--line);
+  }
+  .opt-c .tab {
+    padding: 5px 10px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    color: var(--fg-mute); cursor: pointer;
+    border: 1px solid transparent; border-bottom: none;
+    border-radius: var(--r-sm) var(--r-sm) 0 0;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .opt-c .tab.active { background: var(--bg-2); border-color: var(--line); color: var(--fg); position: relative; }
+  .opt-c .tab.active::before { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: var(--bg-2); }
+  .opt-c .tab .swatch { width: 8px; height: 8px; border-radius: 1px; }
+  .opt-c .tab .x { color: var(--fg-faint); margin-left: 4px; font-size: 10px; }
+  .opt-c .tab.add { color: var(--fg-faint); }
+
+  /* OPTION D — Floating + dockable */
+  .opt-d .float {
+    position: absolute;
+    width: 320px;
+    z-index: 10;
+  }
+  .opt-d .float .ph { cursor: move; user-select: none; }
+  .opt-d .float .ph::before { content: '⋮⋮'; color: var(--fg-faint); margin-right: 6px; font-size: 14px; vertical-align: -1px; }
+  .opt-d .dock-zone {
+    position: absolute; right: 0; top: 0; bottom: 0;
+    width: 24px;
+    background: linear-gradient(to right, transparent, var(--accent-wash));
+    border-left: 1px dashed var(--accent);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+  .opt-d .dock-zone .lbl {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) rotate(90deg);
+    transform-origin: center;
+    font-family: var(--mono); font-size: 9px; color: var(--accent);
+    letter-spacing: 0.16em; text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* Helper styles for panel internals */
+  .check { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); background: var(--bg); border-radius: var(--r-xs); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--bg); font-size: 9px; }
+  .check.on { background: var(--accent); border-color: var(--accent); }
+  .btn-mini { padding: 4px 10px; font-family: var(--sans); font-size: 11px; font-weight: 500; border: 1px solid var(--line-strong); background: transparent; color: var(--fg-mute); cursor: pointer; border-radius: var(--r-sm); }
+  .btn-mini:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-mini.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 600; }
+  .btn-mini.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); color: var(--bg); }
+
+  /* Recommendation card */
+  .recommend {
+    margin-top: var(--s-12);
+    padding: var(--s-6);
+    background: linear-gradient(135deg, var(--accent-wash), var(--bg-2));
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    border-radius: var(--r-md);
+  }
+  .recommend h3 { font-family: var(--serif); font-size: 32px; font-weight: 400; line-height: 1; letter-spacing: -0.015em; }
+  .recommend h3 .em { font-style: italic; color: var(--accent); }
+  .recommend p { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-soft); line-height: 1.5; max-width: 64ch; margin-top: var(--s-3); }
+  .recommend ul { margin-top: var(--s-3); list-style: none; }
+  .recommend ul li { padding: 4px 0 4px 16px; position: relative; font-size: 14px; color: var(--fg-soft); }
+  .recommend ul li::before { content: '→'; position: absolute; left: 0; color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header class="masthead">
+      <span class="wordmark">Vertebrae<span class="ember"></span></span>
+      <span class="crumb">Hearth · Supplement — Floating panels</span>
+      <span class="meta">For review<br>Workflow · Step · Task</span>
+    </header>
+
+    <nav class="chapters">
+      <a href="index.html">§ 01 · Cover</a>
+      <a href="foundations.html">§ 02 · Foundations</a>
+      <a href="components.html">§ 03 · Components</a>
+      <a href="patterns.html">§ 04 · Patterns</a>
+      <a href="panels.html" class="current">＋ Panels</a>
+      <a href="../../Vertebrae Style Guide.html" style="margin-left: auto; border-right: none;">← All directions</a>
+    </nav>
+
+    <section class="section-head">
+      <div>
+        <div class="plate-num"><span class="n">＋</span> · Supplement</div>
+        <h1 class="title" style="margin-top: var(--s-3);">Floating<br><span class="em">panels</span>.</h1>
+      </div>
+      <div>
+        <p class="blurb">
+          The detail panel is the most-used surface in Vertebrae. Workflows,
+          steps, and tasks each have their own kind of detail &mdash; and users
+          often need to <em class="italic">cross-reference</em> them. Four
+          patterns for how that could work, with the trade-offs each
+          one carries.
+        </p>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────
+         The three entity types
+         ───────────────────────────────────────────────── -->
+    <div style="margin-top: var(--s-10); padding: var(--s-6); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+      <div class="eyebrow" style="font-size: 11px; margin-bottom: var(--s-3);">The three detail entities</div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-4);">
+        <div style="border-left: 3px solid var(--fg-mute); padding-left: var(--s-3);">
+          <div style="font-family: var(--serif); font-size: 22px; font-weight: 400;">Workflow</div>
+          <p style="margin-top: 4px; font-size: 13px; color: var(--fg-mute); font-family: var(--serif); font-style: italic;">The pipeline. Lives at the top; defines the steps and the transitions.</p>
+          <div class="pill" style="margin-top: 8px;">workflow / a1b2c3d4</div>
+        </div>
+        <div style="border-left: 3px solid var(--step-execute); padding-left: var(--s-3);">
+          <div style="font-family: var(--serif); font-size: 22px; font-weight: 400;">Step</div>
+          <p style="margin-top: 4px; font-size: 13px; color: var(--fg-mute); font-family: var(--serif); font-style: italic;">A node in the workflow. Carries instructions, agent config, transitions out.</p>
+          <div class="pill execute" style="margin-top: 8px;">step / execute / i9j0k1l2</div>
+        </div>
+        <div style="border-left: 3px solid var(--accent); padding-left: var(--s-3);">
+          <div style="font-family: var(--serif); font-size: 22px; font-weight: 400;">Task</div>
+          <p style="margin-top: 4px; font-size: 13px; color: var(--fg-mute); font-family: var(--serif); font-style: italic;">A unit of work. Most-opened entity. Carries spec, acceptance criteria, runs.</p>
+          <div class="pill" style="margin-top: 8px; color: var(--accent); border-color: var(--accent);">task / m3n4o5p6</div>
+        </div>
+      </div>
+      <p style="margin-top: var(--s-4); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.04em;">// Each panel kind is encoded by a left-edge stripe: gray (workflow) → step-type hue → copper (task)</p>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────
+         OPTION A — Single docked panel (current spec)
+         ───────────────────────────────────────────────── -->
+    <section class="option opt-a">
+      <div class="head">
+        <div>
+          <div class="id">Option A · single dock</div>
+          <h2>One panel,<br><span class="em">replaces</span> on click.</h2>
+        </div>
+        <p class="desc">The current spec. A single right-docked panel that swaps content as you click around. Simple, predictable &mdash; but loses context when comparing two things.</p>
+      </div>
+
+      <div class="frame">
+        <div class="frame-head"><span class="dot" style="background: #ff5f57;"></span><span class="dot" style="background: #febc2e;"></span><span class="dot" style="background: #28c840;"></span><span class="label">vertebrae · Design</span><span class="meta">Option A · single dock</span></div>
+        <div class="frame-body">
+          <div class="side">
+            <div class="logo">V</div><hr><div class="avatar">A</div><hr>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg></div>
+            <div class="item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg></div>
+          </div>
+          <div class="app-main">
+            <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Design</span></span></div>
+            <div class="app-body" style="padding: 0;">
+              <div class="dag-bg" style="height: 100%;">
+                <div class="wf-node execute" style="left: 40px; top: 60px;"><div class="bar"></div><div class="body">Implement<span class="ico" style="color: var(--step-execute-fg);">▶</span><div class="ftr"><span>2</span><span>⟳ 1</span></div></div></div>
+                <div class="wf-node eval" style="left: 240px; top: 60px;"><div class="bar"></div><div class="body">Score quality<span class="ico" style="color: var(--step-eval-fg);">⊙</span><div class="ftr"><span>1</span></div></div></div>
+                <div class="wf-node route" style="left: 440px; top: 60px;"><div class="bar"></div><div class="body">Route<span class="ico" style="color: var(--step-route-fg);">⤳</span><div class="ftr"><span>2 paths</span></div></div></div>
+                <div class="wf-node human" style="left: 440px; top: 200px;"><div class="bar"></div><div class="body">Review<span class="ico" style="color: var(--step-human-fg);">👁</span><div class="ftr"><span>1</span></div></div></div>
+                <div class="wf-node wait" style="left: 240px; top: 200px;"><div class="bar"></div><div class="body">Wait tests<span class="ico" style="color: var(--step-wait-fg);">⏸</span><div class="ftr"><span>4 ch.</span></div></div></div>
+              </div>
+            </div>
+          </div>
+          <!-- Single panel: task selected -->
+          <div class="pnl task">
+            <div class="ph">
+              <div class="ph-top">
+                <div>
+                  <div class="t">Implement <span class="em">JWT</span> service</div>
+                  <div class="ph-meta"><span class="id-badge">m3n4o5p6</span><span class="pill execute">▶ Execute · 4m</span></div>
+                </div>
+                <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">⋯</span><span class="ctrl">✕</span></div>
+              </div>
+            </div>
+            <div class="pb">
+              <div class="lbl">Description</div>
+              <p>Implement a JWT signing service that replaces the current session token approach in the auth middleware.</p>
+              <hr>
+              <div class="lbl">Acceptance · 2 of 4</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Tokens expire in 24h</span></div>
+                <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Refresh token flow</span></div>
+                <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Unit tests for validation</span></div>
+                <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Integration with middleware</span></div>
+              </div>
+              <hr>
+              <div class="lbl">Step</div>
+              <div class="field"><span class="k">Workflow</span><span class="v">Implementation</span></div>
+              <div class="field"><span class="k">Current step</span><span class="v"><span class="pill execute">▶ Implement</span></span></div>
+            </div>
+            <div class="pf"><button class="btn-mini">💬 Chat</button><span style="margin-left: auto;"></span><button class="btn-mini primary">▶ Run</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pro-con">
+        <div class="col pro">
+          <h4>Pros</h4>
+          <ul>
+            <li>Lowest cognitive load &mdash; one thing on screen</li>
+            <li>Easiest to implement, ship today</li>
+            <li>Selection state stays clean &mdash; one selected entity</li>
+          </ul>
+        </div>
+        <div class="col con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Can't compare two tasks side-by-side</li>
+            <li>Drilling task → step → workflow loses parent context</li>
+            <li>Common power-user complaint: "I just need to peek"</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────
+         OPTION B — Multi-pane stack (Linear-style)
+         ───────────────────────────────────────────────── -->
+    <section class="option opt-b">
+      <div class="head">
+        <div>
+          <div class="id">Option B · multi-pane stack</div>
+          <h2>Stack panels,<br><span class="em">cascade</span> right.</h2>
+        </div>
+        <p class="desc">Linear's pattern. Each new selection pushes a panel onto a horizontal stack. The canvas compresses; older panels stay visible. A floating breadcrumb shows depth.</p>
+      </div>
+
+      <div class="frame">
+        <div class="frame-head"><span class="dot" style="background: #ff5f57;"></span><span class="dot" style="background: #febc2e;"></span><span class="dot" style="background: #28c840;"></span><span class="label">vertebrae · Design</span><span class="meta">Option B · cascade</span></div>
+        <div class="frame-body">
+          <div class="side">
+            <div class="logo">V</div><hr><div class="avatar">A</div><hr>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg></div>
+          </div>
+          <div class="app-main">
+            <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Design</span></span></div>
+            <div class="app-body" style="padding: 0;">
+              <div class="dag-bg" style="height: 100%; position: relative;">
+                <div class="crumb-trail">
+                  <span class="seg workflow">Implementation</span>
+                  <span class="sep">›</span>
+                  <span class="seg step">▶ Implement</span>
+                  <span class="sep">›</span>
+                  <span class="seg task">m3n4o5p6 · JWT service</span>
+                  <span style="margin-left: 8px; cursor: pointer; color: var(--fg-faint);">✕ collapse</span>
+                </div>
+                <div class="wf-node execute" style="left: 24px; top: 60px;"><div class="bar"></div><div class="body">Implement<span class="ico" style="color: var(--step-execute-fg);">▶</span><div class="ftr"><span>2</span><span>⟳ 1</span></div></div></div>
+                <div class="wf-node eval dim" style="left: 24px; top: 160px;"><div class="bar"></div><div class="body">Score<span class="ico" style="color: var(--step-eval-fg);">⊙</span><div class="ftr"><span>1</span></div></div></div>
+                <div class="wf-node route dim" style="left: 24px; top: 260px;"><div class="bar"></div><div class="body">Route<span class="ico" style="color: var(--step-route-fg);">⤳</span><div class="ftr"><span>2</span></div></div></div>
+              </div>
+            </div>
+          </div>
+          <!-- Stack: Workflow → Step → Task -->
+          <div class="panel-stack">
+            <div class="pnl workflow">
+              <div class="ph">
+                <div class="ph-top">
+                  <div>
+                    <div class="t" style="font-size: 16px;">Implementation</div>
+                    <div class="ph-meta"><span class="id-badge">a1b2c3d4</span><span class="pill">workflow</span></div>
+                  </div>
+                  <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">✕</span></div>
+                </div>
+              </div>
+              <div class="pb">
+                <div class="lbl">Steps · 5</div>
+                <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px;">
+                  <div class="field" style="padding: 4px 0;"><span class="v"><span class="pill execute">▶ Implement</span></span><span class="k">2 tasks</span></div>
+                  <div class="field" style="padding: 4px 0;"><span class="v"><span class="pill eval">⊙ Eval</span></span><span class="k">1</span></div>
+                  <div class="field" style="padding: 4px 0;"><span class="v"><span class="pill route">⤳ Route</span></span><span class="k">0</span></div>
+                  <div class="field" style="padding: 4px 0;"><span class="v"><span class="pill human">👁 Review</span></span><span class="k">1</span></div>
+                  <div class="field" style="padding: 4px 0;"><span class="v"><span class="pill">⏸ Wait</span></span><span class="k">3</span></div>
+                </div>
+                <hr>
+                <div class="lbl">Board column</div>
+                <div class="field"><span class="k">Kanban</span><span class="v">Implementation</span></div>
+              </div>
+            </div>
+            <div class="pnl step execute">
+              <div class="ph">
+                <div class="ph-top">
+                  <div>
+                    <div class="t" style="font-size: 16px;">Implement <span style="font-style: italic; color: var(--step-execute-fg);">▶</span></div>
+                    <div class="ph-meta"><span class="id-badge">i9j0k1l2</span><span class="pill execute">execute</span></div>
+                  </div>
+                  <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">✕</span></div>
+                </div>
+              </div>
+              <div class="pb">
+                <div class="lbl">Instructions</div>
+                <p style="margin-top: 4px;">Generate code that satisfies the task spec. Use the existing module structure. Return the changed files.</p>
+                <hr>
+                <div class="lbl">Agent config</div>
+                <div class="field"><span class="k">Model</span><span class="v">claude-sonnet-4-6</span></div>
+                <div class="field"><span class="k">Max tokens</span><span class="v">8 000</span></div>
+                <div class="field"><span class="k">Tools</span><span class="v">read, write, bash</span></div>
+              </div>
+            </div>
+            <div class="pnl task">
+              <div class="ph">
+                <div class="ph-top">
+                  <div>
+                    <div class="t">Implement <span class="em">JWT</span> service</div>
+                    <div class="ph-meta"><span class="id-badge">m3n4o5p6</span><span class="pill running"><span class="spinner"></span>RUNNING · 4M</span></div>
+                  </div>
+                  <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">✕</span></div>
+                </div>
+              </div>
+              <div class="pb">
+                <div class="lbl">Description</div>
+                <p>Implement a JWT signing service that replaces the current session token approach in the auth middleware.</p>
+                <hr>
+                <div class="lbl">Acceptance · 2 of 4</div>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                  <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Tokens expire in 24h</span></div>
+                  <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Refresh token flow</span></div>
+                  <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Unit tests for validation</span></div>
+                  <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Integration w/ middleware</span></div>
+                </div>
+              </div>
+              <div class="pf"><button class="btn-mini">💬</button><span style="margin-left: auto;"></span><button class="btn-mini primary">▶ Run</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pro-con">
+        <div class="col pro">
+          <h4>Pros</h4>
+          <ul>
+            <li>Context preserved &mdash; see workflow + step + task at once</li>
+            <li>Natural drill-down: each click pushes a panel</li>
+            <li>Breadcrumb pill gives explicit "stack depth"</li>
+            <li>Closing a panel pops just that frame</li>
+          </ul>
+        </div>
+        <div class="col con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Canvas compresses fast &mdash; on a 13" screen, three panels eat 960 px</li>
+            <li>Easy to lose track of which panel is "active"</li>
+            <li>Needs explicit collapse-all affordance</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────
+         OPTION C — Tabbed inspector
+         ───────────────────────────────────────────────── -->
+    <section class="option opt-c">
+      <div class="head">
+        <div>
+          <div class="id">Option C · tabbed inspector</div>
+          <h2>One panel,<br><span class="em">many</span> tabs.</h2>
+        </div>
+        <p class="desc">A single panel slot, but multiple open entities live as tabs. New selections open as a new tab (Cmd-click) or replace the active tab (plain click). Tabs are color-coded by entity kind.</p>
+      </div>
+
+      <div class="frame">
+        <div class="frame-head"><span class="dot" style="background: #ff5f57;"></span><span class="dot" style="background: #febc2e;"></span><span class="dot" style="background: #28c840;"></span><span class="label">vertebrae · Design</span><span class="meta">Option C · tabbed inspector</span></div>
+        <div class="frame-body">
+          <div class="side">
+            <div class="logo">V</div><hr><div class="avatar">A</div><hr>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg></div>
+          </div>
+          <div class="app-main">
+            <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Design</span></span></div>
+            <div class="app-body" style="padding: 0;">
+              <div class="dag-bg" style="height: 100%;">
+                <div class="wf-node execute selected" style="left: 40px; top: 60px;"><div class="bar"></div><div class="body">Implement<span class="ico" style="color: var(--step-execute-fg);">▶</span><div class="ftr"><span>2</span><span>⟳ 1</span></div></div></div>
+                <div class="wf-node eval" style="left: 240px; top: 60px;"><div class="bar"></div><div class="body">Score<span class="ico" style="color: var(--step-eval-fg);">⊙</span><div class="ftr"><span>1</span></div></div></div>
+                <div class="wf-node route" style="left: 440px; top: 60px;"><div class="bar"></div><div class="body">Route<span class="ico" style="color: var(--step-route-fg);">⤳</span></div></div>
+                <div class="wf-node human" style="left: 440px; top: 200px;"><div class="bar"></div><div class="body">Review<span class="ico" style="color: var(--step-human-fg);">👁</span></div></div>
+                <div class="wf-node wait" style="left: 240px; top: 200px;"><div class="bar"></div><div class="body">Wait tests<span class="ico" style="color: var(--step-wait-fg);">⏸</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="pnl">
+            <div class="tabs">
+              <div class="tab"><span class="swatch" style="background: var(--fg-mute);"></span>Impl. workflow<span class="x">✕</span></div>
+              <div class="tab active"><span class="swatch" style="background: var(--step-execute);"></span>▶ Implement<span class="x">✕</span></div>
+              <div class="tab"><span class="swatch" style="background: var(--accent);"></span>JWT service<span class="x">✕</span></div>
+              <div class="tab"><span class="swatch" style="background: var(--accent);"></span>Validation tests<span class="x">✕</span></div>
+              <div class="tab add">+</div>
+            </div>
+            <div class="ph">
+              <div class="ph-top">
+                <div>
+                  <div class="t" style="font-size: 18px;">Implement <span style="font-style: italic; color: var(--step-execute-fg);">▶</span></div>
+                  <div class="ph-meta"><span class="id-badge">i9j0k1l2</span><span class="pill execute">execute step</span></div>
+                </div>
+                <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">⋯</span></div>
+              </div>
+            </div>
+            <div class="pb">
+              <div class="lbl">Instructions</div>
+              <p style="margin-top: 6px;">Generate code that satisfies the task spec. Use the existing module structure. Return the changed files.</p>
+              <hr>
+              <div class="lbl">Agent config</div>
+              <div class="field"><span class="k">Model</span><span class="v">claude-sonnet-4-6</span></div>
+              <div class="field"><span class="k">Max tokens</span><span class="v">8 000</span></div>
+              <div class="field"><span class="k">Tools</span><span class="v">read, write, bash</span></div>
+              <hr>
+              <div class="lbl">Active tasks · 2</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                <div class="field" style="padding: 4px 0;"><span class="v">JWT service</span><span class="pill running"><span class="spinner"></span>RUNNING</span></div>
+                <div class="field" style="padding: 4px 0;"><span class="v">Migration plan</span><span class="pill running"><span class="spinner"></span>RUNNING</span></div>
+              </div>
+            </div>
+            <div class="pf"><button class="btn-mini">⧉ Detach tab</button><span style="margin-left: auto;"></span><button class="btn-mini primary">Edit step</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pro-con">
+        <div class="col pro">
+          <h4>Pros</h4>
+          <ul>
+            <li>Familiar pattern (browsers, IDEs, Figma)</li>
+            <li>Many entities open without eating canvas width</li>
+            <li>Color-coded tabs make entity kind instantly readable</li>
+            <li>Tabs persist across navigation</li>
+          </ul>
+        </div>
+        <div class="col con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Can't see two tabs at once &mdash; only the active one</li>
+            <li>Tab overflow at 5+ open entities</li>
+            <li>"Where did that tab go?" &mdash; if dismissed accidentally</li>
+            <li>Requires keyboard + modifier convention (Cmd-click = new tab)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────
+         OPTION D — Detachable float
+         ───────────────────────────────────────────────── -->
+    <section class="option opt-d">
+      <div class="head">
+        <div>
+          <div class="id">Option D · detachable float</div>
+          <h2>Dock by default,<br><span class="em">tear off</span> to float.</h2>
+        </div>
+        <p class="desc">Panels open docked. Drag the header (or hit ⌘⇧O) and a panel detaches into a floating, draggable card. Re-dock by snapping near the right edge. Floats persist position; multiple can be open anywhere on the canvas.</p>
+      </div>
+
+      <div class="frame">
+        <div class="frame-head"><span class="dot" style="background: #ff5f57;"></span><span class="dot" style="background: #febc2e;"></span><span class="dot" style="background: #28c840;"></span><span class="label">vertebrae · Design</span><span class="meta">Option D · float + dock</span></div>
+        <div class="frame-body">
+          <div class="side">
+            <div class="logo">V</div><hr><div class="avatar">A</div><hr>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+            <div class="item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg></div>
+          </div>
+          <div class="app-main">
+            <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Design</span></span></div>
+            <div class="app-body" style="padding: 0;">
+              <div class="dag-bg" style="height: 100%;">
+                <!-- Workflow nodes -->
+                <div class="wf-node execute selected" style="left: 40px; top: 320px;"><div class="bar"></div><div class="body">Implement<span class="ico" style="color: var(--step-execute-fg);">▶</span><div class="ftr"><span>2</span><span>⟳ 1</span></div></div></div>
+                <div class="wf-node eval" style="left: 240px; top: 320px;"><div class="bar"></div><div class="body">Score<span class="ico" style="color: var(--step-eval-fg);">⊙</span><div class="ftr"><span>1</span></div></div></div>
+                <div class="wf-node human" style="left: 440px; top: 320px;"><div class="bar"></div><div class="body">Review<span class="ico" style="color: var(--step-human-fg);">👁</span><div class="ftr"><span>1</span></div></div></div>
+
+                <!-- Floating Workflow panel -->
+                <div class="float" style="left: 40px; top: 40px;">
+                  <div class="pnl workflow">
+                    <div class="ph">
+                      <div class="ph-top">
+                        <div>
+                          <div class="t" style="font-size: 15px;">Implementation</div>
+                          <div class="ph-meta"><span class="id-badge">a1b2c3d4</span><span class="pill">workflow</span></div>
+                        </div>
+                        <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">▱</span><span class="ctrl">✕</span></div>
+                      </div>
+                    </div>
+                    <div class="pb" style="max-height: 100px;">
+                      <div class="lbl">Steps · 5</div>
+                      <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;"><span class="pill execute">▶ 2</span><span class="pill eval">⊙ 1</span><span class="pill route">⤳ 0</span><span class="pill human">👁 1</span><span class="pill">⏸ 3</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Floating Step panel -->
+                <div class="float" style="left: 280px; top: 100px;">
+                  <div class="pnl step execute">
+                    <div class="ph">
+                      <div class="ph-top">
+                        <div>
+                          <div class="t" style="font-size: 15px;">▶ Implement</div>
+                          <div class="ph-meta"><span class="id-badge">i9j0k1l2</span><span class="pill execute">execute</span></div>
+                        </div>
+                        <div class="controls"><span class="ctrl">⧉</span><span class="ctrl">▱</span><span class="ctrl">✕</span></div>
+                      </div>
+                    </div>
+                    <div class="pb" style="max-height: 120px;">
+                      <div class="lbl">Agent</div>
+                      <div class="field" style="padding: 4px 0;"><span class="k">Model</span><span class="v">sonnet-4-6</span></div>
+                      <div class="field" style="padding: 4px 0;"><span class="k">Active</span><span class="v"><span class="pill running"><span class="spinner"></span>RUNNING</span></span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Docked Task panel (right edge) -->
+                <div class="pnl task" style="position: absolute; right: 0; top: 0; bottom: 0; width: 300px; border-radius: 0; border-top: none; border-right: none; border-bottom: none;">
+                  <div class="ph">
+                    <div class="ph-top">
+                      <div>
+                        <div class="t" style="font-size: 16px;">Implement <span class="em">JWT</span></div>
+                        <div class="ph-meta"><span class="id-badge">m3n4o5p6</span><span class="pill running"><span class="spinner"></span>RUNNING · 4M</span></div>
+                      </div>
+                      <div class="controls" title="Drag to detach"><span class="ctrl">⧉</span><span class="ctrl">✕</span></div>
+                    </div>
+                  </div>
+                  <div class="pb">
+                    <div class="lbl">Description</div>
+                    <p>Implement a JWT signing service that replaces the current session token approach.</p>
+                    <hr>
+                    <div class="lbl">Acceptance · 2/4</div>
+                    <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+                      <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Tokens expire 24h</span></div>
+                      <div style="display: flex; gap: 8px; align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Refresh flow</span></div>
+                      <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Unit tests</span></div>
+                      <div style="display: flex; gap: 8px; align-items: center;"><span class="check"></span><span>Integration</span></div>
+                    </div>
+                  </div>
+                  <div class="pf"><button class="btn-mini primary" style="width: 100%;">▶ Run</button></div>
+                </div>
+
+                <!-- Dock-zone hint -->
+                <div class="dock-zone" style="right: 300px; width: 16px;"><div class="lbl">DOCK</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pro-con">
+        <div class="col pro">
+          <h4>Pros</h4>
+          <ul>
+            <li>Free-form &mdash; users arrange panels around the work</li>
+            <li>Mix docked + floating: keep the most-used panel anchored</li>
+            <li>Position survives reload (per-entity stored)</li>
+            <li>Best for power users who run multi-monitor</li>
+          </ul>
+        </div>
+        <div class="col con">
+          <h4>Cons</h4>
+          <ul>
+            <li>Most complex to build &mdash; drag, snap, store, restore</li>
+            <li>Discoverability: users may not realise panels can detach</li>
+            <li>Floating panels can occlude the canvas they describe</li>
+            <li>Mobile / narrow viewports degrade ungracefully</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────────────────────────────────────────
+         Recommendation
+         ───────────────────────────────────────────────── -->
+    <section class="recommend">
+      <div class="eyebrow" style="color: var(--accent); font-size: 11px;">Recommendation</div>
+      <h3 style="margin-top: var(--s-3);">Ship <span class="em">B → C</span> in sequence;<br>add <span class="em">D</span> as a power-user gesture.</h3>
+      <p>
+        <strong style="color: var(--fg); font-style: normal;">Option B (multi-pane stack)</strong> is the highest-value next step.
+        It directly addresses the "I just need to peek at the parent" complaint without inventing a new mental model:
+        click drills, ✕ pops. Build this first.
+      </p>
+      <ul>
+        <li><strong style="color: var(--fg);">Phase 1.</strong> Ship Option B. The stack handles 2&ndash;3 panels well, which covers ~95% of cross-reference needs (task ↔ step, task ↔ workflow).</li>
+        <li><strong style="color: var(--fg);">Phase 2.</strong> Add tabs (Option C) as a <em>tab bar inside</em> the rightmost stack slot, so a single panel slot can hold multiple peer entities (e.g. comparing two tasks at the same step).</li>
+        <li><strong style="color: var(--fg);">Phase 3.</strong> Expose detach (Option D) via ⌘⇧O and a header drag-handle. Most users never touch it; power users live in it.</li>
+      </ul>
+      <p style="font-style: normal; font-family: var(--mono); font-size: 12px; color: var(--fg-mute); margin-top: var(--s-4); letter-spacing: 0.02em;">
+        // All four options use the same panel anatomy, color-coded edge stripe (entity kind), and header chrome.<br>
+        // Only the <em style="font-style: italic; color: var(--accent);">placement / lifecycle</em> changes.
+      </p>
+    </section>
+
+    <footer class="colophon">
+      <div>
+        <h4>This supplement</h4>
+        <p>Four panel-management patterns, evaluated for the workflow / step / task triad. Rendered in Hearth's cooler dark palette.</p>
+      </div>
+      <div>
+        <h4>Where this lives</h4>
+        <p>
+          <a href="index.html">↑ Cover</a><br>
+          <a href="components.html">↑ Components &mdash; see DetailPanel anatomy</a><br>
+          <a href="patterns.html">↑ Patterns &mdash; Board pattern uses Option A today</a>
+        </p>
+      </div>
+      <div>
+        <h4>Notes</h4>
+        <p>The five step-type colors (execute / eval / route / human review / wait) appear consistently as the left-edge stripe on step panels.</p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Theme toggle (Hearth) -->
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+  <script>
+    (function(){
+      var key='hearth-theme';
+      var html=document.documentElement;
+      try { if(localStorage.getItem(key)==='light') html.classList.add('theme-light'); } catch(e){}
+      var btn=document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight=html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+
+  <script src="tweaks-panel.js"></script>
+</body>
+</html>

@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Components</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* Component spec card */
+  .spec { margin-top: var(--s-8); border: 1px solid var(--line-strong); background: var(--bg-1); border-radius: var(--r-md); overflow: hidden; }
+  .spec .spec-head {
+    background: var(--bg-2);
+    padding: var(--s-3) var(--s-4);
+    display: grid;
+    grid-template-columns: 80px 1fr auto;
+    gap: var(--s-3);
+    align-items: baseline;
+    border-bottom: 1px solid var(--line);
+  }
+  .spec .spec-head .ix {
+    font-family: var(--serif); font-style: italic; font-size: 22px;
+    color: var(--accent); line-height: 1;
+  }
+  .spec .spec-head .nm {
+    font-family: var(--serif); font-size: 22px; font-weight: 400;
+    letter-spacing: -0.01em; color: var(--fg);
+  }
+  .spec .spec-head .nm .em { font-style: italic; color: var(--fg-mute); font-weight: 300; }
+  .spec .spec-head .meta {
+    font-family: var(--mono); font-size: 10px; color: var(--fg-mute);
+    letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  .spec .spec-body {
+    padding: var(--s-5);
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: var(--s-5);
+  }
+  .spec .legend { padding-right: var(--s-4); border-right: 1px solid var(--line); }
+  .spec .legend .desc { font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--fg-soft); line-height: 1.45; }
+  .spec .legend ul { list-style: none; margin-top: var(--s-3); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .spec .legend ul li { padding: 4px 0; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: var(--s-2); }
+  .spec .legend ul li .k { color: var(--accent); }
+
+  .spec .canvas { display: flex; flex-wrap: wrap; gap: var(--s-4); align-items: flex-start; }
+
+  .var {
+    border: 1px dashed var(--line-strong);
+    padding: var(--s-3); position: relative; min-width: 100px;
+    border-radius: var(--r-sm);
+  }
+  .var .vnum {
+    position: absolute; top: -8px; left: 8px;
+    padding: 0 6px;
+    background: var(--bg-1);
+    font-family: var(--mono); font-size: 9px;
+    color: var(--accent); letter-spacing: 0.14em; text-transform: uppercase;
+  }
+  .var .vsample { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; min-height: 30px; }
+
+  /* Super */
+  .super {
+    margin-top: var(--s-12);
+    padding-bottom: var(--s-3);
+    border-bottom: 1px solid var(--accent);
+    display: flex; align-items: baseline; gap: var(--s-4);
+  }
+  .super .num { font-family: var(--serif); font-style: italic; font-size: 32px; color: var(--accent); }
+  .super .t { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg); }
+  .super .right { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); }
+
+  /* Status pill */
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 7px;
+    font-family: var(--sans); font-size: 11px; font-weight: 500;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line-strong);
+    background: var(--bg-2);
+    color: var(--fg-mute);
+    white-space: nowrap;
+  }
+  .status-pill .spinner { width: 9px; height: 9px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status-pill.running { background: var(--info-wash); color: var(--info); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+  .status-pill.done { background: var(--ok-wash); color: var(--ok); border-color: color-mix(in oklch, var(--ok) 35%, transparent); }
+  .status-pill.failed { background: var(--err-wash); color: var(--err); border-color: color-mix(in oklch, var(--err) 40%, transparent); }
+  .status-pill.review { background: var(--warn-wash); color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
+  .status-pill.queued { background: var(--bg-2); color: var(--fg-mute); }
+  .status-pill.workflow { background: var(--bg-1); color: var(--fg-mute); border-color: var(--line-strong); }
+  .status-pill.workflow .step { color: var(--fg); font-weight: 500; margin-left: 2px; }
+
+  /* Chip */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px;
+    font-family: var(--sans); font-size: 12px; font-weight: 500;
+    border: 1px solid var(--line-strong);
+    background: transparent;
+    color: var(--fg-mute);
+    cursor: pointer;
+    border-radius: var(--r-sm);
+  }
+  .chip:hover { color: var(--fg); border-color: var(--fg-mute); }
+  .chip.active { background: var(--accent-wash); color: var(--accent); border-color: var(--accent); }
+
+  /* Toggle */
+  .toggle { display: inline-flex; align-items: center; gap: var(--s-2); cursor: pointer; }
+  .toggle-track { width: 32px; height: 18px; background: var(--line-strong); border-radius: 9999px; position: relative; }
+  .toggle-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: var(--fg-mute); border-radius: 50%; transition: all var(--t-fast) var(--ease); }
+  .toggle.on .toggle-track { background: var(--accent); }
+  .toggle.on .toggle-track::after { transform: translateX(14px); background: var(--bg); }
+
+  .check { width: 18px; height: 18px; border: 1.5px solid var(--line-strong); background: var(--bg); border-radius: var(--r-xs); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--bg); }
+  .check.on { background: var(--accent); border-color: var(--accent); }
+  .check.ind { background: var(--accent); border-color: var(--accent); position: relative; }
+  .check.ind::after { content: ''; width: 8px; height: 2px; background: var(--bg); }
+
+  /* Spinner ring */
+  .ring { width: 16px; height: 16px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .ring.sm { width: 12px; height: 12px; border-width: 1.5px; }
+  .ring.lg { width: 24px; height: 24px; border-width: 2.5px; }
+  .ring.xl { width: 32px; height: 32px; border-width: 3px; }
+  .bar-progress { width: 200px; height: 3px; background: var(--bg-3); overflow: hidden; position: relative; border-radius: 9999px; }
+  .bar-progress::after { content: ''; position: absolute; left: -40%; top: 0; height: 100%; width: 40%; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: slide 1.4s var(--ease) infinite; border-radius: 9999px; }
+  @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+
+  .skel { background: linear-gradient(90deg, var(--bg-2) 0%, var(--bg-3) 50%, var(--bg-2) 100%); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; border-radius: var(--r-xs); }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .skel.text { height: 10px; }
+
+  .tip { display: inline-block; position: relative; }
+  .tip-bubble {
+    position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+    padding: 5px 10px; background: var(--bg-4); color: var(--fg);
+    border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+    font-family: var(--sans); font-size: 11px; white-space: nowrap;
+    box-shadow: var(--shadow-2);
+  }
+  .tip-bubble::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 4px solid transparent; border-top-color: var(--line-strong); }
+
+  /* Task card */
+  .task-card {
+    width: 220px;
+    background: var(--bg-2); border: 1px solid var(--line-strong);
+    padding: var(--s-3); cursor: pointer;
+    border-radius: var(--r-md);
+    transition: all var(--t-fast) var(--ease);
+  }
+  .task-card:hover { border-color: var(--fg-faint); }
+  .task-card.sel { background: var(--accent-wash); border-color: var(--accent); }
+  .task-card.failed { border-left: 3px solid var(--err); }
+  .task-card.review { border-left: 3px solid var(--step-human); }
+  .task-card .ttl { font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--fg); }
+  .task-card .row { display: flex; justify-content: space-between; align-items: center; margin-top: var(--s-3); }
+
+  /* Workflow node */
+  .wf-node { width: 200px; border: 1px solid var(--line-strong); background: var(--bg-2); border-radius: var(--r-md); overflow: hidden; }
+  .wf-node .bar { height: 3px; }
+  .wf-node .body { padding: var(--s-2) var(--s-3); }
+  .wf-node .ttl { font-size: 13px; font-weight: 500; display: flex; justify-content: space-between; align-items: center; color: var(--fg); }
+  .wf-node .ico { font-family: var(--mono); font-size: 12px; }
+  .wf-node .ftr { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .wf-node.execute .bar { background: var(--step-execute); }
+  .wf-node.eval .bar { background: var(--step-eval); }
+  .wf-node.route .bar { background: var(--step-route); }
+  .wf-node.human .bar { background: var(--step-human); }
+  .wf-node.wait .bar { background: var(--step-wait); }
+  .wf-node.execute .body { background: linear-gradient(to bottom, color-mix(in oklch, var(--step-execute-wash) 30%, var(--bg-2)), var(--bg-2)); }
+  .wf-node.eval .body { background: linear-gradient(to bottom, color-mix(in oklch, var(--step-eval-wash) 30%, var(--bg-2)), var(--bg-2)); }
+  .wf-node.route .body { background: linear-gradient(to bottom, color-mix(in oklch, var(--step-route-wash) 30%, var(--bg-2)), var(--bg-2)); }
+  .wf-node.human .body { background: linear-gradient(to bottom, color-mix(in oklch, var(--step-human-wash) 30%, var(--bg-2)), var(--bg-2)); }
+  .wf-node.wait .body { background: linear-gradient(to bottom, color-mix(in oklch, var(--step-wait-wash) 30%, var(--bg-2)), var(--bg-2)); }
+  .wf-node.sel { border-color: var(--accent); border-width: 2px; box-shadow: 0 0 24px var(--accent-glow); }
+
+  /* Chat message */
+  .cm { padding: var(--s-3) var(--s-4); max-width: 340px; font-size: 13px; line-height: 1.55; border-radius: var(--r-md); }
+  .cm.user { background: var(--bg-2); border: 1px solid var(--line-strong); border-right: 3px solid var(--accent); margin-left: auto; }
+  .cm.assist { background: var(--bg-2); border: 1px solid var(--line-strong); border-left: 3px solid var(--step-execute); }
+  .cm .who { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .cm.user .who { color: var(--accent); }
+
+  .tc { margin-top: var(--s-3); border: 1px solid var(--line-strong); border-left: 3px solid var(--ok); background: var(--bg-1); border-radius: var(--r-sm); }
+  .tc.pending { border-left-color: var(--info); }
+  .tc.error { border-left-color: var(--err); }
+  .tc .th { padding: 5px var(--s-3); background: var(--bg-2); font-family: var(--mono); font-size: 11px; display: flex; justify-content: space-between; }
+  .tc .tb { padding: 5px var(--s-3); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); border-top: 1px solid var(--line); }
+
+  /* Tree */
+  .t-row { display: grid; grid-template-columns: 14px 14px 1fr auto auto; gap: var(--s-2); padding: 4px var(--s-2); align-items: center; font-size: 13px; cursor: pointer; border-radius: var(--r-xs); }
+  .t-row:hover { background: var(--bg-1); }
+  .t-row.sel { background: var(--accent-wash); border-left: 2px solid var(--accent); padding-left: calc(var(--s-2) - 2px); }
+  .t-row.l1 { padding-left: var(--s-5); }
+  .t-row.l2 { padding-left: var(--s-10); }
+  .t-row .chev { font-size: 9px; color: var(--fg-mute); }
+  .t-row .lic { font-family: var(--mono); font-size: 12px; color: var(--fg-mute); }
+
+  /* Modal */
+  .modal { width: 380px; background: var(--bg-2); border: 1px solid var(--line-strong); padding: var(--s-5); box-shadow: var(--shadow-3); border-radius: var(--r-md); }
+
+  /* Toast */
+  .toast { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); background: var(--bg-3); color: var(--fg); border: 1px solid var(--line-strong); border-radius: var(--r-md); font-size: 13px; min-width: 280px; box-shadow: var(--shadow-2); }
+  .toast.ok { border-left: 3px solid var(--ok); }
+  .toast.warn { border-left: 3px solid var(--warn); }
+  .toast.err { border-left: 3px solid var(--err); }
+  .toast.info { border-left: 3px solid var(--info); }
+  .toast .x { margin-left: auto; cursor: pointer; color: var(--fg-mute); }
+
+  /* Sidebar */
+  .side { width: 48px; background: var(--bg); border-right: 1px solid var(--line); padding: var(--s-2) 0; display: flex; flex-direction: column; align-items: center; gap: 4px; border-radius: var(--r-md) 0 0 var(--r-md); }
+  .side .item { width: 32px; height: 32px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: var(--fg-mute); cursor: pointer; position: relative; }
+  .side .item:hover { background: var(--bg-2); color: var(--fg); }
+  .side .item.active { background: var(--accent-wash); color: var(--accent); }
+  .side .item.active::before { content: ''; position: absolute; left: -2px; top: 4px; bottom: 4px; width: 2px; background: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
+  .side hr { width: 24px; border: none; border-top: 1px solid var(--line); margin: 2px 0; }
+  .side .logo {
+    width: 32px; height: 32px; background: var(--accent); color: var(--bg);
+    border-radius: var(--r-md); display: flex; align-items: center; justify-content: center;
+    font-family: var(--serif); font-style: italic; font-size: 18px; font-weight: 500;
+  }
+  .side .avatar { width: 32px; height: 32px; border-radius: var(--r-md); background: var(--step-route); color: var(--bg); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; font-weight: 600; }
+
+  /* Panel */
+  .panel { width: 360px; background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2); overflow: hidden; }
+  .panel .ph { padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: flex-start; }
+  .panel .pb { padding: var(--s-4); }
+  .panel .pf { padding: var(--s-3); border-top: 1px solid var(--line); background: var(--bg-1); display: flex; gap: var(--s-2); }
+
+  /* Search */
+  .search-input { display: flex; align-items: center; gap: 6px; padding: 6px var(--s-3); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); font-size: 13px; color: var(--fg-mute); }
+</style>
+</head>
+<body>
+  <div class="page">
+
+    <header class="masthead">
+      <span class="wordmark">Vertebrae<span class="ember"></span></span>
+      <span class="crumb">Hearth · Components</span>
+      <span class="meta">§ 03 &middot; pp. 23–46</span>
+    </header>
+
+    <nav class="chapters">
+      <a href="index.html">§ 01 · Cover</a>
+      <a href="foundations.html">§ 02 · Foundations</a>
+      <a href="components.html" class="current">§ 03 · Components</a>
+      <a href="patterns.html">§ 04 · Patterns</a>
+      <a href="panels.html">＋ Panels</a>
+      <a href="../../Vertebrae Style Guide.html" style="margin-left: auto; border-right: none;">← All directions</a>
+    </nav>
+
+    <section class="section-head">
+      <div>
+        <div class="plate-num"><span class="n">§ 03</span> · Components</div>
+        <h1 class="title" style="margin-top: var(--s-3);">Every<br><span class="em">piece</span>.</h1>
+      </div>
+      <div>
+        <p class="blurb">
+          Forty-four components in three tiers. Each specimen below shows
+          every variant and meaningful state &mdash; rendered live, not depicted.
+          WorkflowNode and KanbanColumn carry the new <em class="italic">5-type</em> step vocabulary.
+        </p>
+      </div>
+    </section>
+
+    <!-- ── ATOMS ─────────────────────────────────────── -->
+    <div class="super"><span class="num">i.</span><span class="t">Atoms / spec. 1–5</span><span class="right">12 primitives</span></div>
+
+    <!-- Button -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">1.</span><span class="nm">Button <span class="em">— primary action</span></span><span class="meta">Atom · 4 variants · 3 sizes · 6 states</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The primary interactive primitive. Variants differ by visual weight and intent.</p><ul><li><span><span class="k">a</span> primary</span><span>filled copper</span></li><li><span><span class="k">b</span> default</span><span>outlined</span></li><li><span><span class="k">c</span> ghost</span><span>transparent</span></li><li><span><span class="k">d</span> danger</span><span>red</span></li></ul></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · primary</span><div class="vsample"><button class="btn primary sm">Run</button><button class="btn primary">Run task</button><button class="btn primary lg">Run task</button><button class="btn primary" disabled>Disabled</button></div></div>
+          <div class="var"><span class="vnum">b · default</span><div class="vsample"><button class="btn sm">Cancel</button><button class="btn">Cancel</button><button class="btn lg">Cancel</button></div></div>
+          <div class="var"><span class="vnum">c · ghost</span><div class="vsample"><button class="btn ghost">View trace</button><button class="btn ghost sm">View</button></div></div>
+          <div class="var"><span class="vnum">d · danger</span><div class="vsample"><button class="btn danger">Delete task</button><button class="btn danger sm">Delete</button></div></div>
+          <div class="var"><span class="vnum">e · icon-only</span><div class="vsample"><button class="btn ghost" style="padding: 0; width: 32px;">⋯</button><button class="btn ghost" style="padding: 0; width: 32px;">✕</button><button class="btn ghost" style="padding: 0; width: 32px;">⧉</button></div></div>
+          <div class="var"><span class="vnum">f · loading</span><div class="vsample"><button class="btn primary"><span class="ring sm" style="border-top-color: var(--bg); border-color: rgba(0,0,0,0.3); border-top-color: var(--bg);"></span>Running…</button></div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Input -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">2.</span><span class="nm">Input <span class="em">— text entry</span></span><span class="meta">Atom · 6 states</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">Single &amp; multi-line text. Inline-editable everywhere.</p></div>
+        <div class="canvas" style="flex-direction: column; align-items: stretch;">
+          <div class="var" style="width: 360px;"><span class="vnum">a · default</span><div class="vsample"><input class="input" placeholder="Task title…"></div></div>
+          <div class="var" style="width: 360px;"><span class="vnum">b · filled</span><div class="vsample"><input class="input" value="Implement JWT service"></div></div>
+          <div class="var" style="width: 360px;"><span class="vnum">c · focused</span><div class="vsample"><input class="input" value="Implement JWT" style="border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);"></div></div>
+          <div class="var" style="width: 360px;"><span class="vnum">d · invalid</span><div class="vsample" style="flex-direction: column; align-items: flex-start; width: 100%;"><input class="input" value="" style="border-color: var(--err); box-shadow: 0 0 0 3px var(--err-wash);"><div style="font-size: 11px; color: var(--err); margin-top: 4px;">Title is required.</div></div></div>
+          <div class="var" style="width: 360px;"><span class="vnum">e · textarea</span><div class="vsample" style="width: 100%;"><textarea class="input" style="height: 80px; padding: var(--s-2) var(--s-3); resize: vertical; font-family: inherit;">Implement a JWT signing service that replaces the current session token approach.</textarea></div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Select, Toggle, Chip, Badge -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">3.</span><span class="nm">Select <span class="em">· Toggle · Chip · Badge</span></span><span class="meta">Atoms · 4 components</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">Small primitives gathered in one plate. Each provides a single, opinionated mechanism.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · Select / closed &amp; open</span><div class="vsample" style="align-items: flex-start;">
+            <button class="btn" style="justify-content: space-between; width: 200px;">claude-sonnet-4-6 <span style="color: var(--fg-mute);">▾</span></button>
+            <div>
+              <button class="btn" style="justify-content: space-between; width: 200px; border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);">claude-sonnet-4-6 <span style="color: var(--fg-mute);">▾</span></button>
+              <div style="margin-top: 4px; width: 200px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-2);">
+                <div style="padding: 6px var(--s-3); font-size: 13px; background: var(--accent-wash); color: var(--accent); display: flex; justify-content: space-between;">claude-sonnet-4-6 <span>✓</span></div>
+                <div style="padding: 6px var(--s-3); font-size: 13px; color: var(--fg);">claude-opus-4</div>
+                <div style="padding: 6px var(--s-3); font-size: 13px; color: var(--fg);">claude-haiku-4-5</div>
+              </div>
+            </div>
+          </div></div>
+          <div class="var"><span class="vnum">b · Toggle</span><div class="vsample">
+            <span class="toggle"><span class="toggle-track"></span></span>
+            <span class="toggle on"><span class="toggle-track"></span></span>
+            <span class="check"></span>
+            <span class="check on"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+            <span class="check ind"></span>
+          </div></div>
+          <div class="var"><span class="vnum">c · Chip</span><div class="vsample"><span class="chip">auth</span><span class="chip active">Ticket</span><span class="chip">Task</span><span class="chip">step: route ✕</span></div></div>
+          <div class="var"><span class="vnum">d · Badge / 6 intents</span><div class="vsample">
+            <span class="badge"><span class="dot" style="background: var(--fg-mute);"></span>neutral</span>
+            <span class="badge ok"><span class="dot"></span>success</span>
+            <span class="badge warn"><span class="dot"></span>warning</span>
+            <span class="badge err"><span class="dot"></span>error</span>
+            <span class="badge info"><span class="dot"></span>info</span>
+            <span class="badge accent"><span class="dot"></span>accent</span>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Spinner, Skeleton, Tooltip, RelativeTime, Divider, Icon -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">4.</span><span class="nm">Spinner <span class="em">· Skeleton · Tooltip · RelativeTime · Divider · Icon</span></span><span class="meta">Atoms · feedback &amp; chrome</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">Small signal &amp; chrome primitives. The pieces that signal state without taking attention.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · Spinner / 4 sizes</span><div class="vsample"><span class="ring sm"></span><span class="ring"></span><span class="ring lg"></span><span class="ring xl"></span></div></div>
+          <div class="var"><span class="vnum">b · Linear / indet · 64%</span><div class="vsample" style="flex-direction: column; align-items: flex-start; gap: 10px;"><div class="bar-progress"></div><div class="bar-progress" style="overflow: hidden;"><div style="width: 64%; height: 100%; background: var(--accent); border-radius: 9999px; box-shadow: 0 0 6px var(--accent-glow);"></div></div></div></div>
+          <div class="var"><span class="vnum">c · Skeleton</span><div class="vsample" style="flex-direction: column; align-items: flex-start; gap: 6px; min-width: 180px;"><div class="skel text" style="width: 60%;"></div><div class="skel text" style="width: 90%;"></div><div class="skel text" style="width: 40%;"></div></div></div>
+          <div class="var" style="padding-top: var(--s-5);"><span class="vnum">d · Tooltip</span><div class="vsample" style="gap: var(--s-6);"><span class="tip"><button class="btn ghost" style="padding: 0; width: 32px;">⋯</button><span class="tip-bubble">More actions</span></span><span class="tip"><button class="btn ghost" style="padding: 0; width: 32px;">▶</button><span class="tip-bubble">Run · ⌘↵</span></span></div></div>
+          <div class="var"><span class="vnum">e · RelativeTime</span><div class="vsample" style="font-family: var(--mono); font-size: 12px; color: var(--fg-mute); flex-wrap: wrap;"><span>just now</span><span>2m ago</span><span>3h ago</span><span>yesterday</span><span>May 12</span></div></div>
+          <div class="var" style="min-width: 300px;"><span class="vnum">f · Divider</span><div class="vsample" style="width: 100%; flex-direction: column; align-items: stretch;">
+            <hr style="border: none; border-top: 1px solid var(--line); margin: 0;">
+            <div style="display: flex; align-items: center; gap: var(--s-3); margin-top: var(--s-3);"><hr style="flex: 1; border: none; border-top: 1px solid var(--line);"><span class="eyebrow" style="white-space: nowrap; font-size: 10px;">SECTION · BREAK</span><hr style="flex: 1; border: none; border-top: 1px solid var(--line);"></div>
+          </div></div>
+          <div class="var"><span class="vnum">g · Icon / size scale</span><div class="vsample" style="gap: var(--s-5); color: var(--fg);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ── MOLECULES ──────────────────────────────────── -->
+    <div class="super"><span class="num">ii.</span><span class="t">Molecules / spec. 5–10</span><span class="right">12 composed</span></div>
+
+    <!-- StatusBadge -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">5.</span><span class="nm">StatusBadge <span class="em">— task state</span></span><span class="meta">Molecule · 7 states</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The canonical representation of "what is a task doing right now". Seven states cover every execution moment.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · queued</span><div class="vsample"><span class="status-pill queued"><span class="dot" style="background: currentColor; width: 5px; height: 5px; border-radius: 50%;"></span>Queued</span></div></div>
+          <div class="var"><span class="vnum">b · running · spinner</span><div class="vsample"><span class="status-pill running"><span class="spinner"></span>Running · 4m</span></div></div>
+          <div class="var"><span class="vnum">c · waiting</span><div class="vsample"><span class="status-pill review"><span>👁</span>Waiting</span></div></div>
+          <div class="var"><span class="vnum">d · done</span><div class="vsample"><span class="status-pill done"><span>✓</span>Done · 12m</span></div></div>
+          <div class="var"><span class="vnum">e · failed</span><div class="vsample"><span class="status-pill failed"><span>✕</span>Failed · 2m</span></div></div>
+          <div class="var"><span class="vnum">f · pending review</span><div class="vsample"><span class="status-pill review"><span>👁</span>Needs review</span></div></div>
+          <div class="var"><span class="vnum">g · workflow : step</span><div class="vsample"><span class="status-pill workflow">Implementation /<span class="step"> Execute</span></span></div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Identity / Form / Search / Filter -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">6.</span><span class="nm">IdentityBadge <span class="em">· FormField · SearchInput · FilterBar</span></span><span class="meta">Molecules · forms + identity</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The functional molecules behind every page &mdash; ID display, labeled controls, search, and multi-filter rows.</p></div>
+        <div class="canvas" style="flex-direction: column; align-items: stretch; width: 100%;">
+          <div class="var" style="width: 100%;"><span class="vnum">a · IdentityBadge</span><div class="vsample"><span class="id-badge">i9j0k1l2</span><span class="id-badge" style="background: var(--bg-2); padding: 2px 6px; border-radius: var(--r-xs); color: var(--fg);">i9j0k1l2</span><span class="id-badge" style="color: var(--ok); padding: 2px 6px; border-radius: var(--r-xs); background: var(--ok-wash);">i9j0k1l2 · copied</span></div></div>
+          <div class="var" style="width: 100%;"><span class="vnum">b · FormField / labeled · invalid</span><div class="vsample" style="gap: var(--s-5);">
+            <div style="display: flex; flex-direction: column; gap: 6px; width: 300px;"><label style="font-size: 12px; font-weight: 500; color: var(--fg-soft);">Task title <span style="color: var(--accent);">*</span></label><input class="input" placeholder="Describe the task…"><div style="font-size: 11px; color: var(--fg-mute);">Shown on the board and in lists.</div></div>
+            <div style="display: flex; flex-direction: column; gap: 6px; width: 300px;"><label style="font-size: 12px; font-weight: 500; color: var(--fg-soft);">Task title <span style="color: var(--accent);">*</span></label><input class="input" value="" style="border-color: var(--err); box-shadow: 0 0 0 3px var(--err-wash);"><div style="font-size: 11px; color: var(--err);">Title is required.</div></div>
+          </div></div>
+          <div class="var" style="width: 100%;"><span class="vnum">c · SearchInput</span><div class="vsample"><div class="search-input" style="width: 240px;"><span style="font-family: var(--mono); color: var(--fg-mute);">⌕</span><span>Search tasks…</span></div><div class="search-input" style="width: 240px; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);"><span style="font-family: var(--mono); color: var(--accent);">⌕</span><span style="flex: 1; color: var(--fg);">jwt</span><span style="cursor: pointer; color: var(--fg-mute);">✕</span></div></div></div>
+          <div class="var" style="width: 100%;"><span class="vnum">d · FilterBar</span><div class="vsample" style="width: 100%; padding: var(--s-3); background: var(--bg-2); border-radius: var(--r-md); gap: var(--s-2);">
+            <div class="search-input" style="flex: 1;"><span style="font-family: var(--mono);">⌕</span><span>Search…</span></div>
+            <span class="chip">Epic</span><span class="chip active">Ticket</span><span class="chip">Task</span>
+            <button class="btn ghost sm">Step ▾</button><button class="btn ghost sm">Tags ▾</button>
+            <span style="margin-left: auto;"></span><button class="btn ghost sm" style="color: var(--accent);">✕ Clear</button>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Card -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">7.</span><span class="nm">Card <span class="em">— task card</span></span><span class="meta">Molecule · 5 states</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">A task card on the kanban board. Hover lifts the border; selection tints with copper; status-border signals failed or pending review.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · default</span><div class="vsample"><div class="task-card"><div class="ttl">Implement JWT service</div><div class="row"><span class="id-badge">i9j0k1l2</span><span class="status-pill running"><span class="spinner"></span>Running</span></div></div></div></div>
+          <div class="var"><span class="vnum">b · hover</span><div class="vsample"><div class="task-card" style="border-color: var(--fg-faint);"><div class="ttl">Update OpenAPI schema</div><div class="row"><span class="id-badge">a2b3c4d5</span><span class="status-pill queued">Queued</span></div></div></div></div>
+          <div class="var"><span class="vnum">c · selected</span><div class="vsample"><div class="task-card sel"><div class="ttl">Write JWT validation tests</div><div class="row"><span class="id-badge">q7r8s9t0</span><span class="status-pill done">✓ Done</span></div></div></div></div>
+          <div class="var"><span class="vnum">d · failed</span><div class="vsample"><div class="task-card failed"><div class="ttl">Fix auth middleware</div><div class="row"><span class="id-badge">a1b2c3d4</span><span class="status-pill failed">✕ Failed</span></div></div></div></div>
+          <div class="var"><span class="vnum">e · review</span><div class="vsample"><div class="task-card review"><div class="ttl">Review PR output</div><div class="row"><span class="id-badge">e5f6g7h8</span><span class="status-pill review">👁 Review</span></div></div></div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Chat / Tools / Tree -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">8.</span><span class="nm">ChatMessage <span class="em">· ToolCallBlock · TreeNode</span></span><span class="meta">Molecules · content surfaces</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The molecules that carry agent output and hierarchical structure.</p></div>
+        <div class="canvas" style="flex-direction: column; align-items: stretch; width: 100%;">
+          <div class="var" style="width: 100%;"><span class="vnum">a · ChatMessage</span><div class="vsample" style="flex-direction: column; align-items: stretch; gap: var(--s-3); max-width: 520px; margin: 0 auto;">
+            <div class="cm user"><div class="who">YOU</div>What's the status of the auth refactor?</div>
+            <div class="cm assist"><div class="who">CLAUDE · SONNET-4-6</div>Three tickets in progress. <em style="color: var(--accent);">Implement JWT</em> is running now.</div>
+          </div></div>
+          <div class="var" style="width: 100%;"><span class="vnum">b · ToolCallBlock / pending · success · error</span><div class="vsample" style="flex-direction: column; align-items: stretch; gap: var(--s-3); width: 100%; max-width: 560px; margin: 0 auto;">
+            <div class="tc pending"><div class="th"><span><span class="ring sm" style="display: inline-block; vertical-align: middle; margin-right: 6px;"></span>Read file src/auth/middleware.rs</span><span style="color: var(--info);">pending</span></div></div>
+            <div class="tc"><div class="th"><span>▶ Read file src/auth/middleware.rs</span><span style="color: var(--ok);">✓ 218 lines</span></div><div class="tb">use axum::middleware::Next;<br>pub async fn auth(req: Request, next: Next) → Response {</div></div>
+            <div class="tc error"><div class="th"><span>▶ Bash cargo test --package auth</span><span style="color: var(--err);">✕ exit 101</span></div><div class="tb" style="color: var(--err);">error[E0277]: the trait `Signer` is not implemented</div></div>
+          </div></div>
+          <div class="var" style="width: 100%;"><span class="vnum">c · TreeNode</span><div class="vsample" style="width: 100%; flex-direction: column; align-items: stretch;">
+            <div class="t-row"><span class="chev">▼</span><span class="lic">◈</span><span style="font-weight: 500;">Refactor authentication system</span><span class="status-pill workflow"><span class="step">Implementation</span></span><span class="id-badge">a1b2c3d4</span></div>
+            <div class="t-row l1"><span class="chev">▼</span><span class="lic">◇</span><span>Implement JWT service</span><span class="status-pill running"><span class="spinner"></span>Running</span><span class="id-badge">i9j0k1l2</span></div>
+            <div class="t-row l2 sel"><span></span><span class="lic">·</span><span>Create token signing function</span><span class="status-pill queued">Queued</span><span class="id-badge">m3n4o5p6</span></div>
+            <div class="t-row l2"><span></span><span class="lic">·</span><span>Write validation tests</span><span class="status-pill done">✓ Done</span><span class="id-badge">q7r8s9t0</span></div>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Modal / Toast / EmptyState -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">9.</span><span class="nm">Modal <span class="em">· Toast · EmptyState</span></span><span class="meta">Molecules · interruption</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">Surfaces that interrupt on purpose — for confirmation, notification, or the honest absence of content.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · Modal / confirm</span><div class="vsample" style="background: rgba(0,0,0,0.5); padding: var(--s-3); margin: -8px;">
+            <div class="modal">
+              <h3 style="font-family: var(--serif); font-size: 22px; font-weight: 400; line-height: 1.15;">Delete task <em class="italic" style="color: var(--accent);">Implement JWT service</em>?</h3>
+              <p style="margin-top: var(--s-3); color: var(--fg-mute); font-size: 14px;">This cannot be undone. The task, its runs, and trace history will be removed.</p>
+              <div class="row" style="justify-content: flex-end; gap: var(--s-2); margin-top: var(--s-5);"><button class="btn">Cancel</button><button class="btn danger">Delete task</button></div>
+            </div>
+          </div></div>
+          <div class="var"><span class="vnum">b · Toast / 4 intents</span><div class="vsample" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+            <div class="toast ok"><span style="color: var(--ok);">✓</span>Task moved to Done.<span class="x">✕</span></div>
+            <div class="toast warn"><span style="color: var(--warn);">!</span>Connection unstable.<span class="x">✕</span></div>
+            <div class="toast err"><span style="color: var(--err);">✕</span>Run failed — compilation error.<span class="x">✕</span></div>
+            <div class="toast info"><span style="color: var(--info);">i</span>Agent started · est. 3m.<span class="x">✕</span></div>
+          </div></div>
+          <div class="var"><span class="vnum">c · EmptyState / filtered</span><div class="vsample" style="width: 100%;">
+            <div style="margin: 0 auto; text-align: center; padding: var(--s-6); border: 1px dashed var(--line-strong); background: var(--bg-1); width: 100%; border-radius: var(--r-md);">
+              <div style="font-family: var(--serif); font-style: italic; font-size: 56px; color: var(--fg-ghost); line-height: 1;">&mdash;</div>
+              <h3 style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 22px; font-weight: 400;">No tasks match these filters.</h3>
+              <p class="caption" style="margin-top: 4px;">Try clearing tags or widening the level filter.</p>
+              <button class="btn sm" style="margin-top: var(--s-3);">Clear filters</button>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ── ORGANISMS ─────────────────────────────────── -->
+    <div class="super"><span class="num">iii.</span><span class="t">Organisms / spec. 10–13</span><span class="right">11 composed</span></div>
+
+    <!-- Sidebar -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">10.</span><span class="nm">Sidebar <span class="em">— app rail</span></span><span class="meta">Organism · 48 px · always visible</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The icon rail. Wordmark, project avatar (hashed color), primary nav, content nav, footer pair (chat + theme). Always 48 px.</p></div>
+        <div class="canvas" style="align-items: stretch;">
+          <div class="side" style="height: 380px;">
+            <div class="logo">V</div><hr>
+            <div class="avatar">A</div><hr>
+            <div class="item active" style="position: relative;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span style="position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--err); border-radius: 50%; box-shadow: 0 0 4px var(--err);"></span></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="11" rx="1"/></svg></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="3"/><circle cx="19" cy="6" r="3"/><circle cx="12" cy="18" r="3"/><path d="m7 8 4 8M17 8l-4 8"/></svg></div>
+            <hr>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></div>
+            <div style="flex-grow: 1;"></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+            <div class="item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg></div>
+          </div>
+          <div style="flex: 1; padding-left: var(--s-5); padding-top: var(--s-2); font-family: var(--serif); font-size: 15px; line-height: 1.7; color: var(--fg-soft);">
+            <div>← Wordmark &mdash; <em style="font-style: italic; color: var(--fg-mute);">V mark, sets typographic tone</em></div>
+            <div>← Project avatar &mdash; <em style="font-style: italic; color: var(--fg-mute);">hashed color from project name</em></div>
+            <div>← Primary nav &mdash; <em style="font-style: italic; color: var(--fg-mute);">Operations / Board / Design</em></div>
+            <div>← Content nav &mdash; <em style="font-style: italic; color: var(--fg-mute);">Tasks / Traces</em></div>
+            <div>← Footer pair &mdash; <em style="font-style: italic; color: var(--fg-mute);">Chat &middot; Theme toggle</em></div>
+            <div style="margin-top: var(--s-3); font-family: var(--mono); font-size: 12px; color: var(--fg-faint);">notification dot on Operations · 6 px err with subtle glow</div>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- DetailPanel + ChatPanel -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">11.</span><span class="nm">DetailPanel <span class="em">· ChatPanel</span></span><span class="meta">Organisms · floating surfaces</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">Both panels float over the main content. DetailPanel docks to the right; ChatPanel hovers bottom-right.</p></div>
+        <div class="canvas">
+          <div class="var"><span class="vnum">a · DetailPanel / task</span><div class="vsample">
+            <div class="panel">
+              <div class="ph">
+                <div>
+                  <div style="font-family: var(--serif); font-size: 22px; font-weight: 400; letter-spacing: -0.01em;">Implement <em class="italic" style="color: var(--accent);">JWT</em> service</div>
+                  <div class="row" style="margin-top: 4px; gap: var(--s-2); flex-wrap: wrap;"><span class="id-badge">i9j0k1l2</span><span class="status-pill workflow">Implementation /<span class="step"> Execute</span></span></div>
+                </div>
+                <div class="row" style="gap: 2px;"><button class="btn ghost sm" style="padding: 0; width: 24px;">⧉</button><button class="btn ghost sm" style="padding: 0; width: 24px;">✕</button></div>
+              </div>
+              <div class="pb">
+                <div class="eyebrow" style="font-size: 10px;">Description</div>
+                <p style="margin-top: 8px; font-size: 13px; color: var(--fg-soft); line-height: 1.55;">Implement a JWT signing service that replaces the current session token approach.</p>
+                <hr style="margin: var(--s-3) 0; border: none; border-top: 1px solid var(--line);">
+                <div class="eyebrow" style="font-size: 10px;">Acceptance · 2 of 4</div>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: var(--s-2); font-size: 13px;">
+                  <div class="row" style="gap: var(--s-2);"><span class="check on"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="color: var(--fg-mute); text-decoration: line-through;">Tokens expire in 24h</span></div>
+                  <div class="row" style="gap: var(--s-2);"><span class="check on"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5L8.5 2" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span style="color: var(--fg-mute); text-decoration: line-through;">Refresh token flow</span></div>
+                  <div class="row" style="gap: var(--s-2);"><span class="check"></span><span>Unit tests for validation</span></div>
+                </div>
+              </div>
+              <div class="pf"><button class="btn ghost sm">💬 Chat</button><span style="margin-left: auto;"></span><button class="btn primary sm">▶ Run</button></div>
+            </div>
+          </div></div>
+          <div class="var"><span class="vnum">b · ChatPanel / project scope</span><div class="vsample">
+            <div class="panel" style="width: 320px;">
+              <div class="ph">
+                <div class="row" style="gap: 8px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style="font-size: 14px; font-weight: 500;">Project Chat</span></div>
+                <div class="row" style="gap: 2px;"><button class="btn ghost sm" style="padding: 0; width: 24px;">⧉</button><button class="btn ghost sm" style="padding: 0; width: 24px;">✕</button></div>
+              </div>
+              <div class="pb" style="background: var(--bg-1); display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3);">
+                <div class="cm user" style="max-width: 80%;"><div class="who">YOU</div>Status of auth refactor?</div>
+                <div class="cm assist"><div class="who">CLAUDE</div>Three tickets in progress. Implement JWT is live.</div>
+              </div>
+              <div style="padding: 0 var(--s-3);"><div class="bar-progress" style="width: 100%; height: 2px;"><div style="width: 12%; height: 100%; background: var(--ok); border-radius: 9999px;"></div></div><div class="row" style="justify-content: space-between; margin-top: 2px; font-family: var(--mono); font-size: 10px; color: var(--fg-mute);"><span>12% context</span><span>haiku-4-5</span></div></div>
+              <div class="pf"><input class="input" placeholder="Ask anything…" style="border: none; padding: 0; background: transparent;"><button class="btn primary sm">↵</button></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <!-- WorkflowNode (5 types!) + KanbanColumn -->
+    <article class="spec">
+      <div class="spec-head"><span class="ix">12.</span><span class="nm">WorkflowNode <span class="em">· KanbanColumn · LiveTasksPanel</span></span><span class="meta">Organisms · workflow surface · 5 types</span></div>
+      <div class="spec-body">
+        <div class="legend"><p class="desc">The pipeline organisms. WorkflowNode encodes which of the <em>5 step types</em> it is &mdash; this is the heart of Hearth's vocabulary.</p>
+          <ul>
+            <li><span><span class="k">●</span> execute</span><span>violet</span></li>
+            <li><span><span class="k">●</span> eval</span><span>cyan</span></li>
+            <li><span><span class="k">●</span> route</span><span>lime</span></li>
+            <li><span><span class="k">●</span> human review</span><span>amber</span></li>
+            <li><span><span class="k">●</span> wait for children</span><span>slate</span></li>
+          </ul>
+        </div>
+        <div class="canvas">
+          <div class="var" style="width: 100%;"><span class="vnum">a · WorkflowNode / all 5 step types</span><div class="vsample">
+            <div class="wf-node execute"><div class="bar"></div><div class="body"><div class="ttl">Implement <span class="ico" style="color: var(--step-execute-fg);">▶</span></div><div class="ftr"><span>2 tasks</span><span style="color: var(--step-execute-fg);"><span class="ring sm" style="display: inline-block; vertical-align: middle; border-top-color: var(--step-execute-fg); border-color: var(--bg-3); border-top-color: var(--step-execute-fg); margin-right: 4px;"></span>1 running</span></div></div></div>
+            <div class="wf-node eval"><div class="bar"></div><div class="body"><div class="ttl">Score output <span class="ico" style="color: var(--step-eval-fg);">⊙</span></div><div class="ftr"><span>1 task</span><span style="color: var(--step-eval-fg);">⊙ judging</span></div></div></div>
+            <div class="wf-node route"><div class="bar"></div><div class="body"><div class="ttl">Route by score <span class="ico" style="color: var(--step-route-fg);">⤳</span></div><div class="ftr"><span>3 paths</span><span style="color: var(--step-route-fg);">⤳ fork</span></div></div></div>
+            <div class="wf-node human"><div class="bar"></div><div class="body"><div class="ttl">Approve PR <span class="ico" style="color: var(--step-human-fg);">👁</span></div><div class="ftr"><span>1 task</span><span style="color: var(--step-human-fg);">👁 waiting</span></div></div></div>
+            <div class="wf-node wait"><div class="bar"></div><div class="body"><div class="ttl">Wait for tests <span class="ico" style="color: var(--step-wait-fg);">⏸</span></div><div class="ftr"><span>4 children</span><span style="color: var(--step-wait-fg);">⏸ 2/4</span></div></div></div>
+          </div></div>
+
+          <div class="var" style="width: 100%;"><span class="vnum">b · States: default · selected · failed</span><div class="vsample">
+            <div class="wf-node execute"><div class="bar"></div><div class="body"><div class="ttl">Default <span class="ico" style="color: var(--step-execute-fg);">▶</span></div><div class="ftr"><span>2 tasks</span></div></div></div>
+            <div class="wf-node execute sel"><div class="bar"></div><div class="body"><div class="ttl">Selected <span class="ico" style="color: var(--step-execute-fg);">▶</span></div><div class="ftr"><span>2 tasks</span></div></div></div>
+            <div class="wf-node execute" style="border-left: 3px solid var(--err);"><div class="bar"></div><div class="body"><div class="ttl">Failed <span class="ico" style="color: var(--err);">✕</span></div><div class="ftr"><span>2 tasks</span><span style="color: var(--err);">1 failed</span></div></div></div>
+          </div></div>
+
+          <div class="var" style="width: 100%;"><span class="vnum">c · LiveTasksPanel <em style="font-style: italic; color: var(--fg-mute); text-transform: none; letter-spacing: 0;">— task-centric control plane (replaces NodeActionPopover + old LiveBanner)</em></span><div class="vsample" style="background: var(--bg); padding: var(--s-4); width: 100%; border-radius: var(--r-md); flex-direction: column; align-items: stretch;">
+            <div style="background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2), 0 0 32px var(--accent-glow); overflow: hidden;">
+              <!-- Header row -->
+              <div style="display: flex; align-items: center; gap: var(--s-3); padding: 8px var(--s-3); background: var(--bg-3); border-bottom: 1px solid var(--line);">
+                <span style="color: var(--info); display: flex; align-items: center; gap: 6px;"><span class="spinner"></span><span style="font-family: var(--sans); font-size: 12px; font-weight: 600;">Live tasks · 4</span></span>
+                <span style="border-left: 1px solid var(--line); height: 14px;"></span>
+                <div style="display: flex; gap: 4px;">
+                  <span class="chip active" style="font-size: 10px; padding: 1px 7px;">All 4</span>
+                  <span class="chip" style="font-size: 10px; padding: 1px 7px; color: var(--step-execute-fg); border-color: color-mix(in oklch, var(--step-execute) 30%, transparent);">▶ 2</span>
+                  <span class="chip" style="font-size: 10px; padding: 1px 7px; color: var(--step-eval-fg); border-color: color-mix(in oklch, var(--step-eval) 30%, transparent);">⊙ 1</span>
+                  <span class="chip" style="font-size: 10px; padding: 1px 7px; color: var(--step-wait-fg); border-color: color-mix(in oklch, var(--step-wait) 30%, transparent);">⏸ 1</span>
+                </div>
+                <span style="margin-left: auto; display: flex; align-items: center; gap: 6px; padding: 3px 8px; background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-sm); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); min-width: 160px;">⌕ <span>Filter tasks…</span></span>
+                <button class="btn ghost sm" style="font-size: 10px;">▾ Sort: started</button>
+                <button class="btn ghost sm" style="padding: 0; width: 22px;" title="Collapse">▾</button>
+              </div>
+
+              <!-- Task rows -->
+              <div>
+                <!-- Row 1 — execute, selected/expanded -->
+                <div style="display: grid; grid-template-columns: 18px 1fr 130px 80px 56px auto; gap: var(--s-3); padding: 8px var(--s-3); align-items: center; background: var(--accent-wash); border-left: 2px solid var(--accent);">
+                  <span class="spinner" style="border-top-color: var(--step-execute-fg);"></span>
+                  <span style="font-size: 13px; color: var(--fg);">Implement JWT service</span>
+                  <span class="pill execute" style="font-size: 10px;">▶ Implement</span>
+                  <span class="id-badge">i9j0k1l2</span>
+                  <span style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); text-align: right;">4m 12s</span>
+                  <div style="display: flex; gap: 2px;">
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Stop">■</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px; color: var(--accent);" title="Tail live trace">↑</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px; background: var(--accent-wash); color: var(--accent);" title="Toggle detail panel">⧉</button>
+                  </div>
+                </div>
+
+                <!-- Row 2 -->
+                <div style="display: grid; grid-template-columns: 18px 1fr 130px 80px 56px auto; gap: var(--s-3); padding: 8px var(--s-3); align-items: center; border-top: 1px solid var(--line);">
+                  <span class="spinner" style="border-top-color: var(--step-execute-fg);"></span>
+                  <span style="font-size: 13px; color: var(--fg);">Generate migration plan</span>
+                  <span class="pill execute" style="font-size: 10px;">▶ Implement</span>
+                  <span class="id-badge">g2h3j4k5</span>
+                  <span style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); text-align: right;">1m 04s</span>
+                  <div style="display: flex; gap: 2px;">
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Stop">■</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Tail live trace">↑</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Toggle detail panel">⧉</button>
+                  </div>
+                </div>
+
+                <!-- Row 3 — eval -->
+                <div style="display: grid; grid-template-columns: 18px 1fr 130px 80px 56px auto; gap: var(--s-3); padding: 8px var(--s-3); align-items: center; border-top: 1px solid var(--line);">
+                  <span class="spinner" style="border-top-color: var(--step-eval-fg);"></span>
+                  <span style="font-size: 13px; color: var(--fg);">Score auth tests</span>
+                  <span class="pill eval" style="font-size: 10px;">⊙ Eval</span>
+                  <span class="id-badge">s6t7u8v9</span>
+                  <span style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); text-align: right;">22s</span>
+                  <div style="display: flex; gap: 2px;">
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Stop">■</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Tail live trace">↑</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Toggle detail panel">⧉</button>
+                  </div>
+                </div>
+
+                <!-- Row 4 — wait (paused on children) -->
+                <div style="display: grid; grid-template-columns: 18px 1fr 130px 80px 56px auto; gap: var(--s-3); padding: 8px var(--s-3); align-items: center; border-top: 1px solid var(--line);">
+                  <span style="font-family: var(--mono); color: var(--step-wait-fg);">◷</span>
+                  <span style="font-size: 13px; color: var(--fg-soft);">Wait for test suite <span style="color: var(--fg-mute); font-family: var(--mono); font-size: 10px;">2 of 4 ch.</span></span>
+                  <span class="pill" style="font-size: 10px; color: var(--step-wait-fg); border-color: color-mix(in oklch, var(--step-wait) 30%, transparent);">⏸ Wait</span>
+                  <span class="id-badge">w8a9i0t1</span>
+                  <span style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); text-align: right;">3m 41s</span>
+                  <div style="display: flex; gap: 2px;">
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Cancel wait">■</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Tail children">↑</button>
+                    <button class="btn ghost sm" style="padding: 0; width: 26px;" title="Toggle detail panel">⧉</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Footer / queue summary -->
+              <div style="padding: 6px var(--s-3); background: var(--bg-1); border-top: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-3); font-family: var(--mono); font-size: 11px; color: var(--fg-mute);">
+                <span>+ 2 queued ahead</span>
+                <span style="border-left: 1px solid var(--line); height: 12px;"></span>
+                <span style="color: var(--ok);">✓ 14 today</span>
+                <span style="color: var(--err);">✕ 1 today</span>
+                <span style="margin-left: auto; cursor: pointer; color: var(--accent);">＋ Start a task…</span>
+              </div>
+            </div>
+            <p style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 13px; color: var(--fg-mute); line-height: 1.5;">Task-centric control plane &mdash; floats at the top of the Design canvas while any tasks are live. Each row controls a <em style="color: var(--fg);">durable</em> task as it traverses the whole workflow. The step pill shows where it is right now; the action cluster runs the task, stops it, tails its live trace, or toggles its detail panel.</p>
+          </div></div>
+
+          <div class="var" style="width: 100%;"><span class="vnum">d · KanbanColumn / 5 columns w/ step-type left borders</span><div class="vsample" style="gap: var(--s-3); width: 100%; align-items: stretch;">
+            <div style="width: 180px; background: var(--bg-1); padding: var(--s-3); border-left: 2px solid var(--step-execute); border-radius: var(--r-sm);">
+              <div class="row" style="justify-content: space-between; margin-bottom: var(--s-2);"><div class="row" style="gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Implement</span><span style="color: var(--step-execute-fg); font-family: var(--mono);">▶</span></div><span class="badge">2</span></div>
+              <div class="task-card sel" style="width: 100%; margin-bottom: 6px;"><div class="ttl">Implement JWT</div><div class="row"><span class="id-badge">i9j0k1l2</span><span class="status-pill running"><span class="spinner"></span></span></div></div>
+            </div>
+            <div style="width: 180px; background: var(--bg-1); padding: var(--s-3); border-left: 2px solid var(--step-eval); border-radius: var(--r-sm);">
+              <div class="row" style="justify-content: space-between; margin-bottom: var(--s-2);"><div class="row" style="gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Eval</span><span style="color: var(--step-eval-fg); font-family: var(--mono);">⊙</span></div><span class="badge">1</span></div>
+              <div class="task-card" style="width: 100%; margin-bottom: 6px;"><div class="ttl">Score output</div><div class="row"><span class="id-badge">e2v3a4l5</span><span class="status-pill running"><span class="spinner"></span></span></div></div>
+            </div>
+            <div style="width: 180px; background: var(--bg-1); padding: var(--s-3); border-left: 2px solid var(--step-route); border-radius: var(--r-sm);">
+              <div class="row" style="justify-content: space-between; margin-bottom: var(--s-2);"><div class="row" style="gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Route</span><span style="color: var(--step-route-fg); font-family: var(--mono);">⤳</span></div><span class="badge">0</span></div>
+              <div style="font-family: var(--mono); font-size: 11px; color: var(--fg-faint); padding: var(--s-2);">// fork point</div>
+            </div>
+            <div style="width: 180px; background: var(--bg-1); padding: var(--s-3); border-left: 2px solid var(--step-human); border-radius: var(--r-sm);">
+              <div class="row" style="justify-content: space-between; margin-bottom: var(--s-2);"><div class="row" style="gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Review</span><span style="color: var(--step-human-fg); font-family: var(--mono);">👁</span></div><span class="badge">1</span></div>
+              <div class="task-card review" style="width: 100%; margin-bottom: 6px;"><div class="ttl">Review PR output</div><div class="row"><span class="id-badge">e5f6g7h8</span></div></div>
+            </div>
+            <div style="width: 180px; background: var(--bg-1); padding: var(--s-3); border-left: 2px solid var(--step-wait); border-radius: var(--r-sm);">
+              <div class="row" style="justify-content: space-between; margin-bottom: var(--s-2);"><div class="row" style="gap: 6px;"><span style="font-size: 13px; font-weight: 500;">Wait</span><span style="color: var(--step-wait-fg); font-family: var(--mono);">⏸</span></div><span class="badge">3</span></div>
+              <div class="task-card" style="width: 100%; margin-bottom: 6px;"><div class="ttl">Wait for tests</div><div class="row"><span class="id-badge">w8a9i0t1</span></div></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </article>
+
+    <footer class="colophon">
+      <div><h4>This chapter</h4><p>12 specs covering 35 components. Every variant and meaningful state rendered live; <em>5 step types</em> applied to WorkflowNode and KanbanColumn.</p></div>
+      <div><h4>Continue</h4><p><a href="patterns.html">→ § 04 · Patterns</a></p></div>
+      <div><h4>Implementation</h4><p>Components consume tokens, never raw values. See <em>tokens.css</em>.</p></div>
+    </footer>
+  </div>
+
+  <!-- Theme toggle (Hearth) -->
+  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
+    <span class="sym">☾</span>
+    <span class="knob"></span>
+    <span class="sym">☀</span>
+  </button>
+  <script>
+    (function(){
+      var key='hearth-theme';
+      var html=document.documentElement;
+      try { if(localStorage.getItem(key)==='light') html.classList.add('theme-light'); } catch(e){}
+      var btn=document.getElementById('hearthThemeToggle');
+      btn.addEventListener('click', function(){
+        var isLight=html.classList.toggle('theme-light');
+        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
+      });
+    })();
+  </script>
+
+  <script src="tweaks-panel.js"></script>
+</body>
+</html>
