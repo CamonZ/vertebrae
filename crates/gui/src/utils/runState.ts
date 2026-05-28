@@ -76,6 +76,82 @@ export interface RunStateChip {
   tone: "neutral" | "info" | "warning" | "success" | "error" | "muted";
 }
 
+type RunStateTone = RunStateChip["tone"];
+
+function runStatusMeta(status: TaskRunStatus): {
+  label: string;
+  isActive: boolean;
+  tone: RunStateTone;
+} {
+  const label = runStatusLabel(status);
+  const isActive = isActiveRunStatus(status);
+
+  switch (status) {
+    case "queued":
+    case "waiting":
+      return { label, isActive, tone: "info" };
+    case "executing":
+    case "completed":
+      return { label, isActive, tone: "success" };
+    case "failed":
+      return { label, isActive, tone: "error" };
+    case "stopping":
+    case "stopped":
+      return { label, isActive, tone: "muted" };
+    default:
+      return { label, isActive, tone: "neutral" };
+  }
+}
+
+export type HearthRunState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "stopping"
+  | "stopped"
+  | "completed"
+  | "failed";
+
+export interface HearthRunChipState {
+  /** V2-facing state name used for stable `c-run-chip <state>` classes. */
+  state: HearthRunState;
+  /** Production status, retained for callers that need to reason in app terms. */
+  status: TaskRunStatus;
+  label: string;
+  isActive: boolean;
+  tone: RunStateChip["tone"];
+}
+
+const TERMINAL_RUN_STATUSES: ReadonlySet<TaskRunStatus> = new Set([
+  "stopped",
+  "completed",
+  "failed",
+]);
+
+export function taskRunStatusToHearthRunState(
+  status: TaskRunStatus
+): HearthRunState {
+  return status === "executing" ? "running" : status;
+}
+
+export function deriveHearthRunChipState(
+  status: TaskRunStatus | null | undefined,
+  options: { includeTerminal?: boolean } = {}
+): HearthRunChipState | null {
+  if (!status) return null;
+  if (TERMINAL_RUN_STATUSES.has(status) && !options.includeTerminal) {
+    return null;
+  }
+
+  const meta = runStatusMeta(status);
+
+  return {
+    state: taskRunStatusToHearthRunState(status),
+    status,
+    ...meta,
+  };
+}
+
 /**
  * Derive the run state chip strictly from `task.run_controls`.
  *
@@ -101,24 +177,8 @@ export function deriveRunStateChip(
   }
 
   const label = runStatusLabel(status);
-  switch (status) {
-    case "queued":
-      return { label, status, isActive: true, tone: "info" };
-    case "executing":
-      return { label, status, isActive: true, tone: "success" };
-    case "waiting":
-      return { label, status, isActive: true, tone: "info" };
-    case "stopping":
-      return { label, status, isActive: true, tone: "muted" };
-    case "stopped":
-      return { label, status, isActive: false, tone: "muted" };
-    case "completed":
-      return { label, status, isActive: false, tone: "success" };
-    case "failed":
-      return { label, status, isActive: false, tone: "error" };
-    default:
-      return { label, status, isActive: false, tone: "neutral" };
-  }
+  const meta = runStatusMeta(status);
+  return { label, status, isActive: meta.isActive, tone: meta.tone };
 }
 
 /**

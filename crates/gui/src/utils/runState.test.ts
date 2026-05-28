@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { TaskRun, TaskRunControls, TaskRunStatus } from "../bindings";
 import {
+  deriveHearthRunChipState,
   deriveRunControlsState,
   deriveRunStateChip,
   getRunChipStyles,
   isActiveRunStatus,
+  taskRunStatusToHearthRunState,
 } from "./runState";
 
 function makeRun(status: TaskRunStatus, overrides?: Partial<TaskRun>): TaskRun {
@@ -148,6 +150,30 @@ describe("deriveRunStateChip", () => {
         { includeTerminal: true }
       )
     ).toMatchObject({ label: "Stopped", tone: "muted", isActive: false });
+  });
+});
+
+describe("deriveHearthRunChipState", () => {
+  it("maps TaskRunStatus values to v2 Hearth run chip states", () => {
+    expect(taskRunStatusToHearthRunState("executing")).toBe("running");
+    expect(taskRunStatusToHearthRunState("queued")).toBe("queued");
+    expect(taskRunStatusToHearthRunState("waiting")).toBe("waiting");
+  });
+
+  it("hides terminal run states by default and exposes them when requested", () => {
+    expect(deriveHearthRunChipState("completed")).toBeNull();
+    expect(deriveHearthRunChipState("stopped")).toBeNull();
+    expect(deriveHearthRunChipState("failed")).toBeNull();
+
+    expect(
+      deriveHearthRunChipState("failed", { includeTerminal: true })
+    ).toMatchObject({
+      state: "failed",
+      status: "failed",
+      label: "Failed",
+      isActive: false,
+      tone: "error",
+    });
   });
 });
 

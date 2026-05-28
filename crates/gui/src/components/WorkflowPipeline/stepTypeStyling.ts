@@ -13,8 +13,18 @@ export type StepKind =
   | "wait_children"
   | "unknown";
 
+export type HearthStepKind =
+  | "execute"
+  | "eval"
+  | "route"
+  | "human"
+  | "wait"
+  | "unknown";
+
 export interface StepTypeStyle {
   kind: StepKind;
+  /** V2-facing kind used for stable Hearth classes such as `kind-eval`. */
+  hearthKind: HearthStepKind;
   /** Human-readable label (e.g., "AI" / "Review" / "Holding"). */
   label: string;
   /** Single-character glyph used in compact spaces (next to the name). */
@@ -27,7 +37,17 @@ export interface StepTypeStyle {
   fgVar: string;
 }
 
-export function normalizeStepType(stepType: StepType | null | undefined): StepKind {
+export interface HearthStepStyle {
+  kind: HearthStepKind;
+  label: string;
+  barVar: string;
+  washVar: string;
+  fgVar: string;
+}
+
+export function normalizeStepType(
+  stepType: StepType | null | undefined
+): StepKind {
   if (!stepType) return "unknown";
   if (typeof stepType === "string") return stepType as StepKind;
   return "unknown";
@@ -36,6 +56,7 @@ export function normalizeStepType(stepType: StepType | null | undefined): StepKi
 const styles: Record<StepKind, StepTypeStyle> = {
   execute: {
     kind: "execute",
+    hearthKind: "execute",
     label: "Execute",
     icon: "⚡",
     barVar: "--color-step-execute",
@@ -44,6 +65,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
   },
   evaluate: {
     kind: "evaluate",
+    hearthKind: "eval",
     label: "Evaluate",
     icon: "✓",
     barVar: "--color-step-eval",
@@ -52,6 +74,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
   },
   route: {
     kind: "route",
+    hearthKind: "route",
     label: "Route",
     icon: "⤳",
     barVar: "--color-step-route",
@@ -60,6 +83,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
   },
   human_input: {
     kind: "human_input",
+    hearthKind: "human",
     label: "Human Review",
     icon: "👁",
     barVar: "--color-step-human",
@@ -68,6 +92,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
   },
   wait_children: {
     kind: "wait_children",
+    hearthKind: "wait",
     label: "Waiting",
     icon: "⏸",
     barVar: "--color-step-wait",
@@ -76,6 +101,7 @@ const styles: Record<StepKind, StepTypeStyle> = {
   },
   unknown: {
     kind: "unknown",
+    hearthKind: "unknown",
     label: "Step",
     icon: "▸",
     barVar: "--color-line-strong",
@@ -85,7 +111,27 @@ const styles: Record<StepKind, StepTypeStyle> = {
 };
 
 export function stepTypeStyle(
-  stepType: StepType | null | undefined,
+  stepType: StepType | null | undefined
 ): StepTypeStyle {
   return styles[normalizeStepType(stepType)];
+}
+
+export function hearthStepKind(
+  stepType: StepType | null | undefined
+): HearthStepKind {
+  return stepTypeStyle(stepType).hearthKind;
+}
+
+export function hearthStepStyle(kind: HearthStepKind): HearthStepStyle {
+  const style =
+    Object.values(styles).find((candidate) => candidate.hearthKind === kind) ??
+    styles.unknown;
+
+  return {
+    kind: style.hearthKind,
+    label: style.label,
+    barVar: style.barVar,
+    washVar: style.washVar,
+    fgVar: style.fgVar,
+  };
 }

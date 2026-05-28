@@ -38,6 +38,23 @@ export { SectionGroup } from "./SectionGroup";
 export { SegmentedControl } from "./SegmentedControl";
 export type { SegmentedOption } from "./SegmentedControl";
 
+export {
+  CompactRunCard,
+  CompactTaskCard,
+  DetailHeader,
+  Glyph,
+  HeroStatus,
+  IdChip,
+  KindChip,
+  Pipeline,
+  RecentItem,
+  RunChip,
+  StateBreakdown,
+  StepDot,
+  WorkflowRailItem,
+} from "../shared/HearthPrimitives";
+export type { PipelineSegment } from "../shared/HearthPrimitives";
+
 // Existing project molecules that already match Hearth — re-export for one-stop import.
 export { IdentityBadge } from "../shared/EntityId";
 export { ToastContainer } from "../Toast";
