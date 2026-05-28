@@ -25,11 +25,19 @@ export { stashTask, takeStashedTask } from "./taskStash";
 export type { TaskStashPayload } from "./taskStash";
 export { stashChatSession, takeStashedChatSession } from "./chatStash";
 export {
+  deriveHearthRunChipState,
   deriveRunStateChip,
   deriveRunControlsState,
   getRunChipStyles,
   isActiveRunStatus,
+  taskRunStatusToHearthRunState,
 } from "./runState";
-export type { RunStateChip, RunChipStyles, RunControlsState } from "./runState";
+export type {
+  HearthRunChipState,
+  HearthRunState,
+  RunStateChip,
+  RunChipStyles,
+  RunControlsState,
+} from "./runState";
 export { resolveHumanInputGate } from "./humanInputGate";
 export type { HumanInputGateContext } from "./humanInputGate";
