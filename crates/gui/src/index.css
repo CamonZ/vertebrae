@@ -8,10 +8,10 @@
    VERTEBRAE · HEARTH — Warm dark identity
    Copper accent on warm neutrals, serif moments via Newsreader, mono via JetBrains.
    Five step types: execute / eval / route / human_review / wait_for_children.
-   Tokens are layered: Hearth primitives (--bg, --fg, --accent, --step-*) first,
-   then a backwards-compat alias layer (--color-*, --radius-*, --spacing-*) that
-   maps the old Articulated names to the new Hearth values so existing components
-   keep working until they are migrated ticket-by-ticket.
+   Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
+   first, then compatibility aliases for legacy app names and the docs/design v2
+   prototype vocabulary. The production theme owns the values; imported Hearth
+   components should use the v2 aliases only through the adapter below.
    ============================================================================= */
 
 @theme {
@@ -109,6 +109,7 @@
   --spacing-4: 1rem; /* 16 */
   --spacing-5: 1.25rem; /* 20 */
   --spacing-6: 1.5rem; /* 24 */
+  --spacing-7: 1.75rem; /* 28 */
   --spacing-8: 2rem; /* 32 */
   --spacing-10: 2.5rem; /* 40 */
   --spacing-12: 3rem; /* 48 */
@@ -220,6 +221,103 @@
   --transition-normal: var(--t-base);
   --transition-slow: var(--t-slow);
   --transition-pulse: var(--t-pulse);
+}
+
+/* =============================================================================
+   DOCS/DESIGN V2 TOKEN ADAPTER
+   The v2 prototype uses compact names (--bg, --fg, --s-*, --r-*). Keep those
+   names as a thin compatibility layer over production Hearth tokens so v2 React
+   ports can consume the visual vocabulary without copying prototype CSS or
+   creating a second source of truth.
+   ============================================================================= */
+:root {
+  /* Surfaces */
+  --bg: var(--color-bg);
+  --bg-1: var(--color-bg-1);
+  --bg-2: var(--color-bg-2);
+  --bg-3: var(--color-bg-3);
+  --bg-4: var(--color-bg-4);
+
+  /* Text */
+  --fg: var(--color-fg);
+  --fg-soft: var(--color-fg-soft);
+  --fg-mute: var(--color-fg-mute);
+  --fg-faint: var(--color-fg-faint);
+  --fg-ghost: var(--color-fg-ghost);
+
+  /* Lines */
+  --line: var(--color-line);
+  --line-soft: var(--color-line-soft);
+  --line-strong: var(--color-line-strong);
+
+  /* Accent and status */
+  --accent: var(--color-accent);
+  --accent-deep: var(--color-accent-deep);
+  --accent-mute: var(--color-accent-mute);
+  --accent-wash: var(--color-accent-wash);
+  --accent-glow: var(--color-accent-glow);
+  --ok: var(--color-ok);
+  --ok-wash: var(--color-ok-wash);
+  --warn: var(--color-warn);
+  --warn-wash: var(--color-warn-wash);
+  --err: var(--color-err);
+  --err-wash: var(--color-err-wash);
+  --info: var(--color-info);
+  --info-wash: var(--color-info-wash);
+
+  /* Step kinds */
+  --step-execute: var(--color-step-execute);
+  --step-execute-wash: var(--color-step-execute-wash);
+  --step-execute-fg: var(--color-step-execute-fg);
+  --step-eval: var(--color-step-eval);
+  --step-eval-wash: var(--color-step-eval-wash);
+  --step-eval-fg: var(--color-step-eval-fg);
+  --step-route: var(--color-step-route);
+  --step-route-wash: var(--color-step-route-wash);
+  --step-route-fg: var(--color-step-route-fg);
+  --step-human: var(--color-step-human);
+  --step-human-wash: var(--color-step-human-wash);
+  --step-human-fg: var(--color-step-human-fg);
+  --step-wait: var(--color-step-wait);
+  --step-wait-wash: var(--color-step-wait-wash);
+  --step-wait-fg: var(--color-step-wait-fg);
+
+  /* Typography */
+  --serif: var(--font-serif);
+  --sans: var(--font-sans);
+  --mono: var(--font-mono);
+  --display: var(--text-display);
+  --h1: var(--text-5xl);
+  --h2: var(--text-4xl);
+  --h3: var(--text-2xl);
+  --eyebrow: var(--text-eyebrow);
+  --body: var(--text-base);
+  --body-sm: var(--text-sm);
+  --caption: var(--text-xs);
+
+  /* Space */
+  --s-1: var(--spacing-1);
+  --s-2: var(--spacing-2);
+  --s-3: var(--spacing-3);
+  --s-4: var(--spacing-4);
+  --s-5: var(--spacing-5);
+  --s-6: var(--spacing-6);
+  --s-7: var(--spacing-7);
+  --s-8: var(--spacing-8);
+  --s-10: var(--spacing-10);
+  --s-12: var(--spacing-12);
+  --s-16: var(--spacing-16);
+  --s-20: var(--spacing-20);
+  --s-24: var(--spacing-24);
+
+  /* Radii, elevation, and motion */
+  --r-xs: var(--radius-xs);
+  --r-sm: var(--radius-sm);
+  --r-md: var(--radius-md);
+  --r-lg: var(--radius-lg);
+  --r-xl: var(--radius-xl);
+  --r-full: var(--radius-full);
+  --ease: var(--ease-default);
 }
 
 /* =============================================================================
