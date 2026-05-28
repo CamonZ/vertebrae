@@ -53,6 +53,7 @@ import {
 } from "../components/WorkflowPipeline";
 import { STYLEGUIDE_SHORTCUT } from "../utils/styleguideShortcut";
 import { HearthShowcase } from "../components/HearthShowcase";
+import { V2_TOKEN_GROUPS } from "../styles/hearthTokenAdapter";
 
 const workflowPipelineNodeTypes: NodeTypes = {
   stepNode: StepNode,
@@ -826,6 +827,54 @@ export function StyleguidePage() {
         </header>
 
         <HearthShowcase />
+
+        <Section title="V2 Token Adapter">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.85fr)]">
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4">
+              <h3 className="font-mono text-2xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                Adapter decision
+              </h3>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-[var(--color-fg-soft)]">
+                The production GUI keeps <code>--color-*</code>,{" "}
+                <code>--spacing-*</code>, and <code>--radius-*</code> as the
+                canonical Hearth token language. The docs/design v2 short names
+                are available only as aliases in <code>src/index.css</code>, so
+                ported React components can use the prototype vocabulary while
+                still resolving through the app-owned light/dark theme.
+              </p>
+              <p className="mt-3 text-sm leading-relaxed text-[var(--color-fg-mute)]">
+                Future Hearth work should port component structure and state,
+                then either use production tokens directly or consume these
+                aliases. Do not import docs/design HTML, CDN scripts, or
+                prototype CSS wholesale into the app bundle.
+              </p>
+            </div>
+            <div className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4">
+              <h3 className="font-mono text-2xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                Inventory from components-v2.css and components-lib.css
+              </h3>
+              <div className="mt-3 grid gap-3">
+                {V2_TOKEN_GROUPS.map((group) => (
+                  <div key={group.label}>
+                    <div className="font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-faint)]">
+                      {group.label}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {group.tokens.map((token) => (
+                        <code
+                          key={token}
+                          className="rounded-[var(--radius-xs)] border border-[var(--color-line)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-2xs text-[var(--color-fg-soft)]"
+                        >
+                          {token}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Section>
 
         <Section title="Visual Tokens">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
