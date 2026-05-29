@@ -2382,6 +2382,19 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_uuid_short_id_in_undepend_command() {
+        let cli = TestCli::try_parse_from(["test", "undepend", "a1b2c3d4", "--on", "e5f6a7b8"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Undepend(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4");
+                assert_eq!(cmd.blocker_id, "e5f6a7b8");
+            }
+            _ => panic!("Expected Undepend command"),
+        }
+    }
+
+    #[test]
     fn test_command_archive_parses_with_full_uuid() {
         let cli =
             TestCli::try_parse_from(["test", "archive", "a1b2c3d4-0000-4000-8000-000000000001"]);
