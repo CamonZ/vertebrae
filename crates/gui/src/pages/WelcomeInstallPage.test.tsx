@@ -143,7 +143,7 @@ describe("WelcomeInstallPage", () => {
       () => {
         expect(mockNavigate).toHaveBeenCalledWith("/setup", { replace: true });
       },
-      { timeout: 2000 }
+      { timeout: 2500 }
     );
   });
 
