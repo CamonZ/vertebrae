@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Prepare Tauri sidecar binaries for the Vertebrae GUI bundle.
 //
-// Builds `vtb` and `vtb-daemon` from the workspace and stages them under
+// Builds `vtb`, `vtb-daemon`, and `vtb-gate` from the workspace and stages them under
 // `crates/gui/src-tauri/binaries/<bin>-<target-triple>` using the naming
 // convention Tauri's `externalBin` expects.
 //
@@ -27,6 +27,7 @@ const SUPPORTED_TARGETS = new Set([
 const BINARIES = [
   { cargoPkg: "vertebrae-cli", binName: "vtb" },
   { cargoPkg: "vertebrae-daemon", binName: "vtb-daemon" },
+  { cargoPkg: "vtb-gate", binName: "vtb-gate" },
 ];
 
 const PROFILE = process.env.SIDECAR_PROFILE === "debug" ? "debug" : "release";
@@ -98,7 +99,15 @@ function stagedBinariesPresent(target, suffix) {
 }
 
 function runCargoBuild() {
-  const args = ["build", "-p", "vertebrae-cli", "-p", "vertebrae-daemon"];
+  const args = [
+    "build",
+    "-p",
+    "vertebrae-cli",
+    "-p",
+    "vertebrae-daemon",
+    "-p",
+    "vtb-gate",
+  ];
   if (PROFILE === "release") {
     args.splice(1, 0, "--release");
   }
@@ -120,7 +129,7 @@ function stageBinaries(target, suffix) {
     if (!existsSync(src)) {
       throw new Error(
         `expected built binary not found: ${src}. ` +
-          "cargo build must produce both vtb and vtb-daemon.",
+          "cargo build must produce vtb, vtb-daemon, and vtb-gate.",
       );
     }
     copyFileSync(src, dst);

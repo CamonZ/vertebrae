@@ -16,7 +16,7 @@ use tauri::Emitter;
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-use crate::helpers::find_claude_binary;
+use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 ///
@@ -384,6 +384,26 @@ impl ClaudeSessionManager {
         );
 
         let mut cmd = Command::new(&claude_binary);
+        let vtb_gate_binary = match find_vtb_gate_binary() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(e) => {
+                log::error!("Failed to find vtb-gate: {}", e);
+                let _ = ClaudeSessionErrorEvent {
+                    session_id: session_id.clone(),
+                    error: e,
+                }
+                .emit(&app_handle);
+                return;
+            }
+        };
+        let mcp_config = serde_json::json!({
+            "mcpServers": {
+                "vtb-gate": {
+                    "command": vtb_gate_binary
+                }
+            }
+        })
+        .to_string();
 
         // Build args - use --resume if continuing a conversation
         let mut args = vec![
@@ -393,7 +413,10 @@ impl ClaudeSessionManager {
             "stream-json",
             "--verbose",
             "--include-partial-messages",
-            "--dangerously-skip-permissions",
+            "--mcp-config",
+            &mcp_config,
+            "--permission-prompt-tool",
+            "mcp__vtb-gate__permission_prompt",
         ];
 
         // Store resume_id for arg lifetime
@@ -426,6 +449,7 @@ impl ClaudeSessionManager {
             augmented_path
         );
         cmd.env("PATH", &augmented_path);
+        cmd.env("VTB_CLAUDE_SESSION_ID", &session_id);
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -787,18 +811,6 @@ impl ClaudeSessionManager {
                                     serde_json::Value::String(s) => s,
                                     other => serde_json::to_string(&other).unwrap_or_default(),
                                 };
-
-                                // Check if this is a permission request
-                                if result_text.contains("Claude requested permissions") {
-                                    events.push(EmittedEvent::PermissionRequest(
-                                        ClaudePermissionRequestEvent {
-                                            session_id: session_id.to_string(),
-                                            tool_name: "Read".to_string(),
-                                            permission_message: result_text,
-                                        },
-                                    ));
-                                    continue;
-                                }
 
                                 events.push(EmittedEvent::ToolResult(ClaudeToolResultEvent {
                                     session_id: session_id.to_string(),
@@ -1475,70 +1487,6 @@ mod tests {
             }
             other => panic!("Expected ToolResult event, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn test_build_events_user_permission_request() {
-        let msg = parse_msg(
-            r#"{
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "toolu_perm",
-                            "content": "Claude requested permissions to read /etc/passwd",
-                            "is_error": false
-                        }
-                    ]
-                }
-            }"#,
-        );
-
-        let events = ClaudeSessionManager::build_events("sess-1", msg);
-        assert_eq!(events.len(), 1);
-        match &events[0] {
-            EmittedEvent::PermissionRequest(e) => {
-                assert_eq!(e.tool_name, "Read");
-                assert!(e
-                    .permission_message
-                    .contains("Claude requested permissions"));
-            }
-            other => panic!("Expected PermissionRequest event, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_build_events_user_mixed_results_and_permissions() {
-        // A message with both a regular tool result and a permission request
-        let msg = parse_msg(
-            r#"{
-                "type": "user",
-                "message": {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "toolu_1",
-                            "content": "normal result",
-                            "is_error": false
-                        },
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": "toolu_2",
-                            "content": "Claude requested permissions for X",
-                            "is_error": false
-                        }
-                    ]
-                }
-            }"#,
-        );
-
-        let events = ClaudeSessionManager::build_events("sess-1", msg);
-        assert_eq!(events.len(), 2);
-        assert!(matches!(&events[0], EmittedEvent::ToolResult(_)));
-        assert!(matches!(&events[1], EmittedEvent::PermissionRequest(_)));
     }
 
     #[test]

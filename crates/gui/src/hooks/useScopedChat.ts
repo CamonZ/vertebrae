@@ -7,6 +7,7 @@ import type {
   ClaudeToolCallEvent,
   ClaudeToolResultEvent,
   ClaudePermissionRequestEvent,
+  PermissionRequestEvent,
   ClaudeSessionEndEvent,
   ClaudeSessionErrorEvent,
 } from "../bindings";
@@ -109,6 +110,23 @@ export function handlePermissionRequestEvent(
     kind: "permission_request",
     toolName: payload.tool_name,
     message: payload.permission_message,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+export function handleSacrumPermissionRequestEvent(
+  payload: PermissionRequestEvent,
+  claudeSessionId: string | null,
+  sessionId: string,
+  addMessage: (sessionId: string, msg: ChatMessage) => void
+) {
+  if (payload.session_id !== claudeSessionId) return;
+  addMessage(sessionId, {
+    kind: "permission_request",
+    requestId: payload.request_id,
+    toolName: payload.tool_name,
+    message: payload.message ?? `${payload.tool_name} needs approval`,
+    input: JSON.stringify(payload.input, null, 2),
     timestamp: new Date().toISOString(),
   });
 }
@@ -350,6 +368,24 @@ export function useScopedChat(sessionId: string | null) {
         return;
       }
       unlisteners.push(permissionUn);
+
+      if (events.permissionRequestEvent) {
+        const sacrumPermissionUn = await events.permissionRequestEvent.listen(
+          (event) => {
+            handleSacrumPermissionRequestEvent(
+              event.payload,
+              claudeSessionIdRef.current,
+              sessionId,
+              addMessage
+            );
+          }
+        );
+        if (isCancelled) {
+          sacrumPermissionUn();
+          return;
+        }
+        unlisteners.push(sacrumPermissionUn);
+      }
 
       const endUn = await events.claudeSessionEndEvent.listen((event) => {
         handleEndEvent(
