@@ -18,7 +18,7 @@ pub struct BlockersCommand {
     #[arg(long, short = 'd')]
     pub depth: Option<usize>,
 
-    /// Include completed blockers (status = done) in output
+    /// Include blockers whose current workflow step is done
     #[arg(long, short = 'a')]
     pub all: bool,
 }
@@ -133,8 +133,8 @@ impl BlockersCommand {
 
     /// Fetch direct blockers for a task (tasks it depends on).
     ///
-    /// By default, only returns incomplete blockers (status != done).
-    /// When `--all` flag is set, returns all blockers including completed ones.
+    /// By default, hides blockers whose current workflow step is done.
+    /// When `--all` is set, returns blockers regardless of current step.
     async fn fetch_direct_blockers(
         &self,
         services: &VertebraeServices,
@@ -170,7 +170,6 @@ impl BlockersCommand {
                     ("backlog".to_string(), None)
                 };
 
-                // By default, filter out completed blockers (step = done)
                 if !self.all && step_name == "done" {
                     continue;
                 }
