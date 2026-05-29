@@ -1,9 +1,9 @@
-import { useCallback, useMemo } from 'react';
-import type { TaskLevel, TaskFilterOptions } from '../../bindings';
-import { ExpandCollapseAllButton } from './ExpandCollapseAllButton';
-import { FilterBar, type ActiveFilter } from '../molecules/FilterBar';
-import { SearchInput } from '../molecules/SearchInput';
-import { Select } from '../atoms/Select';
+import { useCallback, useMemo } from "react";
+import type { TaskLevel, TaskFilterOptions } from "../../bindings";
+import { ExpandCollapseAllButton } from "./ExpandCollapseAllButton";
+import { FilterBar, type ActiveFilter } from "../molecules/FilterBar";
+import { SearchInput } from "../molecules/SearchInput";
+import { Select } from "../atoms/Select";
 
 interface TaskFiltersProps {
   filters: TaskFilterOptions;
@@ -11,16 +11,17 @@ interface TaskFiltersProps {
   allExpanded?: boolean;
   onToggleExpandAll?: () => void;
   expandAllDisabled?: boolean;
+  className?: string;
 }
 
 const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
-  { value: 'epic', label: 'Epic' },
-  { value: 'ticket', label: 'Ticket' },
-  { value: 'task', label: 'Task' },
+  { value: "epic", label: "Epic" },
+  { value: "ticket", label: "Ticket" },
+  { value: "task", label: "Task" },
 ];
 
 const LEVEL_SELECT_OPTIONS = [
-  { value: '', label: 'All levels' },
+  { value: "", label: "All levels" },
   ...LEVEL_OPTIONS,
 ];
 
@@ -30,6 +31,7 @@ export function TaskFilters({
   allExpanded = false,
   onToggleExpandAll,
   expandAllDisabled,
+  className,
 }: TaskFiltersProps) {
   const handleLevelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -55,7 +57,7 @@ export function TaskFilters({
     });
   }, [filters, onFiltersChange]);
 
-  const selectedLevel = filters.levels?.[0] ?? '';
+  const selectedLevel = filters.levels?.[0] ?? "";
 
   // Active-filter chips rendered by FilterBar below the control row. Each is
   // individually dismissible; FilterBar also renders the clear-all affordance.
@@ -63,7 +65,7 @@ export function TaskFilters({
     const chips: ActiveFilter[] = [];
     if (filters.search) {
       chips.push({
-        id: 'search',
+        id: "search",
         label: `Search: ${filters.search}`,
         onClear: () => onFiltersChange({ ...filters, search: null }),
       });
@@ -73,7 +75,7 @@ export function TaskFilters({
       const label =
         LEVEL_OPTIONS.find((o) => o.value === level)?.label ?? level;
       chips.push({
-        id: 'level',
+        id: "level",
         label: `Level: ${label}`,
         onClear: () => onFiltersChange({ ...filters, levels: null }),
       });
@@ -83,9 +85,10 @@ export function TaskFilters({
 
   return (
     <FilterBar
+      className={className}
       search={
         <SearchInput
-          value={filters.search ?? ''}
+          value={filters.search ?? ""}
           onChange={handleSearchChange}
           debounceMs={0}
           placeholder="Search tasks by title or ID..."

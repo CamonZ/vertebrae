@@ -187,12 +187,14 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         <TaskDetailPanel
           taskId="12345678-90ab-cdef-1234-567890abcdef"
           onClose={vi.fn()}
-        />,
+        />
       );
 
-      expect(screen.getByTestId("task-detail-id")).toHaveTextContent("12345678");
+      expect(screen.getByTestId("task-detail-id")).toHaveTextContent(
+        "12345678"
+      );
       expect(
-        screen.queryByText("12345678-90ab-cdef-1234-567890abcdef"),
+        screen.queryByText("12345678-90ab-cdef-1234-567890abcdef")
       ).not.toBeInTheDocument();
     });
 
@@ -512,7 +514,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
       expect(screen.getByText("Delete Task?")).toBeInTheDocument();
-      expect(screen.getByTestId("task-delete-confirmation")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-delete-confirmation")
+      ).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
 
@@ -561,9 +565,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       fireEvent.click(screen.getByRole("button", { name: /delete task/i }));
-      expect(screen.getByText("This task has 1 child task")).toBeInTheDocument();
+      expect(
+        screen.getByText("This task has 1 child task")
+      ).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("radio", { name: "Delete all child tasks" }));
+      fireEvent.click(
+        screen.getByRole("radio", { name: "Delete all child tasks" })
+      );
       fireEvent.click(screen.getByRole("button", { name: /confirm delete/i }));
 
       await waitFor(() => {
@@ -760,6 +768,25 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const chip = screen.getByTestId("task-detail-run-chip");
       expect(chip).toHaveAttribute("data-run-status", "executing");
       expect(chip).toHaveTextContent(/Running/i);
+    });
+
+    it("renders the Hearth detail hero as idle when no run is active", () => {
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      const hero = screen.getByTestId("task-detail-hero");
+      expect(hero).toHaveAttribute("data-hero-state", "idle");
+      expect(
+        screen.getByTestId("task-detail-hero-idle-label")
+      ).toHaveTextContent("No active run");
+    });
+
+    it("renders the Hearth detail hero with the active run state", () => {
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
+
+      const hero = screen.getByTestId("task-detail-hero");
+      expect(hero).toHaveAttribute("data-hero-state", "executing");
+      expect(hero).toHaveTextContent("Running");
+      expect(hero).toHaveTextContent("In progress");
     });
 
     it("does not render a run state chip when no run is active", () => {
@@ -964,9 +991,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         execFor("run-wait-1", "exec-wait-1"),
       ];
       renderWithTaskOverrides({ run_controls: waitingControls() });
-      expect(
-        screen.getByTestId("human-input-gate-stop")
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("human-input-gate-stop")).toBeInTheDocument();
     });
 
     it("hides Stop when run_controls.stoppable is false", () => {
