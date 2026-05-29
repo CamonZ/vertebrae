@@ -3,6 +3,7 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { EmptyState } from "../molecules/EmptyState";
+import { useCallback, useMemo } from "react";
 
 interface TaskTreeViewProps {
   hierarchy: TaskTreeNodeType[];
@@ -14,9 +15,6 @@ interface TaskTreeViewProps {
   hideStatus?: boolean;
 }
 
-/**
- * Loading skeleton — rows of pulsing placeholder cells on Hearth surfaces.
- */
 function LoadingSkeleton() {
   return (
     <div role="status" aria-label="Loading tasks">
@@ -40,9 +38,6 @@ function LoadingSkeleton() {
   );
 }
 
-/**
- * Error state on a tinted err surface.
- */
 function ErrorState({ error }: { error: string }) {
   return (
     <div
@@ -73,11 +68,29 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
-/**
- * TaskTreeView component displays tasks in a hierarchical tree structure.
- * Shows parent-child relationships with expandable/collapsible nodes.
- * Uses the Neural Pathways design system.
- */
+function flattenVisibleNodes(
+  nodes: TaskTreeNodeType[],
+  expandedNodes?: ReturnType<typeof useExpandedNodes>
+): TaskTreeNodeType[] {
+  const out: TaskTreeNodeType[] = [];
+  const stack = [...nodes].reverse();
+
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    out.push(node);
+    const isExpanded = expandedNodes
+      ? expandedNodes.isNodeExpanded(node.task.id)
+      : true;
+    if (node.children.length > 0 && isExpanded) {
+      for (let index = node.children.length - 1; index >= 0; index -= 1) {
+        stack.push(node.children[index]);
+      }
+    }
+  }
+
+  return out;
+}
+
 export function TaskTreeView({
   hierarchy,
   isLoading,
@@ -87,6 +100,35 @@ export function TaskTreeView({
   expandedNodes,
   hideStatus,
 }: TaskTreeViewProps) {
+  const visibleNodes = useMemo(
+    () => (onTaskSelect ? flattenVisibleNodes(hierarchy, expandedNodes) : []),
+    [hierarchy, expandedNodes, onTaskSelect]
+  );
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent) => {
+      if (!onTaskSelect || !selectedTaskId) return;
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+
+      const selectedIndex = visibleNodes.findIndex(
+        (node) => node.task.id === selectedTaskId
+      );
+      if (selectedIndex === -1) return;
+
+      event.preventDefault();
+      const nextIndex =
+        event.key === "ArrowDown"
+          ? Math.min(visibleNodes.length - 1, selectedIndex + 1)
+          : Math.max(0, selectedIndex - 1);
+
+      const nextNode = visibleNodes[nextIndex];
+      if (nextNode && nextNode.task.id !== selectedTaskId) {
+        onTaskSelect(nextNode.task);
+      }
+    },
+    [onTaskSelect, selectedTaskId, visibleNodes]
+  );
+
   if (error) {
     return <ErrorState error={error} />;
   }
@@ -105,9 +147,8 @@ export function TaskTreeView({
   }
 
   return (
-    <div className="overflow-x-auto">
-      {/* Tree content */}
-      <div role="tree" aria-label="Task hierarchy">
+    <div className="tasks-v2-tree">
+      <div role="tree" aria-label="Task hierarchy" onKeyDown={handleKeyDown}>
         {hierarchy.map((node) => (
           <TaskTreeNode
             key={node.task.id}

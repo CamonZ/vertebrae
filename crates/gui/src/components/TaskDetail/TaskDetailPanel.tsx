@@ -17,9 +17,14 @@ import { SpecSection } from "./SpecSection";
 import { OpenChatButton } from "../OpenChatButton";
 import {
   deriveRunControlsState,
+  deriveHearthStateBreakdown,
   deriveRunStateChip,
   getRunChipStyles,
+  hasHearthStateBreakdown,
+  hearthBreakdownVariantForTask,
+  runStatusLabel,
 } from "../../utils/runState";
+import { formatStepName } from "../../utils/formatStepName";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
@@ -31,6 +36,11 @@ import { SectionGroup } from "../molecules/SectionGroup";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
 import { StepBadge } from "../molecules/StepBadge";
+import {
+  HeroStatus,
+  StateBreakdown,
+  StepDot,
+} from "../shared/HearthPrimitives";
 
 /** Canonical uppercase mono eyebrow used for every collapsible section header. */
 function SectionLabel({ children }: { children: string }) {
@@ -102,7 +112,9 @@ function DetailRow({
       <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
         {label}
       </span>
-      <span className="font-mono text-xs text-[var(--color-fg)]">{children}</span>
+      <span className="font-mono text-xs text-[var(--color-fg)]">
+        {children}
+      </span>
     </div>
   );
 }
@@ -495,6 +507,10 @@ export function TaskDetailPanel({
     ? deriveRunStateChip(taskData, { includeTerminal: false })
     : null;
   const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
+  const heroStatus = activeRun?.status ?? null;
+  const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
+  const childBreakdown = deriveHearthStateBreakdown(children);
+  const hasChildBreakdown = hasHearthStateBreakdown(childBreakdown);
   const isExecuting = runControlsState.hasActiveRun;
   const runWorkflowDisabled = isRunningWorkflow || runControlsState.runDisabled;
   const shouldShowStopWorkflow = runControlsState.showStop;
@@ -749,14 +765,69 @@ export function TaskDetailPanel({
   ) : null;
 
   const content = (
-    <>
+    <div className="tasks-v2-detail-shell">
       <PanelHeader
         title={headerTitle}
         metadata={headerMetadata}
         controls={headerControls}
+        className="t-detail-head"
       />
 
       {deleteConfirmation}
+
+      {taskData && !isLoading && !error && (
+        <div
+          className="t-detail-hero border-b border-[var(--color-line)] bg-[var(--color-bg)] px-4 py-3"
+          data-testid="task-detail-hero"
+          data-hero-state={heroStatus ?? "idle"}
+        >
+          <HeroStatus
+            status={heroStatus}
+            label={
+              heroStatus ? (
+                heroLabel
+              ) : (
+                <span data-testid="task-detail-hero-idle-label">
+                  No active run
+                </span>
+              )
+            }
+            step={{
+              kind: null,
+              label: formatStepName(taskData.step_name, "Unassigned"),
+            }}
+            finished={
+              taskData.completed_at
+                ? `completed ${formatDateTime(taskData.completed_at)}`
+                : undefined
+            }
+            right={
+              children.length > 0 ? (
+                <span className="font-mono text-2xs text-[var(--color-fg-faint)]">
+                  {children.length} child{children.length === 1 ? "" : "ren"}
+                </span>
+              ) : null
+            }
+          >
+            {hasChildBreakdown && (
+              <div className="mt-2">
+                <StateBreakdown {...childBreakdown} />
+              </div>
+            )}
+            {children.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {children.slice(0, 18).map((childTask) => (
+                  <span key={childTask.id} title={childTask.title}>
+                    <StepDot
+                      variant={hearthBreakdownVariantForTask(childTask)}
+                    />
+                  </span>
+                ))}
+              </div>
+            )}
+          </HeroStatus>
+        </div>
+      )}
 
       {workflowError && (
         <div
@@ -806,7 +877,7 @@ export function TaskDetailPanel({
       )}
 
       {taskData && !isLoading && !error && (
-        <div className="flex-1 overflow-auto">
+        <div className="t-detail-body flex-1 overflow-auto">
           {taskData.rejection_reason && (
             <div className="mx-4 mt-3 rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] p-3">
               <div className="flex items-start gap-2">
@@ -856,8 +927,7 @@ export function TaskDetailPanel({
             </div>
           )}
 
-          {/* === ACCEPTANCE CRITERIA (most prominent) === */}
-          <div className="border-t border-[var(--color-line)] mt-3">
+          <div className="tasks-v2-criteria mt-3 border-t border-[var(--color-line)]">
             <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <div className="flex items-center gap-2">
                 <svg
@@ -888,6 +958,7 @@ export function TaskDetailPanel({
           </div>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Progress</SectionLabel>}
             defaultOpen
             testId="progress-section"
@@ -958,6 +1029,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Spec</SectionLabel>}
             defaultOpen
             testId="spec-section-wrapper"
@@ -973,6 +1045,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Children</SectionLabel>}
             defaultOpen={children.length > 0}
             testId="children-section"
@@ -1021,6 +1094,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Dependencies</SectionLabel>}
             testId="dependencies-section"
             ariaLabel="Toggle Dependencies section"
@@ -1040,6 +1114,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Code</SectionLabel>}
             testId="code-section"
             ariaLabel="Toggle Code section"
@@ -1049,6 +1124,7 @@ export function TaskDetailPanel({
           </SectionGroup>
 
           <SectionGroup
+            className="accordion"
             label={<SectionLabel>Details</SectionLabel>}
             testId="details-section"
             ariaLabel="Toggle Details section"
@@ -1193,13 +1269,13 @@ export function TaskDetailPanel({
           </SectionGroup>
         </div>
       )}
-    </>
+    </div>
   );
 
   if (standalone) {
     return (
       <div
-        className="relative flex h-full w-full flex-col bg-[var(--color-bg)]"
+        className="tasks-v2 detail relative flex h-full w-full flex-col bg-[var(--color-bg)]"
         data-testid="task-detail-panel-standalone"
       >
         {content}
@@ -1210,7 +1286,11 @@ export function TaskDetailPanel({
   return (
     <ResizablePanel
       storageKey="task-detail-panel-width"
+      defaultWidth={420}
+      minWidth={360}
+      maxWidth={520}
       glowColor="from-primary/0 via-primary/30 to-primary/0"
+      className="tasks-v2 detail"
     >
       {content}
     </ResizablePanel>
