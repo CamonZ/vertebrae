@@ -1,14 +1,16 @@
-//! Delete command for removing tasks
+//! Delete command for removing tasks.
 //!
-//! Implements the `vtb delete` command to remove tasks with proper handling
-//! of children and dependencies.
+//! Implements `vtb delete <ID>` with optional cascading, confirmation prompts,
+//! and dependency cleanup handled by the task service. Without `--cascade`,
+//! deleting a task with children orphans those children when the user chooses
+//! orphaning or passes `--force`.
 
 use clap::Args;
 use serde::Serialize;
 use std::io::{self, Write};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
-/// Delete a task with optional cascade behavior
+/// Delete a task with optional cascade behavior.
 #[derive(Debug, Args)]
 pub struct DeleteCommand {
     /// Task ID to delete (case-insensitive)
@@ -44,21 +46,22 @@ pub struct DeleteResult {
     pub deleted_count: usize,
 }
 
+impl DeleteResult {
+    fn cancelled(task_id: String) -> Self {
+        Self {
+            task_id,
+            cascade: false,
+            deleted: false,
+            deleted_count: 0,
+        }
+    }
+}
+
 impl DeleteCommand {
-    /// Execute the delete command.
+    /// Execute the delete command and return a structured result.
     ///
-    /// Deletes the task with the given ID, handling children and dependencies
-    /// according to the specified options.
-    ///
-    /// # Arguments
-    ///
-    /// * `service` - Reference to the task service
-    ///
-    /// # Errors
-    ///
-    /// Returns `ServiceError` if:
-    /// - The task with the given ID does not exist
-    /// - Service operations fail
+    /// Cancelled prompts return `Ok(DeleteResult { deleted: false, .. })`
+    /// without mutating the task.
     pub async fn execute_result(
         &self,
         services: &VertebraeServices,
@@ -66,13 +69,11 @@ impl DeleteCommand {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Get task and its relationships separately
         let task = services.tasks().get_task(&id).await?;
         let task_title = &task.title;
-        let children_ids = services.tasks().get_children(&id).await?;
+        let children_ids: Vec<String> =
+            task.children.iter().map(|child| child.id.clone()).collect();
         let children_count = children_ids.len();
-        let dependent_ids = services.tasks().get_dependents(&id).await?;
-        let blocks_count = dependent_ids.len();
 
         // Determine action for children
         let child_action = if children_count > 0 {
@@ -92,32 +93,20 @@ impl DeleteCommand {
 
         // Handle cancel
         if child_action == ChildAction::Cancel {
-            return Ok(DeleteResult {
-                task_id: id,
-                cascade: false,
-                deleted: false,
-                deleted_count: 0,
-            });
+            return Ok(DeleteResult::cancelled(id));
         }
 
         // If not --force and task blocks others, warn and confirm
-        if !self.force && blocks_count > 0 && !self.confirm_blocking(blocks_count)? {
-            return Ok(DeleteResult {
-                task_id: id,
-                cascade: false,
-                deleted: false,
-                deleted_count: 0,
-            });
+        if !self.force {
+            let blocks_count = task.dependents.len();
+            if blocks_count > 0 && !self.confirm_blocking(blocks_count)? {
+                return Ok(DeleteResult::cancelled(id));
+            }
         }
 
         // If not --force and no children, just confirm deletion
         if !self.force && children_count == 0 && !self.confirm_delete(task_title)? {
-            return Ok(DeleteResult {
-                task_id: id,
-                cascade: false,
-                deleted: false,
-                deleted_count: 0,
-            });
+            return Ok(DeleteResult::cancelled(id));
         }
 
         // Determine if we should cascade
@@ -125,7 +114,9 @@ impl DeleteCommand {
 
         // Count descendants for message (if cascading)
         let deleted_count = if cascade {
-            self.count_descendants(services, &id).await? + 1
+            self.count_descendants_from_children(services, &children_ids)
+                .await?
+                + 1
         } else {
             1
         };
@@ -158,33 +149,25 @@ impl DeleteCommand {
         }
     }
 
-    /// Count all descendants of a task recursively.
-    async fn count_descendants(
+    /// Count descendants from an already-known child list.
+    async fn count_descendants_from_children(
         &self,
         services: &VertebraeServices,
-        id: &str,
+        children_ids: &[String],
     ) -> Result<usize, ServiceError> {
-        let children_ids = services.tasks().get_children(id).await?;
         let mut count = children_ids.len();
 
-        for child_id in &children_ids {
-            count += Box::pin(self.count_descendants(services, child_id)).await?;
+        for child_id in children_ids {
+            let grandchildren_ids = services.tasks().get_children(child_id).await?;
+            count += Box::pin(self.count_descendants_from_children(services, &grandchildren_ids))
+                .await?;
         }
 
         Ok(count)
     }
 
-    /// Prompt user for action when task has children.
-    fn prompt_child_action(&self, children_count: usize) -> Result<ChildAction, ServiceError> {
-        print!(
-            "Task has {} {}. [C]ascade delete / [O]rphan / [A]bort? ",
-            children_count,
-            if children_count == 1 {
-                "child"
-            } else {
-                "children"
-            }
-        );
+    fn prompt_input(prompt: &str) -> Result<String, ServiceError> {
+        print!("{}", prompt);
         io::stdout().flush().map_err(|e| {
             ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
         })?;
@@ -193,6 +176,20 @@ impl DeleteCommand {
         io::stdin()
             .read_line(&mut input)
             .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
+        Ok(input)
+    }
+
+    /// Prompt user for action when task has children.
+    fn prompt_child_action(&self, children_count: usize) -> Result<ChildAction, ServiceError> {
+        let input = Self::prompt_input(&format!(
+            "Task has {} {}. [C]ascade delete / [O]rphan / [A]bort? ",
+            children_count,
+            if children_count == 1 {
+                "child"
+            } else {
+                "children"
+            }
+        ))?;
 
         match input.trim().to_lowercase().as_str() {
             "c" | "cascade" => Ok(ChildAction::Cascade),
@@ -204,34 +201,18 @@ impl DeleteCommand {
 
     /// Confirm deletion when task blocks other tasks.
     fn confirm_blocking(&self, blocks_count: usize) -> Result<bool, ServiceError> {
-        print!(
+        let input = Self::prompt_input(&format!(
             "This task blocks {} other {}. Continue? [y/N] ",
             blocks_count,
             if blocks_count == 1 { "task" } else { "tasks" }
-        );
-        io::stdout().flush().map_err(|e| {
-            ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
-        })?;
-
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
+        ))?;
 
         Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
     }
 
     /// Confirm simple deletion.
     fn confirm_delete(&self, title: &str) -> Result<bool, ServiceError> {
-        print!("Delete task '{}'? [y/N] ", title);
-        io::stdout().flush().map_err(|e| {
-            ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
-        })?;
-
-        let mut input = String::new();
-        io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
+        let input = Self::prompt_input(&format!("Delete task '{}'? [y/N] ", title))?;
 
         Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
     }

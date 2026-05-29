@@ -889,11 +889,17 @@ vtb update <id> --remove-section checklist_item 0
 ## Deleting and Archiving Tasks
 
 ```bash
-# Delete single task
+# Delete a single task; prompts for confirmation
 vtb delete <id>
 
-# Delete task and all children
+# Delete a task and all descendants
 vtb delete <id> --cascade
+
+# Delete without prompts; children are orphaned unless --cascade is also set
+vtb delete <id> --force
+
+# Machine-readable delete result
+vtb delete <id> --force --json
 
 # Soft-delete via archive.
 # <id> accepts a full UUID or 8-character short ID.
@@ -905,6 +911,36 @@ vtb unarchive <id>
 ```
 
 Archived tasks are excluded from `vtb list` by default. Use `--include-archived` to see them.
+
+### Delete Options
+
+```bash
+vtb delete [OPTIONS] <ID>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<ID>` | Required task ID; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--cascade` | Also delete all children recursively |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-f, --force` | Skip confirmation prompts |
+| `-h, --help` | Print command help |
+
+`vtb delete` has no aliases. Without `--force`, a task with no children prompts
+`Delete task '<title>'? [y/N]`; only `y` or `yes` confirms. A task with children
+prompts `[C]ascade delete / [O]rphan / [A]bort?`; `c`/`cascade` deletes the
+subtree, `o`/`orphan` deletes only the selected task and keeps children, and
+`a`/`abort`, an empty response, or an unrecognized response cancels. If the task
+blocks other tasks, the command also prompts for confirmation unless `--force`
+is passed.
+
+With `--force` but without `--cascade`, children are orphaned. Dependencies
+pointing to deleted tasks are removed by the service. Under `--json`, the
+operation envelope includes `command`, `status`, `task_id`, `cascade`,
+`deleted`, and `deleted_count`; `status` is either `deleted` or `cancelled`.
+Clap rejects missing or malformed IDs before the command runs; unknown or
+ambiguous short IDs fail during ID resolution, and missing tasks fail in the
+service layer.
 
 ### Archive and Unarchive Options
 
