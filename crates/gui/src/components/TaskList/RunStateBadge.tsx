@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { RunStateChip } from "../../utils/runState";
+import { formatStepName } from "../../utils/formatStepName";
 import { formatDuration } from "../Operations/formatDuration";
 import { Spinner } from "../Spinner";
 
@@ -49,11 +50,6 @@ function toneClasses(chip: RunStateChip): { bg: string; text: string } {
   }
 }
 
-function formatStepType(stepName: string | null): string | null {
-  if (!stepName) return null;
-  return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, " ");
-}
-
 /**
  * Live elapsed timer that re-renders every second while a run is in flight.
  */
@@ -76,11 +72,15 @@ function LiveElapsed({ startedAt }: { startedAt: string }) {
  * elapsed timer. It sits alongside (not in place of) the neutral
  * workflow|step `StatusBadge`, which remains the progress signal.
  */
-export function RunStateBadge({ chip, stepName, startedAt }: RunStateBadgeProps) {
+export function RunStateBadge({
+  chip,
+  stepName,
+  startedAt,
+}: RunStateBadgeProps) {
   if (!chip.isActive) return null;
 
   const tone = toneClasses(chip);
-  const stepType = formatStepType(stepName);
+  const stepType = stepName ? formatStepName(stepName, "") : null;
 
   return (
     <span
