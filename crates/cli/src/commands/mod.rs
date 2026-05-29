@@ -2200,6 +2200,73 @@ mod tests {
     }
 
     #[test]
+    fn test_command_workflow_transition_add_parses_required_label_and_positionals() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "transition",
+            "add",
+            "a1b2c3d4",
+            "11111111-2222-4333-8444-555555555555",
+            "--label",
+            "approve",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Transition(
+                workflow::transition::TransitionCommand::Add(cmd),
+            )) => {
+                assert_eq!(cmd.from_workflow_id, "a1b2c3d4");
+                assert_eq!(cmd.to_workflow_id, "11111111-2222-4333-8444-555555555555");
+                assert_eq!(cmd.label, "approve");
+                assert_eq!(cmd.target_step, None);
+            }
+            _ => panic!("Expected Workflow Transition Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_transition_add_parses_short_flag_aliases() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "transition",
+            "add",
+            "a1b2c3d4",
+            "e5f6a7b8",
+            "-l",
+            "escalate",
+            "-t",
+            "1234abcd",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Transition(
+                workflow::transition::TransitionCommand::Add(cmd),
+            )) => {
+                assert_eq!(cmd.from_workflow_id, "a1b2c3d4");
+                assert_eq!(cmd.to_workflow_id, "e5f6a7b8");
+                assert_eq!(cmd.label, "escalate");
+                assert_eq!(cmd.target_step.as_deref(), Some("1234abcd"));
+            }
+            _ => panic!("Expected Workflow Transition Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_transition_add_requires_label() {
+        let result = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "transition",
+            "add",
+            "a1b2c3d4",
+            "e5f6a7b8",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_command_workflow_add_invalid_step_format() {
         let result = TestCli::try_parse_from([
             "test",
