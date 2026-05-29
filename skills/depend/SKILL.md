@@ -14,6 +14,12 @@ Manage task dependencies.
 vtb depend <task-a> --on <task-b>
 ```
 
+## Options
+
+Use `vtb depend --help` for the live option list. The canonical guide section
+in `docs/vtb-guide.md` covers JSON output, short IDs, aliases, idempotence, and
+validation behavior.
+
 ## Remove dependency
 
 ```bash
