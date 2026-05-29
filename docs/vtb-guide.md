@@ -91,6 +91,16 @@ vtb add "Title" --json                   # JSON of created task
 
 ## Creating Tasks
 
+`vtb add` creates one task from a required `<TITLE>` positional argument:
+
+```bash
+vtb add [OPTIONS] <TITLE>
+```
+
+Quote titles that contain spaces. Unless `-l, --level` is provided, new items
+are created at the `task` level. Omit `--workflow` to use the configured
+default workflow.
+
 ### Basic Creation
 
 ```bash
@@ -110,11 +120,35 @@ vtb add "Create sign() function" --parent <ticket-id>
 vtb add "Fix login bug" -p critical -t bug -t backend
 
 # With a dependency (this task is blocked by another)
-vtb add "Write integration tests" --depends-on <blocker-id>
+vtb add "Write integration tests" --depends-on <blocker-id> --depends-on <another-blocker-id>
 
 # Assign to a specific workflow on creation
 vtb add "New feature" --workflow <workflow-id>
+
+# Machine-readable output
+vtb add "Task title" --json
 ```
+
+### Add Options
+
+| Flag | Description |
+|------|-------------|
+| `<TITLE>` | Required task title |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-l, --level <LEVEL>` | Task level: `epic`, `ticket`, or `task` (default: `task`) |
+| `-d, --description <DESCRIPTION>` | Detailed description |
+| `-p, --priority <PRIORITY>` | Priority: `low`, `medium`, `high`, or `critical` |
+| `-t, --tag <TAGS>` | Add a tag; repeat for multiple tags |
+| `--parent <PARENT>` | Parent task ID; accepts a full UUID or 8-character short ID |
+| `--depends-on <DEPENDS_ON>` | Blocker task ID; accepts a full UUID or 8-character short ID and can be repeated |
+| `--workflow <WORKFLOW>` | Workflow ID to assign task to; accepts a full UUID or 8-character short ID |
+
+For `vtb add`, `--json` returns an operation envelope with `command: "add"`,
+`status: "created"`, and top-level `task_id` set to the created task ID. Clap rejects
+invalid `--level` or `--priority` values, and it rejects malformed
+`--parent`, `--depends-on`, or `--workflow` values before the command runs.
+Unknown or ambiguous short IDs fail during ID resolution; missing referenced
+tasks or workflows fail in the service layer.
 
 ### Planning a Feature (Epic -> Tickets -> Tasks)
 

@@ -7,6 +7,9 @@ description: Create a new task in vertebrae
 
 Create a new task in vertebrae.
 
+`vtb add` takes one required positional argument, `<TITLE>`. Quote titles that
+contain spaces.
+
 ## Usage
 
 ```bash
@@ -20,26 +23,23 @@ vtb add "Feature title" -l epic -d "Detailed description"
 vtb add "Subtask" --parent <parent-id>
 
 # With dependencies
-vtb add "Task" --depends-on <blocker-id>
+vtb add "Task" --depends-on <blocker-id> --depends-on <another-blocker-id>
 
 # With priority and tags
 vtb add "Urgent fix" -p critical -t bug -t backend
 
 # Assign to a workflow on creation
 vtb add "Task" --workflow <workflow-id>
+
+# Machine-readable output
+vtb add "Task title" --json
 ```
 
 ## Options
 
-| Flag | Description |
-|------|-------------|
-| `-l, --level` | Task level: epic, ticket, task (default: task) |
-| `-d, --description` | Detailed description |
-| `-p, --priority` | Priority: low, medium, high, critical |
-| `-t, --tag` | Add tag (repeatable) |
-| `--parent` | Parent task ID |
-| `--depends-on` | Blocker task ID (repeatable) |
-| `--workflow` | Workflow ID to assign task to |
+Use `vtb add --help` for the live option list. The canonical guide section in
+`docs/vtb-guide.md` covers add-specific flags, JSON output, short IDs, and
+validation behavior.
 
 ## Hierarchy (use in order)
 
