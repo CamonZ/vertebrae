@@ -119,9 +119,18 @@ Add a log entry to an execution.
 
 ```bash
 vtb execution log <execution-id> "Processing file auth.rs"
+vtb execution log <execution-id> $'Line 1\nLine 2'
+vtb execution log <execution-id> "Processing file auth.rs" --json
 ```
 
-Takes a required content string as a positional argument.
+`vtb execution log` takes a full execution UUID and one required content
+argument. Quote content in your shell when it contains spaces or newlines.
+
+## Options
+
+Use `vtb execution log --help` for the live option list. The canonical guide
+section in `docs/vtb-guide.md` covers JSON output, ID validation, existence
+checks, and preview behavior.
 
 ---
 
