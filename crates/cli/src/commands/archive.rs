@@ -5,10 +5,10 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, UpdateTaskOptions, VertebraeServices};
 
-/// Archive a task (set archived=true)
+/// Archive a task (set archived=true).
 #[derive(Debug, Args)]
 pub struct ArchiveCommand {
-    /// Task ID to archive (case-insensitive)
+    /// Task ID to archive (full UUID or 8-character short ID, case-insensitive)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 }
@@ -29,10 +29,10 @@ impl ArchiveCommand {
     }
 }
 
-/// Unarchive a task (set archived=false)
+/// Unarchive a task (set archived=false).
 #[derive(Debug, Args)]
 pub struct UnarchiveCommand {
-    /// Task ID to unarchive (case-insensitive)
+    /// Task ID to unarchive (full UUID or 8-character short ID, case-insensitive)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 }
