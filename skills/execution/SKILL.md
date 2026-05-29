@@ -27,22 +27,26 @@ Create a new execution record for a task's current workflow step.
 vtb execution create <task-id>
 
 # With context and prompt data
-vtb execution create abc123 \
+vtb execution create abc12345 \
   --context '{"user": "alice", "environment": "staging"}' \
   --prompt '{"instructions": "Review the code changes"}'
+
+vtb execution create <task-id> --json
 ```
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
-| `--context` | JSON context data about the task |
-| `--prompt` | JSON prompt data for the execution |
+| `--context <CONTEXT>` | JSON context data about the task |
+| `--prompt <PROMPT>` | JSON prompt data for the execution |
+| `--json` | Output a machine-readable create result |
 
 ### Requirements
 
+- `<task-id>` accepts a full UUID or an 8-character hex task short ID
 - Task must have a workflow assigned
-- Creates execution for current workflow step
+- Task must have a current workflow step
 
 ---
 
