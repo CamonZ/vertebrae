@@ -800,8 +800,40 @@ cycle.
 ### Removing Dependencies
 
 ```bash
+# Task A no longer depends on task B
 vtb undepend <task-a> --on <task-b>
+
+# Short IDs are accepted anywhere a task ID is accepted
+vtb undepend <task-a-short-id> --on <task-b-short-id>
+
+# Machine-readable output
+vtb undepend <task-a> --on <task-b> --json
 ```
+
+### Undepend Options
+
+```bash
+vtb undepend [OPTIONS] --on <BLOCKER_ID> <ID>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<ID>` | Required task ID to remove the dependency from; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--on <BLOCKER_ID>` | Required blocker task ID to remove; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-h, --help` | Print command help |
+
+`vtb undepend` has no aliases, no short flags, and no defaults. Under `--json`,
+the command returns `task_id`, `blocker_id`, and `existed`.
+
+Removing an existing dependency succeeds and reports that the task no longer
+depends on the blocker. Removing a dependency that is not present also succeeds
+and reports a warning in human-readable output, with `existed: false` under
+`--json`. The command rejects malformed IDs before execution and unknown or
+ambiguous short IDs during ID resolution. The source task must exist. A
+non-existent full UUID blocker can still report `existed: false` when the source
+task does not depend on it; service failures while removing an existing
+dependency are reported as errors.
 
 ### Viewing Dependencies
 
