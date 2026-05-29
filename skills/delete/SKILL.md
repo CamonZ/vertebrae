@@ -5,40 +5,48 @@ description: Remove tasks from the database
 
 # /delete
 
-Remove tasks from the database.
+Remove tasks from the database. Prefer `vtb archive` for reversible cleanup;
+`vtb delete` is destructive.
 
 ## Usage
 
 ```bash
-# Delete single task (prompts for confirmation)
+# Delete a single task; prompts for confirmation
 vtb delete <task-id>
 
-# Delete task and all children (cascade)
+# Delete a task and all descendants
 vtb delete <task-id> --cascade
 
-# Force delete without prompts
+# Delete without prompts; children are orphaned unless --cascade is also set
 vtb delete <task-id> --force
 
-# Force cascade delete
+# Delete a subtree without prompts
 vtb delete <task-id> --cascade --force
+
+# Machine-readable output
+vtb delete <task-id> --force --json
 ```
 
 ## Options
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--cascade` | | Delete the entire subtree (all children) |
-| `--force` | `-f` | Skip all confirmation prompts |
+Use `vtb delete --help` for the live option list. The canonical guide section
+in `docs/vtb-guide.md` covers prompts, JSON output, short IDs, and validation
+behavior.
 
 ## Behavior
 
-When deleting a task with children (without `--cascade` or `--force`):
-- Interactive prompt: `[C]ascade delete / [O]rphan / [A]bort`
-
-With `--force` but without `--cascade`:
-- Children are orphaned (become root tasks)
+- A task with no children prompts `Delete task '<title>'? [y/N]` unless
+  `--force` is passed.
+- A task with children prompts
+  `Task has N children. [C]ascade delete / [O]rphan / [A]bort?` unless
+  `--cascade` or `--force` is passed.
+- `--cascade` deletes the task and its descendants.
+- `--force` without `--cascade` deletes the task and orphans its children.
+- If the task blocks other tasks, the command prompts
+  `This task blocks N other tasks. Continue? [y/N]` unless `--force` is passed.
+- Empty or unrecognized prompt responses cancel the deletion.
 
 ## Warnings
-- Deleting a task removes its sections and refs
-- `--cascade` deletes entire subtree
-- Dependencies pointing to deleted tasks are removed
+- Deleting a task removes its sections and refs.
+- `--cascade` deletes the entire subtree.
+- Dependencies pointing to deleted tasks are removed.
