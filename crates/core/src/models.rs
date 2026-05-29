@@ -80,6 +80,18 @@ pub enum SectionType {
 }
 
 impl SectionType {
+    pub const ALL: [SectionType; 9] = [
+        SectionType::Goal,
+        SectionType::Context,
+        SectionType::CurrentBehavior,
+        SectionType::DesiredBehavior,
+        SectionType::ChecklistItem,
+        SectionType::TestingCriterion,
+        SectionType::AntiPattern,
+        SectionType::FailureTest,
+        SectionType::Constraint,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             SectionType::Goal => "goal",

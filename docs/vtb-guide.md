@@ -16,6 +16,24 @@ The command handles registration and writes the client configuration. See [SACRU
 
 ---
 
+## CLI Manifest and Docs Validation
+
+The shipped `vtb` binary can emit a machine-readable command manifest derived
+from its clap definitions:
+
+```bash
+vtb manifest print
+```
+
+Validate command examples, aliases, and supported section types in this guide
+and the command skills:
+
+```bash
+vtb manifest validate-docs --repo-root .
+```
+
+---
+
 ## Core Concepts
 
 ### Task Hierarchy
@@ -134,7 +152,6 @@ Sections add structured content to tasks. They are critical for triage.
 | `context` | Background information | Single |
 | `current_behavior` | How it works now (for bugs) | Single |
 | `desired_behavior` | How it should work | Single |
-| `step` | Ordered implementation steps | Multiple |
 | `checklist_item` | Trackable checklist with done/undone | Multiple |
 | `constraint` | Requirements/limitations | Multiple |
 | `testing_criterion` | How to verify success | Multiple |
@@ -150,12 +167,10 @@ vtb section <id> goal "Allow users to subscribe to real-time market data"
 # Background context
 vtb section <id> context "TWS provides tick-by-tick data via request ID subscriptions"
 
-# Implementation steps (ordered)
-vtb section <id> step "Create RequestData struct with contract and tick_list fields"
-vtb section <id> step "Implement binary serialization"
-vtb section <id> step "Add response parsing in from_fields/1"
-
 # Checklist items (trackable)
+vtb section <id> checklist_item "Create RequestData struct with contract and tick_list fields"
+vtb section <id> checklist_item "Implement binary serialization"
+vtb section <id> checklist_item "Add response parsing in from_fields/1"
 vtb section <id> checklist_item "Review API documentation"
 vtb section <id> checklist_item "Update changelog"
 
@@ -178,24 +193,24 @@ vtb section <id> failure_test "Invalid contract returns {:error, reason}"
 
 ```bash
 vtb sections <id>                     # List all sections
-vtb sections <id> --type step         # Filter by type
+vtb sections <id> --type checklist_item  # Filter by type
 ```
 
 ### Editing and Removing Sections
 
 ```bash
 # Edit a section in-place (type + 0-based ordinal + new content)
-vtb update <id> --edit-section step 0 "Updated step content"
+vtb update <id> --edit-section checklist_item 0 "Updated checklist item"
 
 # Remove a section (type + 0-based ordinal)
-vtb update <id> --remove-section step 0
+vtb update <id> --remove-section checklist_item 0
 
 # Remove single-instance types (no index needed)
 vtb unsection <id> goal
 vtb unsection <id> context
 
 # Remove multi-instance types (index required)
-vtb unsection <id> step --index 2
+vtb unsection <id> checklist_item --index 2
 vtb unsection <id> testing_criterion --index 1
 ```
 
@@ -232,7 +247,7 @@ Triage validates that a ticket is properly documented before it can be transitio
 | Section | Minimum | Details |
 |---------|---------|---------|
 | `testing_criterion` | **2** | At least 1 unit + 1 integration criterion |
-| `step` | **1** | Implementation steps |
+| `checklist_item` | **1** | Implementation steps |
 | `constraint` | **2** | Architectural/quality guidelines |
 | `goal` or `desired_behavior` | **1** | Clear objective |
 
@@ -786,8 +801,8 @@ vtb update <id> --parent <parent-id>
 vtb update <id> --parent ""                      # Remove parent
 vtb update <id> --worktree /path/to/worktree
 vtb update <id> --worktree ""                    # Clear worktree
-vtb update <id> --edit-section step 0 "New content"
-vtb update <id> --remove-section step 0
+vtb update <id> --edit-section checklist_item 0 "New content"
+vtb update <id> --remove-section checklist_item 0
 ```
 
 **Never use `vtb update` for workflow/step changes** — use `vtb transition-to` instead.
@@ -866,10 +881,10 @@ Record and review workflow execution history:
 vtb execution create <task-id>
 
 # Add log entries
-vtb execution log <execution-id> "Processing..." --level info
+vtb execution log <execution-id> "Processing..."
 
-# Update execution status
-vtb execution update <execution-id> --status completed
+# Update execution output/result
+vtb execution update <execution-id> --output "Completed"
 
 # View execution lists/details
 vtb execution list <task-id>
@@ -897,7 +912,7 @@ vtb add "Add response parsing" -l ticket --parent <epic-id>
 
 # 2. Document and triage tickets
 vtb section <ticket-id> goal "..."
-vtb section <ticket-id> step "..."
+vtb section <ticket-id> checklist_item "..."
 vtb section <ticket-id> testing_criterion "UNIT: ..."
 vtb section <ticket-id> testing_criterion "INTEGRATION: ..."
 vtb section <ticket-id> constraint "..."
@@ -1018,3 +1033,5 @@ vtb ready
 | Command | Description |
 |---------|-------------|
 | `vtb init` | Initialize project |
+| `vtb manifest print` | Print the clap-derived command manifest |
+| `vtb manifest validate-docs` | Validate docs and skills against the manifest |
