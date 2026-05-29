@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
@@ -32,10 +32,7 @@ function createTask(overrides?: Partial<Task>): Task {
   };
 }
 
-function node(
-  task: Task,
-  children: TaskTreeNodeType[] = []
-): TaskTreeNodeType {
+function node(task: Task, children: TaskTreeNodeType[] = []): TaskTreeNodeType {
   return { task, has_blockers: false, blocker_count: 0, children };
 }
 
@@ -101,27 +98,59 @@ describe("TaskTreeNode", () => {
 
   it("renders a level glyph keyed to the task level", () => {
     renderTree([
-      node(createTask({ id: "a0000000-0000-0000-0000-000000000001", level: "epic" })),
-      node(createTask({ id: "a0000000-0000-0000-0000-000000000002", level: "ticket" })),
-      node(createTask({ id: "a0000000-0000-0000-0000-000000000003", level: "task" })),
+      node(
+        createTask({
+          id: "a0000000-0000-0000-0000-000000000001",
+          level: "epic",
+        })
+      ),
+      node(
+        createTask({
+          id: "a0000000-0000-0000-0000-000000000002",
+          level: "ticket",
+        })
+      ),
+      node(
+        createTask({
+          id: "a0000000-0000-0000-0000-000000000003",
+          level: "task",
+        })
+      ),
     ]);
 
     const glyphs = screen.getAllByTestId("task-tree-node-level-glyph");
     expect(glyphs).toHaveLength(3);
     expect(glyphs[0]).toHaveAttribute("data-level", "epic");
-    expect(glyphs[0].querySelector('[data-shape="diamond-filled"]')).toBeInTheDocument();
+    expect(
+      glyphs[0].querySelector('[data-shape="diamond-filled"]')
+    ).toBeInTheDocument();
     expect(glyphs[1]).toHaveAttribute("data-level", "ticket");
-    expect(glyphs[1].querySelector('[data-shape="diamond-hollow"]')).toBeInTheDocument();
+    expect(
+      glyphs[1].querySelector('[data-shape="diamond-hollow"]')
+    ).toBeInTheDocument();
     expect(glyphs[2]).toHaveAttribute("data-level", "task");
     expect(glyphs[2].querySelector('[data-shape="dot"]')).toBeInTheDocument();
   });
 
   it("shows a pluralized child-level summary using the child level", () => {
-    const childA = node(createTask({ id: "c0000000-0000-0000-0000-000000000001", level: "ticket" }));
-    const childB = node(createTask({ id: "c0000000-0000-0000-0000-000000000002", level: "ticket" }));
+    const childA = node(
+      createTask({
+        id: "c0000000-0000-0000-0000-000000000001",
+        level: "ticket",
+      })
+    );
+    const childB = node(
+      createTask({
+        id: "c0000000-0000-0000-0000-000000000002",
+        level: "ticket",
+      })
+    );
     renderTree([
       node(
-        createTask({ id: "e0000000-0000-0000-0000-000000000000", level: "epic" }),
+        createTask({
+          id: "e0000000-0000-0000-0000-000000000000",
+          level: "epic",
+        }),
         [childA, childB]
       ),
     ]);
@@ -132,10 +161,15 @@ describe("TaskTreeNode", () => {
   });
 
   it("singularizes the child summary for a single child", () => {
-    const child = node(createTask({ id: "c1000000-0000-0000-0000-000000000001", level: "task" }));
+    const child = node(
+      createTask({ id: "c1000000-0000-0000-0000-000000000001", level: "task" })
+    );
     renderTree([
       node(
-        createTask({ id: "t1000000-0000-0000-0000-000000000000", level: "ticket" }),
+        createTask({
+          id: "t1000000-0000-0000-0000-000000000000",
+          level: "ticket",
+        }),
         [child]
       ),
     ]);
@@ -146,9 +180,7 @@ describe("TaskTreeNode", () => {
   });
 
   it("renders each tag as a pill in the metadata line", () => {
-    renderTree([
-      node(createTask({ tags: ["backend", "urgent"] })),
-    ]);
+    renderTree([node(createTask({ tags: ["backend", "urgent"] }))]);
 
     const pills = screen.getAllByTestId("task-tree-node-tag");
     expect(pills.map((p) => p.textContent)).toEqual(["backend", "urgent"]);
@@ -156,9 +188,24 @@ describe("TaskTreeNode", () => {
 
   it("renders priority as a directional arrow on the right", () => {
     renderTree([
-      node(createTask({ id: "p0000000-0000-0000-0000-000000000001", priority: "high" })),
-      node(createTask({ id: "p0000000-0000-0000-0000-000000000002", priority: "medium" })),
-      node(createTask({ id: "p0000000-0000-0000-0000-000000000003", priority: "low" })),
+      node(
+        createTask({
+          id: "p0000000-0000-0000-0000-000000000001",
+          priority: "high",
+        })
+      ),
+      node(
+        createTask({
+          id: "p0000000-0000-0000-0000-000000000002",
+          priority: "medium",
+        })
+      ),
+      node(
+        createTask({
+          id: "p0000000-0000-0000-0000-000000000003",
+          priority: "low",
+        })
+      ),
     ]);
 
     const arrows = screen.getAllByTestId("task-tree-node-priority");
@@ -177,7 +224,7 @@ describe("TaskTreeNode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the run-state badge with the step type while a run is active", () => {
+  it("shows the Hearth run chip with the workflow step while a run is active", () => {
     renderTree([
       node(
         withActiveRun(
@@ -188,20 +235,16 @@ describe("TaskTreeNode", () => {
       ),
     ]);
 
-    const badge = screen.getByTestId("task-tree-node-run-badge");
-    expect(badge).toHaveAttribute("data-run-status", "executing");
-    // Step type is surfaced humanized (in_progress -> "In progress").
-    expect(badge).toHaveTextContent("In progress");
-    expect(badge).toHaveAttribute(
-      "aria-label",
-      "Run state: Running, step In progress"
-    );
-    expect(
-      within(badge).getByTestId("task-tree-node-run-elapsed")
-    ).toBeInTheDocument();
+    const chip = screen.getByTestId("task-tree-node-run-chip");
+    expect(chip).toHaveAttribute("data-run-status", "executing");
+    expect(chip).toHaveAttribute("data-state", "running");
+    expect(chip).toHaveAttribute("aria-label", "Run status: Running");
+    expect(chip).toHaveTextContent("Running");
+    // The neutral workflow|step breadcrumb remains beside the live chip.
+    expect(screen.getByText("In progress")).toBeInTheDocument();
   });
 
-  it("hides the run-state badge for idle tasks but keeps the workflow breadcrumb", () => {
+  it("shows the workflow step for idle tasks without rendering a run chip", () => {
     renderTree([
       node(
         createTask({
@@ -213,10 +256,9 @@ describe("TaskTreeNode", () => {
     ]);
 
     expect(
-      screen.queryByTestId("task-tree-node-run-badge")
+      screen.queryByTestId("task-tree-node-run-chip")
     ).not.toBeInTheDocument();
-    // The neutral workflow|step breadcrumb stays as the progress signal.
-    expect(screen.getByText("Implementation")).toBeInTheDocument();
+    expect(screen.queryByText("Implementation")).not.toBeInTheDocument();
     expect(screen.getByText("Todo")).toBeInTheDocument();
   });
 
@@ -246,5 +288,32 @@ describe("TaskTreeNode", () => {
     expect(selectedRows).toHaveLength(1);
     expect(selectedRows[0]).toHaveAttribute("aria-selected", "true");
     expect(selectedRows[0]).toHaveTextContent("Selected");
+  });
+
+  it("moves selection to the next visible row with ArrowDown", () => {
+    const first = createTask({
+      id: "10000000-0000-0000-0000-000000000000",
+      title: "First",
+    });
+    const second = createTask({
+      id: "20000000-0000-0000-0000-000000000000",
+      title: "Second",
+    });
+    const onTaskSelect = vi.fn();
+
+    render(
+      <TaskTreeView
+        hierarchy={[node(first), node(second)]}
+        isLoading={false}
+        error={null}
+        selectedTaskId={first.id}
+        onTaskSelect={onTaskSelect}
+      />
+    );
+
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
+
+    expect(onTaskSelect).toHaveBeenCalledTimes(1);
+    expect(onTaskSelect).toHaveBeenCalledWith(second);
   });
 });

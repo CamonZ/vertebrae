@@ -1,7 +1,7 @@
+import { formatStepName } from "../../utils/formatStepName";
+
 interface StepBadgeProps {
-  /** Raw workflow step name (e.g. "in_progress"); null renders `emptyLabel`. */
   stepName: string | null;
-  /** Label shown when `stepName` is null. */
   emptyLabel?: string;
   className?: string;
 }
@@ -12,7 +12,10 @@ function getStepStyles(stepName: string | null): {
   glow?: string;
 } {
   if (!stepName) {
-    return { bg: "bg-[var(--color-bg-2)]", text: "text-[var(--color-fg-mute)]" };
+    return {
+      bg: "bg-[var(--color-bg-2)]",
+      text: "text-[var(--color-fg-mute)]",
+    };
   }
   switch (stepName.toLowerCase()) {
     case "todo":
@@ -45,21 +48,13 @@ function getStepStyles(stepName: string | null): {
       };
     case "backlog":
     default:
-      return { bg: "bg-[var(--color-bg-2)]", text: "text-[var(--color-fg-mute)]" };
+      return {
+        bg: "bg-[var(--color-bg-2)]",
+        text: "text-[var(--color-fg-mute)]",
+      };
   }
 }
 
-function formatStepName(stepName: string | null, emptyLabel: string): string {
-  if (!stepName) return emptyLabel;
-  return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, " ");
-}
-
-/**
- * Canonical square status chip for a task's workflow step. Single source of
- * truth for the step's color vocabulary and shape across the tree view, kanban
- * cards, and the detail panel's children list — so "Done" reads identically
- * everywhere instead of drifting between square/rounded and tinted/grey.
- */
 export function StepBadge({
   stepName,
   emptyLabel = "No step",

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatStepName } from "../../utils/formatStepName";
 import { Badge } from "../atoms/Badge";
 import { Spinner } from "../Spinner";
 
@@ -26,12 +27,9 @@ interface Display {
   spinner?: boolean;
 }
 
-function formatStep(step: string): string {
-  if (!step) return "";
-  return step.charAt(0).toUpperCase() + step.slice(1).replace(/_/g, " ");
-}
-
-function displayFor(state: Exclude<StatusBadgeState, { kind: "workflow" }>): Display {
+function displayFor(
+  state: Exclude<StatusBadgeState, { kind: "workflow" }>
+): Display {
   switch (state) {
     case "queued":
       return { label: "Queued", intent: "neutral" };
@@ -61,7 +59,7 @@ export function StatusBadge({ state, size = "sm", onClick }: StatusBadgeProps) {
     // Either segment may be omitted (unassigned task, or workflow with no
     // current step) and the divider only appears when both are present.
     const workflow = state.workflow;
-    const step = formatStep(state.step);
+    const step = formatStepName(state.step, "");
     badge = (
       <span className="inline-flex max-w-full items-center overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] text-2xs font-medium">
         {workflow && (

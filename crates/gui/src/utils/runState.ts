@@ -122,6 +122,26 @@ export interface HearthRunChipState {
   tone: RunStateChip["tone"];
 }
 
+export type HearthStateBreakdownVariant =
+  | "done"
+  | "running"
+  | "waiting"
+  | "queued";
+
+export interface HearthStateBreakdown {
+  done: number;
+  running: number;
+  waiting: number;
+  queued: number;
+}
+
+export const EMPTY_HEARTH_STATE_BREAKDOWN: HearthStateBreakdown = {
+  done: 0,
+  running: 0,
+  waiting: 0,
+  queued: 0,
+};
+
 const TERMINAL_RUN_STATUSES: ReadonlySet<TaskRunStatus> = new Set([
   "stopped",
   "completed",
@@ -150,6 +170,39 @@ export function deriveHearthRunChipState(
     status,
     ...meta,
   };
+}
+
+export function hearthBreakdownVariantForTask(
+  task: Pick<Task, "completed_at" | "run_controls">
+): HearthStateBreakdownVariant {
+  const status = task.run_controls?.active_run?.status ?? null;
+  if (task.completed_at || status === "completed") return "done";
+  if (status === "executing") return "running";
+  if (status === "waiting") return "waiting";
+  return "queued";
+}
+
+export function deriveHearthStateBreakdown<
+  T extends Pick<Task, "completed_at" | "run_controls">,
+>(tasks: T[]): HearthStateBreakdown {
+  return tasks.reduce<HearthStateBreakdown>(
+    (counts, task) => {
+      counts[hearthBreakdownVariantForTask(task)] += 1;
+      return counts;
+    },
+    { ...EMPTY_HEARTH_STATE_BREAKDOWN }
+  );
+}
+
+export function hasHearthStateBreakdown(
+  breakdown: HearthStateBreakdown
+): boolean {
+  return (
+    breakdown.done > 0 ||
+    breakdown.running > 0 ||
+    breakdown.waiting > 0 ||
+    breakdown.queued > 0
+  );
 }
 
 /**
