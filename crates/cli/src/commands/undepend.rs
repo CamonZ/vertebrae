@@ -10,11 +10,11 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// Remove a dependency relationship between tasks
 #[derive(Debug, Args)]
 pub struct UndependCommand {
-    /// Task ID to remove dependency from (case-insensitive)
+    /// Task ID to remove dependency from (full UUID or 8-character short ID, case-insensitive)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// ID of the blocking task to remove
+    /// ID of the blocking task to remove (full UUID or 8-character short ID, case-insensitive)
     #[arg(long = "on", required = true, value_parser = crate::commands::parse_uuid("blocker ID"))]
     pub blocker_id: String,
 }
