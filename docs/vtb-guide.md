@@ -868,14 +868,37 @@ vtb delete <id>
 # Delete task and all children
 vtb delete <id> --cascade
 
-# Soft-delete via archive
+# Soft-delete via archive.
+# <id> accepts a full UUID or 8-character short ID.
 vtb archive <id>
 
-# Restore an archived task
+# Restore an archived task.
+# <id> accepts a full UUID or 8-character short ID.
 vtb unarchive <id>
 ```
 
 Archived tasks are excluded from `vtb list` by default. Use `--include-archived` to see them.
+
+### Archive and Unarchive Options
+
+```bash
+vtb archive [OPTIONS] <ID>
+vtb unarchive [OPTIONS] <ID>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<ID>` | Required task ID; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-h, --help` | Print command help |
+
+These commands have no aliases or command-specific flags. `vtb archive` sets
+`archived=true`; `vtb unarchive` sets `archived=false`. Under `--json`, each
+returns an operation envelope with `command` set to `archive` or `unarchive`,
+`status: "updated"`, and `data.archived` set to the resulting boolean value.
+Clap rejects missing or malformed IDs before the command runs; unknown or
+ambiguous short IDs fail during ID resolution, and missing tasks fail in the
+service layer.
 
 ---
 
