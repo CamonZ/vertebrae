@@ -12,7 +12,19 @@ Remove a dependency relationship between tasks.
 ```bash
 # Task A no longer depends on task B
 vtb undepend <task-a> --on <task-b>
+
+# Short IDs are accepted anywhere a task ID is accepted
+vtb undepend <task-a-short-id> --on <task-b-short-id>
+
+# Machine-readable output
+vtb undepend <task-a> --on <task-b> --json
 ```
+
+## Options
+
+Use `vtb undepend --help` for the live option list. The canonical guide section
+in `docs/vtb-guide.md` covers JSON output, short IDs, aliases,
+missing-dependency behavior, and validation behavior.
 
 ## Behavior
 
