@@ -97,9 +97,10 @@ impl CriterionRefCommand {
     /// Returns `ServiceError` if:
     /// - The task does not exist
     /// - The criterion index is out of bounds
-    /// - The section at the index is not a testing_criterion
     /// - The file specification is invalid
     /// - Database operations fail
+    ///
+    /// Missing files are allowed and reported as warnings in the command result.
     pub async fn execute(
         &self,
         services: &VertebraeServices,
