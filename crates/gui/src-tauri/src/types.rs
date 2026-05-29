@@ -1047,6 +1047,21 @@ impl From<vertebrae_core::ChatMessage> for ChatMessage {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionDecisionBehavior {
+    Allow,
+    Deny,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ResolvePermissionRequestInput {
+    pub request_id: String,
+    pub behavior: PermissionDecisionBehavior,
+    pub message: Option<String>,
+    pub updated_input: Option<serde_json::Value>,
+}
+
 // ============================================================================
 // Pipeline Types
 // ============================================================================

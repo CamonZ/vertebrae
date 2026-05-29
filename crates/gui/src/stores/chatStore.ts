@@ -25,8 +25,10 @@ export type ChatMessage =
     }
   | {
       kind: "permission_request";
+      requestId?: string;
       toolName: string;
       message: string;
+      input?: string;
       timestamp: string;
     }
   | { kind: "session_start"; model: string; timestamp: string }

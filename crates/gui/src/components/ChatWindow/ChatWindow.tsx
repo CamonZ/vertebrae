@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
+import { commands } from "../../bindings";
+import type { JsonValue } from "../../bindings";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
@@ -203,14 +205,7 @@ function renderTurn(turn: Turn, key: string): ReactNode {
       ChatMessage,
       { kind: "permission_request" }
     >;
-    return (
-      <ChatBubble key={key} role="system" author="PERMISSION REQUIRED">
-        <p className="text-sm text-[var(--color-fg-soft)]">{msg.message}</p>
-        <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
-          Grant permission in the Claude CLI terminal to continue.
-        </p>
-      </ChatBubble>
-    );
+    return <PermissionRequestTurn key={key} message={msg} />;
   }
 
   // error
@@ -218,6 +213,93 @@ function renderTurn(turn: Turn, key: string): ReactNode {
   return (
     <ChatBubble key={key} role="system" author="ERROR">
       <p className="text-sm text-[var(--color-err)]">{msg.message}</p>
+    </ChatBubble>
+  );
+}
+
+function PermissionRequestTurn({
+  message,
+}: {
+  message: Extract<ChatMessage, { kind: "permission_request" }>;
+}) {
+  const [updatedInput, setUpdatedInput] = useState(message.input ?? "");
+  const [status, setStatus] = useState<"pending" | "allowing" | "denying" | "resolved" | "error">(
+    message.requestId ? "pending" : "resolved"
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const resolve = async (behavior: "allow" | "deny") => {
+    if (!message.requestId) return;
+    setStatus(behavior === "allow" ? "allowing" : "denying");
+    setError(null);
+
+    let parsedInput: JsonValue | null = null;
+    if (behavior === "allow" && updatedInput.trim()) {
+      try {
+        parsedInput = JSON.parse(updatedInput) as JsonValue;
+      } catch (err) {
+        setStatus("error");
+        setError(err instanceof Error ? err.message : "Invalid JSON");
+        return;
+      }
+    }
+
+    const result = await commands.resolvePermissionRequest({
+      request_id: message.requestId,
+      behavior,
+      message: behavior === "deny" ? "Denied from Vertebrae GUI" : null,
+      updated_input: behavior === "allow" ? parsedInput : null,
+    });
+
+    if (result.status === "ok") {
+      setStatus("resolved");
+    } else {
+      setStatus("error");
+      setError(result.error.message);
+    }
+  };
+
+  const disabled = status === "allowing" || status === "denying" || status === "resolved";
+
+  return (
+    <ChatBubble role="system" author="PERMISSION REQUIRED">
+      <div className="space-y-3">
+        <div>
+          <p className="font-mono text-xs text-[var(--color-fg)]">{message.toolName}</p>
+          <p className="mt-1 text-sm text-[var(--color-fg-soft)]">{message.message}</p>
+        </div>
+        {message.input && (
+          <textarea
+            value={updatedInput}
+            onChange={(event) => setUpdatedInput(event.target.value)}
+            disabled={disabled}
+            className="h-32 w-full resize-y rounded border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs text-[var(--color-fg)] outline-none focus:border-[var(--color-accent)]"
+            spellCheck={false}
+          />
+        )}
+        {error && <p className="text-xs text-[var(--color-err)]">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void resolve("allow")}
+            className="rounded border border-[var(--color-ok)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-ok)] transition-colors hover:bg-[var(--color-ok)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {status === "allowing" ? "Approving..." : "Approve"}
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => void resolve("deny")}
+            className="rounded border border-[var(--color-err)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {status === "denying" ? "Denying..." : "Deny"}
+          </button>
+          {status === "resolved" && (
+            <span className="self-center text-xs text-[var(--color-fg-mute)]">Resolved</span>
+          )}
+        </div>
+      </div>
     </ChatBubble>
   );
 }

@@ -270,3 +270,13 @@ pub struct LiveChatEventCreatedEvent {
     pub event_type: Option<String>,
     pub payload: serde_json::Value,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct PermissionRequestEvent {
+    pub request_id: String,
+    pub session_id: Option<String>,
+    pub tool_name: String,
+    pub tool_use_id: String,
+    pub input: serde_json::Value,
+    pub message: Option<String>,
+}
