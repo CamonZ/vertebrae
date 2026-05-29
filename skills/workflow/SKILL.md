@@ -134,12 +134,30 @@ vtb workflow unassign <task-id>
 Create a transition definition between two workflows.
 
 ```bash
-# Basic transition
-vtb workflow transition add <from-workflow> <to-workflow> --label "approve"
+# Required syntax
+vtb workflow transition add --label <label> <from-workflow-id> <to-workflow-id>
+
+# Basic transition (full UUIDs or 8-character short IDs)
+vtb workflow transition add <from-workflow-id> <to-workflow-id> --label "approve"
+vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "approve"
 
 # With target step in destination workflow
-vtb workflow transition add <from-workflow> <to-workflow> --label "escalate" --target-step <step-id>
+vtb workflow transition add <from-workflow-id> <to-workflow-id> --label "escalate" --target-step <step-id>
+vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "escalate" -t <step-id>
+
+# Machine-readable output
+vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "approve" --json
 ```
+
+Arguments and options:
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<from-workflow-id>` | | Yes | Source workflow ID; accepts a case-insensitive full UUID or 8-character short ID. |
+| `<to-workflow-id>` | | Yes | Target workflow ID; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--label <label>` | `-l` | Yes | Transition label, for example `approve`, `reject`, or `escalate`. |
+| `--target-step <step-id>` | `-t` | No | Destination workflow step to start at; accepts a full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; returns the created workflow transition object as JSON. |
 
 ## workflow transition list
 
