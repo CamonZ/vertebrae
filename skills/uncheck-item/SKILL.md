@@ -16,14 +16,24 @@ Uncheck a previously completed checklist item within a task, marking it as not d
 
 ```bash
 vtb uncheck-item <task-id> <item-index>
+vtb uncheck-item <task-id> <item-index> --json
 ```
+
+Use `--json` when automation needs structured output.
 
 ## Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `task-id` | Yes | Task ID containing the checklist item |
+| `task-id` | Yes | Task ID containing the checklist item; lookup is case-insensitive |
 | `item-index` | Yes | 1-based index of the checklist item to uncheck |
+
+## Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | | Output machine-readable JSON instead of human-readable text |
+| `--help` | `-h` | Print help |
 
 ## Examples
 
@@ -33,7 +43,19 @@ vtb uncheck-item abc123 1
 
 # Uncheck checklist item 3
 vtb uncheck-item abc123 3
+
+# Return JSON for automation
+vtb uncheck-item abc123 3 --json
 ```
+
+Human-readable success output is:
+
+```text
+Unchecked checklist item <item-index> in <task-id>: <item-content>
+```
+
+With `--json`, success output includes `task_id`, `item_index`, and
+`item_content`.
 
 ## Viewing Checklist Item Status
 
@@ -56,6 +78,7 @@ Checklist Items:
 - Item indices are 1-based (first item is 1, not 0)
 - Task ID lookup is case-insensitive
 - Only checklist items (added via `vtb section <task> checklist_item "..."`) can be unchecked
+- The checklist item must currently be checked; already unchecked items fail with `Validation failed: Checklist item <n> is not checked`
 - Unchecking an item updates the task's `updated_at` timestamp
 
 ## Related Commands

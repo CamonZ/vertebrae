@@ -259,9 +259,16 @@ vtb check-item <id> 1
 # Uncheck item #2
 vtb uncheck-item <id> 2
 
+# Emit machine-readable output
+vtb uncheck-item <id> 2 --json
+
 # View checklist status via show
 vtb show <id>
 ```
+
+`vtb uncheck-item` accepts a case-insensitive task ID and a 1-based checklist
+item index. The item must already be checked; otherwise the command fails with
+`Validation failed: Checklist item <n> is not checked`.
 
 Checklist items display with checkboxes:
 ```
@@ -739,6 +746,9 @@ vtb uncheck-item <task-id> 1
 vtb show <task-id>
 ```
 
+Checklist item indices are 1-based. See [Checklist Items](#checklist-items)
+for `uncheck-item` JSON output and validation behavior.
+
 Checklist items display with checkboxes:
 ```
 Checklist Items:
@@ -1079,7 +1089,7 @@ vtb ready
 | `vtb sections <id>` | List sections |
 | `vtb unsection <id> <type>` | Remove a section |
 | `vtb check-item <id> <n>` | Mark checklist item as done |
-| `vtb uncheck-item <id> <n>` | Uncheck a checklist item |
+| `vtb uncheck-item <id> <n>` | Uncheck an already checked checklist item |
 | `vtb ref <id> "path"` | Add code reference |
 | `vtb refs <id>` | List code references |
 | `vtb unref <id> "path"` | Remove code reference |
