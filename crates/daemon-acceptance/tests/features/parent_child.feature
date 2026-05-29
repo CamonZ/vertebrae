@@ -20,7 +20,7 @@ Feature: Parent/child orchestration via wait_children
     And the parent's waiting execution has status "completed"
     And the parent task has a completed step execution for the work step
     And the parent task is done
-    And the daemon never dispatched a run_step for the parent wait_children step
+    And the parent wait_children step was handled without daemon dispatch
 
   Scenario: Parent wakes only after full subtree (grandchildren) completes
     Given a configured daemon test environment

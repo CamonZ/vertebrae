@@ -621,17 +621,33 @@ Define allowed transitions between workflows:
 
 ```bash
 # Create transition rule
-vtb workflow transition add <from-workflow> <to-workflow> --label "approve"
+vtb workflow transition add --label <label> <from-workflow-id> <to-workflow-id>
+vtb workflow transition add <from-workflow-id> <to-workflow-id> --label "approve"
+vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "approve"
 
 # With target step in destination
-vtb workflow transition add <from-workflow> <to-workflow> \
+vtb workflow transition add <from-workflow-id> <to-workflow-id> \
   --label "escalate" --target-step <step-id>
+vtb workflow transition add <from-workflow-id> <to-workflow-id> \
+  -l "escalate" -t <step-id>
+
+# Machine-readable output
+vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "approve" --json
 
 # List and delete transitions
 vtb workflow transition list
 vtb workflow transition list --workflow-id <id>
 vtb workflow transition delete <from-workflow> <to-workflow>
 ```
+
+`workflow transition add` takes two required positional arguments:
+`<from-workflow-id>` and `<to-workflow-id>`. Both workflow IDs accept a
+case-insensitive full UUID or 8-character short ID. The optional `--target-step`
+value accepts a full UUID or an 8-character short ID.
+`--label` (`-l`) is required. `--target-step` (`-t`) is optional and selects the
+destination workflow step where tasks should land after the transition. The
+global `--json` flag can appear anywhere in the command and returns the created
+workflow transition object instead of human-readable text.
 
 ### Step Lifecycle (within a workflow)
 

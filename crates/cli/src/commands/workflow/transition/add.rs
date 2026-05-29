@@ -3,7 +3,10 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, WorkflowService};
 
-/// Create a new workflow transition
+/// Create a new workflow transition.
+///
+/// Workflow and target step IDs accept full UUIDs or 8-character short IDs.
+/// `--label`/`-l` is required; `--target-step`/`-t` is optional.
 #[derive(Debug, Args)]
 pub struct TransitionAddCommand {
     /// Source workflow ID (case-insensitive)
@@ -34,7 +37,8 @@ impl TransitionAddCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if either workflow doesn't exist.
+    /// Returns `ServiceError::NotFound` if either workflow, or the optional
+    /// target step, doesn't exist.
     /// Returns `ServiceError::AlreadyExists` if the transition already exists.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
