@@ -811,12 +811,24 @@ vtb ref <id> "src/service.rs:L42-60" --name "process_request" --desc "Main dispa
 # Link test to testing criterion (1-based criterion index)
 vtb criterion-ref <id> 1 "tests/service_test.rs:L10-25" \
   --name "test_process_request"
+vtb criterion-ref <id> 1 "tests/service_test.rs:L10-25" \
+  --description "Covers request processing"
+vtb criterion-ref <id> 1 "tests/service_test.rs:L10-25" --json
 
 # View and remove references
 vtb refs <id>
 vtb unref <id> "src/service.rs"
 vtb unref <id> --all
 ```
+
+For `vtb criterion-ref`, the criterion index is 1-based among the task's
+`testing_criterion` sections. File specs use the same syntax as `vtb ref`;
+reversed ranges, empty paths, and missing line numbers after `:L` are validation
+errors. `--description` also has the visible alias `--desc`. Missing files are
+accepted with a warning so tests can be linked before the file is created. With
+`--json`, the command returns an operation envelope with `command`
+(`criterion-ref`), `status` (`created`), `task_id`, `criterion_index`,
+`criterion_content`, `path`, `line_start`, `line_end`, `name`, and `warning`.
 
 ---
 
@@ -1093,7 +1105,7 @@ vtb ready
 | `vtb ref <id> "path"` | Add code reference |
 | `vtb refs <id>` | List code references |
 | `vtb unref <id> "path"` | Remove code reference |
-| `vtb criterion-ref <id> <n> "path"` | Link code to test criterion |
+| `vtb criterion-ref <id> <n> "path"` | Link code to a 1-based testing criterion |
 
 ### Execution
 | Command | Description |
