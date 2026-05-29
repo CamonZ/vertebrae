@@ -1075,6 +1075,7 @@ Record and review workflow execution history:
 ```bash
 # Create a new execution record
 vtb execution create <task-id>
+vtb execution create <task-id> --context '{"files":["src/lib.rs"]}' --prompt '{"instructions":"Review changes"}'
 
 # Add log entries
 vtb execution log <execution-id> "Processing..."
@@ -1087,6 +1088,14 @@ vtb execution list <task-id>
 vtb execution list --task-run <task-run-id>
 vtb execution show <execution-id>
 ```
+
+`vtb execution create <task-id>` creates a `StepExecution` for the task's
+current workflow step. The task ID accepts a full UUID or an 8-character hex
+task short ID. The task must exist, have a workflow assigned, and have a
+current step. `--context` and `--prompt` accept any JSON object; invalid JSON
+fails validation before the execution is created. With `--json`, the command
+returns a machine-readable create result with `command: "execution create"`,
+`status: "created"`, `execution_id`, and the resolved lowercase `task_id`.
 
 `vtb execution list <task-id>` treats the positional ID as a task ID. Task short
 IDs are supported, and the output groups TaskRun-backed step executions by
@@ -1211,7 +1220,7 @@ vtb ready
 | `vtb stop-taskrun <id>` | Stop the active TaskRun for a task |
 | `vtb run-workflow <id>` | Compatibility alias for `start-taskrun` |
 | `vtb stop <id>` | Compatibility alias for `stop-taskrun` |
-| `vtb execution create <id>` | Create execution record |
+| `vtb execution create <task-id>` | Create execution record for a task's current workflow step |
 | `vtb execution list <task-id>` | List compact TaskRun-backed executions grouped by TaskRun |
 | `vtb execution list --task-run <task-run-id>` | List compact executions for one full TaskRun UUID |
 | `vtb execution show <id>` | Show execution details |
