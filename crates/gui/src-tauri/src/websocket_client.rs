@@ -14,12 +14,12 @@ use uuid::Uuid;
 
 use crate::events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangeType,
-    LiveChatSessionChangedEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
-    StepChangeType, StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent,
-    StepExecutionStatus, StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType,
-    TaskChangedEvent, TaskRunChangeType, TaskRunChangedEvent, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
-    WorkflowTransitionChangedEvent,
+    LiveChatSessionChangedEvent, PermissionRequestEvent, SectionChangeType, SectionChangedEvent,
+    SessionLogCreatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
+    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
+    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskRunChangeType,
+    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType,
+    WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -393,6 +393,9 @@ impl SacrumSocket {
                 }
                 "chat_event_created" => {
                     Self::handle_chat_event_event(payload, app_handle)?;
+                }
+                "permission_request" => {
+                    Self::handle_permission_request_event(payload, app_handle)?;
                 }
                 "phx_reply" | "phx_error" => {
                     log::info!(
@@ -1252,6 +1255,62 @@ impl SacrumSocket {
 
         app_handle
             .emit("live-chat-event-created-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    fn handle_permission_request_event<R: Runtime>(
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let request_id = payload
+            .get("request_id")
+            .or_else(|| payload.get("id"))
+            .and_then(|v| v.as_str())
+            .ok_or("Missing request_id in permission request payload")?
+            .to_string();
+
+        let tool_name = payload
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let tool_use_id = payload
+            .get("tool_use_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let session_id = payload
+            .get("session_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let message = payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let input = payload
+            .get("input")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        let event = PermissionRequestEvent {
+            request_id,
+            session_id,
+            tool_name,
+            tool_use_id,
+            input,
+            message,
+        };
+
+        log::debug!("[WebSocket] Emitting PermissionRequestEvent: {:?}", event);
+
+        app_handle
+            .emit("permission-request-event", &event)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
 
         Ok(())

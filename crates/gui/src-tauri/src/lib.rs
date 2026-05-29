@@ -30,9 +30,10 @@ use claude_session::{
 use commands::AppState;
 use events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
-    SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
-    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
+    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent,
+    StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent,
+    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -133,6 +134,7 @@ fn create_builder() -> Builder {
             commands::list_chat_sessions,
             commands::delete_chat_session,
             commands::list_chat_messages,
+            commands::resolve_permission_request,
             commands::get_active_chat_session_id,
             commands::set_active_chat_session_id,
             // WebSocket status command
@@ -159,6 +161,7 @@ fn create_builder() -> Builder {
             LiveChatSessionChangedEvent,
             LiveChatMessageCreatedEvent,
             LiveChatEventCreatedEvent,
+            PermissionRequestEvent,
             // Claude session events
             ClaudeSessionInitEvent,
             ClaudeTextEvent,

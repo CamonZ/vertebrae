@@ -101,6 +101,7 @@ It:
 |-----------|---------|---------------------|
 | `vtb` | CLI for managing tasks and workflows | No |
 | `vtb-daemon` | Background workflow runner that executes agents | Yes — launchd (macOS) / systemd `--user` (Linux) |
+| `vtb-gate` | Claude MCP permission prompt bridge for GUI chat sessions | No |
 
 Each binary is copied into a per-OS data dir, set to `0o755`, and symlinked
 into `~/.local/bin`. Installing the daemon additionally writes a service
@@ -109,7 +110,7 @@ definition and loads it so it starts at login. See
 
 ### Sidecar bundling
 
-`vtb` and `vtb-daemon` ship inside the GUI bundle as Tauri `externalBin`
+`vtb`, `vtb-daemon`, and `vtb-gate` ship inside the GUI bundle as Tauri `externalBin`
 sidecars (declared in `src-tauri/tauri.conf.json`). They are produced and
 staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
 `beforeBuildCommand`:
@@ -123,7 +124,7 @@ staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
 1. Detects the build target triple (honoring `TAURI_ENV_TARGET_TRIPLE`, else
    parsing `rustc -vV`). Supported triples: `aarch64-apple-darwin`,
    `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`.
-2. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon`.
+2. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon -p vtb-gate`.
 3. Copies the release binaries to
    `src-tauri/binaries/<bin>-<target-triple>` — the naming Tauri's
    `externalBin` expects.

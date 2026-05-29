@@ -762,6 +762,17 @@ async listChatMessages(chatSessionId: string, limit: number | null, after: strin
 }
 },
 /**
+ * Resolve a Claude permission request shown in the GUI.
+ */
+async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resolve_permission_request", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read the cached active chat session id for the currently selected project.
  * Returns `None` if no project is selected or no session has been cached.
  */
@@ -868,6 +879,7 @@ claudeToolResultEvent: ClaudeToolResultEvent,
 liveChatEventCreatedEvent: LiveChatEventCreatedEvent,
 liveChatMessageCreatedEvent: LiveChatMessageCreatedEvent,
 liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
+permissionRequestEvent: PermissionRequestEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 stepChangedEvent: StepChangedEvent,
@@ -891,6 +903,7 @@ claudeToolResultEvent: "claude-tool-result-event",
 liveChatEventCreatedEvent: "live-chat-event-created-event",
 liveChatMessageCreatedEvent: "live-chat-message-created-event",
 liveChatSessionChangedEvent: "live-chat-session-changed-event",
+permissionRequestEvent: "permission-request-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 stepChangedEvent: "step-changed-event",
@@ -1128,10 +1141,12 @@ export type LiveChatMessageCreatedEvent = { message_id: string; chat_session_id:
 client_message_id: string | null; message: ChatMessage | null }
 export type LiveChatSessionChangeType = "Created" | "Updated"
 export type LiveChatSessionChangedEvent = { session_id: string; change_type: LiveChatSessionChangeType; session: ChatSession | null }
+export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
+export type PermissionRequestEvent = { request_id: string; session_id: string | null; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null }
 /**
  * Workflow step entry in the pipeline summary payload, including the
  * resolver-computed `pipeline_counts`/`active_count` aggregates and the
@@ -1181,6 +1196,7 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
  * A saved project in the project list
  */
