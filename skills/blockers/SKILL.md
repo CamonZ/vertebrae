@@ -15,8 +15,11 @@ vtb blockers <task-id>
 # Limit depth of traversal
 vtb blockers <task-id> --depth 2
 
-# Include completed blockers (normally hidden)
+# Include blockers already in the done workflow step
 vtb blockers <task-id> --all
+
+# Output the blocker tree as JSON
+vtb blockers <task-id> --json
 ```
 
 ## Options
@@ -24,7 +27,8 @@ vtb blockers <task-id> --all
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--depth` | `-d` | Maximum depth to traverse (unlimited by default) |
-| `--all` | `-a` | Include completed blockers (status = done) |
+| `--all` | `-a` | Include blockers whose current workflow step is `done` |
+| `--json` | | Output machine-readable JSON instead of human-readable text |
 
 ## Output
 
@@ -36,10 +40,13 @@ Blockers for: abc123 "Deploy to production"
 
 def456   task     todo         Run integration tests
     `-- ghi789   task     in_progress  Fix failing unit tests
-        `-- jkl012   task     done         Update test fixtures
 
-Total: 3 blocking items
+Total: 2 blocking items
 ```
+
+With `--json`, the command returns `task_id`, `task_title`, recursive
+`blockers` nodes, and `total_count`. Each blocker node includes `id`, `title`,
+`level`, `step_name`, and `children`.
 
 ## When to use
 - Understanding why a task can't transition to in_progress

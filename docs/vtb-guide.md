@@ -771,11 +771,16 @@ vtb undepend <task-a> --on <task-b>
 # Full blocker tree for a task
 vtb blockers <task-id>
 vtb blockers <task-id> --depth 2        # Limit depth
-vtb blockers <task-id> --all            # Include completed blockers
+vtb blockers <task-id> --all            # Include blockers in the done workflow step
+vtb blockers <task-id> --json           # Emit task_id, task_title, blockers, total_count
 
 # Shortest path between two tasks
 vtb path <from-task> <to-task>
 ```
+
+`vtb blockers` hides blockers whose current workflow step is `done` unless
+`--all` is passed. The `--depth` flag is unlimited by default and accepts a
+non-negative integer depth.
 
 ---
 
