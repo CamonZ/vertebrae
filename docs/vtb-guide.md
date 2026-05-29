@@ -1079,6 +1079,8 @@ vtb execution create <task-id> --context '{"files":["src/lib.rs"]}' --prompt '{"
 
 # Add log entries
 vtb execution log <execution-id> "Processing..."
+vtb execution log <execution-id> $'Line 1\nLine 2'
+vtb execution log <execution-id> "Processing..." --json
 
 # Update execution output/result
 vtb execution update <execution-id> --output "Completed"
@@ -1104,6 +1106,16 @@ executions for one exact TaskRun. TaskRun mode requires a full UUID; TaskRun
 short IDs are not supported. `execution list` stays compact and does not render
 TaskRun trees or session log content; use `execution show <execution-id>` for
 the detailed log/output view.
+
+`vtb execution log <execution-id> <content>` adds one session log entry to an
+existing step execution. The execution ID must be a full UUID; short execution
+IDs are rejected by CLI parsing. The required content argument may include
+newlines; quote it in your shell when needed. The command does not read content
+from stdin. The command fails before creating a log if the execution does not
+exist. Human output prints the short log ID, short execution ID, and a content
+preview; long previews are truncated to 50 characters and multiline previews
+are flattened to spaces. With `--json`, the command returns
+`command: "execution log"`, `status: "created"`, `execution_id`, and `log_id`.
 
 ---
 
@@ -1225,7 +1237,7 @@ vtb ready
 | `vtb execution list --task-run <task-run-id>` | List compact executions for one full TaskRun UUID |
 | `vtb execution show <id>` | Show execution details |
 | `vtb execution update <id>` | Update execution status |
-| `vtb execution log <id> "msg"` | Add log entry |
+| `vtb execution log <execution-id> "msg"` | Add a session log entry to a full execution UUID |
 
 ### Daemon
 | Command | Description |

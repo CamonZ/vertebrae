@@ -1139,6 +1139,50 @@ async fn test_execution_log_long_content_truncated_in_output() {
 }
 
 #[tokio::test]
+async fn test_execution_log_unicode_content_truncated_in_output() {
+    let services = mock_services();
+
+    let task_id = services
+        .tasks()
+        .create_task(CreateTaskOptions {
+            id: None,
+            title: "Task".to_string(),
+            description: None,
+            level: None,
+            priority: None,
+            tags: vec![],
+            parent_id: None,
+            workflow_id: None,
+            depends_on: vec![],
+        })
+        .await
+        .unwrap();
+
+    let execution = StepExecution::new(task_id, "wf", "step");
+    let exec_id = services
+        .executions()
+        .create_execution(execution)
+        .await
+        .unwrap();
+
+    let unicode_content = "é".repeat(60);
+    let log_cmd = ExecutionLogCommand {
+        execution_id: exec_id.clone(),
+        content: unicode_content.clone(),
+    };
+
+    let output = log_cmd.execute(&services).await.unwrap();
+    assert!(output.contains(&format!("{}...", "é".repeat(50))));
+
+    let logs = services
+        .executions()
+        .list_logs_for_execution(&exec_id)
+        .await
+        .unwrap();
+    assert_eq!(logs[0].content, unicode_content);
+}
+
+#[tokio::test]
 async fn test_execution_log_nonexistent_execution_fails() {
     let services = mock_services();
 

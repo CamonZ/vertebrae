@@ -658,7 +658,7 @@ pub struct ExecutionLogCommand {
     #[arg(required = true, value_parser = crate::commands::parse_uuid("execution ID"))]
     pub execution_id: String,
 
-    /// Log content (can be multiline text from stdin or shell)
+    /// Log content (quote in your shell when needed; may include newlines)
     #[arg(required = true)]
     pub content: String,
 }
@@ -704,11 +704,11 @@ impl ExecutionLogCommand {
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         let log_id = self.execute_result(services).await?;
 
-        let content_preview = if self.content.len() > 50 {
-            format!("{}...", &self.content[..50])
-        } else {
-            self.content.clone()
-        };
+        let mut preview_chars = self.content.chars();
+        let mut content_preview = preview_chars.by_ref().take(50).collect::<String>();
+        if preview_chars.next().is_some() {
+            content_preview.push_str("...");
+        }
 
         Ok(format!(
             "Added log {} to execution {}: \"{}\"",
