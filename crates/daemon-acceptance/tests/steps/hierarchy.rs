@@ -267,16 +267,16 @@ pub async fn parent_task_is_done(world: &mut DaemonWorld) {
     .await;
 }
 
-#[then("the daemon never dispatched a run_step for the parent wait_children step")]
+#[then("the parent wait_children step was handled without daemon dispatch")]
 pub async fn no_dispatch_for_wait_children(world: &mut DaemonWorld) {
     let parent_id = require(&world.parent_task_id, "parent task not set");
     let execs = list_task_executions(world, &parent_id).await;
     // A wait_children execution is orchestrator-driven: it goes from
     // `waiting` straight to `completed` (on satisfied wait) or
     // `invalidated` (on inter-workflow supersession), without entering
-    // `pending` / `in_progress` and without daemon-populated fields.
-    // Assert no wait_children execution has daemon-populated output or
-    // duration_ms, which would imply a run_step dispatch.
+    // `pending` / `in_progress`. Sacrum may now populate an output payload
+    // when resolving the wait; duration_ms remains daemon-owned and would
+    // imply a run_step dispatch.
     for e in &execs {
         if step_name(e) != Some("wait_children") {
             continue;
@@ -285,13 +285,6 @@ pub async fn no_dispatch_for_wait_children(world: &mut DaemonWorld) {
         assert!(
             matches!(status, "waiting" | "completed" | "invalidated"),
             "wait_children execution has unexpected status {status:?}: {e}"
-        );
-        assert!(
-            e.get("output")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .is_empty(),
-            "wait_children execution has daemon output (implies a dispatch): {e}"
         );
         assert!(
             e.get("duration_ms").and_then(|v| v.as_i64()).is_none(),
