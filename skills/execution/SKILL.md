@@ -97,7 +97,7 @@ Update execution output and transition result.
 
 ```bash
 vtb execution update <execution-id> --output "Review complete"
-vtb execution update <execution-id> --transition_result advance
+vtb execution update <execution-id> --transition-result advance
 ```
 
 ### Options
@@ -105,7 +105,7 @@ vtb execution update <execution-id> --transition_result advance
 | Flag | Description |
 |------|-------------|
 | `--output` | Output text from the execution |
-| `--transition_result` | Transition result (e.g., advance, reject, retry) |
+| `--transition-result` | Transition result (e.g., advance, reject, retry) |
 
 ---
 

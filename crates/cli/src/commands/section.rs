@@ -2,8 +2,8 @@
 //!
 //! Implements the `vtb section` command to add sections for context curation.
 //! Supports both positive space (goal, context, current_behavior, desired_behavior,
-//! step, testing_criterion) and negative space (anti_pattern, failure_test, constraint)
-//! section types.
+//! checklist_item, testing_criterion) and negative space (anti_pattern, failure_test,
+//! constraint) section types.
 
 use clap::Args;
 use serde::Serialize;
@@ -70,8 +70,8 @@ impl SectionCommand {
     /// Adds a typed section to the task's sections array.
     /// For single-instance types (goal, context, current_behavior, desired_behavior),
     /// replaces any existing section of that type.
-    /// For multi-instance types (step, testing_criterion, anti_pattern, failure_test,
-    /// constraint), appends with auto-incrementing ordinal.
+    /// For multi-instance types (checklist_item, testing_criterion, anti_pattern,
+    /// failure_test, constraint), appends with auto-incrementing ordinal.
     ///
     /// # Arguments
     ///

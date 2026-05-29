@@ -1,26 +1,13 @@
 use clap::Parser;
+use serde_json::json;
 use std::process;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
+use vertebrae_cli::CliArgs;
 use vertebrae_cli::commands::Command;
 use vertebrae_core::ServiceError;
 use vertebrae_sacrum_client::SacrumConfig;
-
-/// Vertebrae - A task management CLI tool
-#[derive(Parser)]
-#[command(name = "vtb")]
-#[command(version = "0.1.0")]
-#[command(about = "A task management CLI tool", long_about = None)]
-struct Args {
-    /// Output machine-readable JSON instead of human-readable text
-    #[arg(long, global = true)]
-    json: bool,
-
-    /// Subcommand to execute
-    #[command(subcommand)]
-    command: Option<Command>,
-}
 
 /// Initialize logging based on DEBUGGING environment variable
 ///
@@ -55,18 +42,37 @@ async fn main() {
 
 /// Main application logic - separated for testability
 async fn run_app() -> Result<(), ServiceError> {
-    let args = Args::parse();
+    let args = CliArgs::parse();
     run_with_args(args).await
 }
 
 /// Run the application with the given arguments
-async fn run_with_args(args: Args) -> Result<(), ServiceError> {
+async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
     if let Some(Command::Init(ref cmd)) = args.command {
         let result = cmd
             .execute()
             .await
             .map_err(|e| ServiceError::config_error(e.to_string()))?;
         println!("{}", result);
+        return Ok(());
+    }
+
+    if let Some(Command::Manifest(ref cmd)) = args.command {
+        let result = cmd
+            .execute()
+            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        if args.json {
+            let value = serde_json::from_str(&result).unwrap_or_else(
+                |_| json!({ "command": "manifest", "status": "ok", "message": result }),
+            );
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&value)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?
+            );
+        } else {
+            println!("{}", result);
+        }
         return Ok(());
     }
 
@@ -119,20 +125,20 @@ mod tests {
 
     #[test]
     fn test_args_parsing() {
-        // Test that Args can be parsed with default values
-        let args = Args::try_parse_from(["vtb"]).unwrap();
+        // Test that CliArgs can be parsed with default values
+        let args = CliArgs::try_parse_from(["vtb"]).unwrap();
         assert!(args.command.is_none());
     }
 
     #[test]
     fn test_args_with_add_command() {
-        let args = Args::try_parse_from(["vtb", "add", "My task"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", "My task"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_all_options() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "add",
             "Task title",
@@ -152,7 +158,7 @@ mod tests {
     #[test]
     fn test_add_command_requires_title() {
         // Add command without title should fail
-        let result = Args::try_parse_from(["vtb", "add"]);
+        let result = CliArgs::try_parse_from(["vtb", "add"]);
         match result {
             Err(e) => {
                 let err = e.to_string();
@@ -168,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_add_command_invalid_level() {
-        let result = Args::try_parse_from(["vtb", "add", "Task", "--level", "invalid"]);
+        let result = CliArgs::try_parse_from(["vtb", "add", "Task", "--level", "invalid"]);
         match result {
             Err(e) => {
                 let err = e.to_string();
@@ -184,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_add_command_invalid_priority() {
-        let result = Args::try_parse_from(["vtb", "add", "Task", "--priority", "wrong"]);
+        let result = CliArgs::try_parse_from(["vtb", "add", "Task", "--priority", "wrong"]);
         match result {
             Err(e) => {
                 let err = e.to_string();
@@ -200,8 +206,8 @@ mod tests {
 
     #[test]
     fn test_args_debug() {
-        let args = Args::try_parse_from(["vtb", "add", "Test task title"]).unwrap();
-        // Args does not derive Debug, but Command does - verify Command debug works
+        let args = CliArgs::try_parse_from(["vtb", "add", "Test task title"]).unwrap();
+        // CliArgs does not derive Debug, but Command does - verify Command debug works
         if let Some(cmd) = &args.command {
             let cmd_debug = format!("{:?}", cmd);
             assert!(
@@ -213,7 +219,7 @@ mod tests {
 
     #[test]
     fn test_args_with_multiple_tags() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb", "add", "My task", "-t", "tag1", "-t", "tag2", "-t", "tag3",
         ])
         .unwrap();
@@ -222,27 +228,28 @@ mod tests {
 
     #[test]
     fn test_args_with_show_command() {
-        let args =
-            Args::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000001"]).unwrap();
-        assert!(args.command.is_some());
-    }
-
-    #[test]
-    fn test_args_with_list_command() {
-        let args = Args::try_parse_from(["vtb", "list"]).unwrap();
-        assert!(args.command.is_some());
-    }
-
-    #[test]
-    fn test_args_with_delete_command() {
-        let args = Args::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000001"])
+        let args = CliArgs::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000001"])
             .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
+    fn test_args_with_list_command() {
+        let args = CliArgs::try_parse_from(["vtb", "list"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_with_delete_command() {
+        let args =
+            CliArgs::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000001"])
+                .unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
     fn test_args_with_update_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "update",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -255,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_args_with_depend_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "depend",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -268,14 +275,15 @@ mod tests {
 
     #[test]
     fn test_args_with_workflow_command() {
-        let args = Args::try_parse_from(["vtb", "workflow", "list"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "workflow", "list"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_with_multiple_filters() {
-        let args = Args::try_parse_from(["vtb", "list", "--level", "epic", "--status", "backlog"])
-            .unwrap();
+        let args =
+            CliArgs::try_parse_from(["vtb", "list", "--level", "epic", "--status", "backlog"])
+                .unwrap();
         assert!(args.command.is_some());
     }
 
@@ -291,83 +299,84 @@ mod tests {
         ];
 
         for cmd in &commands {
-            let args = Args::try_parse_from(cmd.clone()).unwrap();
+            let args = CliArgs::try_parse_from(cmd.clone()).unwrap();
             assert!(args.command.is_some(), "Failed to parse: {:?}", cmd);
         }
     }
 
     #[test]
     fn test_args_with_no_arguments() {
-        let args = Args::try_parse_from(["vtb"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb"]).unwrap();
         assert!(args.command.is_none());
     }
 
     #[test]
     fn test_args_add_minimal() {
-        let args = Args::try_parse_from(["vtb", "add", "Minimal task"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", "Minimal task"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_single_tag() {
-        let args = Args::try_parse_from(["vtb", "add", "Task", "-t", "urgent"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", "Task", "-t", "urgent"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_level_only() {
-        let args = Args::try_parse_from(["vtb", "add", "Task", "--level", "epic"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", "Task", "--level", "epic"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_priority_only() {
-        let args = Args::try_parse_from(["vtb", "add", "Task", "--priority", "high"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", "Task", "--priority", "high"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_description() {
         let args =
-            Args::try_parse_from(["vtb", "add", "Task", "-d", "This is a description"]).unwrap();
+            CliArgs::try_parse_from(["vtb", "add", "Task", "-d", "This is a description"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_show_command() {
-        let args =
-            Args::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000003"]).unwrap();
-        assert!(args.command.is_some());
-    }
-
-    #[test]
-    fn test_args_delete_command() {
-        let args = Args::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000003"])
+        let args = CliArgs::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000003"])
             .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
+    fn test_args_delete_command() {
+        let args =
+            CliArgs::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000003"])
+                .unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
     fn test_args_list_command_no_filters() {
-        let args = Args::try_parse_from(["vtb", "list"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "list"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_list_with_level_filter() {
-        let args = Args::try_parse_from(["vtb", "list", "--level", "task"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "list", "--level", "task"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_list_with_status_filter() {
-        let args = Args::try_parse_from(["vtb", "list", "--status", "backlog"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "list", "--status", "backlog"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_update_basic() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "update",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -380,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_args_update_with_priority() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "update",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -393,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_args_depend_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "depend",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -407,32 +416,32 @@ mod tests {
     #[test]
     fn test_args_blockers_command() {
         let args =
-            Args::try_parse_from(["vtb", "blockers", "a1b2c3d4-0000-4000-8000-000000000001"])
+            CliArgs::try_parse_from(["vtb", "blockers", "a1b2c3d4-0000-4000-8000-000000000001"])
                 .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_ready_command() {
-        let args = Args::try_parse_from(["vtb", "ready"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "ready"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_help_flag() {
-        let result = Args::try_parse_from(["vtb", "--help"]);
+        let result = CliArgs::try_parse_from(["vtb", "--help"]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_args_version_flag() {
-        let result = Args::try_parse_from(["vtb", "--version"]);
+        let result = CliArgs::try_parse_from(["vtb", "--version"]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_args_with_empty_title() {
-        let result = Args::try_parse_from(["vtb", "add", ""]);
+        let result = CliArgs::try_parse_from(["vtb", "add", ""]);
         // Empty title should still parse but might be rejected by validation
         let args = result.unwrap();
         assert!(args.command.is_some());
@@ -441,21 +450,21 @@ mod tests {
     #[test]
     fn test_args_command_case_sensitivity() {
         // Commands should be case-sensitive
-        let result = Args::try_parse_from(["vtb", "ADD", "Task"]);
+        let result = CliArgs::try_parse_from(["vtb", "ADD", "Task"]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_args_with_special_characters_in_title() {
         let args =
-            Args::try_parse_from(["vtb", "add", "Task with special chars !@#$%^&*()"]).unwrap();
+            CliArgs::try_parse_from(["vtb", "add", "Task with special chars !@#$%^&*()"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_add_with_long_title() {
         let long_title = "a".repeat(500);
-        let args = Args::try_parse_from(["vtb", "add", &long_title]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "add", &long_title]).unwrap();
         assert!(args.command.is_some());
     }
 
@@ -467,19 +476,19 @@ mod tests {
             cmd.push("-t");
             cmd.push(tag_str);
         }
-        let args = Args::try_parse_from(&cmd).unwrap();
+        let args = CliArgs::try_parse_from(&cmd).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_workflow_list() {
-        let args = Args::try_parse_from(["vtb", "workflow", "list"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "workflow", "list"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_workflow_show() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "workflow",
             "show",
@@ -491,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_args_daemon_install() {
-        let args = Args::try_parse_from(["vtb", "daemon", "install"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "daemon", "install"]).unwrap();
         assert!(args.command.is_some());
         match args.command.unwrap() {
             Command::Daemon(DaemonCommand::Install(_)) => {}
@@ -501,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_args_daemon_install_with_binary() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "daemon",
             "install",
@@ -523,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_args_daemon_uninstall() {
-        let args = Args::try_parse_from(["vtb", "daemon", "uninstall"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "daemon", "uninstall"]).unwrap();
         match args.command.unwrap() {
             Command::Daemon(DaemonCommand::Uninstall(_)) => {}
             other => panic!("Expected Daemon(Uninstall), got: {:?}", other),
@@ -532,7 +541,7 @@ mod tests {
 
     #[test]
     fn test_args_daemon_status() {
-        let args = Args::try_parse_from(["vtb", "daemon", "status"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "daemon", "status"]).unwrap();
         match args.command.unwrap() {
             Command::Daemon(DaemonCommand::Status(_)) => {}
             other => panic!("Expected Daemon(Status), got: {:?}", other),
@@ -541,13 +550,13 @@ mod tests {
 
     #[test]
     fn test_json_flag_defaults_to_false() {
-        let args = Args::try_parse_from(["vtb"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb"]).unwrap();
         assert!(!args.json, "json flag should default to false");
     }
 
     #[test]
     fn test_json_flag_before_subcommand() {
-        let args = Args::try_parse_from(["vtb", "--json", "list"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "--json", "list"]).unwrap();
         assert!(
             args.json,
             "json flag should be true when --json is passed before subcommand"
@@ -557,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_json_flag_after_subcommand() {
-        let args = Args::try_parse_from(["vtb", "list", "--json"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "list", "--json"]).unwrap();
         assert!(
             args.json,
             "json flag should be true when --json is passed after subcommand (global flag)"
@@ -567,7 +576,7 @@ mod tests {
 
     #[test]
     fn test_json_flag_with_show_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "--json",
             "show",
@@ -580,14 +589,14 @@ mod tests {
 
     #[test]
     fn test_json_flag_with_add_command() {
-        let args = Args::try_parse_from(["vtb", "--json", "add", "My task"]).unwrap();
+        let args = CliArgs::try_parse_from(["vtb", "--json", "add", "My task"]).unwrap();
         assert!(args.json, "json flag should be true");
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_json_flag_with_blockers_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "blockers",
             "a1b2c3d4-0000-4000-8000-000000000001",
@@ -602,7 +611,7 @@ mod tests {
 
     #[test]
     fn test_json_flag_with_sections_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "--json",
             "sections",
@@ -614,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_json_flag_with_refs_command() {
-        let args = Args::try_parse_from([
+        let args = CliArgs::try_parse_from([
             "vtb",
             "refs",
             "--json",
