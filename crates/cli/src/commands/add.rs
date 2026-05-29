@@ -1,6 +1,8 @@
-//! Add command for creating new tasks
+//! Add command for creating new tasks.
 //!
-//! Implements the `vtb add` command to create new tasks with all supported options.
+//! Implements `vtb add [OPTIONS] <TITLE>`. Clap validates the required title
+//! and enum fields, the CLI validates and resolves ID-shaped arguments, and the
+//! service layer enforces task relationships and workflow existence.
 
 use clap::Args;
 use vertebrae_core::{CreateTaskOptions, ServiceError, VertebraeServices};
@@ -29,15 +31,21 @@ pub struct AddCommand {
     #[arg(short, long = "tag")]
     pub tags: Vec<String>,
 
-    /// Parent task ID (creates child_of relationship)
+    /// Parent task ID (creates child_of relationship).
+    ///
+    /// Accepts a full UUID or an 8-character short ID prefix.
     #[arg(long, value_parser = crate::commands::parse_uuid("parent ID"))]
     pub parent: Option<String>,
 
-    /// Dependency task ID (can be specified multiple times)
+    /// Dependency task ID (can be specified multiple times).
+    ///
+    /// Each value accepts a full UUID or an 8-character short ID prefix.
     #[arg(long = "depends-on", value_parser = crate::commands::parse_uuid("dependency ID"))]
     pub depends_on: Vec<String>,
 
-    /// Workflow ID to assign task to (defaults to 'default')
+    /// Workflow ID to assign task to (omit to use the configured default workflow).
+    ///
+    /// Accepts a full UUID or an 8-character short ID prefix.
     #[arg(long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
 }
@@ -73,8 +81,8 @@ impl AddCommand {
     /// Execute the add command.
     ///
     /// Creates a new task with the specified options and stores it in the database.
-    /// Automatically assigns the task to a workflow (defaults to "default") to enable
-    /// execution history tracking when transitioning through workflow steps.
+    /// The service assigns the task to the default workflow unless `--workflow`
+    /// selects another workflow.
     ///
     /// # Arguments
     ///
