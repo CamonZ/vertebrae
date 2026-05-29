@@ -767,7 +767,35 @@ Checklist Items:
 ```bash
 # Task A depends on task B (B must finish before A can start)
 vtb depend <task-a> --on <task-b>
+
+# Short IDs are accepted anywhere a task ID is accepted
+vtb depend <task-a-short-id> --on <task-b-short-id>
+
+# Machine-readable output
+vtb depend <task-a> --on <task-b> --json
 ```
+
+### Depend Options
+
+```bash
+vtb depend [OPTIONS] --on <BLOCKER_ID> <ID>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<ID>` | Required task ID to block; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--on <BLOCKER_ID>` | Required blocker task ID; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-h, --help` | Print command help |
+
+`vtb depend` has no aliases, no short flags, and no defaults. Under `--json`,
+the command returns `task_id`, `blocker_id`, and `already_existed`.
+
+Adding the same dependency again is idempotent: the command succeeds and reports
+that the dependency already exists. The command rejects malformed IDs before
+execution, unknown or ambiguous short IDs during ID resolution, missing tasks in
+the service layer, self-dependencies, and dependencies that would create a
+cycle.
 
 ### Removing Dependencies
 
