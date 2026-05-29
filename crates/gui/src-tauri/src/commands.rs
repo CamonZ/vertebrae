@@ -5,10 +5,12 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    ChatMessage, ChatSession, DeleteChatSessionResult, SessionLog, Step, StepExecution,
-    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    ChatMessage, ChatSession, DeleteChatSessionResult, PermissionDecisionBehavior,
+    ResolvePermissionRequestInput, SessionLog, Step, StepExecution, StopRunRequest, Task,
+    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
@@ -1358,6 +1360,61 @@ pub async fn close_claude_session(
 ) -> Result<(), crate::claude_session::ClaudeSessionError> {
     log::info!("close_claude_session called: session_id={}", session_id);
     claude_manager.close_session(&session_id).await
+}
+
+const RESOLVE_PERMISSION_REQUEST: &str = r#"
+    mutation ResolvePermissionRequest(
+        $project_id: Uuid4!,
+        $request_id: String!,
+        $behavior: String!,
+        $message: String,
+        $updated_input: Json
+    ) {
+        resolve_permission_request(
+            project_id: $project_id,
+            request_id: $request_id,
+            behavior: $behavior,
+            message: $message,
+            updated_input: $updated_input
+        )
+    }
+"#;
+
+/// Resolve a Claude permission request shown in the GUI.
+#[tauri::command]
+#[specta::specta]
+pub async fn resolve_permission_request(
+    state: State<'_, AppState>,
+    input: ResolvePermissionRequestInput,
+) -> Result<serde_json::Value, CommandError> {
+    let client_guard = state.sacrum_client.read().await;
+    let client = client_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let behavior = match input.behavior {
+        PermissionDecisionBehavior::Allow => "allow",
+        PermissionDecisionBehavior::Deny => "deny",
+    };
+
+    let response: serde_json::Value = client
+        .execute(
+            RESOLVE_PERMISSION_REQUEST,
+            json!({
+                "project_id": client.project_id(),
+                "request_id": input.request_id,
+                "behavior": behavior,
+                "message": input.message,
+                "updated_input": input.updated_input,
+            }),
+            "resolve_permission_request",
+        )
+        .await
+        .map_err(|err| CommandError {
+            message: err.to_string(),
+        })?;
+
+    Ok(response)
 }
 
 // ============================================================================

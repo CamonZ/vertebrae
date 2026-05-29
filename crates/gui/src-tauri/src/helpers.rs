@@ -50,6 +50,60 @@ pub fn find_claude_binary() -> Result<PathBuf, String> {
     )
 }
 
+pub fn find_vtb_gate_binary() -> Result<PathBuf, String> {
+    if let Ok(path) = std::env::var("VTB_GATE_PATH") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "vtb-gate path specified in VTB_GATE_PATH does not exist: {}",
+            path.display()
+        ));
+    }
+
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(dir) = current_exe.parent() {
+            let sibling = dir.join(if cfg!(windows) {
+                "vtb-gate.exe"
+            } else {
+                "vtb-gate"
+            });
+            if sibling.exists() {
+                return Ok(sibling);
+            }
+            if let Some(target_dir) = dir.parent() {
+                let release = target_dir.join("release").join(if cfg!(windows) {
+                    "vtb-gate.exe"
+                } else {
+                    "vtb-gate"
+                });
+                if release.exists() {
+                    return Ok(release);
+                }
+            }
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("which").arg("vtb-gate").output() {
+        if output.status.success() {
+            let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
+    if let Some(home_dir) = dirs::home_dir() {
+        let path = home_dir.join(".local/bin/vtb-gate");
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
+    Err("vtb-gate not found. Set VTB_GATE_PATH or ensure vtb-gate is on PATH.".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
