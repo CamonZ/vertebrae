@@ -15,7 +15,16 @@ vtb archive <task-id>
 
 # Unarchive a task
 vtb unarchive <task-id>
+
+# Machine-readable archive result
+vtb archive <task-id> --json
 ```
+
+## Options
+
+Use `vtb archive --help` or `vtb unarchive --help` for the live option list.
+The canonical guide section in `docs/vtb-guide.md` covers JSON output, short
+IDs, aliases, and validation behavior.
 
 ## Behavior
 
