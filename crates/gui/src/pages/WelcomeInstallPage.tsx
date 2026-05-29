@@ -4,6 +4,8 @@ import { commands, InstallationStatus } from "../bindings";
 
 type Phase = "loading" | "ready" | "installing" | "success" | "error";
 
+const SUCCESS_REDIRECT_DELAY_MS = 1500;
+
 /**
  * First-run welcome screen. Asks the user for permission to install the
  * bundled `vtb` (CLI) and `vtb-daemon` (background workflow runner)
@@ -82,7 +84,7 @@ export function WelcomeInstallPage() {
         // Brief success state so the user sees confirmation before we move on.
         setTimeout(() => {
           proceedAfterDecision();
-        }, 600);
+        }, SUCCESS_REDIRECT_DELAY_MS);
       } else {
         setError(result.error.message);
         setPhase("error");

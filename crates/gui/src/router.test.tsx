@@ -375,7 +375,7 @@ describe("Router Acceptance Tests", () => {
       });
     });
 
-    it("shows supported task filters on TasksPage without status or done controls", async () => {
+    it("shows supported task filters and scope chips on TasksPage without status controls", async () => {
       const router = createTestRouter(["/tasks"]);
 
       render(
@@ -389,7 +389,7 @@ describe("Router Acceptance Tests", () => {
       });
       expect(screen.getByLabelText("Search tasks by title or ID")).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /done/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /done/i })).toBeInTheDocument();
     });
 
     it("updates search and level filters on TasksPage without status or done filter overrides", async () => {
