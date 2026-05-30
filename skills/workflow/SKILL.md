@@ -101,7 +101,27 @@ Show detailed workflow information including steps.
 
 ```bash
 vtb workflow show <workflow-id>
+vtb workflow show <workflow-id> --json
+vtb --json workflow show <workflow-id>
 ```
+
+`workflow show` has one required positional argument:
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<ID>` | | Yes | Workflow ID to show; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; output the workflow detail object as JSON. |
+
+There are no command aliases, short flags, defaults, or value enums for
+`workflow show`. Human-readable output includes the workflow id, name,
+description, Default and Final values, kanban column, ordered steps with model
+and prompt text, and timestamps. With `--json`, the command returns the raw
+workflow-detail object with `id`, `name`, `description`, `is_default`,
+`is_final`, `kanban_column`, `steps`, `metadata`, `created_at`, and
+`updated_at` fields.
+
+Malformed IDs are rejected before command execution. A valid full UUID or short
+ID that does not resolve to a workflow returns a validation error.
 
 ---
 
