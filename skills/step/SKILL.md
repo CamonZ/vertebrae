@@ -151,9 +151,35 @@ Show detailed step information.
 
 ```bash
 vtb step show <step-id>
+
+# Machine-readable raw step object
+vtb --json step show <step-id>
 ```
 
-Output shows step ID, name, workflow, order, goal, agents, skills, transitions, and timestamps in a flat key-value format.
+### Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | | Output machine-readable JSON instead of human-readable text |
+| `--help` | `-h` | Print help |
+
+The required positional argument is `<id>`, the step ID to show. It accepts a
+full UUID or an 8-character hex short ID and is resolved case-insensitively.
+There are no command aliases, defaults, or value enums for `step show`.
+
+Human-readable output is a flat detail view with the step ID and name, workflow
+ID, order, step type, goal, agents, skills, model, output schema, final-step
+marker, transitions, and created/updated timestamps. Missing optional fields are
+shown as `(none)`, and missing timestamps are shown as `-`.
+
+`--json` returns the raw `Step` object with fields such as `id`, `name`,
+`workflow_id`, `order`, `goal`, `prompt`, `agents`, `skills`, `step_type`,
+`agent_config`, `output_schema`, `is_final`, `transitions_to`, and timestamps.
+It does not wrap the result in an `output` field.
+
+If a full UUID reaches `step show` but no matching step exists, the command
+fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
+resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
 
 ---
 

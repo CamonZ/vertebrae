@@ -529,6 +529,49 @@ When the workflow has no steps, it prints `No steps found for workflow
 '<workflow-id>'`. With the global `--json` flag, `step list` returns the raw
 array of step objects and does not wrap the response in an `output` field.
 
+`vtb step show` takes exactly one required `<id>` argument: the step ID to show.
+It accepts a full UUID or an 8-character hex short ID and resolves IDs
+case-insensitively. The command has no aliases, defaults, or value enums; its
+help lists only `<ID>`, `--json`, and `-h` / `--help`.
+
+Human-readable output is a flat detail view with the step ID and name, workflow
+ID, order, step type, goal, agents, skills, model, output schema, final-step
+marker, transitions, and created/updated timestamps:
+
+```text
+Step: 925c50ac-a1ed-4f5b-82c3-9dcb0773597b - implement
+============================================================
+
+Workflow:      84b28cbb-9c65-4d64-9ea0-b74587f9d056
+Order:         1
+Step Type:     execute
+Goal:          Implement the ticket in the assigned worktree.
+Agents:        (none)
+Skills:        (none)
+Model:         gpt-5.5
+Output Schema: (none)
+Is Final:      No
+Transitions:   57d373b1-e40d-4a42-9ae4-1c6461d7a2b9
+Created:       2026-05-29 12:53
+Updated:       2026-05-30 16:48
+```
+
+Missing optional fields are shown as `(none)`, and missing timestamps are shown
+as `-`. If a full UUID reaches `step show` but no matching step exists, the
+command fails with `Step not found: <id>`. If an 8-character hex short ID cannot
+be resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
+
+With the global `--json` flag, `step show` returns the raw `Step` object and
+does not wrap the response in an `output` field:
+
+```bash
+vtb --json step show <step-id>
+```
+
+The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
+`goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
+`output_schema`, `is_final`, `transitions_to`, `created_at`, and `updated_at`.
+
 ### Step Properties
 
 | Property | Description |
