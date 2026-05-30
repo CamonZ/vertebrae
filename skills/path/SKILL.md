@@ -13,12 +13,11 @@ Find the shortest dependency path between two tasks using breadth-first search.
 vtb path <from-task> <to-task>
 ```
 
-## Arguments
+## Options
 
-| Argument | Description |
-|----------|-------------|
-| `from-task` | Source task ID |
-| `to-task` | Target task ID |
+Use `vtb path --help` for the live option list. The canonical guide section in
+`docs/vtb-guide.md` covers JSON output, short IDs, no-path behavior, and
+validation behavior.
 
 ## Output
 
@@ -29,6 +28,8 @@ Same task: abc123 "Task title"
 
 If a path exists:
 ```
+Path from abc123 to xyz789:
+
 abc123    "Deploy to production"
    ↓ depends on
 def456    "Run integration tests"
@@ -49,7 +50,7 @@ No dependency path from abc123 to xyz789
 
 - Traverses `depends_on` edges using BFS
 - Finds the shortest path (fewest edges)
-- Returns nothing if tasks are not connected
+- Reports `No dependency path ...` when tasks are not connected
 
 ## When to Use
 

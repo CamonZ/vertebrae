@@ -1,7 +1,9 @@
-//! Path command for finding dependency paths between tasks
+//! Path command for finding dependency paths between tasks.
 //!
 //! Implements the `vtb path` command to find the shortest dependency path
-//! between two tasks using BFS traversal of the dependency graph.
+//! between two tasks using BFS traversal of `depends_on` edges. The command
+//! accepts full UUIDs or 8-character short IDs for both positional arguments;
+//! short IDs are resolved before execution by the top-level command dispatcher.
 
 use clap::Args;
 use serde::Serialize;
@@ -10,11 +12,11 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// Find the dependency path between two tasks
 #[derive(Debug, Args)]
 pub struct PathCommand {
-    /// Source task ID (case-insensitive)
+    /// Source task ID (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("from task ID"))]
     pub from_id: String,
 
-    /// Target task ID (case-insensitive)
+    /// Target task ID (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("to task ID"))]
     pub to_id: String,
 }
@@ -42,8 +44,8 @@ pub struct PathResult {
 impl PathCommand {
     /// Execute the path command.
     ///
-    /// Finds the shortest dependency path from `from_id` to `to_id`
-    /// by traversing the `depends_on` edges using BFS.
+    /// Finds the shortest dependency path from `from_id` to `to_id` by
+    /// traversing `depends_on` edges using BFS.
     ///
     /// # Arguments
     ///
@@ -137,5 +139,100 @@ impl std::fmt::Display for PathResult {
                 )
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(id: &str, title: &str) -> TaskSummary {
+        TaskSummary {
+            id: id.to_string(),
+            title: title.to_string(),
+        }
+    }
+
+    #[test]
+    fn path_result_displays_same_task() {
+        let result = PathResult {
+            from_id: "abc12345".to_string(),
+            to_id: "abc12345".to_string(),
+            path: Some(vec![summary("abc12345", "Task title")]),
+        };
+
+        assert_eq!(format!("{result}"), "Same task: abc12345 \"Task title\"\n");
+    }
+
+    #[test]
+    fn path_result_displays_missing_path() {
+        let result = PathResult {
+            from_id: "abc12345".to_string(),
+            to_id: "def67890".to_string(),
+            path: None,
+        };
+
+        assert_eq!(
+            format!("{result}"),
+            "No dependency path from abc12345 to def67890\n"
+        );
+    }
+
+    #[test]
+    fn path_result_displays_dependency_path() {
+        let result = PathResult {
+            from_id: "abc12345".to_string(),
+            to_id: "def67890".to_string(),
+            path: Some(vec![
+                summary("abc12345", "Deploy to production"),
+                summary("def67890", "Run integration tests"),
+            ]),
+        };
+
+        assert_eq!(
+            format!("{result}"),
+            concat!(
+                "Path from abc12345 to def67890:\n",
+                "\n",
+                "abc12345  \"Deploy to production\"\n",
+                "   ↓ depends on\n",
+                "def67890  \"Run integration tests\"\n",
+                "\n",
+                "2 tasks in path\n",
+            )
+        );
+    }
+
+    #[test]
+    fn path_result_json_uses_null_for_missing_path() {
+        let result = PathResult {
+            from_id: "abc12345".to_string(),
+            to_id: "def67890".to_string(),
+            path: None,
+        };
+
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["from_id"], "abc12345");
+        assert_eq!(json["to_id"], "def67890");
+        assert!(json["path"].is_null());
+    }
+
+    #[test]
+    fn path_result_json_includes_task_summaries() {
+        let result = PathResult {
+            from_id: "abc12345".to_string(),
+            to_id: "def67890".to_string(),
+            path: Some(vec![
+                summary("abc12345", "Deploy to production"),
+                summary("def67890", "Run integration tests"),
+            ]),
+        };
+
+        let json = serde_json::to_value(&result).unwrap();
+        let path = json["path"].as_array().unwrap();
+        assert_eq!(path[0]["id"], "abc12345");
+        assert_eq!(path[0]["title"], "Deploy to production");
+        assert_eq!(path[1]["id"], "def67890");
+        assert_eq!(path[1]["title"], "Run integration tests");
     }
 }
