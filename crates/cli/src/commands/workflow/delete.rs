@@ -14,7 +14,11 @@ pub struct WorkflowDeleteCommand {
 impl WorkflowDeleteCommand {
     /// Execute the delete workflow command.
     ///
-    /// Deletes the workflow with the specified ID.
+    /// Deletes the workflow with the specified workflow ID.
+    ///
+    /// The ID is validated by clap before execution and may be either a full
+    /// UUID or an 8-character short ID. Successful JSON output is assembled by
+    /// the top-level command dispatcher.
     ///
     /// # Arguments
     ///
@@ -22,7 +26,7 @@ impl WorkflowDeleteCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
+    /// Returns `ServiceError::WorkflowNotFound` if the workflow doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         service.delete_workflow(&self.id).await?;
@@ -45,8 +49,12 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_delete_command_with_various_ids() {
-        let ids = vec!["wf1", "workflow-abc", "WORKFLOW123", "my-workflow"];
+    fn test_workflow_delete_command_with_uuid_ids() {
+        let ids = vec![
+            "0fbc3b2e",
+            "0fbc3b2e-1111-4222-8333-123456789abc",
+            "0FBC3B2E-1111-4222-8333-123456789ABC",
+        ];
         for id in ids {
             let cmd = WorkflowDeleteCommand { id: id.to_string() };
             assert_eq!(cmd.id, id);
@@ -56,25 +64,25 @@ mod tests {
     #[test]
     fn test_workflow_delete_command_field_value() {
         let cmd = WorkflowDeleteCommand {
-            id: "my-workflow".to_string(),
+            id: "0fbc3b2e".to_string(),
         };
-        assert_eq!(cmd.id, "my-workflow");
+        assert_eq!(cmd.id, "0fbc3b2e");
     }
 
     #[test]
     fn test_workflow_delete_command_case_preservation() {
         let cmd = WorkflowDeleteCommand {
-            id: "MyWorkflow".to_string(),
+            id: "0FBC3B2E-1111-4222-8333-123456789ABC".to_string(),
         };
-        assert_eq!(cmd.id, "MyWorkflow");
+        assert_eq!(cmd.id, "0FBC3B2E-1111-4222-8333-123456789ABC");
     }
 
     #[test]
-    fn test_workflow_delete_command_with_special_ids() {
+    fn test_workflow_delete_command_with_full_uuid() {
         let cmd = WorkflowDeleteCommand {
-            id: "workflow-with-many-dashes-and-numbers-123".to_string(),
+            id: "0fbc3b2e-1111-4222-8333-123456789abc".to_string(),
         };
-        assert!(cmd.id.contains("workflow"));
-        assert!(cmd.id.contains("123"));
+        assert_eq!(cmd.id.len(), 36);
+        assert!(cmd.id.contains('-'));
     }
 }

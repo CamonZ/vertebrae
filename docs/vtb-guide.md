@@ -469,7 +469,8 @@ vtb workflow update <id> --kanban-column "Active"  # Set kanban column
 vtb workflow update <id> --kanban-column ""        # Clear kanban column
 vtb workflow update <id> --default                 # Mark as default
 vtb workflow update <id> --name "Dev" --json       # Emit update envelope
-vtb workflow delete <workflow-id>                  # Delete (no assigned tasks allowed)
+vtb workflow delete <workflow-id>                  # Delete workflow
+vtb workflow delete <workflow-id> --json           # Emit delete envelope
 ```
 
 `vtb workflow list` takes no positional arguments and has no command-specific
@@ -522,6 +523,18 @@ With the global `--json` flag, the command returns an operation envelope with
 Malformed IDs are rejected before command execution. Unknown or ambiguous short
 IDs fail during ID resolution. A full UUID that reaches the service but does
 not exist returns a workflow-not-found service error.
+
+`vtb workflow delete` takes one required positional argument, `<ID>`, which is
+the workflow ID to delete. It accepts a case-insensitive full UUID or
+8-character short ID. The command has no command aliases, short flags, defaults,
+or value enums. Its generated help lists only `<ID>`, the global `--json`, and
+`-h` / `--help`. Human-readable output prints `Deleted workflow: <id>`.
+
+With the global `--json` flag, `workflow delete` returns an operation envelope
+with `command: "workflow delete"`, `status: "deleted"`, and top-level
+`workflow_id` containing the lowercased ID passed to the command. Malformed IDs
+fail validation before execution; valid UUIDs or short IDs that do not resolve
+to a workflow return a validation error from the workflow service.
 
 ### Assigning Workflows to Tasks
 
