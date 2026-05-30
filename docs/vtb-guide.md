@@ -432,7 +432,30 @@ vtb workflow add "Standard" --step Backlog:sonnet --step Done:haiku --default
 
 # Set display order
 vtb workflow add "Triage" --order 1
+
+# Create a workflow first, then add steps later
+vtb workflow add "Planning"
+
+# Machine-readable creation result
+vtb workflow add "Automation" --json
 ```
+
+`vtb workflow add` accepts one required positional argument, `<NAME>`.
+Inline `--step` values are optional, repeatable, and parsed as
+`name:model`; whitespace around each side is trimmed, and the model may contain
+additional colons. The command prints `Created workflow: <workflow-id>` by
+default. The global `--json` flag returns an operation envelope with
+`command: "workflow add"`, `status: "created"`, and top-level `workflow_id`.
+
+| Flag | Description |
+|------|-------------|
+| `<NAME>` | Required workflow name |
+| `-d, --description <DESCRIPTION>` | Optional workflow description |
+| `-s, --step <STEPS>` | Inline workflow step in `name:model` format; repeatable |
+| `-o, --order <ORDER>` | Display order for sorting workflows; lower values appear first; defaults to `0` |
+| `--kanban-column <KANBAN_COLUMN>` | Kanban column used for board placement |
+| `--default` | Mark the workflow as the default for new tasks |
+| `--json` | Global flag; output machine-readable JSON |
 
 ### Managing Workflows
 
