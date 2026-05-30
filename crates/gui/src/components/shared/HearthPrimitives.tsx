@@ -118,6 +118,7 @@ interface WorkflowRailItemProps extends HTMLAttributes<HTMLDivElement> {
   shape: Array<StepType | HearthStepKind>;
   live?: number;
   steps?: number;
+  tasks?: number;
   daily?: ReactNode;
   avg?: ReactNode;
   selected?: boolean;
@@ -689,6 +690,7 @@ export function WorkflowRailItem({
   shape,
   live,
   steps,
+  tasks,
   daily,
   avg,
   selected,
@@ -702,6 +704,7 @@ export function WorkflowRailItem({
       </span>
     ) : null,
     steps ? <span key="steps">{steps} steps</span> : null,
+    tasks !== undefined ? <span key="tasks">{tasks} tasks</span> : null,
     daily ? <span key="daily">{daily} / 24h</span> : null,
     avg ? <span key="avg">avg {avg}</span> : null,
   ].filter(Boolean);
@@ -723,7 +726,7 @@ export function WorkflowRailItem({
         {meta.map((item, index) => (
           <span key={index} className="inline-flex items-center gap-1.5">
             {index > 0 && (
-              <span className="sep text-[var(--color-fg-ghost)]">·</span>
+              <span className="sep text-[var(--color-fg-ghost)]"> · </span>
             )}
             {item}
           </span>
