@@ -92,12 +92,14 @@ epic       → Large initiative spanning multiple features
 
 Tasks don't have a standalone status. A task's position is defined by its **workflow** and **step** within that workflow. For example, a task might be in the `implementation` workflow at the `coding` step.
 
-Use `vtb transition-to` to move tasks between workflows and steps:
+Use `vtb transition-to` to move a task to a step in its current workflow:
 ```bash
-vtb transition-to <id> <target>         # Move to a step by name or UUID
+vtb transition-to <id> <target>         # Move to a step by name, UUID, or short ID
 ```
 
-Steps can be referenced by name (e.g., `backlog`, `in_progress`) or by UUID.
+Steps can be referenced by name (e.g., `backlog`, `in_progress`), full UUID,
+or 8-character short ID. To move a task to a different workflow, use
+`vtb workflow assign`.
 
 ### Short IDs
 
@@ -401,6 +403,9 @@ vtb transition-to <id> <target-step> --force
 
 # Escape hatch to bypass validation entirely
 vtb transition-to <id> <target-step> --skip-validation
+
+# Machine-readable output
+vtb transition-to <id> <target-step> --json
 ```
 
 ---
@@ -718,9 +723,12 @@ supported and should not be assumed to work:
 
 ## Moving Tasks Between Workflows and Steps
 
-### Cross-Workflow Transitions (`transition-to`)
+### Step Transitions (`transition-to`)
 
-Use `transition-to` to move tasks across workflows or to specific steps. The target can be a step name or UUID.
+Use `transition-to` to move a task to a specific step in its current workflow.
+The target can be a step name, full step UUID, or 8-character step short ID.
+Step names are resolved inside the task's current workflow. To move a task to a
+different workflow, use `vtb workflow assign <task-id> <workflow-id>` first.
 
 ```bash
 # Move to a step by name
@@ -730,14 +738,27 @@ vtb transition-to <id> in_progress
 # Move to a step by UUID
 vtb transition-to <id> <step-uuid>
 
+# Move to a step by 8-character step short ID
+vtb transition-to <id> <step-short-id>
+
 # Force past warnings
 vtb transition-to <id> <target> --force
 
 # Bypass validation entirely (escape hatch)
 vtb transition-to <id> <target> --skip-validation
+
+# Machine-readable output
+vtb transition-to <id> <target> --json
 ```
 
-### Workflow Transitions (between workflows)
+`transition-to` validates the requested move against the current step's
+`transitions_to` graph unless `--skip-validation` is supplied. The command
+allows no-op transitions to the task's current step. If the target step belongs
+to a different workflow, the command fails and directs you to `workflow assign`.
+When a task reaches a final step, the human-readable output lists dependent
+tasks that became unblocked.
+
+### Workflow Transition Rules
 
 Define allowed transitions between workflows:
 
@@ -805,7 +826,8 @@ vtb transition-to <id> testing     # Re-advance through the workflow
 
 ### Key Rules
 
-- **`transition-to`** is for moving to any step (by name or UUID)
+- **`transition-to`** is for moving to a step in the current workflow (by name, UUID, or short ID)
+- **`workflow assign`** is for changing a task's workflow
 - **Never use `vtb update`** for workflow/step changes — always use `transition-to`
 - Transitions are validated against workflow rules
 - Use `--skip-validation` only as an escape hatch
@@ -1362,7 +1384,7 @@ vtb ready
 ### Workflow Navigation
 | Command | Description |
 |---------|-------------|
-| `vtb transition-to <id> <target>` | Move to a step (by name or UUID) |
+| `vtb transition-to <id> <target>` | Move to a step in the current workflow (by name, UUID, or short ID) |
 
 ### Workflow Management
 | Command | Description |

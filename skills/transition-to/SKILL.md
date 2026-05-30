@@ -5,13 +5,19 @@ description: Transition a task to a specific workflow step
 
 # /transition-to
 
-Transition a task to a specific step within its current workflow. The task and step arguments accept full UUIDs or 8-char short IDs (uniformly, like every other vtb command).
+Transition a task to a specific step within its current workflow. The task argument accepts a full task UUID or 8-char short ID. The target accepts a full step UUID, an 8-char step short ID, or a step name in the task's current workflow.
 
 ## Usage
 
 ```bash
-# Transition to a step by UUID
-vtb transition-to <task-id> <step-uuid>
+# Transition to a step by name in the task's current workflow
+vtb transition-to <task-id> <step-name>
+
+# Transition to a step by UUID or 8-char step short ID
+vtb transition-to <task-id> <step-id>
+
+# Machine-readable output
+vtb transition-to <task-id> <step-name> --json
 ```
 
 ## Arguments
@@ -19,7 +25,7 @@ vtb transition-to <task-id> <step-uuid>
 | Argument | Description |
 |----------|-------------|
 | `task-id` | Task UUID or 8-char short ID |
-| `step-uuid` | Target step UUID, 8-char short ID, or step name |
+| `target` | Target step UUID, 8-char short ID, or step name |
 
 ## Options
 
@@ -27,10 +33,11 @@ vtb transition-to <task-id> <step-uuid>
 |------|-------|-------------|
 | `--force` | `-f` | Override warnings (but not errors) |
 | `--skip-validation` | | Bypass workflow transition validation |
+| `--json` | | Global flag; output machine-readable JSON instead of human-readable text |
 
 ## Finding Step UUIDs
 
-Before using `transition-to`, look up the step UUIDs:
+To find available steps or IDs:
 
 ```bash
 vtb workflow list                    # List all workflows
@@ -42,6 +49,7 @@ vtb step list <workflow-id>          # List steps with IDs
 
 - The task must already be assigned to the same workflow as the target step
 - To change workflows entirely, use `vtb workflow assign <task-id> <workflow-id>`
+- Step names are resolved only within the task's current workflow
 - Transitions are validated against the step's `transitions_to` graph unless `--skip-validation` is used
 
 ## Output
