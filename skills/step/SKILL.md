@@ -48,7 +48,7 @@ vtb step add "Coding" -w <workflow-id> \
 
 # With prompt and full agent config JSON
 vtb step add "Coding" -w <workflow-id> \
-  --prompt "Implement the task described in {task_id}" \
+  --prompt "Implement the task described in {task.id}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
 # With agents and skills

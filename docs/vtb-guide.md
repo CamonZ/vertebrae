@@ -470,7 +470,7 @@ vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 
 # Add step with prompt and agent config
 vtb step add "Coding" -w <workflow-id> \
-  --prompt "Implement the task described in {task_id}" \
+  --prompt "Implement the task described in {task.id}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
 # Add step with agents and skills
@@ -497,7 +497,7 @@ vtb --json step add "Review" -w <workflow-id>
 vtb step list <workflow-id>
 vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
-vtb step update <step-id> --prompt "New prompt for {task_id}"
+vtb step update <step-id> --prompt "New prompt for {task.id}"
 vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
@@ -519,7 +519,7 @@ and `workflow_id`.
 | `order` | Execution order (lower = first, 0-indexed) |
 | `final` | Marks workflow as complete when reached |
 | `goal` | What this step accomplishes |
-| `prompt` | Template sent to the executing agent (supports `{task_id}` interpolation) |
+| `prompt` | Template sent to the executing agent (supports `{task.id}` interpolation) |
 | `model` | AI model shortcut (sonnet, haiku, opus) |
 | `agent-config` | Full LLM config JSON (model, budget, tools, permissions) |
 | `provider` | Built-in execution provider shortcut (`anthropic`/`claude` or `openai`/`codex`); `--model-provider` is an alias |
