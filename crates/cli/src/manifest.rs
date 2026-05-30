@@ -184,24 +184,24 @@ fn validate_docs_with_manifest(repo_root: &Path, manifest: &CliManifest) -> Vali
         return ValidationReport { issues };
     }
 
-    let guide = repo_root.join("docs/vtb-guide.md");
-    match fs::read_to_string(&guide) {
-        Ok(content) => {
-            validate_markdown_content(&guide, &content, &command_lookup, &flag_lookup, &mut issues);
-            validate_guide_command_coverage(
-                &guide,
-                &content,
-                manifest,
-                &command_lookup,
-                &mut issues,
-            );
-            validate_section_types_in_content(&guide, &content, &mut issues);
-        }
-        Err(_) => issues.push(ValidationIssue {
-            file: guide,
-            message: "required guide file is missing or unreadable".to_string(),
-        }),
+    let guide_pages = read_guide_pages(repo_root, &mut issues);
+    for (guide_page, content) in &guide_pages {
+        validate_markdown_content(
+            guide_page,
+            content,
+            &command_lookup,
+            &flag_lookup,
+            &mut issues,
+        );
+        validate_section_types_in_content(guide_page, content, &mut issues);
     }
+    validate_guide_command_coverage(
+        &repo_root.join("docs/vtb-guide.md"),
+        guide_pages.iter().map(|(_, content)| content.as_str()),
+        manifest,
+        &command_lookup,
+        &mut issues,
+    );
 
     for root in SKILL_MANIFEST_ROOTS {
         let skill_root = repo_root.join(root);
@@ -660,15 +660,73 @@ fn example_flags(tokens: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn validate_guide_command_coverage(
+fn read_guide_pages(repo_root: &Path, issues: &mut Vec<ValidationIssue>) -> Vec<(PathBuf, String)> {
+    let guide = repo_root.join("docs/vtb-guide.md");
+    let content = match fs::read_to_string(&guide) {
+        Ok(content) => content,
+        Err(_) => {
+            issues.push(ValidationIssue {
+                file: guide,
+                message: "required guide file is missing or unreadable".to_string(),
+            });
+            return Vec::new();
+        }
+    };
+
+    let mut pages = vec![(guide.clone(), content.clone())];
+    let mut linked_pages = linked_guide_pages(&content);
+    linked_pages.sort();
+    linked_pages.dedup();
+
+    for relative in linked_pages {
+        let path = repo_root.join("docs").join(&relative);
+        match fs::read_to_string(&path) {
+            Ok(content) => pages.push((path, content)),
+            Err(_) => issues.push(ValidationIssue {
+                file: guide.clone(),
+                message: format!(
+                    "links to missing or unreadable guide page `{}`",
+                    relative.display()
+                ),
+            }),
+        }
+    }
+
+    pages
+}
+
+fn linked_guide_pages(content: &str) -> Vec<PathBuf> {
+    let mut pages = Vec::new();
+    for line in content.lines() {
+        let mut rest = line;
+        while let Some(start) = rest.find("](vtb-guide/") {
+            rest = &rest[start + 2..];
+            let Some(end) = rest.find(')') else {
+                break;
+            };
+            let target = &rest[..end];
+            let target = target.split_once('#').map_or(target, |(path, _)| path);
+            if target.ends_with(".md") {
+                pages.push(PathBuf::from(target));
+            }
+            rest = &rest[end + 1..];
+        }
+    }
+    pages
+}
+
+fn validate_guide_command_coverage<'a>(
     path: &Path,
-    content: &str,
+    contents: impl IntoIterator<Item = &'a str>,
     manifest: &CliManifest,
     command_lookup: &BTreeMap<Vec<String>, &ManifestCommand>,
     issues: &mut Vec<ValidationIssue>,
 ) {
     let accepted_paths = command_lookup.keys().cloned().collect();
-    let mut documented = extract_vtb_command_paths(content, &accepted_paths);
+    let mut documented = BTreeSet::new();
+    for content in contents {
+        documented.extend(extract_vtb_command_paths(content, &accepted_paths));
+    }
     let documented_children = documented.clone();
     for path in documented_children {
         for idx in 1..path.len() {
@@ -811,6 +869,14 @@ mod tests {
             visit(cmd, &mut paths);
         }
         paths
+    }
+
+    fn temp_repo(name: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("vertebrae-manifest-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("docs/vtb-guide")).expect("create temp docs dir");
+        root
     }
 
     #[test]
@@ -974,6 +1040,59 @@ vtb section <id> step "Do the thing"
                 .render()
                 .contains("repository root does not exist or is not a directory")
         );
+    }
+
+    #[test]
+    fn guide_reader_loads_entrypoint_and_linked_split_pages() {
+        let root = temp_repo("split-pages");
+        fs::write(
+            root.join("docs/vtb-guide.md"),
+            "[Tasks](vtb-guide/tasks.md)\n[Steps](vtb-guide/steps.md#provider-selection)\n",
+        )
+        .expect("write guide entrypoint");
+        fs::write(root.join("docs/vtb-guide/tasks.md"), "vtb add \"Title\"\n")
+            .expect("write tasks page");
+        fs::write(root.join("docs/vtb-guide/steps.md"), "vtb step list\n")
+            .expect("write steps page");
+
+        let mut issues = Vec::new();
+        let pages = read_guide_pages(&root, &mut issues);
+
+        assert!(issues.is_empty());
+        assert_eq!(pages.len(), 3);
+        assert!(
+            pages
+                .iter()
+                .any(|(path, _)| path.ends_with("docs/vtb-guide/tasks.md"))
+        );
+        assert!(
+            pages
+                .iter()
+                .any(|(path, _)| path.ends_with("docs/vtb-guide/steps.md"))
+        );
+        fs::remove_dir_all(root).expect("remove temp repo");
+    }
+
+    #[test]
+    fn guide_reader_reports_missing_linked_split_page() {
+        let root = temp_repo("missing-split-page");
+        fs::write(
+            root.join("docs/vtb-guide.md"),
+            "[Missing](vtb-guide/missing.md)\n",
+        )
+        .expect("write guide entrypoint");
+
+        let mut issues = Vec::new();
+        let pages = read_guide_pages(&root, &mut issues);
+
+        assert_eq!(pages.len(), 1);
+        assert_eq!(issues.len(), 1);
+        assert!(
+            issues[0]
+                .message
+                .contains("links to missing or unreadable guide page `vtb-guide/missing.md`")
+        );
+        fs::remove_dir_all(root).expect("remove temp repo");
     }
 
     #[test]

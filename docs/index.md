@@ -9,7 +9,7 @@ This index is the source of truth for project documentation entrypoints.
 | [Project Overview](project-overview.md) | Workspace layout, crates, build commands, dependency summary |
 | [Architecture](architecture.md) | Rust crate architecture, service traits, Sacrum GraphQL client, GUI, daemon |
 | [System Overview](system-overview.md) | Full Vertebrae + Sacrum domain model and AI workflow execution loop |
-| [vtb Guide](vtb-guide.md) | CLI usage for tasks, dependencies, sections, workflows, steps, and execution |
+| [vtb Guide](vtb-guide.md) | CLI guide entrypoint with maintained pages for tasks, dependencies, sections, workflows, steps, and execution |
 | [Sacrum Config](SACRUM_CONFIG.md) | Global config file, project matching, and environment overrides |
 | [GUI Development](gui-development.md) | Tauri + React development, scripts, frontend state, real-time sync |
 | [Testing](testing.md) | Local test commands, coverage, linting, and acceptance-test constraints |
