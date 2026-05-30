@@ -27,7 +27,11 @@ describe("RunHistoryRail", () => {
   describe("TASKS panel", () => {
     it("renders the task tree with depth and highlights the current task", () => {
       const tasks: Task[] = [
-        createMockTask({ id: "ticket-1", title: "Refactor auth", level: "ticket" }),
+        createMockTask({
+          id: "ticket-1",
+          title: "Refactor auth",
+          level: "ticket",
+        }),
         createMockTask({
           id: "task-jwt",
           title: "Implement JWT",
@@ -64,17 +68,29 @@ describe("RunHistoryRail", () => {
         "1",
         "1",
       ]);
+      expect(rows.map((r) => r.getAttribute("data-level"))).toEqual([
+        "ticket",
+        "task",
+        "task",
+      ]);
       expect(rows.map((r) => r.getAttribute("data-active"))).toEqual([
         "false",
         "true",
         "false",
       ]);
+      expect(screen.getByTestId("run-history-task-count")).toHaveTextContent(
+        "3"
+      );
     });
 
     it("calls onSelectTask with the row's id when a task is clicked", () => {
       const onSelectTask = vi.fn();
       const tasks: Task[] = [
-        createMockTask({ id: "ticket-1", title: "Refactor auth", level: "ticket" }),
+        createMockTask({
+          id: "ticket-1",
+          title: "Refactor auth",
+          level: "ticket",
+        }),
         createMockTask({
           id: "task-jwt",
           title: "Implement JWT",
@@ -165,6 +181,13 @@ describe("RunHistoryRail", () => {
       expect(rows[1].getAttribute("data-terminal")).toBe("true");
       expect(rows[0].getAttribute("data-active")).toBe("true");
       expect(rows[0].getAttribute("data-active-source")).toBe("active");
+      expect(screen.getByTestId("run-history-run-count")).toHaveTextContent(
+        "2"
+      );
+      expect(screen.getByTestId("run-history-hero-status")).toHaveAttribute(
+        "data-status",
+        "executing"
+      );
     });
 
     it("invokes onSelectRun with the row's id when clicked", () => {

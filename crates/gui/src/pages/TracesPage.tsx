@@ -392,9 +392,9 @@ export function TracesPage({
     () => railTaskIds.filter((id) => id !== safeTaskId),
     [railTaskIds, safeTaskId]
   );
-  const {
-    runs: descendantRailRuns,
-  } = useTaskRunsForTasks(descendantRailTaskIds);
+  const { runs: descendantRailRuns } = useTaskRunsForTasks(
+    descendantRailTaskIds
+  );
   const railRuns = useMemo(
     () => mergeRunsNewestFirst(runs, descendantRailRuns),
     [runs, descendantRailRuns]
@@ -818,7 +818,7 @@ export function TracesPage({
 
         <main
           data-testid="traces-center-pane"
-          className="flex min-w-0 flex-1 flex-col gap-3 p-4"
+          className="flex min-w-0 flex-1 flex-col gap-3 bg-[var(--color-bg)] p-4"
         >
           {!taskId ? (
             <div
@@ -841,7 +841,7 @@ export function TracesPage({
             </div>
           ) : (
             <>
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2">
                 <ModeToggle mode={mode} onChange={setMode} />
                 <div className="flex items-center gap-3">
                   {showRunHistoryRail && activeTraceRun && (
@@ -863,7 +863,7 @@ export function TracesPage({
                   {mode === "thread" && (
                     <label
                       data-testid="traces-auto-scroll-label"
-                      className="flex cursor-pointer items-center gap-1 text-2xs text-text-secondary"
+                      className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-2xs text-text-secondary"
                     >
                       <input
                         data-testid="traces-auto-scroll"
@@ -888,7 +888,10 @@ export function TracesPage({
                 />
               )}
               <div className="flex min-h-0 flex-1 flex-row gap-3">
-                <div className="min-w-0 flex-1">
+                <div
+                  data-testid="traces-event-stream-frame"
+                  className="min-w-0 flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)]"
+                >
                   {renderModeContent({
                     mode,
                     taskId,

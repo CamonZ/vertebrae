@@ -20,12 +20,57 @@ interface FilterBarProps {
   onRootOnlyChange: (value: boolean) => void;
 }
 
+const FILTER_LABEL_CLASS =
+  "flex items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-[var(--color-fg-soft)]";
+const FILTER_SELECT_CLASS =
+  "border-0 bg-transparent px-1 py-0 text-xs text-[var(--color-fg)] outline-none";
+
 function uniqueSorted(values: Iterable<string | null | undefined>): string[] {
   const set = new Set<string>();
   for (const v of values) {
     if (v && v.trim().length > 0) set.add(v);
   }
   return Array.from(set).sort();
+}
+
+function FilterSelect({
+  testId,
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  testId: string;
+  label: string;
+  value: string | null | undefined;
+  options: readonly string[];
+  onChange: (value: string | null) => void;
+}): ReactNode {
+  const handleChange = (e: ChangeEvent<HTMLSelectElement>): void => {
+    const val = e.target.value;
+    onChange(val === "" ? null : val);
+  };
+
+  return (
+    <label className={FILTER_LABEL_CLASS}>
+      <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+        {label}
+      </span>
+      <select
+        data-testid={testId}
+        className={FILTER_SELECT_CLASS}
+        value={value ?? ""}
+        onChange={handleChange}
+      >
+        <option value="">All</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
@@ -54,88 +99,51 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
       [executions]
     );
 
-    const handleSelect =
-      (cb: (v: string | null) => void) =>
-      (e: ChangeEvent<HTMLSelectElement>): void => {
-        const val = e.target.value;
-        cb(val === "" ? null : val);
-      };
-
     return (
       <div
         data-testid="trace-filter-bar"
-        className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-xs"
+        data-variant="hearth-v2"
+        className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg-1)] px-4 py-2 text-xs"
       >
-        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-            Status
-          </span>
-          <select
-            data-testid="trace-filter-status"
-            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
-            value={filters.status ?? ""}
-            onChange={handleSelect(onStatusChange)}
-          >
-            <option value="">All</option>
-            {statuses.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-            Step
-          </span>
-          <select
-            data-testid="trace-filter-step"
-            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
-            value={filters.stepName ?? ""}
-            onChange={handleSelect(onStepNameChange)}
-          >
-            <option value="">All</option>
-            {stepNames.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="flex items-center gap-1 text-[var(--color-fg-soft)]">
-          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-            Model
-          </span>
-          <select
-            data-testid="trace-filter-model"
-            className="rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-1 py-0.5 text-xs text-[var(--color-fg)]"
-            value={filters.model ?? ""}
-            onChange={handleSelect(onModelChange)}
-          >
-            <option value="">All</option>
-            {models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </label>
+        <FilterSelect
+          testId="trace-filter-status"
+          label="Status"
+          value={filters.status}
+          options={statuses}
+          onChange={onStatusChange}
+        />
+        <FilterSelect
+          testId="trace-filter-step"
+          label="Step"
+          value={filters.stepName}
+          options={stepNames}
+          onChange={onStepNameChange}
+        />
+        <FilterSelect
+          testId="trace-filter-model"
+          label="Model"
+          value={filters.model}
+          options={models}
+          onChange={onModelChange}
+        />
 
         <input
           ref={searchRef}
           data-testid="trace-filter-search"
           type="text"
           placeholder="Search events… (press / to focus)"
-          className="min-w-[180px] flex-1 rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-2 py-0.5 text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
+          className="min-w-[180px] flex-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-3 py-1 text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
           value={filters.search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
 
         <label
           data-testid="trace-filter-root-only-label"
-          className="flex cursor-pointer items-center gap-1 text-[var(--color-fg-soft)]"
+          className={`flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[var(--color-fg-soft)] ${
+            filters.rootOnly
+              ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
+              : "border-[var(--color-line)] bg-[var(--color-bg-2)]"
+          }`}
         >
           <input
             data-testid="trace-filter-root-only"

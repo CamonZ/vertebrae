@@ -43,8 +43,12 @@ const THRESHOLD_CALLOUT_HEIGHT = 14;
 const THRESHOLD_LANE_HEIGHT = 22;
 const TOOL_LANE_HEIGHT = 16;
 const PADDING_X = 8;
-const LANE_LABEL_WIDTH = 72;
+const LANE_LABEL_WIDTH = 76;
 const CALLOUT_MIN_GAP_PX = 70;
+const LANE_BAND_CLASS =
+  "border-b border-[var(--color-line)]/40 bg-[linear-gradient(90deg,var(--color-line)_1px,transparent_1px)] bg-[length:12.5%_100%]";
+const MARKER_BUTTON_CLASS =
+  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] shadow-sm hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)]";
 
 const THRESHOLD_TITLES: Record<ThresholdMarker["kind"], string | null> = {
   approval: "APPROVAL",
@@ -344,13 +348,23 @@ export function FlightStrip({
   return (
     <div
       data-testid="flight-strip"
-      className="relative w-full select-none border-b border-[var(--color-line)] bg-[var(--color-bg-1)]"
+      data-variant="hearth-v2"
+      className="relative w-full select-none rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] shadow-sm"
       style={{ paddingLeft: PADDING_X, paddingRight: PADDING_X }}
     >
-      <div className="flex items-center justify-between gap-2 px-1 pt-1">
-        <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-          Flight strip
-        </span>
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1.5">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+            Flight strip
+          </span>
+          <span
+            data-testid="flight-strip-summary"
+            className="rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-0.5 font-mono text-[9px] text-[var(--color-fg-mute)]"
+          >
+            {projection.thresholds.length} steps · {projection.tools.length}{" "}
+            tools
+          </span>
+        </div>
         <label
           data-testid="flight-strip-thresholds-only-label"
           className="flex cursor-pointer items-center gap-1 text-2xs text-[var(--color-fg-soft)]"
@@ -396,6 +410,7 @@ export function FlightStrip({
             onMarkerClick={handleMarkerClick}
             calloutHeight={THRESHOLD_CALLOUT_HEIGHT}
             laneHeight={THRESHOLD_LANE_HEIGHT}
+            showBand={!thresholdsOnly}
           />
 
           {!thresholdsOnly && (
@@ -404,6 +419,7 @@ export function FlightStrip({
                 testId="flight-strip-lane-tool"
                 top={toolLaneTop}
                 height={TOOL_LANE_HEIGHT}
+                className={LANE_BAND_CLASS}
               >
                 {projection.tools.map((m, i) => (
                   <button
@@ -417,7 +433,7 @@ export function FlightStrip({
                       e.stopPropagation();
                       handleMarkerClick(m);
                     }}
-                    className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 leading-none"
+                    className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-0.5 leading-none ${MARKER_BUTTON_CLASS}`}
                     style={{ left: xPct(m.x) }}
                   >
                     <EventGlyph event={m} size={12} />
@@ -427,7 +443,7 @@ export function FlightStrip({
 
               <div
                 data-testid="flight-strip-lane-main"
-                className="absolute left-0 right-0"
+                className={`absolute left-0 right-0 ${LANE_BAND_CLASS}`}
                 style={{
                   top: mainLaneTop,
                   height: Math.max(LANE_HEIGHT, mainLaneHeight),
@@ -457,7 +473,7 @@ export function FlightStrip({
                           e.stopPropagation();
                           handleMarkerClick(m);
                         }}
-                        className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 leading-none"
+                        className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 p-0.5 leading-none ${MARKER_BUTTON_CLASS}`}
                         style={{ left: xPct(m.x) }}
                       >
                         <EventGlyph
@@ -528,16 +544,18 @@ function Lane({
   top,
   height,
   children,
+  className = "",
 }: {
   testId: string;
   top: number;
   height: number;
   children?: ReactNode;
+  className?: string;
 }): ReactNode {
   return (
     <div
       data-testid={testId}
-      className="absolute left-0 right-0"
+      className={`absolute left-0 right-0 ${className}`}
       style={{ top, height }}
     >
       {children}
@@ -585,7 +603,7 @@ function LaneGutter({
   return (
     <div
       data-testid="flight-strip-gutter"
-      className="relative flex-shrink-0 border-r border-[var(--color-line)]/60"
+      className="relative flex-shrink-0 border-r border-[var(--color-line)]/60 bg-[var(--color-bg-2)]/35"
       style={{ width: LANE_LABEL_WIDTH }}
     >
       <GutterLabel
@@ -628,17 +646,19 @@ function ThresholdLane({
   onMarkerClick,
   calloutHeight,
   laneHeight,
+  showBand,
 }: {
   thresholds: readonly ThresholdMarker[];
   calloutVisible: readonly boolean[];
   onMarkerClick: (m: TimelineMarker) => void;
   calloutHeight: number;
   laneHeight: number;
+  showBand: boolean;
 }): ReactNode {
   return (
     <div
       data-testid="flight-strip-lane-threshold"
-      className="absolute left-0 right-0"
+      className={`absolute left-0 right-0 ${showBand ? LANE_BAND_CLASS : ""}`}
       style={{ top: 0, height: calloutHeight + laneHeight }}
     >
       {thresholds.map((m, i) => {
@@ -659,7 +679,9 @@ function ThresholdLane({
                 data-visible={showTitle ? "true" : "false"}
                 aria-hidden={showTitle ? undefined : "true"}
                 className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[8px] uppercase tracking-wider ${
-                  isError ? "text-[var(--color-err)]" : "text-[var(--color-fg-soft)]"
+                  isError
+                    ? "text-[var(--color-err)]"
+                    : "text-[var(--color-fg-soft)]"
                 }`}
                 style={{
                   height: calloutHeight,
@@ -680,7 +702,7 @@ function ThresholdLane({
                 e.stopPropagation();
                 onMarkerClick(m);
               }}
-              className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center rounded-sm hover:bg-[var(--color-bg-2)]"
+              className={`absolute left-1/2 -translate-x-1/2 flex items-center justify-center ${MARKER_BUTTON_CLASS}`}
               style={{ top: calloutHeight, width: 16, height: laneHeight }}
             >
               <EventGlyph event={m} size={12} />
