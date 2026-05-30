@@ -1008,8 +1008,19 @@ vtb show <id>                         # Full task details with sections, refs, r
 ### Finding Actionable Work
 
 ```bash
-vtb ready                             # Highest-level items ready for work or triage
+vtb ready                             # Items ready for work or triage
+vtb --json ready                      # Same command as machine-readable JSON
+vtb ready --json                      # Global --json may also appear after the subcommand
 ```
+
+`vtb ready` has no positional arguments or command-specific flags. It returns
+actionable items from the backend ready query, filters archived items out of
+that result, and prints each remaining item as `id`, `level`, and `title` under
+`Ready to start (backlog):`. If no items are ready, it prints
+`No actionable items found.`.
+
+JSON output is an object with a `backlog_ready` array containing the serialized
+task records returned by the command.
 
 ---
 
