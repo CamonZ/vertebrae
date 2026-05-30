@@ -37,7 +37,9 @@ function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
         aria-label={label}
         className={({ isActive }) =>
           [
-            "group relative flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)]",
+            // 28px box matches the design rail's `.app-rail .item` (and our
+            // 28px project avatar) — keeps the icon pitch tight per the v2 shell.
+            "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
             "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
             isActive
@@ -138,7 +140,7 @@ function ProjectChatButton() {
         onClick={handleClick}
         aria-label="Project Chat"
         className={[
-          "group relative flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)]",
+          "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
           "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
           panelOpen
@@ -177,18 +179,10 @@ function StyleguideNavItem() {
       id="styleguide"
       label="Styleguide"
       icon={
-        <svg
-          width={14}
-          height={14}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          aria-hidden
-        >
+        <Icon size="sm" strokeWidth={1.6}>
           <path d="M4 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2H4V5z" />
           <path d="M4 9h16v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9zM8 13h3m-3 3h8" />
-        </svg>
+        </Icon>
       }
     />
   );
@@ -357,17 +351,12 @@ function ProjectPopover({
   );
 }
 
-/**
- * Maps a WebSocket connection state onto the rail readout's design tokens:
- * the dot's solid color, its `color-mix` glow, and the lowercase label. Colors
- * use the Hearth `--color-ok`/`--color-warn`/`--color-err` tokens (the design's
- * `.app-rail .sys .conn` ok/warn/err states) — never raw Tailwind palette
- * classes — so the readout stays in sync with the rest of the shell.
- */
 function railStatusConfig(status: WebSocketStatus): {
   dot: string;
   glow: string;
   label: string;
+  name: string;
+  token: "ok" | "warn" | "err";
 } {
   switch (status) {
     case "connected":
@@ -375,6 +364,8 @@ function railStatusConfig(status: WebSocketStatus): {
         dot: "bg-[var(--color-ok)]",
         glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-ok)_60%,transparent)]",
         label: "connected",
+        name: "Connected",
+        token: "ok",
       };
     case "connecting":
     case "reconnecting":
@@ -382,6 +373,8 @@ function railStatusConfig(status: WebSocketStatus): {
         dot: "bg-[var(--color-warn)]",
         glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-warn)_60%,transparent)]",
         label: "connecting",
+        name: status === "reconnecting" ? "Reconnecting" : "Connecting",
+        token: "warn",
       };
     case "disconnected":
     default:
@@ -389,20 +382,16 @@ function railStatusConfig(status: WebSocketStatus): {
         dot: "bg-[var(--color-err)]",
         glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-err)_60%,transparent)]",
         label: "disconnected",
+        name: "Disconnected",
+        token: "err",
       };
   }
 }
 
-/**
- * Hearth v2 vertical connection readout pinned to the bottom of the rail
- * (`.app-rail .sys` in the design shell). The container rotates the text to
- * read bottom-to-top; the dot is counter-rotated upright so the glow stays a
- * round dot. `mt-auto` pushes it below the `flex-1` nav.
- */
 function RailConnectionStatus() {
   const status = useWebSocketStatus();
   const config = railStatusConfig(status);
-  const accessibleName = `WebSocket: ${status.charAt(0).toUpperCase()}${status.slice(1)}`;
+  const accessibleName = `WebSocket: ${config.name}`;
 
   return (
     <div
@@ -415,6 +404,7 @@ function RailConnectionStatus() {
       <span
         aria-hidden
         data-testid="rail-connection-dot"
+        data-status-token={config.token}
         className={`h-1.5 w-1.5 rounded-full [writing-mode:horizontal-tb] rotate-180 ${config.dot} ${config.glow}`}
       />
       <span>{config.label}</span>
@@ -501,11 +491,12 @@ export function Sidebar() {
     <aside
       aria-label="Sidebar navigation"
       className={[
-        "relative flex w-12 shrink-0 flex-col items-center gap-2 py-1.5",
+        // Uniform 4px gap (`gap-1`) mirrors the design rail's `.app-rail { gap: 4px }`.
+        "relative flex w-12 shrink-0 flex-col items-center gap-1 py-1.5",
         "border-r border-[var(--color-line)] bg-[var(--color-bg)]",
       ].join(" ")}
     >
-      <div className="relative flex h-9 items-center justify-center">
+      <div className="relative flex h-7 items-center justify-center">
         {project.name ? (
           <ProjectAvatar
             name={project.name}
@@ -532,6 +523,9 @@ export function Sidebar() {
           />
         )}
       </div>
+      {/* Thin 20px rule between the project monogram and the nav icons —
+          the design rail's `.app-rail hr` (1px, --color-line, 20px wide). */}
+      <div aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-[var(--color-line)]" />
       <nav aria-label="Main navigation" className="flex-1">
         <ul role="list" className="flex flex-col items-center gap-1">
           {RAIL_NAV_ITEMS.map((item) => (

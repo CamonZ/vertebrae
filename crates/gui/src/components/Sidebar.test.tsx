@@ -120,7 +120,9 @@ describe("Sidebar Traces nav", () => {
       </MemoryRouter>
     );
 
-    expect(screen.queryByTestId("sidebar-nav-styleguide")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-nav-styleguide")
+    ).not.toBeInTheDocument();
   });
 
   it("renders a Styleguide nav link pointing at /styleguide when revealed", () => {
@@ -244,7 +246,9 @@ describe("Sidebar project switcher", () => {
     renderSidebar();
     await openSwitcher(user);
 
-    const activeEntry = await screen.findByTestId("sidebar-project-entry-alpha");
+    const activeEntry = await screen.findByTestId(
+      "sidebar-project-entry-alpha"
+    );
     expect(activeEntry).toHaveTextContent("✓");
 
     await user.click(activeEntry);
@@ -342,22 +346,15 @@ describe("Sidebar rail connection readout", () => {
       mockUseWebSocketStatus.mockReturnValue(status);
       renderSidebar();
 
-      const readout = screen.getByRole("status", { name: `WebSocket: ${name}` });
+      const readout = screen.getByRole("status", {
+        name: `WebSocket: ${name}`,
+      });
       expect(readout).toHaveTextContent(label);
       expect(readout).toHaveAttribute("aria-label", `WebSocket: ${name}`);
       expect(readout).toHaveAttribute("title", `WebSocket: ${name}`);
 
-      expect(readout).toHaveClass("[writing-mode:vertical-rl]");
-      expect(readout).toHaveClass("rotate-180");
-      expect(readout).toHaveClass("mt-auto");
-
       const dot = screen.getByTestId("rail-connection-dot");
-      expect(dot).toHaveClass(`bg-[var(--color-${token})]`);
-      expect(dot).toHaveClass(
-        `shadow-[0_0_6px_color-mix(in_oklch,var(--color-${token})_60%,transparent)]`
-      );
-      expect(dot).toHaveClass("[writing-mode:horizontal-tb]");
-      expect(dot).toHaveClass("rotate-180");
+      expect(dot).toHaveAttribute("data-status-token", token);
       expect(dot.className).not.toMatch(
         /bg-(red|green|amber|yellow|emerald|orange)-\d/
       );

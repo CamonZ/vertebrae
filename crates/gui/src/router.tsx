@@ -165,7 +165,7 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
-export const appRoutes: RouteObject[] = [
+const appRoutes: RouteObject[] = [
   {
     path: "/welcome",
     element: <WelcomeInstallPage />,
