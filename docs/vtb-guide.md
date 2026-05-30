@@ -279,10 +279,34 @@ vtb section <id> failure_test "Invalid contract returns {:error, reason}"
 
 ### Viewing Sections
 
+`vtb sections` lists the sections already attached to a task:
+
 ```bash
-vtb sections <id>                     # List all sections
-vtb sections <id> --type checklist_item  # Filter by type
+vtb sections [--json] [--type <SECTION_TYPE>] <id>
 ```
+
+The command has one required positional argument, `<id>`, which is a
+case-insensitive task ID. Without `--json`, output is grouped into desired and
+undesired behavior using the section type categories above. Sections are sorted
+by that group order, then by section type, then by their stored ordinal.
+
+```bash
+# List all sections
+vtb sections <id>
+
+# Filter by type
+vtb sections <id> --type checklist_item
+vtb sections <id> --type testing_criterion
+vtb sections <id> --type constraint
+
+# Emit machine-readable output
+vtb sections <id> --type testing_criterion --json
+```
+
+`--type` accepts any value from the Section Types table above. Invalid section
+types are rejected before the command runs and print the valid type list. With
+`--json`, successful output contains `id`, `sections`, and `filter_type`;
+`filter_type` is `null` when no filter was supplied.
 
 ### Editing and Removing Sections
 
