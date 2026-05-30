@@ -4,6 +4,8 @@ import {
   screen,
   fireEvent,
   createMockTask,
+  createMockTaskRun,
+  createMockTaskRunControls,
 } from "../../test/test-utils";
 import { KanbanCard } from "./KanbanCard";
 
@@ -149,6 +151,63 @@ describe("KanbanCard", () => {
         name: /Task: Unselected task/i,
       });
       expect(card.className).not.toContain("border-[var(--color-accent)]");
+    });
+  });
+
+  describe("Hearth board states", () => {
+    it("marks active runs and renders the run chip", () => {
+      const activeRun = createMockTaskRun({ status: "executing" });
+      const task = createMockTask({
+        title: "Running task",
+        run_controls: createMockTaskRunControls(activeRun),
+      });
+      render(<KanbanCard task={task} />);
+
+      const card = screen.getByRole("button", { name: /Task: Running task/i });
+      expect(card).toHaveAttribute("data-running", "true");
+      expect(screen.getByLabelText("Run status: Running")).toBeInTheDocument();
+    });
+
+    it("marks completed tasks as terminal board cards", () => {
+      const task = createMockTask({
+        title: "Done task",
+        completed_at: "2026-05-30T00:00:00Z",
+      });
+      render(<KanbanCard task={task} />);
+
+      expect(
+        screen.getByRole("button", { name: /Task: Done task/i })
+      ).toHaveAttribute("data-completed", "true");
+    });
+
+    it("renders priority and tag vocabulary", () => {
+      const task = createMockTask({
+        title: "Critical task",
+        priority: "critical",
+        tags: ["hearth", "gui", "extra"],
+      });
+      render(<KanbanCard task={task} />);
+
+      expect(screen.getByLabelText("Critical priority")).toHaveTextContent("↑");
+      expect(screen.getByText("hearth")).toBeInTheDocument();
+      expect(screen.getByText("gui")).toBeInTheDocument();
+      expect(screen.getByText("+1")).toBeInTheDocument();
+    });
+
+    it("renders child state breakdowns", () => {
+      const task = createMockTask({ title: "Parent task" });
+      render(
+        <KanbanCard
+          task={task}
+          childBreakdown={{ done: 1, running: 1, waiting: 0, queued: 2 }}
+        />
+      );
+
+      expect(
+        screen.getByLabelText(
+          "State breakdown: 1 done, 1 running, 0 waiting, 2 queued"
+        )
+      ).toBeInTheDocument();
     });
   });
 });
