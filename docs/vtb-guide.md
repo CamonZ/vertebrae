@@ -1073,6 +1073,8 @@ vtb workflow transition add <from-workflow-id> <to-workflow-id> -l "approve" --j
 # List and delete transitions
 vtb workflow transition list
 vtb workflow transition list --workflow-id <id>
+vtb workflow transition list -w <id>
+vtb workflow transition list --json
 vtb workflow transition delete <from-workflow> <to-workflow>
 ```
 
@@ -1084,6 +1086,25 @@ value accepts a full UUID or an 8-character short ID.
 destination workflow step where tasks should land after the transition. The
 global `--json` flag can appear anywhere in the command and returns the created
 workflow transition object instead of human-readable text.
+
+`workflow transition list` takes no positional arguments. Its only
+command-specific option is `--workflow-id <workflow-id>` (`-w`), which filters
+results by source workflow ID. The option accepts a full UUID; clap also
+accepts an 8-character short-ID-shaped value, but the list command applies the
+filter to the value provided. The command has no command aliases, defaults, or
+value enums. Human-readable output prints one transition per line:
+
+```text
+<from-workflow> -> <to-workflow> [<label>]
+```
+
+Transitions with a destination step append ` -> step:<step-id>`. If no
+transitions exist, the command prints `No workflow transitions found`; if a
+source workflow filter has no matches, it prints
+`No transitions found for workflow <workflow-id>`. With `--json`, the command
+returns the raw array of workflow transition objects from the workflow service,
+including `id`, `from_workflow`, `to_workflow`, `label`, and `target_step` when
+present.
 
 ### Step Lifecycle (within a workflow)
 
