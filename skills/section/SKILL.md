@@ -10,22 +10,26 @@ Add structured content to tasks.
 ## Add sections
 
 ```bash
-vtb section <task-id> <type> "content"
+vtb section [--json] <task-id> <type> "content"
 ```
+
+Task IDs are case-insensitive. Content must not be empty. Single-instance types
+replace the existing section of that type; multi-instance types append a new
+section with a zero-based index.
 
 ## Section types
 
-| Type | Use for |
-|------|---------|
-| `goal` | What this task achieves |
-| `context` | Background information |
-| `current_behavior` | How it works now |
-| `desired_behavior` | How it should work |
-| `checklist_item` | Ordered checklist items |
-| `constraint` | Requirements/limitations |
-| `testing_criterion` | How to verify success |
-| `anti_pattern` | What to avoid |
-| `failure_test` | Expected failure cases |
+| Type | Use for | Cardinality |
+|------|---------|-------------|
+| `goal` | What this task achieves | Single |
+| `context` | Background information | Single |
+| `current_behavior` | How it works now | Single |
+| `desired_behavior` | How it should work | Single |
+| `checklist_item` | Ordered checklist items | Multiple |
+| `constraint` | Requirements/limitations | Multiple |
+| `testing_criterion` | How to verify success | Multiple |
+| `anti_pattern` | What to avoid | Multiple |
+| `failure_test` | Expected failure cases | Multiple |
 
 ## Examples
 
@@ -35,6 +39,7 @@ vtb section abc123 checklist_item "Add User model"
 vtb section abc123 checklist_item "Create login endpoint"
 vtb section abc123 constraint "Must use bcrypt for passwords"
 vtb section abc123 testing_criterion "Login returns JWT token"
+vtb section abc123 checklist_item "Run focused validation" --json
 ```
 
 ## View/remove sections
