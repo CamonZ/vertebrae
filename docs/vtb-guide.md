@@ -941,19 +941,36 @@ accepted with a warning so tests can be linked before the file is created. With
 ### Listing
 
 ```bash
-vtb list                              # All tasks (tree view, excludes done/archived)
+vtb list                              # All non-archived tasks (tree view)
+vtb list --json                       # JSON array of task summaries
 vtb list --flat                       # Flat table view
-vtb list --workflow <workflow-id>     # By workflow
-vtb list --step <step-id>             # By current step UUID
-vtb list -w <wf-id> --step <step-id>  # Combine workflow and step UUID
+vtb list --status in_progress         # By workflow step name (repeatable)
+vtb list -s todo -s in_progress       # Short alias for repeated status filters
+vtb list --workflow <workflow-id>     # By workflow UUID or 8-char short ID
+vtb list --step <step-id>             # By current step UUID or 8-char short ID
+vtb list -w <wf-id> --step <step-id>  # Combine workflow and step filters
 vtb list --level ticket               # By level (can repeat: -l epic -l ticket)
 vtb list --priority high              # By priority (can repeat)
 vtb list --tag backend                # By tag (can repeat)
-vtb list --parent <id>                # Children of a specific parent task
+vtb list --parent <id>                # Children of a specific parent UUID or short ID
 vtb list --root                       # Only root items (no parent)
 vtb list --search "auth"              # Search title/description (case-insensitive)
 vtb list --include-archived           # Include archived items
 ```
+
+`vtb list` accepts `--json` either before or after the subcommand. JSON output
+is a task summary array with `id`, `title`, `level`, `workflow_name`,
+`step_name`, run-state fields, `priority`, `tags`, `archived`, and `parent_id`.
+
+The `--level` values are `epic`, `ticket`, and `task`; `--priority` values are
+`low`, `medium`, `high`, and `critical`. Invalid enum values are rejected by
+clap before execution. `--workflow`, `--step`, and `--parent` accept full UUIDs
+or 8-character hex short IDs, and short IDs are resolved before the query runs.
+`--search ""` or whitespace-only search text fails with
+`Validation failed: Search query cannot be empty`.
+
+`--status` filters by the task's current workflow step name, not a separate
+global task status field. Available values depend on configured workflow steps.
 
 ### Viewing Details
 

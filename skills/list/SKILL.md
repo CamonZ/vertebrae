@@ -10,26 +10,28 @@ List and filter tasks. Displays tasks in a tree view by default.
 ## Basic listing
 
 ```bash
-vtb list                          # All tasks (tree view)
+vtb list                          # All non-archived tasks (tree view)
+vtb list --json                   # JSON array of task summaries
 vtb list --flat                   # Flat table view
 vtb list --status backlog         # By workflow step name
-vtb list --status in_progress     # Currently active
-vtb list --level epic             # By level
-vtb list --priority high          # By priority
-vtb list --tag backend            # By tag
+vtb list -s todo -s in_progress   # Repeat status filters with the short alias
+vtb list --level epic             # By level: epic, ticket, task
+vtb list --priority high          # By priority: low, medium, high, critical
+vtb list --tag backend            # By tag (repeatable)
 ```
 
 ## Filtering by workflow
 
 ```bash
-vtb list --workflow <workflow-id>   # Tasks in specific workflow
-vtb list --step <step-id>          # Tasks at a specific step (UUID)
+vtb list --workflow <workflow-id>  # Tasks in a specific workflow UUID or short ID
+vtb list --step <step-id>          # Tasks at a specific step UUID or short ID
+vtb list -w <wf-id> --step <id>    # Combine workflow and step filters
 ```
 
 ## Filtering by parent
 
 ```bash
-vtb list --parent <ID>            # Show children of a specific task
+vtb list --parent <ID>            # Show children of a specific task UUID or short ID
 vtb list --root                   # Show only root items (no parent)
 ```
 
@@ -42,19 +44,9 @@ vtb list --search "auth"          # Search in title and description
 
 ## Options
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--level` | `-l` | Filter by level (repeatable) |
-| `--status` | `-s` | Filter by workflow step name (repeatable) |
-| `--priority` | `-p` | Filter by priority (repeatable) |
-| `--tag` | `-t` | Filter by tag (repeatable) |
-| `--workflow` | `-w` | Filter by workflow ID |
-| `--step` | | Filter by current step UUID |
-| `--root` | | Show only root items |
-| `--parent` | | Show children of task |
-| `--include-archived` | | Include archived items |
-| `--search` | | Search in title/description |
-| `--flat` | | Table view instead of tree |
+Use `vtb list --help` for the live option list. The canonical guide section in
+`docs/vtb-guide.md` covers list-specific filters, JSON output, short IDs, and
+validation behavior.
 
 ## Note on `--status`
 
@@ -62,4 +54,4 @@ The `--status` flag filters by **workflow step names** (e.g., backlog, todo, in_
 
 ## Display modes
 - **Tree (default)** - Hierarchical view showing parent-child relationships
-- **Flat (`--flat`)** - Table view with columns: ID, Level, Status, Priority, Title, Tags
+- **Flat (`--flat`)** - Table view with columns: ID, Level, Workflow, Run, Priority, Title, Tags, and archived marker
