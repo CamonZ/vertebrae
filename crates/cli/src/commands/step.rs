@@ -503,21 +503,21 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
-    /// New Codex upstream model provider from ~/.codex/config.toml.
+    /// New Codex upstream model provider from ~/.codex/config.toml (alias: --codex-provider).
     ///
     /// Convenience shortcut for `agent_config.codex_model_provider`. Only
-    /// valid with `--provider openai`.
+    /// valid when the resulting provider is OpenAI/Codex.
     #[arg(long, alias = "codex-provider", value_name = "PROVIDER")]
     pub codex_model_provider: Option<String>,
 
     /// New OpenAI/Codex reasoning effort (low, medium, high, xhigh).
     ///
     /// Convenience shortcut for `agent_config.reasoning_effort`. Only valid
-    /// with `--provider openai`.
+    /// when the resulting provider is OpenAI/Codex.
     #[arg(long, value_name = "EFFORT")]
     pub reasoning_effort: Option<String>,
 
-    /// New built-in execution provider for this step (anthropic, openai).
+    /// New built-in execution provider for this step (anthropic, openai; alias: --model-provider).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
     /// JSON for any field this flag does not cover.

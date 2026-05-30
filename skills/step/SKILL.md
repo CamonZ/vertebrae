@@ -197,8 +197,19 @@ vtb step update <step-id> --model opus
 # Move a step to Codex and set reasoning effort
 vtb step update <step-id> --provider openai --model gpt-5.5 --reasoning-effort high
 
+# Use provider aliases
+vtb step update <step-id> --model-provider openai --codex-provider openrouter
+
 # Replace agents list (replaces entire list, not additive)
 vtb step update <step-id> --agent .claude/agents/reviewer.md
+
+# Replace skills list (replaces entire list, not additive)
+vtb step update <step-id> --skill review --skill simplify
+
+# Replace prompt, step type, and output schema
+vtb step update <step-id> --prompt "Review task {task.id}"
+vtb step update <step-id> --step-type evaluate
+vtb step update <step-id> --output-schema '{"type":"object"}'
 
 # Clear all agents
 vtb step update <step-id> --clear-agents
@@ -206,12 +217,61 @@ vtb step update <step-id> --clear-agents
 # Clear all skills
 vtb step update <step-id> --clear-skills
 
+# Clear output schema
+vtb step update <step-id> --clear-output-schema
+
 # Clear all transitions
 vtb step update <step-id> --clear-transitions
 
 # Change order
 vtb step update <step-id> --order 1
+
+# Set or unset final-step marker
+vtb step update <step-id> --final true
+vtb step update <step-id> --final false
+
+# Machine-readable update result
+vtb --json step update <step-id> --goal "New goal"
 ```
+
+### Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | | Global flag; output machine-readable JSON |
+| `--name` | | New step name |
+| `--goal` | `-g` | New goal |
+| `--agent` | `-a` | Replace agents list; repeatable |
+| `--clear-agents` | | Clear all agents |
+| `--skill` | `-s` | Replace skills list; repeatable |
+| `--clear-skills` | | Clear all skills |
+| `--prompt` | | New prompt |
+| `--agent-config` | | Full agent config as a JSON string |
+| `--model` | `-m` | Agent model shortcut |
+| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
+| `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh`; only valid when the resulting provider is OpenAI/Codex |
+| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` |
+| `--output-schema` | | New output schema as a JSON string |
+| `--clear-output-schema` | | Clear the output schema |
+| `--order` | `-o` | New 0-indexed step order |
+| `--final` | | Set final-step marker to `true` or `false` |
+| `--transition-to` | `-t` | Replace transitions list; repeatable |
+| `--clear-transitions` | | Clear all transitions |
+
+The required positional argument is `<id>`, the step ID to update. It accepts a
+full UUID or an 8-character short ID and resolves case-insensitively.
+
+`--agent`, `--skill`, and `--transition-to` replace their entire existing lists.
+Use the matching `--clear-*` flag to persist an empty list. `--agent-config`
+can replace the full config, and the shortcut flags (`--provider`, `--model`,
+`--codex-model-provider`, and `--reasoning-effort`) overlay individual fields.
+
+`--json` returns an operation envelope with `command`, `status`, and `step_id`.
+Invalid `--agent-config` or `--output-schema` JSON fails before persistence.
+Provider/model mismatches, Codex upstream provider usage when the resulting
+provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
+before the step is updated.
 
 ---
 
