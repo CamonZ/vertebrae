@@ -11,7 +11,7 @@ import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskFilters, TaskTreeView } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { Count } from "../components/atoms/Count";
-import { IdentityBadge } from "../components/shared/EntityId";
+import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus } from "../utils/runState";
 import { popOut, stashTask } from "../utils";
 
@@ -278,7 +278,7 @@ export function TasksPage() {
     }
   }, [allExpanded, expandableIds, expandedNodes]);
 
-  const activeCount = counts.active;
+  const runningCount = counts.active;
 
   const currentIsLoading = isLoading;
   const currentError = error;
@@ -287,47 +287,19 @@ export function TasksPage() {
 
   const headerActions = useMemo(
     () => (
-      <div className="flex items-center gap-2 text-xs">
-        {activeCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-ok-wash)] px-2.5 py-0.5 font-medium text-[var(--color-ok)]">
-            <span className="relative inline-flex h-1.5 w-1.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-ok)] opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" />
-            </span>
-            {activeCount} active
-          </span>
-        )}
+      <div className="flex items-center gap-3 text-[11px]">
+        <LiveCount running={runningCount} />
         {!currentIsLoading && !currentError && taskCount > 0 && (
-          <span className="rounded-full bg-[var(--color-bg-2)] px-2.5 py-0.5 font-mono font-medium text-[var(--color-fg-mute)]">
-            {taskCount} task{taskCount !== 1 ? "s" : ""}
-            {hierarchy.length > 0 && (
-              <span className="ml-1.5 text-[var(--color-fg-faint)]">
-                ({hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""})
-              </span>
-            )}
-          </span>
-        )}
-        {selectedTaskId && (
-          <span className="inline-flex items-center gap-1 font-mono text-[var(--color-fg-mute)]">
-            Selected{" "}
-            <IdentityBadge
-              id={selectedTaskId}
-              kind="task"
-              className="text-[var(--color-accent)]"
-              testId="tasks-page-selected-task-id"
-            />
+          <span className="text-[var(--color-fg-mute)]">
+            <b className="font-semibold text-[var(--color-fg)]">{taskCount}</b>{" "}
+            task{taskCount !== 1 ? "s" : ""}{" "}
+            <span className="text-[var(--color-fg-ghost)]">·</span>{" "}
+            {hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""}
           </span>
         )}
       </div>
     ),
-    [
-      activeCount,
-      currentIsLoading,
-      currentError,
-      taskCount,
-      hierarchy.length,
-      selectedTaskId,
-    ]
+    [runningCount, currentIsLoading, currentError, taskCount, hierarchy.length]
   );
 
   useShellHeader("Tasks", headerActions);

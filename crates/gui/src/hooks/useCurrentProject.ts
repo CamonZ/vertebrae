@@ -10,32 +10,40 @@ interface CurrentProject {
 
 const EMPTY: CurrentProject = { name: null, path: null };
 
+let currentProjectRequest: Promise<CurrentProject> | null = null;
+
+async function loadCurrentProject(): Promise<CurrentProject> {
+  try {
+    const result = await commands.getCurrentProject();
+    if (result.status === "ok" && result.data) {
+      const parts = result.data.split("/").filter(Boolean);
+      return {
+        name: parts[parts.length - 1] ?? null,
+        path: result.data,
+      };
+    }
+  } catch {
+    // Treat command failures the same as no loaded project.
+  }
+  return EMPTY;
+}
+
 /**
- * Subscribes to the currently-loaded project. Polls once on mount; the rest
- * of the app refreshes this implicitly by navigating to /setup on switch.
+ * Subscribes to the currently-loaded project. Concurrent shell consumers share
+ * one command request, while later remounts can observe project changes.
  */
 export function useCurrentProject(): CurrentProject {
   const [state, setState] = useState<CurrentProject>(EMPTY);
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const result = await commands.getCurrentProject();
-        if (cancelled) return;
-        if (result.status === "ok" && result.data) {
-          const parts = result.data.split("/").filter(Boolean);
-          setState({
-            name: parts[parts.length - 1] ?? null,
-            path: result.data,
-          });
-        } else {
-          setState(EMPTY);
-        }
-      } catch {
-        if (!cancelled) setState(EMPTY);
-      }
-    })();
+    const request = (currentProjectRequest ??= loadCurrentProject());
+    request.then((project) => {
+      if (!cancelled) setState(project);
+    });
+    request.finally(() => {
+      if (currentProjectRequest === request) currentProjectRequest = null;
+    });
     return () => {
       cancelled = true;
     };

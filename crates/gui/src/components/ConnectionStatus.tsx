@@ -1,39 +1,48 @@
+import { Tooltip } from "./atoms/Tooltip";
 import { useWebSocketStatus, type WebSocketStatus } from "../hooks/useWebSocketStatus";
 
-/** Get display properties for each connection state */
+/**
+ * Get display properties for each connection state.
+ *
+ * Colors are mapped to the Hearth design-system tokens (`--color-ok`/
+ * `--color-warn`/`--color-err`) rather than raw Tailwind palette classes so the
+ * dot stays in sync with the rest of the design shell. The pulse layer reuses
+ * the same token as the solid dot, and `glow` applies the design's
+ * `color-mix` glow (`.app-rail .sys .conn` in the design shell).
+ */
 function getStatusConfig(status: WebSocketStatus): {
   color: string;
-  pulseColor: string;
+  glow: string;
   label: string;
   animate: boolean;
 } {
   switch (status) {
     case "connected":
       return {
-        color: "bg-green-500",
-        pulseColor: "bg-green-400",
+        color: "bg-[var(--color-ok)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-ok)_60%,transparent)]",
         label: "Connected",
         animate: false,
       };
     case "connecting":
       return {
-        color: "bg-yellow-500",
-        pulseColor: "bg-yellow-400",
+        color: "bg-[var(--color-warn)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-warn)_60%,transparent)]",
         label: "Connecting",
         animate: true,
       };
     case "reconnecting":
       return {
-        color: "bg-yellow-500",
-        pulseColor: "bg-yellow-400",
+        color: "bg-[var(--color-warn)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-warn)_60%,transparent)]",
         label: "Reconnecting",
         animate: true,
       };
     case "disconnected":
     default:
       return {
-        color: "bg-red-500",
-        pulseColor: "bg-red-400",
+        color: "bg-[var(--color-err)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-err)_60%,transparent)]",
         label: "Disconnected",
         animate: false,
       };
@@ -49,25 +58,24 @@ export function ConnectionStatus() {
   const config = getStatusConfig(status);
 
   return (
-    <div
-      className="relative flex items-center gap-2"
-      title={`WebSocket: ${config.label}`}
-    >
-      {/* Status dot with optional pulse animation */}
-      <div className="relative">
-        {config.animate && (
+    <Tooltip label={`WebSocket: ${config.label}`}>
+      <div
+        className="relative flex items-center"
+        role="status"
+        aria-label={`WebSocket: ${config.label}`}
+      >
+        <div className="relative">
+          {config.animate && (
+            <span
+              className={`absolute inline-flex h-2.5 w-2.5 rounded-full ${config.color} animate-ping opacity-75`}
+            />
+          )}
           <span
-            className={`absolute inline-flex h-2.5 w-2.5 rounded-full ${config.pulseColor} animate-ping opacity-75`}
+            data-testid="connection-status-dot"
+            className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.color} ${config.glow}`}
           />
-        )}
-        <span
-          className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.color}`}
-        />
+        </div>
       </div>
-      {/* Status label - hidden on small screens */}
-      <span className="hidden text-xs text-text-muted sm:inline">
-        {config.label}
-      </span>
-    </div>
+    </Tooltip>
   );
 }
