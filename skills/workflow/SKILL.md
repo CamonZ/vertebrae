@@ -36,26 +36,36 @@ vtb workflow show <workflow-id>      # See steps within a workflow
 
 ## workflow add
 
-Create a new workflow with steps.
+Create a new workflow, optionally with inline steps.
 
 ```bash
 # Basic workflow with steps
 vtb workflow add "Code Review" --step review:sonnet --step approved:haiku
 
-# With description
-vtb workflow add "CI Pipeline" \
-  -d "Automated build and test" \
-  --step build:haiku \
-  --step test:sonnet
+# Create the workflow first and add steps later
+vtb workflow add "Planning"
+
+# Machine-readable creation result
+vtb workflow add "Automation" --json
 ```
 
 ### Options
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--description` | `-d` | Workflow description |
-| `--step` | `-s` | Step in `name:model` format (repeatable) |
-| `--order` | `-o` | Display order (default: 0) |
+| `--description <DESCRIPTION>` | `-d` | Optional workflow description |
+| `--step <STEPS>` | `-s` | Step in `name:model` format (repeatable) |
+| `--order <ORDER>` | `-o` | Display order; lower values appear first (default: 0) |
+| `--kanban-column <KANBAN_COLUMN>` | | Kanban column for board placement |
+| `--default` | | Mark this workflow as the default for new tasks |
+| `--json` | | Global flag; output machine-readable JSON |
+
+The `<NAME>` positional argument is required. `--step` is optional; when
+omitted, the workflow is created without initial steps and can be populated with
+`vtb step add --workflow <workflow-id> <name>`. Step values trim whitespace and
+split on the first colon, so `step:model:extra` uses `model:extra` as the
+model. `--json` returns an operation envelope with `command`, `status`, and
+`workflow_id`.
 
 ---
 
