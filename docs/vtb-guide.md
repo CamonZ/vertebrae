@@ -890,11 +890,38 @@ vtb blockers <task-id> --json           # Emit task_id, task_title, blockers, to
 
 # Shortest path between two tasks
 vtb path <from-task> <to-task>
+vtb path <from-task> <to-task> --json
 ```
 
 `vtb blockers` hides blockers whose current workflow step is `done` unless
 `--all` is passed. The `--depth` flag is unlimited by default and accepts a
 non-negative integer depth.
+
+### Path Options
+
+```bash
+vtb path [OPTIONS] <FROM_ID> <TO_ID>
+```
+
+| Flag | Description |
+|------|-------------|
+| `<FROM_ID>` | Required source task ID; accepts a full UUID or 8-character short ID, case-insensitive |
+| `<TO_ID>` | Required target task ID; accepts a full UUID or 8-character short ID, case-insensitive |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
+| `-h, --help` | Print command help |
+
+`vtb path` has no aliases, no command-specific flags, and no defaults. It
+traverses `depends_on` edges with breadth-first search and returns the shortest
+path from source to target. If both arguments refer to the same task, human
+output is `Same task: <id> "<title>"`. If no path exists, the command prints
+`No dependency path from <from_id> to <to_id>` and still exits successfully.
+Under `--json`, the command returns `from_id`, `to_id`, and `path`; `path` is
+`null` when no path exists, otherwise it is an ordered array of task summaries
+with `id` and `title`.
+
+Malformed IDs are rejected by CLI parsing. Unknown or ambiguous 8-character
+short IDs fail during ID resolution. Both resolved tasks must exist before path
+search runs.
 
 ---
 
