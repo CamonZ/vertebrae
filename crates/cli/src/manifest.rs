@@ -873,6 +873,13 @@ mod tests {
             .expect("start-taskrun command");
         assert_eq!(start_taskrun.visible_aliases, vec!["run-workflow"]);
 
+        let stop_taskrun = manifest
+            .commands
+            .iter()
+            .find(|cmd| cmd.name == "stop-taskrun")
+            .expect("stop-taskrun command");
+        assert_eq!(stop_taskrun.visible_aliases, vec!["stop", "stop-workflow"]);
+
         let step_add = manifest
             .commands
             .iter()
