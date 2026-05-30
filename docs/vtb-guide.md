@@ -466,8 +466,9 @@ vtb workflow show <workflow-id>                    # See steps and details
 vtb workflow show <workflow-id> --json             # Emit workflow detail JSON
 vtb workflow update <id> --name "Dev"              # Rename
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
+vtb workflow update <id> --kanban-column ""        # Clear kanban column
 vtb workflow update <id> --default                 # Mark as default
-vtb workflow update <id> --no-default              # Unmark as default
+vtb workflow update <id> --name "Dev" --json       # Emit update envelope
 vtb workflow delete <workflow-id>                  # Delete (no assigned tasks allowed)
 ```
 
@@ -497,6 +498,30 @@ object with `id`, `name`, `description`, `is_default`, `is_final`,
 Each `steps` entry includes `id`, `name`, `model`, `order`, and `prompt`.
 Malformed IDs fail validation before execution; valid UUIDs or short IDs that
 do not resolve to a workflow return a validation error.
+
+`vtb workflow update` takes one required positional argument, `<ID>`, which is
+the workflow ID to update. It accepts a case-insensitive full UUID or
+8-character short ID. The command has no aliases, defaults, or value enums.
+Supported update options are:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--name <NAME>` | `-n` | Set a new workflow name |
+| `--description <DESCRIPTION>` | `-d` | Set a new workflow description; conflicts with `--clear-description` |
+| `--clear-description` | | Clear the workflow description; conflicts with `--description` |
+| `--kanban-column <KANBAN_COLUMN>` | | Set the board column; pass an empty string `""` to clear it |
+| `--default` | | Mark this workflow as the default for new tasks; conflicts with `--no-default` |
+| `--no-default` | | Unmark this workflow as the default; conflicts with `--default` |
+| `--json` | | Global flag; output a machine-readable update envelope |
+
+At least one update option is required. Running `vtb workflow update <id>`
+without an update option returns a validation error that names the accepted
+update flags. Human-readable success output prints `Updated workflow: <id>`.
+With the global `--json` flag, the command returns an operation envelope with
+`command: "workflow update"`, `status: "updated"`, and `workflow_id`.
+Malformed IDs are rejected before command execution. Unknown or ambiguous short
+IDs fail during ID resolution. A full UUID that reaches the service but does
+not exist returns a workflow-not-found service error.
 
 ### Assigning Workflows to Tasks
 
