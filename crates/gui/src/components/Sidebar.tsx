@@ -53,7 +53,10 @@ function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
             {isActive && (
               <span
                 aria-hidden
-                className="absolute left-[-6px] top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-[var(--color-accent)]"
+                // Active marker — matches the design rail's `.item.active::before`:
+                // 2px×20px accent bar, offset -8px, with the soft ember glow that
+                // diffuses its edge (without it the raw accent reads harder and thinner).
+                className="absolute left-[-8px] top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r bg-[var(--color-accent)] shadow-[0_0_6px_var(--color-accent-glow)]"
               />
             )}
             <span className="relative shrink-0">

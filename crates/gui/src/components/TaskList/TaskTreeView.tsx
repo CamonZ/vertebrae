@@ -12,7 +12,6 @@ interface TaskTreeViewProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
-  hideStatus?: boolean;
 }
 
 function LoadingSkeleton() {
@@ -98,7 +97,6 @@ export function TaskTreeView({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
-  hideStatus,
 }: TaskTreeViewProps) {
   const visibleNodes = useMemo(
     () => (onTaskSelect ? flattenVisibleNodes(hierarchy, expandedNodes) : []),
@@ -157,7 +155,6 @@ export function TaskTreeView({
             selectedTaskId={selectedTaskId}
             onTaskSelect={onTaskSelect}
             expandedNodes={expandedNodes}
-            hideStatus={hideStatus}
           />
         ))}
       </div>

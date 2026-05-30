@@ -24,7 +24,7 @@ function installClipboardMock() {
 }
 
 describe("Hearth primitives", () => {
-  it("keeps IdChip copy behavior on the existing IdentityBadge copy control", async () => {
+  it("copies the full id when the IdChip itself is activated", async () => {
     const writeText = installClipboardMock();
     render(<IdChip id={FULL_ID} kind="task" />);
 

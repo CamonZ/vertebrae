@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
@@ -90,10 +90,9 @@ describe("TaskTreeNode", () => {
     expect(idBadge).not.toHaveTextContent(
       "feedface-1234-5678-9abc-def012345678"
     );
-    // Copy affordance is preserved.
-    expect(
-      within(idBadge).getByRole("button", { name: /copy full/i })
-    ).toBeInTheDocument();
+    // Copy affordance is preserved — the chip itself is the copy control.
+    expect(idBadge).toHaveAttribute("role", "button");
+    expect(idBadge).toHaveAccessibleName(/copy full/i);
   });
 
   it("renders a level glyph keyed to the task level", () => {
@@ -224,7 +223,7 @@ describe("TaskTreeNode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the Hearth run chip with the workflow step while a run is active", () => {
+  it("shows the Hearth run chip while a run is active", () => {
     renderTree([
       node(
         withActiveRun(
@@ -240,11 +239,9 @@ describe("TaskTreeNode", () => {
     expect(chip).toHaveAttribute("data-state", "running");
     expect(chip).toHaveAttribute("aria-label", "Run status: Running");
     expect(chip).toHaveTextContent("Running");
-    // The neutral workflow|step breadcrumb remains beside the live chip.
-    expect(screen.getByText("In progress")).toBeInTheDocument();
   });
 
-  it("shows the workflow step for idle tasks without rendering a run chip", () => {
+  it("renders neither a run chip nor a workflow/step label for idle tasks", () => {
     renderTree([
       node(
         createTask({
@@ -259,7 +256,7 @@ describe("TaskTreeNode", () => {
       screen.queryByTestId("task-tree-node-run-chip")
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Implementation")).not.toBeInTheDocument();
-    expect(screen.getByText("Todo")).toBeInTheDocument();
+    expect(screen.queryByText("Todo")).not.toBeInTheDocument();
   });
 
   it("marks the selected row with aria-selected and a selected data flag", () => {
