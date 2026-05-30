@@ -270,7 +270,24 @@ List workflow transitions.
 ```bash
 vtb workflow transition list
 vtb workflow transition list --workflow-id <workflow-id>
+vtb workflow transition list -w <workflow-id>
+vtb workflow transition list --json
 ```
+
+Arguments and options:
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `--workflow-id <workflow-id>` | `-w` | No | Filter by source workflow ID; accepts a full UUID. Clap also accepts an 8-character short-ID-shaped value, but the list command applies the filter to the value provided. |
+| `--json` | | No | Global flag; returns the raw workflow transition array as JSON. |
+| `--help` | `-h` | No | Print help. |
+
+The command takes no positional arguments and has no command aliases, defaults,
+or value enums. Human-readable output prints one transition per line as
+`<from-workflow> -> <to-workflow> [<label>]`; transitions with a destination
+step append ` -> step:<step-id>`. If no transitions exist, the command prints
+`No workflow transitions found`; if a source workflow filter has no matches, it
+prints `No transitions found for workflow <workflow-id>`.
 
 ## workflow transition delete
 
