@@ -3,11 +3,80 @@ import { OpenLiveChatButton } from "./LiveChatWindow";
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
 
-/**
- * Page-level header. Breadcrumb on the left (project › page); contextual
- * status/actions slot on the right, contributed by the active page via
- * the useShellHeader hook.
- */
+function BrandMark() {
+  return (
+    <span
+      data-testid="topbar-brand"
+      className="flex shrink-0 items-center gap-[5px] font-serif text-[15px] italic leading-none tracking-[-0.01em] text-[var(--color-fg)]"
+    >
+      Vertebrae
+      <span
+        aria-hidden
+        data-testid="topbar-brand-ember"
+        className="h-1.5 w-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_6px_var(--color-accent-glow)]"
+      />
+    </span>
+  );
+}
+
+function Breadcrumb({
+  project,
+  projectPath,
+  page,
+}: {
+  project: string | null;
+  projectPath: string | null;
+  page: string;
+}) {
+  return (
+    <span
+      data-testid="topbar-breadcrumb"
+      className="flex min-w-0 items-baseline text-[var(--color-fg-faint)]"
+    >
+      {project && (
+        <>
+          <span
+            data-testid="topbar-breadcrumb-project"
+            className="font-sans"
+            title={projectPath ?? undefined}
+          >
+            {project}
+          </span>
+          <span
+            aria-hidden
+            className="mx-1.5 text-[var(--color-fg-ghost)]"
+          >
+            ›
+          </span>
+        </>
+      )}
+      <span
+        data-testid="topbar-breadcrumb-page"
+        className="truncate pl-0.5 font-serif text-[15px] italic tracking-[-0.01em] text-[var(--color-fg)]"
+      >
+        {page}
+      </span>
+    </span>
+  );
+}
+
+function CommandKChip() {
+  return (
+    <span
+      aria-hidden
+      data-testid="topbar-kbd"
+      className="hidden items-center gap-1 text-[var(--color-fg-faint)] sm:inline-flex"
+    >
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-[10px] text-[var(--color-fg-mute)]">
+        ⌘
+      </kbd>
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-[10px] text-[var(--color-fg-mute)]">
+        K
+      </kbd>
+    </span>
+  );
+}
+
 export function Header() {
   const project = useCurrentProject();
   const pageTitle = useShellStore((s) => s.pageTitle);
@@ -17,35 +86,25 @@ export function Header() {
     <header
       role="banner"
       className={[
-        "titlebar relative flex h-12 shrink-0 items-center justify-between gap-4",
-        "border-b border-[var(--color-line)] bg-[var(--color-bg)] px-6",
+        "titlebar relative flex h-[38px] shrink-0 items-center gap-4",
+        "border-b border-[var(--color-line)] bg-[var(--color-bg)] pl-4 pr-4",
+        "font-mono text-[11px] tracking-[0.04em] text-[var(--color-fg-mute)]",
       ].join(" ")}
     >
-      <div className="flex min-w-0 items-baseline gap-2">
-        {project.name && (
-          <>
-            <span
-              className="font-sans text-sm text-[var(--color-fg-mute)]"
-              title={project.path ?? undefined}
-            >
-              {project.name}
-            </span>
-            <span
-              aria-hidden
-              className="text-sm text-[var(--color-fg-faint)]"
-            >
-              ›
-            </span>
-          </>
-        )}
-        <h1 className="truncate font-serif text-xl font-normal text-[var(--color-fg)]">
-          {pageTitle || "Vertebrae"}
-        </h1>
-      </div>
-      <div className="titlebar-button flex items-center gap-3">
+      <BrandMark />
+      <Breadcrumb
+        project={project.name}
+        projectPath={project.path}
+        page={pageTitle || "Vertebrae"}
+      />
+      <div
+        data-testid="topbar-activity"
+        className="titlebar-button ml-auto flex items-center gap-3"
+      >
         {headerActions}
         <OpenLiveChatButton />
         <ConnectionStatus />
+        <CommandKChip />
       </div>
     </header>
   );
