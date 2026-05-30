@@ -114,7 +114,6 @@ impl WorkflowAddCommand {
     ///
     /// Returns `ServiceError` if:
     /// - The name is empty
-    /// - No steps are provided
     /// - Service operations fail
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         let id = self.execute_result(service).await?;
