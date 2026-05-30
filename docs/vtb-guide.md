@@ -463,6 +463,7 @@ default. The global `--json` flag returns an operation envelope with
 vtb workflow list                                  # List all workflows
 vtb workflow list --json                           # List workflow summaries as JSON
 vtb workflow show <workflow-id>                    # See steps and details
+vtb workflow show <workflow-id> --json             # Emit workflow detail JSON
 vtb workflow update <id> --name "Dev"              # Rename
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
 vtb workflow update <id> --default                 # Mark as default
@@ -481,6 +482,21 @@ The default workflow includes ` [default]`; workflows with descriptions append
 ` - <description>`. If no workflows exist, the command prints
 `No workflows found`. The global `--json` flag returns the raw workflow-summary
 array, with `id`, `name`, `description`, `step_count`, and `is_default` fields.
+
+`vtb workflow show` takes one required positional argument, `<ID>`, which is
+the workflow ID to show. It accepts a case-insensitive full UUID or 8-character
+short ID and has no command-specific flags, short flags, aliases, defaults, or
+value enums. Its generated help lists only `<ID>`, the global `--json`, and
+`-h` / `--help`. Human-readable output shows the workflow id, name,
+description, Default and Final values, kanban column, ordered steps with model
+and prompt text, and timestamps.
+
+With the global `--json` flag, `workflow show` returns the raw workflow-detail
+object with `id`, `name`, `description`, `is_default`, `is_final`,
+`kanban_column`, `steps`, `metadata`, `created_at`, and `updated_at` fields.
+Each `steps` entry includes `id`, `name`, `model`, `order`, and `prompt`.
+Malformed IDs fail validation before execution; valid UUIDs or short IDs that
+do not resolve to a workflow return a validation error.
 
 ### Assigning Workflows to Tasks
 
