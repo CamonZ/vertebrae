@@ -43,7 +43,7 @@ describe("Header (Hearth v2 AppTopBar)", () => {
     render(<Header />);
 
     expect(screen.getByTestId("topbar-breadcrumb-project").textContent).toBe(
-      "sacrum",
+      "sacrum"
     );
     const page = screen.getByTestId("topbar-breadcrumb-page");
     expect(page.textContent).toBe("Tasks");
@@ -52,7 +52,7 @@ describe("Header (Hearth v2 AppTopBar)", () => {
   it("falls back to the Vertebrae page name when no page title is set", () => {
     render(<Header />);
     expect(screen.getByTestId("topbar-breadcrumb-page").textContent).toBe(
-      "Vertebrae",
+      "Vertebrae"
     );
   });
 
@@ -66,18 +66,18 @@ describe("Header (Hearth v2 AppTopBar)", () => {
     const action = screen.getByTestId("page-action");
     expect(action.textContent).toBe("3 running");
     expect(activity).toContainElement(action);
-    expect(activity).toContainElement(screen.getByTestId("mock-open-live-chat"));
+    expect(activity).toContainElement(
+      screen.getByTestId("mock-open-live-chat")
+    );
   });
 
   it("no longer renders the WebSocket connection indicator in the topbar", () => {
-    // The connection readout moved into the side rail (Hearth v2 .sys/.conn);
-    // the topbar must not carry a connection status anymore.
     render(<Header />);
     expect(
-      screen.queryByRole("status", { name: /websocket/i }),
+      screen.queryByRole("status", { name: /websocket/i })
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByTestId("connection-status-dot"),
+      screen.queryByTestId("connection-status-dot")
     ).not.toBeInTheDocument();
   });
 
