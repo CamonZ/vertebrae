@@ -65,12 +65,20 @@ import {
   calculateWorkflowZoneWidth,
   calculateWorkflowZoneHeight,
 } from "../components/WorkflowPipeline";
+import {
+  hearthStepKind,
+  type HearthStepKind,
+} from "../components/WorkflowPipeline/stepTypeStyling";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { IdentityBadge } from "../components/shared/EntityId";
 import { LevelMark } from "../components/shared/LevelMark";
+import {
+  WorkflowRailItem as HearthWorkflowRailItem,
+} from "../components/shared/HearthPrimitives";
 import { StatusBadge } from "../components/molecules/StatusBadge";
+import { SearchInput } from "../components/molecules/SearchInput";
 import { Count } from "../components/atoms";
 import { UnifiedChatView, projectTaskRunTrace } from "../components/Traces";
 import { popOut } from "../utils";
@@ -174,6 +182,16 @@ type RenderableWorkflowTransition = {
 
 type PipelinePanelTab = "ready" | "running";
 type StepTypeById = Map<string, string | null>;
+
+type WorkflowRailRow = {
+  workflow: Workflow;
+  stepCount: number;
+  taskCount: number;
+  activeCount: number;
+  shape: HearthStepKind[];
+};
+
+type WorkflowStats = Omit<WorkflowRailRow, "workflow">;
 
 type PipelineRunIndicator = {
   label: string;
@@ -375,6 +393,14 @@ function AllWorkflowsPipelineInner() {
     [pipelineWorkflows]
   );
 
+  const workflowById = useMemo(() => {
+    const map = new Map<string, Workflow>();
+    for (const workflow of workflows) {
+      if (workflow.id) map.set(workflow.id, workflow);
+    }
+    return map;
+  }, [workflows]);
+
   const workflowStepsMap = useMemo(() => {
     const map = new Map<string, Step[]>();
     for (const wf of pipelineWorkflows) {
@@ -443,6 +469,32 @@ function AllWorkflowsPipelineInner() {
     return map;
   }, [pipelineWorkflows]);
 
+  const workflowStatsById = useMemo(() => {
+    const map = new Map<string, WorkflowStats>();
+    for (const wf of pipelineWorkflows) {
+      const steps = workflowStepsMap.get(wf.id) ?? [];
+      map.set(wf.id, {
+        stepCount: steps.length,
+        taskCount: workflowTaskCounts.get(wf.id) ?? 0,
+        activeCount: steps.reduce(
+          (sum, step) =>
+            sum + (step.id ? (stepAggregates.get(step.id)?.active ?? 0) : 0),
+          0
+        ),
+        shape: steps.map((step) => hearthStepKind(step.step_type)),
+      });
+    }
+    return map;
+  }, [pipelineWorkflows, stepAggregates, workflowStepsMap, workflowTaskCounts]);
+
+  const totalActiveWorkflowRuns = useMemo(() => {
+    let total = 0;
+    for (const stats of workflowStatsById.values()) {
+      total += stats.activeCount;
+    }
+    return total;
+  }, [workflowStatsById]);
+
   // Inter-workflow transitions for both ELK and React Flow rendering.
   const workflowTransitions: WorkflowTransition[] = useMemo(() => {
     const nameById = new Map<string, string>();
@@ -490,6 +542,7 @@ function AllWorkflowsPipelineInner() {
   const [createTransitionError, setCreateTransitionError] = useState<
     string | undefined
   >(undefined);
+  const [workflowSearch, setWorkflowSearch] = useState("");
 
   const selectedTransition = useMemo(() => {
     if (!selectedTransitionEdgeId) return null;
@@ -501,6 +554,32 @@ function AllWorkflowsPipelineInner() {
       ) ?? null
     );
   }, [selectedTransitionEdgeId, workflowTransitions]);
+
+  const workflowRailRows = useMemo<WorkflowRailRow[]>(() => {
+    return pipelineWorkflows.flatMap((wf) => {
+      const workflow = workflowById.get(wf.id);
+      const stats = workflowStatsById.get(wf.id);
+      if (!workflow || !stats) return [];
+      return {
+        workflow,
+        ...stats,
+      };
+    });
+  }, [pipelineWorkflows, workflowById, workflowStatsById]);
+
+  const filteredWorkflowRailRows = useMemo(() => {
+    const query = workflowSearch.trim().toLowerCase();
+    if (!query) return workflowRailRows;
+    return workflowRailRows.filter(({ workflow }) => {
+      const id = workflow.id?.toLowerCase() ?? "";
+      return (
+        workflow.name.toLowerCase().includes(query) ||
+        workflow.description?.toLowerCase().includes(query) ||
+        id.includes(query) ||
+        id.slice(0, 8) === query
+      );
+    });
+  }, [workflowRailRows, workflowSearch]);
 
   const handleCreateTransition = useCallback(
     async (
@@ -848,8 +927,9 @@ function AllWorkflowsPipelineInner() {
       const elkPosition = elkPositions.get(wf.id);
       const zoneX = elkPosition?.x ?? 0;
       const zoneY = elkPosition?.y ?? fallbackY;
+      const workflowStats = workflowStatsById.get(wf.id);
 
-      const workflowEntity = workflows.find((w) => w.id === wf.id);
+      const workflowEntity = workflowById.get(wf.id);
 
       nodes.push({
         id: `workflow-zone-${wf.id}`,
@@ -861,6 +941,7 @@ function AllWorkflowsPipelineInner() {
           workflow: workflowEntity!,
           taskCount,
           stepCount: sortedSteps.length,
+          activeCount: workflowStats?.activeCount ?? 0,
           width: zoneWidth,
           height: zoneHeight,
           onWorkflowClick: handleWorkflowClick,
@@ -918,9 +999,10 @@ function AllWorkflowsPipelineInner() {
     return nodes;
   }, [
     pipelineWorkflows,
-    workflows,
+    workflowById,
     workflowStepsMap,
     workflowTaskCounts,
+    workflowStatsById,
     stepAggregates,
     elkPositions,
     handleStepClick,
@@ -1080,17 +1162,43 @@ function AllWorkflowsPipelineInner() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1 bg-bg-primary">
+      <WorkflowRail
+        rows={filteredWorkflowRailRows}
+        totalCount={workflowRailRows.length}
+        search={workflowSearch}
+        onSearchChange={setWorkflowSearch}
+        selectedWorkflowId={selectedWorkflowId}
+        onWorkflowClick={handleWorkflowClick}
+      />
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        <div className="relative flex h-12 items-center border-b border-border bg-bg-primary px-6">
-          <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative flex items-center gap-3">
-            <h1 className="text-sm font-semibold text-text-primary">
+        <div className="relative flex min-h-16 items-center justify-between border-b border-border bg-bg-secondary/80 px-6">
+          <div className="neural-grid pointer-events-none absolute inset-0 opacity-15" />
+          <div className="relative min-w-0">
+            <p className="font-mono text-2xs uppercase tracking-wider text-primary">
+              workflow · live canvas
+            </p>
+            <h1 className="truncate text-lg font-semibold text-text-primary">
               Workflow Pipelines
             </h1>
-            <span className="font-mono text-xs text-text-muted">
+          </div>
+          <div className="relative flex items-center gap-4 text-xs text-text-muted">
+            <span className="sr-only">
               {pipelineWorkflows.length} workflow
               {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
+            </span>
+            <span>
+              <b className="text-text-primary">{pipelineWorkflows.length}</b>{" "}
+              workflows
+            </span>
+            <span>
+              <b className="text-text-primary">{allSteps.length}</b> steps
+            </span>
+            <span>
+              <b className="text-primary">
+                {totalActiveWorkflowRuns}
+              </b>{" "}
+              active
             </span>
           </div>
         </div>
@@ -1118,20 +1226,20 @@ function AllWorkflowsPipelineInner() {
             colorMode="dark"
             attributionPosition="bottom-left"
             proOptions={{ hideAttribution: true }}
-            style={{ backgroundColor: "#0c0c0e" }}
+            style={{ backgroundColor: "var(--color-bg-1)" }}
           >
             <Controls
               showInteractive={false}
-              className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
+              className="!left-auto !right-4 !top-4 !bottom-auto !rounded-md !border !border-border !bg-bg-elevated/95 !shadow-xl [&_button]:!border-border [&_button]:!bg-bg-secondary [&_button]:!text-text-primary [&_button:hover]:!bg-bg-hover"
             />
             <Background
               variant={BackgroundVariant.Dots}
               gap={24}
               size={1}
-              color="#57534e"
-              bgColor="#0c0c0e"
+              color="var(--color-line)"
+              bgColor="var(--color-bg-1)"
             />
-            <CanvasMiniMap className="!bottom-12 !right-4" />
+            <CanvasMiniMap className="!bottom-24 !right-4" />
           </ReactFlow>
           <ActiveRunsPanelContainer
             onTaskSelect={handleActiveRunTaskSelect}
@@ -1300,7 +1408,7 @@ function ActiveRunsPanelContainer({
   );
 
   return (
-    <div className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex w-[32rem] max-w-[calc(100%-2rem)] flex-col gap-3">
+    <div className="pointer-events-none absolute inset-x-4 bottom-4 z-10 flex max-h-[45%] flex-col-reverse gap-3">
       <ActiveRunsPanel
         items={items}
         readyTasks={readyTasks}
@@ -1321,6 +1429,79 @@ function ActiveRunsPanelContainer({
         />
       )}
     </div>
+  );
+}
+
+function WorkflowRail({
+  rows,
+  totalCount,
+  search,
+  onSearchChange,
+  selectedWorkflowId,
+  onWorkflowClick,
+}: {
+  rows: WorkflowRailRow[];
+  totalCount: number;
+  search: string;
+  onSearchChange: (value: string) => void;
+  selectedWorkflowId: string | null;
+  onWorkflowClick: (workflow: Workflow) => void;
+}) {
+  return (
+    <aside
+      className="hidden w-80 shrink-0 border-r border-border bg-bg-secondary/75 xl:flex xl:min-h-0 xl:flex-col"
+      aria-label="Workflow catalog"
+    >
+      <header className="border-b border-border px-4 py-4">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <p className="font-mono text-2xs uppercase tracking-wider text-primary">
+              catalog
+            </p>
+            <h2 className="text-sm font-semibold text-text-primary">
+              Workflow Rail
+            </h2>
+          </div>
+          <Count value={totalCount} />
+        </div>
+        <SearchInput
+          value={search}
+          onChange={onSearchChange}
+          className="mt-3"
+          placeholder="Search workflows..."
+          aria-label="Search workflows"
+        />
+      </header>
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+        {rows.map((row) => (
+          <HearthWorkflowRailItem
+            key={row.workflow.id}
+            name={row.workflow.name}
+            shape={row.shape.slice(0, 8)}
+            live={row.activeCount}
+            steps={row.stepCount}
+            tasks={row.taskCount}
+            selected={selectedWorkflowId === row.workflow.id}
+            onClick={() => onWorkflowClick(row.workflow)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onWorkflowClick(row.workflow);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            data-testid="workflow-rail-item"
+            className="cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+        ))}
+        {rows.length === 0 && (
+          <div className="rounded-md border border-border bg-bg-primary p-4 text-center text-xs text-text-muted">
+            No workflows match.
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -1465,9 +1646,15 @@ function ActiveRunsPanel({
   return (
     <section
       aria-label="Pipeline task launcher"
-      className="pointer-events-auto overflow-hidden rounded-lg border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
+      className="pointer-events-auto overflow-hidden rounded-md border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-success" />
+          <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+            Active runs
+          </span>
+        </div>
         <div
           role="tablist"
           aria-label="Pipeline task tabs"
@@ -1502,7 +1689,7 @@ function ActiveRunsPanel({
         </div>
       </div>
 
-      <div className="p-2">
+      <div className="flex max-h-48 gap-2 overflow-x-auto overflow-y-hidden p-2">
         {activeTab === "ready" &&
           readyTasks.map((task) => (
             <TaskPanelRow
@@ -1519,7 +1706,7 @@ function ActiveRunsPanel({
             return (
               <div
                 key={taskRun.id}
-                className="border-l-2 border-l-success/50"
+                className="w-[28rem] shrink-0 rounded-md border border-border bg-bg-primary/70"
                 data-testid="pipeline-active-run"
                 data-run-status={taskRun.status}
               >
@@ -1534,7 +1721,7 @@ function ActiveRunsPanel({
                 />
                 {childTasks.length > 0 && (
                   <div
-                    className="border-t border-border/60 bg-bg-primary/40 py-1 pl-5 pr-2"
+                    className="max-h-28 overflow-y-auto border-t border-border/60 bg-bg-secondary/50 py-1 pl-5 pr-2"
                     data-testid="pipeline-active-run-children"
                   >
                     {childTasks.map((childTask) => (
@@ -1608,7 +1795,7 @@ function ActiveRunsPanel({
             );
           })}
         {tabItems.length === 0 && (
-          <div className="px-3 py-6 text-center text-xs text-text-muted">
+          <div className="w-full px-3 py-6 text-center text-xs text-text-muted">
             No {activeTab} tasks.
           </div>
         )}

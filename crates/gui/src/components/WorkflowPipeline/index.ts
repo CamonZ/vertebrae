@@ -22,6 +22,7 @@ export {
   TRANSITION_ARROW_COLOR_SELECTED,
 } from "./transitionEdge";
 export { getStatusColor, getStatusIcon, getLevelDotColor } from "./taskUtils";
+export { stepTypeStyle } from "./stepTypeStyling";
 export {
   NODE_SIZING,
   NODE_SHADOW_STYLE,
