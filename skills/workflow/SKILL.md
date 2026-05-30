@@ -187,7 +187,24 @@ Assign a task to a workflow (starts at first step).
 
 ```bash
 vtb workflow assign <task-id> <workflow-id>
+vtb workflow assign <task-id> <workflow-id> --json
 ```
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<task-id>` | | Yes | Task ID to assign; accepts a case-insensitive full UUID or 8-character short ID. |
+| `<workflow-id>` | | Yes | Workflow ID to assign; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; returns an operation envelope with `command: "workflow assign"`, `status: "updated"`, `task_id`, and `workflow_id`. |
+| `--help` | `-h` | No | Print help. |
+
+The command has no aliases, short flags other than help, command-specific
+flags, defaults, or value enums. Assignment resets the task to the assigned
+workflow's first step. Human-readable success output prints
+`Assigned task <task-id> to workflow <workflow-id> at step 1: <first-step-name>`.
+
+Malformed IDs are rejected before command execution. Unknown or ambiguous short
+IDs fail during ID resolution. A full UUID that reaches the service but does
+not exist returns a task- or workflow-not-found service error.
 
 ---
 
