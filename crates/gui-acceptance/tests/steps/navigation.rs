@@ -196,7 +196,7 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
         });
 
     let click_result = element.click().await;
-    if click_result.is_err() {
+    if let Err(element_click_err) = click_result {
         let clickable = client
             .wait()
             .at_most(std::time::Duration::from_secs(5))
@@ -209,9 +209,21 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
                 )
             });
 
-        clickable.click().await.unwrap_or_else(|err| {
-            panic!("failed to click element containing text '{}': {err}", text)
-        });
+        if let Err(clickable_click_err) = clickable.click().await {
+            let clickable_json = serde_json::to_value(&clickable).expect("serialize element");
+            client
+                .execute(
+                    "arguments[0].scrollIntoView({ block: 'center', inline: 'center' }); arguments[0].click();",
+                    vec![clickable_json],
+                )
+                .await
+                .unwrap_or_else(|js_click_err| {
+                    panic!(
+                        "failed to click element containing text '{}': element click: {}; clickable click: {}; js click: {}",
+                        text, element_click_err, clickable_click_err, js_click_err
+                    )
+                });
+        }
     }
 
     // Brief pause to let the UI respond to the click.
