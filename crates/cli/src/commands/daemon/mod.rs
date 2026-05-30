@@ -22,14 +22,17 @@ use vertebrae_installer::InstallerError;
 /// continue to compile.
 pub const LAUNCHD_LABEL: &str = vertebrae_installer::LAUNCHD_LABEL;
 
+/// The systemd `--user` unit name used for the vtb-daemon service.
+pub const SYSTEMD_UNIT_NAME: &str = vertebrae_installer::SYSTEMD_UNIT_NAME;
+
 /// Daemon management commands
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
-    /// Install vtb-daemon as a launchd service
+    /// Install vtb-daemon as a launchd or systemd user service
     Install(DaemonInstallCommand),
-    /// Uninstall the vtb-daemon launchd service
+    /// Uninstall the vtb-daemon launchd or systemd user service
     Uninstall(DaemonUninstallCommand),
-    /// Check the status of the vtb-daemon launchd service
+    /// Check the status of the vtb-daemon launchd or systemd user service
     Status(DaemonStatusCommand),
 }
 

@@ -26,12 +26,13 @@ impl DaemonInstallCommand {
         Ok(format!(
             "vtb-daemon installed and loaded.\n\
              \n\
-             Plist:   {}\n\
+             {}:   {}\n\
              Binary:  {}\n\
              Logs:    {}\n\
              Errors:  {}\n\
              \n\
              The daemon will start automatically on login.",
+            service_file_label(),
             report.service_file.display(),
             report.binary_path.display(),
             report.stdout_log.display(),
@@ -83,6 +84,16 @@ impl DaemonInstallCommand {
             .map_err(|e| DaemonError::BinaryResolution(e.to_string()))?;
         Ok(canonical)
     }
+}
+
+#[cfg(target_os = "linux")]
+fn service_file_label() -> &'static str {
+    "Unit"
+}
+
+#[cfg(not(target_os = "linux"))]
+fn service_file_label() -> &'static str {
+    "Plist"
 }
 
 #[cfg(test)]
