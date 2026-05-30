@@ -461,6 +461,7 @@ default. The global `--json` flag returns an operation envelope with
 
 ```bash
 vtb workflow list                                  # List all workflows
+vtb workflow list --json                           # List workflow summaries as JSON
 vtb workflow show <workflow-id>                    # See steps and details
 vtb workflow update <id> --name "Dev"              # Rename
 vtb workflow update <id> --kanban-column "Active"  # Set kanban column
@@ -468,6 +469,18 @@ vtb workflow update <id> --default                 # Mark as default
 vtb workflow update <id> --no-default              # Unmark as default
 vtb workflow delete <workflow-id>                  # Delete (no assigned tasks allowed)
 ```
+
+`vtb workflow list` takes no positional arguments and has no command-specific
+options. Its human-readable output is one workflow per line:
+
+```text
+<workflow-id> - <name> (<step-count> steps)[default marker][description]
+```
+
+The default workflow includes ` [default]`; workflows with descriptions append
+` - <description>`. If no workflows exist, the command prints
+`No workflows found`. The global `--json` flag returns the raw workflow-summary
+array, with `id`, `name`, `description`, `step_count`, and `is_default` fields.
 
 ### Assigning Workflows to Tasks
 
