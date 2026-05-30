@@ -42,7 +42,11 @@
   --color-accent: oklch(0.74 0.18 40);
   --color-accent-deep: oklch(0.58 0.18 35);
   --color-accent-mute: oklch(0.52 0.12 38);
-  --color-accent-wash: oklch(0.3 0.13 38);
+  /* Subtle warm ember tint — design's `--accent-wash`. Low chroma (0.05) and a
+     small lightness lift over `--color-bg` so selection/active states tint a
+     surface rather than slab it. Used by the rail active item, selected task
+     rows, badges, chips, and focus rings. */
+  --color-accent-wash: oklch(0.22 0.05 38);
   --color-accent-glow: rgba(217, 124, 70, 0.22);
 
   /* Status — four semantic states, each with a wash background variant */
@@ -344,7 +348,9 @@
   --color-accent: oklch(0.74 0.18 40);
   --color-accent-deep: oklch(0.58 0.18 35);
   --color-accent-mute: oklch(0.52 0.12 38);
-  --color-accent-wash: oklch(0.3 0.13 38);
+  /* Light-theme counterpart — design's light `--accent-wash`: a pale cream-ember
+     tint (was incorrectly duplicating the dark value). */
+  --color-accent-wash: oklch(0.95 0.03 50);
   --color-accent-glow: rgba(217, 124, 70, 0.2);
 
   --color-ok: oklch(0.5 0.15 145);
@@ -1218,15 +1224,194 @@ body {
   min-width: 0;
 }
 
+/* RunChip — ported verbatim from the design reference (docs/design/
+   components-v2.css). Single source of truth for run-state chips across the
+   app; the React component supplies `c-run-chip <state>` and these rules style
+   it. Keep in sync with that mockup. */
+.c-run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px 0 9px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+  position: relative;
+}
+
+.c-run-chip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  border-radius: 2px 0 0 2px;
+  background: var(--fg-faint);
+}
+
+.c-run-chip.running {
+  color: var(--accent);
+  background: var(--accent-wash);
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+
+.c-run-chip.running::before {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.c-run-chip.waiting {
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn-wash) 40%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--warn) 30%, transparent);
+}
+
+.c-run-chip.waiting::before {
+  background: var(--warn);
+}
+
+.c-run-chip.queued {
+  color: var(--fg-mute);
+}
+
+.c-run-chip.queued::before {
+  background: var(--fg-ghost);
+}
+
+.c-run-chip.completed {
+  color: var(--ok);
+  background: color-mix(in oklch, var(--ok-wash) 35%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--ok) 30%, transparent);
+}
+
+.c-run-chip.completed::before {
+  background: var(--ok);
+}
+
+.c-run-chip.failed {
+  color: var(--err);
+  background: color-mix(in oklch, var(--err-wash) 40%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--err) 30%, transparent);
+}
+
+.c-run-chip.failed::before {
+  background: var(--err);
+}
+
+.c-run-chip .spinner {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: c-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.c-run-chip .runtime {
+  color: inherit;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
+.c-run-chip.sm {
+  height: 17px;
+  padding: 0 6px 0 7px;
+  font-size: 10px;
+}
+
+.c-run-chip.sm .spinner {
+  width: 7px;
+  height: 7px;
+}
+
+@keyframes c-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* IdChip — copyable id chip, ported verbatim from the design reference
+   (docs/design/components-v2.css). The whole chip copies on click; the
+   copy-mark reveals on hover and swaps to the ok-mark while `copied`. */
+.c-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  padding: 2px 5px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--t-fast) var(--ease);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.c-id-chip:hover {
+  background: var(--bg-2);
+  color: var(--fg-mute);
+}
+
+.c-id-chip:active {
+  background: var(--bg-3);
+}
+
+.c-id-chip:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.c-id-chip .copy-mark {
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+  flex-shrink: 0;
+}
+
+.c-id-chip:hover .copy-mark {
+  opacity: 1;
+}
+
+.c-id-chip .ok-mark {
+  display: none;
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.c-id-chip.copied {
+  background: color-mix(in oklch, var(--ok-wash) 40%, transparent);
+  color: var(--ok);
+}
+
+.c-id-chip.copied .copy-mark {
+  display: none;
+}
+
+.c-id-chip.copied .ok-mark {
+  display: inline-block;
+  opacity: 1;
+}
+
+/* Task rows — ported verbatim from the design reference (docs/design/
+   tasks-v2.html). Keep these values in sync with that mockup. The :focus /
+   :focus-visible rules and the [data-accent] glyph hook are our a11y/React
+   additions on top of the reference. */
 .tasks-v2 .t-row {
-  --row-depth: calc(var(--depth, 0) * 18px);
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 0 var(--s-5) 0 calc(var(--s-5) + var(--row-depth));
+  gap: var(--s-3);
+  padding: 0 var(--s-5);
   cursor: pointer;
   transition: background var(--t-fast) var(--ease);
 }
@@ -1244,28 +1429,30 @@ body {
 }
 
 .tasks-v2 .t-row.sel {
-  background: color-mix(in oklch, var(--color-err) 36%, var(--bg));
+  background: var(--accent-wash);
 }
 
 .tasks-v2 .t-row.sel::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
   background: var(--accent);
-  box-shadow: 0 0 10px var(--accent-glow);
+  box-shadow: 0 0 8px var(--accent-glow);
+  border-radius: 0 2px 2px 0;
 }
 
 .tasks-v2 .t-indent {
-  width: calc(var(--depth, 0) * 12px);
-  align-self: stretch;
   display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
 }
 
 .tasks-v2 .t-indent .g {
-  width: 12px;
+  width: 18px;
+  align-self: stretch;
   border-right: 1px dashed transparent;
 }
 
@@ -1276,29 +1463,29 @@ body {
 }
 
 .tasks-v2 .t-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
 .tasks-v2 .t-top {
-  min-width: 0;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .tasks-v2 .t-chev {
-  width: 14px;
-  height: 18px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 10px;
+  font-size: 9px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+  text-align: center;
+  cursor: pointer;
+  background: transparent;
   border: 0;
   padding: 0;
-  background: transparent;
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: 13px;
-  cursor: pointer;
 }
 
 .tasks-v2 .t-chev:empty {
@@ -1306,33 +1493,31 @@ body {
 }
 
 .tasks-v2 .t-glyph {
-  display: inline-flex;
-  align-items: center;
-  color: var(--fg-faint);
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-family: var(--mono);
+  color: var(--fg-mute);
+  font-size: 13px;
+  line-height: 1;
 }
 
 .tasks-v2 .t-glyph[data-accent="true"] {
   color: var(--accent);
 }
 
-.tasks-v2 .t-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .tasks-v2 .t-row.l0 {
-  padding-top: 7px;
-  padding-bottom: 5px;
+  padding-top: 10px;
+  padding-bottom: 8px;
 }
 
 .tasks-v2 .t-row.l0 .t-title {
   font-family: var(--serif);
   font-style: italic;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 400;
   color: var(--fg);
+  letter-spacing: -0.01em;
   line-height: 1.15;
 }
 
@@ -1342,15 +1527,16 @@ body {
 }
 
 .tasks-v2 .t-row.l1 {
-  padding-top: 5px;
-  padding-bottom: 4px;
+  padding-top: 7px;
+  padding-bottom: 6px;
 }
 
 .tasks-v2 .t-row.l1 .t-title {
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--fg);
+  letter-spacing: -0.005em;
 }
 
 .tasks-v2 .t-row.l1 .t-glyph {
@@ -1358,78 +1544,118 @@ body {
 }
 
 .tasks-v2 .t-row.l2 {
-  padding-top: 4px;
-  padding-bottom: 3px;
+  padding-top: 5px;
+  padding-bottom: 5px;
 }
 
 .tasks-v2 .t-row.l2 .t-title {
   font-family: var(--sans);
-  font-size: 10.5px;
+  font-size: 13px;
   font-weight: 400;
   color: var(--fg-soft);
+}
+
+.tasks-v2 .t-row.l2 .t-glyph {
+  font-size: 16px;
+  color: var(--fg-faint);
+  line-height: 0.6;
 }
 
 .tasks-v2 .t-row.l2.sel .t-title {
   color: var(--fg);
 }
 
+.tasks-v2 .t-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
 .tasks-v2 .t-title.done {
   color: var(--fg-faint);
-  text-decoration: line-through;
+}
+
+.tasks-v2 .t-row.l0 .t-title.done {
+  font-style: italic;
 }
 
 .tasks-v2 .t-meta {
+  margin-top: 1px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 2px;
-  color: var(--fg-faint);
+  gap: 8px;
   font-family: var(--mono);
-  font-size: 9px;
-  line-height: 1.25;
+  font-size: 10px;
+  color: var(--fg-faint);
+  letter-spacing: 0.02em;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.tasks-v2 .t-meta > span,
+.tasks-v2 .t-meta .c-breakdown,
+.tasks-v2 .t-meta .c-pipeline {
+  white-space: nowrap;
+}
+
+.tasks-v2 .t-meta .sep {
+  color: var(--fg-ghost);
 }
 
 .tasks-v2 .t-meta .tag {
   color: var(--fg-mute);
-  text-decoration: underline dotted
-    color-mix(in oklch, var(--fg-mute) 45%, transparent);
-  text-underline-offset: 3px;
+  border-bottom: 1px dotted var(--fg-ghost);
+}
+
+.tasks-v2 .t-pri {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+/* Four priority levels (reference has three). Colours follow getPriorityIndicator:
+   critical/high read as urgent, medium/low recede. */
+.tasks-v2 .t-pri.critical {
+  color: var(--err);
+  opacity: 0.9;
+}
+
+.tasks-v2 .t-pri.high {
+  color: var(--warn);
+}
+
+.tasks-v2 .t-pri.medium {
+  color: var(--fg-soft);
+}
+
+.tasks-v2 .t-pri.low {
+  color: var(--fg-faint);
 }
 
 .tasks-v2 .t-right {
-  min-width: 116px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px;
+  display: flex;
   align-items: center;
-  justify-items: end;
-  gap: 2px 7px;
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: 9px;
+  gap: var(--s-3);
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .tasks-v2 .t-right .chip-slot {
-  min-height: 18px;
-  min-width: 54px;
-  display: inline-flex;
-  justify-content: flex-end;
-  grid-column: 1 / 2;
-}
-
-.tasks-v2 .t-right .t-id {
-  grid-column: 2 / 3;
+  display: flex;
   justify-content: flex-end;
 }
 
 .tasks-v2 .t-right .when {
-  grid-column: 1 / 3;
-  max-width: 116px;
-  overflow: hidden;
+  min-width: 50px;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .tasks-v2 .caption-strip {

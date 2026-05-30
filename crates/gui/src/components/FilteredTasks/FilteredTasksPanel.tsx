@@ -329,7 +329,6 @@ export function FilteredTasksPanel({
           selectedTaskId={selectedTaskId}
           onTaskSelect={(task) => onTaskSelect?.(task.id)}
           expandedNodes={expandedNodes}
-          hideStatus
         />
       </div>
 

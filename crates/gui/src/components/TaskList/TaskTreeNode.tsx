@@ -10,13 +10,14 @@ import {
   hasHearthStateBreakdown,
   isActiveRunStatus,
 } from "../../utils/runState";
-import { formatStepName } from "../../utils/formatStepName";
 import {
   Glyph,
   IdChip,
+  Pipeline,
   RunChip,
   StateBreakdown,
 } from "../shared/HearthPrimitives";
+import type { PipelineSegment } from "../shared/HearthPrimitives";
 
 interface TaskTreeNodeProps {
   node: TaskTreeNodeType;
@@ -25,7 +26,6 @@ interface TaskTreeNodeProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
-  hideStatus?: boolean;
 }
 
 /**
@@ -62,7 +62,6 @@ export function TaskTreeNode({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
-  hideStatus,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
@@ -99,6 +98,11 @@ export function TaskTreeNode({
     [node.children]
   );
   const hasBreakdown = hasHearthStateBreakdown(breakdown);
+
+  // Workflow pipeline segments for the meta line. Not yet sourced for the list
+  // view — the per-task step-state data isn't loaded here, so this stays empty
+  // and the <Pipeline> renders nothing until that wiring lands.
+  const pipeline: PipelineSegment[] = [];
 
   const chevron = hasChildren ? (isExpanded ? "▾" : "▸") : "";
 
@@ -164,7 +168,7 @@ export function TaskTreeNode({
             </span>
             {priority && (
               <span
-                className={`t-pri ${task.priority ?? ""} ${priority.color}`}
+                className={`t-pri ${task.priority ?? ""}`}
                 title={priority.label}
                 aria-label={priority.label}
                 data-testid="task-tree-node-priority"
@@ -183,12 +187,26 @@ export function TaskTreeNode({
                 {childLine}
               </span>
             )}
+            {childLine && tags.length > 0 && (
+              <span className="sep">·</span>
+            )}
             {tags.slice(0, 3).map((tag) => (
               <span key={tag} data-testid="task-tree-node-tag" className="tag">
                 {tag}
               </span>
             ))}
-            {hasBreakdown && <StateBreakdown {...breakdown} />}
+            {pipeline.length > 0 && (
+              <>
+                <span className="sep">·</span>
+                <Pipeline segments={pipeline} width={120} />
+              </>
+            )}
+            {hasBreakdown && (
+              <>
+                <span className="sep">·</span>
+                <StateBreakdown {...breakdown} />
+              </>
+            )}
           </div>
         </div>
         <div className="t-right">
@@ -209,11 +227,6 @@ export function TaskTreeNode({
             className="t-id"
             testId="task-tree-node-id"
           />
-          {!hideStatus && task.step_name && (
-            <span className="when">
-              {formatStepName(task.step_name, "No step")}
-            </span>
-          )}
           {task.updated_at && (
             <span className="when">{formatRelative(task.updated_at)}</span>
           )}
@@ -230,7 +243,6 @@ export function TaskTreeNode({
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
-              hideStatus={hideStatus}
             />
           ))}
         </div>

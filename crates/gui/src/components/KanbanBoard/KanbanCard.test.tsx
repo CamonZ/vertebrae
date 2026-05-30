@@ -35,8 +35,8 @@ describe("KanbanCard", () => {
       render(<KanbanCard task={task} />);
 
       expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
-        "title",
-        `Epic ID: ${task.id}`
+        "aria-label",
+        "Copy full epic ID"
       );
     });
 
@@ -45,8 +45,8 @@ describe("KanbanCard", () => {
       render(<KanbanCard task={task} />);
 
       expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
-        "title",
-        `Ticket ID: ${task.id}`
+        "aria-label",
+        "Copy full ticket ID"
       );
     });
 
@@ -55,8 +55,8 @@ describe("KanbanCard", () => {
       render(<KanbanCard task={task} />);
 
       expect(screen.getByTestId("kanban-card-id")).toHaveAttribute(
-        "title",
-        `Task ID: ${task.id}`
+        "aria-label",
+        "Copy full task ID"
       );
     });
 

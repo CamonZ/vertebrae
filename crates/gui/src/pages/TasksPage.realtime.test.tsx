@@ -4,6 +4,7 @@ import type { TaskStepChangedEvent } from "../bindings";
 import { createMockTask } from "../test/test-utils";
 import { resetProjectScopedStores } from "../stores/projectScopedStores";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
+import { useTaskStore } from "../stores/taskStore";
 import { TasksPage } from "./TasksPage";
 
 const mockListTasks = vi.fn();
@@ -50,7 +51,7 @@ describe("TasksPage realtime task membership", () => {
     resetProjectScopedStores();
   });
 
-  it("updates the visible step badge from a websocket step-change event without refetching the page", async () => {
+  it("applies a websocket step-change event in place without refetching the page", async () => {
     const original = createMockTask({
       id: "task-realtime-step",
       title: "Realtime ticket",
@@ -70,7 +71,7 @@ describe("TasksPage realtime task membership", () => {
     render(<TasksPageWithRealtime />);
 
     await waitFor(() => {
-      expect(screen.getByText("Todo")).toBeInTheDocument();
+      expect(screen.getByText("Realtime ticket")).toBeInTheDocument();
     });
 
     if (!taskStepChangedHandler) throw new Error("step listener not registered");
@@ -86,10 +87,15 @@ describe("TasksPage realtime task membership", () => {
       });
     });
 
+    // The row no longer surfaces the step, so assert the in-place update via the
+    // store and confirm the event did not trigger a refetch.
     await waitFor(() => {
-      expect(screen.getByText("Pending review")).toBeInTheDocument();
+      expect(
+        useTaskStore
+          .getState()
+          .tasks.find((t) => t.id === "task-realtime-step")?.step_name
+      ).toBe("pending_review");
     });
-    expect(screen.queryByText("Todo")).not.toBeInTheDocument();
     expect(mockListTasks).toHaveBeenCalledTimes(1);
   });
 });
