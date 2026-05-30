@@ -1,12 +1,16 @@
-//! Workflow unassign command
+//! Workflow unassign command.
+//!
+//! Removes the workflow assignment from a task. The command accepts a full task
+//! UUID or 8-character short ID and supports the global `--json` flag through
+//! the top-level CLI dispatcher.
 
 use clap::Args;
 use vertebrae_core::{ServiceError, WorkflowService};
 
-/// Remove workflow assignment from a task
+/// Remove workflow assignment from a task.
 #[derive(Debug, Args)]
 pub struct WorkflowUnassignCommand {
-    /// Task ID to unassign workflow from (case-insensitive)
+    /// Task ID to unassign workflow from (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 }
@@ -14,7 +18,8 @@ pub struct WorkflowUnassignCommand {
 impl WorkflowUnassignCommand {
     /// Execute the unassign workflow command.
     ///
-    /// Removes workflow assignment from a task, clearing workflow_id and current_step_id.
+    /// Removes workflow assignment from a task, clearing `workflow_id` and
+    /// `current_step_id`.
     ///
     /// # Arguments
     ///
@@ -22,10 +27,9 @@ impl WorkflowUnassignCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if the task doesn't exist.
+    /// Returns `ServiceError::TaskNotFound` if the task doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
-        // Unassign the workflow
         service.unassign_workflow(&self.task_id).await?;
 
         Ok(format!("Unassigned workflow from task {}", self.task_id))
