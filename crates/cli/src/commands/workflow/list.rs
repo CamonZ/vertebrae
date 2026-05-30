@@ -3,14 +3,22 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, WorkflowService};
 
-/// List all workflows
+/// List all workflows.
+///
+/// This command has no command-specific arguments or options. The global
+/// `--json` flag returns workflow summaries as structured JSON.
 #[derive(Debug, Args)]
 pub struct WorkflowListCommand {}
 
 impl WorkflowListCommand {
     /// Execute the list workflows command.
     ///
-    /// Fetches all workflows from the database and returns a formatted list.
+    /// Fetches all workflow summaries from the service and returns one
+    /// human-readable line per workflow:
+    ///
+    /// `<id> - <name> (<step-count> steps)[default marker][description]`
+    ///
+    /// When no workflows exist, returns `No workflows found`.
     ///
     /// # Arguments
     ///
