@@ -11,27 +11,35 @@ import {
 import { resetProjectScopedStores } from "../stores";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Tooltip } from "./atoms/Tooltip";
+import { Icon } from "./atoms/Icon";
 import { ThemeToggle } from "./ThemeToggle";
+import {
+  useWebSocketStatus,
+  type WebSocketStatus,
+} from "../hooks/useWebSocketStatus";
 
 interface NavItemProps {
   to: string;
+  id: string;
   label: string;
   icon: React.ReactNode;
   /** Render a small dot in the corner — used for unread/needs-attention. */
   withDot?: boolean;
 }
 
-function NavItem({ to, label, icon, withDot }: NavItemProps) {
+function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
   return (
     <li>
       <NavLink
         to={to}
-        data-testid={`sidebar-nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        data-testid={`sidebar-nav-${id}`}
         title={label}
         aria-label={label}
         className={({ isActive }) =>
           [
-            "group relative flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)]",
+            // 28px box matches the design rail's `.app-rail .item` (and our
+            // 28px project avatar) — keeps the icon pitch tight per the v2 shell.
+            "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
             "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
             isActive
@@ -101,8 +109,13 @@ function ProjectAvatar({
         className={[
           "flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
           // Project monogram is part of the Hearth wordmark family — serif
-          // italic (Newsreader), not the mono UI numerals.
-          "font-serif text-[15px] italic text-white",
+          // italic (Newsreader), not the mono UI numerals. `leading-none`
+          // collapses the line box so the glyph centers vertically (matching
+          // the design's `.app-rail .logo`); the 0.5px right→left translate is
+          // an optical nudge to counter the italic slant pushing the glyph
+          // visually right.
+          "font-serif text-[15px] italic leading-none text-white",
+          "[transform:translateX(-0.5px)]",
           "ring-0 transition-shadow duration-[var(--t-fast)] hover:ring-2 hover:ring-[var(--color-accent-wash)]",
           palette[bucket],
         ].join(" ")}
@@ -127,7 +140,7 @@ function ProjectChatButton() {
         onClick={handleClick}
         aria-label="Project Chat"
         className={[
-          "group relative flex h-9 w-9 items-center justify-center rounded-[var(--radius-md)]",
+          "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
           "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
           "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
           panelOpen
@@ -163,62 +176,15 @@ function StyleguideNavItem() {
   return (
     <NavItem
       to="/styleguide"
+      id="styleguide"
       label="Styleguide"
       icon={
-        <svg
-          width={18}
-          height={18}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          aria-hidden
-        >
+        <Icon size="sm" strokeWidth={1.6}>
           <path d="M4 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2H4V5z" />
           <path d="M4 9h16v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9zM8 13h3m-3 3h8" />
-        </svg>
+        </Icon>
       }
     />
-  );
-}
-
-/**
- * Vertebrae logo mark — stylised spine with copper ember glow.
- */
-function LogoMark() {
-  return (
-    <div className="relative flex h-7 w-7 items-center justify-center">
-      <svg
-        viewBox="0 0 24 24"
-        width={22}
-        height={22}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.6}
-        className="relative text-[var(--color-accent)]"
-        aria-label="Vertebrae"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 2v20M12 6c-2 0-3.5 1-3.5 2s1.5 2 3.5 2 3.5-1 3.5-2-1.5-2-3.5-2z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 10c-2 0-3.5 1-3.5 2s1.5 2 3.5 2 3.5-1 3.5-2-1.5-2-3.5-2z"
-        />
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 14c-2 0-3.5 1-3.5 2s1.5 2 3.5 2 3.5-1 3.5-2-1.5-2-3.5-2z"
-        />
-      </svg>
-      <span
-        aria-hidden
-        className="absolute inset-0 rounded-full bg-[var(--color-accent)] opacity-20 blur-md"
-      />
-    </div>
   );
 }
 
@@ -385,6 +351,120 @@ function ProjectPopover({
   );
 }
 
+function railStatusConfig(status: WebSocketStatus): {
+  dot: string;
+  glow: string;
+  label: string;
+  name: string;
+  token: "ok" | "warn" | "err";
+} {
+  switch (status) {
+    case "connected":
+      return {
+        dot: "bg-[var(--color-ok)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-ok)_60%,transparent)]",
+        label: "connected",
+        name: "Connected",
+        token: "ok",
+      };
+    case "connecting":
+    case "reconnecting":
+      return {
+        dot: "bg-[var(--color-warn)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-warn)_60%,transparent)]",
+        label: "connecting",
+        name: status === "reconnecting" ? "Reconnecting" : "Connecting",
+        token: "warn",
+      };
+    case "disconnected":
+    default:
+      return {
+        dot: "bg-[var(--color-err)]",
+        glow: "shadow-[0_0_6px_color-mix(in_oklch,var(--color-err)_60%,transparent)]",
+        label: "disconnected",
+        name: "Disconnected",
+        token: "err",
+      };
+  }
+}
+
+function RailConnectionStatus() {
+  const status = useWebSocketStatus();
+  const config = railStatusConfig(status);
+  const accessibleName = `WebSocket: ${config.name}`;
+
+  return (
+    <div
+      role="status"
+      title={accessibleName}
+      aria-label={accessibleName}
+      data-testid="rail-connection-status"
+      className="mt-auto flex flex-col items-center gap-1.5 pb-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--color-fg-faint)] [writing-mode:vertical-rl] rotate-180"
+    >
+      <span
+        aria-hidden
+        data-testid="rail-connection-dot"
+        data-status-token={config.token}
+        className={`h-1.5 w-1.5 rounded-full [writing-mode:horizontal-tb] rotate-180 ${config.dot} ${config.glow}`}
+      />
+      <span>{config.label}</span>
+    </div>
+  );
+}
+
+const RAIL_NAV_ITEMS = [
+  {
+    id: "tasks",
+    to: "/tasks",
+    label: "Tasks",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        {/* Round caps are required for zero-length dot lines to render. */}
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
+      </Icon>
+    ),
+  },
+  {
+    id: "board",
+    to: "/board",
+    label: "Board",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <rect x="3" y="3" width="7" height="18" rx="1" />
+        <rect x="14" y="3" width="7" height="11" rx="1" />
+      </Icon>
+    ),
+  },
+  {
+    id: "design",
+    to: "/design",
+    label: "Design",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <circle cx="5" cy="6" r="3" />
+        <circle cx="19" cy="6" r="3" />
+        <circle cx="12" cy="18" r="3" />
+        <path d="m7 8 4 8M17 8l-4 8" />
+      </Icon>
+    ),
+  },
+  {
+    id: "traces",
+    to: "/traces",
+    label: "Traces",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <path d="M3 12h4l3-9 4 18 3-9h4" />
+      </Icon>
+    ),
+  },
+] as const;
+
 /**
  * Application sidebar. 48px fixed width, icon-only nav, project avatar at top,
  * project chat and theme toggle pinned to the bottom.
@@ -411,15 +491,12 @@ export function Sidebar() {
     <aside
       aria-label="Sidebar navigation"
       className={[
-        "relative flex w-12 shrink-0 flex-col items-center gap-2 py-1.5",
+        // Uniform 4px gap (`gap-1`) mirrors the design rail's `.app-rail { gap: 4px }`.
+        "relative flex w-12 shrink-0 flex-col items-center gap-1 py-1.5",
         "border-r border-[var(--color-line)] bg-[var(--color-bg)]",
       ].join(" ")}
     >
-      <div className="flex h-9 items-center justify-center">
-        <LogoMark />
-      </div>
-      <div className="h-px w-7 bg-[var(--color-line)]" aria-hidden />
-      <div className="relative flex h-9 items-center justify-center">
+      <div className="relative flex h-7 items-center justify-center">
         {project.name ? (
           <ProjectAvatar
             name={project.name}
@@ -446,81 +523,14 @@ export function Sidebar() {
           />
         )}
       </div>
-      <div className="h-px w-7 bg-[var(--color-line)]" aria-hidden />
+      {/* Thin 20px rule between the project monogram and the nav icons —
+          the design rail's `.app-rail hr` (1px, --color-line, 20px wide). */}
+      <div aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-[var(--color-line)]" />
       <nav aria-label="Main navigation" className="flex-1">
         <ul role="list" className="flex flex-col items-center gap-1">
-          {/* Operations is hidden for now — the page needs more work before
-              it is ready for users. Route + page code are preserved; see
-              router.tsx (the default landing redirects to /board instead). */}
-          <NavItem
-            to="/board"
-            label="Board"
-            icon={
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                aria-hidden
-              >
-                <path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
-              </svg>
-            }
-          />
-          <NavItem
-            to="/design"
-            label="Design"
-            icon={
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                aria-hidden
-              >
-                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            }
-          />
-          <li aria-hidden className="my-1 h-px w-5 bg-[var(--color-line)]" />
-          <NavItem
-            to="/tasks"
-            label="Tasks"
-            icon={
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                aria-hidden
-              >
-                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-              </svg>
-            }
-          />
-          <NavItem
-            to="/traces"
-            label="Traces"
-            icon={
-              <svg
-                width={18}
-                height={18}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.6}
-                aria-hidden
-              >
-                <path d="M4 6h6m0 0a2 2 0 104 0 2 2 0 00-4 0zm0 0v12m4-6h6m-6 0a2 2 0 104 0 2 2 0 00-4 0zm-4 6h6m-6 0a2 2 0 104 0 2 2 0 00-4 0z" />
-              </svg>
-            }
-          />
+          {RAIL_NAV_ITEMS.map((item) => (
+            <NavItem key={item.id} {...item} />
+          ))}
           <StyleguideNavItem />
         </ul>
       </nav>
@@ -528,6 +538,7 @@ export function Sidebar() {
         <ProjectChatButton />
         <ThemeToggle />
       </div>
+      <RailConnectionStatus />
     </aside>
   );
 }

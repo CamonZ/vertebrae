@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import { ReactFlowProvider } from "@xyflow/react";
 import * as React from "react";
 
@@ -12,7 +12,7 @@ vi.mock("./bindings", () => ({
     getWorkflowWithTaskDetails: vi.fn(),
     getPipelineSummary: vi.fn(),
     getWebsocketStatus: vi.fn(() =>
-      Promise.resolve({ status: "ok", data: "connected" }),
+      Promise.resolve({ status: "ok", data: "connected" })
     ),
     listTasks: vi.fn(),
     getTask: vi.fn(),
@@ -70,6 +70,10 @@ function createTestRouter(initialEntries: string[]) {
   return createMemoryRouter(
     [
       {
+        path: "/",
+        element: <Navigate to="/tasks" replace />,
+      },
+      {
         path: "/operations",
         element: <OperationsPage />,
       },
@@ -98,7 +102,7 @@ function createTestRouter(initialEntries: string[]) {
         element: <StyleguidePage />,
       },
     ],
-    { initialEntries },
+    { initialEntries }
   );
 }
 
@@ -114,20 +118,24 @@ describe("Router Acceptance Tests", () => {
     vi.clearAllMocks();
 
     // Default mock implementations
-    (commands.hasProjectSelected as ReturnType<typeof vi.fn>).mockResolvedValue({
-      status: "ok",
-      data: true,
-    });
+    (commands.hasProjectSelected as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {
+        status: "ok",
+        data: true,
+      }
+    );
 
     (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
       data: [],
     });
 
-    (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
-      status: "ok",
-      data: { workflows: [] },
-    });
+    (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {
+        status: "ok",
+        data: { workflows: [] },
+      }
+    );
 
     (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
@@ -141,22 +149,24 @@ describe("Router Acceptance Tests", () => {
 
     // Default: components already on PATH so the InstallationGuard never
     // redirects to /welcome in the bulk of the routing tests.
-    (commands.installationStatus as ReturnType<typeof vi.fn>).mockResolvedValue({
-      status: "ok",
-      data: {
-        cli: {
-          installed_at_symlink: true,
-          symlink_path: "/home/user/.local/bin/vtb",
-          on_path: true,
+    (commands.installationStatus as ReturnType<typeof vi.fn>).mockResolvedValue(
+      {
+        status: "ok",
+        data: {
+          cli: {
+            installed_at_symlink: true,
+            symlink_path: "/home/user/.local/bin/vtb",
+            on_path: true,
+          },
+          daemon: {
+            installed_at_symlink: true,
+            symlink_path: "/home/user/.local/bin/vtb-daemon",
+            on_path: true,
+          },
+          service: { kind: "not_loaded" },
         },
-        daemon: {
-          installed_at_symlink: true,
-          symlink_path: "/home/user/.local/bin/vtb-daemon",
-          on_path: true,
-        },
-        service: { kind: "not_loaded" },
-      },
-    });
+      }
+    );
 
     (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
@@ -247,12 +257,12 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Operations" }),
+          screen.getByRole("heading", { name: "Operations" })
         ).toBeInTheDocument();
       });
 
@@ -270,12 +280,12 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Board" }),
+          screen.getByRole("heading", { name: "Board" })
         ).toBeInTheDocument();
       });
     });
@@ -288,7 +298,7 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -302,7 +312,7 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -311,7 +321,9 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("displays workflows when they exist", async () => {
-      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (
+        commands.getPipelineSummary as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
         status: "ok",
         data: {
           workflows: [
@@ -349,7 +361,7 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -365,12 +377,12 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Tasks" }),
+          screen.getByRole("heading", { name: "Tasks" })
         ).toBeInTheDocument();
       });
     });
@@ -381,13 +393,15 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(screen.getByLabelText("Filter by level")).toBeInTheDocument();
       });
-      expect(screen.getByLabelText("Search tasks by title or ID")).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Search tasks by title or ID")
+      ).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: /done/i })).toBeInTheDocument();
     });
@@ -398,20 +412,20 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(commands.listTasks).toHaveBeenCalledWith(
           expect.objectContaining({
             step_names: null,
-          }),
+          })
         );
       });
       expect(commands.listTasks).toHaveBeenLastCalledWith(
         expect.not.objectContaining({
           include_done: expect.anything(),
-        }),
+        })
       );
 
       fireEvent.change(screen.getByLabelText("Search tasks by title or ID"), {
@@ -423,13 +437,13 @@ describe("Router Acceptance Tests", () => {
           expect.objectContaining({
             search: "release",
             step_names: null,
-          }),
+          })
         );
       });
       expect(commands.listTasks).toHaveBeenLastCalledWith(
         expect.not.objectContaining({
           include_done: expect.anything(),
-        }),
+        })
       );
 
       fireEvent.change(screen.getByLabelText("Filter by level"), {
@@ -442,13 +456,13 @@ describe("Router Acceptance Tests", () => {
             search: "release",
             levels: ["ticket"],
             step_names: null,
-          }),
+          })
         );
       });
       expect(commands.listTasks).toHaveBeenLastCalledWith(
         expect.not.objectContaining({
           include_done: expect.anything(),
-        }),
+        })
       );
     });
 
@@ -487,16 +501,16 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(screen.getByTestId("task-tree-node-id")).toHaveTextContent(
-          "feedface",
+          "feedface"
         );
       });
       expect(
-        screen.queryByText("feedface-3456-7890-abcd-ef1234567890"),
+        screen.queryByText("feedface-3456-7890-abcd-ef1234567890")
       ).not.toBeInTheDocument();
     });
   });
@@ -507,7 +521,7 @@ describe("Router Acceptance Tests", () => {
       const { unmount: unmountDesign } = render(
         <TestWrapper>
           <RouterProvider router={designRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -515,7 +529,7 @@ describe("Router Acceptance Tests", () => {
       });
 
       expect(
-        screen.queryByRole("heading", { name: "Tasks" }),
+        screen.queryByRole("heading", { name: "Tasks" })
       ).not.toBeInTheDocument();
 
       unmountDesign();
@@ -524,18 +538,16 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={tasksRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Tasks" }),
+          screen.getByRole("heading", { name: "Tasks" })
         ).toBeInTheDocument();
       });
 
-      expect(
-        screen.queryByText("Workflow Pipelines"),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
     });
 
     it("'/operations' and '/board' render different placeholder pages", async () => {
@@ -543,17 +555,17 @@ describe("Router Acceptance Tests", () => {
       const { unmount: unmountOps } = render(
         <TestWrapper>
           <RouterProvider router={opsRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Operations" }),
+          screen.getByRole("heading", { name: "Operations" })
         ).toBeInTheDocument();
       });
 
       expect(
-        screen.queryByRole("heading", { name: "Board" }),
+        screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
 
       unmountOps();
@@ -562,17 +574,17 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={boardRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Board" }),
+          screen.getByRole("heading", { name: "Board" })
         ).toBeInTheDocument();
       });
 
       expect(
-        screen.queryByRole("heading", { name: "Operations" }),
+        screen.queryByRole("heading", { name: "Operations" })
       ).not.toBeInTheDocument();
     });
 
@@ -589,12 +601,12 @@ describe("Router Acceptance Tests", () => {
         const { unmount } = render(
           <TestWrapper>
             <RouterProvider router={router} />
-          </TestWrapper>,
+          </TestWrapper>
         );
 
         await waitFor(() => {
           expect(
-            screen.getByRole("heading", { name: route.heading }),
+            screen.getByRole("heading", { name: route.heading })
           ).toBeInTheDocument();
         });
 
@@ -602,7 +614,7 @@ describe("Router Acceptance Tests", () => {
         const otherRoutes = routes.filter((r) => r.path !== route.path);
         for (const other of otherRoutes) {
           expect(
-            screen.queryByRole("heading", { name: other.heading }),
+            screen.queryByRole("heading", { name: other.heading })
           ).not.toBeInTheDocument();
         }
 
@@ -614,7 +626,7 @@ describe("Router Acceptance Tests", () => {
       const { unmount: unmountDesign } = render(
         <TestWrapper>
           <RouterProvider router={designRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -626,47 +638,18 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("Default route redirect", () => {
-    it("'/' redirects to '/operations'", async () => {
-      createMemoryRouter(
-        [
-          {
-            path: "/",
-            element: <div>Root should not render</div>,
-          },
-          {
-            path: "/operations",
-            element: <OperationsPage />,
-          },
-        ],
-        { initialEntries: ["/"] },
-      );
-
-      // Replace the root route to simulate the Navigate redirect
-      const redirectRouter = createMemoryRouter(
-        [
-          {
-            path: "/",
-            element: (
-              <div data-testid="redirect-marker">Redirecting...</div>
-            ),
-          },
-          {
-            path: "/operations",
-            element: <OperationsPage />,
-          },
-        ],
-        { initialEntries: ["/operations"] },
-      );
+    it("'/' redirects to '/tasks'", async () => {
+      const router = createTestRouter(["/"]);
 
       render(
         <TestWrapper>
-          <RouterProvider router={redirectRouter} />
-        </TestWrapper>,
+          <RouterProvider router={router} />
+        </TestWrapper>
       );
 
       await waitFor(() => {
         expect(
-          screen.getByRole("heading", { name: "Operations" }),
+          screen.getByRole("heading", { name: "Tasks" })
         ).toBeInTheDocument();
       });
     });
@@ -678,7 +661,7 @@ describe("Router Acceptance Tests", () => {
       workflowId: string,
       name: string,
       order: number,
-      isFinal = false,
+      isFinal = false
     ) {
       return {
         id,
@@ -696,7 +679,9 @@ describe("Router Acceptance Tests", () => {
     }
 
     it("displays multiple workflows as zones in a single canvas", async () => {
-      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (
+        commands.getPipelineSummary as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
         status: "ok",
         data: {
           workflows: [
@@ -708,7 +693,9 @@ describe("Router Acceptance Tests", () => {
               kanban_column: null,
               is_default: false,
               display_order: 0,
-              workflow_steps: [makePipelineStep("step-1", "workflow-1", "backlog", 0)],
+              workflow_steps: [
+                makePipelineStep("step-1", "workflow-1", "backlog", 0),
+              ],
               transitions: [],
             },
             {
@@ -719,44 +706,8 @@ describe("Router Acceptance Tests", () => {
               kanban_column: null,
               is_default: false,
               display_order: 1,
-              workflow_steps: [makePipelineStep("step-2", "workflow-2", "backlog", 0)],
-              transitions: [],
-            },
-          ],
-        },
-      });
-
-      const router = createTestRouter(["/design"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>,
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("Workflow One")).toBeInTheDocument();
-        expect(screen.getByText("Workflow Two")).toBeInTheDocument();
-      });
-    });
-
-    it("displays workflow zones with step counts", async () => {
-      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-multi",
-              name: "Multi-Step Workflow",
-              description: null,
-              initial_step_id: "step-backlog",
-              kanban_column: null,
-              is_default: false,
-              display_order: 0,
               workflow_steps: [
-                makePipelineStep("step-backlog", "workflow-multi", "backlog", 0),
-                makePipelineStep("step-todo", "workflow-multi", "todo", 1),
-                makePipelineStep("step-done", "workflow-multi", "done", 2, true),
+                makePipelineStep("step-2", "workflow-2", "backlog", 0),
               ],
               transitions: [],
             },
@@ -769,7 +720,58 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Workflow One")).toBeInTheDocument();
+        expect(screen.getByText("Workflow Two")).toBeInTheDocument();
+      });
+    });
+
+    it("displays workflow zones with step counts", async () => {
+      (
+        commands.getPipelineSummary as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
+        status: "ok",
+        data: {
+          workflows: [
+            {
+              id: "workflow-multi",
+              name: "Multi-Step Workflow",
+              description: null,
+              initial_step_id: "step-backlog",
+              kanban_column: null,
+              is_default: false,
+              display_order: 0,
+              workflow_steps: [
+                makePipelineStep(
+                  "step-backlog",
+                  "workflow-multi",
+                  "backlog",
+                  0
+                ),
+                makePipelineStep("step-todo", "workflow-multi", "todo", 1),
+                makePipelineStep(
+                  "step-done",
+                  "workflow-multi",
+                  "done",
+                  2,
+                  true
+                ),
+              ],
+              transitions: [],
+            },
+          ],
+        },
+      });
+
+      const router = createTestRouter(["/design"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -785,7 +787,7 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -801,7 +803,7 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -813,14 +815,18 @@ describe("Router Acceptance Tests", () => {
     it("ProjectGuard redirects to /setup when no project is selected", async () => {
       // Wrap the route element with a ProjectGuard-like guard to verify the
       // redirect behavior, since the production router applies ProjectGuard.
-      (commands.hasProjectSelected as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (
+        commands.hasProjectSelected as ReturnType<typeof vi.fn>
+      ).mockResolvedValue({
         status: "ok",
         data: false,
       });
 
       // Build a small router that mirrors the production guard contract.
       function Guard({ children }: { children: React.ReactNode }) {
-        const [hasProject, setHasProject] = React.useState<boolean | null>(null);
+        const [hasProject, setHasProject] = React.useState<boolean | null>(
+          null
+        );
         React.useEffect(() => {
           commands.hasProjectSelected().then((r) => {
             setHasProject(r.status === "ok" && r.data === true);
@@ -842,13 +848,13 @@ describe("Router Acceptance Tests", () => {
             ),
           },
         ],
-        { initialEntries: ["/traces/task-123"] },
+        { initialEntries: ["/traces/task-123"] }
       );
 
       render(
         <TestWrapper>
           <RouterProvider router={guardedRouter} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       await waitFor(() => {
@@ -867,19 +873,19 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       // None of the known pages should render
       expect(
-        screen.queryByRole("heading", { name: "Operations" }),
+        screen.queryByRole("heading", { name: "Operations" })
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { name: "Board" }),
+        screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
       expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { name: "Tasks" }),
+        screen.queryByRole("heading", { name: "Tasks" })
       ).not.toBeInTheDocument();
     });
 
@@ -889,18 +895,18 @@ describe("Router Acceptance Tests", () => {
       render(
         <TestWrapper>
           <RouterProvider router={router} />
-        </TestWrapper>,
+        </TestWrapper>
       );
 
       expect(
-        screen.queryByRole("heading", { name: "Operations" }),
+        screen.queryByRole("heading", { name: "Operations" })
       ).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { name: "Board" }),
+        screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
       expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { name: "Tasks" }),
+        screen.queryByRole("heading", { name: "Tasks" })
       ).not.toBeInTheDocument();
     });
   });
@@ -928,7 +934,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(false, false),
-        }),
+        })
       ).toBe(true);
     });
 
@@ -937,7 +943,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, true),
           daemon: comp(false, false),
-        }),
+        })
       ).toBe(false);
     });
 
@@ -946,7 +952,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(true, false),
-        }),
+        })
       ).toBe(false);
     });
   });
