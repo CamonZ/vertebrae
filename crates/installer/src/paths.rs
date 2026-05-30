@@ -89,6 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn bin_dir_is_under_local_bin() {
         let dir = bin_dir().expect("home dir resolvable in tests");
         assert!(
@@ -98,6 +99,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn symlink_path_uses_provided_name() {
         let path = symlink_path("vtb-daemon").expect("home dir resolvable in tests");
         assert!(
@@ -113,6 +115,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn data_bin_dir_is_data_dir_plus_bin() {
         let data = data_dir().expect("home dir resolvable in tests");
         let bin = data_bin_dir().expect("home dir resolvable in tests");
@@ -125,6 +128,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[serial_test::serial]
     fn data_dir_is_under_application_support_on_macos() {
         let dir = data_dir().expect("home dir resolvable in tests");
         let s = dir.to_string_lossy();
@@ -136,6 +140,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[serial_test::serial]
     fn data_bin_dir_is_under_application_support_on_macos() {
         let dir = data_bin_dir().expect("home dir resolvable in tests");
         let s = dir.to_string_lossy();
@@ -147,6 +152,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    #[serial_test::serial]
     fn data_bin_dir_is_under_xdg_data_on_linux() {
         let dir = data_bin_dir().expect("home dir resolvable in tests");
         let s = dir.to_string_lossy();
@@ -158,6 +164,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    #[serial_test::serial]
     fn log_dir_is_under_library_logs_on_macos() {
         let dir = log_dir().expect("home dir resolvable in tests");
         let s = dir.to_string_lossy();
