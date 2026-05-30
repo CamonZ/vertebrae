@@ -505,6 +505,8 @@ vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --clear-agents --clear-skills
 vtb --json step update <step-id> --final true
 vtb step delete <step-id>
+vtb step delete <step-id> --force
+vtb --json step delete <step-id>
 ```
 
 `vtb step add` takes a required `<name>` positional argument plus required
@@ -631,6 +633,33 @@ With the global `--json` flag, `step update` returns an operation envelope:
   "step_id": "<step-id>"
 }
 ```
+
+`vtb step delete` takes exactly one required `<id>` argument: the step ID to
+delete. It accepts a full UUID or an 8-character hex short ID and resolves IDs
+case-insensitively. Its only command-specific flag is `--force` / `-f`.
+Deletion does not prompt for confirmation today, so `--force` is accepted for
+compatibility with delete-style commands rather than changing behavior.
+
+Human-readable success output is:
+
+```text
+Deleted step: <step-id>
+```
+
+With the global `--json` flag, `step delete` returns an operation envelope:
+
+```json
+{
+  "command": "step delete",
+  "status": "deleted",
+  "step_id": "<step-id>"
+}
+```
+
+The JSON `step_id` is lowercased. If a full UUID reaches `step delete` but no
+matching step exists, the command fails with `Step not found: <id>`. If an
+8-character hex short ID cannot be resolved, the shared ID resolver reports
+`step with prefix '<id>' not found`.
 
 ### Step Properties
 
