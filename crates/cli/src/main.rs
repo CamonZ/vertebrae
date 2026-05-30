@@ -1,11 +1,12 @@
 use clap::Parser;
+use serde::Serialize;
 use serde_json::json;
 use std::process;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::CliArgs;
-use vertebrae_cli::commands::Command;
+use vertebrae_cli::commands::{Command, CommandResult};
 use vertebrae_core::ServiceError;
 use vertebrae_sacrum_client::SacrumConfig;
 
@@ -53,7 +54,11 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
             .execute()
             .await
             .map_err(|e| ServiceError::config_error(e.to_string()))?;
-        println!("{}", result);
+        if args.json {
+            print_json(&result)?;
+        } else {
+            println!("{}", result);
+        }
         return Ok(());
     }
 
@@ -65,11 +70,7 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
             let value = serde_json::from_str(&result).unwrap_or_else(
                 |_| json!({ "command": "manifest", "status": "ok", "message": result }),
             );
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&value)
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?
-            );
+            println!("{}", CommandResult::Json(value));
         } else {
             println!("{}", result);
         }
@@ -115,6 +116,13 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
         }
     }
 
+    Ok(())
+}
+
+fn print_json<T: Serialize>(value: &T) -> Result<(), ServiceError> {
+    let value =
+        serde_json::to_value(value).map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+    println!("{}", CommandResult::Json(value));
     Ok(())
 }
 
