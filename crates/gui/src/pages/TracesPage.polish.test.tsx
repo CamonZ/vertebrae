@@ -411,10 +411,15 @@ describe("TracesPage THREAD empty-state", () => {
 describe("TracesPage filter bar updates URL and exposes test ids", () => {
   it("renders status/step/model selects with the right options", () => {
     renderAt("/traces/root");
+    expect(screen.getByTestId("trace-filter-bar")).toHaveAttribute(
+      "data-variant",
+      "hearth-v2"
+    );
     const status = screen.getByTestId("trace-filter-status");
     const opts = within(status).queryAllByRole("option");
     const labels = opts.map((o) => (o as HTMLOptionElement).value);
     expect(labels).toContain("completed");
     expect(labels).toContain("failed");
+    expect(screen.getByTestId("traces-event-stream-frame")).toBeInTheDocument();
   });
 });

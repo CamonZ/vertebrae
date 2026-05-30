@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { Task, TaskRun, TaskRunStatus } from "../../bindings";
 import type { ResolvedRunSource } from "../../hooks/useTaskRuns";
-import { isActiveRunStatus } from "../../utils/runState";
+import { isActiveRunStatus, runStatusLabel } from "../../utils/runState";
 import { IdentityBadge, ScanIdentifier } from "../shared/EntityId";
 import { safeMs } from "./timeUtils";
 
@@ -20,6 +20,8 @@ const MAX_RAIL_WIDTH = 560;
 const DEFAULT_TASKS_HEIGHT = 220;
 const MIN_TASKS_HEIGHT = 80;
 const MAX_TASKS_HEIGHT = 600;
+const HEADER_COUNT_CLASS =
+  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-fg-mute)]";
 
 interface RunHistoryRailProps {
   /**
@@ -55,16 +57,16 @@ function statusClasses(status: TaskRunStatus): string {
     case "executing":
     case "queued":
     case "waiting":
-      return "bg-[var(--color-warn)]";
+      return "border-[var(--color-warn)] bg-[var(--color-warn-wash)] text-[var(--color-warn)]";
     case "completed":
-      return "bg-[var(--color-ok)]";
+      return "border-[var(--color-ok)] bg-[var(--color-ok-wash)] text-[var(--color-ok)]";
     case "failed":
-      return "bg-[var(--color-err)]";
+      return "border-[var(--color-err)] bg-[var(--color-err-wash)] text-[var(--color-err)]";
     case "stopping":
     case "stopped":
-      return "bg-text-muted";
+      return "border-[var(--color-fg-mute)] bg-[var(--color-bg-3)] text-[var(--color-fg-mute)]";
     default:
-      return "bg-text-muted";
+      return "border-[var(--color-fg-mute)] bg-[var(--color-bg-3)] text-[var(--color-fg-mute)]";
   }
 }
 
@@ -146,8 +148,7 @@ function buildTaskTree(tasks: readonly Task[]): TaskTreeRow[] {
 
   const childrenByParent = new Map<string | null, Task[]>();
   for (const t of tasks) {
-    const parentId =
-      t.parent_id && byId.has(t.parent_id) ? t.parent_id : null;
+    const parentId = t.parent_id && byId.has(t.parent_id) ? t.parent_id : null;
     const bucket = childrenByParent.get(parentId);
     if (bucket) bucket.push(t);
     else childrenByParent.set(parentId, [t]);
@@ -187,33 +188,35 @@ interface TaskRowProps {
 function TaskRow({ row, isCurrent, onSelect }: TaskRowProps): ReactNode {
   const { task, taskId, depth } = row;
   const title = task?.title ?? taskId;
+  const level = task?.level ?? "task";
   return (
     <li
       data-testid="run-history-task-row"
       data-task-id={taskId}
       data-depth={depth}
       data-active={isCurrent ? "true" : "false"}
+      data-level={level}
     >
       <button
         type="button"
         onClick={onSelect}
         aria-current={isCurrent ? "true" : undefined}
         data-testid="run-history-task-row-button"
-        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[var(--color-bg-3)] ${
+        className={`group mx-1 my-0.5 flex w-[calc(100%-0.5rem)] items-center gap-2 rounded-[var(--radius-sm)] border px-2 py-1.5 text-left text-xs transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)] ${
           isCurrent
-            ? "border-l-2 border-[var(--color-accent)] bg-[var(--color-bg-3)] text-[var(--color-fg)]"
-            : "border-l-2 border-transparent text-[var(--color-fg-soft)]"
+            ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 text-[var(--color-fg)] shadow-[inset_3px_0_0_var(--color-accent)]"
+            : "border-transparent text-[var(--color-fg-soft)]"
         }`}
         style={{ paddingLeft: `${10 + depth * 14}px` }}
       >
-        {depth > 0 && (
-          <span
-            aria-hidden="true"
-            className="font-mono text-[var(--color-fg-mute)]"
-          >
-            ↳
-          </span>
-        )}
+        <span
+          aria-hidden="true"
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+            isCurrent
+              ? "bg-[var(--color-accent)]"
+              : "bg-[var(--color-fg-mute)]/50 group-hover:bg-[var(--color-fg-soft)]"
+          }`}
+        />
         <IdentityBadge
           id={taskId}
           kind="task"
@@ -241,7 +244,7 @@ function RunRow({
   onSelect,
 }: RunRowProps): ReactNode {
   const terminal = !isActiveRunStatus(run.status);
-  const label = run.status.replace(/_/g, " ");
+  const label = runStatusLabel(run.status);
   const glyph = statusGlyph(run.status);
   return (
     <li
@@ -257,17 +260,17 @@ function RunRow({
         onClick={onSelect}
         aria-current={isActive ? "true" : undefined}
         data-testid="run-history-row-button"
-        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--color-bg-3)] ${
+        className={`mx-2 my-1 flex w-[calc(100%-1rem)] items-start gap-2 rounded-[var(--radius-sm)] border px-2.5 py-2 text-left text-xs transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)] ${
           isActive
-            ? "border-l-2 border-[var(--color-accent)] bg-[var(--color-bg-3)]"
-            : "border-l-2 border-transparent"
+            ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10 shadow-[inset_3px_0_0_var(--color-accent)]"
+            : "border-[var(--color-line)] bg-[var(--color-bg-2)]/55"
         }`}
       >
         <span
           data-testid="run-history-row-pip"
           data-status={run.status}
           title={label}
-          className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full text-2xs leading-none text-[var(--color-bg-0)] ${statusClasses(
+          className={`inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border text-2xs leading-none ${statusClasses(
             run.status
           )}`}
         >
@@ -352,6 +355,10 @@ export function RunHistoryRail({
       .slice()
       .sort(compareRunsDescending);
   }, [runs, currentTaskId]);
+  const activeRun = useMemo(
+    () => currentTaskRuns.find((r) => r.id === activeRunId) ?? null,
+    [activeRunId, currentTaskRuns]
+  );
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -507,15 +514,21 @@ export function RunHistoryRail({
       <section
         ref={tasksPanelRef}
         data-testid="run-history-tasks-section"
-        className="flex min-h-0 flex-col"
+        className="flex min-h-0 flex-col bg-[var(--color-bg-1)]"
         style={{ height: tasksHeight }}
       >
-        <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
+        <div className="flex items-center justify-between border-b border-[var(--color-line)] px-3 py-2">
           <span
             data-testid="run-history-rail-title"
             className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]"
           >
             Tasks
+          </span>
+          <span
+            data-testid="run-history-task-count"
+            className={HEADER_COUNT_CLASS}
+          >
+            {taskRows.length}
           </span>
           <div className="flex items-center gap-1">
             {onSwitchTask && (
@@ -585,7 +598,9 @@ export function RunHistoryRail({
           }
         }}
         className={`relative h-1 cursor-ns-resize border-b border-[var(--color-line)] ${
-          isResizingTasks ? "bg-[var(--color-accent)]/40" : "hover:bg-[var(--color-accent)]/30"
+          isResizingTasks
+            ? "bg-[var(--color-accent)]/40"
+            : "hover:bg-[var(--color-accent)]/30"
         }`}
       />
 
@@ -593,14 +608,45 @@ export function RunHistoryRail({
         data-testid="run-history-runs-section"
         className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="flex items-center justify-between border-b border-[var(--color-line)] px-2 py-1.5">
+        <div className="flex items-center justify-between border-b border-[var(--color-line)] px-3 py-2">
           <span
             data-testid="run-history-runs-title"
             className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]"
           >
             Runs
           </span>
+          <span
+            data-testid="run-history-run-count"
+            className={HEADER_COUNT_CLASS}
+          >
+            {currentTaskRuns.length}
+          </span>
         </div>
+        {activeRun && (
+          <div
+            data-testid="run-history-hero-status"
+            data-status={activeRun.status}
+            className="border-b border-[var(--color-line)] bg-[var(--color-bg-2)]/40 px-3 py-2"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                {activeRunSource} run
+              </span>
+              <span
+                className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ${statusClasses(
+                  activeRun.status
+                )}`}
+              >
+                {runStatusLabel(activeRun.status)}
+              </span>
+            </div>
+            <div className="mt-1 flex min-w-0 items-center gap-1 font-mono text-2xs text-[var(--color-fg-soft)]">
+              <span>{formatStartedAt(activeRun.started_at)}</span>
+              <span className="text-[var(--color-fg-mute)]">·</span>
+              <ScanIdentifier id={activeRun.id} kind="task run" />
+            </div>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto">
           {!currentTaskId ? (
             <div
