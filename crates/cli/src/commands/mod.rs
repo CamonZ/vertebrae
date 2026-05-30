@@ -855,7 +855,7 @@ impl Command {
                     .execute()
                     .await
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                operation_result("init", "ok", json!({ "message": result.to_string() }))
+                json_value(result)?
             }
             Command::Manifest(cmd) => {
                 let result = cmd
