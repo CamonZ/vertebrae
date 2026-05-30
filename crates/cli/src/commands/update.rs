@@ -45,12 +45,12 @@ pub struct UpdateCommand {
     pub worktree: Option<String>,
 
     /// Edit a section: <type> <ordinal> <new-content>
-    /// Example: --edit-section step 0 "New step content"
+    /// Example: --edit-section checklist_item 0 "New checklist item content"
     #[arg(long = "edit-section", num_args = 3, value_names = ["TYPE", "ORDINAL", "CONTENT"])]
     pub edit_section: Option<Vec<String>>,
 
     /// Remove a section: <type> <ordinal>
-    /// Example: --remove-section step 0
+    /// Example: --remove-section checklist_item 0
     #[arg(long = "remove-section", num_args = 2, value_names = ["TYPE", "ORDINAL"])]
     pub remove_section: Option<Vec<String>>,
 }
@@ -167,8 +167,10 @@ impl UpdateCommand {
             }
         }
 
-        // Apply all field/tag/parent updates via service layer
-        services.tasks().update_task(&id, options).await?;
+        // Apply task updates via service layer when present.
+        if self.has_task_updates() {
+            services.tasks().update_task(&id, options).await?;
+        }
 
         // Handle section edits via service layer
         if let Some(args) = &self.edit_section {
@@ -224,6 +226,11 @@ impl UpdateCommand {
 
     /// Check if any updates were specified.
     fn has_updates(&self) -> bool {
+        self.has_task_updates() || self.edit_section.is_some() || self.remove_section.is_some()
+    }
+
+    /// Check if any task field updates were specified.
+    fn has_task_updates(&self) -> bool {
         self.title.is_some()
             || self.description.is_some()
             || self.priority.is_some()
@@ -231,7 +238,5 @@ impl UpdateCommand {
             || !self.remove_tags.is_empty()
             || self.parent.is_some()
             || self.worktree.is_some()
-            || self.edit_section.is_some()
-            || self.remove_section.is_some()
     }
 }
