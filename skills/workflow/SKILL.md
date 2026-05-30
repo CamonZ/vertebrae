@@ -214,7 +214,22 @@ Remove workflow assignment from a task.
 
 ```bash
 vtb workflow unassign <task-id>
+vtb workflow unassign <task-id> --json
 ```
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<task-id>` | | Yes | Task ID to unassign; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; returns an operation envelope with `command: "workflow unassign"`, `status: "updated"`, `task_id`, and `workflow_id: null`. |
+| `--help` | `-h` | No | Print help. |
+
+The command has no aliases, command-specific flags, defaults, or value enums.
+Unassignment clears the task's workflow and current step. Human-readable success
+output prints `Unassigned workflow from task <task-id>`.
+
+Malformed IDs are rejected before command execution. Unknown or ambiguous short
+IDs fail during ID resolution. A full UUID that reaches the service but does
+not exist returns a task-not-found service error.
 
 ---
 
