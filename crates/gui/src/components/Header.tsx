@@ -1,4 +1,3 @@
-import { ConnectionStatus } from "./ConnectionStatus";
 import { OpenLiveChatButton } from "./LiveChatWindow";
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
@@ -103,7 +102,6 @@ export function Header() {
       >
         {headerActions}
         <OpenLiveChatButton />
-        <ConnectionStatus />
         <CommandKChip />
       </div>
     </header>

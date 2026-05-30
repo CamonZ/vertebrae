@@ -54,6 +54,7 @@ vi.mock("./bindings", () => ({
 
 // Import after mocking
 import { commands } from "./bindings";
+import { appRoutes } from "./router";
 
 // Import page components
 import { AllWorkflowsPipeline } from "./pages/AllWorkflowsPipeline";
@@ -626,48 +627,14 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("Default route redirect", () => {
-    it("'/' redirects to '/operations'", async () => {
-      createMemoryRouter(
-        [
-          {
-            path: "/",
-            element: <div>Root should not render</div>,
-          },
-          {
-            path: "/operations",
-            element: <OperationsPage />,
-          },
-        ],
-        { initialEntries: ["/"] },
-      );
+    it("the production index route redirects '/' to '/tasks'", () => {
+      const rootRoute = appRoutes.find((route) => route.path === "/");
+      const indexRoute = rootRoute?.children?.find((route) => route.index);
 
-      // Replace the root route to simulate the Navigate redirect
-      const redirectRouter = createMemoryRouter(
-        [
-          {
-            path: "/",
-            element: (
-              <div data-testid="redirect-marker">Redirecting...</div>
-            ),
-          },
-          {
-            path: "/operations",
-            element: <OperationsPage />,
-          },
-        ],
-        { initialEntries: ["/operations"] },
-      );
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={redirectRouter} />
-        </TestWrapper>,
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Operations" }),
-        ).toBeInTheDocument();
+      expect(React.isValidElement(indexRoute?.element)).toBe(true);
+      expect((indexRoute?.element as React.ReactElement).props).toMatchObject({
+        to: "/tasks",
+        replace: true,
       });
     });
   });

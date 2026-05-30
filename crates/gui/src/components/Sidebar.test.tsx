@@ -33,6 +33,11 @@ vi.mock("../hooks/useScopedChat", () => ({
   useOpenChat: () => vi.fn(),
 }));
 
+const mockUseWebSocketStatus = vi.fn();
+vi.mock("../hooks/useWebSocketStatus", () => ({
+  useWebSocketStatus: () => mockUseWebSocketStatus(),
+}));
+
 function LocationDisplay() {
   const loc = useLocation();
   return <div data-testid="loc">{loc.pathname}</div>;
@@ -42,6 +47,7 @@ describe("Sidebar Traces nav", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mockUseWebSocketStatus.mockReturnValue("connected");
     useStyleguideStore.setState({ isStyleguideNavVisible: false });
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
@@ -50,6 +56,34 @@ describe("Sidebar Traces nav", () => {
       status: "ok",
       data: { slug: "new", project_id: "id", path: "/new" },
     });
+  });
+
+  it("renders the primary nav in design-rail order with 14px icons", () => {
+    render(
+      <MemoryRouter initialEntries={["/operations"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    const nav = screen.getByRole("navigation", { name: "Main navigation" });
+    const order = Array.from(nav.querySelectorAll("a[data-testid]")).map((a) =>
+      a.getAttribute("data-testid")
+    );
+    expect(order).toEqual([
+      "sidebar-nav-tasks",
+      "sidebar-nav-board",
+      "sidebar-nav-design",
+      "sidebar-nav-traces",
+    ]);
+
+    for (const label of ["tasks", "board", "design", "traces"]) {
+      const svg = screen
+        .getByTestId(`sidebar-nav-${label}`)
+        .querySelector("svg");
+      expect(svg).not.toBeNull();
+      expect(svg?.getAttribute("width")).toBe("14");
+      expect(svg?.getAttribute("height")).toBe("14");
+    }
   });
 
   it("renders a Traces nav link pointing at /traces", () => {
@@ -128,6 +162,7 @@ describe("Sidebar project switcher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mockUseWebSocketStatus.mockReturnValue("connected");
     useStyleguideStore.setState({ isStyleguideNavVisible: false });
     // A project is loaded so the avatar (and switcher) renders.
     mockGetCurrentProject.mockResolvedValue({
@@ -259,5 +294,84 @@ describe("Sidebar project switcher", () => {
         screen.queryByRole("dialog", { name: "Switch project" })
       ).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("Sidebar rail connection readout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    mockUseWebSocketStatus.mockReturnValue("connected");
+    useStyleguideStore.setState({ isStyleguideNavVisible: false });
+    mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+  });
+
+  function renderSidebar() {
+    render(
+      <MemoryRouter initialEntries={["/board"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+  }
+
+  const cases = [
+    { status: "connected", label: "connected", name: "Connected", token: "ok" },
+    {
+      status: "connecting",
+      label: "connecting",
+      name: "Connecting",
+      token: "warn",
+    },
+    {
+      status: "reconnecting",
+      label: "connecting",
+      name: "Reconnecting",
+      token: "warn",
+    },
+    {
+      status: "disconnected",
+      label: "disconnected",
+      name: "Disconnected",
+      token: "err",
+    },
+  ] as const;
+
+  for (const { status, label, name, token } of cases) {
+    it(`renders the ${status} state with the ${token} token, glow, and label`, () => {
+      mockUseWebSocketStatus.mockReturnValue(status);
+      renderSidebar();
+
+      const readout = screen.getByRole("status", { name: `WebSocket: ${name}` });
+      expect(readout).toHaveTextContent(label);
+      expect(readout).toHaveAttribute("aria-label", `WebSocket: ${name}`);
+      expect(readout).toHaveAttribute("title", `WebSocket: ${name}`);
+
+      expect(readout).toHaveClass("[writing-mode:vertical-rl]");
+      expect(readout).toHaveClass("rotate-180");
+      expect(readout).toHaveClass("mt-auto");
+
+      const dot = screen.getByTestId("rail-connection-dot");
+      expect(dot).toHaveClass(`bg-[var(--color-${token})]`);
+      expect(dot).toHaveClass(
+        `shadow-[0_0_6px_color-mix(in_oklch,var(--color-${token})_60%,transparent)]`
+      );
+      expect(dot).toHaveClass("[writing-mode:horizontal-tb]");
+      expect(dot).toHaveClass("rotate-180");
+      expect(dot.className).not.toMatch(
+        /bg-(red|green|amber|yellow|emerald|orange)-\d/
+      );
+    });
+  }
+
+  it("drops the app icon (LogoMark) and the top separators from the rail", () => {
+    renderSidebar();
+    expect(screen.queryByLabelText("Vertebrae")).not.toBeInTheDocument();
+    const aside = screen.getByRole("complementary", {
+      name: "Sidebar navigation",
+    });
+    const dividers = aside.querySelectorAll("div.h-px");
+    expect(dividers).toHaveLength(0);
+    expect(aside.querySelectorAll("li.h-px")).toHaveLength(0);
   });
 });
