@@ -40,6 +40,17 @@ vtb step add "Coding" -w <workflow-id> \
   --model gpt-5.5 \
   --reasoning-effort high
 
+# Codex/OpenAI with a configured upstream provider
+vtb step add "Coding" -w <workflow-id> \
+  --provider openai \
+  --codex-model-provider openrouter \
+  --model deepseek/deepseek-v4-flash
+
+# With prompt and full agent config JSON
+vtb step add "Coding" -w <workflow-id> \
+  --prompt "Implement the task described in {task.id}" \
+  --agent-config '{"model":"opus","max_budget_usd":5.0}'
+
 # With agents and skills
 vtb step add "Testing" -w <workflow-id> \
   --agent .claude/agents/test-runner.md \
@@ -49,22 +60,41 @@ vtb step add "Testing" -w <workflow-id> \
 # With transitions and final flag
 vtb step add "Approved" -w <workflow-id> --final
 vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
+
+# With step type and structured output schema
+vtb step add "Evaluate" -w <workflow-id> \
+  --step-type evaluate \
+  --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
+
+# Machine-readable creation result
+vtb --json step add "Review" -w <workflow-id>
 ```
 
 ### Options
 
 | Flag | Short | Description |
 |------|-------|-------------|
+| `--json` | | Global flag; output machine-readable JSON |
 | `--workflow` | `-w` | Workflow ID (required) |
+| `--id` | | Optional step ID; auto-generated if omitted |
 | `--goal` | `-g` | Goal describing what this step accomplishes |
 | `--agent` | `-a` | Path to agent file (repeatable) |
 | `--skill` | `-s` | Skill name (repeatable) |
+| `--prompt` | | Prompt sent to the agent when executing this step |
+| `--agent-config` | | Full agent config as a JSON string |
 | `--model` | `-m` | Model to use |
-| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex` |
+| `--provider` | | Built-in provider: `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--codex-model-provider` | | Codex upstream provider from `~/.codex/config.toml`; alias `--codex-provider` |
 | `--reasoning-effort` | | OpenAI/Codex-only effort: `low`, `medium`, `high`, or `xhigh` |
+| `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (default: `execute`) |
+| `--output-schema` | | JSON Schema describing expected structured output |
 | `--order` | `-o` | Step order (default: 0) |
 | `--final` | | Mark as a final step |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
+
+The required positional argument is `<name>`. `--workflow` and
+`--transition-to` accept full UUIDs or 8-character short IDs. `--json` returns a
+creation envelope with `command`, `status`, `step_id`, and `workflow_id`.
 
 `--reasoning-effort` is only valid with the OpenAI/Codex provider. Supported
 values are `low`, `medium`, `high`, and `xhigh`; Claude/Anthropic steps reject

@@ -470,7 +470,7 @@ vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 
 # Add step with prompt and agent config
 vtb step add "Coding" -w <workflow-id> \
-  --prompt "Implement the task described in {task_id}" \
+  --prompt "Implement the task described in {task.id}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
 # Add step with agents and skills
@@ -484,20 +484,32 @@ vtb step add "Evaluate" -w <workflow-id> \
   --step-type evaluate \
   --output-schema '{"type":"object","required":["passed"],"properties":{"passed":{"type":"boolean"}}}'
 
+# Add a human-input gate
+vtb step add "Needs Input" -w <workflow-id> --step-type human_input
+
 # Add a routing step
 vtb step add "Router" -w <workflow-id> --step-type route
+
+# Machine-readable creation result
+vtb --json step add "Review" -w <workflow-id>
 
 # List, show, update, delete steps
 vtb step list <workflow-id>
 vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
-vtb step update <step-id> --prompt "New prompt for {task_id}"
+vtb step update <step-id> --prompt "New prompt for {task.id}"
 vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --clear-agents --clear-skills
 vtb step delete <step-id>
 ```
+
+`vtb step add` takes a required `<name>` positional argument plus required
+`--workflow` / `-w`; run `vtb step add --help` for the complete creation flag
+list. `--transition-to` accepts full UUIDs or 8-character short IDs. The global
+`--json` flag returns a creation envelope with `command`, `status`, `step_id`,
+and `workflow_id`.
 
 ### Step Properties
 
@@ -507,13 +519,16 @@ vtb step delete <step-id>
 | `order` | Execution order (lower = first, 0-indexed) |
 | `final` | Marks workflow as complete when reached |
 | `goal` | What this step accomplishes |
-| `prompt` | Template sent to the executing agent (supports `{task_id}` interpolation) |
+| `prompt` | Template sent to the executing agent (supports `{task.id}` interpolation) |
 | `model` | AI model shortcut (sonnet, haiku, opus) |
 | `agent-config` | Full LLM config JSON (model, budget, tools, permissions) |
+| `provider` | Built-in execution provider shortcut (`anthropic`/`claude` or `openai`/`codex`); `--model-provider` is an alias |
+| `codex-model-provider` | Codex upstream provider shortcut from `~/.codex/config.toml`; `--codex-provider` is an alias |
+| `reasoning-effort` | OpenAI/Codex reasoning effort (`low`, `medium`, `high`, `xhigh`) |
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `execute`, `evaluate`, `route`, or `wait_children` (see below) |
+| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 
 ### Step Types
@@ -526,10 +541,14 @@ Each step has a `--step-type` that determines its role in the workflow:
 | `evaluate` | Assesses the output of a previous step. Used with `eval_prompt` to determine which transition to follow when a step has multiple outgoing paths. |
 | `route` | Directs work to different paths based on conditions. Uses a fixed routing contract schema. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
+| `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
 
 ```bash
 # Set step type on creation
 vtb step add "Eval" -w <wf-id> --step-type evaluate
+
+# Create a human-input gate
+vtb step add "Needs Input" -w <wf-id> --step-type human_input
 
 # Change step type later
 vtb step update <step-id> --step-type route
@@ -539,9 +558,9 @@ When a step has type `evaluate` and multiple outgoing transitions, the daemon ru
 
 ### Output Schemas
 
-Steps can define an `output_schema` — a JSON Schema describing the expected structured output from Claude. When present:
+Steps can define an `output_schema` — a JSON Schema describing the expected structured output from the selected harness. When present:
 
-- The daemon passes it as `--json-schema` to the Claude CLI subprocess, enforcing structured output
+- The daemon passes it to the selected harness subprocess, enforcing structured output
 - The step-level `output_schema` takes precedence over `agent_config.json_schema`
 - This enables reliable machine-readable responses for evaluation steps, routing decisions, and automated pipeline stages
 
