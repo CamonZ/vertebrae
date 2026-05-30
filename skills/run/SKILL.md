@@ -5,12 +5,15 @@ description: Execute a workflow step for a task via the daemon
 
 # /run
 
-Execute the current workflow step for a task. Sends a request to the Sacrum backend which broadcasts to the connected daemon for execution.
+Execute the current workflow step for a task. The command validates that the
+task has an assigned workflow and current step, then asks the connected daemon
+to start that step execution.
 
 ## Usage
 
 ```bash
 vtb run <task-id>
+vtb --json run <task-id>
 ```
 
 ## Arguments
@@ -18,6 +21,17 @@ vtb run <task-id>
 | Argument | Description |
 |----------|-------------|
 | `task-id` | Task ID with an assigned workflow and current step |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Global flag; output the `StepExecution` object as machine-readable JSON |
+| `-h`, `--help` | Print command help |
+
+`vtb run` has no command alias. Use `vtb start-taskrun <task-id>` (also
+available as `vtb run-workflow <task-id>`) when you want a durable multi-step
+TaskRun instead of one current-step execution.
 
 ## Requirements
 
@@ -51,15 +65,15 @@ Task abc123 has no current step. Assign a workflow first.
 ## How It Works
 
 1. Validates task exists, has a workflow, and has a current step
-2. Calls `run_step` on the Sacrum backend via GraphQL
-3. Sacrum creates a `StepExecution` record and broadcasts to connected daemons
+2. Calls `run_step` through the Vertebrae service layer
+3. The backend creates a `StepExecution` record and broadcasts to connected daemons
 4. The daemon picks up the execution and runs the step
 
 ## When to Use
 
-- Starting automated workflow execution
-- Running agent-assisted workflows
-- Executing multi-step processes
+- Dispatching the task's current step to a connected daemon
+- Re-running one workflow step after adjusting task or workflow state
+- Testing daemon step execution without starting a durable TaskRun
 
 ## See Also
 
