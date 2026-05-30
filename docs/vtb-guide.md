@@ -1040,7 +1040,25 @@ global task status field. Available values depend on configured workflow steps.
 
 ```bash
 vtb show <id>                         # Full task details with sections, refs, relationships
+vtb --json show <id>                  # Same details as a JSON task object
+vtb show <id> --json                  # Global --json may also appear after the subcommand
 ```
+
+`<id>` is required and accepts a full task UUID or an 8-character hex short ID.
+The lookup is case-insensitive after ID validation. `vtb show` has no
+task-specific filters; use `vtb list` or `vtb ready` to find candidate tasks
+before opening one detail view.
+
+The human-readable view prints task metadata, workflow position and
+previous/next steps, run state and controls, recent task-local run history,
+description, structured sections, relationships, and code references.
+Checklist items are rendered with checkboxes, and testing criteria show linked
+code refs inline. Completed blockers are omitted from the `Blocked by` list,
+while children and downstream `Blocks` relationships are shown as summaries.
+
+Under `--json`, the command returns the structured task detail object directly,
+including `workflow`, `run_controls`, `run_history`, `sections`, `code_refs`,
+`parent`, `children`, `blocked_by`, `blocks`, `archived`, and `parent_id`.
 
 ### Finding Actionable Work
 
