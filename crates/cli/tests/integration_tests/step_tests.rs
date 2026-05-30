@@ -482,10 +482,63 @@ mod step_list_tests {
 
         // Verify output contains steps
         assert!(result.contains("Steps for workflow"));
-        assert!(result.contains("Step 1"));
-        assert!(result.contains("Step 2"));
-        assert!(result.contains("Step 3"));
-        assert!(result.contains("FINAL"));
+        assert!(result.contains("1. Step 1 (id: step-0, type: execute, model: default)"));
+        assert!(result.contains("2. Step 2 (id: step-1, type: execute, model: default)"));
+        assert!(result.contains("3. Step 3 (id: step-2, type: execute, model: default) [FINAL]"));
+    }
+
+    #[tokio::test]
+    async fn test_list_steps_json_outputs_raw_steps() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Pipeline", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Review".to_string(),
+            workflow: workflow_id.clone(),
+            id: Some("review-step".to_string()),
+            goal: Some("Review implementation".to_string()),
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: Some("sonnet".to_string()),
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            r#final: true,
+            transitions_to: vec![],
+            step_type: CliStepType::Evaluate,
+            output_schema: None,
+        };
+        cmd.execute(services.steps()).await.unwrap();
+
+        let command = Command::Step(StepCommand::List(StepListCommand {
+            workflow: workflow_id.clone(),
+        }));
+        let result = command.execute_json(&services).await.unwrap();
+
+        let CommandResult::Json(json) = result else {
+            panic!("step list --json should return JSON output");
+        };
+        let steps = json
+            .as_array()
+            .expect("step list --json should return an array");
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0]["id"], "review-step");
+        assert_eq!(steps[0]["name"], "Review");
+        assert_eq!(steps[0]["workflow_id"], workflow_id);
+        assert_eq!(steps[0]["goal"], "Review implementation");
+        assert_eq!(steps[0]["step_type"], "evaluate");
+        assert_eq!(steps[0]["agent_config"]["model"], "sonnet");
+        assert_eq!(steps[0]["is_final"], true);
     }
 
     #[tokio::test]

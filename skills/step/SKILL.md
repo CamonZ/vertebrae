@@ -108,15 +108,40 @@ List all steps for a workflow.
 
 ```bash
 vtb step list <workflow-id>
+
+# Machine-readable list of raw step objects
+vtb --json step list <workflow-id>
 ```
 
 Output:
 ```
 Steps for workflow '<workflow-id>':
-1. coding (id: a1b2c3d4, model: sonnet)
-2. testing (id: e5f6a7b8, model: haiku)
-3. documentation (id: c9d0e1f2, model: haiku)
+1. coding (id: a1b2c3d4, type: execute, model: sonnet)
+2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
+3. approved (id: c9d0e1f2, type: execute, model: default) [FINAL]
 ```
+
+### Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | | Global flag; output machine-readable JSON |
+| `--help` | `-h` | Print help |
+
+The required positional argument is `<workflow>`, the workflow ID whose steps
+should be listed. It accepts a full UUID or an 8-character short ID. There are
+no command-specific flags or aliases for `step list`.
+
+When no steps exist, human-readable output is:
+
+```text
+No steps found for workflow '<workflow-id>'
+```
+
+`--json` returns the raw array of `Step` objects with fields such as `id`,
+`name`, `workflow_id`, `order`, `step_type`, `agent_config`, `is_final`,
+`transitions_to`, and timestamps. It does not wrap the result in an `output`
+field.
 
 ---
 
