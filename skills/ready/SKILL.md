@@ -1,20 +1,30 @@
 ---
 name: ready
-description: Show unblocked backlog items ready for triage
+description: Show actionable items ready for work or triage
 ---
 
 # /ready
 
-Show unblocked items in the backlog that are ready to be triaged.
+Show actionable items returned by the ready query.
 
 ## When to use
-- Finding what to triage next from backlog
-- Starting a work session — seeing what needs attention
+- Finding what to triage or start next from the backlog
+- Starting a work session by checking the current actionable queue
+- Confirming dependency blockers have been cleared before selecting work
 
 ## Command
 
 ```bash
 vtb ready
+```
+
+`ready` has no positional arguments or command-specific flags.
+
+The global `--json` flag also applies:
+
+```bash
+vtb --json ready
+vtb ready --json
 ```
 
 ## Output
@@ -27,7 +37,18 @@ Ready to start (backlog):
 
 ## How it works
 
-Returns all unblocked tasks (no pending dependency blockers) that are in the backlog. Items are displayed with their ID, level, and title.
+Returns actionable items from the backend ready query. The CLI
+filters archived items from that result, then displays each remaining item with
+its ID, level, and title.
+
+If no items are ready, the human-readable output is:
+
+```text
+No actionable items found.
+```
+
+JSON output is an object with a `backlog_ready` array containing the serialized
+task records returned by the command.
 
 ## See Also
 
