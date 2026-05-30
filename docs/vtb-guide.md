@@ -1217,6 +1217,9 @@ vtb run-workflow <task-id>
 # Stop the active TaskRun for a task
 vtb stop-taskrun <task-id>
 
+# Emit the stopped TaskRun (or null when none is active) as JSON
+vtb --json stop-taskrun <task-id>
+
 # Compatibility alias
 vtb stop <task-id>
 
@@ -1230,8 +1233,14 @@ vtb stop-workflow <task-id>
 must already have an assigned workflow and current step, and a connected daemon
 must be available to handle the execution. `vtb start-taskrun` starts a durable
 TaskRun for the task's assigned workflow, handling transitions, eval prompts,
-and workflow chaining. `vtb run-workflow`, `vtb stop`, and `vtb stop-workflow`
-remain compatibility aliases for `start-taskrun` and `stop-taskrun`.
+and workflow chaining. `vtb stop-taskrun` stops the active TaskRun for the task
+ID passed as its only positional argument. It accepts the global `--json` flag:
+JSON output is the stopped `TaskRun` object, or `null` when the task has no
+active TaskRun. Human-readable output reports either `Stopped run: <status>
+taskRun=<task-run-id> latestStep=<step-execution-id|none>` or `No active run for
+task <task-id>`. `vtb run-workflow`, `vtb stop`, and
+`vtb stop-workflow` remain compatibility aliases for `start-taskrun` and
+`stop-taskrun`.
 
 ---
 
@@ -1396,9 +1405,10 @@ vtb ready
 |---------|-------------|
 | `vtb run <id>` | Execute current step via daemon |
 | `vtb start-taskrun <id>` | Start a TaskRun via daemon |
-| `vtb stop-taskrun <id>` | Stop the active TaskRun for a task |
+| `vtb stop-taskrun <id>` | Stop the active TaskRun for a task; supports global `--json` |
 | `vtb run-workflow <id>` | Compatibility alias for `start-taskrun` |
 | `vtb stop <id>` | Compatibility alias for `stop-taskrun` |
+| `vtb stop-workflow <id>` | Compatibility alias for `stop-taskrun` |
 | `vtb execution create <task-id>` | Create execution record for a task's current workflow step |
 | `vtb execution list <task-id>` | List compact TaskRun-backed executions grouped by TaskRun |
 | `vtb execution list --task-run <task-run-id>` | List compact executions for one full TaskRun UUID |
