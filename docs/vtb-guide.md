@@ -541,6 +541,7 @@ to a workflow return a validation error from the workflow service.
 ```bash
 vtb workflow assign <task-id> <workflow-id>    # Assign (starts at first step)
 vtb workflow unassign <task-id>                # Remove workflow
+vtb workflow unassign <task-id> --json         # Machine-readable result
 ```
 
 `vtb workflow assign` takes two required positional arguments: `<TASK_ID>` and
@@ -559,6 +560,22 @@ with `command: "workflow assign"`, `status: "updated"`, `task_id`, and
 Malformed IDs are rejected before command execution. Unknown or ambiguous short
 IDs fail during ID resolution. A full UUID that reaches the service but does
 not exist returns a task- or workflow-not-found service error.
+
+`vtb workflow unassign` takes one required positional argument, `<TASK_ID>`,
+which accepts a case-insensitive full UUID or 8-character short ID. The command
+has no aliases, no command-specific flags, no defaults, and no value enums. Its
+generated help lists only the task positional argument, the global `--json`,
+and `-h` / `--help`.
+
+On success, workflow unassignment clears the task's workflow and current step.
+Human-readable output prints `Unassigned workflow from task <task-id>`. With
+the global `--json` flag, `workflow unassign` returns an operation envelope with
+`command: "workflow unassign"`, `status: "updated"`, `task_id`, and
+`workflow_id: null`.
+
+Malformed IDs are rejected before command execution. Unknown or ambiguous short
+IDs fail during ID resolution. A full UUID that reaches the service but does
+not exist returns a task-not-found service error.
 
 ### Managing Steps
 
