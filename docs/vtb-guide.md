@@ -222,6 +222,16 @@ vtb blockers <final-task-id>
 
 Sections add structured content to tasks. They are critical for triage.
 
+`vtb section` accepts the global `--json` flag and takes a case-insensitive task
+ID, a section type, and non-empty content:
+
+```bash
+vtb section [--json] <id> <section-type> "content"
+```
+
+Single-instance section types replace the existing section of that type.
+Multi-instance section types append a new section with a zero-based index.
+
 ### Section Types
 
 | Type | Purpose | Cardinality |
@@ -277,10 +287,10 @@ vtb sections <id> --type checklist_item  # Filter by type
 ### Editing and Removing Sections
 
 ```bash
-# Edit a section in-place (type + 0-based ordinal + new content)
+# Edit a section in-place (type + 0-based index + new content)
 vtb update <id> --edit-section checklist_item 0 "Updated checklist item"
 
-# Remove a section (type + 0-based ordinal)
+# Remove a section (type + 0-based index)
 vtb update <id> --remove-section checklist_item 0
 
 # Remove single-instance types (no index needed)
@@ -290,6 +300,9 @@ vtb unsection <id> context
 # Remove multi-instance types (index required)
 vtb unsection <id> checklist_item --index 2
 vtb unsection <id> testing_criterion --index 1
+
+# Emit machine-readable output
+vtb section <id> checklist_item "Update changelog" --json
 ```
 
 ### Checklist Items
