@@ -194,6 +194,22 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
       expect(screen.getByText("Pipeline Beta")).toBeInTheDocument();
     });
     expect(screen.getByText("2 workflows visualized")).toBeInTheDocument();
+    const railItems = screen.getAllByTestId("workflow-rail-item");
+    expect(railItems).toHaveLength(2);
+    expect(railItems[0]).toHaveTextContent("Pipeline Alpha");
+    expect(railItems[0]).toHaveTextContent(/2 steps.*6 tasks/);
+    expect(railItems[0]).toHaveTextContent("1");
+    expect(railItems[1]).toHaveTextContent("Pipeline Beta");
+    expect(railItems[1]).toHaveTextContent(/1 steps.*0 tasks/);
+
+    fireEvent.change(screen.getByLabelText("Search workflows"), {
+      target: { value: "Beta" },
+    });
+    const filteredRailItems = screen.getAllByTestId("workflow-rail-item");
+    expect(filteredRailItems).toHaveLength(1);
+    expect(filteredRailItems[0]).toHaveTextContent("Pipeline Beta");
+    expect(filteredRailItems[0]).not.toHaveTextContent("Pipeline Alpha");
+
     // The summary may be fetched more than once in test mode (StrictMode +
     // visibilitychange listeners can refetch); we just want at least one call.
     expect(
