@@ -3,10 +3,10 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, UpdateWorkflowOptions, WorkflowService};
 
-/// Update a workflow's properties
+/// Update a workflow's properties.
 #[derive(Debug, Args)]
 pub struct WorkflowUpdateCommand {
-    /// Workflow ID to update (case-insensitive)
+    /// Workflow ID to update (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub id: String,
 
@@ -18,7 +18,7 @@ pub struct WorkflowUpdateCommand {
     #[arg(short, long)]
     pub description: Option<String>,
 
-    /// Clear the workflow description
+    /// Clear the workflow description; conflicts with --description
     #[arg(long, conflicts_with = "description")]
     pub clear_description: bool,
 
@@ -26,11 +26,11 @@ pub struct WorkflowUpdateCommand {
     #[arg(long = "kanban-column")]
     pub kanban_column: Option<String>,
 
-    /// Mark this workflow as the default for new tasks
+    /// Mark this workflow as the default for new tasks; conflicts with --no-default
     #[arg(long, conflicts_with = "no_default")]
     pub default: bool,
 
-    /// Unmark this workflow as the default
+    /// Unmark this workflow as the default; conflicts with --default
     #[arg(long, conflicts_with = "default")]
     pub no_default: bool,
 }
@@ -39,6 +39,8 @@ impl WorkflowUpdateCommand {
     /// Execute the update workflow command.
     ///
     /// Updates the workflow with the specified ID using the provided options.
+    /// At least one update flag must be present. Empty `--kanban-column ""`
+    /// clears the kanban column.
     ///
     /// # Arguments
     ///
@@ -46,7 +48,8 @@ impl WorkflowUpdateCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
+    /// Returns `ServiceError::validation_failed` if no update flags are provided.
+    /// Returns `ServiceError::WorkflowNotFound` if the workflow doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         // Build the update options

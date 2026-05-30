@@ -131,17 +131,26 @@ Update workflow properties.
 
 ```bash
 vtb workflow update <id> --name "Development"
-vtb workflow update <id> --description "New description"
-vtb workflow update <id> --clear-description
+vtb workflow update <id> --kanban-column ""
+vtb workflow update <id> --name "Development" --json
 ```
 
 ### Options
 
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--name` | `-n` | New workflow name |
-| `--description` | `-d` | New description |
-| `--clear-description` | | Remove description |
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<ID>` | | Yes | Workflow ID to update; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--name <NAME>` | `-n` | No | New workflow name. |
+| `--description <DESCRIPTION>` | `-d` | No | New description; conflicts with `--clear-description`. |
+| `--clear-description` | | No | Remove description; conflicts with `--description`. |
+| `--kanban-column <KANBAN_COLUMN>` | | No | Set board column; pass an empty string `""` to clear. |
+| `--default` | | No | Mark this workflow as the default for new tasks; conflicts with `--no-default`. |
+| `--no-default` | | No | Unmark this workflow as the default; conflicts with `--default`. |
+| `--json` | | No | Global flag; returns an operation envelope with `command`, `status`, and `workflow_id`. |
+
+At least one update option is required. Running `vtb workflow update <id>` without
+`--name`, `--description`, `--clear-description`, `--kanban-column`,
+`--default`, or `--no-default` returns a validation error.
 
 ---
 
