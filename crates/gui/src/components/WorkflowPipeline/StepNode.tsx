@@ -61,23 +61,25 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       onClick={handleClick}
       data-testid={`step-node-${step.name}`}
       data-step-kind={typeStyle.kind}
-      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+      className={`group relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} rounded-md border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
         isFlashing ? "animate-flash-border" : ""
       } ${
         isNodeSelected
-          ? "border-primary/50 bg-primary/5 shadow-glow-sm"
-          : "border-border hover:border-border/80 hover:bg-bg-hover"
+          ? "border-primary/50 bg-primary/10 shadow-glow-sm"
+          : "border-border/90 hover:border-border hover:bg-bg-hover"
       }`}
       style={{
-        boxShadow: NODE_SHADOW_STYLE.boxShadow,
-        background: `linear-gradient(to bottom, color-mix(in oklch, var(${typeStyle.washVar}) 30%, var(--color-bg-2)), var(--color-bg-2))`,
+        boxShadow: isExecuting
+          ? `0 0 0 1px color-mix(in oklch, var(${typeStyle.barVar}) 55%, transparent), ${NODE_SHADOW_STYLE.boxShadow}`
+          : NODE_SHADOW_STYLE.boxShadow,
+        background: `linear-gradient(180deg, color-mix(in oklch, var(${typeStyle.washVar}) 42%, var(--color-bg-2)) 0%, var(--color-bg-2) 58%, var(--color-bg-1) 100%)`,
       }}
     >
       {/* Top step-type accent bar */}
       <span
         aria-hidden
         data-testid="step-type-bar"
-        className={`pointer-events-none absolute left-0 right-0 top-0 h-[3px] ${
+        className={`pointer-events-none absolute left-0 right-0 top-0 h-1 ${
           isExecuting ? "animate-status-pulse" : ""
         }`}
         style={{ backgroundColor: `var(${typeStyle.barVar})` }}
@@ -99,7 +101,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       <div className="relative mb-3 flex items-center gap-3">
         <div className="relative">
           <span
-            className={`flex h-7 w-7 items-center justify-center rounded-lg border font-mono text-xs font-bold ${
+            className={`flex h-7 w-7 items-center justify-center rounded-md border font-mono text-xs font-bold ${
               isFirst
                 ? "border-accent/30 bg-accent/10 text-accent"
                 : "border-primary/30 bg-primary/10 text-primary"
@@ -129,10 +131,10 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               data-testid="step-type-icon"
               title={typeStyle.label}
               aria-label={typeStyle.label}
-              className="ml-auto inline-flex h-4 w-4 shrink-0 items-center justify-center text-[12px]"
+              className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded border border-border bg-bg-primary px-1 font-mono text-[10px] uppercase"
               style={{ color: `var(${typeStyle.fgVar})` }}
             >
-              {typeStyle.icon}
+              {typeStyle.hearthKind}
             </span>
           </div>
           {step.goal && (
@@ -227,7 +229,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       </div>
 
       {/* Step type indicators */}
-      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3">
+      <div className="mt-auto flex items-center gap-2 border-t border-border pt-3">
         {isFirst && (
           <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-accent">
             <svg

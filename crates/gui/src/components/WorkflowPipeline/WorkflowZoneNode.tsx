@@ -10,6 +10,7 @@ export type WorkflowZoneNodeData = {
   workflow: Workflow;
   taskCount: number;
   stepCount: number;
+  activeCount?: number;
   width: number;
   height: number;
   onWorkflowClick?: (workflow: Workflow) => void;
@@ -31,6 +32,7 @@ function WorkflowZoneNodeComponent({
     workflow,
     taskCount,
     stepCount,
+    activeCount = 0,
     width,
     height,
     onWorkflowClick,
@@ -47,13 +49,18 @@ function WorkflowZoneNodeComponent({
 
   return (
     <div
-      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''}`}
+      className={`relative rounded-xl bg-bg-secondary/40 transition-all ${isFlashing ? "animate-flash-border" : ""}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
         border: isWorkflowHighlighted
           ? "2px dashed #ff5c2e"
-          : "2px dashed rgba(100, 116, 139, 0.4)",
+          : isWorkflowSelected
+            ? "2px solid var(--color-primary)"
+            : "1px solid var(--color-line-strong)",
+        boxShadow: isWorkflowSelected
+          ? "0 0 0 1px color-mix(in oklch, var(--color-primary) 35%, transparent), 0 24px 60px rgba(0,0,0,0.28)"
+          : "0 18px 44px rgba(0,0,0,0.2)",
       }}
     >
       {/* Handles for workflow-to-workflow transition edges */}
@@ -71,14 +78,12 @@ function WorkflowZoneNodeComponent({
       />
 
       {/* Workflow header */}
-      <div
-        className="absolute left-4 top-4 right-4 z-10"
-      >
+      <div className="absolute left-4 right-4 top-4 z-10">
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={handleWorkflowClick}
-            className={`text-lg font-semibold transition-colors text-left cursor-pointer pointer-events-auto ${
+            className={`nodrag nopan cursor-pointer pointer-events-auto text-left text-base font-semibold transition-colors ${
               isWorkflowSelected
                 ? "text-primary"
                 : "text-text-primary hover:text-primary"
@@ -94,6 +99,12 @@ function WorkflowZoneNodeComponent({
           {workflow.is_final && (
             <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-warning pointer-events-none">
               Final
+            </span>
+          )}
+          {activeCount > 0 && (
+            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 font-mono text-2xs text-success pointer-events-none">
+              <span className="h-1.5 w-1.5 rounded-full bg-success" />
+              {activeCount} active
             </span>
           )}
         </div>

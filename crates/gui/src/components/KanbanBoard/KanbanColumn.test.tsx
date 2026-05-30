@@ -45,10 +45,10 @@ describe("KanbanColumn", () => {
   });
 
   describe("empty state", () => {
-    it("shows 'No tasks' message when column has no tasks", () => {
+    it("shows empty message when column has no tasks", () => {
       render(<KanbanColumn columnName="Done" tasks={[]} />);
 
-      expect(screen.getByText("No tasks")).toBeInTheDocument();
+      expect(screen.getByText("Nothing here")).toBeInTheDocument();
     });
   });
 

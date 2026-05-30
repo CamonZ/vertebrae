@@ -177,13 +177,16 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
         .clone();
     let client = wd.lock().await;
 
+    let text_xpath = format!("//*[contains(text(), '{}')]", text);
+    let clickable_xpath = format!(
+        "//*[contains(text(), '{}')]/ancestor-or-self::*[self::button or @role='button'][1]",
+        text
+    );
+
     let element = client
         .wait()
         .at_most(std::time::Duration::from_secs(5))
-        .for_element(Locator::XPath(&format!(
-            "//*[contains(text(), '{}')]",
-            text
-        )))
+        .for_element(Locator::XPath(&text_xpath))
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -192,10 +195,36 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
             )
         });
 
-    element
-        .click()
-        .await
-        .unwrap_or_else(|_| panic!("failed to click element containing text '{}'", text));
+    let click_result = element.click().await;
+    if let Err(element_click_err) = click_result {
+        let clickable = client
+            .wait()
+            .at_most(std::time::Duration::from_secs(5))
+            .for_element(Locator::XPath(&clickable_xpath))
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "clickable element containing text '{}' not found within 5 seconds",
+                    text
+                )
+            });
+
+        if let Err(clickable_click_err) = clickable.click().await {
+            let clickable_json = serde_json::to_value(&clickable).expect("serialize element");
+            client
+                .execute(
+                    "arguments[0].scrollIntoView({ block: 'center', inline: 'center' }); arguments[0].click();",
+                    vec![clickable_json],
+                )
+                .await
+                .unwrap_or_else(|js_click_err| {
+                    panic!(
+                        "failed to click element containing text '{}': element click: {}; clickable click: {}; js click: {}",
+                        text, element_click_err, clickable_click_err, js_click_err
+                    )
+                });
+        }
+    }
 
     // Brief pause to let the UI respond to the click.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
