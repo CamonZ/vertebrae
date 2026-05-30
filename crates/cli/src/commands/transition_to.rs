@@ -9,16 +9,18 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Transition a task to a specific workflow step
 ///
-/// The task argument is a UUID. The target can be either a full UUID or a step
-/// name (e.g., 'backlog', 'in_progress', 'done'). When a name is given, it is
-/// resolved by looking up the task's current workflow steps.
+/// The task argument accepts a full task UUID or 8-character short ID,
+/// case-insensitive. The target can be a full step UUID, an 8-character step
+/// short ID, or a step name (e.g., 'backlog', 'in_progress', 'done'). When a
+/// name is given, it is resolved by looking up the task's current workflow
+/// steps.
 #[derive(Debug, Args)]
 pub struct TransitionToCommand {
-    /// Task UUID to transition
+    /// Task ID to transition (full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Target step: a full UUID or step name (e.g., 'backlog', 'in_progress')
+    /// Target step: name, full UUID, or 8-character short ID
     #[arg(required = true)]
     pub target: String,
 
@@ -96,8 +98,10 @@ impl std::fmt::Display for TransitionToResult {
 impl TransitionToCommand {
     /// Execute the transition-to command.
     ///
-    /// Transitions a task to a target step within the same workflow,
-    /// validating the transition against the step's transitions_to graph.
+    /// Transitions a task to a target step within the same workflow. Use
+    /// `vtb workflow assign` to move a task to a different workflow.
+    /// Transitions are validated against the step's transitions_to graph unless
+    /// `--skip-validation` is supplied.
     #[allow(deprecated)]
     pub async fn execute(
         &self,
