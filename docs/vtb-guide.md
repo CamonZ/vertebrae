@@ -503,6 +503,7 @@ vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --clear-agents --clear-skills
+vtb --json step update <step-id> --final true
 vtb step delete <step-id>
 ```
 
@@ -571,6 +572,65 @@ vtb --json step show <step-id>
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
 `goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
 `output_schema`, `is_final`, `transitions_to`, `created_at`, and `updated_at`.
+
+`vtb step update` takes exactly one required `<id>` argument: the step ID to
+update. It accepts a full UUID or an 8-character hex short ID and resolves IDs
+case-insensitively. Every command-specific flag is optional, so running
+`vtb step update <step-id>` with no property flags is accepted and performs a
+request with no property changes before reporting success.
+
+| Flag | Short | Behavior |
+|------|-------|----------|
+| `--name <NAME>` | | Replace the step name |
+| `--goal <GOAL>` | `-g` | Replace the step goal |
+| `--agent <AGENT>` | `-a` | Replace the full agents list; repeat for multiple agents |
+| `--clear-agents` | | Replace the agents list with an empty list |
+| `--skill <SKILL>` | `-s` | Replace the full skills list; repeat for multiple skills |
+| `--clear-skills` | | Replace the skills list with an empty list |
+| `--prompt <PROMPT>` | | Replace the execution prompt |
+| `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
+| `--model <MODEL>` | `-m` | Set `agent_config.model` |
+| `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
+| `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
+| `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
+| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, and `human_input` |
+| `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
+| `--clear-output-schema` | | Remove the output schema |
+| `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
+| `--final <true|false>` | | Set or unset the final-step marker |
+| `--transition-to <STEP_ID>` | `-t` | Replace the full transitions list; repeat for multiple target steps |
+| `--clear-transitions` | | Replace the transitions list with an empty list |
+
+For replacement-list fields, update is not additive: any provided `--agent`,
+`--skill`, or `--transition-to` values replace the existing list. The matching
+`--clear-*` flags win for that field when present. `--agent-config` starts from
+the supplied JSON; the shortcut flags (`--provider`, `--model`,
+`--codex-model-provider`, and `--reasoning-effort`) then overlay individual
+fields before the config is validated and persisted.
+
+Invalid JSON in `--agent-config` or `--output-schema` fails before persistence.
+Provider/model mismatches, Codex upstream provider usage when the resulting
+provider is Anthropic, and Anthropic reasoning effort are rejected by the CLI
+before the step is updated.
+If a full UUID reaches `step update` but no matching step exists, the command
+fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
+resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
+
+Human-readable success output is:
+
+```text
+Updated step: <step-id>
+```
+
+With the global `--json` flag, `step update` returns an operation envelope:
+
+```json
+{
+  "command": "step update",
+  "status": "updated",
+  "step_id": "<step-id>"
+}
+```
 
 ### Step Properties
 
