@@ -1075,7 +1075,8 @@ vtb workflow transition list
 vtb workflow transition list --workflow-id <id>
 vtb workflow transition list -w <id>
 vtb workflow transition list --json
-vtb workflow transition delete <from-workflow> <to-workflow>
+vtb workflow transition delete <from-workflow-id> <to-workflow-id>
+vtb workflow transition delete <from-workflow-id> <to-workflow-id> --json
 ```
 
 `workflow transition add` takes two required positional arguments:
@@ -1105,6 +1106,31 @@ source workflow filter has no matches, it prints
 returns the raw array of workflow transition objects from the workflow service,
 including `id`, `from_workflow`, `to_workflow`, `label`, and `target_step` when
 present.
+
+`workflow transition delete` takes two required positional arguments:
+`<from-workflow-id>` and `<to-workflow-id>`. Both workflow IDs accept a
+case-insensitive full UUID or 8-character short ID. The command has no
+command-specific flags, aliases, defaults, or value enums. Human-readable
+output confirms the deleted source and target workflow IDs:
+
+```text
+Deleted transition from workflow <from-workflow-id> to workflow <to-workflow-id>
+```
+
+With `--json`, the command returns an operation result. Short IDs are resolved
+before execution, and IDs in JSON output are lowercased:
+
+```json
+{
+  "command": "workflow transition delete",
+  "status": "deleted",
+  "from_workflow_id": "<resolved-from-workflow-id>",
+  "to_workflow_id": "<resolved-to-workflow-id>"
+}
+```
+
+If no transition exists from the source workflow to the target workflow, the
+workflow service returns a not-found error.
 
 ### Step Lifecycle (within a workflow)
 

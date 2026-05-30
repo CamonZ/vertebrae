@@ -3,7 +3,11 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, WorkflowService};
 
-/// Delete a workflow transition
+/// Delete a workflow transition.
+///
+/// Source and target workflow IDs accept full UUIDs or 8-character short IDs.
+/// The command has no command-specific flags; the global `--json` flag returns
+/// a structured operation result with the resolved source and target workflow IDs.
 #[derive(Debug, Args)]
 pub struct TransitionDeleteCommand {
     /// Source workflow ID (case-insensitive)
