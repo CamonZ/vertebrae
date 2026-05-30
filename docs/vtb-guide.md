@@ -1203,10 +1203,10 @@ service layer.
 
 ## Daemon Management
 
-The daemon (`vtb-daemon`) is a background service that executes workflow steps by spawning a local harness CLI — Claude Code (`claude`) for `anthropic` provider steps and Codex CLI (`codex`) for `openai` provider steps. See [Provider Selection](#provider-selection-anthropic--openai) for how to pick a harness per step. It runs as a macOS launchd service.
+The daemon (`vtb-daemon`) is a background service that executes workflow steps by spawning a local harness CLI — Claude Code (`claude`) for `anthropic` provider steps and Codex CLI (`codex`) for `openai` provider steps. See [Provider Selection](#provider-selection-anthropic--openai) for how to pick a harness per step. It runs as a macOS launchd service or a Linux systemd `--user` service.
 
 ```bash
-# Install as a launchd service
+# Install as a launchd or systemd user service
 vtb daemon install
 
 # Install with explicit binary path
@@ -1218,6 +1218,30 @@ vtb daemon status
 # Uninstall the service
 vtb daemon uninstall
 ```
+
+### Daemon Install Options
+
+```bash
+vtb daemon install [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--binary <BINARY>` | Explicit path to the `vtb-daemon` binary; if omitted, the CLI resolves `vtb-daemon` from `PATH` with `which` |
+| `--json` | Global flag accepted by clap; daemon commands currently still print human-readable text |
+| `-h, --help` | Print command help |
+
+`vtb daemon install` has no aliases, positional arguments, short flags,
+defaults, or value enums. If `--binary` is provided, the path must exist and is
+canonicalized before installation. Without `--binary`, `vtb-daemon` must be on
+`PATH`; otherwise the command fails with a hint to install it or pass
+`--binary`. On macOS, installation writes
+`~/Library/LaunchAgents/com.vertebrae.daemon.plist`, loads it with
+`launchctl`, and logs to `~/Library/Logs/vertebrae/{daemon.log,daemon.error.log}`.
+On Linux, installation writes
+`~/.config/systemd/user/vertebrae-daemon.service`, runs `systemctl --user
+daemon-reload`, enables and starts `vertebrae-daemon`, and logs to
+`~/.local/state/vertebrae/logs/{daemon.log,daemon.error.log}`.
 
 ### Running Steps via Daemon
 
@@ -1441,8 +1465,8 @@ vtb ready
 ### Daemon
 | Command | Description |
 |---------|-------------|
-| `vtb daemon install` | Install as launchd service |
-| `vtb daemon uninstall` | Uninstall launchd service |
+| `vtb daemon install` | Install as launchd or systemd user service |
+| `vtb daemon uninstall` | Uninstall launchd or systemd user service |
 | `vtb daemon status` | Check daemon status |
 
 ### Other
