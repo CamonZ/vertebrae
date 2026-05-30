@@ -1,6 +1,11 @@
 import type { ChangeEvent } from "react";
 import { useState, useCallback, useMemo } from "react";
-import type { Task, TaskLevel, TaskFilterOptions, WorkflowTransition } from "../bindings";
+import type {
+  Task,
+  TaskLevel,
+  TaskFilterOptions,
+  WorkflowTransition,
+} from "../bindings";
 import { useTasks } from "../hooks/useTasks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
@@ -8,6 +13,10 @@ import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { popOut, stashTask } from "../utils";
+import {
+  deriveHearthStateBreakdown,
+  type HearthStateBreakdown,
+} from "../utils/runState";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -22,7 +31,7 @@ const UNASSIGNED_COLUMN = "Unassigned";
 export function topologicalColumnSort(
   allColumns: Set<string>,
   transitions: WorkflowTransition[],
-  workflowColumnMap: Map<string, string>,
+  workflowColumnMap: Map<string, string>
 ): string[] {
   if (allColumns.size === 0) return [];
 
@@ -106,8 +115,13 @@ function compareWithTerminalLast(terminal: Set<string>) {
 }
 
 /** DFS cycle detection on column-level adjacency. */
-function hasCycle(nodes: Set<string>, edges: Map<string, Set<string>>): boolean {
-  const WHITE = 0, GRAY = 1, BLACK = 2;
+function hasCycle(
+  nodes: Set<string>,
+  edges: Map<string, Set<string>>
+): boolean {
+  const WHITE = 0,
+    GRAY = 1,
+    BLACK = 2;
   const color = new Map<string, number>();
   for (const n of nodes) color.set(n, WHITE);
 
@@ -164,8 +178,16 @@ export function BoardPage() {
 
   useShellHeader("Board");
 
-  const { tasks, isLoading: tasksLoading, error: tasksError } = useTasks(TASK_FILTER);
-  const { workflows, isLoading: workflowsLoading, error: workflowsError } = useWorkflows();
+  const {
+    tasks,
+    isLoading: tasksLoading,
+    error: tasksError,
+  } = useTasks(TASK_FILTER);
+  const {
+    workflows,
+    isLoading: workflowsLoading,
+    error: workflowsError,
+  } = useWorkflows();
   const { transitions } = useWorkflowTransitions();
 
   const handleTaskSelect = useCallback((task: Task) => {
@@ -184,7 +206,7 @@ export function BoardPage() {
         (t) =>
           t.id !== selectedTaskId &&
           (t.parent_id === selectedTaskId ||
-            t.dependency_ids?.includes(selectedTaskId)),
+            t.dependency_ids?.includes(selectedTaskId))
       );
       stashTask(focal, related);
     }
@@ -224,9 +246,26 @@ export function BoardPage() {
 
   // Topologically sort columns using workflow transitions
   const sortedColumns = useMemo(
-    () => topologicalColumnSort(allKanbanColumns, transitions, workflowColumnMap),
-    [allKanbanColumns, transitions, workflowColumnMap],
+    () =>
+      topologicalColumnSort(allKanbanColumns, transitions, workflowColumnMap),
+    [allKanbanColumns, transitions, workflowColumnMap]
   );
+
+  const childBreakdowns = useMemo(() => {
+    const childrenByParent = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (!task.parent_id) continue;
+      const siblings = childrenByParent.get(task.parent_id) ?? [];
+      siblings.push(task);
+      childrenByParent.set(task.parent_id, siblings);
+    }
+
+    const breakdowns = new Map<string, HearthStateBreakdown>();
+    for (const [parentId, children] of childrenByParent) {
+      breakdowns.set(parentId, deriveHearthStateBreakdown(children));
+    }
+    return breakdowns;
+  }, [tasks]);
 
   // Filter tasks by level and search, then group by kanban_column
   const { columns, columnOrder, totalFiltered } = useMemo(() => {
@@ -249,7 +288,9 @@ export function BoardPage() {
 
     let hasUnassigned = false;
     for (const task of filtered) {
-      const column = (task.workflow_id && workflowColumnMap.get(task.workflow_id)) ?? UNASSIGNED_COLUMN;
+      const column =
+        (task.workflow_id && workflowColumnMap.get(task.workflow_id)) ??
+        UNASSIGNED_COLUMN;
 
       if (column === UNASSIGNED_COLUMN) hasUnassigned = true;
 
@@ -272,8 +313,19 @@ export function BoardPage() {
       order.push(UNASSIGNED_COLUMN);
     }
 
-    return { columns: grouped, columnOrder: order, totalFiltered: filtered.length };
-  }, [tasks, levelFilter, search, workflowColumnMap, allKanbanColumns, sortedColumns]);
+    return {
+      columns: grouped,
+      columnOrder: order,
+      totalFiltered: filtered.length,
+    };
+  }, [
+    tasks,
+    levelFilter,
+    search,
+    workflowColumnMap,
+    allKanbanColumns,
+    sortedColumns,
+  ]);
 
   const isLoading = tasksLoading || workflowsLoading;
   const error = tasksError || workflowsError;
@@ -337,13 +389,13 @@ export function BoardPage() {
                 onChange={handleLevelChange}
                 className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
               >
-                  <option value="">All</option>
-                  {LEVEL_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <option value="">All</option>
+                {LEVEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Clear filters */}
@@ -421,6 +473,7 @@ export function BoardPage() {
                   columnName={columnName}
                   tasks={columns.get(columnName) ?? []}
                   selectedTaskId={selectedTaskId}
+                  childBreakdowns={childBreakdowns}
                   onTaskSelect={handleTaskSelect}
                 />
               ))}
