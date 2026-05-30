@@ -3,7 +3,14 @@
 use clap::Args;
 use vertebrae_core::{ServiceError, WorkflowService};
 
-/// List workflow transitions
+/// List workflow transitions.
+///
+/// With `--workflow-id`/`-w`, results are filtered by source workflow ID.
+/// Human-readable output prints one transition per line as
+/// `<from-workflow> -> <to-workflow> [<label>]`, with ` -> step:<step-id>`
+/// appended when the transition targets a specific destination step. The
+/// global `--json` flag bypasses this formatter and returns the raw transition
+/// list from the workflow service.
 #[derive(Debug, Args)]
 pub struct TransitionListCommand {
     /// Filter by source workflow ID (case-insensitive)
