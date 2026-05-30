@@ -156,11 +156,28 @@ At least one update option is required. Running `vtb workflow update <id>` witho
 
 ## workflow delete
 
-Delete a workflow. Cannot delete workflows with assigned tasks.
+Delete a workflow.
 
 ```bash
 vtb workflow delete <workflow-id>
+vtb workflow delete <workflow-id> --json
 ```
+
+Arguments and options:
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<ID>` | | Yes | Workflow ID to delete; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; returns an operation envelope with `command`, `status`, and `workflow_id`. |
+
+There are no command aliases, short flags, defaults, or value enums for
+`workflow delete`. Human-readable output prints `Deleted workflow: <id>`.
+With `--json`, successful deletion returns `command: "workflow delete"`,
+`status: "deleted"`, and the lowercased `workflow_id`.
+
+Malformed IDs are rejected before command execution. A valid full UUID or short
+ID that does not resolve to a workflow returns a validation error from the
+workflow service.
 
 ---
 
