@@ -655,7 +655,7 @@ vtb execution list <task-id-2>        # confirm a run was recorded
 
 Each smoke task uses a single-step workflow so the run is unambiguous about
 which provider the daemon resolved. The resolved provider and model are
-persisted on the `StepExecution` record (and reported back to Sacrum); the
+persisted on the `StepExecution` record (and reported back to the backend); the
 `vtb execution show` text output does not yet print those fields, so confirm
 the harness was actually used by tailing the daemon logs or by inspecting the
 spawned process while the run is in flight.
@@ -1150,6 +1150,9 @@ Once the daemon is running, trigger step execution:
 # Run the current step for a task (dispatches to daemon)
 vtb run <task-id>
 
+# Emit the StepExecution as machine-readable JSON
+vtb --json run <task-id>
+
 # Start a TaskRun for a task's assigned workflow (automatic multi-step)
 vtb start-taskrun <task-id>
 
@@ -1161,9 +1164,19 @@ vtb stop-taskrun <task-id>
 
 # Compatibility alias
 vtb stop <task-id>
+
+# Compatibility alias
+vtb stop-workflow <task-id>
 ```
 
-`vtb run` executes a single step. `vtb start-taskrun` starts a durable TaskRun for the task's assigned workflow, handling transitions, eval prompts, and workflow chaining. `vtb run-workflow` and `vtb stop` remain available as compatibility aliases.
+`vtb run` executes exactly the task's current workflow step and returns a
+`StepExecution` record. It has no command alias. The only required input is
+`<task-id>`; use the global `--json` flag for machine-readable output. The task
+must already have an assigned workflow and current step, and a connected daemon
+must be available to handle the execution. `vtb start-taskrun` starts a durable
+TaskRun for the task's assigned workflow, handling transitions, eval prompts,
+and workflow chaining. `vtb run-workflow`, `vtb stop`, and `vtb stop-workflow`
+remain compatibility aliases for `start-taskrun` and `stop-taskrun`.
 
 ---
 
