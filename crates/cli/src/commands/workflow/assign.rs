@@ -6,11 +6,11 @@ use vertebrae_core::{ServiceError, WorkflowService};
 /// Assign a task to a workflow
 #[derive(Debug, Args)]
 pub struct WorkflowAssignCommand {
-    /// Task ID to assign workflow to (case-insensitive)
+    /// Task ID to assign workflow to (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 
-    /// Workflow ID to assign
+    /// Workflow ID to assign (case-insensitive full UUID or 8-character short ID)
     #[arg(required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow_id: String,
 }
@@ -18,7 +18,8 @@ pub struct WorkflowAssignCommand {
 impl WorkflowAssignCommand {
     /// Execute the assign workflow command.
     ///
-    /// Assigns a task to a workflow, setting the current step to the first step (0).
+    /// Assigns a task to a workflow, setting the current step to the workflow's
+    /// first step.
     ///
     /// # Arguments
     ///
@@ -26,10 +27,11 @@ impl WorkflowAssignCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if the task or workflow doesn't exist.
-    /// Returns `ServiceError` if service operations fail.
+    /// Malformed IDs are rejected by clap before execution. Short IDs are
+    /// resolved before execution. Returns `ServiceError::NotFound` if the task
+    /// or workflow doesn't exist, or another `ServiceError` if service
+    /// operations fail.
     pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
-        // Assign the task to the workflow
         let result = service
             .assign_workflow(&self.task_id, &self.workflow_id)
             .await?;
@@ -44,6 +46,13 @@ impl WorkflowAssignCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        command: WorkflowAssignCommand,
+    }
 
     #[test]
     fn test_workflow_assign_command_debug() {
@@ -114,5 +123,20 @@ mod tests {
         };
         assert_eq!(cmd.task_id, "task123");
         assert_eq!(cmd.workflow_id, "workflow456");
+    }
+
+    #[test]
+    fn test_workflow_assign_accepts_short_ids_case_insensitively() {
+        let cli = TestCli::try_parse_from(["test", "ABCDEF12", "1234ABCD"]).unwrap();
+        assert_eq!(cli.command.task_id, "abcdef12");
+        assert_eq!(cli.command.workflow_id, "1234abcd");
+    }
+
+    #[test]
+    fn test_workflow_assign_rejects_malformed_ids() {
+        let result = TestCli::try_parse_from(["test", "task1", "workflow1"]);
+        assert!(result.is_err());
+        let message = result.unwrap_err().to_string();
+        assert!(message.contains("task ID 'task1' is not a valid UUID or short ID"));
     }
 }
