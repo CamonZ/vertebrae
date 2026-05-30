@@ -19,18 +19,32 @@ describe("OpenLiveChatButton", () => {
     render(<OpenLiveChatButton />);
 
     expect(
-      screen.queryByRole("button", { name: "Live Chat" })
+      screen.queryByRole("button", { name: "Open live chat" })
     ).not.toBeInTheDocument();
   });
 
-  it("renders and toggles the live chat panel when chrome shortcuts are visible", async () => {
+  it("renders an icon-only button with no visible text label", () => {
+    useStyleguideStore.getState().revealChromeShortcuts();
+
+    render(<OpenLiveChatButton />);
+
+    const button = screen.getByRole("button", { name: "Open live chat" });
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveTextContent("");
+    expect(button.querySelector("svg")).not.toBeNull();
+    expect(screen.queryByText("Live Chat")).not.toBeInTheDocument();
+  });
+
+  it("toggles the panel and swaps its accessible name when opened", async () => {
     const user = userEvent.setup();
     useStyleguideStore.getState().revealChromeShortcuts();
 
     render(<OpenLiveChatButton />);
 
-    await user.click(screen.getByRole("button", { name: "Live Chat" }));
+    await user.click(screen.getByRole("button", { name: "Open live chat" }));
 
     expect(useLiveChatStore.getState().panelOpen).toBe(true);
+    const button = screen.getByRole("button", { name: "Close live chat" });
+    expect(button).toHaveAttribute("aria-pressed", "true");
   });
 });

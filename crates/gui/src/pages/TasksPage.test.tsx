@@ -14,8 +14,8 @@ import { useShellStore } from "../stores/shellStore";
 import type { Task, TaskFilterOptions } from "../bindings";
 
 /**
- * The visible page title and status pills (active count, task counts, and the
- * selected-task short ID) live in the shell header now, surfaced via
+ * The visible page title and activity readouts (the "N running" pulse and the
+ * "N tasks · M roots" count) live in the shell header now, surfaced via
  * useShellHeader. The shell chrome isn't mounted in this isolated render, so we
  * mount the stored header actions alongside the page to assert on them.
  */
@@ -63,12 +63,6 @@ describe("TasksPage", () => {
     mockTasks = [];
     lastFilters = undefined;
     window.history.pushState({}, "", "/tasks");
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: vi.fn().mockResolvedValue(undefined),
-      },
-    });
   });
 
   it("filters the live list by active scope while retaining ancestors", async () => {
@@ -135,9 +129,9 @@ describe("TasksPage", () => {
     fireEvent.click(screen.getByText("First task"));
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
 
-    expect(screen.getByTestId("tasks-page-selected-task-id")).toHaveTextContent(
-      "22222222"
-    );
+    const rows = screen.getAllByRole("treeitem");
+    expect(rows[0]).not.toHaveAttribute("aria-selected", "true");
+    expect(rows[1]).toHaveAttribute("aria-selected", "true");
   });
 
   it("keeps the detail rail populated with the first visible task", async () => {
@@ -151,16 +145,16 @@ describe("TasksPage", () => {
     render(<TasksPageWithHeader />);
 
     expect(await screen.findByTestId("task-detail-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("tasks-page-selected-task-id")).toHaveTextContent(
-      "11111111"
+    expect(screen.getByRole("treeitem")).toHaveAttribute(
+      "aria-selected",
+      "true"
     );
   });
 
-  it("renders the selected task as an 8-digit short ID", () => {
-    const taskId = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+  it("does not render a 'Selected <id>' chip in the header activity slot", () => {
     mockTasks = [
       createMockTask({
-        id: taskId,
+        id: "860cde1b-9093-42ff-a19d-7453f3b7891b",
         title: "Standardize GUI entity ID primitives",
       }),
     ];
@@ -168,32 +162,64 @@ describe("TasksPage", () => {
     render(<TasksPageWithHeader />);
     fireEvent.click(screen.getAllByRole("treeitem")[0]);
 
-    expect(screen.getByTestId("tasks-page-selected-task-id")).toHaveTextContent(
-      "860cde1b"
-    );
-    expect(screen.queryByText(taskId)).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("tasks-page-selected-task-id")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/Selected/)).not.toBeInTheDocument();
   });
 
-  it("copies the full selected task ID from the acceptance surface", async () => {
-    const user = userEvent.setup();
-    const writeText = vi.spyOn(navigator.clipboard, "writeText");
-    const taskId = "860cde1b-9093-42ff-a19d-7453f3b7891b";
+  it("renders the 'N tasks · M roots' count readout (bold number, no parentheses)", () => {
+    const parent = createMockTask({
+      id: "10000000-0000-0000-0000-000000000000",
+      title: "Root epic",
+      level: "epic",
+    });
+    const child = createMockTask({
+      id: "20000000-0000-0000-0000-000000000000",
+      title: "Child task",
+      parent_id: parent.id,
+    });
+    const otherRoot = createMockTask({
+      id: "30000000-0000-0000-0000-000000000000",
+      title: "Second root",
+    });
+    mockTasks = [parent, child, otherRoot];
+
+    render(<TasksPageWithHeader />);
+
+    const headerActions = screen.getByTestId("shell-header-actions");
+    expect(headerActions).toHaveTextContent("3 tasks · 2 roots");
+    expect(headerActions.textContent).not.toMatch(/\(2 roots\)/);
+  });
+
+  it("renders the accent 'N running' pulse readout when runs are active", () => {
     mockTasks = [
       createMockTask({
-        id: taskId,
-        title: "Standardize GUI entity ID primitives",
+        id: "40000000-0000-0000-0000-000000000000",
+        title: "Executing task",
+        run_controls: createMockTaskRunControls(
+          createMockTaskRun({ status: "executing" })
+        ),
       }),
     ];
 
     render(<TasksPageWithHeader />);
-    fireEvent.click(screen.getAllByRole("treeitem")[0]);
 
-    const selectedTaskId = screen.getByTestId("tasks-page-selected-task-id");
-    const copyButton = selectedTaskId.querySelector('[role="button"]');
-    expect(copyButton).not.toBeNull();
+    const liveCount = screen.getByTestId("topbar-live-count");
+    expect(liveCount).toHaveTextContent("1 running");
+    expect(screen.queryByText(/\bactive\b/)).not.toBeInTheDocument();
+  });
 
-    await user.click(copyButton!);
+  it("omits the running readout entirely when nothing is active", () => {
+    mockTasks = [
+      createMockTask({
+        id: "50000000-0000-0000-0000-000000000000",
+        title: "Idle task",
+      }),
+    ];
 
-    expect(writeText).toHaveBeenCalledWith(taskId);
+    render(<TasksPageWithHeader />);
+
+    expect(screen.queryByTestId("topbar-live-count")).not.toBeInTheDocument();
   });
 });
