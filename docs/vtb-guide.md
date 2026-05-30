@@ -495,6 +495,7 @@ vtb --json step add "Review" -w <workflow-id>
 
 # List, show, update, delete steps
 vtb step list <workflow-id>
+vtb --json step list <workflow-id>
 vtb step show <step-id>
 vtb step update <step-id> --goal "New goal" --model opus
 vtb step update <step-id> --prompt "New prompt for {task.id}"
@@ -510,6 +511,23 @@ vtb step delete <step-id>
 list. `--transition-to` accepts full UUIDs or 8-character short IDs. The global
 `--json` flag returns a creation envelope with `command`, `status`, `step_id`,
 and `workflow_id`.
+
+`vtb step list` takes exactly one required `<workflow>` argument and no
+command-specific flags. `vtb step list --help` shows only the global `--json`
+flag plus `-h` / `--help`. Human-readable output is ordered by each step's
+`order` field and includes the step name, ID, type, model, and `[FINAL]` marker
+when applicable:
+
+```text
+Steps for workflow '<workflow-id>':
+1. coding (id: a1b2c3d4, type: execute, model: sonnet)
+2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
+3. approved (id: c9d0e1f2, type: execute, model: default) [FINAL]
+```
+
+When the workflow has no steps, it prints `No steps found for workflow
+'<workflow-id>'`. With the global `--json` flag, `step list` returns the raw
+array of step objects and does not wrap the response in an `output` field.
 
 ### Step Properties
 
