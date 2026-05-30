@@ -43,7 +43,7 @@ pub struct ListCommand {
     #[arg(short, long = "level", value_parser = parse_level)]
     pub levels: Vec<Level>,
 
-    /// Filter by status (can be specified multiple times)
+    /// Filter by workflow step name (can be specified multiple times)
     #[arg(short, long = "status")]
     pub statuses: Vec<String>,
 
@@ -55,11 +55,11 @@ pub struct ListCommand {
     #[arg(short, long = "tag")]
     pub tags: Vec<String>,
 
-    /// Filter by workflow ID (tasks assigned to a specific workflow)
+    /// Filter by workflow ID or short ID (tasks assigned to a specific workflow)
     #[arg(short = 'w', long = "workflow", value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
 
-    /// Filter by current step UUID (tasks whose current_step_id matches)
+    /// Filter by current step UUID or short ID (tasks whose current_step_id matches)
     #[arg(long = "step", value_parser = crate::commands::parse_uuid("step ID"))]
     pub step: Option<String>,
 
@@ -67,7 +67,7 @@ pub struct ListCommand {
     #[arg(long)]
     pub root: bool,
 
-    /// Show children of a specific parent task
+    /// Show children of a specific parent task ID or short ID
     #[arg(long, value_parser = crate::commands::parse_uuid("parent ID"))]
     pub parent: Option<String>,
 
@@ -164,8 +164,7 @@ impl ListCommand {
     ///
     /// Returns `ServiceError` if:
     /// - Service query fails
-    /// - Invalid filter values are provided
-    /// - Search query is empty
+    /// - Search query is empty or whitespace-only
     pub async fn execute(
         &self,
         services: &VertebraeServices,
