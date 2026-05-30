@@ -1,70 +1,102 @@
 ---
 name: run-workflow
-description: Orchestrate a task through its entire workflow via Sacrum
+description: Start or stop durable TaskRuns for a task via the daemon-backed workflow runner
 ---
 
 # /run-workflow
 
-Orchestrate a task through its entire workflow. Sends a request to the Sacrum backend which uses the TaskOrchestrator FSM to drive the task through workflow execution, eval prompts, and workflow chaining.
+Start a durable TaskRun for a task's assigned workflow. `vtb run-workflow` is a
+compatibility alias for `vtb start-taskrun`; prefer `start-taskrun` in new
+examples. Use `vtb stop-taskrun` to stop the task's active TaskRun.
 
 ## Usage
 
 ```bash
+vtb start-taskrun <task-id>
 vtb run-workflow <task-id>
+vtb stop-taskrun <task-id>
+vtb stop <task-id>
+vtb stop-workflow <task-id>
+vtb --json stop-taskrun <task-id>
 ```
 
 ## Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `task-id` | Task ID with an assigned workflow |
+| `task-id` | Task ID with an assigned workflow for start, or the task whose active TaskRun should stop |
+
+## Options
+
+| Option | Description |
+|--------|-------------|
+| `--json` | Global flag; for `stop-taskrun`, output the stopped `TaskRun` object or `null` when none is active |
+| `-h`, `--help` | Print command help |
+
+## Aliases
+
+| Command | Alias of |
+|---------|----------|
+| `vtb run-workflow <task-id>` | `vtb start-taskrun <task-id>` |
+| `vtb stop <task-id>` | `vtb stop-taskrun <task-id>` |
+| `vtb stop-workflow <task-id>` | `vtb stop-taskrun <task-id>` |
 
 ## Requirements
 
-1. Task must have a workflow assigned
-2. Task must not be already completed
-3. No orchestration must already be running for the task
+1. Starting requires a task with a workflow assigned
+2. Task must not already have an active TaskRun when starting
+3. A connected daemon must be available for workflow execution
+4. Stopping requires the task ID whose active TaskRun should be stopped
 
 ## Output
 
+Start output:
+
 ```
-Workflow orchestration started for task a1b2c3d4
+Run: a1b2c3d4 (task: 89abcdef, status: queued)
 ```
+
+Stop output:
+
+```
+Stopped run: stopping taskRun=a1b2c3d4-0000-4000-8000-000000000001 latestStep=none
+```
+
+When no active TaskRun exists:
+
+```
+No active run for task 89abcdef-0123-4567-89ab-cdef01234567
+```
+
+JSON stop output is the stopped `TaskRun` object, or `null` when no active run
+exists.
 
 ## Errors
 
-If the task has no workflow:
+When starting, if the task has no workflow:
+
 ```
 Task abc123 has no assigned workflow
-```
-
-If the task is already completed:
-```
-Cannot orchestrate a completed task
-```
-
-If orchestration is already running:
-```
-Orchestration is already running for this task
 ```
 
 ## How It Works
 
 1. Validates task exists and has a workflow assigned
-2. Calls `orchestrate_task` mutation on the Sacrum backend via GraphQL
-3. Sacrum schedules the task with the TaskOrchestrator FSM
-4. The orchestrator drives the task through all workflow steps automatically
+2. Calls the execution service to start or stop a TaskRun
+3. The backend records TaskRun state and broadcasts work to connected daemons
+4. The daemon executes workflow steps and reports progress back to Sacrum
 
 ## Difference from `/run`
 
 - `/run` executes only the current step and requires a connected daemon
-- `/run-workflow` orchestrates the entire workflow server-side via Sacrum's FSM
+- `/run-workflow` / `start-taskrun` creates a durable multi-step TaskRun
+- `stop-taskrun` stops the active TaskRun for a task and returns the stopped run, `No active run for task <task-id>`, or `null` with `--json`
 
 ## When to Use
 
-- Driving a task through its complete workflow automatically
+- Driving a task through its assigned workflow automatically
 - Running multi-step orchestrated processes
-- When you want Sacrum to handle step progression and chaining
+- Stopping a task's active TaskRun with `stop-taskrun`, `stop`, or `stop-workflow`
 
 ## See Also
 
