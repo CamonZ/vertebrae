@@ -4,7 +4,7 @@
 use clap::Args;
 use vertebrae_installer as installer;
 
-use super::{DaemonError, LAUNCHD_LABEL};
+use super::DaemonError;
 
 /// Check the status of the vtb-daemon service.
 #[derive(Debug, Args)]
@@ -14,7 +14,7 @@ impl DaemonStatusCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
         let status = installer::service_status()?;
         let mut lines = vec![
-            format!("Service: {LAUNCHD_LABEL}"),
+            format!("Service: {}", service_label()),
             format!("Status:  {status}"),
         ];
         if let Some(service_file_line) = service_file_line()? {
@@ -22,6 +22,16 @@ impl DaemonStatusCommand {
         }
         Ok(lines.join("\n"))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn service_label() -> &'static str {
+    super::SYSTEMD_UNIT_NAME
+}
+
+#[cfg(not(target_os = "linux"))]
+fn service_label() -> &'static str {
+    super::LAUNCHD_LABEL
 }
 
 #[cfg(target_os = "macos")]
