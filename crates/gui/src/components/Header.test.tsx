@@ -12,9 +12,6 @@ function setShell(state: Partial<ShellState>) {
   });
 }
 
-vi.mock("./ConnectionStatus", () => ({
-  ConnectionStatus: () => <div data-testid="mock-connection-status" />,
-}));
 vi.mock("./LiveChatWindow", () => ({
   OpenLiveChatButton: () => <button data-testid="mock-open-live-chat" />,
 }));
@@ -70,9 +67,18 @@ describe("Header (Hearth v2 AppTopBar)", () => {
     expect(action.textContent).toBe("3 running");
     expect(activity).toContainElement(action);
     expect(activity).toContainElement(screen.getByTestId("mock-open-live-chat"));
-    expect(activity).toContainElement(
-      screen.getByTestId("mock-connection-status"),
-    );
+  });
+
+  it("no longer renders the WebSocket connection indicator in the topbar", () => {
+    // The connection readout moved into the side rail (Hearth v2 .sys/.conn);
+    // the topbar must not carry a connection status anymore.
+    render(<Header />);
+    expect(
+      screen.queryByRole("status", { name: /websocket/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("connection-status-dot"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders a static ⌘K command chip in the activity slot", () => {

@@ -2,6 +2,7 @@ import {
   createBrowserRouter,
   Navigate,
   Outlet,
+  type RouteObject,
   useNavigate,
 } from "react-router-dom";
 import { useState, useEffect } from "react";
@@ -164,7 +165,7 @@ function GuardedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
-export const router = createBrowserRouter([
+export const appRoutes: RouteObject[] = [
   {
     path: "/welcome",
     element: <WelcomeInstallPage />,
@@ -195,8 +196,8 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        // Operations is hidden for now (needs more work); land on the board.
-        element: <Navigate to="/board" replace />,
+        // Operations is hidden for now (needs more work); land on tasks.
+        element: <Navigate to="/tasks" replace />,
       },
       {
         path: "operations",
@@ -256,4 +257,6 @@ export const router = createBrowserRouter([
       },
     ],
   },
-]);
+];
+
+export const router = createBrowserRouter(appRoutes);
