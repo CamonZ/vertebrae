@@ -294,8 +294,24 @@ prints `No transitions found for workflow <workflow-id>`.
 Delete a transition between workflows.
 
 ```bash
-vtb workflow transition delete <from-workflow> <to-workflow>
+vtb workflow transition delete <from-workflow-id> <to-workflow-id>
+vtb workflow transition delete <from-workflow-id> <to-workflow-id> --json
 ```
+
+Arguments and options:
+
+| Argument/Option | Alias | Required | Notes |
+| --- | --- | --- | --- |
+| `<from-workflow-id>` | | Yes | Source workflow ID; accepts a case-insensitive full UUID or 8-character short ID. |
+| `<to-workflow-id>` | | Yes | Target workflow ID; accepts a case-insensitive full UUID or 8-character short ID. |
+| `--json` | | No | Global flag; returns a structured operation result with `command`, `status`, and resolved lowercased `from_workflow_id` and `to_workflow_id`. |
+| `--help` | `-h` | No | Print help. |
+
+The command has no command-specific flags, command aliases, defaults, or value
+enums. Human-readable output prints
+`Deleted transition from workflow <from-workflow-id> to workflow <to-workflow-id>`.
+If no transition exists from the source workflow to the target workflow, the
+workflow service returns a not-found error.
 
 ---
 
