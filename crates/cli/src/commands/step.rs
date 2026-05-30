@@ -109,7 +109,7 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
-    /// Codex upstream model provider from ~/.codex/config.toml.
+    /// Codex upstream model provider from ~/.codex/config.toml (alias: --codex-provider).
     ///
     /// Convenience shortcut for `agent_config.codex_model_provider`. Only
     /// valid with `--provider openai`.
@@ -123,7 +123,7 @@ pub struct StepAddCommand {
     #[arg(long, value_name = "EFFORT")]
     pub reasoning_effort: Option<String>,
 
-    /// Built-in execution provider for this step (anthropic, openai).
+    /// Built-in execution provider for this step (anthropic, openai; alias: --model-provider).
     ///
     /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
     /// JSON for any field this flag does not cover.
