@@ -1,8 +1,9 @@
 import { useCallback, useMemo } from "react";
-import type { Task, TaskPriority } from "../../bindings";
+import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { formatRelative } from "../../utils/formatRelative";
+import { getPriorityIndicator } from "../../utils/taskPriority";
 import {
   deriveHearthStateBreakdown,
   deriveRunStateChip,
@@ -25,44 +26,6 @@ interface TaskTreeNodeProps {
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
-}
-
-/**
- * Priority surfaces as a directional arrow on the right edge: high points up,
- * medium points right, low points down. `critical` reuses the up arrow with the
- * error tone so it still reads as "most urgent". Unset priority renders nothing.
- */
-function getPriorityIndicator(
-  priority: TaskPriority | null
-): { glyph: string; color: string; label: string } | null {
-  switch (priority) {
-    case "critical":
-      return {
-        glyph: "↑",
-        color: "text-[var(--color-err)]",
-        label: "Critical priority",
-      };
-    case "high":
-      return {
-        glyph: "↑",
-        color: "text-[var(--color-warn)]",
-        label: "High priority",
-      };
-    case "medium":
-      return {
-        glyph: "→",
-        color: "text-[var(--color-fg-soft)]",
-        label: "Medium priority",
-      };
-    case "low":
-      return {
-        glyph: "↓",
-        color: "text-[var(--color-fg-mute)]",
-        label: "Low priority",
-      };
-    default:
-      return null;
-  }
 }
 
 /**
