@@ -225,6 +225,13 @@ describe("FlightStrip", () => {
     );
 
     expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
+    expect(screen.getByTestId("flight-strip")).toHaveAttribute(
+      "data-variant",
+      "hearth-v2"
+    );
+    expect(screen.getByTestId("flight-strip-summary")).toHaveTextContent(
+      /steps .* tools/
+    );
     expect(
       screen.getByTestId("flight-strip-lane-threshold")
     ).toBeInTheDocument();
