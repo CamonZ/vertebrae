@@ -83,7 +83,7 @@ function WorkflowZoneNodeComponent({
           <button
             type="button"
             onClick={handleWorkflowClick}
-            className={`cursor-pointer pointer-events-auto text-left text-base font-semibold transition-colors ${
+            className={`nodrag nopan cursor-pointer pointer-events-auto text-left text-base font-semibold transition-colors ${
               isWorkflowSelected
                 ? "text-primary"
                 : "text-text-primary hover:text-primary"

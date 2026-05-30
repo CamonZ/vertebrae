@@ -177,13 +177,16 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
         .clone();
     let client = wd.lock().await;
 
+    let text_xpath = format!("//*[contains(text(), '{}')]", text);
+    let clickable_xpath = format!(
+        "//*[contains(text(), '{}')]/ancestor-or-self::*[self::button or @role='button'][1]",
+        text
+    );
+
     let element = client
         .wait()
         .at_most(std::time::Duration::from_secs(5))
-        .for_element(Locator::XPath(&format!(
-            "//*[contains(text(), '{}')]",
-            text
-        )))
+        .for_element(Locator::XPath(&text_xpath))
         .await
         .unwrap_or_else(|_| {
             panic!(
@@ -192,10 +195,24 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
             )
         });
 
-    element
-        .click()
-        .await
-        .unwrap_or_else(|_| panic!("failed to click element containing text '{}'", text));
+    let click_result = element.click().await;
+    if click_result.is_err() {
+        let clickable = client
+            .wait()
+            .at_most(std::time::Duration::from_secs(5))
+            .for_element(Locator::XPath(&clickable_xpath))
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "clickable element containing text '{}' not found within 5 seconds",
+                    text
+                )
+            });
+
+        clickable.click().await.unwrap_or_else(|err| {
+            panic!("failed to click element containing text '{}': {err}", text)
+        });
+    }
 
     // Brief pause to let the UI respond to the click.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
