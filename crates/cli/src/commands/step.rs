@@ -383,7 +383,7 @@ impl StepShowCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError::NotFound` if the step doesn't exist.
+    /// Returns `ServiceError::ValidationFailed` if the step doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
         let s = self.get_step(service).await?;
