@@ -667,7 +667,7 @@ pub struct StepDeleteCommand {
     #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
     pub id: String,
 
-    /// Force deletion without confirmation
+    /// Accepted for compatibility; step deletion does not prompt for confirmation
     #[arg(long, short)]
     pub force: bool,
 }

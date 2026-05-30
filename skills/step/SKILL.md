@@ -282,9 +282,36 @@ Delete a step.
 ```bash
 vtb step delete <step-id>
 
-# Force delete without confirmation
+# Accepted for compatibility; deletion does not prompt either way
 vtb step delete <step-id> --force
+
+# Machine-readable deletion result
+vtb --json step delete <step-id>
 ```
+
+### Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--json` | | Global flag; output machine-readable JSON |
+| `--force` | `-f` | Accepted for compatibility; step deletion does not prompt for confirmation |
+| `--help` | `-h` | Print help |
+
+The required positional argument is `<id>`, the step ID to delete. It accepts a
+full UUID or an 8-character short ID and resolves case-insensitively.
+
+Human-readable success output is:
+
+```text
+Deleted step: <step-id>
+```
+
+`--json` returns an operation envelope with `command`, `status`, and `step_id`.
+`step_id` is lowercased in JSON output.
+
+If a full UUID reaches `step delete` but no matching step exists, the command
+fails with `Step not found: <id>`. If an 8-character hex short ID cannot be
+resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
 
 ---
 
