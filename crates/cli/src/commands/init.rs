@@ -7,10 +7,11 @@
 //! 4. Derive project slug from current directory name
 //! 5. Check if project exists in Sacrum API, create if needed
 //! 6. Register the project in global config
-//! 7. Write embedded skills to .claude/skills/
+//! 7. Write embedded skills to the configured target directory
 
 use clap::Args;
 use include_dir::{Dir, include_dir};
+use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use vertebrae_sacrum_client::{
@@ -31,13 +32,13 @@ pub struct InitCommand {
     #[arg(long)]
     pub token: Option<String>,
 
-    /// Target directory for skills (defaults to ".claude/skills/")
+    /// Target directory for skills (defaults to ".claude/skills")
     #[arg(long, default_value = ".claude/skills")]
     pub skills_target: PathBuf,
 }
 
 /// Result of the init command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct InitResult {
     /// Path to the config file
     pub config_path: PathBuf,
@@ -49,6 +50,8 @@ pub struct InitResult {
     pub project_name: String,
     /// Number of skills copied
     pub skills_copied: usize,
+    /// Directory where embedded skills were copied
+    pub skills_target: PathBuf,
     /// Whether the project was newly created
     pub project_created: bool,
 }
@@ -71,8 +74,9 @@ impl std::fmt::Display for InitResult {
         if self.skills_copied > 0 {
             write!(
                 f,
-                "  Copied {} skill(s) to .claude/skills/",
-                self.skills_copied
+                "  Copied {} skill(s) to {}",
+                self.skills_copied,
+                self.skills_target.display()
             )?;
         } else {
             write!(
@@ -267,6 +271,7 @@ impl InitCommand {
             project_id: project.id,
             project_name: project.name,
             skills_copied,
+            skills_target,
             project_created: created,
         })
     }
@@ -569,6 +574,7 @@ mod tests {
             project_id: "proj-123".to_string(),
             project_name: "My Project".to_string(),
             skills_copied: 5,
+            skills_target: PathBuf::from("/tmp/my-project/.custom/skills"),
             project_created: true,
         };
 
@@ -579,6 +585,7 @@ mod tests {
         assert!(output.contains("proj-123"));
         assert!(output.contains("My Project"));
         assert!(output.contains("Copied 5 skill(s)"));
+        assert!(output.contains("/tmp/my-project/.custom/skills"));
     }
 
     #[test]
@@ -589,6 +596,7 @@ mod tests {
             project_id: "proj-456".to_string(),
             project_name: "Vertebrae".to_string(),
             skills_copied: 0,
+            skills_target: PathBuf::from(".claude/skills"),
             project_created: false,
         };
 
