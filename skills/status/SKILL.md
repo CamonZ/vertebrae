@@ -37,6 +37,9 @@ retrying:
 ```bash
 vtb daemon status
 vtb daemon install --binary /path/to/vtb-daemon
+vtb daemon uninstall
 ```
 
 The daemon installs as launchd on macOS or systemd `--user` on Linux.
+`vtb daemon uninstall` removes that user service. See
+`docs/vtb-guide.md#daemon-uninstall-options` for full option behavior.

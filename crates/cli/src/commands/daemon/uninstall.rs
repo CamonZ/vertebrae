@@ -1,5 +1,5 @@
-//! `vtb daemon uninstall` — unload the daemon service via the shared
-//! [`vertebrae_installer`] crate.
+//! `vtb daemon uninstall` — unregister the launchd or systemd user service via
+//! the shared [`vertebrae_installer`] crate.
 
 use clap::Args;
 use vertebrae_installer as installer;
