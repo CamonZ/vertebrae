@@ -543,6 +543,23 @@ vtb workflow assign <task-id> <workflow-id>    # Assign (starts at first step)
 vtb workflow unassign <task-id>                # Remove workflow
 ```
 
+`vtb workflow assign` takes two required positional arguments: `<TASK_ID>` and
+`<WORKFLOW_ID>`. Both accept case-insensitive full UUIDs or 8-character short
+IDs. The command has no aliases, no command-specific flags, no defaults, and no
+value enums. Its generated help lists only the two positional arguments, the
+global `--json`, and `-h` / `--help`.
+
+On success, workflow assignment sets the task to the specified workflow and
+resets the task to that workflow's first step. Human-readable output prints
+`Assigned task <task-id> to workflow <workflow-id> at step 1: <first-step-name>`.
+With the global `--json` flag, `workflow assign` returns an operation envelope
+with `command: "workflow assign"`, `status: "updated"`, `task_id`, and
+`workflow_id`.
+
+Malformed IDs are rejected before command execution. Unknown or ambiguous short
+IDs fail during ID resolution. A full UUID that reaches the service but does
+not exist returns a task- or workflow-not-found service error.
+
 ### Managing Steps
 
 ```bash
