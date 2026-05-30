@@ -75,7 +75,23 @@ List all defined workflows.
 
 ```bash
 vtb workflow list
+vtb workflow list --json
 ```
+
+`workflow list` takes no positional arguments and has no command-specific
+options. The global `--json` flag returns workflow summaries as structured JSON.
+
+Human-readable output prints one workflow per line:
+
+```text
+<workflow-id> - <name> (<step-count> steps)[default marker][description]
+```
+
+The default workflow includes ` [default]` after the step count. Workflows with
+a description append ` - <description>`. If no workflows exist, the command
+prints `No workflows found`. With `--json`, the command returns the raw array of
+workflow summaries with `id`, `name`, `description`, `step_count`, and
+`is_default` fields.
 
 ---
 
