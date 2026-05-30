@@ -37,6 +37,13 @@ impl WorkflowDeleteCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        command: WorkflowDeleteCommand,
+    }
 
     #[test]
     fn test_workflow_delete_command_debug() {
@@ -49,40 +56,21 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_delete_command_with_uuid_ids() {
-        let ids = vec![
-            "0fbc3b2e",
-            "0fbc3b2e-1111-4222-8333-123456789abc",
-            "0FBC3B2E-1111-4222-8333-123456789ABC",
-        ];
-        for id in ids {
-            let cmd = WorkflowDeleteCommand { id: id.to_string() };
-            assert_eq!(cmd.id, id);
-        }
+    fn test_workflow_delete_command_parses_short_id() {
+        let cli = TestCli::try_parse_from(["test", "0FBC3B2E"]).unwrap();
+        assert_eq!(cli.command.id, "0fbc3b2e");
     }
 
     #[test]
-    fn test_workflow_delete_command_field_value() {
-        let cmd = WorkflowDeleteCommand {
-            id: "0fbc3b2e".to_string(),
-        };
-        assert_eq!(cmd.id, "0fbc3b2e");
+    fn test_workflow_delete_command_parses_full_uuid() {
+        let cli =
+            TestCli::try_parse_from(["test", "0FBC3B2E-1111-4222-8333-123456789ABC"]).unwrap();
+        assert_eq!(cli.command.id, "0fbc3b2e-1111-4222-8333-123456789abc");
     }
 
     #[test]
-    fn test_workflow_delete_command_case_preservation() {
-        let cmd = WorkflowDeleteCommand {
-            id: "0FBC3B2E-1111-4222-8333-123456789ABC".to_string(),
-        };
-        assert_eq!(cmd.id, "0FBC3B2E-1111-4222-8333-123456789ABC");
-    }
-
-    #[test]
-    fn test_workflow_delete_command_with_full_uuid() {
-        let cmd = WorkflowDeleteCommand {
-            id: "0fbc3b2e-1111-4222-8333-123456789abc".to_string(),
-        };
-        assert_eq!(cmd.id.len(), 36);
-        assert!(cmd.id.contains('-'));
+    fn test_workflow_delete_command_rejects_invalid_id() {
+        let result = TestCli::try_parse_from(["test", "not-a-workflow-id"]);
+        assert!(result.is_err());
     }
 }
