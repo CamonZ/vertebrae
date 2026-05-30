@@ -10,7 +10,10 @@ use serde::Serialize;
 use vertebrae_core::{Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
-/// Add a typed content section to a task
+/// Add a typed content section to a task.
+///
+/// Single-instance section types replace the existing section of that type.
+/// Multi-instance section types append a new section with a zero-based index.
 #[derive(Debug, Args)]
 pub struct SectionCommand {
     /// Task ID to add section to (case-insensitive)
@@ -22,7 +25,7 @@ pub struct SectionCommand {
     #[arg(required = true)]
     pub section_type: SectionType,
 
-    /// Section content
+    /// Section content (must not be empty)
     #[arg(required = true)]
     pub content: String,
 }
