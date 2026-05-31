@@ -4,6 +4,7 @@ import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 
 function createTask(overrides?: Partial<Task>): Task {
   return {
@@ -316,15 +317,15 @@ describe("TaskTreeNode", () => {
   });
 });
 
-// ── Done-task list controls (hide-done) ─────────────
+// ── Done-task list controls (hide-done + done summary) ─────────────
 function doneTask(id: string, title: string): Task {
   return createTask({ id, title, completed_at: "2025-01-02T00:00:00Z" });
 }
 
 /**
- * Renders the tree with the real expansion hook wired up, with the given parent
- * ids expanded so child controls are exercised against live state.
- * `onTaskSelect` is provided so keyboard navigation is active.
+ * Renders the tree with the real expansion + summary hooks wired up, with the
+ * given parent ids expanded so child controls are exercised against live
+ * state. `onTaskSelect` is provided so keyboard navigation is active.
  */
 function Harness({
   hierarchy,
@@ -342,6 +343,7 @@ function Harness({
   onTaskSelect?: (task: Task) => void;
 }) {
   const expandedNodes = useExpandedNodes();
+  const summaryExpanded = useSummaryExpanded();
   if (expandIds.length && expandedNodes.expandedNodeIds.size === 0) {
     expandedNodes.expandAll(expandIds);
   }
@@ -353,13 +355,14 @@ function Harness({
       selectedTaskId={selectedTaskId}
       onTaskSelect={onTaskSelect}
       expandedNodes={expandedNodes}
+      summaryExpanded={summaryExpanded}
       hideCompleted={hideCompleted}
       filtering={filtering}
     />
   );
 }
 
-describe("hide-done controls", () => {
+describe("hide-done + done summary controls", () => {
   it("hides completed LEAVES but keeps completed parents and open tasks", () => {
     const completedParent = node(
       doneTask("d1000000-0000-0000-0000-000000000000", "Done parent"),
@@ -433,6 +436,131 @@ describe("hide-done controls", () => {
     expect(screen.getByText("Done leaf")).toBeInTheDocument();
   });
 
+  it("collapses >= 3 done leaves into a single '{n} completed' summary row", () => {
+    const root = createTask({
+      id: "e0000000-0000-0000-0000-00000000000c",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(
+          createTask({
+            id: "0pen0000-0000-0000-0000-000000000000",
+            title: "Open leaf",
+          })
+        ),
+        node(doneTask("d0000000-0000-0000-0000-000000000010", "Done one")),
+        node(doneTask("d0000000-0000-0000-0000-000000000011", "Done two")),
+        node(doneTask("d0000000-0000-0000-0000-000000000012", "Done three")),
+      ]),
+    ];
+
+    render(<Harness hierarchy={hierarchy} expandIds={[root.id]} />);
+
+    const summary = screen.getByTestId("task-tree-summary-row");
+    expect(summary).toHaveTextContent("3 completed");
+    expect(screen.getByText("Open leaf")).toBeInTheDocument();
+    expect(screen.queryByText("Done one")).not.toBeInTheDocument();
+    expect(screen.queryByText("Done three")).not.toBeInTheDocument();
+  });
+
+  it("does NOT collapse when there are fewer than 3 done leaves", () => {
+    const root = createTask({
+      id: "e0000000-0000-0000-0000-00000000000d",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(doneTask("d0000000-0000-0000-0000-000000000020", "Done one")),
+        node(doneTask("d0000000-0000-0000-0000-000000000021", "Done two")),
+      ]),
+    ];
+
+    render(<Harness hierarchy={hierarchy} expandIds={[root.id]} />);
+
+    expect(
+      screen.queryByTestId("task-tree-summary-row")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Done one")).toBeInTheDocument();
+    expect(screen.getByText("Done two")).toBeInTheDocument();
+  });
+
+  it("toggles the folded done leaves when the summary row is clicked", () => {
+    const root = createTask({
+      id: "e0000000-0000-0000-0000-00000000000e",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(doneTask("d0000000-0000-0000-0000-000000000030", "Done one")),
+        node(doneTask("d0000000-0000-0000-0000-000000000031", "Done two")),
+        node(doneTask("d0000000-0000-0000-0000-000000000032", "Done three")),
+      ]),
+    ];
+
+    render(<Harness hierarchy={hierarchy} expandIds={[root.id]} />);
+
+    const summary = screen.getByTestId("task-tree-summary-row");
+    expect(screen.queryByText("Done one")).not.toBeInTheDocument();
+    expect(summary).toHaveTextContent("show");
+
+    fireEvent.click(summary);
+
+    expect(screen.getByText("Done one")).toBeInTheDocument();
+    expect(screen.getByText("Done three")).toBeInTheDocument();
+    expect(screen.getByTestId("task-tree-summary-row")).toHaveTextContent(
+      "hide"
+    );
+
+    fireEvent.click(screen.getByTestId("task-tree-summary-row"));
+    expect(screen.queryByText("Done one")).not.toBeInTheDocument();
+  });
+
+  it("bypasses collapse when hide-done is on (leaves hidden, no summary)", () => {
+    const root = createTask({
+      id: "e0000000-0000-0000-0000-00000000000f",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(doneTask("d0000000-0000-0000-0000-000000000040", "Done one")),
+        node(doneTask("d0000000-0000-0000-0000-000000000041", "Done two")),
+        node(doneTask("d0000000-0000-0000-0000-000000000042", "Done three")),
+      ]),
+    ];
+
+    render(
+      <Harness hierarchy={hierarchy} hideCompleted expandIds={[root.id]} />
+    );
+
+    expect(
+      screen.queryByTestId("task-tree-summary-row")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Done one")).not.toBeInTheDocument();
+  });
+
+  it("bypasses collapse when filtering (all done leaves render, no summary)", () => {
+    const root = createTask({
+      id: "e0000000-0000-0000-0000-000000000010",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(doneTask("d0000000-0000-0000-0000-000000000050", "Done one")),
+        node(doneTask("d0000000-0000-0000-0000-000000000051", "Done two")),
+        node(doneTask("d0000000-0000-0000-0000-000000000052", "Done three")),
+      ]),
+    ];
+
+    render(<Harness hierarchy={hierarchy} filtering expandIds={[root.id]} />);
+
+    expect(
+      screen.queryByTestId("task-tree-summary-row")
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Done one")).toBeInTheDocument();
+    expect(screen.getByText("Done three")).toBeInTheDocument();
+  });
+
   it("ArrowDown skips hidden done leaves during keyboard navigation", () => {
     const open1 = createTask({
       id: "a0000000-0000-0000-0000-0000000000a1",
@@ -469,5 +597,44 @@ describe("hide-done controls", () => {
     // skipping the hidden done leaf in between.
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
     expect(onTaskSelect).toHaveBeenCalledWith(open2);
+  });
+
+  it("ArrowDown skips collapsed done leaves, landing on the next real row", () => {
+    const root = createTask({
+      id: "b0000000-0000-0000-0000-0000000000b0",
+      title: "Root",
+    });
+    const open1 = createTask({
+      id: "b0000000-0000-0000-0000-0000000000b1",
+      title: "Open A",
+    });
+    const sibling = createTask({
+      id: "b0000000-0000-0000-0000-0000000000b9",
+      title: "Sibling root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(open1),
+        node(doneTask("b0000000-0000-0000-0000-0000000000d1", "Done one")),
+        node(doneTask("b0000000-0000-0000-0000-0000000000d2", "Done two")),
+        node(doneTask("b0000000-0000-0000-0000-0000000000d3", "Done three")),
+      ]),
+      node(sibling),
+    ];
+    const onTaskSelect = vi.fn();
+
+    render(
+      <Harness
+        hierarchy={hierarchy}
+        expandIds={[root.id]}
+        selectedTaskId={open1.id}
+        onTaskSelect={onTaskSelect}
+      />
+    );
+
+    // The 3 done leaves are folded behind a (non-selectable) summary row; from
+    // "Open A" the next selectable row is the sibling root.
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
+    expect(onTaskSelect).toHaveBeenCalledWith(sibling);
   });
 });

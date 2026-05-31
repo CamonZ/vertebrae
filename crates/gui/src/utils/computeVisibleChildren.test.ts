@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { Task } from "../bindings";
 import type { TaskTreeNode } from "../types/ui";
-import { computeVisibleChildren, isDoneLeaf } from "./computeVisibleChildren";
+import {
+  COLLAPSE_THRESHOLD,
+  computeVisibleChildren,
+  isDoneLeaf,
+} from "./computeVisibleChildren";
 
 function task(overrides?: Partial<Task>): Task {
   return {
@@ -44,6 +48,7 @@ const opts = (
 ) => ({
   hideCompleted: false,
   filtering: false,
+  summaryExpanded: new Set<string>(),
   ...over,
 });
 
@@ -127,5 +132,53 @@ describe("computeVisibleChildren", () => {
       .map((c) => c.node.task.id);
     // open leaf and the completed PARENT survive; the done leaf is gone.
     expect(ids).toEqual(["open", "dp"]);
+  });
+
+  it("collapses >= threshold done leaves into one summary when hide is off", () => {
+    const leaves = Array.from({ length: COLLAPSE_THRESHOLD }, (_, i) =>
+      doneLeaf(`d${i}`)
+    );
+    const parent = node(task({ id: "p" }), [openLeaf("open"), ...leaves]);
+    const out = computeVisibleChildren(parent, opts());
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({ kind: "node", node: parent.children[0] });
+    expect(out[1]).toEqual({
+      kind: "summary",
+      parentId: "p",
+      count: COLLAPSE_THRESHOLD,
+    });
+  });
+
+  it("does NOT collapse fewer than threshold done leaves", () => {
+    const parent = node(task({ id: "p" }), [doneLeaf("d0"), doneLeaf("d1")]);
+    const out = computeVisibleChildren(parent, opts());
+    expect(out).toHaveLength(2);
+    expect(out.every((c) => c.kind === "node")).toBe(true);
+  });
+
+  it("expands the folded leaves inline when the parent is in summaryExpanded", () => {
+    const parent = node(task({ id: "p" }), [
+      doneLeaf("d0"),
+      doneLeaf("d1"),
+      doneLeaf("d2"),
+    ]);
+    const out = computeVisibleChildren(
+      parent,
+      opts({ summaryExpanded: new Set(["p"]) })
+    );
+    expect(out[0]).toEqual({ kind: "summary", parentId: "p", count: 3 });
+    expect(
+      out.slice(1).map((c) => (c.kind === "node" ? c.node.task.id : c.kind))
+    ).toEqual(["d0", "d1", "d2"]);
+  });
+
+  it("hideCompleted bypasses collapse (no summary, leaves gone)", () => {
+    const parent = node(task({ id: "p" }), [
+      doneLeaf("d0"),
+      doneLeaf("d1"),
+      doneLeaf("d2"),
+    ]);
+    const out = computeVisibleChildren(parent, opts({ hideCompleted: true }));
+    expect(out).toHaveLength(0);
   });
 });

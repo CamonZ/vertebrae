@@ -2,6 +2,7 @@ import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useMemo } from "react";
@@ -15,6 +16,7 @@ interface TaskTreeViewProps {
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideCompleted?: boolean;
   filtering?: boolean;
+  summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
 }
 
 function LoadingSkeleton() {
@@ -74,17 +76,20 @@ interface FlattenOptions {
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideCompleted: boolean;
   filtering: boolean;
+  summaryExpanded: ReadonlySet<string>;
 }
 
 /**
  * Flatten the visible, selectable rows in document order for keyboard
  * navigation. This shares {@link computeVisibleChildren} with the render path
  * so the keyboard cursor can never land on a row that isn't drawn — or skip a
- * row that is.
+ * row that is. Summary rows are not selectable and carry no task, so they are
+ * intentionally absent from this list (the helper only yields them as
+ * `kind: "summary"`, which we drop here).
  */
 function flattenVisibleNodes(
   nodes: TaskTreeNodeType[],
-  { expandedNodes, hideCompleted, filtering }: FlattenOptions
+  { expandedNodes, hideCompleted, filtering, summaryExpanded }: FlattenOptions
 ): TaskTreeNodeType[] {
   const out: TaskTreeNodeType[] = [];
   const stack = [...nodes].reverse();
@@ -99,9 +104,13 @@ function flattenVisibleNodes(
       const visible = computeVisibleChildren(node, {
         hideCompleted,
         filtering,
+        summaryExpanded,
       });
       for (let index = visible.length - 1; index >= 0; index -= 1) {
-        stack.push(visible[index].node);
+        const child = visible[index];
+        if (child.kind === "node") {
+          stack.push(child.node);
+        }
       }
     }
   }
@@ -118,7 +127,9 @@ export function TaskTreeView({
   expandedNodes,
   hideCompleted = false,
   filtering = false,
+  summaryExpanded,
 }: TaskTreeViewProps) {
+  const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
   const visibleNodes = useMemo(
     () =>
       onTaskSelect
@@ -126,9 +137,17 @@ export function TaskTreeView({
             expandedNodes,
             hideCompleted,
             filtering,
+            summaryExpanded: summaryExpandedIds ?? new Set<string>(),
           })
         : [],
-    [hierarchy, expandedNodes, onTaskSelect, hideCompleted, filtering]
+    [
+      hierarchy,
+      expandedNodes,
+      onTaskSelect,
+      hideCompleted,
+      filtering,
+      summaryExpandedIds,
+    ]
   );
 
   const handleKeyDown = useCallback(
@@ -185,6 +204,7 @@ export function TaskTreeView({
             expandedNodes={expandedNodes}
             hideCompleted={hideCompleted}
             filtering={filtering}
+            summaryExpanded={summaryExpanded}
           />
         ))}
       </div>
