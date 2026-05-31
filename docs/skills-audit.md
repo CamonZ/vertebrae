@@ -45,6 +45,37 @@ The first command should match the inventory's `Skill file` column. The second
 should match the manifest coverage notes below, including shared hooks for
 commands such as `start-taskrun` and `stop-taskrun`.
 
+## Sacrum guide parity findings
+
+The sibling Sacrum checkout is a layout comparison, not command truth. Its
+`.claude/skills/*/SKILL.md` tree uses the same one-directory-per-command
+pattern, concise YAML frontmatter, command usage blocks, examples, output
+notes, and related-command links. Vertebrae keeps those structural choices for
+installed skills while deriving command names and flags from the local CLI
+manifest.
+
+Sacrum skill files that are intentionally **not** copied into Vertebrae:
+
+| Sacrum skill | Vertebrae treatment | Reason |
+|---|---|---|
+| `start-step` | Fold into `run`, `transition-to`, and execution guide text | Current Vertebrae exposes daemon execution through `run` for one step and TaskRuns through `start-taskrun`; there is no local `start-step` command. |
+| `complete-step` | Fold into workflow transition guidance | Current step movement is documented through `transition-to`, workflow assignment, and TaskRun execution; there is no local `complete-step` command. |
+| `reject-step` | Fold into transition/workflow guidance | Rejection is modeled as workflow movement or review policy, not a standalone CLI command in the manifest. |
+| `review` | Not installed as a command skill | Human review is represented by workflow/step configuration and task movement; the local manifest has no `review` command. |
+| `status` | Not installed as a command skill | Current status inspection is covered by `show`, `list`, `ready`, `execution`, and `daemon status`; there is no top-level `status` command. |
+| `implement` | Not installed as a command skill | Implementation workflow is project guidance, not a local CLI command. |
+
+Vertebrae-only or renamed skills:
+
+| Vertebrae skill | Source of truth | Notes |
+|---|---|---|
+| `run-workflow` | Manifest hooks for `start-taskrun` and `stop-taskrun` | File name remains for compatibility with installed skill naming, but examples prefer `start-taskrun` and `stop-taskrun`; `run-workflow`, `stop`, and `stop-workflow` are documented as aliases. |
+| `gui-dev` | `hammerspoon/` helpers and GUI docs | Curated workflow guidance with no Sacrum counterpart. |
+
+The parity target is structural: keep the split guide pages and installed skill
+shape that worked in Sacrum, but reject stale Sacrum command semantics unless
+the local manifest exposes the command.
+
 ## Disposition categories
 
 - `keep-generated`: keep the skill, but regenerate command syntax from the CLI
