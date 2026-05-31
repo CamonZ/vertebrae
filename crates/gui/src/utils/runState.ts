@@ -35,6 +35,25 @@ export function isActiveRunStatus(
   return status != null && ACTIVE_RUN_STATUSES.has(status);
 }
 
+/**
+ * Whether a task is considered "done" for the purposes of list scoping and the
+ * hide-done / done-summary list controls.
+ *
+ * This mirrors the "done" scope predicate used by the Tasks page scope chips: a
+ * task counts as done when it has a completion timestamp, has reached the
+ * terminal `done` workflow step, or its active run has finished with a
+ * `completed` status. Centralizing it here keeps the scope filter and the
+ * list-pane done-collapse logic from drifting apart.
+ */
+export function isTaskDone(task: Task): boolean {
+  const status = task.run_controls?.active_run?.status ?? null;
+  return (
+    Boolean(task.completed_at) ||
+    task.step_name === "done" ||
+    status === "completed"
+  );
+}
+
 export function deriveActiveTaskRuns(
   tasks: Task[],
   options: { includeStopping?: boolean; sortNewestFirst?: boolean } = {}

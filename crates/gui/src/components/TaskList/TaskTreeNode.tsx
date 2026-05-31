@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
 import {
@@ -26,6 +27,8 @@ interface TaskTreeNodeProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideCompleted?: boolean;
+  filtering?: boolean;
 }
 
 /**
@@ -62,6 +65,8 @@ export function TaskTreeNode({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
+  hideCompleted = false,
+  filtering = false,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
@@ -105,6 +110,15 @@ export function TaskTreeNode({
   const pipeline: PipelineSegment[] = [];
 
   const chevron = hasChildren ? (isExpanded ? "▾" : "▸") : "";
+
+  const visibleChildren = useMemo(
+    () =>
+      computeVisibleChildren(node, {
+        hideCompleted,
+        filtering,
+      }),
+    [node, hideCompleted, filtering]
+  );
 
   return (
     <div>
@@ -187,9 +201,7 @@ export function TaskTreeNode({
                 {childLine}
               </span>
             )}
-            {childLine && tags.length > 0 && (
-              <span className="sep">·</span>
-            )}
+            {childLine && tags.length > 0 && <span className="sep">·</span>}
             {tags.slice(0, 3).map((tag) => (
               <span key={tag} data-testid="task-tree-node-tag" className="tag">
                 {tag}
@@ -235,14 +247,16 @@ export function TaskTreeNode({
 
       {hasChildren && isExpanded && (
         <div role="group" aria-label={`Children of ${task.title}`}>
-          {node.children.map((childNode: TaskTreeNodeType) => (
+          {visibleChildren.map((child) => (
             <TaskTreeNode
-              key={childNode.task.id}
-              node={childNode}
+              key={child.node.task.id}
+              node={child.node}
               depth={depth + 1}
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
+              hideCompleted={hideCompleted}
+              filtering={filtering}
             />
           ))}
         </div>

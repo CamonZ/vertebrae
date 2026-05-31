@@ -222,4 +222,84 @@ describe("TasksPage", () => {
 
     expect(screen.queryByTestId("topbar-live-count")).not.toBeInTheDocument();
   });
+
+  it("renders a hide-done toggle that flips its label and .on class", async () => {
+    const user = userEvent.setup();
+    mockTasks = [
+      createMockTask({
+        id: "60000000-0000-0000-0000-000000000000",
+        title: "A task",
+      }),
+    ];
+
+    render(<TasksPageWithHeader />);
+
+    const toggle = screen.getByTestId("tasks-hide-done");
+    expect(toggle).toHaveTextContent("Hide done");
+    expect(toggle).not.toHaveClass("on");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveTextContent("Done hidden");
+    expect(toggle).toHaveClass("on");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hides completed leaf children once the toggle is on", async () => {
+    const user = userEvent.setup();
+    const parent = createMockTask({
+      id: "70000000-0000-0000-0000-000000000000",
+      title: "Parent epic",
+      level: "epic",
+    });
+    const openChild = createMockTask({
+      id: "71000000-0000-0000-0000-000000000000",
+      title: "Open child",
+      parent_id: parent.id,
+    });
+    const doneChild = createMockTask({
+      id: "72000000-0000-0000-0000-000000000000",
+      title: "Done child",
+      parent_id: parent.id,
+      completed_at: "2025-01-02T00:00:00Z",
+    });
+    mockTasks = [parent, openChild, doneChild];
+
+    render(<TasksPageWithHeader />);
+
+    // Expand the parent so its children render.
+    await user.click(screen.getByRole("button", { name: /^expand$/i }));
+    expect(screen.getByText("Done child")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("tasks-hide-done"));
+
+    expect(screen.getByText("Open child")).toBeInTheDocument();
+    expect(screen.queryByText("Done child")).not.toBeInTheDocument();
+  });
+
+  it("does not hide done children while a scope filter is active (bypass)", async () => {
+    const user = userEvent.setup();
+    const parent = createMockTask({
+      id: "80000000-0000-0000-0000-000000000000",
+      title: "Parent epic",
+      level: "epic",
+    });
+    const doneChild = createMockTask({
+      id: "81000000-0000-0000-0000-000000000000",
+      title: "Done child",
+      parent_id: parent.id,
+      completed_at: "2025-01-02T00:00:00Z",
+    });
+    mockTasks = [parent, doneChild];
+
+    render(<TasksPageWithHeader />);
+
+    // Turn hide-done on, then activate the "done" scope. Scoping force-expands
+    // the tree, and filtering must bypass hide-done so the done child shows.
+    await user.click(screen.getByTestId("tasks-hide-done"));
+    await user.click(screen.getByRole("button", { name: /done1/i }));
+
+    expect(await screen.findByText("Done child")).toBeInTheDocument();
+  });
 });

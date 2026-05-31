@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
+import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 
 function createTask(overrides?: Partial<Task>): Task {
   return {
@@ -312,5 +313,161 @@ describe("TaskTreeNode", () => {
 
     expect(onTaskSelect).toHaveBeenCalledTimes(1);
     expect(onTaskSelect).toHaveBeenCalledWith(second);
+  });
+});
+
+// ── Done-task list controls (hide-done) ─────────────
+function doneTask(id: string, title: string): Task {
+  return createTask({ id, title, completed_at: "2025-01-02T00:00:00Z" });
+}
+
+/**
+ * Renders the tree with the real expansion hook wired up, with the given parent
+ * ids expanded so child controls are exercised against live state.
+ * `onTaskSelect` is provided so keyboard navigation is active.
+ */
+function Harness({
+  hierarchy,
+  hideCompleted = false,
+  filtering = false,
+  expandIds = [],
+  selectedTaskId,
+  onTaskSelect = () => {},
+}: {
+  hierarchy: TaskTreeNodeType[];
+  hideCompleted?: boolean;
+  filtering?: boolean;
+  expandIds?: string[];
+  selectedTaskId?: string | null;
+  onTaskSelect?: (task: Task) => void;
+}) {
+  const expandedNodes = useExpandedNodes();
+  if (expandIds.length && expandedNodes.expandedNodeIds.size === 0) {
+    expandedNodes.expandAll(expandIds);
+  }
+  return (
+    <TaskTreeView
+      hierarchy={hierarchy}
+      isLoading={false}
+      error={null}
+      selectedTaskId={selectedTaskId}
+      onTaskSelect={onTaskSelect}
+      expandedNodes={expandedNodes}
+      hideCompleted={hideCompleted}
+      filtering={filtering}
+    />
+  );
+}
+
+describe("hide-done controls", () => {
+  it("hides completed LEAVES but keeps completed parents and open tasks", () => {
+    const completedParent = node(
+      doneTask("d1000000-0000-0000-0000-000000000000", "Done parent"),
+      [
+        node(
+          createTask({
+            id: "d1c00000-0000-0000-0000-000000000000",
+            title: "Open grandchild",
+          })
+        ),
+      ]
+    );
+    const hierarchy: TaskTreeNodeType[] = [
+      node(
+        createTask({
+          id: "e0000000-0000-0000-0000-00000000000a",
+          title: "Root",
+          level: "epic",
+        }),
+        [
+          node(
+            createTask({
+              id: "00pen000-0000-0000-0000-000000000000",
+              title: "Open leaf",
+            })
+          ),
+          node(doneTask("d0000000-0000-0000-0000-000000000000", "Done leaf")),
+          completedParent,
+        ]
+      ),
+    ];
+
+    render(
+      <Harness
+        hierarchy={hierarchy}
+        hideCompleted
+        expandIds={[
+          "e0000000-0000-0000-0000-00000000000a",
+          "d1000000-0000-0000-0000-000000000000",
+        ]}
+      />
+    );
+
+    expect(screen.getByText("Open leaf")).toBeInTheDocument();
+    expect(screen.getByText("Done parent")).toBeInTheDocument();
+    expect(screen.getByText("Open grandchild")).toBeInTheDocument();
+    expect(screen.queryByText("Done leaf")).not.toBeInTheDocument();
+  });
+
+  it("does nothing while filtering: a done leaf still renders", () => {
+    const hierarchy: TaskTreeNodeType[] = [
+      node(
+        createTask({
+          id: "e0000000-0000-0000-0000-00000000000b",
+          title: "Root",
+        }),
+        [node(doneTask("d0000000-0000-0000-0000-000000000001", "Done leaf"))]
+      ),
+    ];
+
+    render(
+      <Harness
+        hierarchy={hierarchy}
+        hideCompleted
+        filtering
+        expandIds={["e0000000-0000-0000-0000-00000000000b"]}
+      />
+    );
+
+    // hide-done is on, but filtering bypasses it.
+    expect(screen.getByText("Done leaf")).toBeInTheDocument();
+  });
+
+  it("ArrowDown skips hidden done leaves during keyboard navigation", () => {
+    const open1 = createTask({
+      id: "a0000000-0000-0000-0000-0000000000a1",
+      title: "Open A",
+    });
+    const open2 = createTask({
+      id: "a0000000-0000-0000-0000-0000000000a2",
+      title: "Open B",
+    });
+    const root = createTask({
+      id: "a0000000-0000-0000-0000-0000000000a0",
+      title: "Root",
+    });
+    const hierarchy: TaskTreeNodeType[] = [
+      node(root, [
+        node(open1),
+        node(doneTask("a0000000-0000-0000-0000-0000000000d1", "Hidden done")),
+        node(open2),
+      ]),
+    ];
+    const onTaskSelect = vi.fn();
+
+    render(
+      <Harness
+        hierarchy={hierarchy}
+        hideCompleted
+        expandIds={[root.id]}
+        selectedTaskId={open1.id}
+        onTaskSelect={onTaskSelect}
+      />
+    );
+
+    // From the first open child, ArrowDown must land on the second open child,
+    // skipping the hidden done leaf in between.
+    fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
+    expect(onTaskSelect).toHaveBeenCalledWith(open2);
   });
 });

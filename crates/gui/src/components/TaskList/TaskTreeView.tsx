@@ -2,6 +2,7 @@ import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useMemo } from "react";
 
@@ -12,6 +13,8 @@ interface TaskTreeViewProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideCompleted?: boolean;
+  filtering?: boolean;
 }
 
 function LoadingSkeleton() {
@@ -67,9 +70,21 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
+interface FlattenOptions {
+  expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideCompleted: boolean;
+  filtering: boolean;
+}
+
+/**
+ * Flatten the visible, selectable rows in document order for keyboard
+ * navigation. This shares {@link computeVisibleChildren} with the render path
+ * so the keyboard cursor can never land on a row that isn't drawn — or skip a
+ * row that is.
+ */
 function flattenVisibleNodes(
   nodes: TaskTreeNodeType[],
-  expandedNodes?: ReturnType<typeof useExpandedNodes>
+  { expandedNodes, hideCompleted, filtering }: FlattenOptions
 ): TaskTreeNodeType[] {
   const out: TaskTreeNodeType[] = [];
   const stack = [...nodes].reverse();
@@ -81,8 +96,12 @@ function flattenVisibleNodes(
       ? expandedNodes.isNodeExpanded(node.task.id)
       : true;
     if (node.children.length > 0 && isExpanded) {
-      for (let index = node.children.length - 1; index >= 0; index -= 1) {
-        stack.push(node.children[index]);
+      const visible = computeVisibleChildren(node, {
+        hideCompleted,
+        filtering,
+      });
+      for (let index = visible.length - 1; index >= 0; index -= 1) {
+        stack.push(visible[index].node);
       }
     }
   }
@@ -97,10 +116,19 @@ export function TaskTreeView({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
+  hideCompleted = false,
+  filtering = false,
 }: TaskTreeViewProps) {
   const visibleNodes = useMemo(
-    () => (onTaskSelect ? flattenVisibleNodes(hierarchy, expandedNodes) : []),
-    [hierarchy, expandedNodes, onTaskSelect]
+    () =>
+      onTaskSelect
+        ? flattenVisibleNodes(hierarchy, {
+            expandedNodes,
+            hideCompleted,
+            filtering,
+          })
+        : [],
+    [hierarchy, expandedNodes, onTaskSelect, hideCompleted, filtering]
   );
 
   const handleKeyDown = useCallback(
@@ -155,6 +183,8 @@ export function TaskTreeView({
             selectedTaskId={selectedTaskId}
             onTaskSelect={onTaskSelect}
             expandedNodes={expandedNodes}
+            hideCompleted={hideCompleted}
+            filtering={filtering}
           />
         ))}
       </div>
