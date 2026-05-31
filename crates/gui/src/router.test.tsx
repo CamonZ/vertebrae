@@ -403,7 +403,12 @@ describe("Router Acceptance Tests", () => {
         screen.getByLabelText("Search tasks by title or ID")
       ).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /done/i })).toBeInTheDocument();
+      // The "Done" scope chip is a pressable button; disambiguate from the
+      // "Hide done" list control (which also matches /done/i) via its class.
+      const doneChip = screen
+        .getAllByRole("button", { name: /done/i })
+        .find((el) => el.classList.contains("scope-chip"));
+      expect(doneChip).toBeInTheDocument();
     });
 
     it("updates search and level filters on TasksPage without status or done filter overrides", async () => {

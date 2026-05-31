@@ -1121,6 +1121,49 @@ body {
   animation: pulse 1.6s ease-in-out infinite;
 }
 
+/* Right-aligned secondary slot in the scope row (hide-done toggle). */
+.tasks-v2 .scope-secondary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: auto;
+}
+
+/* Hide-done header control. Ported from docs/design/tasks-v2.html (lines
+   160-163) with --s-2h -> --s-2 and --text-10 -> --text-2xs token swaps for
+   the live v2 scale. */
+.tasks-v2 .hide-done {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  color: var(--fg-mute);
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+  white-space: nowrap;
+}
+
+.tasks-v2 .hide-done:hover {
+  color: var(--fg);
+  border-color: var(--fg-faint);
+}
+
+.tasks-v2 .hide-done.on {
+  color: var(--accent);
+  background: var(--accent-wash);
+  border-color: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+.tasks-v2 .hide-done svg {
+  flex-shrink: 0;
+}
+
 .tasks-v2 .tasks-v2-filters {
   gap: var(--s-2);
 }
