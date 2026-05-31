@@ -142,8 +142,9 @@ vtb run-workflow <task>
 
 See `skills/` for detailed command guides:
 
-**Workflow guides:**
-- `/status` - Check current state
+**Workflow helpers:**
+- `/ready` - Show items ready for work or triage
+- `/vtb-show` - Display task details
 
 **Task management:**
 - `/add` - Create tasks with hierarchy and dependencies
