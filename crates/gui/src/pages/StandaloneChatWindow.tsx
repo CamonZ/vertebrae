@@ -36,7 +36,7 @@ export function StandaloneChatWindow() {
   if (!sessionId) {
     return (
       <WindowLayout>
-        <div className="flex h-full items-center justify-center text-sm text-text-muted">
+        <div className="flex h-full items-center justify-center text-sm text-fg-mute">
           Missing sessionId query parameter
         </div>
       </WindowLayout>

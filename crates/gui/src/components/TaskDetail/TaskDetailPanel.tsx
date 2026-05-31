@@ -1289,7 +1289,7 @@ export function TaskDetailPanel({
       defaultWidth={420}
       minWidth={360}
       maxWidth={520}
-      glowColor="from-primary/0 via-primary/30 to-primary/0"
+      glowColor="from-accent/0 via-accent/30 to-accent/0"
       className="tasks-v2 detail"
     >
       {content}

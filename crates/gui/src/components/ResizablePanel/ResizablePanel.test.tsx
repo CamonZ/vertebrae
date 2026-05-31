@@ -282,10 +282,10 @@ describe("ResizablePanel", () => {
       );
 
       const handle = container.querySelector('[role="separator"]') as HTMLElement;
-      expect(handle).not.toHaveClass("bg-primary/20");
+      expect(handle).not.toHaveClass("bg-accent/20");
 
       fireEvent.mouseDown(handle);
-      expect(handle).toHaveClass("bg-primary/20");
+      expect(handle).toHaveClass("bg-accent/20");
     });
   });
 

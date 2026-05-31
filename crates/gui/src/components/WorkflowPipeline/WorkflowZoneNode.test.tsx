@@ -100,7 +100,7 @@ describe("WorkflowZoneNode", () => {
       const { container } = render(<WorkflowZoneNode {...props} />);
 
       const button = container.querySelector("button");
-      expect(button).toHaveClass("text-primary");
+      expect(button).toHaveClass("text-accent");
     });
   });
 

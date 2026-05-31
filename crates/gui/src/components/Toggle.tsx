@@ -8,10 +8,10 @@ interface ToggleProps {
 }
 
 const colorClasses = {
-  primary: "bg-primary",
-  warning: "bg-warning",
-  success: "bg-success",
-  error: "bg-error",
+  primary: "bg-accent",
+  warning: "bg-warn",
+  success: "bg-ok",
+  error: "bg-err",
   info: "bg-info",
 };
 
@@ -29,8 +29,8 @@ export function Toggle({
     <button
       type="button"
       onClick={() => !disabled && onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-bg-primary disabled:cursor-not-allowed disabled:opacity-50 ${
-        checked ? colorClasses[activeColor] : "bg-bg-tertiary"
+      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-bg disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked ? colorClasses[activeColor] : "bg-bg-2"
       }`}
       role="switch"
       aria-checked={checked}

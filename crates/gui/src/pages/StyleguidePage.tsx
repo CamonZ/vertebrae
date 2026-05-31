@@ -69,7 +69,7 @@ function Section({
 }) {
   return (
     <section className="border-b border-border py-8 last:border-b-0">
-      <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+      <h2 className="text-lg font-semibold text-fg">{title}</h2>
       <div className="mt-4">{children}</div>
     </section>
   );
@@ -77,13 +77,13 @@ function Section({
 
 function TokenSwatch({ name, className }: { name: string; className: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-secondary p-3">
+    <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-1 p-3">
       <div
         className={`h-10 w-10 rounded-md border border-border ${className}`}
       />
       <div>
-        <p className="text-sm font-medium text-text-primary">{name}</p>
-        <p className="font-mono text-xs text-text-muted">{className}</p>
+        <p className="text-sm font-medium text-fg">{name}</p>
+        <p className="font-mono text-xs text-fg-mute">{className}</p>
       </div>
     </div>
   );
@@ -97,8 +97,8 @@ function ComponentExample({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-bg-secondary p-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+    <div className="rounded-lg border border-border bg-bg-1 p-4">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-mute">
         {title}
       </h3>
       {children}
@@ -262,20 +262,20 @@ const sampleDiagramSteps: Step[] = [
 function MiniNavExample() {
   const navItems = ["Operations", "Board", "Design", "Tasks", "Traces"];
   return (
-    <div className="flex w-16 flex-col rounded-lg border border-border bg-bg-secondary p-3">
+    <div className="flex w-16 flex-col rounded-lg border border-border bg-bg-1 p-3">
       <ul className="space-y-1" aria-label="Styleguide navigation example">
         {navItems.map((item, index) => (
           <li key={item}>
             <div
               className={`relative flex h-10 w-10 items-center justify-center rounded-lg text-sm transition-colors ${
                 index === 0
-                  ? "bg-primary/10 text-primary shadow-glow-sm"
-                  : "text-text-secondary"
+                  ? "bg-accent/10 text-accent shadow-glow-sm"
+                  : "text-fg-soft"
               }`}
               title={item}
             >
               {index === 0 && (
-                <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-primary shadow-glow-sm" />
+                <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent shadow-glow-sm" />
               )}
               <span className="font-mono text-2xs">{item.slice(0, 2)}</span>
             </div>
@@ -288,21 +288,21 @@ function MiniNavExample() {
 
 function ProductFrameExample() {
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-bg-primary">
+    <div className="overflow-hidden rounded-lg border border-border bg-bg">
       <div className="flex h-[460px] min-w-[760px]">
         <Sidebar />
-        <main className="flex min-w-0 flex-1 flex-col bg-bg-primary">
+        <main className="flex min-w-0 flex-1 flex-col bg-bg">
           <div className="relative flex h-12 items-center justify-between border-b border-border px-5">
             <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
             <div className="relative">
-              <p className="text-sm font-semibold text-text-primary">
+              <p className="text-sm font-semibold text-fg">
                 Workflow Pipelines
               </p>
-              <p className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+              <p className="font-mono text-2xs uppercase tracking-wider text-fg-mute">
                 App shell content header
               </p>
             </div>
-            <div className="relative rounded-md border border-border bg-bg-secondary px-2 py-1 font-mono text-2xs text-text-muted">
+            <div className="relative rounded-md border border-border bg-bg-1 px-2 py-1 font-mono text-2xs text-fg-mute">
               Side panel open
             </div>
           </div>
@@ -310,16 +310,16 @@ function ProductFrameExample() {
             <div className="relative min-w-0 flex-1 overflow-hidden bg-[#0c0c0e]">
               <div className="neural-grid pointer-events-none absolute inset-0 opacity-30" />
               <div className="relative h-full p-5">
-                <div className="h-full rounded-xl border border-border/70 bg-bg-secondary/20 p-4">
+                <div className="h-full rounded-xl border border-border/70 bg-bg-1/20 p-4">
                   <div className="mb-4 flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-primary shadow-glow-sm" />
-                    <span className="font-mono text-xs uppercase tracking-wider text-text-muted">
+                    <span className="h-2 w-2 rounded-full bg-accent shadow-glow-sm" />
+                    <span className="font-mono text-xs uppercase tracking-wider text-fg-mute">
                       Diagram canvas region
                     </span>
                   </div>
                   <div className="flex gap-4">
-                    <div className="h-28 w-44 rounded-lg border border-primary/40 bg-primary/10" />
-                    <div className="h-28 w-44 rounded-lg border border-border bg-bg-tertiary" />
+                    <div className="h-28 w-44 rounded-lg border border-accent/40 bg-accent/10" />
+                    <div className="h-28 w-44 rounded-lg border border-border bg-bg-2" />
                   </div>
                 </div>
               </div>
@@ -433,7 +433,7 @@ function WorkflowDiagrammingExample() {
           >
             <Controls
               showInteractive={false}
-              className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
+              className="!rounded-lg !border-border !bg-bg-2 !shadow-3"
             />
             <Background
               variant={BackgroundVariant.Dots}
@@ -447,18 +447,18 @@ function WorkflowDiagrammingExample() {
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
         <ComponentExample title="Workflow Container">
-          <p className="text-sm text-text-secondary">
+          <p className="text-sm text-fg-soft">
             Dashed zone, workflow metadata, task totals, and transition handles.
           </p>
         </ComponentExample>
         <ComponentExample title="Step Cards">
-          <p className="text-sm text-text-secondary">
+          <p className="text-sm text-fg-soft">
             Fixed-width nodes with order, goal, agent configuration, and state
             badges.
           </p>
         </ComponentExample>
         <ComponentExample title="Pipeline Background">
-          <p className="text-sm text-text-secondary">
+          <p className="text-sm text-fg-soft">
             React Flow controls, dotted canvas, transition arrows, and selected
             edge styling.
           </p>
@@ -471,7 +471,7 @@ function WorkflowDiagrammingExample() {
 function TaskTraceExample() {
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-border bg-bg-secondary p-4">
+      <div className="rounded-lg border border-border bg-bg-1 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -481,22 +481,22 @@ function TaskTraceExample() {
                 level="ticket"
                 copyable={false}
               />
-              <span className="rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+              <span className="rounded-full border border-warn/40 bg-warn/10 px-2 py-0.5 text-xs font-medium text-warn">
                 pending_review
               </span>
-              <span className="rounded-full border border-success/40 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
+              <span className="rounded-full border border-ok/40 bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok">
                 runnable
               </span>
             </div>
-            <h3 className="mt-2 text-base font-semibold text-text-primary">
+            <h3 className="mt-2 text-base font-semibold text-fg">
               Review operator handoff flow
             </h3>
-            <p className="mt-1 text-sm text-text-secondary">
+            <p className="mt-1 text-sm text-fg-soft">
               Workflow step selection, route protection, and display primitives
               shown with static sample data.
             </p>
           </div>
-          <button className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <button className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             Run
           </button>
         </div>
@@ -518,16 +518,16 @@ function TaskTraceExample() {
             />
           </svg>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-text-primary">
+            <p className="text-sm font-medium text-fg">
               Waiting on human input
             </p>
-            <p className="mt-0.5 text-xs text-text-secondary">
-              Step <span className="font-mono text-text-primary">review</span>{" "}
+            <p className="mt-0.5 text-xs text-fg-soft">
+              Step <span className="font-mono text-fg">review</span>{" "}
               is parked until an operator resumes it.
             </p>
             <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
               <div>
-                <dt className="font-mono uppercase tracking-wider text-text-muted">
+                <dt className="font-mono uppercase tracking-wider text-fg-mute">
                   Run
                 </dt>
                 <dd>
@@ -539,7 +539,7 @@ function TaskTraceExample() {
                 </dd>
               </div>
               <div>
-                <dt className="font-mono uppercase tracking-wider text-text-muted">
+                <dt className="font-mono uppercase tracking-wider text-fg-mute">
                   Execution
                 </dt>
                 <dd>
@@ -640,7 +640,7 @@ function ControlsAndFeedbackExample() {
       </ComponentExample>
       <ComponentExample title="Spinner And RelativeTime">
         <div className="flex flex-wrap items-center gap-4">
-          <Spinner className="h-5 w-5 text-primary" />
+          <Spinner className="h-5 w-5 text-accent" />
           <RelativeTime date="2026-05-22T10:00:00Z" />
         </div>
       </ComponentExample>
@@ -656,12 +656,12 @@ function ControlsAndFeedbackExample() {
           onConfirm={() => {}}
           onCancel={() => {}}
         >
-          <label className="flex items-center gap-2 text-xs text-text-secondary">
+          <label className="flex items-center gap-2 text-xs text-fg-soft">
             <input
               type="checkbox"
               readOnly
               checked
-              className="accent-primary"
+              className="accent-accent"
             />
             Include child tasks
           </label>
@@ -803,24 +803,24 @@ function TraceAndWorkflowExample() {
 
 export function StyleguidePage() {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-bg-primary">
+    <div className="min-h-0 flex-1 overflow-y-auto bg-bg">
       <div className="mx-auto w-full max-w-6xl px-6 py-8">
         <header className="border-b border-border pb-6">
-          <p className="font-mono text-xs uppercase tracking-wider text-text-muted">
+          <p className="font-mono text-xs uppercase tracking-wider text-fg-mute">
             Protected route /styleguide
           </p>
           <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
             <div>
-              <h1 className="text-3xl font-semibold text-text-primary">
+              <h1 className="text-3xl font-semibold text-fg">
                 GUI Styleguide
               </h1>
-              <p className="mt-2 max-w-2xl text-sm text-text-secondary">
+              <p className="mt-2 max-w-2xl text-sm text-fg-soft">
                 Visual tokens and representative app components. Reveal the
                 hidden styleguide and live chat controls with{" "}
                 {STYLEGUIDE_SHORTCUT.label}.
               </p>
             </div>
-            <span className="rounded-md border border-border bg-bg-secondary px-3 py-1.5 font-mono text-xs text-text-secondary">
+            <span className="rounded-md border border-border bg-bg-1 px-3 py-1.5 font-mono text-xs text-fg-soft">
               {STYLEGUIDE_SHORTCUT.label}
             </span>
           </div>
@@ -878,13 +878,13 @@ export function StyleguidePage() {
 
         <Section title="Visual Tokens">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <TokenSwatch name="Primary" className="bg-primary" />
+            <TokenSwatch name="Primary" className="bg-accent" />
             <TokenSwatch name="Accent" className="bg-accent" />
-            <TokenSwatch name="Success" className="bg-success" />
-            <TokenSwatch name="Warning" className="bg-warning" />
+            <TokenSwatch name="Success" className="bg-ok" />
+            <TokenSwatch name="Warning" className="bg-warn" />
             <TokenSwatch name="Info" className="bg-info" />
-            <TokenSwatch name="Error" className="bg-error" />
-            <TokenSwatch name="Surface" className="bg-bg-secondary" />
+            <TokenSwatch name="Error" className="bg-err" />
+            <TokenSwatch name="Surface" className="bg-bg-1" />
             <TokenSwatch name="Hover" className="bg-bg-hover" />
           </div>
         </Section>
@@ -904,14 +904,14 @@ export function StyleguidePage() {
         <Section title="Buttons And Forms">
           <div className="grid gap-4 lg:grid-cols-2">
             <div className="space-y-3">
-              <button className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <button className="rounded-md bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 Primary action
               </button>
-              <button className="ml-2 rounded-md border border-border bg-bg-secondary px-3 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+              <button className="ml-2 rounded-md border border-border bg-bg-1 px-3 py-2 text-sm font-medium text-fg transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
                 Secondary action
               </button>
             </div>
-            <div className="rounded-lg border border-border bg-bg-secondary p-4">
+            <div className="rounded-lg border border-border bg-bg-1 p-4">
               <FormField
                 label="Task title"
                 required
@@ -921,7 +921,7 @@ export function StyleguidePage() {
                 <input
                   id="styleguide-task-title"
                   defaultValue="Review waiting gate display"
-                  className="w-full rounded-md border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm text-fg outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20"
                 />
               </FormField>
             </div>
@@ -959,7 +959,7 @@ export function StyleguidePage() {
               kind="step"
               copyable={false}
             />
-            <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
               workflow
             </span>
           </div>

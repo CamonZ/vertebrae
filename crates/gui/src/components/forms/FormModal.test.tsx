@@ -167,7 +167,7 @@ describe("FormModal", () => {
 
       const submitButton = screen.getByRole("button", { name: /submit/i });
       expect(submitButton).toBeDisabled();
-      expect(submitButton).toHaveClass("bg-primary/80");
+      expect(submitButton).toHaveClass("bg-accent/80");
       expect(submitButton).toHaveClass("cursor-not-allowed");
     });
 
@@ -408,12 +408,12 @@ describe("FormModal", () => {
       );
 
       const errorBanner = screen.getByRole("alert");
-      expect(errorBanner).toHaveClass("bg-error/10");
-      expect(errorBanner).toHaveClass("border-error");
+      expect(errorBanner).toHaveClass("bg-err/10");
+      expect(errorBanner).toHaveClass("border-err");
 
       const icon = errorBanner.querySelector("svg");
       expect(icon).toBeInTheDocument();
-      expect(icon).toHaveClass("text-error");
+      expect(icon).toHaveClass("text-err");
     });
 
     it("shows dismiss button in error banner", () => {

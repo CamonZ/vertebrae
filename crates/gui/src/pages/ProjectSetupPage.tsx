@@ -101,9 +101,9 @@ export function ProjectSetupPage() {
   };
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-bg-secondary p-8">
+    <div className="flex h-screen w-screen items-center justify-center bg-bg-1 p-8">
       <div
-        className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg"
+        className="w-full rounded-xl border border-border bg-bg p-8 shadow-3"
         style={{ maxWidth: "640px", minWidth: "400px" }}
       >
         {/* Header — serif-italic Hearth wordmark over a muted lede subtitle. */}
@@ -125,7 +125,7 @@ export function ProjectSetupPage() {
 
         {/* Loading state */}
         {isLoading && (
-          <div className="py-12 text-center text-text-secondary">
+          <div className="py-12 text-center text-fg-soft">
             Loading projects...
           </div>
         )}
@@ -134,7 +134,7 @@ export function ProjectSetupPage() {
         {!isLoading && (
           <div className="mb-6 space-y-2">
             {projects.length === 0 ? (
-              <div className="py-12 text-center text-text-secondary">
+              <div className="py-12 text-center text-fg-soft">
                 No projects added yet. Add a project to get started.
               </div>
             ) : (
@@ -142,21 +142,21 @@ export function ProjectSetupPage() {
                 <div
                   key={project.slug}
                   onClick={() => handleSelectProject(project)}
-                  className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-4 transition-colors hover:border-accent-secondary hover:bg-bg-tertiary"
+                  className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-4 transition-colors hover:border-accent hover:bg-bg-2"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-text-primary">
+                      <span className="font-medium text-fg">
                         {project.slug}
                       </span>
                     </div>
-                    <div className="mt-1 truncate text-sm text-text-tertiary">
+                    <div className="mt-1 truncate text-sm text-fg-mute">
                       {project.path || project.project_id}
                     </div>
                   </div>
                   <button
                     onClick={(e) => handleRemoveProject(e, project)}
-                    className="ml-4 rounded p-2 text-text-tertiary transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    className="ml-4 rounded p-2 text-fg-mute transition-colors hover:bg-red-500/10 hover:text-red-400"
                     title="Remove from list"
                   >
                     <svg
@@ -184,7 +184,7 @@ export function ProjectSetupPage() {
         <button
           onClick={handleAddProject}
           disabled={isAddingProject}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-bg-tertiary px-4 py-3 text-text-secondary transition-colors hover:border-accent-secondary hover:bg-bg-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-bg-2 px-4 py-3 text-fg-soft transition-colors hover:border-accent hover:bg-bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isAddingProject ? (
             "Selecting..."

@@ -150,7 +150,7 @@ export function WorkflowDetailPanel({
   return (
     <ResizablePanel
       storageKey="workflow-detail-panel-width"
-      glowColor="from-primary/0 via-primary/30 to-primary/0"
+      glowColor="from-accent/0 via-accent/30 to-accent/0"
     >
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-[var(--color-line)] px-4">

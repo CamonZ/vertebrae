@@ -5,18 +5,18 @@ import type { TaskLevel } from "../../bindings";
  */
 export function getStatusColor(status: string, isSelected: boolean): string {
   if (isSelected) {
-    return "border-primary bg-primary/20 ring-1 ring-primary/50";
+    return "border-accent bg-accent/20 ring-1 ring-accent/50";
   }
   switch (status) {
     case "in_progress":
       return "border-accent bg-accent/10";
     case "completed":
     case "done":
-      return "border-success/50 bg-success/5";
+      return "border-ok/50 bg-ok/5";
     case "failed":
-      return "border-error bg-error/10";
+      return "border-err bg-err/10";
     default:
-      return "border-border bg-bg-tertiary ring-none";
+      return "border-border bg-bg-2 ring-none";
   }
 }
 
@@ -45,10 +45,10 @@ export function getLevelDotColor(level: TaskLevel): string {
     case "epic":
       return "bg-info";
     case "ticket":
-      return "bg-primary";
+      return "bg-accent";
     case "task":
-      return "bg-text-secondary";
+      return "bg-fg-soft";
     default:
-      return "bg-text-muted";
+      return "bg-fg-mute";
   }
 }

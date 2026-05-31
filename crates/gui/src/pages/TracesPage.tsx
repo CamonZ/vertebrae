@@ -826,13 +826,13 @@ export function TracesPage({
               className="flex h-full flex-col justify-center px-8 text-center"
             >
               <div className="mx-auto" style={{ maxWidth: "28rem" }}>
-                <h2 className="text-base font-medium text-text-secondary">
+                <h2 className="text-base font-medium text-fg-soft">
                   No task selected
                 </h2>
-                <p className="mt-2 text-sm text-text-muted">
+                <p className="mt-2 text-sm text-fg-mute">
                   Search for a task in the panel on the left to view its
                   execution traces. Press{" "}
-                  <kbd className="rounded border border-border bg-bg-tertiary px-1 font-mono text-2xs text-text-secondary">
+                  <kbd className="rounded border border-border bg-bg-2 px-1 font-mono text-2xs text-fg-soft">
                     /
                   </kbd>{" "}
                   to focus the search field.
@@ -849,13 +849,13 @@ export function TracesPage({
                       data-testid="traces-active-run"
                       data-run-id={activeTraceRun.id}
                       data-run-source={activeTraceRunSource}
-                      className="flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-text-muted"
+                      className="flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-fg-mute"
                     >
                       <span>{activeTraceRunSource} run</span>
                       <IdentityBadge
                         id={activeTraceRun.id}
                         kind="task run"
-                        className="px-1 text-text-secondary"
+                        className="px-1 text-fg-soft"
                         testId="traces-active-run-id"
                       />
                     </span>
@@ -863,7 +863,7 @@ export function TracesPage({
                   {mode === "thread" && (
                     <label
                       data-testid="traces-auto-scroll-label"
-                      className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-2xs text-text-secondary"
+                      className="flex cursor-pointer items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-2xs text-fg-soft"
                     >
                       <input
                         data-testid="traces-auto-scroll"
@@ -917,12 +917,12 @@ export function TracesPage({
                   <aside
                     data-testid="corridor-detail-pin"
                     data-execution-id={pinnedExecutionId}
-                    className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-tertiary p-3 text-xs"
+                    className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-2 p-3 text-xs"
                   >
-                    <div className="mb-2 font-mono text-2xs uppercase tracking-wider text-text-muted">
+                    <div className="mb-2 font-mono text-2xs uppercase tracking-wider text-fg-mute">
                       Pinned execution
                     </div>
-                    <div className="break-all font-mono text-text-primary">
+                    <div className="break-all font-mono text-fg">
                       {pinnedExecutionId}
                     </div>
                   </aside>

@@ -201,7 +201,7 @@ describe("TaskSections", () => {
       await userEvent.click(screen.getByText("Constraints"));
 
       // Should have bullet point (small circle)
-      const bullets = document.querySelectorAll(".rounded-full.bg-text-muted");
+      const bullets = document.querySelectorAll(".rounded-full.bg-fg-mute");
       expect(bullets.length).toBe(1);
     });
   });

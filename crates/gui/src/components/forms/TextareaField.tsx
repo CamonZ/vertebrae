@@ -174,7 +174,7 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
 
     // Error state classes
     const errorClasses = displayError
-      ? "border-error focus:border-error focus:ring-error/20"
+      ? "border-err focus:border-err focus:ring-err/20"
       : "";
 
     // Disabled state classes
@@ -223,7 +223,7 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
             <div
               id={`${inputId}-charcount`}
               className={`absolute right-3 bottom-3 text-2xs font-medium ${
-                charCountValid ? "text-text-muted" : "text-error"
+                charCountValid ? "text-fg-mute" : "text-err"
               }`}
               aria-live="polite"
             >
