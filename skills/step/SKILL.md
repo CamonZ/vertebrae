@@ -48,7 +48,7 @@ vtb step add "Coding" -w <workflow-id> \
 
 # With prompt and full agent config JSON
 vtb step add "Coding" -w <workflow-id> \
-  --prompt "Implement the task described in {task.id}" \
+  --prompt "Implement the task described in {{task.id}}" \
   --agent-config '{"model":"opus","max_budget_usd":5.0}'
 
 # With agents and skills
@@ -207,7 +207,7 @@ vtb step update <step-id> --agent .claude/agents/reviewer.md
 vtb step update <step-id> --skill review --skill simplify
 
 # Replace prompt, step type, and output schema
-vtb step update <step-id> --prompt "Review task {task.id}"
+vtb step update <step-id> --prompt "Review task {{task.id}}"
 vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 
