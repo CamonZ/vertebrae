@@ -221,7 +221,7 @@ This is the core loop: a task moves through a workflow, and each step is execute
 
 4. ExecutionDispatcher creates StepExecution
    ├── Status: "entered"
-   ├── Renders prompt (interpolates {task_id})
+   ├── Renders prompt (interpolates {{task.id}})
    └── Broadcasts "run_step" on Phoenix Channel project:{project_id}
 
 5. Daemon (vtb-daemon) receives "run_step"
