@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
@@ -29,6 +30,57 @@ interface TaskTreeNodeProps {
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideCompleted?: boolean;
   filtering?: boolean;
+  summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
+}
+
+/**
+ * Collapsed-done summary row. Stands in for `count` folded done-leaf children
+ * under an expanded parent. It is not a `treeitem` and is not selectable —
+ * clicking it toggles the fold open/closed. Rendered at the same indent depth
+ * as the leaves it replaces.
+ */
+function SummaryRow({
+  parentId,
+  count,
+  depth,
+  open,
+  onToggle,
+}: {
+  parentId: string;
+  count: number;
+  depth: number;
+  open: boolean;
+  onToggle: (parentId: string) => void;
+}) {
+  return (
+    <div
+      className={["t-summary", open ? "open" : ""].filter(Boolean).join(" ")}
+      onClick={() => onToggle(parentId)}
+      data-testid="task-tree-summary-row"
+      data-parent-id={parentId}
+      style={{ ["--depth" as string]: depth }}
+    >
+      <div className="t-indent" aria-hidden>
+        {depth >= 1 ? <span className="g l1" /> : null}
+        {depth >= 2 ? <span className="g l2" /> : null}
+      </div>
+      <span className="sum-chev">{open ? "▾" : "▸"}</span>
+      <span className="sum-mark" aria-hidden>
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+        >
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+      <span className="sum-label">{count} completed</span>
+      <span className="sum-hint">{open ? "hide" : "show"}</span>
+    </div>
+  );
 }
 
 /**
@@ -67,6 +119,7 @@ export function TaskTreeNode({
   expandedNodes,
   hideCompleted = false,
   filtering = false,
+  summaryExpanded,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
@@ -111,13 +164,15 @@ export function TaskTreeNode({
 
   const chevron = hasChildren ? (isExpanded ? "▾" : "▸") : "";
 
+  const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
   const visibleChildren = useMemo(
     () =>
       computeVisibleChildren(node, {
         hideCompleted,
         filtering,
+        summaryExpanded: summaryExpandedIds ?? new Set<string>(),
       }),
-    [node, hideCompleted, filtering]
+    [node, hideCompleted, filtering, summaryExpandedIds]
   );
 
   return (
@@ -247,18 +302,32 @@ export function TaskTreeNode({
 
       {hasChildren && isExpanded && (
         <div role="group" aria-label={`Children of ${task.title}`}>
-          {visibleChildren.map((child) => (
-            <TaskTreeNode
-              key={child.node.task.id}
-              node={child.node}
-              depth={depth + 1}
-              selectedTaskId={selectedTaskId}
-              onTaskSelect={onTaskSelect}
-              expandedNodes={expandedNodes}
-              hideCompleted={hideCompleted}
-              filtering={filtering}
-            />
-          ))}
+          {visibleChildren.map((child) =>
+            child.kind === "node" ? (
+              <TaskTreeNode
+                key={child.node.task.id}
+                node={child.node}
+                depth={depth + 1}
+                selectedTaskId={selectedTaskId}
+                onTaskSelect={onTaskSelect}
+                expandedNodes={expandedNodes}
+                hideCompleted={hideCompleted}
+                filtering={filtering}
+                summaryExpanded={summaryExpanded}
+              />
+            ) : (
+              <SummaryRow
+                key={`summary-${child.parentId}`}
+                parentId={child.parentId}
+                count={child.count}
+                depth={depth + 1}
+                open={summaryExpandedIds?.has(child.parentId) ?? false}
+                onToggle={(parentId) =>
+                  summaryExpanded?.toggleSummary(parentId)
+                }
+              />
+            )
+          )}
         </div>
       )}
     </div>

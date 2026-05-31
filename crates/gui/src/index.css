@@ -1164,6 +1164,71 @@ body {
   flex-shrink: 0;
 }
 
+/* Collapsed-done summary row. Ported from docs/design/tasks-v2.html (lines
+   148-156) with --s-1h -> --s-1 and --text-9/--text-11 -> --text-2xs token
+   swaps for the live v2 scale. */
+.tasks-v2 .t-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-5);
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease);
+}
+
+.tasks-v2 .t-summary:hover {
+  background: color-mix(in oklch, var(--bg-1) 60%, var(--bg));
+}
+
+.tasks-v2 .t-summary .t-indent {
+  flex-shrink: 0;
+  align-self: stretch;
+}
+
+.tasks-v2 .t-summary .t-indent .g.l1,
+.tasks-v2 .t-summary .t-indent .g.l2 {
+  border-right-color: var(--line);
+}
+
+.tasks-v2 .t-summary .sum-chev {
+  width: 10px;
+  text-align: center;
+  font-size: var(--text-2xs);
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.tasks-v2 .t-summary .sum-mark {
+  display: inline-flex;
+  color: var(--ok);
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.tasks-v2 .t-summary .sum-label {
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.04em;
+  color: var(--ok);
+  opacity: 0.9;
+  white-space: nowrap;
+}
+
+.tasks-v2 .t-summary .sum-hint {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+}
+
+.tasks-v2 .t-summary:hover .sum-hint {
+  opacity: 1;
+}
+
 .tasks-v2 .tasks-v2-filters {
   gap: var(--s-2);
 }

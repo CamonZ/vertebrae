@@ -13,6 +13,7 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { Count } from "../components/atoms/Count";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
+import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
 import { popOut, stashTask } from "../utils";
 
 type TaskScope =
@@ -173,6 +174,7 @@ export function TasksPage() {
   const [hideCompleted, setHideCompleted] = useState(false);
 
   const expandedNodes = useExpandedNodes();
+  const summaryExpanded = useSummaryExpanded();
 
   useEffect(() => {
     const workflowId = searchParams.get("workflowId");
@@ -198,8 +200,8 @@ export function TasksPage() {
   );
 
   // "Filtering" mirrors the prototype: a scope chip (other than "all") or a
-  // non-empty search narrows the list, in which case hide-done is bypassed so
-  // every match stays visible.
+  // non-empty search narrows the list, in which case hide-done and the
+  // done-summary collapse are bypassed so every match stays visible.
   const filtering = scope !== "all" || Boolean(filters.search?.trim());
 
   useEffect(() => {
@@ -391,6 +393,7 @@ export function TasksPage() {
               expandedNodes={expandedNodes}
               hideCompleted={hideCompleted}
               filtering={filtering}
+              summaryExpanded={summaryExpanded}
             />
           </div>
           <div className="caption-strip">
