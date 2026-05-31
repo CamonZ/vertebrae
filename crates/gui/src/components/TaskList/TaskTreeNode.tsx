@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import type { Task } from "../../bindings";
+import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
@@ -31,6 +31,59 @@ interface TaskTreeNodeProps {
   hideCompleted?: boolean;
   filtering?: boolean;
   summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
+}
+
+/**
+ * Terminal-run completion marker shown in the row's chip slot when there is no
+ * active run. Mirrors the reference (docs/design/lib/tasks-app.jsx
+ * `CompletionMark`): completed → green ✓, stopped → muted ⊘, failed → error ⊘.
+ * Active runs are handled by the RunChip instead, and never-run tasks render
+ * nothing.
+ */
+function CompletionMark({
+  status,
+}: {
+  status: TaskRunStatus | null;
+}) {
+  if (status === "completed") {
+    return (
+      <span
+        className="done-mark"
+        title="Completed"
+        aria-label="Completed"
+        data-testid="task-tree-node-done-mark"
+      >
+        <svg
+          width="11"
+          height="11"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          aria-hidden
+        >
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+  if (status === "stopped" || status === "failed") {
+    const failed = status === "failed";
+    return (
+      <span
+        className={["cancel-mark", failed ? "failed" : ""]
+          .filter(Boolean)
+          .join(" ")}
+        title={failed ? "Failed" : "Stopped"}
+        aria-label={failed ? "Failed" : "Stopped"}
+        data-testid="task-tree-node-cancel-mark"
+        data-run-status={status}
+      >
+        ⊘
+      </span>
+    );
+  }
+  return null;
 }
 
 /**
@@ -278,13 +331,15 @@ export function TaskTreeNode({
         </div>
         <div className="t-right">
           <span className="chip-slot">
-            {runChip && (
+            {runChip ? (
               <RunChip
                 status={runChip.status}
                 label={runChip.label}
                 data-testid="task-tree-node-run-chip"
                 data-run-status={runChip.status ?? undefined}
               />
+            ) : (
+              <CompletionMark status={activeRunStatus} />
             )}
           </span>
           <IdChip

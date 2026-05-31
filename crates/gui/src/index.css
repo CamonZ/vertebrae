@@ -1263,6 +1263,32 @@ body {
   min-width: 0;
 }
 
+/* Completion marks for terminal task runs in the list. Ported from
+   docs/design/tasks-v2.html (.done-mark / .cancel-mark) with --text-13 ->
+   var(--text-sm). Active runs show a RunChip; completed runs a green ✓; stopped
+   runs a muted ⊘; failed runs an error-toned ⊘. */
+.tasks-v2 .done-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1);
+  color: var(--ok);
+  font-family: var(--mono);
+}
+
+.tasks-v2 .cancel-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  line-height: 1;
+  color: var(--fg-faint);
+}
+
+.tasks-v2 .cancel-mark.failed {
+  color: var(--err);
+}
+
 /* RunChip — ported verbatim from the design reference (docs/design/
    components-v2.css). Single source of truth for run-state chips across the
    app; the React component supplies `c-run-chip <state>` and these rules style

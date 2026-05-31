@@ -261,6 +261,58 @@ describe("TaskTreeNode", () => {
     expect(screen.queryByText("Todo")).not.toBeInTheDocument();
   });
 
+  it("shows a completion ✓ (not a run chip) for a task whose run completed", () => {
+    renderTree([
+      node(
+        withActiveRun(
+          createTask({ title: "Done run" }),
+          "completed",
+          "2025-01-01T00:00:00Z"
+        )
+      ),
+    ]);
+
+    expect(
+      screen.queryByTestId("task-tree-node-run-chip")
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-tree-node-done-mark")).toHaveAttribute(
+      "aria-label",
+      "Completed"
+    );
+  });
+
+  it("shows ⊘ marks for terminal runs: muted for stopped, error-toned for failed", () => {
+    renderTree([
+      node(
+        withActiveRun(
+          createTask({ id: "stopped-task", title: "Stopped run" }),
+          "stopped",
+          "2025-01-01T00:00:00Z"
+        )
+      ),
+      node(
+        withActiveRun(
+          createTask({ id: "failed-task", title: "Failed run" }),
+          "failed",
+          "2025-01-01T00:00:00Z"
+        )
+      ),
+    ]);
+
+    const marks = screen.getAllByTestId("task-tree-node-cancel-mark");
+    expect(marks).toHaveLength(2);
+    const stopped = marks.find(
+      (m) => m.getAttribute("data-run-status") === "stopped"
+    );
+    const failed = marks.find(
+      (m) => m.getAttribute("data-run-status") === "failed"
+    );
+    expect(stopped).toBeDefined();
+    expect(stopped).not.toHaveClass("failed");
+    expect(failed).toHaveClass("failed");
+    expect(failed).toHaveAttribute("aria-label", "Failed");
+  });
+
   it("marks the selected row with aria-selected and a selected data flag", () => {
     const selected = createTask({
       id: "5e1ec7ed-0000-0000-0000-000000000000",
