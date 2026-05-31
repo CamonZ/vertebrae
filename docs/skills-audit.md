@@ -42,8 +42,8 @@ cargo run --quiet -p vertebrae-cli -- manifest print \
 ```
 
 The first command should match the inventory's `Skill file` column. The second
-should match the manifest coverage notes below, including explicit no-hook
-commands such as `start-taskrun`.
+should match the manifest coverage notes below, including shared hooks for
+commands such as `start-taskrun` and `stop-taskrun`.
 
 ## Disposition categories
 
@@ -77,11 +77,10 @@ commands such as `start-taskrun`.
 | `skills/ready/SKILL.md` | `vtb ready` | Command reference | CLI manifest `ready`; `docs/vtb-guide/tasks.md` | keep-generated | Manifest hook exists. |
 | `skills/ref/SKILL.md` | `vtb ref` | Command reference | CLI manifest `ref`; `docs/vtb-guide/references.md` | keep-generated | Manifest hook exists; file-spec rules should match shared parser behavior. |
 | `skills/refs/SKILL.md` | `vtb refs` | Command reference | CLI manifest `refs`; `docs/vtb-guide/references.md` | keep-generated | Manifest hook exists. |
-| `skills/run-workflow/SKILL.md` | `vtb start-taskrun`; `vtb run-workflow` alias | Command reference | CLI manifest `start-taskrun`; `docs/vtb-guide/execution.md` | rewrite | The manifest has no examples hook for `start-taskrun`, but does expose `run-workflow` as a visible alias. Rewrite around the primary command name and treat `run-workflow` as compatibility syntax. |
+| `skills/run-workflow/SKILL.md` | `vtb start-taskrun`; `vtb stop-taskrun`; compatibility aliases | Command reference | CLI manifest `start-taskrun` and `stop-taskrun`; `docs/vtb-guide/execution.md` | rewrite | Manifest hooks map both primary TaskRun commands to this skill. Rewrite around the primary command names and treat `run-workflow`, `stop`, and `stop-workflow` as compatibility syntax. |
 | `skills/run/SKILL.md` | `vtb run` | Command reference | CLI manifest `run`; `docs/vtb-guide/execution.md` | keep-generated | Manifest hook exists; distinguish one-step execution from TaskRun. |
 | `skills/section/SKILL.md` | `vtb section` | Command reference | CLI manifest `section`; manifest section types; `docs/vtb-guide/sections.md` | keep-generated | Manifest hook exists; section type list must be generated from manifest metadata. |
 | `skills/sections/SKILL.md` | `vtb sections` | Command reference | CLI manifest `sections`; manifest section types; `docs/vtb-guide/sections.md` | keep-generated | Manifest hook exists. |
-| `skills/status/SKILL.md` | Status workflow helper | Workflow helper | No manifest command; `docs/vtb-guide/overview.md`; `docs/vtb-guide/daemon.md` | remove | There is no `vtb status` command in the current manifest. Fold useful recovery guidance into `ready`, `vtb-show`, or the overview guide rather than installing a pseudo-command skill. |
 | `skills/step/SKILL.md` | `vtb step ...` | Command family reference | CLI manifest `step` and subcommands; `docs/vtb-guide/steps.md` | keep-generated | Manifest hook exists on the parent command. Regenerate subcommand syntax, especially provider/model flags. |
 | `skills/transition-to/SKILL.md` | `vtb transition-to` | Command reference | CLI manifest `transition-to`; `docs/vtb-guide/workflows.md` | keep-generated | Manifest hook exists; keep the workflow-assignment distinction explicit. |
 | `skills/uncheck-item/SKILL.md` | `vtb uncheck-item` | Command reference | CLI manifest `uncheck-item`; `docs/vtb-guide/tasks.md`; `docs/vtb-guide/sections.md` | keep-generated | Manifest hook exists. |
@@ -96,13 +95,13 @@ commands such as `start-taskrun`.
 
 The current manifest has examples hooks for every `keep-generated` command skill.
 It also includes commands with no standalone skill or examples hook: `daemon`,
-`manifest`, `start-taskrun`, `stop-taskrun`, `unarchive`, and nested
-command-family subcommands. Those can remain documented inside guide pages or
-parent command-family skills unless product onboarding needs a dedicated
-installed skill for them.
+`manifest`, `unarchive`, and nested command-family subcommands. Those can
+remain documented inside guide pages or parent command-family skills unless
+product onboarding needs a dedicated installed skill for them.
 
-`start-taskrun` is the only existing skill topic whose primary command name
-differs from the skill file name. Regeneration should either rename the
-installed skill or rewrite the skill title and examples so the primary command
-is `vtb start-taskrun`, with `vtb run-workflow` treated as compatibility syntax
-because the manifest exposes it as a visible alias.
+`start-taskrun` and `stop-taskrun` are the only retained command topics whose
+primary command names differ from the skill file name. The manifest maps both
+commands to `skills/run-workflow/SKILL.md`; the skill title and examples should
+prefer the primary names while treating `run-workflow`, `stop`, and
+`stop-workflow` as compatibility syntax because the manifest exposes them as
+visible aliases.

@@ -59,7 +59,7 @@ Vertebrae initialized successfully!
   Project name: my-project
   Project ID: bb747fd8-5395-486f-bc8b-24ccd1615e18
   Created new Sacrum project
-  Copied 32 skill(s) to /path/to/project/.claude/skills
+  Copied <N> skill(s) to /path/to/project/.claude/skills
 ```
 
 With `--json`, successful output is a JSON object with `config_path`, `project_slug`, `project_id`, `project_name`, `skills_copied`, `skills_target`, and `project_created`. `skills_target` reports the resolved directory used for the copy.

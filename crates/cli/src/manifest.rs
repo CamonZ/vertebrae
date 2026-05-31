@@ -383,6 +383,7 @@ fn examples_hook(path: &[String]) -> Option<String> {
     if path.len() == 1 {
         let name = match path[0].as_str() {
             "show" => "vtb-show",
+            "start-taskrun" | "stop-taskrun" => "run-workflow",
             other => other,
         };
         let skill_path = format!("skills/{name}/SKILL.md");
@@ -938,6 +939,10 @@ mod tests {
             .find(|cmd| cmd.name == "start-taskrun")
             .expect("start-taskrun command");
         assert_eq!(start_taskrun.visible_aliases, vec!["run-workflow"]);
+        assert_eq!(
+            start_taskrun.examples_hook.as_deref(),
+            Some("skills/run-workflow/SKILL.md")
+        );
 
         let stop_taskrun = manifest
             .commands
@@ -945,6 +950,10 @@ mod tests {
             .find(|cmd| cmd.name == "stop-taskrun")
             .expect("stop-taskrun command");
         assert_eq!(stop_taskrun.visible_aliases, vec!["stop", "stop-workflow"]);
+        assert_eq!(
+            stop_taskrun.examples_hook.as_deref(),
+            Some("skills/run-workflow/SKILL.md")
+        );
 
         let step_add = manifest
             .commands
@@ -1005,6 +1014,17 @@ mod tests {
             .collect();
         assert!(values.contains(&"checklist_item"));
         assert!(!values.contains(&"step"));
+    }
+
+    #[test]
+    fn embedded_skill_set_spot_checks_audited_installable_skills() {
+        assert!(SKILLS_DIR.get_file("add/SKILL.md").is_some());
+        assert!(SKILLS_DIR.get_file("run-workflow/SKILL.md").is_some());
+        assert!(SKILLS_DIR.get_file("gui-dev/SKILL.md").is_some());
+        assert!(
+            SKILLS_DIR.get_file("status/SKILL.md").is_none(),
+            "status is workflow guidance, not an installable command skill"
+        );
     }
 
     #[test]
