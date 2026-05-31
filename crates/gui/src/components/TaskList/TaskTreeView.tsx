@@ -1,9 +1,12 @@
 import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
-import { TaskTreeNode } from "./TaskTreeNode";
+import { SummaryRow, TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
-import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
+import {
+  computeVisibleChildren,
+  computeVisibleRoots,
+} from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useMemo } from "react";
 
@@ -92,7 +95,17 @@ function flattenVisibleNodes(
   { expandedNodes, hideCompleted, filtering, summaryExpanded }: FlattenOptions
 ): TaskTreeNodeType[] {
   const out: TaskTreeNodeType[] = [];
-  const stack = [...nodes].reverse();
+  // Apply the same root-level collapse the render uses so the keyboard cursor
+  // never lands on a folded-away root node (or skips a visible one).
+  const visibleRoots = computeVisibleRoots(nodes, {
+    hideCompleted,
+    filtering,
+    summaryExpanded,
+  });
+  const stack = visibleRoots
+    .filter((child) => child.kind === "node")
+    .map((child) => child.node)
+    .reverse();
 
   while (stack.length > 0) {
     const node = stack.pop()!;
@@ -150,6 +163,16 @@ export function TaskTreeView({
     ]
   );
 
+  const visibleRoots = useMemo(
+    () =>
+      computeVisibleRoots(hierarchy, {
+        hideCompleted,
+        filtering,
+        summaryExpanded: summaryExpandedIds ?? new Set<string>(),
+      }),
+    [hierarchy, hideCompleted, filtering, summaryExpandedIds]
+  );
+
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
       if (!onTaskSelect || !selectedTaskId) return;
@@ -194,19 +217,30 @@ export function TaskTreeView({
   return (
     <div className="tasks-v2-tree">
       <div role="tree" aria-label="Task hierarchy" onKeyDown={handleKeyDown}>
-        {hierarchy.map((node) => (
-          <TaskTreeNode
-            key={node.task.id}
-            node={node}
-            depth={0}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={onTaskSelect}
-            expandedNodes={expandedNodes}
-            hideCompleted={hideCompleted}
-            filtering={filtering}
-            summaryExpanded={summaryExpanded}
-          />
-        ))}
+        {visibleRoots.map((child) =>
+          child.kind === "node" ? (
+            <TaskTreeNode
+              key={child.node.task.id}
+              node={child.node}
+              depth={0}
+              selectedTaskId={selectedTaskId}
+              onTaskSelect={onTaskSelect}
+              expandedNodes={expandedNodes}
+              hideCompleted={hideCompleted}
+              filtering={filtering}
+              summaryExpanded={summaryExpanded}
+            />
+          ) : (
+            <SummaryRow
+              key={`summary-${child.parentId}`}
+              parentId={child.parentId}
+              count={child.count}
+              depth={0}
+              open={summaryExpandedIds?.has(child.parentId) ?? false}
+              onToggle={(parentId) => summaryExpanded?.toggleSummary(parentId)}
+            />
+          )
+        )}
       </div>
     </div>
   );

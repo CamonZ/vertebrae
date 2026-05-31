@@ -4,7 +4,9 @@ import type { TaskTreeNode } from "../types/ui";
 import {
   COLLAPSE_THRESHOLD,
   computeVisibleChildren,
-  isDoneLeaf,
+  computeVisibleRoots,
+  isFullyComplete,
+  ROOT_SUMMARY_KEY,
 } from "./computeVisibleChildren";
 
 function task(overrides?: Partial<Task>): Task {
@@ -52,14 +54,14 @@ const opts = (
   ...over,
 });
 
-describe("isDoneLeaf", () => {
+describe("isFullyComplete", () => {
   it("is true for a completed task with no children", () => {
     expect(
-      isDoneLeaf(node(task({ completed_at: "2025-01-02T00:00:00Z" })))
+      isFullyComplete(node(task({ completed_at: "2025-01-02T00:00:00Z" })))
     ).toBe(true);
   });
 
-  it("is true when the run finished completed", () => {
+  it("is false when the run finished completed but completed_at is unset", () => {
     const t = task({
       run_controls: {
         runnable: false,
@@ -86,18 +88,26 @@ describe("isDoneLeaf", () => {
         },
       },
     });
-    expect(isDoneLeaf(node(t))).toBe(true);
+    expect(isFullyComplete(node(t))).toBe(false);
   });
 
-  it("is false for a completed PARENT (has children)", () => {
+  it("is true for a completed PARENT whose children are all complete", () => {
+    const parent = node(task({ completed_at: "2025-01-02T00:00:00Z" }), [
+      doneLeaf("c1"),
+      doneLeaf("c2"),
+    ]);
+    expect(isFullyComplete(parent)).toBe(true);
+  });
+
+  it("is false for a completed PARENT with an open child", () => {
     const parent = node(task({ completed_at: "2025-01-02T00:00:00Z" }), [
       openLeaf("c1"),
     ]);
-    expect(isDoneLeaf(parent)).toBe(false);
+    expect(isFullyComplete(parent)).toBe(false);
   });
 
   it("is false for an incomplete leaf", () => {
-    expect(isDoneLeaf(openLeaf("x"))).toBe(false);
+    expect(isFullyComplete(openLeaf("x"))).toBe(false);
   });
 });
 
@@ -114,15 +124,15 @@ describe("computeVisibleChildren", () => {
     expect(out.every((c) => c.kind === "node")).toBe(true);
   });
 
-  it("omits done leaves (only) when hideCompleted is on", () => {
-    const doneParent = node(
+  it("omits fully-complete children when hideCompleted is on, keeping ones with open work", () => {
+    const partlyDoneParent = node(
       task({ id: "dp", completed_at: "2025-01-02T00:00:00Z" }),
       [openLeaf("gc")]
     );
     const parent = node(task({ id: "p" }), [
       openLeaf("open"),
       doneLeaf("done1"),
-      doneParent,
+      partlyDoneParent,
     ]);
     const out = computeVisibleChildren(parent, opts({ hideCompleted: true }));
     const ids = out
@@ -130,7 +140,8 @@ describe("computeVisibleChildren", () => {
         (c): c is { kind: "node"; node: TaskTreeNode } => c.kind === "node"
       )
       .map((c) => c.node.task.id);
-    // open leaf and the completed PARENT survive; the done leaf is gone.
+    // The open leaf and the completed-but-not-fully-done parent (it has an open
+    // child) survive; the fully-complete done leaf is gone.
     expect(ids).toEqual(["open", "dp"]);
   });
 
@@ -147,6 +158,25 @@ describe("computeVisibleChildren", () => {
       parentId: "p",
       count: COLLAPSE_THRESHOLD,
     });
+  });
+
+  it("folds fully-complete PARENTS into the summary, not just leaves", () => {
+    // Three completed tickets, each with a completed child task — every one is
+    // fully complete, so all three fold even though none is a leaf.
+    const completedParent = (id: string) =>
+      node(task({ id, completed_at: "2025-01-02T00:00:00Z" }), [
+        doneLeaf(`${id}-child`),
+      ]);
+    const parent = node(task({ id: "epic" }), [
+      openLeaf("open"),
+      completedParent("t0"),
+      completedParent("t1"),
+      completedParent("t2"),
+    ]);
+    const out = computeVisibleChildren(parent, opts());
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({ kind: "node", node: parent.children[0] });
+    expect(out[1]).toEqual({ kind: "summary", parentId: "epic", count: 3 });
   });
 
   it("does NOT collapse fewer than threshold done leaves", () => {
@@ -180,5 +210,47 @@ describe("computeVisibleChildren", () => {
     ]);
     const out = computeVisibleChildren(parent, opts({ hideCompleted: true }));
     expect(out).toHaveLength(0);
+  });
+});
+
+describe("computeVisibleRoots", () => {
+  it("folds >= threshold completed top-level siblings under the root key", () => {
+    const roots = [
+      openLeaf("open"),
+      doneLeaf("r0"),
+      doneLeaf("r1"),
+      doneLeaf("r2"),
+    ];
+    const out = computeVisibleRoots(roots, opts());
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({ kind: "node", node: roots[0] });
+    expect(out[1]).toEqual({
+      kind: "summary",
+      parentId: ROOT_SUMMARY_KEY,
+      count: 3,
+    });
+  });
+
+  it("re-emits the folded roots inline when the root key is expanded", () => {
+    const roots = [doneLeaf("r0"), doneLeaf("r1"), doneLeaf("r2")];
+    const out = computeVisibleRoots(
+      roots,
+      opts({ summaryExpanded: new Set([ROOT_SUMMARY_KEY]) })
+    );
+    expect(out[0]).toEqual({
+      kind: "summary",
+      parentId: ROOT_SUMMARY_KEY,
+      count: 3,
+    });
+    expect(
+      out.slice(1).map((c) => (c.kind === "node" ? c.node.task.id : c.kind))
+    ).toEqual(["r0", "r1", "r2"]);
+  });
+
+  it("does not fold fewer than threshold completed roots", () => {
+    const roots = [doneLeaf("r0"), doneLeaf("r1")];
+    const out = computeVisibleRoots(roots, opts());
+    expect(out).toHaveLength(2);
+    expect(out.every((c) => c.kind === "node")).toBe(true);
   });
 });

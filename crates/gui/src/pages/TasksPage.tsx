@@ -396,13 +396,6 @@ export function TasksPage() {
               summaryExpanded={summaryExpanded}
             />
           </div>
-          <div className="caption-strip">
-            <span className="plate">⊹ tasks · v2</span>
-            <em>
-              {taskCount} visible · {hierarchy.length} root
-              {hierarchy.length === 1 ? "" : "s"}
-            </em>
-          </div>
         </div>
       </div>
 

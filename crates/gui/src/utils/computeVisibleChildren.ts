@@ -1,19 +1,23 @@
 import type { TaskTreeNode } from "../types/ui";
-import { isTaskDone } from "./runState";
 
 /**
- * Fold this many done-leaf children under a single parent into one collapsed
- * summary row. Below the threshold the done leaves render inline as usual.
+ * Fold this many completed sibling children under a single parent into one
+ * collapsed summary row. Below the threshold the completed children render
+ * inline as usual.
  */
 export const COLLAPSE_THRESHOLD = 3;
 
 /**
- * A node is a "done leaf" when it is itself done (per {@link isTaskDone}) and
- * has no children. Done *parents* are never hidden or folded — only terminal
- * leaves participate in hide-done / done-summary behaviour.
+ * A node is "fully complete" when it has a completion timestamp and — for
+ * parents — every descendant is fully complete too. Both childless completed
+ * leaves and completed parents whose entire subtree is done participate in the
+ * hide-done / done-summary collapse. A completed parent with even one open
+ * descendant stays expanded so the unfinished work remains visible.
  */
-export function isDoneLeaf(node: TaskTreeNode): boolean {
-  return node.children.length === 0 && isTaskDone(node.task);
+export function isFullyComplete(node: TaskTreeNode): boolean {
+  return (
+    Boolean(node.task.completed_at) && node.children.every(isFullyComplete)
+  );
 }
 
 /**
@@ -49,53 +53,85 @@ export interface VisibleChildrenOptions {
 }
 
 /**
- * Compute the ordered list of visible children for one expanded parent node.
- *
- * This is the single source of truth shared by both the recursive render
- * (`TaskTreeNode`) and the keyboard-navigation flattener
- * (`flattenVisibleNodes`) so the two can never disagree about which rows are
- * present or in what order.
+ * Stable `summaryExpanded` key for the root-level done summary. Real tasks use
+ * UUID ids, so this sentinel can never collide with a parent id.
+ */
+export const ROOT_SUMMARY_KEY = "__root__";
+
+/**
+ * Core collapse over one set of siblings, keyed by `summaryKey` for the folded
+ * summary row. Shared by {@link computeVisibleChildren} (a parent's children,
+ * keyed by the parent id) and {@link computeVisibleRoots} (the top-level
+ * forest, keyed by {@link ROOT_SUMMARY_KEY}).
  *
  * Rules (matching the Hearth prototype `computeItems`):
- * - While `filtering`, children are returned unchanged.
- * - When `hideCompleted`, done-leaf children are omitted.
- * - Otherwise, when a parent has at least {@link COLLAPSE_THRESHOLD} done-leaf
- *   children, those leaves are folded into a single summary row. The summary's
- *   leaves are re-emitted inline (after the summary row) only when the parent
- *   id appears in `summaryExpanded`.
+ * - While `filtering`, siblings are returned unchanged.
+ * - When `hideCompleted`, fully-complete siblings are omitted.
+ * - Otherwise, when at least {@link COLLAPSE_THRESHOLD} siblings are fully
+ *   complete, those are folded into a single summary row. The folded siblings
+ *   are re-emitted inline (after the summary row) only when `summaryKey`
+ *   appears in `summaryExpanded`.
  */
-export function computeVisibleChildren(
-  node: TaskTreeNode,
+function collapseSiblings(
+  siblings: TaskTreeNode[],
+  summaryKey: string,
   { hideCompleted, filtering, summaryExpanded }: VisibleChildrenOptions
 ): VisibleChild[] {
-  const children = node.children;
   if (filtering) {
-    return children.map((child) => ({ kind: "node", node: child }));
+    return siblings.map((child) => ({ kind: "node", node: child }));
   }
 
-  const doneLeaves = children.filter(isDoneLeaf);
-  const collapse = !hideCompleted && doneLeaves.length >= COLLAPSE_THRESHOLD;
+  const completed = siblings.filter(isFullyComplete);
+  const collapse = !hideCompleted && completed.length >= COLLAPSE_THRESHOLD;
 
   const out: VisibleChild[] = [];
-  for (const child of children) {
-    const leaf = isDoneLeaf(child);
-    if (hideCompleted && leaf) continue;
-    if (collapse && leaf) continue;
+  for (const child of siblings) {
+    const done = isFullyComplete(child);
+    if (hideCompleted && done) continue;
+    if (collapse && done) continue;
     out.push({ kind: "node", node: child });
   }
 
   if (collapse) {
     out.push({
       kind: "summary",
-      parentId: node.task.id,
-      count: doneLeaves.length,
+      parentId: summaryKey,
+      count: completed.length,
     });
-    if (summaryExpanded.has(node.task.id)) {
-      for (const leaf of doneLeaves) {
-        out.push({ kind: "node", node: leaf });
+    if (summaryExpanded.has(summaryKey)) {
+      for (const child of completed) {
+        out.push({ kind: "node", node: child });
       }
     }
   }
 
   return out;
+}
+
+/**
+ * Compute the ordered list of visible children for one expanded parent node.
+ *
+ * This is the single source of truth shared by both the recursive render
+ * (`TaskTreeNode`) and the keyboard-navigation flattener
+ * (`flattenVisibleNodes`) so the two can never disagree about which rows are
+ * present or in what order.
+ */
+export function computeVisibleChildren(
+  node: TaskTreeNode,
+  options: VisibleChildrenOptions
+): VisibleChild[] {
+  return collapseSiblings(node.children, node.task.id, options);
+}
+
+/**
+ * Same collapse, applied to the top-level forest. Without this, fully-complete
+ * top-level items (including children orphaned to the root because their parent
+ * was archived/filtered out of the loaded set) would never fold, since the root
+ * forest does not pass through {@link computeVisibleChildren}.
+ */
+export function computeVisibleRoots(
+  roots: TaskTreeNode[],
+  options: VisibleChildrenOptions
+): VisibleChild[] {
+  return collapseSiblings(roots, ROOT_SUMMARY_KEY, options);
 }

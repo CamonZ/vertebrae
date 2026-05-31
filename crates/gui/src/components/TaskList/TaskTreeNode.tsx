@@ -36,16 +36,23 @@ interface TaskTreeNodeProps {
 /**
  * Terminal-run completion marker shown in the row's chip slot when there is no
  * active run. Mirrors the reference (docs/design/lib/tasks-app.jsx
- * `CompletionMark`): completed → green ✓, stopped → muted ⊘, failed → error ⊘.
+ * `CompletionMark`): done → green ✓, stopped → muted ⊘, failed → error ⊘.
  * Active runs are handled by the RunChip instead, and never-run tasks render
  * nothing.
+ *
+ * `done` is driven purely by `completed_at`: any task with a completion
+ * timestamp shows the ✓, whether or not it has a run. The ⊘ stays keyed off
+ * the concrete terminal run `status` (a stopped/failed run that never
+ * completed).
  */
 function CompletionMark({
+  done,
   status,
 }: {
+  done: boolean;
   status: TaskRunStatus | null;
 }) {
-  if (status === "completed") {
+  if (done) {
     return (
       <span
         className="done-mark"
@@ -92,7 +99,7 @@ function CompletionMark({
  * clicking it toggles the fold open/closed. Rendered at the same indent depth
  * as the leaves it replaces.
  */
-function SummaryRow({
+export function SummaryRow({
   parentId,
   count,
   depth,
@@ -339,7 +346,10 @@ export function TaskTreeNode({
                 data-run-status={runChip.status ?? undefined}
               />
             ) : (
-              <CompletionMark status={activeRunStatus} />
+              <CompletionMark
+                done={Boolean(task.completed_at)}
+                status={activeRunStatus}
+              />
             )}
           </span>
           <IdChip

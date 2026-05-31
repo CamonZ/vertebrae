@@ -261,11 +261,14 @@ describe("TaskTreeNode", () => {
     expect(screen.queryByText("Todo")).not.toBeInTheDocument();
   });
 
-  it("shows a completion ✓ (not a run chip) for a task whose run completed", () => {
+  it("shows a completion ✓ (not a run chip) for a task with completed_at, even after a completed run", () => {
     renderTree([
       node(
         withActiveRun(
-          createTask({ title: "Done run" }),
+          createTask({
+            title: "Done run",
+            completed_at: "2025-01-01T00:00:00Z",
+          }),
           "completed",
           "2025-01-01T00:00:00Z"
         )
@@ -279,6 +282,36 @@ describe("TaskTreeNode", () => {
       "aria-label",
       "Completed"
     );
+  });
+
+  it("shows a completion ✓ for a task with completed_at and no active run", () => {
+    renderTree([
+      node(
+        createTask({
+          title: "Completed, never ran",
+          completed_at: "2025-01-01T00:00:00Z",
+        })
+      ),
+    ]);
+
+    expect(
+      screen.queryByTestId("task-tree-node-run-chip")
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-tree-node-done-mark")).toHaveAttribute(
+      "aria-label",
+      "Completed"
+    );
+  });
+
+  it("shows no completion mark when completed_at is unset (done step alone is not enough)", () => {
+    renderTree([node(createTask({ title: "Done step", step_name: "done" }))]);
+
+    expect(
+      screen.queryByTestId("task-tree-node-done-mark")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-tree-node-cancel-mark")
+    ).not.toBeInTheDocument();
   });
 
   it("shows ⊘ marks for terminal runs: muted for stopped, error-toned for failed", () => {
@@ -688,5 +721,81 @@ describe("hide-done + done summary controls", () => {
     // "Open A" the next selectable row is the sibling root.
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
     expect(onTaskSelect).toHaveBeenCalledWith(sibling);
+  });
+
+  // Mirrors the production bug: when an archived/filtered-out parent epic is
+  // absent from the loaded set, its completed children are re-parented to the
+  // root by buildTreeFromTasks. Root-level completed siblings must still fold.
+  it("collapses >= 3 completed ROOT-level siblings into a summary row", () => {
+    const hierarchy: TaskTreeNodeType[] = [
+      node(
+        createTask({
+          id: "f0000000-0000-0000-0000-000000000000",
+          title: "Open root",
+        })
+      ),
+      node(doneTask("f0000000-0000-0000-0000-000000000001", "Orphan done one")),
+      node(doneTask("f0000000-0000-0000-0000-000000000002", "Orphan done two")),
+      node(
+        doneTask("f0000000-0000-0000-0000-000000000003", "Orphan done three")
+      ),
+    ];
+
+    render(<Harness hierarchy={hierarchy} />);
+
+    expect(screen.getByTestId("task-tree-summary-row")).toHaveTextContent(
+      "3 completed"
+    );
+    expect(screen.getByText("Open root")).toBeInTheDocument();
+    expect(screen.queryByText("Orphan done one")).not.toBeInTheDocument();
+    expect(screen.queryByText("Orphan done three")).not.toBeInTheDocument();
+  });
+
+  it("toggles the folded ROOT-level done siblings when the summary is clicked", () => {
+    const hierarchy: TaskTreeNodeType[] = [
+      node(doneTask("f1000000-0000-0000-0000-000000000001", "Root done one")),
+      node(doneTask("f1000000-0000-0000-0000-000000000002", "Root done two")),
+      node(doneTask("f1000000-0000-0000-0000-000000000003", "Root done three")),
+    ];
+
+    render(<Harness hierarchy={hierarchy} />);
+
+    const summary = screen.getByTestId("task-tree-summary-row");
+    expect(screen.queryByText("Root done one")).not.toBeInTheDocument();
+
+    fireEvent.click(summary);
+
+    expect(screen.getByText("Root done one")).toBeInTheDocument();
+    expect(screen.getByText("Root done three")).toBeInTheDocument();
+  });
+
+  it("folds a fully-complete ROOT epic (all children done) at the top level", () => {
+    // A completed top-level epic whose entire subtree is done participates in
+    // the root collapse, alongside completed orphan leaves.
+    const completedEpic = node(
+      doneTask("f2000000-0000-0000-0000-000000000000", "Done epic"),
+      [
+        node(doneTask("f2c00000-0000-0000-0000-000000000001", "Done child")),
+        node(doneTask("f2c00000-0000-0000-0000-000000000002", "Done child 2")),
+      ]
+    );
+    const hierarchy: TaskTreeNodeType[] = [
+      completedEpic,
+      node(doneTask("f2000000-0000-0000-0000-000000000003", "Done leaf one")),
+      node(doneTask("f2000000-0000-0000-0000-000000000004", "Done leaf two")),
+    ];
+
+    render(
+      <Harness
+        hierarchy={hierarchy}
+        expandIds={["f2000000-0000-0000-0000-000000000000"]}
+      />
+    );
+
+    expect(screen.getByTestId("task-tree-summary-row")).toHaveTextContent(
+      "3 completed"
+    );
+    expect(screen.queryByText("Done epic")).not.toBeInTheDocument();
+    expect(screen.queryByText("Done child")).not.toBeInTheDocument();
   });
 });
