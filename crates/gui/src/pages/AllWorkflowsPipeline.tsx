@@ -208,7 +208,7 @@ function runningIndicatorForTask(
     case "queued":
       return { label: "Queued", dotClass: "bg-sky-400", pulse: false };
     case "executing":
-      return { label: "Running", dotClass: "bg-success", pulse: false };
+      return { label: "Running", dotClass: "bg-ok", pulse: false };
     case "waiting": {
       const stepType = task.current_step_id
         ? stepTypeById.get(task.current_step_id)
@@ -223,18 +223,18 @@ function runningIndicatorForTask(
       if (stepType === "human_input") {
         return {
           label: "Waiting for human input",
-          dotClass: "bg-warning",
+          dotClass: "bg-warn",
           pulse: false,
         };
       }
       return { label: "Waiting", dotClass: "bg-sky-400", pulse: false };
     }
     case "stopping":
-      return { label: "Stopping", dotClass: "bg-text-muted", pulse: true };
+      return { label: "Stopping", dotClass: "bg-fg-mute", pulse: true };
     default:
       return {
         label: runStatusLabel(status),
-        dotClass: "bg-text-muted",
+        dotClass: "bg-fg-mute",
         pulse: false,
       };
   }
@@ -1093,10 +1093,10 @@ function AllWorkflowsPipelineInner() {
       <div className="flex h-screen items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <div className="relative">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-primary" />
-            <div className="absolute inset-0 animate-pulse rounded-full bg-primary/10" />
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-border border-t-accent" />
+            <div className="absolute inset-0 animate-pulse rounded-full bg-accent/10" />
           </div>
-          <p className="text-sm text-text-muted">Loading workflows...</p>
+          <p className="text-sm text-fg-mute">Loading workflows...</p>
         </div>
       </div>
     );
@@ -1104,14 +1104,14 @@ function AllWorkflowsPipelineInner() {
 
   if (error && pipelineWorkflows.length === 0) {
     return (
-      <div className="m-6 rounded-xl border border-error/30 bg-error/5 p-6">
-        <h2 className="mb-2 text-lg font-semibold text-text-primary">
+      <div className="m-6 rounded-xl border border-err/30 bg-err/5 p-6">
+        <h2 className="mb-2 text-lg font-semibold text-fg">
           Error Loading Workflows
         </h2>
-        <p className="mb-4 font-mono text-sm text-error">{error}</p>
+        <p className="mb-4 font-mono text-sm text-err">{error}</p>
         <button
           onClick={refetch}
-          className="rounded-lg bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-error/90"
+          className="rounded-lg bg-err px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-err/90"
         >
           Try Again
         </button>
@@ -1125,18 +1125,18 @@ function AllWorkflowsPipelineInner() {
         <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
         <div className="relative">
           <div className="mb-6">
-            <h1 className="text-2xl font-bold text-text-primary">
+            <h1 className="text-2xl font-bold text-fg">
               Workflow Pipelines
             </h1>
-            <p className="mt-2 text-sm text-text-muted">
+            <p className="mt-2 text-sm text-fg-mute">
               All workflows visualized as connected pipelines
             </p>
           </div>
-          <div className="flex h-96 items-center justify-center rounded-xl border border-border bg-bg-secondary">
+          <div className="flex h-96 items-center justify-center rounded-xl border border-border bg-bg-1">
             <div className="neural-grid pointer-events-none absolute inset-0 rounded-xl opacity-30" />
             <div className="relative text-center">
               <svg
-                className="mx-auto h-12 w-12 text-text-muted"
+                className="mx-auto h-12 w-12 text-fg-mute"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -1148,10 +1148,10 @@ function AllWorkflowsPipelineInner() {
                   d="M13 10V3L4 14h7v7l9-11h-7z"
                 />
               </svg>
-              <p className="mt-3 text-sm font-medium text-text-primary">
+              <p className="mt-3 text-sm font-medium text-fg">
                 No workflows yet
               </p>
-              <p className="mt-1 text-xs text-text-muted">
+              <p className="mt-1 text-xs text-fg-mute">
                 Create a workflow to get started
               </p>
             </div>
@@ -1162,7 +1162,7 @@ function AllWorkflowsPipelineInner() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 bg-bg-primary">
+    <div className="flex min-h-0 flex-1 bg-bg">
       <WorkflowRail
         rows={filteredWorkflowRailRows}
         totalCount={workflowRailRows.length}
@@ -1172,30 +1172,30 @@ function AllWorkflowsPipelineInner() {
         onWorkflowClick={handleWorkflowClick}
       />
       <div className="relative flex-1 flex flex-col overflow-hidden">
-        <div className="relative flex min-h-16 items-center justify-between border-b border-border bg-bg-secondary/80 px-6">
+        <div className="relative flex min-h-16 items-center justify-between border-b border-border bg-bg-1/80 px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-15" />
           <div className="relative min-w-0">
-            <p className="font-mono text-2xs uppercase tracking-wider text-primary">
+            <p className="font-mono text-2xs uppercase tracking-wider text-accent">
               workflow · live canvas
             </p>
-            <h1 className="truncate text-lg font-semibold text-text-primary">
+            <h1 className="truncate text-lg font-semibold text-fg">
               Workflow Pipelines
             </h1>
           </div>
-          <div className="relative flex items-center gap-4 text-xs text-text-muted">
+          <div className="relative flex items-center gap-4 text-xs text-fg-mute">
             <span className="sr-only">
               {pipelineWorkflows.length} workflow
               {pipelineWorkflows.length !== 1 ? "s" : ""} visualized
             </span>
             <span>
-              <b className="text-text-primary">{pipelineWorkflows.length}</b>{" "}
+              <b className="text-fg">{pipelineWorkflows.length}</b>{" "}
               workflows
             </span>
             <span>
-              <b className="text-text-primary">{allSteps.length}</b> steps
+              <b className="text-fg">{allSteps.length}</b> steps
             </span>
             <span>
-              <b className="text-primary">
+              <b className="text-accent">
                 {totalActiveWorkflowRuns}
               </b>{" "}
               active
@@ -1230,7 +1230,7 @@ function AllWorkflowsPipelineInner() {
           >
             <Controls
               showInteractive={false}
-              className="!left-auto !right-4 !top-4 !bottom-auto !rounded-md !border !border-border !bg-bg-elevated/95 !shadow-xl [&_button]:!border-border [&_button]:!bg-bg-secondary [&_button]:!text-text-primary [&_button:hover]:!bg-bg-hover"
+              className="!left-auto !right-4 !top-4 !bottom-auto !rounded-md !border !border-border !bg-bg-2/95 !shadow-xl [&_button]:!border-border [&_button]:!bg-bg-1 [&_button]:!text-fg [&_button:hover]:!bg-bg-hover"
             />
             <Background
               variant={BackgroundVariant.Dots}
@@ -1449,16 +1449,16 @@ function WorkflowRail({
 }) {
   return (
     <aside
-      className="hidden w-80 shrink-0 border-r border-border bg-bg-secondary/75 xl:flex xl:min-h-0 xl:flex-col"
+      className="hidden w-80 shrink-0 border-r border-border bg-bg-1/75 xl:flex xl:min-h-0 xl:flex-col"
       aria-label="Workflow catalog"
     >
       <header className="border-b border-border px-4 py-4">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <p className="font-mono text-2xs uppercase tracking-wider text-primary">
+            <p className="font-mono text-2xs uppercase tracking-wider text-accent">
               catalog
             </p>
-            <h2 className="text-sm font-semibold text-text-primary">
+            <h2 className="text-sm font-semibold text-fg">
               Workflow Rail
             </h2>
           </div>
@@ -1492,11 +1492,11 @@ function WorkflowRail({
             role="button"
             tabIndex={0}
             data-testid="workflow-rail-item"
-            className="cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-primary"
+            className="cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-accent"
           />
         ))}
         {rows.length === 0 && (
-          <div className="rounded-md border border-border bg-bg-primary p-4 text-center text-xs text-text-muted">
+          <div className="rounded-md border border-border bg-bg p-4 text-center text-xs text-fg-mute">
             No workflows match.
           </div>
         )}
@@ -1606,10 +1606,10 @@ function IconButton({
 }) {
   const variantClass =
     variant === "success"
-      ? "text-success hover:bg-success/10 hover:text-success"
+      ? "text-ok hover:bg-ok/10 hover:text-ok"
       : variant === "danger"
-        ? "text-error hover:bg-error/10 hover:text-error"
-        : "text-text-muted hover:bg-bg-secondary hover:text-text-primary";
+        ? "text-err hover:bg-err/10 hover:text-err"
+        : "text-fg-mute hover:bg-bg-1 hover:text-fg";
   return (
     <button
       type="button"
@@ -1620,7 +1620,7 @@ function IconButton({
       disabled={disabled}
       title={label}
       aria-label={label}
-      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-1 focus:ring-primary disabled:cursor-not-allowed disabled:opacity-50 ${variantClass}`}
+      className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors focus:outline-none focus:ring-1 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50 ${variantClass}`}
     >
       {children}
     </button>
@@ -1646,19 +1646,19 @@ function ActiveRunsPanel({
   return (
     <section
       aria-label="Pipeline task launcher"
-      className="pointer-events-auto overflow-hidden rounded-md border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
+      className="pointer-events-auto overflow-hidden rounded-md border border-border bg-bg-2/95 shadow-xl backdrop-blur"
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-success" />
-          <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+          <span className="h-2 w-2 rounded-full bg-ok" />
+          <span className="font-mono text-2xs uppercase tracking-wider text-fg-mute">
             Active runs
           </span>
         </div>
         <div
           role="tablist"
           aria-label="Pipeline task tabs"
-          className="flex rounded-md bg-bg-primary p-0.5"
+          className="flex rounded-md bg-bg p-0.5"
         >
           <button
             type="button"
@@ -1667,8 +1667,8 @@ function ActiveRunsPanel({
             onClick={() => onTabChange("ready")}
             className={`rounded px-2 py-1 text-xs font-medium ${
               activeTab === "ready"
-                ? "bg-bg-tertiary text-text-primary"
-                : "text-text-muted hover:text-text-primary"
+                ? "bg-bg-2 text-fg"
+                : "text-fg-mute hover:text-fg"
             }`}
           >
             Ready <Count value={readyTasks.length} />
@@ -1680,8 +1680,8 @@ function ActiveRunsPanel({
             onClick={() => onTabChange("running")}
             className={`rounded px-2 py-1 text-xs font-medium ${
               activeTab === "running"
-                ? "bg-bg-tertiary text-text-primary"
-                : "text-text-muted hover:text-text-primary"
+                ? "bg-bg-2 text-fg"
+                : "text-fg-mute hover:text-fg"
             }`}
           >
             Running <Count value={items.length} />
@@ -1706,7 +1706,7 @@ function ActiveRunsPanel({
             return (
               <div
                 key={taskRun.id}
-                className="w-[28rem] shrink-0 rounded-md border border-border bg-bg-primary/70"
+                className="w-[28rem] shrink-0 rounded-md border border-border bg-bg/70"
                 data-testid="pipeline-active-run"
                 data-run-status={taskRun.status}
               >
@@ -1721,7 +1721,7 @@ function ActiveRunsPanel({
                 />
                 {childTasks.length > 0 && (
                   <div
-                    className="max-h-28 overflow-y-auto border-t border-border/60 bg-bg-secondary/50 py-1 pl-5 pr-2"
+                    className="max-h-28 overflow-y-auto border-t border-border/60 bg-bg-1/50 py-1 pl-5 pr-2"
                     data-testid="pipeline-active-run-children"
                   >
                     {childTasks.map((childTask) => (
@@ -1775,10 +1775,10 @@ function ActiveRunsPanel({
                           className="shrink-0"
                           testId="pipeline-active-run-child-id"
                         />
-                        <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
+                        <span className="min-w-0 flex-1 truncate text-xs text-fg-soft">
                           {childTask.title}
                         </span>
-                        <span className="flex min-w-0 max-w-40 shrink items-center text-2xs text-text-muted">
+                        <span className="flex min-w-0 max-w-40 shrink items-center text-2xs text-fg-mute">
                           <StatusBadge
                             state={{
                               kind: "workflow",
@@ -1795,7 +1795,7 @@ function ActiveRunsPanel({
             );
           })}
         {tabItems.length === 0 && (
-          <div className="w-full px-3 py-6 text-center text-xs text-text-muted">
+          <div className="w-full px-3 py-6 text-center text-xs text-fg-mute">
             No {activeTab} tasks.
           </div>
         )}
@@ -1824,7 +1824,7 @@ function TaskPanelRow({
   pending?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 px-3 py-2 hover:bg-bg-secondary">
+    <div className="flex items-start justify-between gap-3 px-3 py-2 hover:bg-bg-1">
       <div className="flex min-w-0 flex-1 items-start gap-2">
         <div className="flex shrink-0 items-center gap-1">
           {onTaskStart && (
@@ -1870,7 +1870,7 @@ function TaskPanelRow({
           </IconButton>
         </div>
         <div className="min-w-0 flex-1">
-          <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-text-primary">
+          <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-fg">
             <LevelMark level={task.level} className="h-5 w-4" />
             <span className="min-w-0 truncate">{task.title}</span>
             {(task.workflow_name || task.step_name) && (
@@ -1883,7 +1883,7 @@ function TaskPanelRow({
               />
             )}
           </p>
-          <p className="mt-1 flex min-w-0 items-center text-xs text-text-muted">
+          <p className="mt-1 flex min-w-0 items-center text-xs text-fg-mute">
             <IdentityBadge
               id={task.id}
               kind="task"
@@ -1929,13 +1929,13 @@ function ActiveRunTracePanel({ selection, onClose }: ActiveRunTracePanelProps) {
   return (
     <section
       aria-label="Live task run trace"
-      className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-elevated/95 shadow-xl backdrop-blur"
+      className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-2/95 shadow-xl backdrop-blur"
       data-testid="pipeline-active-run-trace-panel"
       data-run-id={selection.taskRun.id}
     >
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <div className="min-w-0">
-          <p className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase text-text-secondary">
+          <p className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase text-fg-soft">
             Live trace
             <IdentityBadge
               id={selection.taskRun.id}
@@ -1944,14 +1944,14 @@ function ActiveRunTracePanel({ selection, onClose }: ActiveRunTracePanelProps) {
               testId="pipeline-active-run-trace-id"
             />
           </p>
-          <p className="mt-1 truncate text-xs text-text-muted">
+          <p className="mt-1 truncate text-xs text-fg-mute">
             {selection.task.title}
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="rounded px-2 py-1 text-xs text-text-muted hover:bg-bg-secondary hover:text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          className="rounded px-2 py-1 text-xs text-fg-mute hover:bg-bg-1 hover:text-fg focus:outline-none focus:ring-1 focus:ring-accent"
           aria-label="Close live trace"
         >
           Close
@@ -2013,17 +2013,17 @@ function CreateTransitionModal({
       error={error}
       submitButtonText="Create transition"
     >
-      <p className="mb-4 text-xs text-text-muted">
+      <p className="mb-4 text-xs text-fg-mute">
         From{" "}
-        <span className="font-medium text-text-primary">
+        <span className="font-medium text-fg">
           {fromWorkflowName}
         </span>{" "}
         to{" "}
-        <span className="font-medium text-text-primary">{toWorkflowName}</span>
+        <span className="font-medium text-fg">{toWorkflowName}</span>
       </p>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-text-muted">
+        <label className="mb-1 block text-xs font-medium text-fg-mute">
           Label (optional)
         </label>
         <input
@@ -2032,18 +2032,18 @@ function CreateTransitionModal({
           onChange={(e) => onLabelChange(e.target.value)}
           placeholder="e.g. needs review"
           autoFocus
-          className="w-full rounded-md border border-border bg-bg-primary px-2 py-1.5 text-sm text-text-primary outline-none focus:border-primary"
+          className="w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
         />
       </div>
 
       <div className="mt-3">
-        <label className="mb-1 block text-xs font-medium text-text-muted">
+        <label className="mb-1 block text-xs font-medium text-fg-mute">
           Target step (optional)
         </label>
         <select
           value={targetStepId}
           onChange={(e) => onTargetStepChange(e.target.value)}
-          className="w-full rounded-md border border-border bg-bg-primary px-2 py-1.5 text-sm text-text-primary outline-none focus:border-primary"
+          className="w-full rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-fg outline-none focus:border-accent"
         >
           <option value="">First step in target workflow</option>
           {targetSteps.map((step) => (

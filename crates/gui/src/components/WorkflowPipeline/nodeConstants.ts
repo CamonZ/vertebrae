@@ -24,7 +24,7 @@ export const HANDLE_SIZING = {
   heightClass: "!h-3", // 12px (was TaskNode h-2.5, StepNode h-3)
   roundedClass: "!rounded-full",
   borderClass: "!border-2",
-  bgClass: "!bg-bg-primary",
+  bgClass: "!bg-bg",
 } as const;
 
 /**

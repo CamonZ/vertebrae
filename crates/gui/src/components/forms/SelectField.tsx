@@ -164,13 +164,13 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
     const baseSelectClasses = `
       appearance-none
       w-full
-      bg-background-primary
+      bg-bg
       border border-border
-      text-text-primary
+      text-fg
       rounded-md
-      focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:border-transparent
+      focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:border-transparent
       disabled:opacity-50 disabled:cursor-not-allowed
-      ${disabled ? "bg-background-secondary" : ""}
+      ${disabled ? "bg-bg-1" : ""}
       ${className}
     `;
 
@@ -243,7 +243,7 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
           {showArrow && (
             <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
               <svg
-                className={`h-5 w-5 text-text-secondary ${disabled ? "opacity-50" : ""}`}
+                className={`h-5 w-5 text-fg-soft ${disabled ? "opacity-50" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"

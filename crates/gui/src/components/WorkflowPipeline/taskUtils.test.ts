@@ -5,7 +5,7 @@ describe("taskUtils", () => {
   describe("getStatusColor", () => {
     it("returns selected styles when isSelected is true", () => {
       const result = getStatusColor("any_status", true);
-      expect(result).toBe("border-primary bg-primary/20 ring-1 ring-primary/50");
+      expect(result).toBe("border-accent bg-accent/20 ring-1 ring-accent/50");
     });
 
     it("returns in_progress styles", () => {
@@ -15,32 +15,32 @@ describe("taskUtils", () => {
 
     it("returns completed styles", () => {
       const result = getStatusColor("completed", false);
-      expect(result).toBe("border-success/50 bg-success/5");
+      expect(result).toBe("border-ok/50 bg-ok/5");
     });
 
     it("returns done styles (same as completed)", () => {
       const result = getStatusColor("done", false);
-      expect(result).toBe("border-success/50 bg-success/5");
+      expect(result).toBe("border-ok/50 bg-ok/5");
     });
 
     it("returns failed styles", () => {
       const result = getStatusColor("failed", false);
-      expect(result).toBe("border-error bg-error/10");
+      expect(result).toBe("border-err bg-err/10");
     });
 
     it("returns default styles for unknown status", () => {
       const result = getStatusColor("unknown", false);
-      expect(result).toBe("border-border bg-bg-tertiary ring-none");
+      expect(result).toBe("border-border bg-bg-2 ring-none");
     });
 
     it("returns default styles for pending status", () => {
       const result = getStatusColor("pending", false);
-      expect(result).toBe("border-border bg-bg-tertiary ring-none");
+      expect(result).toBe("border-border bg-bg-2 ring-none");
     });
 
     it("prioritizes selected over status", () => {
       const result = getStatusColor("failed", true);
-      expect(result).toBe("border-primary bg-primary/20 ring-1 ring-primary/50");
+      expect(result).toBe("border-accent bg-accent/20 ring-1 ring-accent/50");
     });
   });
 
@@ -76,16 +76,16 @@ describe("taskUtils", () => {
     });
 
     it("returns primary color for ticket", () => {
-      expect(getLevelDotColor("ticket")).toBe("bg-primary");
+      expect(getLevelDotColor("ticket")).toBe("bg-accent");
     });
 
     it("returns secondary color for task", () => {
-      expect(getLevelDotColor("task")).toBe("bg-text-secondary");
+      expect(getLevelDotColor("task")).toBe("bg-fg-soft");
     });
 
     it("returns muted color for unknown level", () => {
       // Cast to any to test the default case
-      expect(getLevelDotColor("unknown" as "epic")).toBe("bg-text-muted");
+      expect(getLevelDotColor("unknown" as "epic")).toBe("bg-fg-mute");
     });
   });
 });

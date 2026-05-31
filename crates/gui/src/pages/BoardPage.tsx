@@ -336,12 +336,12 @@ export function BoardPage() {
       {/* Main board area */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Title + filters bar */}
-        <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg-primary px-6">
+        <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
           <div className="relative flex shrink-0 items-center gap-3">
-            <h1 className="text-sm font-semibold text-text-primary">Board</h1>
+            <h1 className="text-sm font-semibold text-fg">Board</h1>
             {totalFiltered > 0 && (
-              <span className="font-mono text-xs text-text-muted">
+              <span className="font-mono text-xs text-fg-mute">
                 {totalFiltered} task{totalFiltered !== 1 ? "s" : ""}
               </span>
             )}
@@ -355,12 +355,12 @@ export function BoardPage() {
                 placeholder="Search tasks by title or ID..."
                 value={search}
                 onChange={handleSearchChange}
-                className="h-8 w-full rounded-md border border-border bg-bg-tertiary px-3 pl-9 text-sm text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="h-8 w-full rounded-md border border-border bg-bg-2 px-3 pl-9 text-sm text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
                 aria-label="Search tasks by title or ID"
                 data-testid="board-task-search-input"
               />
               <svg
-                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted"
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-mute"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -376,10 +376,10 @@ export function BoardPage() {
             </div>
 
             {/* Level filter */}
-            <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-tertiary/50 px-1">
+            <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-2/50 px-1">
               <label
                 htmlFor="board-level-filter"
-                className="px-2 font-mono text-2xs uppercase tracking-wider text-text-muted"
+                className="px-2 font-mono text-2xs uppercase tracking-wider text-fg-mute"
               >
                 Level
               </label>
@@ -387,7 +387,7 @@ export function BoardPage() {
                 id="board-level-filter"
                 value={levelFilter}
                 onChange={handleLevelChange}
-                className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-fg focus:outline-none focus:ring-2 focus:ring-accent/20"
               >
                 <option value="">All</option>
                 {LEVEL_OPTIONS.map((option) => (
@@ -403,7 +403,7 @@ export function BoardPage() {
               <button
                 type="button"
                 onClick={handleClearFilters}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-tertiary/50 px-3 py-1.5 text-xs text-text-muted transition-all hover:border-error/30 hover:bg-error/10 hover:text-error focus:outline-none focus:ring-2 focus:ring-error/20"
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-2/50 px-3 py-1.5 text-xs text-fg-mute transition-all hover:border-err/30 hover:bg-err/10 hover:text-err focus:outline-none focus:ring-2 focus:ring-err/20"
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -426,25 +426,25 @@ export function BoardPage() {
         </div>
 
         {/* Board content */}
-        <div className="flex-1 overflow-auto bg-bg-primary p-4">
+        <div className="flex-1 overflow-auto bg-bg p-4">
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
-                <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                <p className="text-sm text-text-muted">Loading board...</p>
+                <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                <p className="text-sm text-fg-mute">Loading board...</p>
               </div>
             </div>
           ) : error ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
-                <p className="text-sm text-error">{error}</p>
+                <p className="text-sm text-err">{error}</p>
               </div>
             </div>
           ) : columnOrder.length === 0 ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <svg
-                  className="mx-auto mb-4 h-12 w-12 text-text-muted"
+                  className="mx-auto mb-4 h-12 w-12 text-fg-mute"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -457,10 +457,10 @@ export function BoardPage() {
                     d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
                   />
                 </svg>
-                <p className="text-sm text-text-muted">
+                <p className="text-sm text-fg-mute">
                   No tasks with kanban columns assigned
                 </p>
-                <p className="mt-1 text-xs text-text-muted">
+                <p className="mt-1 text-xs text-fg-mute">
                   Assign workflows with kanban columns to see tasks on the board
                 </p>
               </div>

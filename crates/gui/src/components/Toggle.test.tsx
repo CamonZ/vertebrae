@@ -43,31 +43,31 @@ describe("Toggle", () => {
     it("uses primary color by default when checked", () => {
       render(<Toggle {...defaultProps} checked={true} />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-primary");
+      expect(toggle.className).toContain("bg-accent");
     });
 
     it("uses warning color when activeColor is warning", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="warning" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-warning");
+      expect(toggle.className).toContain("bg-warn");
     });
 
     it("uses success color when activeColor is success", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="success" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-success");
+      expect(toggle.className).toContain("bg-ok");
     });
 
     it("uses error color when activeColor is error", () => {
       render(<Toggle {...defaultProps} checked={true} activeColor="error" />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-error");
+      expect(toggle.className).toContain("bg-err");
     });
 
     it("uses tertiary background when unchecked", () => {
       render(<Toggle {...defaultProps} checked={false} />);
       const toggle = screen.getByRole("switch");
-      expect(toggle.className).toContain("bg-bg-tertiary");
+      expect(toggle.className).toContain("bg-bg-2");
     });
   });
 

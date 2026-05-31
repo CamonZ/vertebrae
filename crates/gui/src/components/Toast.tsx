@@ -48,17 +48,17 @@ export function ToastContainer() {
             key={toast.id}
             className={`
               flex items-center gap-3 px-4 py-3 rounded-lg border
-              shadow-lg backdrop-blur-sm
+              shadow-3 backdrop-blur-sm
               animate-in slide-in-from-right-5 fade-in duration-200
               ${config.bgClass} ${config.borderClass}
             `}
             role="alert"
           >
             <span className={`text-lg ${config.textClass}`}>{config.icon}</span>
-            <span className="text-sm text-text-primary">{toast.message}</span>
+            <span className="text-sm text-fg">{toast.message}</span>
             <button
               onClick={() => removeToast(toast.id)}
-              className="ml-2 text-text-tertiary hover:text-text-primary transition-colors"
+              className="ml-2 text-fg-mute hover:text-fg transition-colors"
               aria-label="Dismiss"
             >
               <span className="text-sm">{"\u2715"}</span>

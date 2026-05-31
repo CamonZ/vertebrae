@@ -14,7 +14,7 @@ export function ExpandCollapseAllButton({
       type="button"
       onClick={onToggle}
       disabled={disabled}
-      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-bg-tertiary/50 px-2 text-xs text-text-muted transition-all hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-40"
+      className="flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-bg-2/50 px-2 text-xs text-fg-mute transition-all hover:text-fg focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:opacity-40"
       aria-label={allExpanded ? "Collapse all" : "Expand all"}
       title={allExpanded ? "Collapse all" : "Expand all"}
     >

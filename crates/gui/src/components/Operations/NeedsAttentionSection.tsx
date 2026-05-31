@@ -43,13 +43,13 @@ export function NeedsAttentionSection({
           return (
             <div
               key={key}
-              className="border-l-2 border-l-error/40 bg-error/5 px-4 py-3"
+              className="border-l-2 border-l-err/40 bg-err/5 px-4 py-3"
               data-testid="attention-item"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-1 items-start gap-3">
                   <svg
-                    className="mt-0.5 h-4 w-4 shrink-0 text-error"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-err"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -63,14 +63,14 @@ export function NeedsAttentionSection({
                     />
                   </svg>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-text-primary">
+                    <p className="text-sm font-medium text-fg">
                       {item.task.title}
-                      <span className="font-normal text-text-secondary">
+                      <span className="font-normal text-fg-soft">
                         {" "}
                         &mdash; orchestration run failed
                       </span>
                     </p>
-                    <p className="mt-0.5 text-xs text-text-muted">
+                    <p className="mt-0.5 text-xs text-fg-mute">
                       {item.task.workflow_name && (
                         <>{item.task.workflow_name} &middot; </>
                       )}
@@ -105,14 +105,14 @@ export function NeedsAttentionSection({
                       <button
                         type="button"
                         onClick={() => onViewLogs?.(item.taskRun!.id!)}
-                        className="rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
+                        className="rounded-md border border-border bg-bg-2 px-2.5 py-1 text-xs text-fg-soft transition-colors hover:bg-bg-hover hover:text-fg"
                       >
                         View Logs
                       </button>
                       <button
                         type="button"
                         onClick={() => onRetry?.(item.task.id)}
-                        className="rounded-md border border-error/30 bg-error/10 px-2.5 py-1 text-xs text-error transition-colors hover:bg-error/20"
+                        className="rounded-md border border-err/30 bg-err/10 px-2.5 py-1 text-xs text-err transition-colors hover:bg-err/20"
                       >
                         Retry
                       </button>

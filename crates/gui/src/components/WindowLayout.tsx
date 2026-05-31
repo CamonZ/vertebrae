@@ -16,7 +16,7 @@ export function WindowLayout({ children }: WindowLayoutProps) {
   useTheme();
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg-primary">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg">
       <GlobalListeners />
       <main
         className="flex min-h-0 flex-1 flex-col overflow-hidden"

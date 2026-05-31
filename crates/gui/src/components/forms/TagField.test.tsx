@@ -369,7 +369,7 @@ describe("TagField", () => {
         />
       );
       const input = screen.getByPlaceholderText("Add a tag and press Enter");
-      expect(input).toHaveClass("border-error");
+      expect(input).toHaveClass("border-err");
     });
 
     it("highlights duplicate tags in error color", () => {

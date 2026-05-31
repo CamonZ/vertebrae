@@ -295,9 +295,9 @@ export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
   switch (chip.tone) {
     case "warning":
       return {
-        bg: "bg-warning/10",
-        text: "text-warning",
-        dot: "bg-warning",
+        bg: "bg-warn/10",
+        text: "text-warn",
+        dot: "bg-warn",
         pulse: false,
       };
     case "info":
@@ -309,30 +309,30 @@ export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
       };
     case "success":
       return {
-        bg: "bg-success/10",
-        text: "text-success",
-        dot: "bg-success",
+        bg: "bg-ok/10",
+        text: "text-ok",
+        dot: "bg-ok",
         pulse: false,
       };
     case "error":
       return {
-        bg: "bg-error/10",
-        text: "text-error",
-        dot: "bg-error",
+        bg: "bg-err/10",
+        text: "text-err",
+        dot: "bg-err",
         pulse: false,
       };
     case "muted":
       return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-muted",
-        dot: "bg-text-muted",
+        bg: "bg-bg-2",
+        text: "text-fg-mute",
+        dot: "bg-fg-mute",
         pulse: chip.status === "stopping",
       };
     default:
       return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-secondary",
-        dot: "bg-text-muted",
+        bg: "bg-bg-2",
+        text: "text-fg-soft",
+        dot: "bg-fg-mute",
         pulse: false,
       };
   }

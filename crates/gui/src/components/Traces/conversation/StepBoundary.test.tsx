@@ -141,7 +141,7 @@ describe("StepBoundary", () => {
     expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
     const callout = screen.getByTestId("step-boundary-threshold-callout");
     expect(callout.getAttribute("data-kind")).toBe("rejection");
-    expect(callout.className).toMatch(/text-error/);
+    expect(callout.className).toMatch(/text-err/);
     expect(callout.textContent).toBe("rejection");
   });
 
@@ -149,7 +149,7 @@ describe("StepBoundary", () => {
     render(<StepBoundary {...baseProps} thresholdKind="approval" />);
     const callout = screen.getByTestId("step-boundary-threshold-callout");
     expect(callout.getAttribute("data-kind")).toBe("approval");
-    expect(callout.className).toMatch(/text-success/);
+    expect(callout.className).toMatch(/text-ok/);
   });
 
   it("humanizes underscores in the threshold callout label", () => {

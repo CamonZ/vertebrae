@@ -72,7 +72,7 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
 
   if (isChecking) {
     return (
-      <div className="flex h-full items-center justify-center text-text-secondary">
+      <div className="flex h-full items-center justify-center text-fg-soft">
         Loading...
       </div>
     );

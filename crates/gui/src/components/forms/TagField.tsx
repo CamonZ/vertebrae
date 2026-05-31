@@ -273,14 +273,14 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
           {/* Tag chips */}
           <div className="flex flex-wrap gap-2 min-h-[40px]">
             {value.length === 0 ? (
-              <span className="text-text-muted text-sm">{emptyText}</span>
+              <span className="text-fg-mute text-sm">{emptyText}</span>
             ) : (
               value.map((tag, index) => (
                 <div
                   key={`${tag}-${index}`}
                   className={`
                     inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm
-                    bg-primary/10 text-primary border border-primary/20
+                    bg-accent/10 text-accent border border-accent/20
                     ${tagClassName || ""}
                   `}
                 >
@@ -288,7 +288,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
                   <button
                     type="button"
                     onClick={() => handleRemoveTag(index)}
-                    className="hover:bg-primary/20 rounded-full p-0.5 transition-colors cursor-pointer"
+                    className="hover:bg-accent/20 rounded-full p-0.5 transition-colors cursor-pointer"
                     aria-label={`Remove tag ${tag}`}
                   >
                     <svg
@@ -313,7 +313,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
 
           {/* Tag count */}
           {showCount && value.length > 0 && (
-            <div className="text-xs text-text-muted">
+            <div className="text-xs text-fg-mute">
               {value.length}{maxTags && `/${maxTags}`} {value.length === 1 ? 'tag' : 'tags'}
             </div>
           )}
@@ -327,7 +327,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
-              className={`input w-full ${displayError ? "border-error" : ""}`}
+              className={`input w-full ${displayError ? "border-err" : ""}`}
               aria-invalid={displayError ? "true" : undefined}
               aria-describedby={displayError ? `${inputId}-error` : undefined}
               disabled={required && hasNoTags}

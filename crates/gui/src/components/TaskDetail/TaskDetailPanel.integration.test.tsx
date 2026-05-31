@@ -180,7 +180,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(textarea).toHaveValue("Test Description for inline editing");
 
       // Should show warning dot (edit indicator)
-      const warningDot = document.querySelector(".bg-warning");
+      const warningDot = document.querySelector(".bg-warn");
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
@@ -209,7 +209,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(input).toHaveValue("tag1, tag2");
 
       // Should show warning dot
-      const warningDot = document.querySelector(".bg-warning");
+      const warningDot = document.querySelector(".bg-warn");
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons

@@ -49,17 +49,17 @@ function WorkflowZoneNodeComponent({
 
   return (
     <div
-      className={`relative rounded-xl bg-bg-secondary/40 transition-all ${isFlashing ? "animate-flash-border" : ""}`}
+      className={`relative rounded-xl bg-bg-1/40 transition-all ${isFlashing ? "animate-flash-border" : ""}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
         border: isWorkflowHighlighted
           ? "2px dashed #ff5c2e"
           : isWorkflowSelected
-            ? "2px solid var(--color-primary)"
+            ? "2px solid var(--color-accent)"
             : "1px solid var(--color-line-strong)",
         boxShadow: isWorkflowSelected
-          ? "0 0 0 1px color-mix(in oklch, var(--color-primary) 35%, transparent), 0 24px 60px rgba(0,0,0,0.28)"
+          ? "0 0 0 1px color-mix(in oklch, var(--color-accent) 35%, transparent), 0 24px 60px rgba(0,0,0,0.28)"
           : "0 18px 44px rgba(0,0,0,0.2)",
       }}
     >
@@ -67,13 +67,13 @@ function WorkflowZoneNodeComponent({
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-accent !border-bg-primary !w-3 !h-3"
+        className="!bg-accent !border-bg !w-3 !h-3"
         style={{ top: "50%" }}
       />
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-accent !border-bg-primary !w-3 !h-3"
+        className="!bg-accent !border-bg !w-3 !h-3"
         style={{ top: "50%" }}
       />
 
@@ -85,30 +85,30 @@ function WorkflowZoneNodeComponent({
             onClick={handleWorkflowClick}
             className={`nodrag nopan cursor-pointer pointer-events-auto text-left text-base font-semibold transition-colors ${
               isWorkflowSelected
-                ? "text-primary"
-                : "text-text-primary hover:text-primary"
+                ? "text-accent"
+                : "text-fg hover:text-accent"
             }`}
           >
             {workflow.name}
           </button>
           {workflow.is_default && (
-            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-primary pointer-events-none">
+            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-accent/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-accent pointer-events-none">
               Default
             </span>
           )}
           {workflow.is_final && (
-            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-warning pointer-events-none">
+            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warn/15 px-2 py-0.5 text-2xs font-medium uppercase tracking-wider text-warn pointer-events-none">
               Final
             </span>
           )}
           {activeCount > 0 && (
-            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 font-mono text-2xs text-success pointer-events-none">
-              <span className="h-1.5 w-1.5 rounded-full bg-success" />
+            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 font-mono text-2xs text-ok pointer-events-none">
+              <span className="h-1.5 w-1.5 rounded-full bg-ok" />
               {activeCount} active
             </span>
           )}
         </div>
-        <div className="mt-1 flex items-center gap-3 text-xs text-text-muted">
+        <div className="mt-1 flex items-center gap-3 text-xs text-fg-mute">
           <ScanIdentifier
             id={workflow.id}
             kind="workflow"
@@ -168,7 +168,7 @@ function WorkflowZoneNodeComponent({
           )}
         </div>
         {workflow.description && (
-          <p className="mt-2 text-sm text-text-secondary line-clamp-2">
+          <p className="mt-2 text-sm text-fg-soft line-clamp-2">
             {workflow.description}
           </p>
         )}

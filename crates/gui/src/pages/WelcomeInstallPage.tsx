@@ -115,11 +115,11 @@ export function WelcomeInstallPage() {
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-bg-secondary p-8"
+      className="flex h-screen w-screen items-center justify-center bg-bg-1 p-8"
       data-testid="welcome-page"
     >
       <div
-        className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg"
+        className="w-full rounded-xl border border-border bg-bg p-8 shadow-3"
         style={{ maxWidth: "640px", minWidth: "400px" }}
       >
         <div className="mb-6 text-center">
@@ -140,7 +140,7 @@ export function WelcomeInstallPage() {
 
         {phase === "loading" && (
           <div
-            className="py-12 text-center text-text-secondary"
+            className="py-12 text-center text-fg-soft"
             data-testid="welcome-loading"
           >
             Checking installation status...
@@ -185,7 +185,7 @@ export function WelcomeInstallPage() {
 
         {phase === "installing" && (
           <div
-            className="mb-4 rounded-lg border border-border bg-bg-tertiary p-3 text-center text-text-secondary"
+            className="mb-4 rounded-lg border border-border bg-bg-2 p-3 text-center text-fg-soft"
             data-testid="welcome-installing"
           >
             Installing components...
@@ -205,7 +205,7 @@ export function WelcomeInstallPage() {
           <button
             onClick={handleCancel}
             disabled={isBusy}
-            className="rounded-lg border border-border bg-bg-tertiary px-4 py-2 text-text-secondary transition-colors hover:border-accent-secondary hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-border bg-bg-2 px-4 py-2 text-fg-soft transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="welcome-cancel"
           >
             Cancel
@@ -213,7 +213,7 @@ export function WelcomeInstallPage() {
           <button
             onClick={handleInstall}
             disabled={installButtonDisabled || nothingToInstall}
-            className="rounded-lg bg-primary px-4 py-2 font-medium text-bg-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-accent px-4 py-2 font-medium text-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             data-testid="welcome-install"
           >
             {phase === "installing" ? "Installing..." : "Install"}
@@ -249,7 +249,7 @@ function ComponentRow({
 }: ComponentRowProps) {
   return (
     <label
-      className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-bg-tertiary p-4 transition-colors hover:border-accent-secondary"
+      className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-bg-2 p-4 transition-colors hover:border-accent"
       data-testid={testId}
     >
       <input
@@ -257,12 +257,12 @@ function ComponentRow({
         checked={checked}
         disabled={disabled || alreadyInstalled}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 h-4 w-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
+        className="mt-1 h-4 w-4 cursor-pointer accent-accent disabled:cursor-not-allowed"
         data-testid={`${testId}-checkbox`}
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-text-primary">{label}</span>
+          <span className="font-medium text-fg">{label}</span>
           {alreadyInstalled && (
             <span
               className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300"
@@ -273,15 +273,15 @@ function ComponentRow({
           )}
           {!alreadyInstalled && onPath && (
             <span
-              className="rounded bg-bg-primary px-2 py-0.5 text-xs text-text-tertiary"
+              className="rounded bg-bg px-2 py-0.5 text-xs text-fg-mute"
               data-testid={`${testId}-on-path`}
             >
               found on PATH
             </span>
           )}
         </div>
-        <div className="mt-1 text-sm text-text-secondary">{description}</div>
-        <div className="mt-2 truncate font-mono text-xs text-text-tertiary">
+        <div className="mt-1 text-sm text-fg-soft">{description}</div>
+        <div className="mt-2 truncate font-mono text-xs text-fg-mute">
           {targetPath}
         </div>
       </div>

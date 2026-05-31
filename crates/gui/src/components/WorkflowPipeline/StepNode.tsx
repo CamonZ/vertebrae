@@ -61,11 +61,11 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       onClick={handleClick}
       data-testid={`step-node-${step.name}`}
       data-step-kind={typeStyle.kind}
-      className={`group relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} rounded-md border bg-bg-tertiary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+      className={`group relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} rounded-md border bg-bg-2 ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-accent text-left ${
         isFlashing ? "animate-flash-border" : ""
       } ${
         isNodeSelected
-          ? "border-primary/50 bg-primary/10 shadow-glow-sm"
+          ? "border-accent/50 bg-accent/10 shadow-glow-sm"
           : "border-border/90 hover:border-border hover:bg-bg-hover"
       }`}
       style={{
@@ -87,14 +87,14 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
 
       {/* Subtle inner glow effect */}
       <div
-        className={`pointer-events-none absolute inset-0 ${NODE_SIZING.borderRadiusClass} from-primary/5 to-transparent`}
+        className={`pointer-events-none absolute inset-0 ${NODE_SIZING.borderRadiusClass} from-accent/5 to-transparent`}
       />
 
       <Handle
         type="target"
         position={Position.Left}
         isConnectable={!isFirst}
-        className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isFirst ? "!opacity-0" : ""}`}
+        className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-accent ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isFirst ? "!opacity-0" : ""}`}
       />
 
       {/* Step header with order badge */}
@@ -104,7 +104,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             className={`flex h-7 w-7 items-center justify-center rounded-md border font-mono text-xs font-bold ${
               isFirst
                 ? "border-accent/30 bg-accent/10 text-accent"
-                : "border-primary/30 bg-primary/10 text-primary"
+                : "border-accent/30 bg-accent/10 text-accent"
             }`}
           >
             {(step.order ?? 0) + 1}
@@ -117,13 +117,13 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3
-              className="text-sm font-semibold text-text-primary truncate"
+              className="text-sm font-semibold text-fg truncate"
               title={step.goal || step.name}
             >
               {step.name}
             </h3>
             {step.is_final && (
-              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
+              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warn/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warn">
                 Final
               </span>
             )}
@@ -131,7 +131,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               data-testid="step-type-icon"
               title={typeStyle.label}
               aria-label={typeStyle.label}
-              className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded border border-border bg-bg-primary px-1 font-mono text-[10px] uppercase"
+              className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded border border-border bg-bg px-1 font-mono text-[10px] uppercase"
               style={{ color: `var(${typeStyle.fgVar})` }}
             >
               {typeStyle.hearthKind}
@@ -140,7 +140,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           {step.goal && (
             <div className="w-2/3">
               <p
-                className="mt-0.5 truncate text-2xs text-text-secondary"
+                className="mt-0.5 truncate text-2xs text-fg-soft"
                 title={step.goal}
               >
                 {step.goal}
@@ -148,7 +148,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             </div>
           )}
           {!step.goal && agentConfig?.model && (
-            <p className="mt-0.5 truncate font-mono text-2xs text-text-muted">
+            <p className="mt-0.5 truncate font-mono text-2xs text-fg-mute">
               {formatAgentModelLabel(agentConfig)}
             </p>
           )}
@@ -180,7 +180,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         )}
         {toolCount > 0 && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-2xs font-medium text-success"
+            className="inline-flex items-center gap-1 rounded-full border border-ok/30 bg-ok/10 px-2 py-0.5 text-2xs font-medium text-ok"
             title={`${toolCount} tool(s) configured`}
           >
             <svg
@@ -207,7 +207,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         )}
         {agentConfig?.permission_mode && (
           <span
-            className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning"
+            className="inline-flex items-center gap-1 rounded-full border border-warn/30 bg-warn/10 px-2 py-0.5 text-2xs font-medium text-warn"
             title={`Permission mode: ${agentConfig.permission_mode}`}
           >
             <svg
@@ -249,7 +249,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </span>
         )}
         {isLast && (
-          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-success">
+          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-ok">
             <svg
               className="h-3 w-3"
               fill="none"
@@ -267,7 +267,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </span>
         )}
         {!isFirst && !isLast && (
-          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-text-muted">
+          <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-fg-mute">
             <svg
               className="h-3 w-3"
               fill="none"
@@ -292,7 +292,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             <div className="ml-auto flex items-center gap-2">
               {taskCounts.epic > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-fg-mute"
                   title={`${taskCounts.epic} epic(s)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-info" />
@@ -301,19 +301,19 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               )}
               {taskCounts.ticket > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-fg-mute"
                   title={`${taskCounts.ticket} ticket(s)`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-primary" />
+                  <span className="w-2 h-2 rounded-full bg-accent" />
                   {taskCounts.ticket}
                 </span>
               )}
               {taskCounts.task > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-text-muted"
+                  className="flex items-center gap-1 text-2xs text-fg-mute"
                   title={`${taskCounts.task} task(s)`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-text-secondary" />
+                  <span className="w-2 h-2 rounded-full bg-fg-soft" />
                   {taskCounts.task}
                 </span>
               )}
@@ -327,34 +327,34 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           executionCounts.completed > 0 ||
           executionCounts.failed > 0) && (
           <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
-            <span className="font-mono text-2xs uppercase tracking-wider text-text-muted">
+            <span className="font-mono text-2xs uppercase tracking-wider text-fg-mute">
               Run
             </span>
             <div className="flex items-center gap-1.5 ml-auto">
               {executionCounts.active > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-success"
+                  className="flex items-center gap-1 text-2xs text-ok"
                   title={`${executionCounts.active} active`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-success" />
+                  <span className="w-2 h-2 rounded-full bg-ok" />
                   {executionCounts.active}
                 </span>
               )}
               {executionCounts.completed > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-success"
+                  className="flex items-center gap-1 text-2xs text-ok"
                   title={`${executionCounts.completed} completed`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-success" />
+                  <span className="w-2 h-2 rounded-full bg-ok" />
                   {executionCounts.completed}
                 </span>
               )}
               {executionCounts.failed > 0 && (
                 <span
-                  className="flex items-center gap-1 text-2xs text-error"
+                  className="flex items-center gap-1 text-2xs text-err"
                   title={`${executionCounts.failed} failed`}
                 >
-                  <span className="w-2 h-2 rounded-full bg-error" />
+                  <span className="w-2 h-2 rounded-full bg-err" />
                   {executionCounts.failed}
                 </span>
               )}
@@ -366,7 +366,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         type="source"
         position={Position.Right}
         isConnectable={!isLast}
-        className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isLast ? "!opacity-0" : ""}`}
+        className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-accent ${HANDLE_SIZING.bgClass} !shadow-glow-sm ${isLast ? "!opacity-0" : ""}`}
       />
     </button>
   );

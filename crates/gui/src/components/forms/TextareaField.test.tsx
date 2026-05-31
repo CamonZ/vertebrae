@@ -168,7 +168,7 @@ describe("TextareaField", () => {
         />
       );
       const textarea = screen.getByRole("textbox");
-      expect(textarea).toHaveClass("border-error");
+      expect(textarea).toHaveClass("border-err");
     });
 
     it("shows error styling when minLength constraint violated", () => {
@@ -181,7 +181,7 @@ describe("TextareaField", () => {
         />
       );
       const textarea = screen.getByRole("textbox");
-      expect(textarea).toHaveClass("border-error");
+      expect(textarea).toHaveClass("border-err");
     });
 
     it("shows error message when minLength constraint violated", () => {
@@ -293,7 +293,7 @@ describe("TextareaField", () => {
         />
       );
       const charCount = screen.getByText("5/500");
-      expect(charCount).toHaveClass("text-text-muted");
+      expect(charCount).toHaveClass("text-fg-mute");
     });
 
     it("shows character count in error color when at or over limit", () => {
@@ -306,7 +306,7 @@ describe("TextareaField", () => {
         />
       );
       const charCount = screen.getByText("31/31");
-      expect(charCount).toHaveClass("text-error");
+      expect(charCount).toHaveClass("text-err");
     });
 
     it("does not show character count when maxLength is not set", () => {

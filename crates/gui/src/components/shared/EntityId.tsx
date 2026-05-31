@@ -116,7 +116,7 @@ function CopyIdButton({ id, label, className }: CopyIdButtonProps): ReactNode {
       onClick={handleCopy}
       onKeyDown={handleKeyDown}
       className={[
-        "inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        "inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-fg-mute transition-colors hover:bg-bg-hover hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent",
         className,
       ]
         .filter(Boolean)
@@ -186,7 +186,7 @@ export function ScanIdentifier({
   copyable,
   level,
 }: BaseEntityIdProps): ReactNode {
-  const textColor = taskLevelColor(kind, level) ?? "text-text-muted";
+  const textColor = taskLevelColor(kind, level) ?? "text-fg-mute";
   return (
     <EntityIdShell
       id={id}
@@ -216,7 +216,7 @@ export function IdentityBadge({
   // The level is conveyed by surrounding affordances (e.g. the tree's level
   // mark), so the badge renders in a single neutral tone rather than a
   // per-level tint. `level` is still used for the accessible label/title.
-  const textColor = "text-text-muted";
+  const textColor = "text-fg-mute";
   return (
     <EntityIdShell
       id={id}
@@ -225,7 +225,7 @@ export function IdentityBadge({
       emptyValue={emptyValue}
       copyable={copyable}
       className={[
-        "rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-2xs",
+        "rounded bg-bg-2 px-1.5 py-0.5 font-mono text-2xs",
         textColor,
         className,
       ]
@@ -247,7 +247,7 @@ export function NavigableReference({
   copyable,
   level,
 }: BaseEntityIdProps): ReactNode {
-  const textColor = taskLevelColor(kind, level) ?? "text-text-secondary";
+  const textColor = taskLevelColor(kind, level) ?? "text-fg-soft";
   return (
     <EntityIdShell
       id={id}
@@ -274,7 +274,7 @@ export function DiagnosticId({
   copyable,
   level,
 }: BaseEntityIdProps): ReactNode {
-  const textColor = taskLevelColor(kind, level) ?? "text-text-primary";
+  const textColor = taskLevelColor(kind, level) ?? "text-fg";
   return (
     <EntityIdShell
       id={id}

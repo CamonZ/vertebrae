@@ -132,7 +132,7 @@ export function Timestamp({
           toggle();
         }
       }}
-      className="text-xs text-text-muted hover:text-primary font-mono cursor-pointer flex-shrink-0 transition-colors"
+      className="text-xs text-fg-mute hover:text-accent font-mono cursor-pointer flex-shrink-0 transition-colors"
       title={
         mode === "absolute"
           ? "Click for differential time"
@@ -249,10 +249,10 @@ export function AssistantMessageBlock({
   return (
     <div
       data-testid="assistant-message"
-      className="py-2 border-l-2 border-primary/40 pl-3"
+      className="py-2 border-l-2 border-accent/40 pl-3"
     >
       <div className="flex items-start gap-2">
-        <span className="font-mono text-2xs uppercase tracking-wider text-primary mt-1">
+        <span className="font-mono text-2xs uppercase tracking-wider text-accent mt-1">
           assistant
         </span>
         <div className="flex-1 min-w-0">
@@ -292,7 +292,7 @@ export function FileEditBlock({
     >
       <div className="flex items-start gap-2">
         <span
-          className={`font-mono text-2xs uppercase tracking-wider mt-1 ${failed ? "text-error" : "text-success"}`}
+          className={`font-mono text-2xs uppercase tracking-wider mt-1 ${failed ? "text-err" : "text-ok"}`}
         >
           {failed ? "patch failed" : "patch"}
         </span>
@@ -313,19 +313,19 @@ export function FileEditBlock({
                   >
                     {change.kind}
                   </span>
-                  <span className="font-mono text-xs text-text-primary truncate">
+                  <span className="font-mono text-xs text-fg truncate">
                     {change.path}
                   </span>
                   {hasDiff && (
                     <span
-                      className={`text-text-muted transition-transform ${isOpen ? "rotate-90" : ""}`}
+                      className={`text-fg-mute transition-transform ${isOpen ? "rotate-90" : ""}`}
                     >
                       <ChevronRightIcon />
                     </span>
                   )}
                 </button>
                 {isOpen && hasDiff && (
-                  <pre className="mt-1 ml-4 p-2 bg-bg-tertiary rounded text-xs font-mono whitespace-pre-wrap break-words">
+                  <pre className="mt-1 ml-4 p-2 bg-bg-2 rounded text-xs font-mono whitespace-pre-wrap break-words">
                     {renderDiffLines(change.diff!)}
                   </pre>
                 )}
@@ -345,35 +345,35 @@ export function FileEditBlock({
 function changeKindClass(kind: string): string {
   switch (kind) {
     case "add":
-      return "text-success";
+      return "text-ok";
     case "delete":
-      return "text-error";
+      return "text-err";
     case "update":
-      return "text-warning";
+      return "text-warn";
     default:
-      return "text-text-muted";
+      return "text-fg-mute";
   }
 }
 
 /**
  * Render a unified diff body with per-line +/- coloring. Recognized line
  * leads:
- *   `+` -> addition (text-success)
- *   `-` -> deletion (text-error)
+ *   `+` -> addition (text-ok)
+ *   `-` -> deletion (text-err)
  *   `@@` -> hunk header (text-info)
  * everything else renders neutral.
  */
 function renderDiffLines(diff: string): ReactNode {
   return diff.split("\n").map((line, i) => {
-    let cls = "text-text-secondary";
+    let cls = "text-fg-soft";
     if (line.startsWith("+++") || line.startsWith("---")) {
-      cls = "text-text-muted";
+      cls = "text-fg-mute";
     } else if (line.startsWith("@@")) {
       cls = "text-info";
     } else if (line.startsWith("+")) {
-      cls = "text-success";
+      cls = "text-ok";
     } else if (line.startsWith("-")) {
-      cls = "text-error";
+      cls = "text-err";
     }
     return (
       <div key={i} className={cls}>
@@ -397,7 +397,7 @@ export function TodoListBlock({
   return (
     <div data-testid="todo-list" data-item-id={event.itemId} className="py-2">
       <div className="flex items-start gap-2">
-        <span className="font-mono text-2xs uppercase tracking-wider text-primary mt-1">
+        <span className="font-mono text-2xs uppercase tracking-wider text-accent mt-1">
           plan
         </span>
         <ul className="flex-1 min-w-0 space-y-0.5">
@@ -408,7 +408,7 @@ export function TodoListBlock({
               data-completed={row.completed}
             >
               <span
-                className={`mt-0.5 flex-shrink-0 ${row.completed ? "text-success" : "text-text-muted"}`}
+                className={`mt-0.5 flex-shrink-0 ${row.completed ? "text-ok" : "text-fg-mute"}`}
                 aria-hidden="true"
               >
                 {row.completed ? "[x]" : "[ ]"}
@@ -416,8 +416,8 @@ export function TodoListBlock({
               <span
                 className={
                   row.completed
-                    ? "text-text-muted line-through"
-                    : "text-text-primary"
+                    ? "text-fg-mute line-through"
+                    : "text-fg"
                 }
               >
                 {row.text}
@@ -439,11 +439,11 @@ export function ToolResult({ event }: { event: ToolResultEvent }) {
     <div className="py-1 ml-8 flex items-start gap-2">
       <EventGlyph
         event={event}
-        tintClassName={event.isError ? "text-error" : "text-success"}
+        tintClassName={event.isError ? "text-err" : "text-ok"}
         className="mt-0.5"
       />
       <span
-        className={`text-xs whitespace-pre-wrap break-words ${event.isError ? "text-error" : "text-text-muted"}`}
+        className={`text-xs whitespace-pre-wrap break-words ${event.isError ? "text-err" : "text-fg-mute"}`}
       >
         {event.result}
       </span>

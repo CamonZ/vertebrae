@@ -51,7 +51,7 @@ describe("MarkdownContent", () => {
       const code = screen.getByText("console.log()");
       expect(code.tagName).toBe("CODE");
       expect(code.className).toContain("font-mono");
-      expect(code.className).toContain("text-primary");
+      expect(code.className).toContain("text-accent");
     });
   });
 
