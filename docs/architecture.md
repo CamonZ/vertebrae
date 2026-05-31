@@ -145,7 +145,7 @@ Binary name: `vtb`
 - Output modes: tree (hierarchical, default), table (flat), JSON (`--json`)
 - At startup: loads Sacrum config, creates `SacrumClient`, builds `VertebraeServices`
 
-See [vtb Guide](vtb-guide.md) for full CLI reference.
+See [vtb Guide](vtb-guide.md) for the CLI guide entrypoint.
 
 ## Daemon (`crates/daemon`)
 
@@ -164,7 +164,7 @@ DaemonSupervisor
 - Resolves the step's `agent_config.provider` to a built-in harness:
   `anthropic` (default) → `claude -p "<prompt>" --output-format stream-json`,
   `openai` → `codex exec --json "<prompt>"`. See
-  [vtb Guide — Provider Selection](vtb-guide.md#provider-selection-anthropic--openai).
+  [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
 - When a step has an `output_schema`, passes it as `--json-schema` (Claude) or
   `--output-schema <path>` (Codex) to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
