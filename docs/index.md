@@ -14,6 +14,7 @@ This index is the source of truth for project documentation entrypoints.
 | [GUI Development](gui-development.md) | Tauri + React development, scripts, frontend state, real-time sync |
 | [Testing](testing.md) | Local test commands, coverage, linting, and acceptance-test constraints |
 | [Git Hooks](git-hooks.md) | Pre-commit hook setup and checks |
+| [Skills Audit](skills-audit.md) | Installed skill inventory, manifest generation policy, and Sacrum parity findings |
 
 ## Fast Paths
 
