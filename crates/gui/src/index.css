@@ -9,9 +9,9 @@
    Copper accent on warm neutrals, serif moments via Newsreader, mono via JetBrains.
    Five step types: execute / eval / route / human_review / wait_for_children.
    Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
-   first, then compatibility aliases for legacy app names and the docs/design v2
-   prototype vocabulary. The production theme owns the values; imported Hearth
-   components should use the v2 aliases only through the adapter below.
+   are the single source of truth and own all values; the docs/design v2 adapter
+   below re-exports them under the compact prototype vocabulary (--bg, --fg,
+   --s-*, --r-*) so v2 React ports can consume the design system directly.
    ============================================================================= */
 
 @theme {
@@ -25,6 +25,9 @@
   --color-bg-2: #221d1a;
   --color-bg-3: #2c2622;
   --color-bg-4: #38312c;
+  /* Hover wash — a faint cream veil over a surface. Real themed token (see the
+     .light override below), not an alias. */
+  --color-bg-hover: rgba(232, 229, 221, 0.04);
 
   /* Text — warm neutral cream, five steps to ghost */
   --color-fg: #e8e5dd;
@@ -152,73 +155,6 @@
   --t-base: 180ms;
   --t-slow: 280ms;
   --t-pulse: 2s;
-
-  /* ---------------------------------------------------------------------------
-     BACKWARDS-COMPAT ALIAS LAYER
-     Maps the old Articulated tokens onto Hearth primitives so existing
-     components keep rendering until they are migrated. Remove an alias only
-     once every reference in components/* is updated.
-     --------------------------------------------------------------------------- */
-
-  /* Backgrounds */
-  --color-bg-primary: var(--color-bg);
-  --color-bg-secondary: var(--color-bg-1);
-  --color-bg-tertiary: var(--color-bg-2);
-  --color-bg-elevated: var(--color-bg-2);
-  --color-bg-hover: rgba(232, 229, 221, 0.04);
-
-  /* Text */
-  --color-text-primary: var(--color-fg);
-  --color-text-secondary: var(--color-fg-soft);
-  --color-text-muted: var(--color-fg-mute);
-  --color-text-accent: var(--color-accent);
-
-  /* Borders */
-  --color-border: var(--color-line);
-  --color-border-subtle: var(--color-line-soft);
-  --color-border-strong: var(--color-line-strong);
-  --color-border-focus: var(--color-accent);
-  --color-border-glow: var(--color-accent-glow);
-
-  /* Primary / accent — the old code uses both names interchangeably */
-  --color-primary: var(--color-accent);
-  --color-primary-hover: var(--color-accent-deep);
-  --color-primary-dim: var(--color-accent-wash);
-  --color-primary-glow: var(--color-accent-glow);
-  --color-accent-hover: var(--color-accent-deep);
-  --color-accent-dim: var(--color-accent-wash);
-
-  /* Secondary — warm neutral */
-  --color-secondary: var(--color-fg-mute);
-
-  /* Status — old `-dim` aliases map to Hearth `-wash` */
-  --color-success: var(--color-ok);
-  --color-success-dim: var(--color-ok-wash);
-  --color-warning: var(--color-warn);
-  --color-warning-dim: var(--color-warn-wash);
-  --color-error: var(--color-err);
-  --color-error-dim: var(--color-err-wash);
-  --color-info-dim: var(--color-info-wash);
-
-  /* Spacing — keep the old t-shirt names alive */
-  --spacing-xs: var(--spacing-1);
-  --spacing-sm: var(--spacing-2);
-  --spacing-md: var(--spacing-4);
-  --spacing-lg: var(--spacing-6);
-  --spacing-xl: var(--spacing-8);
-  --spacing-2xl: var(--spacing-12);
-  --spacing-3xl: var(--spacing-16);
-
-  /* Shadow aliases */
-  --shadow-sm: var(--shadow-1);
-  --shadow-md: var(--shadow-2);
-  --shadow-lg: var(--shadow-3);
-
-  /* Motion aliases */
-  --transition-fast: var(--t-fast);
-  --transition-normal: var(--t-base);
-  --transition-slow: var(--t-slow);
-  --transition-pulse: var(--t-pulse);
 }
 
 /* =============================================================================
@@ -1780,23 +1716,14 @@ body {
 
 /* =============================================================================
    UTILITY OVERRIDES FOR TAILWIND
-   These are kept for direct utility access in JSX. Prefer Tailwind tokens
-   (bg-bg, text-fg, etc.) once components migrate.
+   Hand-written utilities for cases Tailwind does not generate from @theme.
+   `bg-bg-hover` is kept because it sees direct use in JSX; the glow shadows are
+   non-standard composites. Accent color/border utilities (text-accent,
+   bg-accent, bg-accent/10, border-accent, …) are intentionally absent — Tailwind
+   v4 auto-generates them from the --color-accent theme token.
    ============================================================================= */
-.text-text-accent {
-  color: var(--color-accent);
-}
-
 .bg-bg-hover {
   background-color: var(--color-bg-hover);
-}
-
-.bg-bg-elevated {
-  background-color: var(--color-bg-2);
-}
-
-.border-border-subtle {
-  border-color: var(--color-line-soft);
 }
 
 .shadow-glow {
@@ -1805,33 +1732,4 @@ body {
 
 .shadow-glow-sm {
   box-shadow: var(--shadow-glow-sm);
-}
-
-/* Accent color utilities — used by legacy components until they migrate */
-.text-accent {
-  color: var(--color-accent);
-}
-
-.bg-accent {
-  background-color: var(--color-accent);
-}
-
-.bg-accent\/10 {
-  background-color: color-mix(in oklch, var(--color-accent) 10%, transparent);
-}
-
-.bg-accent\/20 {
-  background-color: var(--color-accent-wash);
-}
-
-.border-accent {
-  border-color: var(--color-accent);
-}
-
-.border-accent\/30 {
-  border-color: color-mix(in oklch, var(--color-accent) 30%, transparent);
-}
-
-.shadow-accent-glow {
-  box-shadow: 0 0 20px var(--color-accent-glow);
 }
