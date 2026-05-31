@@ -1620,6 +1620,14 @@ body {
   font-style: italic;
 }
 
+/* Completed titles inside the list lift from --fg-faint back up to the more
+   legible --fg-mute, matching docs/design/tasks-v2.html (.list .t-title.done).
+   The base .t-title.done above stays --fg-faint for completed titles rendered
+   outside the list. */
+.tasks-v2 .list .t-title.done {
+  color: var(--fg-mute);
+}
+
 .tasks-v2 .t-meta {
   margin-top: 1px;
   display: flex;
