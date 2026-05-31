@@ -5,16 +5,13 @@ import { useTask } from "../../hooks/useTask";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
 import { useTaskStore } from "../../stores";
-import { TraceMiniView } from "./TraceMiniView";
 import { DeleteConfirmation } from "../DeleteConfirmation";
-import { ResizablePanel } from "../ResizablePanel";
 import { Spinner } from "../Spinner";
 import { InlineEditField } from "./InlineEditField";
 import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
-import { OpenChatButton } from "../OpenChatButton";
 import {
   deriveRunControlsState,
   deriveHearthStateBreakdown,
@@ -28,24 +25,27 @@ import { formatStepName } from "../../utils/formatStepName";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
-import { Button } from "../atoms/Button";
 import { Text } from "../atoms/Text";
-import { Badge } from "../atoms/Badge";
 import { PanelHeader, ReviewGateBanner } from "../panels";
 import { SectionGroup } from "../molecules/SectionGroup";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
-import { StepBadge } from "../molecules/StepBadge";
 import {
   HeroStatus,
   StateBreakdown,
   StepDot,
 } from "../shared/HearthPrimitives";
 
-/** Canonical uppercase mono eyebrow used for every collapsible section header. */
+/** Canonical uppercase mono eyebrow used for every collapsible section header.
+ * Muted (not accent), matching the reference `.acc-hd .name` (var(--fg-mute)) —
+ * the same tone as the in-section subtitles' parent step. */
 function SectionLabel({ children }: { children: string }) {
   return (
-    <Text variant="eyebrow" color="accent">
+    <Text
+      variant="eyebrow"
+      color="tertiary"
+      style={{ fontSize: "var(--text-2xs)" }}
+    >
       {children}
     </Text>
   );
@@ -53,6 +53,14 @@ function SectionLabel({ children }: { children: string }) {
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
+
+/** Floating detail-panel width: persistence key and clamp bounds (px). */
+const WIDTH_STORAGE_KEY = "task-detail-panel-width";
+const MIN_PANEL_WIDTH = 360;
+const MAX_PANEL_WIDTH = 760;
+const DEFAULT_PANEL_WIDTH = 480;
+/** Keyboard resize step (px) for the drag handle. */
+const RESIZE_STEP = 16;
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -119,17 +127,24 @@ function DetailRow({
   );
 }
 
+/**
+ * Header action button. Icon-only, 28×28, with the Hearth hover affordance
+ * (docs/design components-lib.css `.icon-btn`): transparent at rest, and on
+ * hover a rounded box appears — a faint border plus a `bg-1` fill.
+ */
 function IconButton({
   onClick,
   ariaLabel,
   title,
   testId,
+  disabled = false,
   children,
 }: {
   onClick: () => void;
   ariaLabel: string;
   title?: string;
   testId?: string;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -139,10 +154,39 @@ function IconButton({
       aria-label={ariaLabel}
       title={title}
       data-testid={testId}
-      className="cursor-pointer rounded-[var(--radius-sm)] p-1.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+      disabled={disabled}
+      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent text-[var(--color-fg-mute)] transition-all hover:border-[var(--color-fg-faint)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
     >
       {children}
     </button>
+  );
+}
+
+/** Filled play triangle for the Run action (matches the reference run glyph). */
+function PlayIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+  );
+}
+
+/** Filled square for the Stop action (matches the reference stop glyph). */
+function StopIcon() {
+  return (
+    <svg
+      className="h-3 w-3"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+    </svg>
   );
 }
 
@@ -176,6 +220,50 @@ export function TaskDetailPanel({
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+
+  // Horizontal resize for the floating panel. The panel is right-anchored, so a
+  // drag on its left edge widens it as the cursor moves left. We measure the
+  // panel's fixed right edge from the DOM rather than assuming the inset value.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return DEFAULT_PANEL_WIDTH;
+    const stored = parseInt(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "", 10);
+    return Number.isNaN(stored)
+      ? DEFAULT_PANEL_WIDTH
+      : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, stored));
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
+    }
+  }, [panelWidth]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (event: MouseEvent) => {
+      const rightEdge =
+        panelRef.current?.getBoundingClientRect().right ?? window.innerWidth;
+      setPanelWidth(
+        Math.min(
+          MAX_PANEL_WIDTH,
+          Math.max(MIN_PANEL_WIDTH, rightEdge - event.clientX)
+        )
+      );
+    };
+    const onUp = () => setIsResizing(false);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ew-resize";
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, [isResizing]);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { executions: taskExecutions } = useTaskExecutions(taskId);
   const allTasks = useTaskStore((s) => s.tasks);
@@ -207,6 +295,12 @@ export function TaskDetailPanel({
   const [fetchedLevels, setFetchedLevels] = useState<
     Record<string, Task["level"]>
   >({});
+  // Titles for related tasks (e.g. the parent) fetched alongside their levels
+  // when they aren't already in the store — backs the header "under <parent>"
+  // crumb.
+  const [fetchedTitles, setFetchedTitles] = useState<Record<string, string>>(
+    {}
+  );
   const taskLevelById = useMemo(() => {
     const map = new Map<string, Task["level"]>();
     for (const t of allTasks) map.set(t.id, t.level);
@@ -219,6 +313,16 @@ export function TaskDetailPanel({
     (id: string) => taskLevelById.get(id) ?? null,
     [taskLevelById]
   );
+
+  // Parent title for the header "under <parent>" crumb. Prefer the store, fall
+  // back to the title fetched alongside relation levels above.
+  const parentTitle = useMemo(() => {
+    const pid = taskData?.parent_id;
+    if (!pid) return null;
+    return (
+      allTasks.find((t) => t.id === pid)?.title ?? fetchedTitles[pid] ?? null
+    );
+  }, [taskData?.parent_id, allTasks, fetchedTitles]);
 
   useEffect(() => {
     if (!taskData) return;
@@ -236,15 +340,21 @@ export function TaskDetailPanel({
       missing.map(async (id) => {
         const result = await commands.getTask(id);
         return result.status === "ok"
-          ? ([id, result.data.level] as const)
+          ? ([id, result.data.level, result.data.title] as const)
           : null;
       })
     ).then((entries) => {
       if (cancelled) return;
-      const updates: Record<string, Task["level"]> = {};
-      for (const entry of entries) if (entry) updates[entry[0]] = entry[1];
-      if (Object.keys(updates).length > 0) {
-        setFetchedLevels((prev) => ({ ...prev, ...updates }));
+      const levelUpdates: Record<string, Task["level"]> = {};
+      const titleUpdates: Record<string, string> = {};
+      for (const entry of entries) {
+        if (!entry) continue;
+        levelUpdates[entry[0]] = entry[1];
+        titleUpdates[entry[0]] = entry[2];
+      }
+      if (Object.keys(levelUpdates).length > 0) {
+        setFetchedLevels((prev) => ({ ...prev, ...levelUpdates }));
+        setFetchedTitles((prev) => ({ ...prev, ...titleUpdates }));
       }
     });
     return () => {
@@ -255,11 +365,6 @@ export function TaskDetailPanel({
   const acceptanceCriteria = useMemo(
     () =>
       (taskData?.sections ?? []).filter((s) => s.type === "testing_criterion"),
-    [taskData?.sections]
-  );
-
-  const checklistItems = useMemo(
-    () => (taskData?.sections ?? []).filter((s) => s.type === "checklist_item"),
     [taskData?.sections]
   );
 
@@ -511,7 +616,6 @@ export function TaskDetailPanel({
   const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
   const childBreakdown = deriveHearthStateBreakdown(children);
   const hasChildBreakdown = hasHearthStateBreakdown(childBreakdown);
-  const isExecuting = runControlsState.hasActiveRun;
   const runWorkflowDisabled = isRunningWorkflow || runControlsState.runDisabled;
   const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
@@ -553,47 +657,48 @@ export function TaskDetailPanel({
   const headerControls = taskData ? (
     <>
       {taskData.workflow_id && !runControlsState.hasActiveRun && (
-        <Button
-          variant="primary"
-          size="sm"
-          data-testid="task-detail-run-button"
+        <IconButton
+          testId="task-detail-run-button"
           onClick={handleRunWorkflow}
           disabled={runWorkflowDisabled}
-          loading={isRunningWorkflow}
-          aria-label="Run entire workflow"
+          ariaLabel="Run entire workflow"
           title="Run the entire workflow for this task"
         >
-          {isRunningWorkflow ? "Running..." : "Run Workflow"}
-        </Button>
+          {isRunningWorkflow ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : (
+            <PlayIcon />
+          )}
+          <span className="sr-only">
+            {isRunningWorkflow ? "Running..." : "Run Workflow"}
+          </span>
+        </IconButton>
       )}
       {shouldShowStopWorkflow && (
-        <Button
-          variant="danger"
-          size="sm"
-          data-testid="task-detail-stop-button"
+        <IconButton
+          testId="task-detail-stop-button"
           onClick={handleStopWorkflow}
           disabled={stopWorkflowDisabled}
-          loading={isStoppingWorkflow}
-          aria-label="Stop running workflow"
+          ariaLabel="Stop running workflow"
           title={
             runControlsState.isStopping
               ? "Cancel the in-flight stop request"
               : "Stop the running orchestrator for this task"
           }
         >
-          {isStoppingWorkflow
-            ? "Stopping..."
-            : runControlsState.isStopping
-              ? "Cancel orchestration"
-              : "Stop"}
-        </Button>
-      )}
-      {taskData.id && (
-        <OpenChatButton
-          scope="task"
-          entityId={taskData.id}
-          label={taskData.title}
-        />
+          {isStoppingWorkflow ? (
+            <Spinner className="h-3.5 w-3.5" />
+          ) : (
+            <StopIcon />
+          )}
+          <span className="sr-only">
+            {isStoppingWorkflow
+              ? "Stopping..."
+              : runControlsState.isStopping
+                ? "Cancel orchestration"
+                : "Stop"}
+          </span>
+        </IconButton>
       )}
       <IconButton
         onClick={openDeleteDialog}
@@ -616,6 +721,9 @@ export function TaskDetailPanel({
           />
         </svg>
       </IconButton>
+      {(onDetach || onClose) && (
+        <span className="t-action-sep" aria-hidden="true" />
+      )}
       {onDetach && (
         <IconButton
           onClick={onDetach}
@@ -725,23 +833,43 @@ export function TaskDetailPanel({
         level={taskData.level}
         testId="task-detail-id"
       />
-      {(taskData.workflow_name || taskData.step_name) && (
-        <span
-          data-testid="status-badge"
-          className={`inline-flex rounded-[var(--radius-sm)] ${isExecuting ? "animate-pulse-glow" : ""}`}
-        >
-          {taskData.workflow_name ? (
-            <StatusBadge
-              state={{
-                kind: "workflow",
-                workflow: taskData.workflow_name,
-                step: taskData.step_name ?? "",
-              }}
-            />
-          ) : (
-            <StepBadge stepName={taskData.step_name} />
-          )}
-        </span>
+      {/* Crumb line, per docs/design tasks-v2 detail header (`.dh-crumb`):
+          "<id> · <level> · under <parent>". The run/step status lives in the
+          hero below, so it isn't repeated here. */}
+      <span
+        aria-hidden
+        className="font-mono text-2xs text-[var(--color-fg-faint)]"
+      >
+        ·
+      </span>
+      <span
+        data-testid="task-detail-level"
+        className="font-mono text-2xs text-[var(--color-fg-faint)]"
+      >
+        {taskData.level}
+      </span>
+      {taskData.parent_id && parentTitle && (
+        <>
+          <span
+            aria-hidden
+            className="font-mono text-2xs text-[var(--color-fg-faint)]"
+          >
+            ·
+          </span>
+          <span className="font-mono text-2xs text-[var(--color-fg-faint)]">
+            under{" "}
+            <button
+              type="button"
+              data-testid="task-detail-parent-link"
+              onClick={() =>
+                taskData.parent_id && onTaskSelect?.(taskData.parent_id)
+              }
+              className="cursor-pointer font-serif text-xs italic text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg)]"
+            >
+              {parentTitle}
+            </button>
+          </span>
+        </>
       )}
       {priorityStyles && (
         <span
@@ -766,68 +894,73 @@ export function TaskDetailPanel({
 
   const content = (
     <div className="tasks-v2-detail-shell">
-      <PanelHeader
-        title={headerTitle}
-        metadata={headerMetadata}
-        controls={headerControls}
-        className="t-detail-head"
-      />
+      {/* Header block: title + crumb + hero status read as one accent-tinted
+          band with a gradient accent line at the bottom, per docs/design
+          tasks-v2.html `.t-detail-head` (the hero lives inside the head). */}
+      <div className="t-detail-head">
+        <PanelHeader
+          title={headerTitle}
+          metadata={headerMetadata}
+          controls={headerControls}
+          className="t-detail-head-bar"
+        />
+
+        {taskData && !isLoading && !error && (
+          <div
+            className="t-detail-hero"
+            data-testid="task-detail-hero"
+            data-hero-state={heroStatus ?? "idle"}
+          >
+            <HeroStatus
+              status={heroStatus}
+              label={
+                heroStatus ? (
+                  heroLabel
+                ) : (
+                  <span data-testid="task-detail-hero-idle-label">
+                    No active run
+                  </span>
+                )
+              }
+              step={{
+                kind: null,
+                label: formatStepName(taskData.step_name, "Unassigned"),
+              }}
+              finished={
+                taskData.completed_at
+                  ? `completed ${formatDateTime(taskData.completed_at)}`
+                  : undefined
+              }
+              right={
+                children.length > 0 ? (
+                  <span className="font-mono text-2xs text-[var(--color-fg-faint)]">
+                    {children.length} child{children.length === 1 ? "" : "ren"}
+                  </span>
+                ) : null
+              }
+            >
+              {hasChildBreakdown && (
+                <div className="mt-2">
+                  <StateBreakdown {...childBreakdown} />
+                </div>
+              )}
+              {children.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  {children.slice(0, 18).map((childTask) => (
+                    <span key={childTask.id} title={childTask.title}>
+                      <StepDot
+                        variant={hearthBreakdownVariantForTask(childTask)}
+                      />
+                    </span>
+                  ))}
+                </div>
+              )}
+            </HeroStatus>
+          </div>
+        )}
+      </div>
 
       {deleteConfirmation}
-
-      {taskData && !isLoading && !error && (
-        <div
-          className="t-detail-hero border-b border-[var(--color-line)] bg-[var(--color-bg)] px-4 py-3"
-          data-testid="task-detail-hero"
-          data-hero-state={heroStatus ?? "idle"}
-        >
-          <HeroStatus
-            status={heroStatus}
-            label={
-              heroStatus ? (
-                heroLabel
-              ) : (
-                <span data-testid="task-detail-hero-idle-label">
-                  No active run
-                </span>
-              )
-            }
-            step={{
-              kind: null,
-              label: formatStepName(taskData.step_name, "Unassigned"),
-            }}
-            finished={
-              taskData.completed_at
-                ? `completed ${formatDateTime(taskData.completed_at)}`
-                : undefined
-            }
-            right={
-              children.length > 0 ? (
-                <span className="font-mono text-2xs text-[var(--color-fg-faint)]">
-                  {children.length} child{children.length === 1 ? "" : "ren"}
-                </span>
-              ) : null
-            }
-          >
-            {hasChildBreakdown && (
-              <div className="mt-2">
-                <StateBreakdown {...childBreakdown} />
-              </div>
-            )}
-            {children.length > 0 && (
-              <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                {children.slice(0, 18).map((childTask) => (
-                  <span key={childTask.id} title={childTask.title}>
-                    <StepDot
-                      variant={hearthBreakdownVariantForTask(childTask)}
-                    />
-                  </span>
-                ))}
-              </div>
-            )}
-          </HeroStatus>
-        </div>
-      )}
 
       {workflowError && (
         <div
@@ -878,35 +1011,6 @@ export function TaskDetailPanel({
 
       {taskData && !isLoading && !error && (
         <div className="t-detail-body flex-1 overflow-auto">
-          {taskData.rejection_reason && (
-            <div className="mx-4 mt-3 rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] p-3">
-              <div className="flex items-start gap-2">
-                <svg
-                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-[var(--color-err)]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                  />
-                </svg>
-                <div className="min-w-0">
-                  <h4 className="text-xs font-semibold text-[var(--color-err)]">
-                    Rejection Reason
-                  </h4>
-                  <p className="mt-0.5 whitespace-pre-wrap text-xs text-[var(--color-fg-soft)]">
-                    {taskData.rejection_reason}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
           {isPendingReview && (
             <ReviewGateBanner
               title={`"${taskData.title}" is waiting on your review`}
@@ -927,107 +1031,6 @@ export function TaskDetailPanel({
             </div>
           )}
 
-          <div className="tasks-v2-criteria mt-3 border-t border-[var(--color-line)]">
-            <div className="flex items-center justify-between px-4 pt-4 pb-2">
-              <div className="flex items-center gap-2">
-                <svg
-                  className="h-4 w-4 text-[var(--color-ok)]"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                <Text variant="eyebrow" color="accent" as="h3">
-                  Test Criteria
-                </Text>
-              </div>
-              <Badge count={acceptanceCriteria.length} intent="neutral" />
-            </div>
-            <AcceptanceCriteria
-              criteria={acceptanceCriteria}
-              taskId={taskData.id}
-              onSectionsChanged={refetch}
-            />
-          </div>
-
-          <SectionGroup
-            className="accordion"
-            label={<SectionLabel>Progress</SectionLabel>}
-            defaultOpen
-            testId="progress-section"
-            ariaLabel="Toggle Progress section"
-            count={
-              checklistItems.length > 0
-                ? `${checklistItems.filter((c) => c.done).length}/${checklistItems.length}`
-                : undefined
-            }
-          >
-            {checklistItems.length > 0 && (
-              <div className="space-y-1 pb-2">
-                {[...checklistItems]
-                  .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-                  .map((item, i) => (
-                    <div
-                      key={`checklist-${item.order ?? i}`}
-                      className="flex items-start gap-2 py-1"
-                    >
-                      <span
-                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-2xs ${
-                          item.done
-                            ? "bg-[var(--color-ok-wash)] text-[var(--color-ok)]"
-                            : "bg-[var(--color-bg-2)] text-[var(--color-fg-mute)]"
-                        }`}
-                      >
-                        {item.done ? (
-                          <svg
-                            className="h-2.5 w-2.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={3}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        ) : (
-                          <span className="font-mono">
-                            {(item.order ?? i) + 1}
-                          </span>
-                        )}
-                      </span>
-                      <span
-                        className={`text-xs leading-relaxed ${
-                          item.done
-                            ? "text-[var(--color-fg-mute)] line-through"
-                            : "text-[var(--color-fg-soft)]"
-                        }`}
-                      >
-                        {item.content}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
-            {taskData.id && (
-              <TraceMiniView
-                taskId={taskData.id}
-                workflowName={taskData.workflow_name}
-                stepName={taskData.step_name}
-              />
-            )}
-          </SectionGroup>
-
           <SectionGroup
             className="accordion"
             label={<SectionLabel>Spec</SectionLabel>}
@@ -1041,6 +1044,21 @@ export function TaskDetailPanel({
               onDescriptionChange={async (value) => {
                 await onUpdateField("description", value);
               }}
+            />
+          </SectionGroup>
+
+          <SectionGroup
+            className="accordion"
+            label={<SectionLabel>Test Criteria</SectionLabel>}
+            defaultOpen={acceptanceCriteria.length > 0}
+            testId="criteria-section"
+            ariaLabel="Toggle Test Criteria section"
+            count={acceptanceCriteria.length}
+          >
+            <AcceptanceCriteria
+              criteria={acceptanceCriteria}
+              taskId={taskData.id}
+              onSectionsChanged={refetch}
             />
           </SectionGroup>
 
@@ -1185,11 +1203,10 @@ export function TaskDetailPanel({
                             handleFieldSave("level");
                           }}
                           disabled={isSubmitting}
-                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors ${
-                            editValues.level === level
+                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors ${editValues.level === level
                               ? "bg-[var(--color-accent)] text-[var(--color-bg)]"
                               : "border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
-                          } disabled:cursor-not-allowed disabled:opacity-50`}
+                            } disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                           {level.charAt(0).toUpperCase() + level.slice(1)}
                         </button>
@@ -1208,7 +1225,7 @@ export function TaskDetailPanel({
                   >
                     {taskData.level
                       ? taskData.level.charAt(0).toUpperCase() +
-                        taskData.level.slice(1)
+                      taskData.level.slice(1)
                       : "Unknown"}
                   </p>
                 )}
@@ -1273,26 +1290,56 @@ export function TaskDetailPanel({
   );
 
   if (standalone) {
+    // Pop-out window: same floating-glass surface as the docked panel, but
+    // inset on all sides so it floats within — and grows with — its resizable
+    // window instead of being capped at the docked column width.
     return (
       <div
-        className="tasks-v2 detail relative flex h-full w-full flex-col bg-[var(--color-bg)]"
+        className="tasks-v2 detail detail-standalone"
         data-testid="task-detail-panel-standalone"
       >
+        <div data-tauri-drag-region className="detail-drag-strip" />
         {content}
       </div>
     );
   }
 
+  // Floating glass overlay (mirrors the chat / Design inspector), per
+  // docs/design/tasks-v2.html `.detail`: a fixed, full-height translucent
+  // surface that floats over the full-width list. Closeable via the header X
+  // and horizontally resizable via the left-edge handle (kept inside the panel
+  // so the rounded, overflow-clipped surface doesn't hide it).
   return (
-    <ResizablePanel
-      storageKey="task-detail-panel-width"
-      defaultWidth={420}
-      minWidth={360}
-      maxWidth={520}
-      glowColor="from-accent/0 via-accent/30 to-accent/0"
-      className="tasks-v2 detail"
+    <div
+      ref={panelRef}
+      className="tasks-v2 detail detail-float"
+      style={{ width: `${panelWidth}px` }}
+      data-testid="task-detail-panel"
     >
+      <div
+        className="detail-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panel"
+        aria-valuenow={panelWidth}
+        aria-valuemin={MIN_PANEL_WIDTH}
+        aria-valuemax={MAX_PANEL_WIDTH}
+        tabIndex={0}
+        data-resizing={isResizing || undefined}
+        data-testid="task-detail-resize-handle"
+        onMouseDown={(event) => {
+          event.preventDefault();
+          setIsResizing(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            setPanelWidth((w) => Math.min(MAX_PANEL_WIDTH, w + RESIZE_STEP));
+          } else if (event.key === "ArrowRight") {
+            setPanelWidth((w) => Math.max(MIN_PANEL_WIDTH, w - RESIZE_STEP));
+          }
+        }}
+      />
       {content}
-    </ResizablePanel>
+    </div>
   );
 }
