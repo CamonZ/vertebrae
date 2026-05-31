@@ -119,6 +119,9 @@ vi.mock("../../bindings", () => ({
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
     toggleChecklistItemDone: vi.fn(),
+    // Relation levels/titles are looked up from the store in tests; this stub
+    // just keeps the fallback fetch from throwing when a relation isn't seeded.
+    getTask: vi.fn(async () => ({ status: "error", error: "not mocked" })),
   },
   events: {
     taskChangedEvent: {
@@ -168,13 +171,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Header", () => {
-    it("displays workflow -> step breadcrumb when task has workflow", () => {
+    it("shows the current step in the hero status", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      // "Implementation" + "In progress" appear both in the header breadcrumb
-      // and inside TraceMiniView (both via the shared StepBadge formatting) —
-      // assert presence rather than uniqueness.
-      expect(screen.getAllByText("Implementation").length).toBeGreaterThan(0);
+      // The workflow name is no longer surfaced in the panel; the step appears
+      // in the hero status band (formatStepName("in_progress") -> "In progress").
       expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
     });
 
@@ -198,19 +199,40 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("status badge does NOT glow purely from step_name=in_progress without an active run", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+    it("renders the level crumb and a clickable 'under <parent>' link", () => {
+      mockTaskOverrides.current = { level: "ticket", parent_id: "parent-1" };
+      useTaskStore
+        .getState()
+        .setTasks([
+          createMockTask({ id: "parent-1", title: "Vertebrae Web App" }),
+        ]);
+      const onTaskSelect = vi.fn();
 
-      const statusBadge = screen.getByTestId("status-badge");
-      expect(statusBadge).toBeInTheDocument();
-      expect(statusBadge.className).not.toContain("animate-pulse-glow");
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onTaskSelect={onTaskSelect}
+        />
+      );
+
+      expect(screen.getByTestId("task-detail-level")).toHaveTextContent(
+        "ticket"
+      );
+      const parentLink = screen.getByTestId("task-detail-parent-link");
+      expect(parentLink).toHaveTextContent("Vertebrae Web App");
+
+      fireEvent.click(parentLink);
+      expect(onTaskSelect).toHaveBeenCalledWith("parent-1");
     });
 
-    it("status badge glows when an active run is executing, regardless of step_name", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+    it("omits the 'under' crumb when the task has no parent", () => {
+      renderWithTaskOverrides({ parent_id: null });
 
-      const statusBadge = screen.getByTestId("status-badge");
-      expect(statusBadge.className).toContain("animate-pulse-glow");
+      expect(screen.getByTestId("task-detail-level")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("task-detail-parent-link")
+      ).not.toBeInTheDocument();
     });
 
     it("renders back button when onBack is provided", () => {
@@ -406,23 +428,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
   });
 
-  describe("Progress section", () => {
-    it("shows checklist items in progress section", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      const progressSection = screen.getByTestId("progress-section");
-      expect(progressSection).toBeInTheDocument();
-      expect(screen.getByText("First step")).toBeInTheDocument();
-      expect(screen.getByText("Second step")).toBeInTheDocument();
-    });
-
-    it("shows checklist progress badge", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      expect(screen.getByText("1/2")).toBeInTheDocument();
-    });
-  });
-
   describe("Collapsible sections", () => {
     it("renders Spec collapsible section", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
@@ -538,10 +543,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const confirmationHeading = screen.getByRole("heading", {
         name: "Delete Task?",
       });
-      // The Test Criteria heading is the first element of the
-      // scrollable body, below the static panel header chrome.
-      const bodyAnchor = screen.getByRole("heading", {
-        name: "Test Criteria",
+      // The Spec section toggle is the first element of the scrollable
+      // body, below the static panel header chrome.
+      const bodyAnchor = screen.getByRole("button", {
+        name: /toggle spec section/i,
       });
 
       expect(

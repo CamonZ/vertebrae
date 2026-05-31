@@ -19,6 +19,9 @@ export interface InlineEditFieldProps {
   allowEmpty?: boolean;
   /** Custom className for the display text */
   displayClassName?: string;
+  /** Padding utility for the display-mode wrapper. Defaults to `p-2` (a roomy
+   *  click target); pass e.g. `p-0` to render flush prose. */
+  displayPadding?: string;
   /** Start in edit mode immediately (useful for add forms) */
   startInEditMode?: boolean;
   /** Callback when cancel is clicked (useful for add forms) */
@@ -54,6 +57,7 @@ export function InlineEditField({
   validate,
   allowEmpty = true,
   displayClassName = '',
+  displayPadding = 'p-2',
   startInEditMode = false,
   onCancel,
   clearOnSave = false,
@@ -279,7 +283,7 @@ export function InlineEditField({
   return (
     <div
       onClick={handleEdit}
-      className={`cursor-pointer rounded p-2 hover:bg-bg-hover transition-colors ${displayClassName}`}
+      className={`cursor-pointer rounded ${displayPadding} hover:bg-bg-hover transition-colors ${displayClassName}`}
       title="Click to edit"
     >
       {!isEmpty && renderDisplay ? (
