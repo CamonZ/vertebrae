@@ -75,8 +75,8 @@ describe("TaskSections", () => {
       // Should show "2" for steps count in the header badge
       const stepsHeader = screen.getByText("Checklist Items").closest("button");
       expect(stepsHeader).toBeInTheDocument();
-      // The count badge is a sibling span
-      expect(stepsHeader?.querySelector(".rounded-full")).toHaveTextContent("2");
+      // The count badge is a sibling span (square Badge atom, mono digits).
+      expect(stepsHeader?.querySelector(".font-mono")).toHaveTextContent("2");
     });
   });
 

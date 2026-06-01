@@ -9,24 +9,23 @@
 <link rel="stylesheet" href="lib/components-lib.css">
 <style>
   html, body { height: 100%; }
-  body { display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-size: var(--text-13); }
   #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
   /* ── Board area ── */
   .board { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
   .board-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-3); }
   .board-head .board-search { flex: 1; max-width: 480px; }
-  .board-head .board-search .search-bar { width: 100%; }
 
   .columns { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(280px, 1fr)); gap: var(--s-3); padding: var(--s-4); overflow-x: auto; }
   .columns::-webkit-scrollbar { height: 8px; }
-  .columns::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 4px; }
+  .columns::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-md); }
 
   .col { display: flex; flex-direction: column; min-height: 0; background: color-mix(in oklch, var(--bg-1) 50%, var(--bg)); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-  .col-head { flex-shrink: 0; padding: var(--s-3) var(--s-4); display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); position: relative; background: var(--bg); }
+  .col-head { flex-shrink: 0; padding: var(--s-3) var(--s-4); display: flex; align-items: center; gap: var(--s-2); border-bottom: 1px solid var(--line); position: relative; background: var(--bg); }
   .col-head .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-ghost); flex-shrink: 0; }
-  .col-head .name { font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-mute); font-weight: 500; }
-  .col-head .count { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg); line-height: 1; padding-right: 2px; }
+  .col-head .name { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-mute); font-weight: 500; }
+  .col-head .count { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--fg); line-height: 1; padding-right: var(--s-0); }
   .col.running .col-head .name, .col.running .col-head .count { color: var(--accent); }
   .col.running .col-head .lamp { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: app-pulse 1.6s ease-in-out infinite; }
   .col.running .col-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, var(--accent), transparent 70%); }
@@ -37,26 +36,17 @@
 
   .col-body { flex: 1; overflow-y: auto; padding: var(--s-3); display: flex; flex-direction: column; gap: var(--s-2); }
   .col-body::-webkit-scrollbar { width: 6px; }
-  .col-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
-  .col-body.empty { align-items: center; justify-content: center; color: var(--fg-faint); font-family: var(--serif); font-style: italic; font-size: 13px; padding: var(--s-6) var(--s-4); }
+  .col-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-sm); }
+  .col-body.empty { align-items: center; justify-content: center; color: var(--fg-faint); font-family: var(--serif); font-style: italic; font-size: var(--text-13); padding: var(--s-6) var(--s-4); }
   /* board cards are clickable */
-  .col-body .board-card { cursor: pointer; transition: all var(--t-fast) var(--ease); }
-  .col-body .board-card:hover { background: var(--bg-1); transform: translateY(-1px); }
-  .col-body .board-card.running:hover { background: linear-gradient(135deg, var(--accent-wash), var(--bg-1) 40%); }
 
-  .add-stub { border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: var(--s-3); text-align: center; color: var(--fg-faint); font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all var(--t-fast) var(--ease); }
+  .add-stub { border: 1px dashed var(--line-strong); border-radius: var(--r-md); padding: var(--s-3); text-align: center; color: var(--fg-faint); font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer; transition: all var(--t-fast) var(--ease); }
   .add-stub:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
 </style>
 </head>
 <body>
 
   <div id="root"></div>
-
-  <button class="theme-toggle" id="hearthThemeToggle" aria-label="Toggle light/dark">
-    <span class="sym">☾</span>
-    <span class="knob"></span>
-    <span class="sym">☀</span>
-  </button>
 
   <script src="tasks-data.js"></script>
 
@@ -69,20 +59,25 @@
   <script type="text/babel" src="lib/lib-primitives.jsx"></script>
   <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
   <script type="text/babel" src="lib/lib-controls.jsx"></script>
+  <script type="text/babel" src="lib/lib-project-switcher.jsx"></script>
+  <script type="text/babel" src="lib/lib-palette.jsx"></script>
+  <script type="text/babel" src="lib/lib-chat.jsx"></script>
+  <script type="text/babel" src="lib/lib-theme.jsx"></script>
   <script type="text/babel" src="lib/lib-shell.jsx"></script>
   <!-- Board app -->
   <script type="text/babel" src="lib/board-app.jsx"></script>
 
   <script>
+    // Anti-flash boot: resolve & apply theme before paint. Full control lives in lib-theme.jsx.
     (function(){
       var key = 'hearth-theme';
       var html = document.documentElement;
-      try { if(localStorage.getItem(key) === 'light') html.classList.add('theme-light'); } catch(e){}
-      var btn = document.getElementById('hearthThemeToggle');
-      btn.addEventListener('click', function(){
-        var isLight = html.classList.toggle('theme-light');
-        try { localStorage.setItem(key, isLight ? 'light' : 'dark'); } catch(e){}
-      });
+      function resolve(p){ return p === 'system'
+        ? ((window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark')
+        : p; }
+      var pref = 'dark';
+      try { pref = localStorage.getItem(key) || 'dark'; } catch(e){}
+      html.classList.toggle('theme-light', resolve(pref) === 'light');
     })();
   </script>
 </body>

@@ -42,8 +42,8 @@
   const Rule = ({ children }) => <span className="rule">{children}</span>;
 
   const SubHead = ({ children, em, mt }) => (
-    <h3 style={{ fontFamily: 'var(--serif)', fontSize: 22, fontStyle: 'italic', fontWeight: 400, color: 'var(--fg)', letterSpacing: '-0.01em', margin: (mt ? 'var(--s-7)' : 'var(--s-6)') + ' 0 var(--s-3)', lineHeight: 1.15 }}>
-      {children}{em ? <em style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-faint)', fontStyle: 'normal', letterSpacing: '0.06em', marginLeft: 8 }}>{em}</em> : null}
+    <h3 style={{ fontFamily: 'var(--serif)', fontSize: 'var(--text-22)', fontStyle: 'italic', fontWeight: 400, color: 'var(--fg)', letterSpacing: '-0.01em', margin: (mt ? 'var(--s-7)' : 'var(--s-6)') + ' 0 var(--s-3)', lineHeight: 1.15 }}>
+      {children}{em ? <em style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)', fontStyle: 'normal', letterSpacing: '0.06em', marginLeft: 8 }}>{em}</em> : null}
     </h3>
   );
 
@@ -72,7 +72,7 @@
         </div>
 
         <SubHead em="semantic anchors" mt>Status</SubHead>
-        <p className="lede" style={{ fontSize: 14, marginBottom: 'var(--s-3)' }}>Four colors fixed by universal meaning — red, green, yellow, blue. Each derives a main / wash / fg family.</p>
+        <p className="lede" style={{ fontSize: 'var(--text-14)', marginBottom: 'var(--s-3)' }}>Four colors fixed by universal meaning — red, green, yellow, blue. Each derives a main / wash / fg family.</p>
         <div className="grid">
           <TokenTriplet base="ok" fg="ok" hue={145} note="status" anchored />
           <TokenTriplet base="warn" fg="warn" hue={75} note="status" anchored />
@@ -81,7 +81,7 @@
         </div>
 
         <SubHead em="workflow position" mt>Step kinds</SubHead>
-        <p className="lede" style={{ fontSize: 14, marginBottom: 'var(--s-3)' }}>Five hues, each ≥30° from its neighbors — chosen for perceptual distinctness.</p>
+        <p className="lede" style={{ fontSize: 'var(--text-14)', marginBottom: 'var(--s-3)' }}>Five hues, each ≥30° from its neighbors — chosen for perceptual distinctness.</p>
         <div className="grid">
           <TokenTriplet base="step-execute" fg="step-execute-fg" hue={285} note="execute" />
           <TokenTriplet base="step-eval" fg="step-eval-fg" hue={200} note="eval" />
@@ -130,7 +130,7 @@
               <RunChip state="completed" label="Completed" force />
               <RunChip state="failed" label="Failed" />
             </>}
-            foot={<><b>Variants:</b> running · waiting · queued · completed · failed · cancelled · stopped. <b>Sizes:</b> default, sm.<br /><Rule>Rule — for terminal states and null, render nothing (the <code style={{ fontFamily: 'var(--mono)', fontSize: 10 }}>force</code> prop overrides for this catalog).</Rule></>} />
+            foot={<><b>Variants:</b> running · waiting · queued · completed · failed · cancelled · stopped. <b>Sizes:</b> default, sm.<br /><Rule>Rule — for terminal states and null, render nothing (the <code style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)' }}>force</code> prop overrides for this catalog).</Rule></>} />
 
           <Card name="IdChip" em="copyable identity"
             desc="Every ID is one of these — never bare text. Hover reveals copy glyph, click flashes green ✓. Try clicking one."
@@ -188,7 +188,7 @@
             desc="Compact horizontal segments. Kind = hue, state = opacity + glow. Five kinds × four states = the entire vocabulary in a 4px ribbon."
             canvasClass="col start" canvasStyle={{ padding: 'var(--s-4)' }}
             canvas={<>
-              <table style={{ borderCollapse: 'collapse', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-faint)', width: '100%' }}>
+              <table style={{ borderCollapse: 'collapse', fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)', width: '100%' }}>
                 <tbody>
                   <tr><td></td>{states.map(s => <td key={s} style={{ padding: '4px 8px', textAlign: 'center' }}>{s}</td>)}</tr>
                   {kinds.map(k => (
@@ -204,7 +204,7 @@
                 </tbody>
               </table>
               <div style={{ marginTop: 'var(--s-4)', width: '100%' }}>
-                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-faint)', marginBottom: 6 }}>Example — running ticket's workflow:</div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)', marginBottom: 6 }}>Example — running ticket's workflow:</div>
                 <Pipeline width={200} height={8} segments={[
                   { kind: 'execute', state: 'completed' }, { kind: 'execute', state: 'completed' },
                   { kind: 'execute', state: 'completed' }, { kind: 'execute', state: 'running' },
@@ -341,7 +341,7 @@
             foot={<><b>Shape strip</b> summarizes step kinds in order. <b>Live count</b> only appears when &gt; 0.</>} />
         </div>
         <div style={{ marginTop: 'var(--s-4)', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-faint)' }}>selected:</span>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-11)', color: 'var(--fg-faint)' }}>selected:</span>
           <IdChip id={selected} />
           <span style={{ marginLeft: 'auto' }}><ViewTabs value={view} onChange={setView} tabs={[
             { id: 'list', label: 'List', icon: 'list' }, { id: 'board', label: 'Board', icon: 'board' },
@@ -610,7 +610,7 @@
             foot={<><b>Live edges</b> use flow @ 1.4s. <b>Wait bars</b> use flow @ 2.4s — slower because waiting is a longer-felt state.</>} />
         </div>
 
-        <div className="ember-callout"><em>One library.</em> Every component in this catalog is a real React component imported from <code style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--accent)' }}>lib/*.jsx</code> — driven by props, interactive where it counts, built on the exact token + class vocabulary the spec defines.</div>
+        <div className="ember-callout"><em>One library.</em> Every component in this catalog is a real React component imported from <code style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-12)', color: 'var(--accent)' }}>lib/*.jsx</code> — driven by props, interactive where it counts, built on the exact token + class vocabulary the spec defines.</div>
       </Section>
     );
   }

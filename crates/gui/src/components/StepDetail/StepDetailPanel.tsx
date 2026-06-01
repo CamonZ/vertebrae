@@ -7,7 +7,6 @@ import { EditableList } from "../EditableList";
 import { ResizablePanel } from "../ResizablePanel";
 import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
-import { OpenChatButton } from "../OpenChatButton";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { LiquidHighlight } from "./LiquidHighlight";
 import { IdentityBadge } from "../shared/EntityId";
@@ -59,7 +58,7 @@ function SectionHeader({ title, count }: { title: string; count?: number }) {
       <Text variant="eyebrow" color="accent" as="h3">
         {title}
       </Text>
-      {count !== undefined && <Badge count={count} intent="neutral" />}
+      {count !== undefined && <Badge count={count} intent="neutral" bordered />}
     </div>
   );
 }
@@ -498,14 +497,6 @@ export function StepDetailPanel({
           </Text>
         </div>
         <div className="flex items-center gap-2">
-          {/* Open Chat button */}
-          {step?.id && (
-            <OpenChatButton
-              scope="step"
-              entityId={step.id}
-              label={step.name}
-            />
-          )}
           {/* Delete button */}
           <IconButton
             onClick={handleShowDeleteConfirmation}

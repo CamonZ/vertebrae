@@ -35,7 +35,7 @@ export function TaskDetailPage() {
   useTasks();
 
   return (
-    <WindowLayout>
+    <WindowLayout transparent>
       <TaskDetailPanel
         taskId={activeTaskId}
         onTaskSelect={setActiveTaskId}

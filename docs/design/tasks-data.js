@@ -143,7 +143,7 @@
         runtime: '7h 36m', when: '11h', priority: 'hi',
         tags: ['live-chat', 'runner', 'gui-contract', 'rehydration', 'jido', 'durability'],
         parent: '2b064abb',
-        children: ['80e1a7b6', 'a904a91e', '23df40d5', 'c794b783', 'c0a5b5e3', '8156c4fb'],
+        children: ['80e1a7b6', 'a904a91e', '23df40d5', 'c794b783', 'c0a5b5e3', '8156c4fb', 'e2f1a7c9'],
         pipeline: [
           { kind: 'execute', state: 'completed' },
           { kind: 'execute', state: 'completed' },
@@ -179,6 +179,8 @@
         runState: 'completed', stepKind: 'execute', when: '7h', parent: '40628099' },
       { id: '8156c4fb', level: 2, title: 'Add end-to-end tests for activity, multi-turn ingress, and restart recovery',
         runState: 'queued', stepKind: 'execute', when: '7h', parent: '40628099' },
+      { id: 'e2f1a7c9', level: 2, title: 'Spike: poll persisted chat_messages as ingress fallback',
+        runState: 'cancelled', stepKind: 'execute', when: '5d', parent: '40628099' },
 
       { id: 'f0546c38', level: 1, title: 'Plumb OpenRouter provider routing through chat inference',
         runState: null, when: '17d', priority: 'lo',

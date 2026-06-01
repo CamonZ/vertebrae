@@ -228,6 +228,22 @@
   --body: var(--text-base);
   --body-sm: var(--text-sm);
   --caption: var(--text-xs);
+  /* Pixel-named type scale — mirror docs/design/tokens.css so the v2 prototype
+     vocabulary stays defined in the production adapter (see
+     styles/hearthTokenAdapter). Where a Hearth rem token has the same size it
+     is aliased; the off-scale sizes carry literal px. */
+  --text-8: 8px;
+  --text-9: 9px;
+  --text-10: var(--text-2xs); /* 10px */
+  --text-11: var(--text-eyebrow); /* 11px */
+  --text-12: var(--text-xs); /* 12px */
+  --text-13: 13px;
+  --text-14: var(--text-sm); /* 14px */
+  --text-15: var(--text-base); /* 15px */
+  --text-16: var(--text-lg); /* 16px */
+  --text-20: var(--text-2xl); /* 20px */
+  --text-22: 22px;
+  --text-40: 40px;
 
   /* Space */
   --s-1: var(--spacing-1);
@@ -243,6 +259,15 @@
   --s-16: var(--spacing-16);
   --s-20: var(--spacing-20);
   --s-24: var(--spacing-24);
+  /* Micro + half-steps and row indents — mirror docs/design/tokens.css. The
+     prototype uses these for hairline insets and task-list indentation; the
+     Hearth primitive scale has no half-steps, so these carry literal px. */
+  --s-0: 2px;
+  --s-1h: 6px;
+  --s-2h: 10px;
+  --s-3h: 14px;
+  --indent-1: calc(var(--s-2h) + var(--s-4)); /* 26px — row pad + glyph + gap */
+  --indent-2: 44px; /* +1 level */
 
   /* Radii, elevation, and motion */
   --r-xs: var(--radius-xs);
@@ -1081,11 +1106,9 @@ html.window-transparent #root {
   border-radius: var(--r-sm);
   background: transparent;
   color: var(--fg-mute);
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  font-weight: 400;
   cursor: pointer;
   transition:
     background var(--t-fast) var(--ease),
@@ -1104,33 +1127,17 @@ html.window-transparent #root {
   border-color: color-mix(in oklch, var(--accent) 30%, transparent);
 }
 
-.tasks-v2 .scope-chip .n {
-  min-width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--r-full);
-  background: var(--bg-2);
-  color: var(--fg-faint);
-  font-size: 10px;
+/* Thin divider that splits the scope chips into groups (Recent | Queued),
+   mirroring docs/design ScopeBar. */
+.tasks-v2 .scope-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--line);
+  margin: 0 6px;
 }
 
-.tasks-v2 .scope-chip.active .n {
-  background: color-mix(in oklch, var(--accent) 25%, var(--bg));
-  color: var(--accent);
-}
-
-.tasks-v2 .scope-chip .pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--r-full);
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-
-/* Right-aligned secondary slot in the scope row (hide-done toggle). */
+/* Right-aligned secondary slot in the scope row (hide-done toggle, level
+   filter, expand-all). */
 .tasks-v2 .scope-secondary {
   display: flex;
   align-items: center;
@@ -1138,35 +1145,85 @@ html.window-transparent #root {
   margin-left: auto;
 }
 
-/* Hide-done header control. Ported from docs/design/tasks-v2.html (lines
-   160-163) with --s-2h -> --s-2 and --text-10 -> --text-2xs token swaps for
-   the live v2 scale. */
-.tasks-v2 .hide-done {
+/* ── Scope-row secondary controls ────────────────────────────────────────────
+   "Hide done", the "All levels" <select>, and "Expand all" wrap three different
+   components: a plain button, the shared Select atom (a 34px sans form row), and
+   the shared ExpandCollapseAllButton (32px, a bg-2 fill, and a *currentColor*
+   border because its `border-border` class maps to an undefined token). Left
+   alone they read as three mismatched widgets. Normalize them into one cohesive
+   header-chip set — 26px tall, transparent, 1px --line-strong, --r-sm, mono
+   --text-2xs, --fg-mute. These rules are unlayered, so they win over the
+   components' own Tailwind utilities. */
+.tasks-v2 .scope-level,
+.tasks-v2 .scope-expand {
   display: inline-flex;
-  align-items: center;
+}
+
+.tasks-v2 .scope-secondary .hide-done,
+.tasks-v2 .scope-level select,
+.tasks-v2 .scope-expand button {
+  height: 26px;
+  padding: 0 var(--s-2);
   gap: var(--s-1);
-  padding: var(--s-1) var(--s-2);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
   font-family: var(--mono);
   font-size: var(--text-2xs);
   letter-spacing: 0.04em;
   color: var(--fg-mute);
-  background: var(--bg-1);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  transition: color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+/* Layout extras the plain <button> needs (the Select atom and the expand button
+   already flex via their own classes). */
+.tasks-v2 .scope-secondary .hide-done {
+  display: inline-flex;
+  align-items: center;
   cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
   white-space: nowrap;
 }
 
-.tasks-v2 .hide-done:hover {
+/* Native <select> sizes to content and needs right room for the caret overlay. */
+.tasks-v2 .scope-level select {
+  width: auto;
+  padding-right: var(--s-6);
+}
+
+.tasks-v2 .scope-secondary .hide-done:hover,
+.tasks-v2 .scope-level select:hover,
+.tasks-v2 .scope-expand button:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
 }
 
-.tasks-v2 .hide-done.on {
+/* Active "Hide done" keeps the accent treatment. Placed after the shared rule
+   so it wins the equal-specificity tie. */
+.tasks-v2 .scope-secondary .hide-done.on {
   color: var(--accent);
   background: var(--accent-wash);
   border-color: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+/* Optically center the leading/trailing icons on the text mid-line and equalize
+   their box: the eye and the "Expand all" SVG chevron sit on the flex line-box
+   center, which reads ~1px low against the mono lowercase label. */
+.tasks-v2 .scope-secondary .hide-done svg,
+.tasks-v2 .scope-expand button svg {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  margin-top: -1px;
+}
+
+/* The Select atom renders its dropdown caret as a rotated border-box pseudo
+   whose visible vertex falls ~5px below box center. Recolor it to the muted
+   chip text and raise it so it reads at the same height as the "Expand all"
+   chevron and the eye. */
+.tasks-v2 .scope-level > span::after {
+  border-color: var(--fg-mute);
+  margin-top: -5px;
 }
 
 .tasks-v2 .hide-done svg {
@@ -1241,28 +1298,6 @@ html.window-transparent #root {
 
 .tasks-v2 .t-summary:hover .sum-hint {
   opacity: 1;
-}
-
-.tasks-v2 .tasks-v2-filters {
-  gap: var(--s-2);
-}
-
-.tasks-v2 .tasks-v2-filters input[type="search"] {
-  height: 30px;
-  border-radius: var(--r-md);
-  background: var(--bg-1);
-  border-color: var(--line);
-  font-family: var(--sans);
-}
-
-.tasks-v2 .tasks-v2-filters select {
-  height: 30px;
-  border-radius: var(--r-sm);
-  background: var(--bg);
-  border-color: var(--line);
-  color: var(--fg-soft);
-  font-family: var(--mono);
-  font-size: 11px;
 }
 
 .tasks-v2 .list {
@@ -1556,15 +1591,20 @@ html.window-transparent #root {
 }
 
 .tasks-v2 .t-chev {
-  width: 10px;
-  font-size: 9px;
-  color: var(--fg-faint);
+  width: 14px;
+  font-size: 12px;
+  color: var(--fg-mute);
   flex-shrink: 0;
   text-align: center;
   cursor: pointer;
   background: transparent;
   border: 0;
   padding: 0;
+  transition: color var(--t-fast) var(--ease);
+}
+
+.tasks-v2 .t-chev:hover {
+  color: var(--fg);
 }
 
 .tasks-v2 .t-chev:empty {
@@ -1590,16 +1630,6 @@ html.window-transparent #root {
   padding-bottom: 8px;
 }
 
-.tasks-v2 .t-row.l0 .t-title {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: var(--text-sm); /* 14px */
-  font-weight: 400;
-  color: var(--fg);
-  letter-spacing: -0.01em;
-  line-height: 1.15;
-}
-
 .tasks-v2 .t-row.l0 .t-glyph {
   color: var(--fg);
   font-size: 14px;
@@ -1608,14 +1638,6 @@ html.window-transparent #root {
 .tasks-v2 .t-row.l1 {
   padding-top: 7px;
   padding-bottom: 6px;
-}
-
-.tasks-v2 .t-row.l1 .t-title {
-  font-family: var(--sans);
-  font-size: var(--text-sm); /* 14px */
-  font-weight: 500;
-  color: var(--fg);
-  letter-spacing: -0.005em;
 }
 
 .tasks-v2 .t-row.l1 .t-glyph {
@@ -1627,37 +1649,31 @@ html.window-transparent #root {
   padding-bottom: 5px;
 }
 
-.tasks-v2 .t-row.l2 .t-title {
-  font-family: var(--sans);
-  font-size: var(--text-sm); /* 14px */
-  font-weight: 400;
-  color: var(--fg-soft);
-}
-
 .tasks-v2 .t-row.l2 .t-glyph {
   font-size: 16px;
   color: var(--fg-faint);
   line-height: 0.6;
 }
 
-.tasks-v2 .t-row.l2.sel .t-title {
-  color: var(--fg);
-}
-
+/* Uniform title typography across every level (epic / ticket / task). Hierarchy
+   is carried by the glyph, indentation and spacing — not by mixing serif-italic
+   and sans, which reads as noise across a dense list. */
 .tasks-v2 .t-title {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
   flex: 1;
+  font-family: var(--sans);
+  font-style: normal;
+  font-size: var(--text-sm); /* 14px */
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.005em;
 }
 
 .tasks-v2 .t-title.done {
   color: var(--fg-faint);
-}
-
-.tasks-v2 .t-row.l0 .t-title.done {
-  font-style: italic;
 }
 
 /* Completed titles inside the list lift from --fg-faint back up to the more
@@ -1672,8 +1688,8 @@ html.window-transparent #root {
   margin-top: 1px;
   /* Align the meta line under the title, not the chevron (docs/design
      tasks-v2.html `.t-meta` uses --s-10). The offset is the title's left edge
-     inside .t-top: chevron 10px + gap 8px + glyph 14px + gap 8px = 40px. */
-  margin-left: 40px;
+     inside .t-top: chevron 14px + gap 8px + glyph 14px + gap 8px = 44px. */
+  margin-left: 44px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1808,7 +1824,6 @@ html.window-transparent #root {
   -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
   backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
-  border-right: 3px solid var(--accent);
   border-radius: var(--r-lg);
   box-shadow:
     var(--shadow-3),

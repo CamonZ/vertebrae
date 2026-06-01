@@ -2,11 +2,20 @@ import { OpenLiveChatButton } from "./LiveChatWindow";
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
 
+/**
+ * On macOS the window uses an overlay title bar (tauri.conf.json
+ * `titleBarStyle: Overlay`), so the traffic-light controls float over the
+ * top-left of our custom header. Reserve room for them so the brand mark
+ * doesn't sit underneath. Other platforms have no overlay controls.
+ */
+const IS_MACOS =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+
 function BrandMark() {
   return (
     <span
       data-testid="topbar-brand"
-      className="flex shrink-0 items-center gap-[5px] font-serif text-[15px] italic leading-none tracking-[-0.01em] text-[var(--color-fg)]"
+      className="pointer-events-none flex shrink-0 items-center gap-[5px] font-serif text-[15px] italic leading-none tracking-[-0.01em] text-[var(--color-fg)]"
     >
       Vertebrae
       <span
@@ -30,7 +39,7 @@ function Breadcrumb({
   return (
     <span
       data-testid="topbar-breadcrumb"
-      className="flex min-w-0 items-baseline text-[var(--color-fg-faint)]"
+      className="pointer-events-none flex min-w-0 items-baseline text-[var(--color-fg-faint)]"
     >
       {project && (
         <>
@@ -84,9 +93,11 @@ export function Header() {
   return (
     <header
       role="banner"
+      data-tauri-drag-region
       className={[
         "titlebar relative flex h-[38px] shrink-0 items-center gap-4",
-        "border-b border-[var(--color-line)] bg-[var(--color-bg)] pl-4 pr-4",
+        "border-b border-[var(--color-line)] bg-[var(--color-bg)] pr-4",
+        IS_MACOS ? "pl-[78px]" : "pl-4",
         "font-mono text-[11px] tracking-[0.04em] text-[var(--color-fg-mute)]",
       ].join(" ")}
     >

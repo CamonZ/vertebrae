@@ -13,15 +13,15 @@
     gap: var(--s-8); align-items: start;
   }
   .fig-key { position: sticky; top: var(--s-6); }
-  .fig-key .plate { font-family: var(--serif); font-style: italic; font-size: 56px; line-height: 1; color: var(--accent); }
+  .fig-key .plate { font-family: var(--serif); font-style: italic; font-size: var(--text-56); line-height: 1; color: var(--accent); }
   .fig-key h3 {
     margin-top: var(--s-3);
-    font-family: var(--serif); font-size: 28px; line-height: 1; font-weight: 400;
+    font-family: var(--serif); font-size: var(--text-28); line-height: 1; font-weight: 400;
     letter-spacing: -0.01em; color: var(--fg);
   }
   .fig-key h3 .em { font-style: italic; color: var(--fg-mute); }
-  .fig-key .desc { margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--fg-mute); line-height: 1.5; }
-  .fig-key .meta { margin-top: var(--s-4); font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; }
+  .fig-key .desc { margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-14); color: var(--fg-mute); line-height: 1.5; }
+  .fig-key .meta { margin-top: var(--s-4); font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; }
 
   /* Palette */
   .palette {
@@ -38,11 +38,11 @@
     padding: var(--s-3);
     display: flex; flex-direction: column; justify-content: space-between;
     border-right: 1px solid var(--line);
-    font-family: var(--mono); font-size: 10px;
+    font-family: var(--mono); font-size: var(--text-10);
     position: relative;
   }
   .palette > div:last-child { border-right: none; }
-  .palette > div .ix { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--accent); line-height: 1; }
+  .palette > div .ix { font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--accent); line-height: 1; }
   .palette > div.dark .ix { color: var(--accent-mute); }
   .palette > div .meta .nm { display: block; font-weight: 500; }
   .palette > div .meta .hx { display: block; color: var(--fg-mute); margin-top: 1px; }
@@ -61,9 +61,9 @@
   .status-cell.warn::before { background: var(--warn); }
   .status-cell.err::before { background: var(--err); }
   .status-cell.info::before { background: var(--info); }
-  .status-cell .h { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.14em; text-transform: uppercase; }
+  .status-cell .h { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); letter-spacing: 0.14em; text-transform: uppercase; }
   .status-cell .b { margin-top: var(--s-3); }
-  .status-cell .v { margin-top: var(--s-3); font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.04em; }
+  .status-cell .v { margin-top: var(--s-3); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.04em; }
 
   /* Step type plate — 5 columns, the centerpiece */
   .steps-table {
@@ -80,26 +80,26 @@
     min-height: 220px;
   }
   .step-cell .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
-  .step-cell .ix { font-family: var(--serif); font-style: italic; font-size: 32px; line-height: 1; }
+  .step-cell .ix { font-family: var(--serif); font-style: italic; font-size: var(--text-32); line-height: 1; }
   .step-cell .icon {
-    margin-top: var(--s-3); font-family: var(--mono); font-size: 14px;
+    margin-top: var(--s-3); font-family: var(--mono); font-size: var(--text-14);
   }
   .step-cell .nm {
     margin-top: var(--s-2);
-    font-family: var(--serif); font-size: 24px; font-weight: 400; line-height: 1.05;
+    font-family: var(--serif); font-size: var(--text-24); font-weight: 400; line-height: 1.05;
     letter-spacing: -0.01em; color: var(--fg);
   }
   .step-cell .nm .it { font-style: italic; }
   .step-cell .what {
     margin-top: var(--s-2);
-    font-family: var(--serif); font-style: italic; font-size: 13px;
+    font-family: var(--serif); font-style: italic; font-size: var(--text-13);
     color: var(--fg-mute); line-height: 1.45;
   }
   .step-cell .tokens {
     margin-top: var(--s-4);
     padding-top: var(--s-3);
     border-top: 1px solid var(--line);
-    font-family: var(--mono); font-size: 10px; color: var(--fg-faint);
+    font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint);
     line-height: 1.7;
   }
   .step-cell .tokens .k { color: var(--fg-mute); }
@@ -120,10 +120,10 @@
   .themes .pane { padding: var(--s-5); }
   .themes .pane.dark { background: var(--bg); }
   .themes .pane.lite { background: #f5efe2; color: #1d1814; }
-  .themes .pane .lab { font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.65; }
+  .themes .pane .lab { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.18em; text-transform: uppercase; opacity: 0.65; }
   .themes .pane .h {
     margin-top: var(--s-3);
-    font-family: var(--serif); font-size: 32px; line-height: 1; letter-spacing: -0.015em;
+    font-family: var(--serif); font-size: var(--text-32); line-height: 1; letter-spacing: -0.015em;
   }
   .themes .pane.dark .h em { color: var(--accent); font-style: italic; }
   .themes .pane.lite .h em { color: oklch(0.55 0.14 50); font-style: italic; }
@@ -131,7 +131,7 @@
     display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; margin-top: var(--s-3);
     background: var(--line);
   }
-  .themes .strip > div { height: 28px; padding: 4px; font-family: var(--mono); font-size: 8px; display: flex; align-items: flex-end; }
+  .themes .strip > div { height: 28px; padding: var(--s-1); font-family: var(--mono); font-size: var(--text-8); display: flex; align-items: flex-end; }
 
   /* Type plate */
   .type-plate {
@@ -143,8 +143,8 @@
     padding: var(--s-4) 0; border-bottom: 1px solid var(--line); align-items: baseline;
   }
   .type-plate .r:last-child { border-bottom: none; }
-  .type-plate .meta { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.04em; }
-  .type-plate .meta .nm { display: block; color: var(--fg); font-size: 12px; margin-bottom: 4px; font-weight: 500; }
+  .type-plate .meta { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); letter-spacing: 0.04em; }
+  .type-plate .meta .nm { display: block; color: var(--fg); font-size: var(--text-12); margin-bottom: var(--s-1); font-weight: 500; }
   .type-plate .sample { color: var(--fg); }
 
   /* Scale */
@@ -155,25 +155,25 @@
     border-bottom: 1px solid var(--line); align-items: baseline;
   }
   .scale .r:last-child { border-bottom: none; }
-  .scale .px { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: 0.04em; }
-  .scale .nm { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .scale .px { font-family: var(--mono); font-size: var(--text-11); color: var(--accent); letter-spacing: 0.04em; }
+  .scale .nm { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
 
   /* Space */
   .space-table { background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; }
   .space-table .r {
     display: grid; grid-template-columns: 80px 80px 1fr; gap: var(--s-3);
-    padding: 6px var(--s-4); border-bottom: 1px solid var(--line); align-items: center;
+    padding: var(--s-1h) var(--s-4); border-bottom: 1px solid var(--line); align-items: center;
   }
   .space-table .r:last-child { border-bottom: none; }
-  .space-table .nm { font-family: var(--mono); font-size: 12px; color: var(--fg); }
-  .space-table .px { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+  .space-table .nm { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); }
+  .space-table .px { font-family: var(--mono); font-size: var(--text-11); color: var(--accent); }
   .space-table .bar { height: 12px; background: var(--accent); border-radius: 1px; }
 
   /* Radii */
   .rad-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-4); }
   .rad-grid .item { display: flex; flex-direction: column; gap: var(--s-2); }
   .rad-grid .demo { aspect-ratio: 1.4; background: var(--bg-2); border: 1px solid var(--line-strong); }
-  .rad-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .rad-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); }
   .rad-grid .lbl .nm { color: var(--fg); }
 
   /* Elevation — dark uses bg shifts */
@@ -182,14 +182,14 @@
   .elev-grid .demo {
     aspect-ratio: 1.5;
     display: flex; align-items: center; justify-content: center;
-    font-family: var(--mono); font-size: 11px; color: var(--fg-mute);
+    font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute);
     border-radius: var(--r-md);
   }
   .elev-grid .e0 { background: var(--bg); }
   .elev-grid .e1 { background: var(--bg-1); border: 1px solid var(--line); }
   .elev-grid .e2 { background: var(--bg-2); box-shadow: var(--shadow-2); }
   .elev-grid .e3 { background: var(--bg-3); box-shadow: var(--shadow-3); }
-  .elev-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--fg-mute); }
+  .elev-grid .lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); }
   .elev-grid .lbl .nm { color: var(--fg); }
 
   /* Motion */
@@ -199,9 +199,9 @@
     padding: var(--s-4); position: relative; overflow: hidden; height: 96px;
     cursor: pointer; border-radius: var(--r-md);
   }
-  .motion-grid .m .lbl { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .motion-grid .m .lbl { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
   .motion-grid .m .lbl .nm { color: var(--fg); }
-  .motion-grid .m .val { font-family: var(--mono); font-size: 10px; color: var(--accent); }
+  .motion-grid .m .val { font-family: var(--mono); font-size: var(--text-10); color: var(--accent); }
   .motion-grid .m .puck {
     position: absolute; bottom: var(--s-4); left: var(--s-4);
     width: 14px; height: 14px; background: var(--accent);
@@ -209,10 +209,10 @@
     box-shadow: 0 0 12px var(--accent-glow);
   }
   .motion-grid .m:hover .puck { left: calc(100% - 30px); }
-  .motion-grid .m.fast .puck { transition: left 100ms var(--ease); }
-  .motion-grid .m.base .puck { transition: left 180ms var(--ease); }
-  .motion-grid .m.slow .puck { transition: left 280ms var(--ease); }
-  .motion-grid .m.linear .puck { transition: left 180ms linear; }
+  .motion-grid .m.fast .puck { transition: left var(--t-fast) var(--ease); }
+  .motion-grid .m.base .puck { transition: left var(--t-base) var(--ease); }
+  .motion-grid .m.slow .puck { transition: left var(--t-slow) var(--ease); }
+  .motion-grid .m.linear .puck { transition: left var(--t-base) linear; }
 
   /* Super header */
   .super {
@@ -221,9 +221,9 @@
     border-bottom: 1px solid var(--accent);
     display: flex; align-items: baseline; gap: var(--s-4);
   }
-  .super .num { font-family: var(--serif); font-style: italic; font-size: 32px; color: var(--accent); }
-  .super .t { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg); }
-  .super .right { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); }
+  .super .num { font-family: var(--serif); font-style: italic; font-size: var(--text-32); color: var(--accent); }
+  .super .t { font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg); }
+  .super .right { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--fg-mute); }
 </style>
 </head>
 <body>
@@ -300,75 +300,75 @@
 
       <!-- Accent alternatives — UI snippets to compare -->
       <div style="grid-column: 1 / -1; margin-top: var(--s-6);">
-        <div class="eyebrow" style="font-size: 10px; margin-bottom: var(--s-3); display: flex; align-items: baseline; gap: var(--s-3);">
+        <div class="eyebrow" style="font-size: var(--text-10); margin-bottom: var(--s-3); display: flex; align-items: baseline; gap: var(--s-3);">
           <span>// alternatives to consider</span>
-          <span style="font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--fg-mute); letter-spacing: 0; text-transform: none;">same UI, five candidate hues &mdash; pick the one that <em>belongs</em>.</span>
+          <span style="font-family: var(--serif); font-style: italic; font-size: var(--text-16); color: var(--fg-mute); letter-spacing: 0; text-transform: none;">same UI, five candidate hues &mdash; pick the one that <em>belongs</em>.</span>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s-3);">
           <!-- 1. Hearthfire (current — live tokens) -->
           <div style="--alt: var(--accent); --alt-wash: var(--accent-wash); --alt-deep: var(--accent-deep); --alt-glow: var(--accent-glow); padding: var(--s-4); background: var(--bg-1); border: 2px solid var(--alt); border-radius: var(--r-md); position: relative; box-shadow: 0 0 24px var(--alt-glow);">
-            <div style="position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: 9px; color: var(--alt); letter-spacing: 0.12em;">CURRENT</div>
-            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Hearthfire <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ copper</span></div>
-            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;"><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></div>
-            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
-              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600; box-shadow: 0 0 12px var(--alt-glow);">▶ Run task</button>
-              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            <div style="position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: var(--text-9); color: var(--alt); letter-spacing: 0.12em;">CURRENT</div>
+            <div style="font-family: var(--serif); font-size: var(--text-18); font-weight: 400; letter-spacing: -0.01em;">Hearthfire <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ copper</span></div>
+            <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0); letter-spacing: 0.04em;"><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); border-radius: var(--r-md); font-family: var(--sans); font-size: var(--text-12); font-weight: 600; box-shadow: 0 0 12px var(--alt-glow);">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); font-size: var(--text-12); border-radius: var(--r-md); color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: var(--r-sm); font-size: var(--text-11); font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
             </div>
-            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Live tokens. Warmest of the set &mdash; the chosen direction.</div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-12); color: var(--fg-mute); line-height: 1.4;">Live tokens. Warmest of the set &mdash; the chosen direction.</div>
           </div>
 
           <!-- 2. Steel blue -->
           <div style="--alt: oklch(0.80 0.09 230); --alt-wash: oklch(0.30 0.08 230); --alt-deep: oklch(0.62 0.11 230); --alt-glow: rgba(120, 170, 220, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
-            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Steel blue</div>
-            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.80 .09 230)</div>
-            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
-              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
-              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            <div style="font-family: var(--serif); font-size: var(--text-18); font-weight: 400; letter-spacing: -0.01em;">Steel blue</div>
+            <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0); letter-spacing: 0.04em;">oklch(.80 .09 230)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); border-radius: var(--r-md); font-family: var(--sans); font-size: var(--text-12); font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); font-size: var(--text-12); border-radius: var(--r-md); color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: var(--r-sm); font-size: var(--text-11); font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
             </div>
-            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cool, technical &mdash; close to the original indigo but lighter and more breathable.</div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-12); color: var(--fg-mute); line-height: 1.4;">Cool, technical &mdash; close to the original indigo but lighter and more breathable.</div>
           </div>
 
           <!-- 3. Glacier teal -->
           <div style="--alt: oklch(0.78 0.10 200); --alt-wash: oklch(0.30 0.09 200); --alt-deep: oklch(0.60 0.12 200); --alt-glow: rgba(100, 190, 200, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
-            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Glacier</div>
-            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.78 .10 200)</div>
-            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
-              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
-              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            <div style="font-family: var(--serif); font-size: var(--text-18); font-weight: 400; letter-spacing: -0.01em;">Glacier</div>
+            <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0); letter-spacing: 0.04em;">oklch(.78 .10 200)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); border-radius: var(--r-md); font-family: var(--sans); font-size: var(--text-12); font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); font-size: var(--text-12); border-radius: var(--r-md); color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: var(--r-sm); font-size: var(--text-11); font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
             </div>
-            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cooler, aquatic. Could collide with step-eval (cyan) &mdash; would need that shifted.</div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-12); color: var(--fg-mute); line-height: 1.4;">Cooler, aquatic. Could collide with step-eval (cyan) &mdash; would need that shifted.</div>
           </div>
 
           <!-- 4. Periwinkle -->
           <div style="--alt: oklch(0.76 0.11 270); --alt-wash: oklch(0.30 0.09 270); --alt-deep: oklch(0.60 0.13 270); --alt-glow: rgba(150, 150, 230, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
-            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Periwinkle</div>
-            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.76 .11 270)</div>
-            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
-              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
-              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            <div style="font-family: var(--serif); font-size: var(--text-18); font-weight: 400; letter-spacing: -0.01em;">Periwinkle</div>
+            <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0); letter-spacing: 0.04em;">oklch(.76 .11 270)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); border-radius: var(--r-md); font-family: var(--sans); font-size: var(--text-12); font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); font-size: var(--text-12); border-radius: var(--r-md); color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: var(--r-sm); font-size: var(--text-11); font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
             </div>
-            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">Cool indigo-leaning. Distinct from step-execute (violet 285&deg;) but in the same family.</div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-12); color: var(--fg-mute); line-height: 1.4;">Cool indigo-leaning. Distinct from step-execute (violet 285&deg;) but in the same family.</div>
           </div>
 
           <!-- 5. Grayscale (no hue) -->
           <div style="--alt: oklch(0.86 0 0); --alt-wash: oklch(0.30 0 0); --alt-deep: oklch(0.65 0 0); --alt-glow: rgba(220, 220, 220, 0.22); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
-            <div style="font-family: var(--serif); font-size: 18px; font-weight: 400; letter-spacing: -0.01em;">Bone <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ no-hue</span></div>
-            <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px; letter-spacing: 0.04em;">oklch(.86 .00 0)</div>
-            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: 8px;">
-              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: 6px 10px; border-radius: 5px; font-family: var(--sans); font-size: 12px; font-weight: 600;">▶ Run task</button>
-              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: 6px 10px; font-size: 12px; border-radius: 4px; color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
-              <div style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: 3px; font-size: 11px; font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
+            <div style="font-family: var(--serif); font-size: var(--text-18); font-weight: 400; letter-spacing: -0.01em;">Bone <span style="color: var(--fg-mute); font-style: italic; font-weight: 400;">/ no-hue</span></div>
+            <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0); letter-spacing: 0.04em;">oklch(.86 .00 0)</div>
+            <div style="margin-top: var(--s-4); display: flex; flex-direction: column; gap: var(--s-2);">
+              <button style="background: var(--alt); color: var(--bg); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); border-radius: var(--r-md); font-family: var(--sans); font-size: var(--text-12); font-weight: 600;">▶ Run task</button>
+              <div style="background: var(--bg-2); border: 1px solid var(--alt); padding: var(--s-1h) var(--s-2h); font-size: var(--text-12); border-radius: var(--r-md); color: var(--fg);">Implement <em style="color: var(--alt); font-style: italic;">JWT</em></div>
+              <div style="display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); background: var(--alt-wash); color: var(--alt); border: 1px solid color-mix(in oklch, var(--alt) 40%, transparent); border-radius: var(--r-sm); font-size: var(--text-11); font-weight: 500; align-self: flex-start;"><span style="width: 5px; height: 5px; border-radius: 50%; background: var(--alt);"></span>Selected</div>
             </div>
-            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: 12px; color: var(--fg-mute); line-height: 1.4;">No-accent option. The interface speaks entirely through value &amp; the five step-type hues. Most disciplined; loses ember warmth entirely.</div>
+            <div style="margin-top: var(--s-3); font-family: var(--serif); font-style: italic; font-size: var(--text-12); color: var(--fg-mute); line-height: 1.4;">No-accent option. The interface speaks entirely through value &amp; the five step-type hues. Most disciplined; loses ember warmth entirely.</div>
           </div>
         </div>
 
-        <p style="margin-top: var(--s-4); font-family: var(--serif); font-style: italic; font-size: 15px; color: var(--fg-mute); line-height: 1.5; max-width: 72ch;">
+        <p style="margin-top: var(--s-4); font-family: var(--serif); font-style: italic; font-size: var(--text-15); color: var(--fg-mute); line-height: 1.5; max-width: 72ch;">
           Colder candidates plus a true grayscale. <em style="color: var(--fg);">Steel blue</em> reads most natural with the cool neutrals and stays distinct from every step-type hue. <em style="color: var(--fg);">Glacier</em> and <em style="color: var(--fg);">periwinkle</em> are more characterful but each crowds an existing step token. <em style="color: var(--fg);">Bone</em> is the disciplined choice &mdash; the interface speaks through the five workflow hues alone.
         </p>
       </div>
@@ -473,8 +473,8 @@
 
       <!-- Token reference table -->
       <div style="grid-column: 1 / -1; margin-top: var(--s-6); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
-        <div class="eyebrow" style="font-size: 10px; margin-bottom: var(--s-3);">// step-type token reference</div>
-        <div style="display: grid; grid-template-columns: 140px repeat(5, 1fr); gap: var(--s-3); font-family: var(--mono); font-size: 11px;">
+        <div class="eyebrow" style="font-size: var(--text-10); margin-bottom: var(--s-3);">// step-type token reference</div>
+        <div style="display: grid; grid-template-columns: 140px repeat(5, 1fr); gap: var(--s-3); font-family: var(--mono); font-size: var(--text-11);">
           <div style="color: var(--fg-mute);">type</div>
           <div style="color: var(--step-execute-fg);">execute</div>
           <div style="color: var(--step-eval-fg);">eval</div>
@@ -483,18 +483,18 @@
           <div style="color: var(--step-wait-fg);">wait</div>
 
           <div style="color: var(--fg-mute);">--bar</div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.72 .16 285)" data-light="oklch(.52 .18 285)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.78 .13 200)" data-light="oklch(.52 .13 200)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.82 .18 135)" data-light="oklch(.55 .18 135)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.80 .15 70)" data-light="oklch(.55 .15 70)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.62 .04 250)" data-light="oklch(.50 .04 250)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.72 .16 285)" data-light="oklch(.52 .18 285)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.78 .13 200)" data-light="oklch(.52 .13 200)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.82 .18 135)" data-light="oklch(.55 .18 135)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.80 .15 70)" data-light="oklch(.55 .15 70)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.62 .04 250)" data-light="oklch(.50 .04 250)"></span></div>
 
           <div style="color: var(--fg-mute);">--wash (bg)</div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .12 285)" data-light="oklch(.93 .05 285)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .10 200)" data-light="oklch(.93 .05 200)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .12 135)" data-light="oklch(.93 .07 135)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.32 .10 70)" data-light="oklch(.93 .06 75)"></span></div>
-          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait-wash); vertical-align: middle; margin-right: 6px;"></span><span class="hx" data-dark="oklch(.28 .02 250)" data-light="oklch(.92 .02 250)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-execute-wash); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.32 .12 285)" data-light="oklch(.93 .05 285)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-eval-wash); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.32 .10 200)" data-light="oklch(.93 .05 200)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-route-wash); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.32 .12 135)" data-light="oklch(.93 .07 135)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-human-wash); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.32 .10 70)" data-light="oklch(.93 .06 75)"></span></div>
+          <div><span style="display: inline-block; width: 8px; height: 8px; background: var(--step-wait-wash); vertical-align: middle; margin-right: var(--s-1h);"></span><span class="hx" data-dark="oklch(.28 .02 250)" data-light="oklch(.92 .02 250)"></span></div>
         </div>
       </div>
     </div>
@@ -549,15 +549,15 @@
       <div class="type-plate">
         <div class="r">
           <div class="meta"><span class="nm">Newsreader</span>Production Type · 2020<br>Display serif, italic emphasis<br>Variable · 6–72 opsz</div>
-          <div class="sample" style="font-family: var(--serif); font-size: 64px; line-height: 0.95; letter-spacing: -0.02em;">By <em class="italic" style="color: var(--accent);">firelight</em></div>
+          <div class="sample" style="font-family: var(--serif); font-size: var(--text-64); line-height: 0.95; letter-spacing: -0.02em;">By <em class="italic" style="color: var(--accent);">firelight</em></div>
         </div>
         <div class="r">
           <div class="meta"><span class="nm">Geist</span>Vercel · 2024<br>Body sans · 300–700<br>OpenType ss01, cv11</div>
-          <div class="sample" style="font-family: var(--sans); font-size: 22px; line-height: 1.45; max-width: 480px;">A geometric sans designed for screens. Used on every functional surface &mdash; buttons, body, lists, navigation, settings.</div>
+          <div class="sample" style="font-family: var(--sans); font-size: var(--text-22); line-height: 1.45; max-width: 480px;">A geometric sans designed for screens. Used on every functional surface &mdash; buttons, body, lists, navigation, settings.</div>
         </div>
         <div class="r">
           <div class="meta"><span class="nm">JetBrains Mono</span>JetBrains · open source<br>Code &middot; IDs &middot; paths<br>400 &middot; 500</div>
-          <div class="sample" style="font-family: var(--mono); font-size: 15px; line-height: 1.55;">task &gt; i9j0k1l2 &nbsp; <span style="color: var(--accent);">▶ execute</span> &nbsp; 4m12s</div>
+          <div class="sample" style="font-family: var(--mono); font-size: var(--text-15); line-height: 1.55;">task &gt; i9j0k1l2 &nbsp; <span style="color: var(--accent);">▶ execute</span> &nbsp; 4m12s</div>
         </div>
       </div>
     </div>
@@ -571,13 +571,13 @@
         <div class="meta">8 sizes &middot; 4 px grid</div>
       </div>
       <div class="scale">
-        <div class="r"><span class="px">140 px</span><span class="nm">display</span><span style="font-family: var(--serif); font-size: 96px; letter-spacing: -0.025em; line-height: 1;">Aa</span></div>
-        <div class="r"><span class="px">56 px</span><span class="nm">h1</span><span style="font-family: var(--serif); font-size: 56px; letter-spacing: -0.02em; line-height: 1;">By firelight</span></div>
-        <div class="r"><span class="px">36 px</span><span class="nm">h2</span><span style="font-family: var(--serif); font-style: italic; font-size: 36px; line-height: 1.05;">Foundations</span></div>
-        <div class="r"><span class="px">20 px</span><span class="nm">h3</span><span style="font-family: var(--sans); font-size: 20px; font-weight: 500;">Section heading</span></div>
-        <div class="r"><span class="px">15 px</span><span class="nm">body</span><span style="font-family: var(--sans); font-size: 15px;">Default reading size for body copy.</span></div>
-        <div class="r"><span class="px">13 px</span><span class="nm">body-sm</span><span style="font-family: var(--sans); font-size: 13px;">Secondary text &mdash; metadata, lists.</span></div>
-        <div class="r"><span class="px">12 px</span><span class="nm">caption</span><span style="font-family: var(--sans); font-size: 12px;">Footnotes, timestamps.</span></div>
+        <div class="r"><span class="px">140 px</span><span class="nm">display</span><span style="font-family: var(--serif); font-size: var(--text-96); letter-spacing: -0.025em; line-height: 1;">Aa</span></div>
+        <div class="r"><span class="px">56 px</span><span class="nm">h1</span><span style="font-family: var(--serif); font-size: var(--text-56); letter-spacing: -0.02em; line-height: 1;">By firelight</span></div>
+        <div class="r"><span class="px">36 px</span><span class="nm">h2</span><span style="font-family: var(--serif); font-style: italic; font-size: var(--text-36); line-height: 1.05;">Foundations</span></div>
+        <div class="r"><span class="px">20 px</span><span class="nm">h3</span><span style="font-family: var(--sans); font-size: var(--text-20); font-weight: 500;">Section heading</span></div>
+        <div class="r"><span class="px">15 px</span><span class="nm">body</span><span style="font-family: var(--sans); font-size: var(--text-15);">Default reading size for body copy.</span></div>
+        <div class="r"><span class="px">13 px</span><span class="nm">body-sm</span><span style="font-family: var(--sans); font-size: var(--text-13);">Secondary text &mdash; metadata, lists.</span></div>
+        <div class="r"><span class="px">12 px</span><span class="nm">caption</span><span style="font-family: var(--sans); font-size: var(--text-12);">Footnotes, timestamps.</span></div>
         <div class="r"><span class="px">11 px</span><span class="nm">eyebrow</span><span class="eyebrow">SECTION &middot; LABEL &middot; MARKER</span></div>
       </div>
     </div>
@@ -654,8 +654,8 @@
         </div>
         <div style="margin-top: var(--s-4); padding: var(--s-4); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div><div class="eyebrow">Easing</div><code class="mono" style="font-size: 13px; color: var(--accent); margin-top: 4px; display: block;">cubic-bezier(0.16, 1, 0.3, 1)</code></div>
-            <span style="font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--fg-mute);">Snappy ease-out &mdash; fast in, soft out.</span>
+            <div><div class="eyebrow">Easing</div><code class="mono" style="font-size: var(--text-13); color: var(--accent); margin-top: var(--s-1); display: block;">var(--ease)</code></div>
+            <span style="font-family: var(--serif); font-style: italic; font-size: var(--text-16); color: var(--fg-mute);">Snappy ease-out &mdash; fast in, soft out.</span>
           </div>
         </div>
       </div>

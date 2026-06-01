@@ -12,6 +12,24 @@
 
   const GLYPHS = ['◈', '◇', '·'];
   const RUN_LABEL = { running: 'Running', waiting: 'Waiting', queued: 'Queued' };
+  const COLLAPSE_THRESHOLD = 3;   // fold this many done leaves under a parent into one summary line
+
+  const isTerminal = (s) => s === 'cancelled' || s === 'stopped';
+  const isDoneLeaf = (t) => t.runState === 'completed' && !(t.children && t.children.length);
+
+  const CheckMark = () => (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+  );
+
+  // Three-state completion marker. Active → RunChip; done → green ✓;
+  // cancelled/stopped → muted ⊘; never-run → nothing.
+  function CompletionMark({ t }) {
+    if (isActiveRun(t.runState)) return <RunChip state={t.runState} label={RUN_LABEL[t.runState]} runtime={t.runtime} />;
+    if (t.runState === 'completed') return <span className="done-mark icon" title="Completed"><CheckMark /></span>;
+    if (isTerminal(t.runState))
+      return <span className="cancel-mark" title={t.runState === 'stopped' ? 'Stopped' : 'Cancelled'}>⊘</span>;
+    return null;
+  }
 
   // ── Filtering helpers (ported) ──────────────────────────────
   function matchesScope(t, scope) {
@@ -32,7 +50,7 @@
     return t.title.toLowerCase().indexOf(q) !== -1 || t.id.indexOf(q) !== -1 ||
       (t.tags || []).some(x => x.toLowerCase().indexOf(q) !== -1);
   }
-  function computeVisible(scope, query, expanded) {
+  function computeItems(scope, query, expanded, hideCompleted, summaryExpanded) {
     const filtering = scope !== 'all' || !!query;
     if (filtering) {
       const include = new Set();
@@ -42,17 +60,30 @@
           ancestorIds(t).forEach(a => include.add(a));
         }
       });
-      return TASKS.filter(t => include.has(t.id)).map(t => t.id);
+      // Filtering bypasses collapse/hide — you asked to see matches.
+      return TASKS.filter(t => include.has(t.id)).map(t => ({ type: 'row', id: t.id }));
     }
     const out = [];
-    (function () {
-      function visit(id) {
-        const t = byId[id]; if (!t) return;
-        out.push(id);
-        if (expanded.has(id) && t.children) t.children.forEach(visit);
+    function visit(id) {
+      const t = byId[id]; if (!t) return;
+      out.push({ type: 'row', id });
+      if (!expanded.has(id) || !t.children) return;
+      const kids = t.children.map(c => byId[c]).filter(Boolean);
+      const doneLeaves = kids.filter(isDoneLeaf);
+      const collapse = !hideCompleted && doneLeaves.length >= COLLAPSE_THRESHOLD;
+      kids.forEach(c => {
+        const leaf = isDoneLeaf(c);
+        if (hideCompleted && leaf) return;
+        if (collapse && leaf) return;
+        visit(c.id);
+      });
+      if (collapse) {
+        const isOpen = summaryExpanded.has(id);
+        out.push({ type: 'summary', parentId: id, count: doneLeaves.length, open: isOpen });
+        if (isOpen) doneLeaves.forEach(c => visit(c.id));
       }
-      TASKS.filter(t => !t.parent).forEach(r => visit(r.id));
-    })();
+    }
+    TASKS.filter(t => !t.parent).forEach(r => visit(r.id));
     return out;
   }
   function scopeCounts() {
@@ -123,10 +154,23 @@
           {meta}
         </div>
         <div className="t-right">
-          <div className="chip-slot">{isActiveRun(t.runState) ? <RunChip state={t.runState} label={RUN_LABEL[t.runState]} runtime={t.runtime} /> : null}</div>
+          <div className="chip-slot"><CompletionMark t={t} /></div>
           <IdChip id={t.id} />
           <div className="when">{t.when || ''}</div>
         </div>
+      </div>
+    );
+  }
+
+  // ── Collapsed-done summary row ───────────────────────────────
+  function SummaryRow({ item, onToggle }) {
+    return (
+      <div className={'t-summary' + (item.open ? ' open' : '')} onClick={() => onToggle(item.parentId)}>
+        <div className="t-indent"><span className="g l1" /><span className="g l2" /></div>
+        <span className="sum-chev">{item.open ? '▾' : '▸'}</span>
+        <span className="sum-mark"><CheckMark /></span>
+        <span className="sum-label">{item.count} completed</span>
+        <span className="sum-hint">{item.open ? 'hide' : 'show'}</span>
       </div>
     );
   }
@@ -160,13 +204,21 @@
     const [expanded, setExpanded] = useState(() => new Set(['2b064abb', '40628099']));
     const [scope, setScope] = useState('all');
     const [query, setQuery] = useState('');
+    const [hideCompleted, setHideCompleted] = useState(false);
+    const [summaryExpanded, setSummaryExpanded] = useState(() => new Set());
+    const [rev, setRev] = useState(0);   // bumps when the tree mutates (new task added)
     const searchRef = useRef(null);
     const listRef = useRef(null);
 
     const counts = useMemo(scopeCounts, []);
     const total = TASKS.length;
     const roots = useMemo(() => TASKS.filter(t => !t.parent).length, []);
-    const visible = useMemo(() => computeVisible(scope, query, expanded), [scope, query, expanded]);
+    const items = useMemo(() => computeItems(scope, query, expanded, hideCompleted, summaryExpanded),
+      [scope, query, expanded, hideCompleted, summaryExpanded, rev]);
+    const rowIds = useMemo(() => items.filter(i => i.type === 'row').map(i => i.id), [items]);
+    const toggleSummary = useCallback((pid) => {
+      setSummaryExpanded(prev => { const n = new Set(prev); n.has(pid) ? n.delete(pid) : n.add(pid); return n; });
+    }, []);
 
     const select = useCallback((id) => {
       if (!byId[id]) return;
@@ -181,14 +233,33 @@
       setExpanded(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
     }, []);
 
+    // Add a child task under `parentId`. Draft = quiet task you'll spec; delegate = queued for the agent.
+    const addChild = useCallback((parentId, { title, level, priority, mode }) => {
+      const p = byId[parentId];
+      if (!p) return;
+      const id = Math.random().toString(16).slice(2, 10);
+      const node = {
+        id, title, level, parent: parentId, children: [],
+        priority: priority === 'none' ? null : priority,
+        tags: [], when: 'now', stepKind: null,
+        runState: mode === 'delegate' ? 'queued' : undefined,
+      };
+      TASKS.push(node);
+      byId[id] = node;
+      p.children = (p.children || []).concat(id);
+      setExpanded(prev => { const n = new Set(prev); n.add(parentId); return n; });
+      setRev(r => r + 1);
+      // keep the parent in focus so the freshly-added child appears in its Children section
+    }, []);
+
     // keep selected row in view (no scrollIntoView)
     useEffect(() => {
       const list = listRef.current; if (!list) return;
       const row = list.querySelector('.t-row.sel'); if (!row) return;
       const r = row.getBoundingClientRect(), l = list.getBoundingClientRect();
-      if (r.top < l.top + 8) list.scrollTop -= (l.top + 8 - r.top);
-      else if (r.bottom > l.bottom - 8) list.scrollTop += (r.bottom - (l.bottom - 8));
-    }, [selectedId, visible]);
+      if (r.bottom > l.bottom - 8) list.scrollTop += (r.bottom - (l.bottom - 8));
+      else if (r.top < l.top + 8) list.scrollTop -= (l.top + 8 - r.top);
+    }, [selectedId, items]);
 
     // keyboard
     useEffect(() => {
@@ -203,9 +274,9 @@
           e.preventDefault(); searchRef.current && searchRef.current.focus();
         } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && selectedId && !inSearch) {
           e.preventDefault();
-          let i = visible.indexOf(selectedId); if (i < 0) return;
-          i = e.key === 'ArrowDown' ? Math.min(visible.length - 1, i + 1) : Math.max(0, i - 1);
-          select(visible[i]);
+          let i = rowIds.indexOf(selectedId); if (i < 0) return;
+          i = e.key === 'ArrowDown' ? Math.min(rowIds.length - 1, i + 1) : Math.max(0, i - 1);
+          select(rowIds[i]);
         } else if (e.key === 'ArrowLeft' && selectedId && !inSearch) {
           const t = byId[selectedId];
           if (expanded.has(t.id) && t.children && t.children.length) toggle(t.id);
@@ -217,7 +288,7 @@
       }
       document.addEventListener('keydown', onKey);
       return () => document.removeEventListener('keydown', onKey);
-    }, [selectedId, expanded, query, visible, select, toggle]);
+    }, [selectedId, expanded, query, rowIds, select, toggle]);
 
     const selectedTask = byId[selectedId];
 
@@ -233,6 +304,16 @@
               <div className="scope-row">
                 <ScopeBar scope={scope} setScope={setScope} counts={counts} />
                 <div className="secondary">
+                  <button className={'hide-done' + (hideCompleted ? ' on' : '')}
+                    onClick={() => setHideCompleted(v => !v)}
+                    title={hideCompleted ? 'Show completed tasks' : 'Hide completed tasks'}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      {hideCompleted
+                        ? <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>
+                        : <><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></>}
+                    </svg>
+                    {hideCompleted ? 'Done hidden' : 'Hide done'}
+                  </button>
                   <select><option>All levels</option><option>Epics only</option><option>Tickets</option><option>Tasks</option></select>
                 </div>
               </div>
@@ -240,20 +321,16 @@
                 placeholder="Search tasks by title, id, or tag…" hint="/" />
             </div>
             <div className="list" ref={listRef}>
-              {visible.length
-                ? visible.map(id => (
-                    <ListRow key={id} t={byId[id]} selected={id === selectedId}
-                      expanded={expanded.has(id)} onSelect={select} onToggle={toggle} />
-                  ))
+              {items.length
+                ? items.map(it => it.type === 'summary'
+                    ? <SummaryRow key={'sum-' + it.parentId} item={it} onToggle={toggleSummary} />
+                    : <ListRow key={it.id} t={byId[it.id]} selected={it.id === selectedId}
+                        expanded={expanded.has(it.id)} onSelect={select} onToggle={toggle} />)
                 : <div style={{ padding: 'var(--s-8) var(--s-5)', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--fg-faint)' }}>No tasks match that filter.</div>}
-            </div>
-            <div className="caption-strip">
-              <span className="plate">⊹ tasks · v2</span>
-              <em>built on the component library · ember on the live</em>
             </div>
           </main>
           <aside className="detail">
-            <TaskDetail task={selectedTask} onSelect={select} onClose={() => setSelectedId(null)} onTraces={() => { location.href = 'traces-v2.html'; }} />
+            <TaskDetail task={selectedTask} onSelect={select} onClose={() => setSelectedId(null)} onTraces={() => { location.href = 'traces-v2.html'; }} onAddChild={addChild} />
           </aside>
         </AppShell>
     );
