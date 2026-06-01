@@ -134,7 +134,7 @@ describe("TasksPage", () => {
     expect(rows[1]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("keeps the detail rail populated with the first visible task", async () => {
+  it("does not auto-select a task on load; the detail panel opens only on click", async () => {
     mockTasks = [
       createMockTask({
         id: "11111111-0000-0000-0000-000000000000",
@@ -143,6 +143,16 @@ describe("TasksPage", () => {
     ];
 
     render(<TasksPageWithHeader />);
+
+    // The side panel starts closed — no task is selected by default.
+    expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem")).not.toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+
+    // Picking a row opens the detail panel for that task.
+    fireEvent.click(screen.getByText("First visible task"));
 
     expect(await screen.findByTestId("task-detail-panel")).toBeInTheDocument();
     expect(screen.getByRole("treeitem")).toHaveAttribute(
@@ -301,5 +311,36 @@ describe("TasksPage", () => {
     await user.click(screen.getByRole("button", { name: /done1/i }));
 
     expect(await screen.findByText("Done child")).toBeInTheDocument();
+  });
+
+  it("focuses the search box when '/' is pressed outside a text field", async () => {
+    mockTasks = [];
+    render(<TasksPageWithHeader />);
+
+    const input = screen.getByTestId("task-search-input");
+    expect(document.activeElement).not.toBe(input);
+
+    fireEvent.keyDown(window, { key: "/" });
+
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("does not steal focus on '/' while typing in another field", async () => {
+    mockTasks = [];
+    render(
+      <>
+        <TasksPageWithHeader />
+        <input data-testid="other-field" />
+      </>
+    );
+
+    const other = screen.getByTestId("other-field") as HTMLInputElement;
+    other.focus();
+    expect(document.activeElement).toBe(other);
+
+    fireEvent.keyDown(window, { key: "/" });
+
+    // Focus stays in the field the user was already typing in.
+    expect(document.activeElement).toBe(other);
   });
 });

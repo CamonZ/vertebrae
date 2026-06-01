@@ -62,6 +62,10 @@ const DEFAULT_PANEL_WIDTH = 480;
 /** Keyboard resize step (px) for the drag handle. */
 const RESIZE_STEP = 16;
 
+/** Temporarily hide the pop-out/detach control on side panels. Flip back to
+ * `true` to restore the Detach button (the onDetach plumbing is left intact). */
+const DETACH_ENABLED = false;
+
 interface TaskDetailPanelProps {
   taskId: string | null;
   onClose?: () => void;
@@ -721,10 +725,8 @@ export function TaskDetailPanel({
           />
         </svg>
       </IconButton>
-      {(onDetach || onClose) && (
-        <span className="t-action-sep" aria-hidden="true" />
-      )}
-      {onDetach && (
+      {onClose && <span className="t-action-sep" aria-hidden="true" />}
+      {DETACH_ENABLED && onDetach && (
         <IconButton
           onClick={onDetach}
           ariaLabel="Detach into pop-out window"

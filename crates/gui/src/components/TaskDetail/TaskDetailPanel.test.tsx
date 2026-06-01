@@ -308,7 +308,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("renders the Detach button and invokes onDetach when clicked", () => {
+    it("does not render the Detach button even when onDetach is provided (temporarily disabled)", () => {
       const mockOnDetach = vi.fn();
       render(
         <TaskDetailPanel
@@ -318,13 +318,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         />
       );
 
-      const detachButton = screen.getByRole("button", {
-        name: /detach into pop-out window/i,
-      });
-      expect(detachButton).toBeInTheDocument();
-
-      fireEvent.click(detachButton);
-      expect(mockOnDetach).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByRole("button", { name: /detach into pop-out window/i })
+      ).not.toBeInTheDocument();
     });
 
     it("renders the standalone wrapper and hides Detach in standalone mode", () => {

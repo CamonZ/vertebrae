@@ -3,7 +3,6 @@ import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { ResizablePanel } from "../ResizablePanel";
-import { OpenChatButton } from "../OpenChatButton";
 import { Toggle } from "../Toggle";
 import { IdentityBadge } from "../shared/EntityId";
 import { Text } from "../atoms/Text";
@@ -167,11 +166,6 @@ export function WorkflowDetailPanel({
           </Text>
         </div>
         <div className="flex items-center gap-2">
-          <OpenChatButton
-            scope="workflow"
-            entityId={workflow.id}
-            label={workflow.name}
-          />
           {onClose && (
             <IconButton onClick={onClose} ariaLabel="Close panel">
               <svg

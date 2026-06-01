@@ -1,6 +1,13 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  useRef,
+  Fragment,
+} from "react";
 import { useSearchParams } from "react-router-dom";
-import type { TaskFilterOptions, Task } from "../bindings";
+import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
 import {
   buildTreeFromTasks,
@@ -8,9 +15,11 @@ import {
 } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { useShellHeader } from "../hooks/useShellHeader";
-import { TaskFilters, TaskTreeView } from "../components/TaskList";
+import { TaskTreeView, ExpandCollapseAllButton } from "../components/TaskList";
+import { SearchInput } from "../components/molecules/SearchInput";
+import { Select } from "../components/atoms/Select";
 import { TaskDetailPanel } from "../components/TaskDetail";
-import { Count } from "../components/atoms/Count";
+import { Badge } from "../components/atoms/Badge";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
@@ -22,14 +31,11 @@ type TaskScope =
   | "waiting"
   | "blocked"
   | "recent"
-  | "mine"
   | "queued"
   | "done";
 
-const MINE_SCOPE_TAG_RE = /authoring|chat|live/i;
-
 type TaskScopeCounts = Record<
-  "active" | "waiting" | "blocked" | "mine" | "queued" | "done",
+  "active" | "waiting" | "blocked" | "recent" | "queued" | "done",
   number
 >;
 
@@ -37,15 +43,13 @@ interface TaskScopeChipDefinition {
   key: Exclude<TaskScope, "all">;
   label: string;
   countKey?: keyof TaskScopeCounts;
-  pulse?: boolean;
 }
 
 const TASK_SCOPE_CHIPS: TaskScopeChipDefinition[] = [
-  { key: "active", label: "Active", countKey: "active", pulse: true },
+  { key: "active", label: "Active", countKey: "active" },
   { key: "waiting", label: "Waiting", countKey: "waiting" },
   { key: "blocked", label: "Blocked", countKey: "blocked" },
-  { key: "recent", label: "Recent" },
-  { key: "mine", label: "Mine", countKey: "mine" },
+  { key: "recent", label: "Recent", countKey: "recent" },
   { key: "queued", label: "Queued", countKey: "queued" },
   { key: "done", label: "Done", countKey: "done" },
 ];
@@ -56,6 +60,13 @@ const COUNTED_TASK_SCOPE_CHIPS = TASK_SCOPE_CHIPS.filter(
   ): chip is TaskScopeChipDefinition & { countKey: keyof TaskScopeCounts } =>
     Boolean(chip.countKey)
 );
+
+const LEVEL_SELECT_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All levels" },
+  { value: "epic", label: "Epics only" },
+  { value: "ticket", label: "Tickets" },
+  { value: "task", label: "Tasks" },
+];
 
 const INITIAL_FILTERS: TaskFilterOptions = {
   step_names: null,
@@ -85,8 +96,6 @@ function matchesScope(task: Task, scope: TaskScope): boolean {
       if (!Number.isFinite(updated)) return false;
       return Date.now() - updated <= 24 * 60 * 60 * 1000;
     }
-    case "mine":
-      return (task.tags ?? []).some((tag) => MINE_SCOPE_TAG_RE.test(tag));
     case "queued":
       return status === "queued";
     case "done":
@@ -126,7 +135,7 @@ function scopeCounts(tasks: Task[]) {
       });
       return counts;
     },
-    { active: 0, waiting: 0, blocked: 0, mine: 0, queued: 0, done: 0 }
+    { active: 0, waiting: 0, blocked: 0, recent: 0, queued: 0, done: 0 }
   );
 }
 
@@ -142,13 +151,11 @@ function ScopeChip({
   count,
   label,
   onClick,
-  pulse,
 }: {
   active: boolean;
   count?: number;
   label: string;
   onClick: () => void;
-  pulse?: boolean;
 }) {
   return (
     <button
@@ -159,9 +166,10 @@ function ScopeChip({
         .filter(Boolean)
         .join(" ")}
     >
-      {pulse && count && count > 0 && <span className="pulse" aria-hidden />}
       <span>{label}</span>
-      {count != null && <Count value={count} className="n" />}
+      {count != null && (
+        <Badge count={count} intent={active ? "accent" : "neutral"} />
+      )}
     </button>
   );
 }
@@ -173,8 +181,34 @@ export function TasksPage() {
   const [scope, setScope] = useState<TaskScope>("all");
   const [hideCompleted, setHideCompleted] = useState(false);
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
   const expandedNodes = useExpandedNodes();
   const summaryExpanded = useSummaryExpanded();
+
+  // Press "/" anywhere on the page to jump to the search box, unless the user
+  // is already typing in a field. Mirrors the docs/design search hint badge.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el?.isContentEditable
+      ) {
+        return;
+      }
+      event.preventDefault();
+      searchInputRef.current?.focus();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     const workflowId = searchParams.get("workflowId");
@@ -204,33 +238,40 @@ export function TasksPage() {
   // done-summary collapse are bypassed so every match stays visible.
   const filtering = scope !== "all" || Boolean(filters.search?.trim());
 
+  // The side panel starts closed: we never auto-select a task on load. This
+  // effect only drops a stale selection when the chosen task leaves the current
+  // scope (or the list empties) so the panel doesn't point at a hidden task.
   useEffect(() => {
-    if (scopedTasks.length === 0) {
-      if (selectedTaskId !== null) {
-        setSelectedTaskId(null);
-      }
-      return;
-    }
-
     if (
-      !selectedTaskId ||
+      selectedTaskId &&
       !scopedTasks.some((task) => task.id === selectedTaskId)
     ) {
-      setSelectedTaskId(scopedTasks[0].id);
+      setSelectedTaskId(null);
     }
   }, [scopedTasks, selectedTaskId]);
 
-  const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
-    setFilters(newFilters);
+  const handleSearchChange = useCallback((value: string) => {
+    setFilters((prev) => ({ ...prev, search: value || null }));
   }, []);
+
+  const handleLevelChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = event.target.value;
+      const levels = value ? [value as TaskLevel] : null;
+      setFilters((prev) => ({ ...prev, levels }));
+    },
+    []
+  );
+
+  const selectedLevel = filters.levels?.[0] ?? "";
 
   const handleTaskSelect = useCallback((task: Task) => {
     setSelectedTaskId(task.id);
   }, []);
 
   const handleClosePanel = useCallback(() => {
-    setSelectedTaskId(scopedTasks[0]?.id ?? null);
-  }, [scopedTasks]);
+    setSelectedTaskId(null);
+  }, []);
 
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -252,7 +293,17 @@ export function TasksPage() {
       title: "Task Details",
       width: 720,
       height: 800,
+      // Transparent native window so the floating-glass panel reads as a glass
+      // card over the desktop rather than sitting on opaque app chrome. The
+      // pop-out document is made transparent via WindowLayout (scoped to this
+      // window's DOM only — the main window stays opaque).
+      transparent: true,
+      // Overlay title bar: no separate native top bar — the traffic lights
+      // float in the transparent strip above the inset glass card.
+      titleBarStyle: "overlay",
+      hiddenTitle: true,
     });
+    // The task now lives in its own window — dismiss the docked panel.
     setSelectedTaskId(null);
   }, [selectedTaskId, tasks]);
 
@@ -321,16 +372,19 @@ export function TasksPage() {
             <div className="scope-row" data-testid="tasks-scope-bar">
               <div className="scope-primary">
                 {TASK_SCOPE_CHIPS.map((item) => (
-                  <ScopeChip
-                    key={item.key}
-                    active={scope === item.key}
-                    count={item.countKey ? counts[item.countKey] : undefined}
-                    label={item.label}
-                    pulse={item.pulse}
-                    onClick={() =>
-                      setScope(scope === item.key ? "all" : item.key)
-                    }
-                  />
+                  <Fragment key={item.key}>
+                    <ScopeChip
+                      active={scope === item.key}
+                      count={item.countKey ? counts[item.countKey] : undefined}
+                      label={item.label}
+                      onClick={() =>
+                        setScope(scope === item.key ? "all" : item.key)
+                      }
+                    />
+                    {item.key === "recent" && (
+                      <span className="scope-sep" aria-hidden />
+                    )}
+                  </Fragment>
                 ))}
               </div>
               <div className="scope-secondary">
@@ -371,15 +425,33 @@ export function TasksPage() {
                   </svg>
                   {hideCompleted ? "Done hidden" : "Hide done"}
                 </button>
+                <div className="scope-level">
+                  <Select
+                    options={LEVEL_SELECT_OPTIONS}
+                    value={selectedLevel}
+                    onChange={handleLevelChange}
+                    aria-label="Filter by level"
+                    id="level-filter"
+                  />
+                </div>
+                <div className="scope-expand">
+                  <ExpandCollapseAllButton
+                    allExpanded={allExpanded}
+                    onToggle={handleToggleExpandAll}
+                    disabled={expandableIds.length === 0}
+                  />
+                </div>
               </div>
             </div>
-            <TaskFilters
-              className="tasks-v2-filters"
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              allExpanded={allExpanded}
-              onToggleExpandAll={handleToggleExpandAll}
-              expandAllDisabled={expandableIds.length === 0}
+            <SearchInput
+              ref={searchInputRef}
+              value={filters.search ?? ""}
+              onChange={handleSearchChange}
+              debounceMs={0}
+              hint="/"
+              placeholder="Search tasks by title, id, or tag…"
+              aria-label="Search tasks by title, id, or tag"
+              data-testid="task-search-input"
             />
           </div>
 

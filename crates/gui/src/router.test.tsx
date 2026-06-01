@@ -400,7 +400,7 @@ describe("Router Acceptance Tests", () => {
         expect(screen.getByLabelText("Filter by level")).toBeInTheDocument();
       });
       expect(
-        screen.getByLabelText("Search tasks by title or ID")
+        screen.getByLabelText("Search tasks by title, id, or tag")
       ).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
       // The "Done" scope chip is a pressable button; disambiguate from the
@@ -433,7 +433,7 @@ describe("Router Acceptance Tests", () => {
         })
       );
 
-      fireEvent.change(screen.getByLabelText("Search tasks by title or ID"), {
+      fireEvent.change(screen.getByLabelText("Search tasks by title, id, or tag"), {
         target: { value: "release" },
       });
 

@@ -15,8 +15,11 @@ interface BadgeProps {
   size?: BadgeSize;
   /** Show a leading colored dot (or only the dot when there is no label). */
   dot?: boolean | "only";
-  /** Render a count badge (small pill). Accepts a ratio string like "5/13". */
+  /** Render a count badge (small square). Accepts a ratio string like "5/13". */
   count?: number | string;
+  /** Draw a 1px border on the count variant (off by default — opt in where a
+   *  framed look is wanted, e.g. task/step detail section headers). */
+  bordered?: boolean;
   className?: string;
   /** Stable selector for integration/acceptance tests; sets data-testid. */
   testId?: string;
@@ -51,6 +54,7 @@ export function Badge({
   size = "sm",
   dot,
   count,
+  bordered = false,
   className,
   testId,
   children,
@@ -60,10 +64,11 @@ export function Badge({
       <span
         data-testid={testId}
         className={[
-          "inline-flex min-w-[18px] h-[18px] px-1.5 items-center justify-center",
-          "rounded-full font-mono text-2xs font-medium",
+          "inline-flex min-w-[18px] h-[18px] items-center justify-center",
+          "rounded-[var(--radius-xs)] font-mono text-2xs font-medium",
           intentClasses[intent],
-          "border max-w-full truncate",
+          bordered && "border",
+          "max-w-full truncate",
           className,
         ]
           .filter(Boolean)

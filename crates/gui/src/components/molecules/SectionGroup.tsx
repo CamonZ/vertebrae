@@ -79,7 +79,9 @@ export function SectionGroup({
         <span className="flex-1 truncate">{label}</span>
         {badge !== undefined
           ? badge
-          : count !== undefined && <Badge count={count} intent="neutral" />}
+          : count !== undefined && (
+              <Badge count={count} intent="neutral" bordered />
+            )}
       </button>
       <div
         className={[
