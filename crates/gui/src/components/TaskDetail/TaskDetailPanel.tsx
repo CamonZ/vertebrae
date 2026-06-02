@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import type { Task, TaskPriority, TaskChangedEvent } from "../../bindings";
+import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
+import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { useTaskStore } from "../../stores";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
@@ -12,6 +13,7 @@ import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
+import { TracesExplorerButton } from "./TracesExplorerButton";
 import {
   deriveRunControlsState,
   deriveHearthStateBreakdown,
@@ -22,6 +24,7 @@ import {
   runStatusLabel,
 } from "../../utils/runState";
 import { formatStepName } from "../../utils/formatStepName";
+import { getPriorityIndicator } from "../../utils/taskPriority";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
@@ -32,6 +35,7 @@ import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
 import {
   HeroStatus,
+  IdChip,
   StateBreakdown,
   StepDot,
 } from "../shared/HearthPrimitives";
@@ -75,25 +79,11 @@ interface TaskDetailPanelProps {
   onDetach?: () => void;
   /** Skip the ResizablePanel wrapper and fill the area — used by the pop-out window. */
   standalone?: boolean;
-}
-
-function getPriorityStyles(
-  priority: TaskPriority | null
-): { indicator: string; color: string } | null {
-  if (!priority) return null;
-
-  switch (priority) {
-    case "critical":
-      return { indicator: "!!!", color: "text-[var(--color-err)]" };
-    case "high":
-      return { indicator: "!!", color: "text-[var(--color-warn)]" };
-    case "medium":
-      return { indicator: "!", color: "text-[var(--color-fg-soft)]" };
-    case "low":
-      return { indicator: "-", color: "text-[var(--color-fg-mute)]" };
-    default:
-      return null;
-  }
+  /** Drilling out on close — applies the exit animation and drops focus. The
+   *  parent (TasksPage) keeps the panel mounted through this window. */
+  closing?: boolean;
+  /** Fires when the float's exit animation ends, so the parent can unmount. */
+  onExitAnimationEnd?: (event: { target: EventTarget; currentTarget: EventTarget }) => void;
 }
 
 function formatDateTime(isoString: string | null): string {
@@ -206,6 +196,8 @@ export function TaskDetailPanel({
   onBack,
   onDetach,
   standalone = false,
+  closing = false,
+  onExitAnimationEnd,
 }: TaskDetailPanelProps) {
   const [editingField, setEditingField] = useState<
     "title" | "priority" | "level" | null
@@ -268,6 +260,17 @@ export function TaskDetailPanel({
       document.body.style.cursor = "";
     };
   }, [isResizing]);
+
+  // Join the shared glass-panel focus model (in-app float only — the pop-out is
+  // its own window). Escape closes the panel unless an inline edit is open, in
+  // which case its own Escape-to-cancel handler wins.
+  const { isFocused, focusProps } = useGlassPanel({
+    id: "task-detail",
+    isOpen: !standalone && taskId != null && !closing,
+    onClose: onClose ?? (() => {}),
+    shouldHandleEscape: () => editingField === null && onClose != null,
+  });
+
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { executions: taskExecutions } = useTaskExecutions(taskId);
   const allTasks = useTaskStore((s) => s.tasks);
@@ -607,7 +610,9 @@ export function TaskDetailPanel({
     return null;
   }
 
-  const priorityStyles = taskData ? getPriorityStyles(taskData.priority) : null;
+  const priorityIndicator = taskData
+    ? getPriorityIndicator(taskData.priority)
+    : null;
   const runControlsState = deriveRunControlsState(
     taskData?.run_controls ?? null,
     { hasWorkflow: Boolean(taskData?.workflow_id) }
@@ -829,7 +834,7 @@ export function TaskDetailPanel({
           </svg>
         </button>
       )}
-      <IdentityBadge
+      <IdChip
         id={taskData.id}
         kind="task"
         level={taskData.level}
@@ -873,12 +878,12 @@ export function TaskDetailPanel({
           </span>
         </>
       )}
-      {priorityStyles && (
+      {priorityIndicator && (
         <span
-          className={`font-mono text-xs font-bold ${priorityStyles.color}`}
-          aria-label={`Priority: ${taskData.priority}`}
+          className={`font-mono text-xs font-bold ${priorityIndicator.color}`}
+          aria-label={priorityIndicator.label}
         >
-          {priorityStyles.indicator}
+          {priorityIndicator.glyph}
         </span>
       )}
       {runChip && runChipStyles && (
@@ -1286,6 +1291,8 @@ export function TaskDetailPanel({
               )}
             </div>
           </SectionGroup>
+
+          <TracesExplorerButton taskId={taskData.id} standalone={standalone} />
         </div>
       )}
     </div>
@@ -1314,9 +1321,13 @@ export function TaskDetailPanel({
   return (
     <div
       ref={panelRef}
-      className="tasks-v2 detail detail-float"
+      className={`tasks-v2 detail detail-float${closing ? " is-closing" : ""}`}
       style={{ width: `${panelWidth}px` }}
       data-testid="task-detail-panel"
+      data-focused={isFocused || undefined}
+      data-closing={closing || undefined}
+      onAnimationEnd={onExitAnimationEnd}
+      {...focusProps}
     >
       <div
         className="detail-resize-handle"

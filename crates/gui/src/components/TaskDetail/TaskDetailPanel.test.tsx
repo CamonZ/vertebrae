@@ -6,6 +6,7 @@ import {
   createMockTaskRun,
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
 import type { Task, TaskRunControls } from "../../bindings";
 import { useTaskStore } from "../../stores";
@@ -161,6 +162,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     vi.clearAllMocks();
     mockTaskOverrides.current = {};
     mockTaskExecutionsOverrides.current = [];
+    usePanelFocusStore.getState().reset();
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
@@ -384,6 +386,33 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
   });
 
+  describe("Glass-panel focus (Escape to close)", () => {
+    it("registers as a focused glass panel while open", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+      expect(usePanelFocusStore.getState().stack).toContain("task-detail");
+    });
+
+    it("closes the panel on Escape when not editing", () => {
+      const onClose = vi.fn();
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not close the panel on Escape while an inline edit is open", () => {
+      const onClose = vi.fn();
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
+
+      // Enter title edit mode; its own Escape-to-cancel must win.
+      fireEvent.click(screen.getByText("Test Task"));
+      const input = screen.getByDisplayValue("Test Task");
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Acceptance Criteria section", () => {
     it("is the first section after the title badges", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
@@ -589,8 +618,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByTestId("task-detail-id")).toHaveAttribute(
-        "title",
-        `Task ID: ${mockTaskData.id}`
+        "aria-label",
+        `Copy full ${mockTaskData.level} ID`
       );
     });
 

@@ -5,10 +5,10 @@ import type { JsonValue } from "../../bindings";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
+import { useCurrentProject } from "../../hooks/useCurrentProject";
 import {
   formatTokenCount,
   utilizationLevel,
-  type UtilizationLevel,
 } from "../../utils/modelContextWindow";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { ChatMessage as ChatBubble } from "../molecules/ChatMessage";
@@ -17,36 +17,6 @@ import {
   type ToolCallState,
 } from "../molecules/ToolCallBlock";
 import { ChatInput } from "../ChatInput";
-
-const LEVEL_CLASSES: Record<UtilizationLevel, string> = {
-  danger: "border-[var(--color-err)]/40 bg-[var(--color-err)]/10 text-[var(--color-err)]",
-  warn: "border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10 text-[var(--color-warn)]",
-  ok: "border-[var(--color-line)] bg-[var(--color-bg-2)] text-[var(--color-fg-mute)]",
-};
-
-function ContextUtilizationBadge({
-  model,
-  used,
-  max,
-}: {
-  model?: string;
-  used: number;
-  max: number;
-}) {
-  const level = utilizationLevel(used, max);
-  const pct = max > 0 ? Math.round((used / max) * 100) : 0;
-  const modelLabel = model?.replace(/^claude-/i, "");
-
-  return (
-    <span
-      className={`rounded border px-1.5 py-0.5 font-mono text-eyebrow ${LEVEL_CLASSES[level]}`}
-      title={`${used.toLocaleString()} / ${max.toLocaleString()} input tokens (${pct}%)`}
-    >
-      {modelLabel ? `${modelLabel} · ` : ""}
-      {formatTokenCount(used)} / {formatTokenCount(max)} ({pct}%)
-    </span>
-  );
-}
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -304,59 +274,37 @@ function PermissionRequestTurn({
   );
 }
 
-/**
- * Scope breadcrumb showing current scope with widen control
- */
-function ScopeBreadcrumb({
-  scope,
-  label,
-  onWiden,
-}: {
-  scope: ChatScope;
-  label: string;
-  onWiden: (() => void) | null;
-}) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs">
-      <span className="rounded bg-[var(--color-accent)]/10 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-wider text-[var(--color-accent)]">
-        {scopeLabel(scope)}
-      </span>
-      <span className="max-w-[150px] truncate text-[var(--color-fg-soft)]" title={label}>
-        {label}
-      </span>
-      {onWiden && (
-        <button
-          onClick={onWiden}
-          className="ml-1 rounded p-0.5 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
-          title={`Widen scope to ${scopeLabel(getParentScope(scope)!)}`}
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-            />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
+/** Scope chip + human description for the "scoped to …" header line. The chip
+ *  echoes the design reference (project name for project scope, else the short
+ *  entity id); the description reads like the reference's "whole project". */
+function scopeMeta(
+  scope: ChatScope,
+  entityId: string | null,
+  projectName: string | null
+): { chip: string; description: string } {
+  switch (scope) {
+    case "project":
+      return { chip: projectName ?? "project", description: "whole project" };
+    case "workflow":
+      return { chip: entityId?.slice(0, 8) ?? "workflow", description: "this workflow" };
+    case "task":
+      return { chip: entityId?.slice(0, 8) ?? "task", description: "this task" };
+    case "step":
+      return { chip: entityId?.slice(0, 8) ?? "step", description: "this step" };
+  }
 }
 
 interface ChatWindowProps {
   sessionId: string;
+  /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
+  onClosePanel?: () => void;
 }
 
 /**
- * ChatWindow renders a single chat session with message list, input, and scope header.
+ * ChatWindow renders a single chat session: the header band (title + scope),
+ * the message thread, and the composer footer with its context-utilization bar.
  */
-export function ChatWindow({ sessionId }: ChatWindowProps) {
+export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [inputValue, setInputValue] = useState("");
@@ -366,17 +314,19 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
 
   const clearMessages = useChatStore((s) => s.clearMessages);
   const widenScope = useChatStore((s) => s.widenScope);
+  const { name: projectName } = useCurrentProject();
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.messages]);
 
-  // Focus input when session becomes active
+  // Focus the composer when the window appears (the panel was just opened via
+  // the launcher or ⌥⌥, or the active tab switched) and again whenever the
+  // session becomes active. The composer is always rendered, so this lands even
+  // before a claude session has been started.
   useEffect(() => {
-    if (isActive) {
-      inputRef.current?.focus();
-    }
+    inputRef.current?.focus();
   }, [isActive]);
 
   const handleSend = useCallback(() => {
@@ -421,64 +371,70 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
     session.messages.length > 0 &&
     session.messages[session.messages.length - 1].kind === "user";
 
+  const { chip: scopeChip, description: scopeDescription } = scopeMeta(
+    session.scope,
+    session.entityId,
+    projectName
+  );
+
+  // Context utilization for the footer bar + readout. Falls back to an empty
+  // bar before the first usage event lands.
+  const usage = session.tokenUsage;
+  const ctxPct =
+    usage && usage.max > 0 ? Math.round((usage.used / usage.max) * 100) : 0;
+  const ctxColor =
+    usage && usage.max > 0
+      ? utilizationLevel(usage.used, usage.max) === "danger"
+        ? "var(--color-err)"
+        : utilizationLevel(usage.used, usage.max) === "warn"
+          ? "var(--color-warn)"
+          : "var(--color-ok)"
+      : "var(--color-ok)";
+
   return (
     <div className="flex h-full flex-col">
-      {/* Scope header */}
-      <div className="flex items-center justify-between border-b border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2">
-        <ScopeBreadcrumb
-          scope={session.scope}
-          label={session.label}
-          onWiden={canWiden ? handleWiden : null}
-        />
-        <div className="flex items-center gap-1.5">
-          {session.tokenUsage && (
-            <ContextUtilizationBadge
-              model={session.model}
-              used={session.tokenUsage.used}
-              max={session.tokenUsage.max}
-            />
-          )}
-          {/* Active indicator */}
-          {isActive && (
-            <span className="relative flex h-2 w-2">
-              <span
-                data-testid="chat-active-dot"
-                className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-ok)]"
-              />
-            </span>
-          )}
-          {session.status === "closed" && (
-            <span
-              data-testid="chat-closed-dot"
-              className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-fg-mute)]"
-            />
-          )}
-          {isActive && (
-            <button
-              onClick={closeClaudeSession}
-              className="ml-1 rounded p-1 text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10"
-              title="End session"
-            >
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+      {/* Header — single band: title + status ember, controls, scope line. */}
+      <div className="hc-head">
+        <div className="hc-head-top">
+          <span className="hc-title">
+            <span className="label">{session.label}</span>
+            {isActive ? (
+              <span data-testid="chat-active-dot" className="em ok" />
+            ) : session.status === "closed" ? (
+              <span data-testid="chat-closed-dot" className="em mute" />
+            ) : (
+              <span className="em" />
+            )}
+          </span>
+          <div className="hc-ctrls">
+            {isActive && (
+              <button
+                className="hc-ctrl danger"
+                onClick={closeClaudeSession}
+                title="End session"
+                aria-label="End session"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          )}
-          <button
-            onClick={() => clearMessages(sessionId)}
-            className="rounded p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
-            title="Clear messages"
-          >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5.636 5.636a9 9 0 1012.728 0M12 3v9"
+                  />
+                </svg>
+              </button>
+            )}
+            <button
+              className="hc-ctrl"
+              onClick={() => clearMessages(sessionId)}
+              title="Clear messages"
+              aria-label="Clear messages"
+            >
             <svg
               className="h-3.5 w-3.5"
               fill="none"
@@ -493,6 +449,58 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
               />
             </svg>
           </button>
+            <button
+              className="hc-ctrl"
+              onClick={onClosePanel}
+              title="Close chat panel"
+              aria-label="Close chat panel"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="hc-head-meta">
+          <span className="hc-scope">
+            <span className="badge-dot" />
+            scoped to
+          </span>
+          <span className="hc-scope-id">{scopeChip}</span>
+          <span className="hc-sep">·</span>
+          <span className="hc-scope">{scopeDescription}</span>
+          {canWiden && (
+            <button
+              className="hc-widen"
+              onClick={handleWiden}
+              title={`Widen scope to ${scopeLabel(getParentScope(session.scope)!)}`}
+              aria-label="Widen scope"
+            >
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -530,10 +538,10 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
               </svg>
             </div>
             <p className="text-sm text-[var(--color-fg-soft)]">
-              Chat scoped to {scopeLabel(session.scope).toLowerCase()}
+              Create, edit, and delete tasks, steps, and workflows
             </p>
             <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
-              Type a message and press Enter to begin
+              Or run a task through a workflow
             </p>
           </div>
         )}
@@ -545,18 +553,40 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
         </div>
       </div>
 
-      {/* Input area */}
-      <div className="border-t border-[var(--color-line)] bg-[var(--color-bg-1)] p-3">
-        <ChatInput
-          ref={inputRef}
-          value={inputValue}
-          onChange={setInputValue}
-          onSubmit={isActive ? handleSend : handleStartSession}
-          canSubmit={isActive || inputValue.trim().length > 0}
-          placeholder={isActive ? "Type a message..." : "Type a message to start..."}
-          buttonTitle={isActive ? "Send message" : "Start session"}
-          buttonAriaLabel={isActive ? "Send message" : "Start session"}
-        />
+      {/* Composer footer — context-utilization bar, input, context readout. */}
+      <div className="hc-foot">
+        <div className="hc-ctx">
+          <div
+            className="hc-ctx-fill"
+            data-testid="chat-context-fill"
+            style={{ width: `${ctxPct}%`, background: ctxColor }}
+          />
+        </div>
+        <div className="p-3">
+          <ChatInput
+            ref={inputRef}
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={isActive ? handleSend : handleStartSession}
+            canSubmit={isActive || inputValue.trim().length > 0}
+            placeholder={isActive ? "Type a message..." : "Type a message to start..."}
+            buttonTitle={isActive ? "Send message" : "Start session"}
+            buttonAriaLabel={isActive ? "Send message" : "Start session"}
+          />
+        </div>
+        {usage && usage.max > 0 && (
+          <div className="hc-foot-meta">
+            <span
+              className="ctx-lbl"
+              title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} input tokens`}
+            >
+              context <b>{ctxPct}%</b>
+              {session.model
+                ? ` · ${session.model.replace(/^claude-/i, "")} · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.max)}`
+                : ""}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

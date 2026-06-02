@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const { popOutMock } = vi.hoisted(() => {
@@ -23,16 +23,27 @@ const { popOutMock } = vi.hoisted(() => {
 
 vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
 
+// Synchronous project so the header's "scoped to" line renders without an async
+// state update (which would otherwise log act() warnings).
+vi.mock("../../hooks/useCurrentProject", () => ({
+  useCurrentProject: () => ({ name: "test-project", path: "/test/project" }),
+}));
+
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
+import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import type { ChatSession } from "../../stores/chatStore";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
-// Mock the bindings (needed by useScopedChat inside ChatWindow)
+// Mock the bindings (needed by useScopedChat + useCurrentProject inside ChatWindow)
 vi.mock("../../bindings", () => ({
   commands: {
+    getCurrentProject: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: "/test/project",
+    }),
     getCurrentProjectPath: vi.fn().mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -79,6 +90,7 @@ describe("ChatWindowManager", () => {
       activeSessionId: null,
       panelOpen: false,
     });
+    usePanelFocusStore.getState().reset();
   });
 
   it("does not render when panel is closed", () => {
@@ -104,103 +116,25 @@ describe("ChatWindowManager", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders tab for each session when panel is open", () => {
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    const s2 = createSession({
-      id: "s2",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "Workflow B",
+  it("renders the active session as a single header band, with no tabs", () => {
+    const s1 = createSession({
+      id: "s1",
+      scope: "project",
+      entityId: null,
+      label: "Project Chat",
     });
 
     useChatStore.setState({
-      sessions: { s1, s2 },
+      sessions: { s1 },
       activeSessionId: "s1",
       panelOpen: true,
     });
 
     render(<ChatWindowManager />);
 
-    // Tab titles are unique (tab + breadcrumb may both show the label)
-    expect(screen.getByTitle("Task: Task A")).toBeInTheDocument();
-    expect(screen.getByTitle("Workflow: Workflow B")).toBeInTheDocument();
-  });
-
-  it("highlights the active tab", () => {
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    const s2 = createSession({
-      id: "s2",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "Workflow B",
-    });
-
-    useChatStore.setState({
-      sessions: { s1, s2 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    // The active tab (div[role=tab]) should have the selected indicator
-    const tabA = screen.getByTitle("Task: Task A");
-    expect(tabA.className).toContain("bg-[var(--color-bg-1)]");
-    expect(tabA.getAttribute("aria-selected")).toBe("true");
-
-    const tabB = screen.getByTitle("Workflow: Workflow B");
-    expect(tabB.className).not.toContain("bg-[var(--color-bg-1)]");
-    expect(tabB.getAttribute("aria-selected")).toBe("false");
-  });
-
-  it("switches active session when tab is clicked", async () => {
-    const user = userEvent.setup();
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    const s2 = createSession({
-      id: "s2",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "Workflow B",
-    });
-
-    useChatStore.setState({
-      sessions: { s1, s2 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    await user.click(screen.getByTitle("Workflow: Workflow B"));
-    expect(useChatStore.getState().activeSessionId).toBe("s2");
-  });
-
-  it("closes a session when close tab button is clicked", async () => {
-    const user = userEvent.setup();
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    const s2 = createSession({
-      id: "s2",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "Workflow B",
-    });
-
-    useChatStore.setState({
-      sessions: { s1, s2 },
-      activeSessionId: "s2",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    // Close tab buttons should be present
-    const closeBtns = screen.getAllByTitle("Close tab");
-    expect(closeBtns).toHaveLength(2);
-
-    // Close the first tab
-    await user.click(closeBtns[0]);
-    expect(useChatStore.getState().sessions["s1"]).toBeUndefined();
-    expect(useChatStore.getState().sessions["s2"]).toBeDefined();
+    // The session label is the header title; tabs were removed.
+    expect(screen.getByText("Project Chat")).toBeInTheDocument();
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
   it("shows close panel button", () => {
@@ -233,224 +167,55 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().panelOpen).toBe(false);
   });
 
-  it("shows status dot for active claude sessions", () => {
-    const s1 = createSession({
-      id: "s1",
-      label: "Active Chat",
-      claudeSessionId: "claude-123",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    // The tab should contain a green dot for active session
-    const tab = screen.getByTitle("Task: Active Chat");
-    expect(
-      tab.querySelector('[data-testid="chat-tab-active-dot"]')
-    ).toBeInTheDocument();
-  });
-
-  it("shows closed status dot for closed sessions", () => {
-    const s1 = createSession({
-      id: "s1",
-      label: "Closed Chat",
-      status: "closed",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Task: Closed Chat");
-    expect(
-      tab.querySelector('[data-testid="chat-tab-closed-dot"]')
-    ).toBeInTheDocument();
-  });
-
-  // --- E) Active tab indicator exclusivity ---
-
-  it("inactive tab does not have accent bar", () => {
+  it("closes the panel on Escape when it is the focused glass panel", async () => {
+    const user = userEvent.setup();
     const s1 = createSession({ id: "s1", label: "Task A" });
-    const s2 = createSession({
-      id: "s2",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "Workflow B",
-    });
 
     useChatStore.setState({
-      sessions: { s1, s2 },
+      sessions: { s1 },
       activeSessionId: "s1",
       panelOpen: true,
     });
 
     render(<ChatWindowManager />);
+    // Registered itself and became the focused panel.
+    expect(usePanelFocusStore.getState().stack).toContain("chat");
 
-    const activeTab = screen.getByTitle("Task: Task A");
-    const inactiveTab = screen.getByTitle("Workflow: Workflow B");
+    await user.keyboard("{Escape}");
+    expect(useChatStore.getState().panelOpen).toBe(false);
+  });
 
-    // Active tab has the accent bar
+  it("drills out on close: lingers with is-closing, then unmounts when the exit animation ends", () => {
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    expect(screen.getByTestId("chat-window-manager")).not.toHaveClass(
+      "is-closing"
+    );
+
+    // Close: the panel stays mounted and drills out.
+    act(() => {
+      useChatStore.setState({ panelOpen: false });
+    });
+    const panel = screen.getByTestId("chat-window-manager");
+    expect(panel).toHaveClass("is-closing");
+
+    // The exit animation finishing on the panel root unmounts it.
+    fireEvent.animationEnd(panel);
     expect(
-      activeTab.querySelector('[data-testid="chat-tab-active-bar"]')
-    ).toBeInTheDocument();
-    // Inactive tab does NOT
-    expect(
-      inactiveTab.querySelector('[data-testid="chat-tab-active-bar"]')
+      screen.queryByTestId("chat-window-manager")
     ).not.toBeInTheDocument();
-  });
-
-  // --- F) Status dot absence ---
-
-  it("does not show status dot for open session without claude backend", () => {
-    const s1 = createSession({
-      id: "s1",
-      label: "Idle Chat",
-      status: "open",
-      claudeSessionId: null,
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Task: Idle Chat");
-    expect(
-      tab.querySelector('[data-testid="chat-tab-active-dot"]')
-    ).not.toBeInTheDocument();
-    expect(
-      tab.querySelector('[data-testid="chat-tab-closed-dot"]')
-    ).not.toBeInTheDocument();
-  });
-
-  // --- G) Scope icons per type ---
-
-  it("renders correct scope icon for project", () => {
-    const s1 = createSession({
-      id: "s1",
-      scope: "project",
-      entityId: null,
-      label: "Project Chat",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Project: Project Chat");
-    // Project icon has folder path "M3 7v10..."
-    const svg = tab.querySelector("svg");
-    expect(svg).toBeInTheDocument();
-    const path = svg!.querySelector("path");
-    expect(path?.getAttribute("d")).toContain("M3 7v10");
-  });
-
-  it("renders correct scope icon for workflow", () => {
-    const s1 = createSession({
-      id: "s1",
-      scope: "workflow",
-      entityId: "wf-1",
-      label: "WF Chat",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Workflow: WF Chat");
-    const svg = tab.querySelector("svg");
-    expect(svg).toBeInTheDocument();
-    // Workflow icon has lightning bolt path "M13 10V3..."
-    const path = svg!.querySelector("path");
-    expect(path?.getAttribute("d")).toContain("M13 10V3");
-  });
-
-  it("renders correct scope icon for task", () => {
-    const s1 = createSession({
-      id: "s1",
-      scope: "task",
-      entityId: "t-1",
-      label: "Task Chat",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Task: Task Chat");
-    const svg = tab.querySelector("svg");
-    expect(svg).toBeInTheDocument();
-    // Task icon has clipboard path "M9 5H7..."
-    const path = svg!.querySelector("path");
-    expect(path?.getAttribute("d")).toContain("M9 5H7");
   });
 
   // --- Detach / reattach ---
 
-  it("shows a detach button on each non-detached tab", () => {
+  it("does not render a detach button (detach removed from the chat panel)", () => {
     const s1 = createSession({ id: "s1", label: "Task A" });
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    expect(
-      screen.getByTitle("Detach into pop-out window"),
-    ).toBeInTheDocument();
-  });
-
-  it("clicking the detach button calls detachSession (which invokes popOut)", async () => {
-    const user = userEvent.setup();
-    popOutMock.mockClear();
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    await user.click(screen.getByTitle("Detach into pop-out window"));
-
-    expect(popOutMock).toHaveBeenCalledTimes(1);
-    expect(popOutMock.mock.calls[0][1]).toBe("chat-s1");
-    expect(useChatStore.getState().sessions["s1"].isDetached).toBe(true);
-  });
-
-  it("hides the detach button and shows a 'detached' badge when isDetached", () => {
-    const s1 = createSession({
-      id: "s1",
-      label: "Task A",
-      isDetached: true,
-    });
     useChatStore.setState({
       sessions: { s1 },
       activeSessionId: "s1",
@@ -462,7 +227,6 @@ describe("ChatWindowManager", () => {
     expect(
       screen.queryByTitle("Detach into pop-out window"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("detached")).toBeInTheDocument();
   });
 
   it("renders the detached placeholder (not the chat history) when active session is detached", () => {
@@ -505,29 +269,5 @@ describe("ChatWindowManager", () => {
     await user.click(screen.getByRole("button", { name: "Reattach to panel" }));
 
     expect(useChatStore.getState().sessions["s1"].isDetached).toBe(false);
-  });
-
-  it("renders correct scope icon for step", () => {
-    const s1 = createSession({
-      id: "s1",
-      scope: "step",
-      entityId: "step-1",
-      label: "Step Chat",
-    });
-
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    const tab = screen.getByTitle("Step: Step Chat");
-    const svg = tab.querySelector("svg");
-    expect(svg).toBeInTheDocument();
-    // Step icon has trend path "M13 7h8..."
-    const path = svg!.querySelector("path");
-    expect(path?.getAttribute("d")).toContain("M13 7h8");
   });
 });

@@ -23,6 +23,7 @@ import { Badge } from "../components/atoms/Badge";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
+import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { popOut, stashTask } from "../utils";
 
 type TaskScope =
@@ -273,6 +274,19 @@ export function TasksPage() {
     setSelectedTaskId(null);
   }, []);
 
+  // Defer the detail-float unmount so it can drill back out to the right edge on
+  // close. Closing nulls selectedTaskId (which drops the task data), so we keep
+  // rendering the last task id through the exit window. EXIT_MS must match
+  // `.detail-float.is-closing` (--t-base = 180ms).
+  const lastSelectedTaskIdRef = useRef<string | null>(null);
+  if (selectedTaskId) lastSelectedTaskIdRef.current = selectedTaskId;
+  const {
+    mounted: detailMounted,
+    closing: detailClosing,
+    onAnimationEnd: detailOnAnimationEnd,
+  } = usePanelExitTransition(selectedTaskId != null, 180);
+  const detailTaskId = selectedTaskId ?? lastSelectedTaskIdRef.current;
+
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
   }, []);
@@ -471,12 +485,16 @@ export function TasksPage() {
         </div>
       </div>
 
-      <TaskDetailPanel
-        taskId={selectedTaskId}
-        onClose={handleClosePanel}
-        onTaskSelect={handleRelatedTaskSelect}
-        onDetach={handleDetachPanel}
-      />
+      {detailMounted && (
+        <TaskDetailPanel
+          taskId={detailTaskId}
+          closing={detailClosing}
+          onExitAnimationEnd={detailOnAnimationEnd}
+          onClose={handleClosePanel}
+          onTaskSelect={handleRelatedTaskSelect}
+          onDetach={handleDetachPanel}
+        />
+      )}
     </div>
   );
 }
