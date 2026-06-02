@@ -15,7 +15,7 @@ const syntaxTheme = {
   ...vscDarkPlus,
   'pre[class*="language-"]': {
     ...(vscDarkPlus['pre[class*="language-"]'] as React.CSSProperties),
-    background: "var(--color-bg-primary)",
+    background: "var(--color-bg)",
     margin: 0,
     borderRadius: "var(--radius-md)",
   },
@@ -33,7 +33,7 @@ type CodeProps = ComponentPropsWithoutRef<"code"> & {
 const codeBlockStyle: React.CSSProperties = {
   margin: 0,
   padding: "0.75rem",
-  background: "var(--color-bg-primary)",
+  background: "var(--color-bg)",
   fontSize: "13px",
   lineHeight: "1.6",
   overflow: "auto",
@@ -48,7 +48,7 @@ const codeTagStyle = {
 const components = {
   p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
     <p
-      className="mb-2 text-[15px] leading-relaxed text-text-primary antialiased last:mb-0"
+      className="mb-2 text-[15px] leading-relaxed text-fg antialiased last:mb-0"
       {...props}
     >
       {children}
@@ -56,7 +56,7 @@ const components = {
   ),
   h1: ({ children, ...props }: ComponentPropsWithoutRef<"h1">) => (
     <h1
-      className="mb-3 mt-4 text-xl font-bold text-text-primary first:mt-0"
+      className="mb-3 mt-4 text-xl font-bold text-fg first:mt-0"
       {...props}
     >
       {children}
@@ -64,7 +64,7 @@ const components = {
   ),
   h2: ({ children, ...props }: ComponentPropsWithoutRef<"h2">) => (
     <h2
-      className="mb-2 mt-3 text-lg font-semibold text-text-primary first:mt-0"
+      className="mb-2 mt-3 text-lg font-semibold text-fg first:mt-0"
       {...props}
     >
       {children}
@@ -72,7 +72,7 @@ const components = {
   ),
   h3: ({ children, ...props }: ComponentPropsWithoutRef<"h3">) => (
     <h3
-      className="mb-2 mt-3 text-base font-semibold text-text-primary first:mt-0"
+      className="mb-2 mt-3 text-base font-semibold text-fg first:mt-0"
       {...props}
     >
       {children}
@@ -80,7 +80,7 @@ const components = {
   ),
   h4: ({ children, ...props }: ComponentPropsWithoutRef<"h4">) => (
     <h4
-      className="mb-1 mt-2 text-sm font-semibold text-text-primary first:mt-0"
+      className="mb-1 mt-2 text-sm font-semibold text-fg first:mt-0"
       {...props}
     >
       {children}
@@ -88,7 +88,7 @@ const components = {
   ),
   ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
     <ul
-      className="mb-2 ml-4 list-disc space-y-1 text-[15px] text-text-primary"
+      className="mb-2 ml-4 list-disc space-y-1 text-[15px] text-fg"
       {...props}
     >
       {children}
@@ -96,7 +96,7 @@ const components = {
   ),
   ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
     <ol
-      className="mb-2 ml-4 list-decimal space-y-1 text-[15px] text-text-primary"
+      className="mb-2 ml-4 list-decimal space-y-1 text-[15px] text-fg"
       {...props}
     >
       {children}
@@ -112,7 +112,7 @@ const components = {
     ...props
   }: ComponentPropsWithoutRef<"blockquote">) => (
     <blockquote
-      className="mb-2 border-l-2 border-primary/50 pl-3 text-text-secondary italic"
+      className="mb-2 border-l-2 border-accent/50 pl-3 text-fg-soft italic"
       {...props}
     >
       {children}
@@ -120,7 +120,7 @@ const components = {
   ),
   a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (
     <a
-      className="text-primary underline decoration-primary/30 hover:decoration-primary"
+      className="text-accent underline decoration-accent/30 hover:decoration-accent"
       target="_blank"
       rel="noopener noreferrer"
       {...props}
@@ -142,7 +142,7 @@ const components = {
   ),
   th: ({ children, ...props }: ComponentPropsWithoutRef<"th">) => (
     <th
-      className="px-3 py-1.5 text-left text-xs font-medium text-text-secondary"
+      className="px-3 py-1.5 text-left text-xs font-medium text-fg-soft"
       {...props}
     >
       {children}
@@ -150,7 +150,7 @@ const components = {
   ),
   td: ({ children, ...props }: ComponentPropsWithoutRef<"td">) => (
     <td
-      className="border-t border-border/50 px-3 py-1.5 text-text-primary"
+      className="border-t border-border/50 px-3 py-1.5 text-fg"
       {...props}
     >
       {children}
@@ -160,7 +160,7 @@ const components = {
     <hr className="my-3 border-border" {...props} />
   ),
   strong: ({ children, ...props }: ComponentPropsWithoutRef<"strong">) => (
-    <strong className="font-semibold text-text-primary" {...props}>
+    <strong className="font-semibold text-fg" {...props}>
       {children}
     </strong>
   ),
@@ -183,10 +183,10 @@ const components = {
 
     if (!inline && (match || codeString.includes("\n"))) {
       return (
-        <div className="group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-md border border-border/50 bg-bg-primary">
+        <div className="group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-md border border-border/50 bg-bg">
           {match && (
             <div className="flex items-center border-b border-border/50 px-3 py-1">
-              <span className="font-mono text-eyebrow text-text-muted">
+              <span className="font-mono text-eyebrow text-fg-mute">
                 {match[1]}
               </span>
             </div>
@@ -206,7 +206,7 @@ const components = {
 
     return (
       <code
-        className="rounded bg-bg-primary/80 px-1.5 py-0.5 font-mono text-[13px] text-primary"
+        className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-[13px] text-accent"
         {...props}
       >
         {children}

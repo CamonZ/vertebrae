@@ -134,7 +134,7 @@ describe("TasksPage", () => {
     expect(rows[1]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("keeps the detail rail populated with the first visible task", async () => {
+  it("does not auto-select a task on load; the detail panel opens only on click", async () => {
     mockTasks = [
       createMockTask({
         id: "11111111-0000-0000-0000-000000000000",
@@ -143,6 +143,16 @@ describe("TasksPage", () => {
     ];
 
     render(<TasksPageWithHeader />);
+
+    // The side panel starts closed — no task is selected by default.
+    expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
+    expect(screen.getByRole("treeitem")).not.toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+
+    // Picking a row opens the detail panel for that task.
+    fireEvent.click(screen.getByText("First visible task"));
 
     expect(await screen.findByTestId("task-detail-panel")).toBeInTheDocument();
     expect(screen.getByRole("treeitem")).toHaveAttribute(
@@ -221,5 +231,116 @@ describe("TasksPage", () => {
     render(<TasksPageWithHeader />);
 
     expect(screen.queryByTestId("topbar-live-count")).not.toBeInTheDocument();
+  });
+
+  it("renders a hide-done toggle that flips its label and .on class", async () => {
+    const user = userEvent.setup();
+    mockTasks = [
+      createMockTask({
+        id: "60000000-0000-0000-0000-000000000000",
+        title: "A task",
+      }),
+    ];
+
+    render(<TasksPageWithHeader />);
+
+    const toggle = screen.getByTestId("tasks-hide-done");
+    expect(toggle).toHaveTextContent("Hide done");
+    expect(toggle).not.toHaveClass("on");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveTextContent("Done hidden");
+    expect(toggle).toHaveClass("on");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hides completed leaf children once the toggle is on", async () => {
+    const user = userEvent.setup();
+    const parent = createMockTask({
+      id: "70000000-0000-0000-0000-000000000000",
+      title: "Parent epic",
+      level: "epic",
+    });
+    const openChild = createMockTask({
+      id: "71000000-0000-0000-0000-000000000000",
+      title: "Open child",
+      parent_id: parent.id,
+    });
+    const doneChild = createMockTask({
+      id: "72000000-0000-0000-0000-000000000000",
+      title: "Done child",
+      parent_id: parent.id,
+      completed_at: "2025-01-02T00:00:00Z",
+    });
+    mockTasks = [parent, openChild, doneChild];
+
+    render(<TasksPageWithHeader />);
+
+    // Expand the parent so its children render.
+    await user.click(screen.getByRole("button", { name: /^expand$/i }));
+    expect(screen.getByText("Done child")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("tasks-hide-done"));
+
+    expect(screen.getByText("Open child")).toBeInTheDocument();
+    expect(screen.queryByText("Done child")).not.toBeInTheDocument();
+  });
+
+  it("does not hide done children while a scope filter is active (bypass)", async () => {
+    const user = userEvent.setup();
+    const parent = createMockTask({
+      id: "80000000-0000-0000-0000-000000000000",
+      title: "Parent epic",
+      level: "epic",
+    });
+    const doneChild = createMockTask({
+      id: "81000000-0000-0000-0000-000000000000",
+      title: "Done child",
+      parent_id: parent.id,
+      completed_at: "2025-01-02T00:00:00Z",
+    });
+    mockTasks = [parent, doneChild];
+
+    render(<TasksPageWithHeader />);
+
+    // Turn hide-done on, then activate the "done" scope. Scoping force-expands
+    // the tree, and filtering must bypass hide-done so the done child shows.
+    await user.click(screen.getByTestId("tasks-hide-done"));
+    await user.click(screen.getByRole("button", { name: /done1/i }));
+
+    expect(await screen.findByText("Done child")).toBeInTheDocument();
+  });
+
+  it("focuses the search box when '/' is pressed outside a text field", async () => {
+    mockTasks = [];
+    render(<TasksPageWithHeader />);
+
+    const input = screen.getByTestId("task-search-input");
+    expect(document.activeElement).not.toBe(input);
+
+    fireEvent.keyDown(window, { key: "/" });
+
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("does not steal focus on '/' while typing in another field", async () => {
+    mockTasks = [];
+    render(
+      <>
+        <TasksPageWithHeader />
+        <input data-testid="other-field" />
+      </>
+    );
+
+    const other = screen.getByTestId("other-field") as HTMLInputElement;
+    other.focus();
+    expect(document.activeElement).toBe(other);
+
+    fireEvent.keyDown(window, { key: "/" });
+
+    // Focus stays in the field the user was already typing in.
+    expect(document.activeElement).toBe(other);
   });
 });

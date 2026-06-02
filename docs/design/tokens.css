@@ -72,19 +72,50 @@
   --sans:     'Geist', system-ui, -apple-system, sans-serif;
   --mono:     'JetBrains Mono', ui-monospace, monospace;
 
-  --display:    clamp(72px, 11vw, 140px);
-  --h1:         56px;
-  --h2:         36px;
-  --h3:         20px;
-  --eyebrow:    11px;
-  --body:       15px;
-  --body-sm:    13px;
-  --caption:    12px;
+  /* ── Type scale ──────────────────────────────────────────
+     Numeric ramp — the single source for every font-size in the system.
+     UI range (8–22) is dense because the product is information-rich;
+     display range (24–96) is sparse. Off-ramp values (17/19/38/44/88 and
+     any half-pixels) snap to the nearest step. Retune type here, once. */
+  --text-8:  8px;   --text-9:  9px;   --text-10: 10px; --text-11: 11px;
+  --text-12: 12px;  --text-13: 13px;  --text-14: 14px; --text-15: 15px;
+  --text-16: 16px;  --text-18: 18px;  --text-20: 20px; --text-22: 22px;
+  --text-24: 24px;  --text-28: 28px;  --text-32: 32px; --text-36: 36px;
+  --text-40: 40px;  --text-48: 48px;  --text-56: 56px; --text-64: 64px;
+  --text-96: 96px;
 
-  /* Space */
-  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  /* Semantic roles — alias into the ramp so headings/body stay meaningful */
+  --display:    clamp(72px, 11vw, 140px);
+  --h1:         var(--text-56);
+  --h2:         var(--text-36);
+  --h3:         var(--text-20);
+  --eyebrow:    var(--text-11);
+  --body:       var(--text-15);
+  --body-sm:    var(--text-13);
+  --caption:    var(--text-12);
+
+  /* Space — base ramp on a 4px grid, plus half-steps (-h) filling the 2px
+     gaps so dense item internals (rows, cards, chips) stay on-system instead
+     of reaching for magic numbers like 6 / 10 / 14.
+
+     ROUNDING CONVENTION (canonical): when an off-grid value must be snapped,
+     round to the NEAREST step; on an exact tie, round UP (e.g. 5→6, 7→8, 9→10,
+     3→4). Matches components-lib.css. A deliberate one-off (a real design
+     variation) should NOT be snapped — give it a named scoped token below. */
+  --s-0:  2px;                  /* micro — hairline insets */
+  --s-1:  4px;  --s-1h:  6px;
+  --s-2:  8px;  --s-2h: 10px;
+  --s-3: 12px;  --s-3h: 14px;
+  --s-4: 16px;  --s-4h: 18px;
+  --s-5: 20px;
   --s-6: 24px; --s-7: 28px; --s-8: 32px; --s-10: 40px; --s-12: 48px; --s-16: 64px;
   --s-20: 80px; --s-24: 96px;
+
+  /* Tree indent (Task rows) — each nesting level steps children in by one
+     disclosure width so titles align under their parent. Derived from the
+     ramp instead of hand-tuned magic numbers. */
+  --indent-1: calc(var(--s-2h) + var(--s-4));       /* 26px — row pad + glyph + gap */
+  --indent-2: calc(var(--indent-1) + var(--s-4h));  /* 44px — +1 level */
 
   /* Radii — between Imprint (soft) and Console (sharp) */
   --r-xs: 2px; --r-sm: 3px; --r-md: 5px; --r-lg: 8px; --r-xl: 12px; --r-full: 9999px;
@@ -146,7 +177,7 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
 .caption { font-size: var(--caption); color: var(--fg-mute); }
 .lede {
   font-family: var(--serif);
-  font-size: 22px;
+  font-size: var(--text-22);
   font-weight: 300;
   font-style: italic;
   line-height: 1.45;
@@ -156,11 +187,11 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
 
 /* Plate / figure marker */
 .plate-num {
-  font-family: var(--mono); font-size: 11px;
+  font-family: var(--mono); font-size: var(--text-11);
   color: var(--accent); letter-spacing: 0.14em; text-transform: uppercase;
 }
 .plate-num .n {
-  font-family: var(--serif); font-style: italic; font-size: 18px;
+  font-family: var(--serif); font-style: italic; font-size: var(--text-18);
   letter-spacing: 0; color: var(--accent);
 }
 
@@ -181,7 +212,7 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
 }
 .masthead .wordmark {
   font-family: var(--serif);
-  font-size: 24px;
+  font-size: var(--text-24);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -192,19 +223,19 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
   background: var(--accent);
   border-radius: 50%;
   vertical-align: 4px;
-  margin-left: 4px;
+  margin-left: var(--s-1);
   box-shadow: 0 0 8px var(--accent-glow);
 }
 .masthead .crumb {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--fg-mute);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 .masthead .meta {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-11);
   color: var(--fg-mute);
   text-align: right;
   letter-spacing: 0.06em;
@@ -222,7 +253,7 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
   border-right: 1px solid var(--line);
   transition: all var(--t-fast) var(--ease);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-11);
   letter-spacing: 0.06em;
   white-space: nowrap;
   position: relative;
@@ -245,20 +276,20 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
   align-items: baseline;
 }
 .section-head .title {
-  font-family: var(--serif); font-size: 56px; line-height: 1; font-weight: 400;
+  font-family: var(--serif); font-size: var(--text-56); line-height: 1; font-weight: 400;
   letter-spacing: -0.02em; color: var(--fg);
 }
 .section-head .title .em { font-style: italic; color: var(--accent); }
 .section-head .blurb {
-  font-family: var(--serif); font-style: italic; font-size: 22px; font-weight: 300;
+  font-family: var(--serif); font-style: italic; font-size: var(--text-22); font-weight: 300;
   color: var(--fg-mute); line-height: 1.45;
 }
 
 /* Component primitives — used across pages */
 .btn {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: var(--s-1h);
   height: 32px; padding: 0 var(--s-4);
-  font-family: var(--sans); font-size: 13px; font-weight: 500;
+  font-family: var(--sans); font-size: var(--text-13); font-weight: 500;
   border: 1px solid var(--line-strong);
   background: transparent;
   color: var(--fg);
@@ -275,15 +306,15 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
 .btn.ghost:hover { color: var(--accent); background: var(--bg-1); border-color: transparent; }
 .btn.danger { background: var(--err); color: var(--bg); border-color: var(--err); font-weight: 600; }
 .btn.danger:hover { background: var(--bg); color: var(--err); }
-.btn.sm { height: 26px; padding: 0 var(--s-3); font-size: 12px; }
-.btn.lg { height: 40px; padding: 0 var(--s-5); font-size: 14px; }
+.btn.sm { height: 26px; padding: 0 var(--s-3); font-size: var(--text-12); }
+.btn.lg { height: 40px; padding: 0 var(--s-5); font-size: var(--text-14); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Badge */
 .badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  height: 22px; padding: 0 8px;
-  font-family: var(--sans); font-size: 11px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: var(--s-1);
+  height: 22px; padding: 0 var(--s-2);
+  font-family: var(--sans); font-size: var(--text-11); font-weight: 500;
   border-radius: var(--r-sm);
   background: var(--bg-2);
   color: var(--fg-mute);
@@ -297,7 +328,7 @@ h3, .h3 { font-family: var(--sans);  font-size: var(--h3); font-weight: 500; lin
 .badge.info  { color: var(--info);  background: var(--info-wash); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
 .badge.accent{ color: var(--accent); background: var(--accent-wash); border-color: color-mix(in oklch, var(--accent) 45%, transparent); }
 
-.id-badge { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); }
+.id-badge { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint); }
 
 /* Theme-aware hex labels: data-dark shown by default, data-light when .theme-light is active */
 .hx[data-dark]::before { content: attr(data-dark); }
@@ -307,7 +338,7 @@ html.theme-light .hx[data-dark]::before { content: attr(data-light); }
 .input {
   height: 34px; padding: 0 var(--s-3);
   background: var(--bg-1); border: 1px solid var(--line-strong);
-  font-family: var(--sans); font-size: 14px; color: var(--fg);
+  font-family: var(--sans); font-size: var(--text-14); color: var(--fg);
   width: 100%; outline: none;
   border-radius: var(--r-md);
   transition: all var(--t-fast) var(--ease);
@@ -336,13 +367,58 @@ html.theme-light .hx[data-dark]::before { content: attr(data-light); }
   font-size: var(--body-sm); color: var(--fg-mute);
 }
 .colophon h4 {
-  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  font-family: var(--mono); font-size: var(--text-11); font-weight: 500;
   letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
   margin-bottom: var(--s-3);
 }
 .colophon a { color: var(--fg-soft); }
 .colophon a:hover { color: var(--accent); }
 .colophon em { color: var(--fg); font-style: italic; }
+
+
+/* ──────────────────────────────────────────────────────────
+   Component variations — page-scoped
+   Contextual overrides of library components, kept here (not in each
+   page's <style>) so all variations live with the system. Each selector
+   is scoped to its page container and out-specifies the base component,
+   so source order is irrelevant. Spacing uses the ramp; column-track and
+   icon sizes stay literal (they are widths, not spacing).
+   ────────────────────────────────────────────────────────── */
+
+  /* · Tasks — detail panel · */
+  .list-head .search-bar { width: auto; }
+  .t-actions .icon-btn { border-color: transparent; }
+  .t-detail-body .accordion { border: none; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+  .t-detail-body .accordion .acc-hd { padding: var(--s-2h) var(--s-5); }
+  .t-detail-body .accordion.open .acc-hd { border-bottom: none; }
+  .t-detail-body .accordion .acc-bd { padding: 0 var(--s-5) var(--s-4); }
+
+  /* · Board — kanban cards · */
+  .board-head .board-search .search-bar { width: 100%; }
+  .col-body .board-card { cursor: pointer; transition: all var(--t-fast) var(--ease); }
+  .col-body .board-card:hover { background: var(--bg-1); transform: translateY(-1px); }
+  .col-body .board-card.running:hover { background: linear-gradient(135deg, var(--accent-wash), var(--bg-1) 40%); }
+
+  /* · Traces — thread stream · */
+  .center-head .actions .icon-btn { border-color: transparent; width: 26px; height: 26px; }
+  .center-head .hero-status { margin-top: var(--s-3); }
+  .filters .filter-search .search-bar { width: 100%; }
+  .stream .event { grid-template-columns: 90px 1fr; padding: var(--s-2) 0; }
+  .stream .event .when { text-align: right; }
+
+  /* · Operations — workflow rail · */
+  .wf-list .wf-rail-item { border: none; background: transparent; min-width: 0; padding: var(--s-3) 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+  .wf-list .wf-rail-item:last-child { border-bottom: none; }
+  .wf-list .wf-rail-item:hover { background: transparent; }
+  .wf-list .wf-rail-item .name { font-size: var(--text-14); }
+
+  /* · Design — workflow rail & canvas · */
+  .wf-list-head .search-bar { width: auto; }
+  .wf-list-body .wf-rail-item { border: none; background: transparent; min-width: 0; padding: var(--s-3) var(--s-3) var(--s-3) var(--s-4); }
+  .wf-list-body .wf-rail-item:hover { background: var(--bg-1); }
+  .wf-list-body .wf-rail-item.selected { background: var(--accent-wash); }
+  .wf-list-body .wf-rail-item .name { font-size: var(--text-15); }
+  .canvas-controls .icon-btn { border-color: transparent; }
 
 
 /* ──────────────────────────────────────────────────────────
@@ -418,37 +494,37 @@ html.theme-light {
   z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 10px;
+  gap: var(--s-1);
+  padding: var(--s-1h) var(--s-2h);
   background: var(--bg-2);
   border: 1px solid var(--line-strong);
-  border-radius: 9999px;
+  border-radius: var(--r-full);
   box-shadow: var(--shadow-2);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-11);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--fg-mute);
   cursor: pointer;
-  transition: all 120ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all var(--t-fast) var(--ease);
   user-select: none;
 }
 .theme-toggle:hover { color: var(--accent); border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 16px var(--accent-glow); }
 .theme-toggle .sym {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px;
-  font-size: 14px;
+  font-size: var(--text-14);
   color: var(--accent);
 }
 .theme-toggle .knob {
   display: inline-block; width: 28px; height: 16px;
   background: var(--bg-1); border: 1px solid var(--line-strong);
-  border-radius: 9999px; position: relative; margin: 0 6px;
+  border-radius: var(--r-full); position: relative; margin: 0 var(--s-1h);
 }
 .theme-toggle .knob::after {
   content: ''; position: absolute; top: 1px; left: 1px;
   width: 12px; height: 12px; background: var(--accent); border-radius: 50%;
-  transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--t-base) var(--ease);
   box-shadow: 0 0 8px var(--accent-glow);
 }
 html.theme-light .theme-toggle .knob::after { transform: translateX(12px); }

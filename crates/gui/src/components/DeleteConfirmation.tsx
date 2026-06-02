@@ -41,10 +41,10 @@ export function DeleteConfirmation({
     >
       <div className="space-y-3">
         <div>
-          <h4 className="text-sm font-semibold text-error">
+          <h4 className="text-sm font-semibold text-err">
             Delete {itemType}?
           </h4>
-          <p className="mt-1 text-sm text-text-secondary">
+          <p className="mt-1 text-sm text-fg-soft">
             Are you sure you want to delete <EmWord>{itemName}</EmWord>?
           </p>
         </div>
@@ -52,7 +52,7 @@ export function DeleteConfirmation({
         {children}
 
         {error && (
-          <p className="text-xs text-error bg-error/10 p-2 rounded">{error}</p>
+          <p className="text-xs text-err bg-err/10 p-2 rounded">{error}</p>
         )}
 
         <div className="flex gap-2">

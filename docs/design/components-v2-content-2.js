@@ -449,13 +449,140 @@
     return html;
   }
 
+  // ── CHAT · PROJECT CHAT FLOAT ──────────────────────────────────
+  function chat() {
+    const STYLE = '<style>' +
+      '.cat-chat-wrap{display:flex;gap:var(--s-5);flex-wrap:wrap;align-items:flex-start;}' +
+      '.cat-chat{width:344px;background:linear-gradient(155deg,color-mix(in oklch,var(--bg-3) 34%,transparent),color-mix(in oklch,var(--bg-2) 28%,transparent));-webkit-backdrop-filter:blur(30px) brightness(1.5) saturate(1.6);backdrop-filter:blur(30px) brightness(1.5) saturate(1.6);border:1px solid color-mix(in oklch,var(--fg) 12%,transparent);border-left:3px solid var(--accent);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-2),0 0 30px rgba(0,0,0,0.28),inset 0 1px 0 color-mix(in oklch,var(--fg) 16%,transparent);display:flex;flex-direction:column;}' +
+      '.cat-chat .hd{background:color-mix(in oklch,var(--bg-3) 26%,transparent);border-bottom:1px solid color-mix(in oklch,var(--fg) 8%,transparent);padding:9px 8px 9px 7px;}' +
+      '.cat-chat .hd-top{display:flex;align-items:center;gap:7px;}' +
+      '.cat-chat .grip{display:flex;flex-direction:column;gap:3px;padding:2px;opacity:.4;}' +
+      '.cat-chat .grip span{display:block;width:11px;height:1.5px;background:var(--fg-mute);border-radius:9999px;}' +
+      '.cat-chat .ttl{flex:1;font-family:var(--serif);font-size:15.5px;color:var(--fg);letter-spacing:-0.01em;line-height:1;}' +
+      '.cat-chat .ttl .em{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 7px var(--accent-glow);display:inline-block;margin-left:5px;vertical-align:2px;}' +
+      '.cat-chat .ctrls{display:flex;gap:1px;}' +
+      '.cat-chat .ctrl{width:24px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--fg-mute);border-radius:var(--r-sm);}' +
+      '.cat-chat .meta{display:flex;align-items:center;gap:7px;margin-top:7px;margin-left:19px;font-family:var(--mono);font-size:10px;color:var(--fg-mute);}' +
+      '.cat-chat .meta .id{color:var(--fg-faint);padding:1px 6px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-xs);}' +
+      '.cat-chat .meta .gd{width:5px;height:5px;border-radius:50%;background:var(--ok);box-shadow:0 0 5px color-mix(in oklch,var(--ok) 60%,transparent);}' +
+      '.cat-chat .meta .sep{color:var(--fg-ghost);}' +
+      '.cat-chat .body{background:transparent;padding:var(--s-4);display:flex;flex-direction:column;gap:var(--s-4);}' +
+      '.cat-chat .day{align-self:center;font-family:var(--mono);font-size:9px;letter-spacing:0.18em;text-transform:uppercase;color:var(--fg-faint);}' +
+      '.cat-chat .turn{display:flex;flex-direction:column;gap:7px;}' +
+      '.cat-chat .turn.user{align-items:flex-end;}' +
+      '.cat-chat .bubble{max-width:86%;padding:9px 12px;font-size:13px;line-height:1.55;border-radius:var(--r-lg);background:var(--accent-wash);color:var(--fg);border:1px solid color-mix(in oklch,var(--accent) 32%,transparent);border-bottom-right-radius:var(--r-xs);}' +
+      '.cat-chat .speaker{font-family:var(--mono);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--fg-mute);display:flex;align-items:center;gap:7px;}' +
+      '.cat-chat .speaker .ember{width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent-glow);}' +
+      '.cat-chat .speaker .model{color:var(--fg-faint);font-size:9px;padding:1px 5px;border:1px solid var(--line);border-radius:var(--r-xs);text-transform:none;letter-spacing:0.04em;}' +
+      '.cat-chat .prose{color:var(--fg-soft);font-size:13px;line-height:1.6;border-left:2px solid var(--line-strong);padding:1px 0 1px 12px;}' +
+      '.cat-chat .prose strong{color:var(--fg);font-weight:600;}' +
+      '.cat-chat .prose code{font-family:var(--mono);font-size:11.5px;color:var(--accent);background:var(--accent-wash);padding:1px 5px;border-radius:var(--r-xs);}' +
+      '.cat-chat .cur{display:inline-block;width:7px;height:14px;background:var(--accent);margin-left:2px;vertical-align:-2px;box-shadow:0 0 6px var(--accent-glow);animation:cat-blink 1s step-end infinite;}' +
+      '@keyframes cat-blink{50%{opacity:0;}}' +
+      '.cat-tool{border:1px solid color-mix(in oklch,var(--step-execute) 28%,var(--line-strong));border-radius:var(--r-sm);overflow:hidden;}' +
+      '.cat-tool .th{display:flex;align-items:center;gap:8px;padding:6px 9px;background:color-mix(in oklch,var(--step-execute-wash) 28%,var(--bg-2));}' +
+      '.cat-tool .tdot{width:6px;height:6px;border-radius:50%;background:var(--step-execute);flex-shrink:0;}' +
+      '.cat-tool .tname{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--step-execute-fg);}' +
+      '.cat-tool .tsum{font-family:var(--mono);font-size:10px;color:var(--fg-faint);margin-left:auto;}' +
+      '.cat-tool .tchev{color:var(--fg-faint);font-size:9px;}' +
+      '.cat-tool .tb{padding:8px 10px;background:var(--bg);border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;line-height:1.55;color:var(--fg-mute);white-space:pre-wrap;}' +
+      '.cat-tool.pending{border-color:color-mix(in oklch,var(--accent) 32%,transparent);}' +
+      '.cat-tool.pending .th{background:color-mix(in oklch,var(--accent-wash) 50%,var(--bg-2));}' +
+      '.cat-tool.pending .tdot{background:var(--accent);box-shadow:0 0 5px var(--accent-glow);}' +
+      '.cat-tool.pending .tname{color:var(--accent);}' +
+      '.cat-spin{width:9px;height:9px;border:1.5px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:cat-spin .7s linear infinite;flex-shrink:0;}' +
+      '@keyframes cat-spin{to{transform:rotate(360deg);}}' +
+      '.cat-chat .foot{background:color-mix(in oklch,var(--bg-2) 24%,transparent);border-top:1px solid color-mix(in oklch,var(--fg) 8%,transparent);}' +
+      '.cat-chat .ctx{height:2px;background:color-mix(in oklch,var(--bg) 50%,transparent);}' +
+      '.cat-chat .ctx > i{display:block;height:100%;width:38%;background:var(--ok);}' +
+      '.cat-chat .compose{padding:9px 10px 8px;}' +
+      '.cat-chat .iw{display:flex;align-items:flex-end;gap:8px;background:var(--bg-1);border:1px solid var(--accent);box-shadow:0 0 0 3px var(--accent-wash);border-radius:var(--r-md);padding:6px 6px 6px 10px;}' +
+      '.cat-chat .iw .ico{width:18px;height:18px;color:var(--fg-faint);display:flex;align-items:center;}' +
+      '.cat-chat .iw .ph{flex:1;font-size:13px;color:var(--fg);padding:2px 0;}' +
+      '.cat-chat .iw .ph .car{display:inline-block;width:1.5px;height:15px;background:var(--accent);vertical-align:-3px;margin-left:1px;animation:cat-blink 1s step-end infinite;}' +
+      '.cat-chat .send{width:28px;height:28px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:var(--accent);color:var(--bg);border-radius:var(--r-sm);}' +
+      '.cat-chat .fm{display:flex;align-items:center;gap:8px;padding:0 12px 8px;font-family:var(--mono);font-size:9.5px;color:var(--fg-faint);}' +
+      '.cat-chat .fm .key{padding:1px 4px;background:var(--bg-3);border:1px solid var(--line-strong);border-radius:var(--r-xs);color:var(--fg-mute);}' +
+      '.cat-chat .fm .r{margin-left:auto;}' +
+      '.cat-chat .fm .r b{color:var(--fg-mute);font-weight:500;}' +
+      '.cat-launch{display:inline-flex;align-items:center;gap:9px;height:38px;padding:0 16px 0 12px;background:color-mix(in oklch,var(--bg-2) 66%,transparent);-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);color:var(--fg);border:1px solid var(--line-strong);border-left:3px solid var(--accent);border-radius:var(--r-full);box-shadow:var(--shadow-2),0 0 18px var(--accent-glow);}' +
+      '.cat-launch .ic{color:var(--accent);display:inline-flex;}' +
+      '.cat-launch .lbl{font-family:var(--serif);font-style:italic;font-size:15px;}' +
+      '.cat-launch .ember{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 7px var(--accent-glow);}' +
+      '</style>';
+
+    const sendSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+    const attachSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+    const dockSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><path d="M14 8h7M14 12h7M14 16h7"/></svg>';
+    const expandSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+    const closeSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    const chatSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
+    let html = sectHeader('14', 'chat', 'Project chat, floating.',
+      'A single project-level conversation that floats over every page. It reuses the float-panel chrome \u2014 ember spine, drag handle, dock control \u2014 and fills it with the same agent prose and tool blocks the trace stream uses. Drag it anywhere; drop it near the left edge to dock beside the rail.');
+
+    html += STYLE;
+    html += '<div class="cat-chat-wrap">';
+
+    // The panel
+    html += '<div class="cat-chat">' +
+      '<div class="hd">' +
+        '<div class="hd-top">' +
+          '<span class="grip"><span></span><span></span><span></span></span>' +
+          '<span class="ttl">Project chat<span class="em"></span></span>' +
+          '<div class="ctrls"><span class="ctrl">' + dockSvg + '</span><span class="ctrl">' + expandSvg + '</span><span class="ctrl">' + closeSvg + '</span></div>' +
+        '</div>' +
+        '<div class="meta"><span class="gd"></span>scoped to <span class="id">sacrum</span><span class="sep">\u00b7</span>whole project</div>' +
+      '</div>' +
+      '<div class="body">' +
+        '<div class="day">Today</div>' +
+        '<div class="turn user"><div class="bubble">Which runs need a human before they can finish?</div></div>' +
+        '<div class="turn assistant">' +
+          '<div class="speaker"><span class="ember"></span>sacrum<span class="model">orchestrator</span></div>' +
+          '<div class="cat-tool"><div class="th"><span class="tdot"></span><span class="tname">query_runs</span><span class="tsum">state: pending_review</span><span class="tchev">\u25be</span></div>' +
+            '<div class="tb">\u2192 2 matches\n  03ae9f60  Persist authoring draft   review \u00b7 7h 36m\n  bf68e7ac  Score draft quality       review \u00b7 41m</div></div>' +
+          '<div class="prose">Two runs are holding on a review gate. <strong>Persist authoring draft</strong> has been waiting <code>7h 36m</code> \u2014 its acceptance criteria are flagged <code>human</code>. <strong>Score draft quality</strong> just entered review 41m ago.<span class="cur"></span></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="foot">' +
+        '<div class="ctx"><i></i></div>' +
+        '<div class="compose"><div class="iw"><span class="ico">' + attachSvg + '</span><span class="ph">Open the first one<span class="car"></span></span><span class="send">' + sendSvg + '</span></div></div>' +
+        '<div class="fm"><span><span class="key">\u23ce</span> send \u00b7 <span class="key">\u21e7\u23ce</span> newline</span><span class="r">context <b>34%</b></span></div>' +
+      '</div>' +
+    '</div>';
+
+    // Side notes: launcher + states
+    html += '<div style="flex:1;min-width:240px;max-width:360px;display:flex;flex-direction:column;gap:var(--s-4);">' +
+      '<div class="card" style="margin:0;">' +
+        '<div class="card-head"><div class="card-name">Launcher <em>collapsed state</em></div></div>' +
+        '<div class="card-desc">When closed, the panel folds into an ember-spined pill at the bottom-left \u2014 the only persistent entry point.</div>' +
+        '<div class="card-canvas start"><span class="cat-launch"><span class="ic">' + chatSvg + '</span><span class="lbl">Ask sacrum</span><span class="ember"></span></span></div>' +
+      '</div>' +
+      '<div class="card" style="margin:0;">' +
+        '<div class="card-head"><div class="card-name">Tool block <em>pending \u2192 done</em></div></div>' +
+        '<div class="card-canvas col start" style="gap:var(--s-3);align-items:stretch;">' +
+          '<div class="cat-tool pending"><div class="th"><span class="cat-spin"></span><span class="tname">search_tasks</span><span class="tsum">running\u2026</span></div></div>' +
+          '<div class="cat-tool"><div class="th"><span class="tdot"></span><span class="tname">search_tasks</span><span class="tsum">3 active runs</span><span class="tchev">\u25be</span></div><div class="tb">\u2192 3 active runs\n  03ae9f60  durable write fan-out   +41m\n  7c1102de  OpenRouter stream       +9m</div></div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+
+    html += '</div>'; // /cat-chat-wrap
+
+    html += '<div class="card-foot" style="margin-top:var(--s-4);"><b>Project-scoped, single session.</b> No per-task threads \u2014 the chat always answers for the whole project, so its memory follows you between pages. ' +
+      '<span class="rule">Rule \u2014 the ember spine and streaming cursor mark this as the one live, conversational surface. Tool calls borrow the <em style="font-style:italic;">execute</em> violet, never a new colour.</span></div>';
+
+    html += '</section>';
+    return html;
+  }
+
   // ── Append to page ──────────────────────────────────────────
   const continueDiv = document.getElementById('catalogContinue');
   if (continueDiv) {
-    continueDiv.outerHTML = graph() + traces() + filters() + switches() + motion();
+    continueDiv.outerHTML = graph() + traces() + chat() + filters() + switches() + motion();
   } else {
     document.getElementById('catalogBody').insertAdjacentHTML('beforeend',
-      graph() + traces() + filters() + switches() + motion());
+      graph() + traces() + chat() + filters() + switches() + motion());
   }
 })();
 

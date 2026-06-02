@@ -88,7 +88,7 @@ describe("TracesHeader", () => {
     expect(screen.queryByTestId("traces-back-button")).toBeNull();
   });
 
-  it("renders Detach button and fires onDetach when clicked", () => {
+  it("does not render the Detach button even when onDetach is provided (temporarily disabled)", () => {
     const onDetach = vi.fn();
     render(
       <TracesHeader
@@ -99,11 +99,7 @@ describe("TracesHeader", () => {
         onDetach={onDetach}
       />
     );
-    const btn = screen.getByTestId("traces-detach-button");
-    expect(btn).toBeInTheDocument();
-    expect(btn.textContent).toMatch(/Detach/);
-    fireEvent.click(btn);
-    expect(onDetach).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("traces-detach-button")).toBeNull();
   });
 
   it("hides the Detach button when no onDetach is provided", () => {

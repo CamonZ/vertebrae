@@ -21,7 +21,7 @@ function LiveDuration({ startedAt }: { startedAt: string }) {
   }, []);
 
   return (
-    <span className="font-mono text-xs text-success">
+    <span className="font-mono text-xs text-ok">
       {formatDuration(startedAt, null)}
     </span>
   );
@@ -47,16 +47,16 @@ export function LiveSection({ items }: LiveSectionProps) {
           return (
             <div
               key={item.taskRun.id ?? item.task.id}
-              className="border-l-2 border-l-success/40 bg-success/5 px-4 py-3"
+              className="border-l-2 border-l-ok/40 bg-ok/5 px-4 py-3"
               data-testid="live-item"
               data-run-status={item.taskRun.status}
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-text-primary">
+                  <p className="text-sm font-medium text-fg">
                     {item.task.title}
                     {item.task.workflow_name && (
-                      <span className="font-normal text-text-secondary">
+                      <span className="font-normal text-fg-soft">
                         {" "}
                         &rarr; {item.task.workflow_name} ({statusLabel})
                         {item.taskRun.started_at && (
@@ -74,7 +74,7 @@ export function LiveSection({ items }: LiveSectionProps) {
                       </span>
                     )}
                   </p>
-                  <p className="mt-0.5 flex items-center gap-2 text-xs text-text-muted">
+                  <p className="mt-0.5 flex items-center gap-2 text-xs text-fg-mute">
                     {item.task.workflow_name && (
                       <span>{item.task.workflow_name}</span>
                     )}
@@ -88,16 +88,16 @@ export function LiveSection({ items }: LiveSectionProps) {
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-success border-t-transparent" />
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-ok border-t-transparent" />
                 </div>
               </div>
               {/* Progress bar */}
               <div
-                className="mt-2 h-1 w-full overflow-hidden rounded-full bg-success/10"
+                className="mt-2 h-1 w-full overflow-hidden rounded-full bg-ok/10"
                 data-testid="live-progress-bar"
               >
                 <div
-                  className="h-full animate-signal-flow rounded-full bg-success/40"
+                  className="h-full animate-signal-flow rounded-full bg-ok/40"
                   style={{ width: "100%" }}
                 />
               </div>

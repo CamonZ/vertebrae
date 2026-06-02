@@ -62,7 +62,7 @@ describe('InlineEditField', () => {
       await userEvent.click(screen.getByText('Test value'));
 
       // The warning dot has a specific class
-      const warningDot = document.querySelector('.bg-warning');
+      const warningDot = document.querySelector('.bg-warn');
       expect(warningDot).toBeInTheDocument();
     });
 

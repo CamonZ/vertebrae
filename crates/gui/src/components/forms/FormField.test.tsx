@@ -177,14 +177,14 @@ describe("FormField", () => {
   });
 
   describe("label styling", () => {
-    it("applies text-text-secondary color to label", () => {
+    it("applies text-fg-soft color to label", () => {
       render(
         <FormField label="Title">
           <input type="text" />
         </FormField>
       );
       const label = screen.getByText("Title");
-      expect(label).toHaveClass("text-text-secondary");
+      expect(label).toHaveClass("text-fg-soft");
     });
 
     it("applies font-medium to label", () => {
@@ -207,26 +207,26 @@ describe("FormField", () => {
       expect(label).toHaveClass("text-xs");
     });
 
-    it("applies text-error color to required asterisk", () => {
+    it("applies text-err color to required asterisk", () => {
       render(
         <FormField label="Title" required>
           <input type="text" />
         </FormField>
       );
       const asterisk = screen.getByLabelText("required");
-      expect(asterisk).toHaveClass("text-error");
+      expect(asterisk).toHaveClass("text-err");
     });
   });
 
   describe("help text styling", () => {
-    it("applies text-text-muted color to help text", () => {
+    it("applies text-fg-mute color to help text", () => {
       render(
         <FormField label="Title" helpText="Help text">
           <input type="text" />
         </FormField>
       );
       const helpText = screen.getByText("Help text");
-      expect(helpText).toHaveClass("text-text-muted");
+      expect(helpText).toHaveClass("text-fg-mute");
     });
 
     it("renders help text as small muted serif italic (field-hint role)", () => {
@@ -241,14 +241,14 @@ describe("FormField", () => {
   });
 
   describe("error styling", () => {
-    it("applies text-error color to error message", () => {
+    it("applies text-err color to error message", () => {
       render(
         <FormField label="Title" error="Error message">
           <input type="text" />
         </FormField>
       );
       const errorContainer = screen.getByRole("alert");
-      expect(errorContainer).toHaveClass("text-error");
+      expect(errorContainer).toHaveClass("text-err");
     });
 
     it("applies the 2xs token size to error message", () => {

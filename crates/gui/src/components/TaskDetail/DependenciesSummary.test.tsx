@@ -44,7 +44,7 @@ describe("DependenciesSummary", () => {
         />
       );
 
-      const link = screen.getByText("parent-1");
+      const link = screen.getByTestId("dependencies-summary-link");
       fireEvent.click(link);
 
       expect(onSelect).toHaveBeenCalledWith("parent-123");
@@ -120,7 +120,7 @@ describe("DependenciesSummary", () => {
         />
       );
 
-      const links = screen.getAllByRole("button");
+      const links = screen.getAllByTestId("dependencies-summary-link");
       fireEvent.click(links[0]);
 
       expect(onSelect).toHaveBeenCalledTimes(1);

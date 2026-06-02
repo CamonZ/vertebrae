@@ -5,6 +5,7 @@
    ────────────────────────────────────────────────────────────────── */
 (function () {
   const { DetailHeader, HeroStatus, Accordion, FieldRow, RunChip, IdChip, StepDot, StateBreakdown, Button, IconButton } = window;
+  const { useState, useRef, useEffect } = React;
   const D = window.HEARTH_DATA;
 
   const LEVEL_NAMES = ['Epic', 'Ticket', 'Task'];
@@ -43,7 +44,7 @@
           const c = D.byId[cid]; if (!c) return null;
           return <span key={cid} title={c.title + (c.runState ? ' — ' + c.runState : '')}><StepDot variant={map[c.runState] || 'queued'} /></span>;
         })}
-        {t.runs ? <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-faint)' }}>{t.runs.this.runs} runs · {t.runs.this.attempts} attempts</span> : null}
+        {t.runs ? <span style={{ marginLeft: 'auto', fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)' }}>{t.runs.this.runs} runs · {t.runs.this.attempts} attempts</span> : null}
       </div>
     );
   }
@@ -62,7 +63,7 @@
         <HeroStatus state={state} edge={edge} label={label} runtime={runtime}
           step={kind ? { kind } : null} finished={finished}>
           {hasBreak ? (
-            <div style={{ marginTop: 'var(--s-2)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+            <div style={{ marginTop: 'var(--s-2)', fontFamily: 'var(--mono)', fontSize: 'var(--text-11)' }}>
               <StateBreakdown done={cc.done} running={cc.running} waiting={cc.waiting} queued={cc.queued} />
             </div>
           ) : null}
@@ -135,8 +136,75 @@
     );
   }
 
+  // ── Quick-add composer ──────────────────────────────────────
+  // Two paths to the same tree: Draft (you author it) or Delegate (hand a
+  // one-line intent to the agent in chat). Inline, keyboard-driven — no modal.
+  function Composer({ t, onAddChild, onCancel }) {
+    const [mode, setMode] = useState('draft');
+    const [title, setTitle] = useState('');
+    const [level, setLevel] = useState(Math.min(t.level + 1, 2));
+    const [priority, setPriority] = useState('none');
+    const inputRef = useRef(null);
+    useEffect(() => { if (inputRef.current) inputRef.current.focus(); }, []);
+
+    const levelOpts = [];
+    for (let i = Math.min(t.level + 1, 2); i <= 2; i++) levelOpts.push(i);
+    if (!levelOpts.length) levelOpts.push(2);
+
+    const canCreate = title.trim().length > 0;
+    function submit() {
+      if (!canCreate) return;
+      onAddChild(t.id, { title: title.trim(), level, priority, mode });
+      onCancel();
+    }
+    function onKey(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+      else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+      e.stopPropagation();   // keep the list's arrow/esc handlers from firing while typing
+    }
+
+    return (
+      <div className="t-composer">
+        <div className="tc-top">
+          <div className="tc-pre">New task <em>· child of {LEVEL_NAMES[t.level].toLowerCase()}</em></div>
+          <div className="tc-seg">
+            <button className={mode === 'draft' ? 'on' : ''} onClick={() => setMode('draft')}>Draft</button>
+            <button className={mode === 'delegate' ? 'on' : ''} onClick={() => setMode('delegate')}>Delegate</button>
+          </div>
+        </div>
+        <textarea ref={inputRef} className="tc-input" rows={2}
+          placeholder={mode === 'draft' ? 'Title — what needs doing?' : 'Describe the outcome; the agent will break it down…'}
+          value={title} onChange={e => setTitle(e.target.value)} onKeyDown={onKey} />
+        {mode === 'draft' ? (
+          <div className="tc-meta">
+            <label className="tc-field"><span>Level</span>
+              <select value={level} onChange={e => setLevel(+e.target.value)}>
+                {levelOpts.map(i => <option key={i} value={i}>{LEVEL_NAMES[i]}</option>)}
+              </select>
+            </label>
+            <label className="tc-field"><span>Priority</span>
+              <select value={priority} onChange={e => setPriority(e.target.value)}>
+                <option value="none">None</option><option value="lo">Low</option><option value="md">Medium</option><option value="hi">High</option>
+              </select>
+            </label>
+          </div>
+        ) : (
+          <div className="tc-delegate-note">Opens a <b>chat</b> seeded with this task. The agent proposes a breakdown into subtasks before any run starts.</div>
+        )}
+        <div className="tc-actions">
+          <span className="tc-hint"><kbd>⏎</kbd> create · <kbd>esc</kbd> cancel</span>
+          <span className="sp" />
+          <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+          <Button variant="primary" size="sm" onClick={submit}>{mode === 'draft' ? '＋ Create task' : '→ Hand to agent'}</Button>
+        </div>
+      </div>
+    );
+  }
+
   // ── TaskDetail ──────────────────────────────────────────────
-  function TaskDetail({ task, onSelect, onClose, onTraces }) {
+  function TaskDetail({ task, onSelect, onClose, onTraces, onAddChild }) {
+    const [composing, setComposing] = useState(false);
+    useEffect(() => { setComposing(false); }, [task && task.id]);
     if (!task) {
       return <div style={{ padding: 'var(--s-8)', color: 'var(--fg-faint)', fontStyle: 'italic', fontFamily: 'var(--serif)' }}>No task selected.</div>;
     }
@@ -182,12 +250,16 @@
           ) : null}
         </div>
 
-        <div className="t-detail-foot">
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-faint)' }}>esc · close</span>
-          <span style={{ marginLeft: 'auto' }} />
-          <Button variant="ghost" size="sm">＋ Add task</Button>
-          <Button size="sm">⊙ Inspect</Button>
-        </div>
+        {composing ? (
+          <Composer t={t} onAddChild={onAddChild} onCancel={() => setComposing(false)} />
+        ) : (
+          <div className="t-detail-foot">
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)' }}>esc · close</span>
+            <span style={{ marginLeft: 'auto' }} />
+            <Button variant="ghost" size="sm" onClick={() => setComposing(true)}>＋ Add task</Button>
+            <Button size="sm" onClick={onTraces}>⊙ Inspect</Button>
+          </div>
+        )}
       </>
     );
   }

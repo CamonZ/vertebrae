@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vertebrae · Hearth — Operations (v2 · components)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; font-size: var(--text-13); }
+  #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ── Operations overview (calm, sectioned) ── */
+  .ops { flex: 1; min-width: 0; overflow-y: auto; background: var(--bg); }
+  .ops::-webkit-scrollbar { width: 10px; }
+  .ops::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-md); }
+  .ops-wrap { max-width: 1180px; margin: 0 auto; padding: var(--s-8) var(--s-8) var(--s-12); }
+
+  /* Header */
+  .ops-header { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s-8); padding-bottom: var(--s-5); border-bottom: 1px solid var(--line); }
+  .ops-title { font-family: var(--serif); font-size: var(--text-48); font-weight: 400; letter-spacing: -0.02em; color: var(--fg); line-height: 1; margin: 0; }
+  .ops-sub { font-family: var(--serif); font-size: var(--text-16); font-style: italic; color: var(--fg-mute); line-height: 1.4; margin: var(--s-3) 0 0; max-width: 560px; }
+  .ops-sub em { color: var(--accent); font-style: italic; }
+
+  /* Summary cells */
+  .ops-summary { display: flex; gap: var(--s-6); flex-shrink: 0; }
+  .op-cell { text-align: right; }
+  .op-cell .n { font-family: var(--serif); font-size: var(--text-40); font-weight: 400; line-height: 1; letter-spacing: -0.02em; color: var(--fg); }
+  .op-cell .n.accent { color: var(--accent); }
+  .op-cell .n.warn { color: var(--warn); }
+  .op-cell .n.ok { color: var(--ok); }
+  .op-cell .l { margin-top: var(--s-1h); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); }
+
+  /* Body layout */
+  .ops-body { display: grid; grid-template-columns: 1fr 340px; gap: var(--s-8); margin-top: var(--s-6); align-items: start; }
+  .ops-main { display: flex; flex-direction: column; gap: var(--s-7); min-width: 0; }
+  .ops-rail { display: flex; flex-direction: column; gap: var(--s-5); }
+
+  /* Section heads */
+  .sec-title-row { display: flex; align-items: baseline; gap: var(--s-3); margin-bottom: var(--s-2); }
+  .sec-title { font-family: var(--serif); font-size: var(--text-22); font-weight: 400; letter-spacing: -0.01em; color: var(--fg); margin: 0; }
+  .sec-title .it { font-style: italic; color: var(--accent); }
+  .sec-count { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-xs); padding: 1px var(--s-1h); min-width: 18px; text-align: center; }
+
+  /* Run rows */
+  .op-list { border-top: 1px solid var(--line); }
+  .op-row { display: grid; grid-template-columns: 18px 1fr auto; gap: var(--s-4); align-items: start; padding: var(--s-3) var(--s-2); border-bottom: 1px solid var(--line); text-decoration: none; transition: background var(--t-fast) var(--ease); }
+  .op-row:hover { background: var(--bg-1); }
+  .op-row .c-glyph { margin-top: 1px; }
+  .op-main { min-width: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+  .op-title { font-family: var(--sans); font-size: var(--text-14); color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .op-meta { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
+  .op-when { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); white-space: nowrap; min-width: 40px; text-align: right; padding-top: 1px; }
+  .op-empty { padding: var(--s-5) 0; font-family: var(--serif); font-style: italic; color: var(--fg-faint); }
+
+  /* Rail cards */
+  .side-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-4) var(--s-4) var(--s-3); }
+  .side-card .sec-title { font-size: var(--text-18); }
+  .side-card .sec-title-row { margin-bottom: var(--s-3); }
+
+  /* Signals */
+  .sig-list { display: flex; flex-direction: column; }
+  .sig-row { display: grid; grid-template-columns: 9px 1fr auto; gap: var(--s-2); align-items: center; padding: var(--s-2) 0; border-top: 1px solid var(--line); }
+  .sig-row:first-child { border-top: none; }
+  .sig-dot { width: 7px; height: 7px; border-radius: 50%; justify-self: center; flex-shrink: 0; }
+  .sig-dot.err { background: var(--err); box-shadow: 0 0 5px var(--err-wash); }
+  .sig-dot.wait { background: var(--warn); }
+  .sig-dot.run { background: var(--accent); box-shadow: 0 0 5px var(--accent-glow); }
+  .sig-dot.ok { background: var(--ok); }
+  .sig-text { font-family: var(--sans); font-size: var(--text-13); color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .sig-text .sub { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint); }
+  .sig-when { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); white-space: nowrap; }
+
+  /* Workflows — flush rail items */
+  .wf-list { display: flex; flex-direction: column; gap: var(--s-0); }
+
+  @media (max-width: 920px) {
+    .ops-body { grid-template-columns: 1fr; }
+    .ops-header { flex-direction: column; align-items: flex-start; gap: var(--s-4); }
+    .ops-summary { gap: var(--s-5); }
+  }
+</style>
+</head>
+<body>
+
+  <div id="root"></div>
+
+  <script src="tasks-data.js"></script>
+
+  <!-- React + Babel (pinned) -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- Component library -->
+  <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
+  <script type="text/babel" src="lib/lib-detail.jsx"></script>
+  <script type="text/babel" src="lib/lib-traces.jsx"></script>
+  <script type="text/babel" src="lib/lib-controls.jsx"></script>
+  <script type="text/babel" src="lib/lib-project-switcher.jsx"></script>
+  <script type="text/babel" src="lib/lib-palette.jsx"></script>
+  <script type="text/babel" src="lib/lib-chat.jsx"></script>
+  <script type="text/babel" src="lib/lib-theme.jsx"></script>
+  <script type="text/babel" src="lib/lib-shell.jsx"></script>
+  <!-- Operations app -->
+  <script type="text/babel" src="lib/operations-app.jsx"></script>
+
+  <script>
+    // Anti-flash boot: resolve & apply theme before paint. Full control lives in lib-theme.jsx.
+    (function(){
+      var key = 'hearth-theme';
+      var html = document.documentElement;
+      function resolve(p){ return p === 'system'
+        ? ((window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark')
+        : p; }
+      var pref = 'dark';
+      try { pref = localStorage.getItem(key) || 'dark'; } catch(e){}
+      html.classList.toggle('theme-light', resolve(pref) === 'light');
+    })();
+  </script>
+</body>
+</html>

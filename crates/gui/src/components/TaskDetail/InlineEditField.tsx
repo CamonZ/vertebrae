@@ -19,6 +19,9 @@ export interface InlineEditFieldProps {
   allowEmpty?: boolean;
   /** Custom className for the display text */
   displayClassName?: string;
+  /** Padding utility for the display-mode wrapper. Defaults to `p-2` (a roomy
+   *  click target); pass e.g. `p-0` to render flush prose. */
+  displayPadding?: string;
   /** Start in edit mode immediately (useful for add forms) */
   startInEditMode?: boolean;
   /** Callback when cancel is clicked (useful for add forms) */
@@ -54,6 +57,7 @@ export function InlineEditField({
   validate,
   allowEmpty = true,
   displayClassName = '',
+  displayPadding = 'p-2',
   startInEditMode = false,
   onCancel,
   clearOnSave = false,
@@ -180,7 +184,7 @@ export function InlineEditField({
       <div className="flex-1 min-w-0">
         <div className={`flex items-start ${containerGap}`}>
           {/* Status indicator dot */}
-          <span className={`${dotMargin} h-2 w-2 flex-shrink-0 rounded-full bg-warning`} />
+          <span className={`${dotMargin} h-2 w-2 flex-shrink-0 rounded-full bg-warn`} />
 
           {/* Optional prefix (e.g., step checkbox) */}
           {prefix}
@@ -194,7 +198,7 @@ export function InlineEditField({
               disabled={isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
-              className={`flex-1 min-h-0 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50 ${resizeClasses[resize]}`}
+              className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50 ${resizeClasses[resize]}`}
             />
           ) : (
             <input
@@ -205,7 +209,7 @@ export function InlineEditField({
               onKeyDown={handleKeyDown}
               disabled={isSubmitting || isDeleting}
               placeholder={placeholder}
-              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50`}
+              className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50`}
             />
           )}
 
@@ -215,7 +219,7 @@ export function InlineEditField({
               type="button"
               onClick={handleSave}
               disabled={isSubmitting || isDeleting}
-              className={`${buttonPadding} rounded text-warning hover:bg-warning/10 transition-colors disabled:opacity-50 cursor-pointer`}
+              className={`${buttonPadding} rounded text-warn hover:bg-warn/10 transition-colors disabled:opacity-50 cursor-pointer`}
               title={multiline ? 'Save (Ctrl+Enter)' : 'Save (Enter)'}
               aria-label="Save"
             >
@@ -234,7 +238,7 @@ export function InlineEditField({
               type="button"
               onClick={handleCancel}
               disabled={isSubmitting || isDeleting}
-              className={`${buttonPadding} rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors disabled:opacity-50 cursor-pointer`}
+              className={`${buttonPadding} rounded text-fg-mute hover:bg-bg-2 hover:text-fg transition-colors disabled:opacity-50 cursor-pointer`}
               title="Cancel (Esc)"
               aria-label="Cancel"
             >
@@ -247,7 +251,7 @@ export function InlineEditField({
                 type="button"
                 onClick={onDelete}
                 disabled={isSubmitting || isDeleting}
-                className={`${buttonPadding} rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors disabled:opacity-50 cursor-pointer`}
+                className={`${buttonPadding} rounded text-fg-mute hover:bg-err/10 hover:text-err transition-colors disabled:opacity-50 cursor-pointer`}
                 title="Delete"
                 aria-label="Delete"
               >
@@ -266,7 +270,7 @@ export function InlineEditField({
           </div>
         </div>
         {error && (
-          <p className="text-xs text-error ml-4 mt-1">{error}</p>
+          <p className="text-xs text-err ml-4 mt-1">{error}</p>
         )}
       </div>
     );
@@ -279,13 +283,13 @@ export function InlineEditField({
   return (
     <div
       onClick={handleEdit}
-      className={`cursor-pointer rounded p-2 hover:bg-bg-hover transition-colors ${displayClassName}`}
+      className={`cursor-pointer rounded ${displayPadding} hover:bg-bg-hover transition-colors ${displayClassName}`}
       title="Click to edit"
     >
       {!isEmpty && renderDisplay ? (
         renderDisplay(value)
       ) : (
-        <p className={`text-sm ${monospace && !isEmpty ? 'font-mono' : ''} ${isEmpty ? 'text-text-muted italic' : 'text-text-secondary whitespace-pre-wrap leading-relaxed'}`}>
+        <p className={`text-sm ${monospace && !isEmpty ? 'font-mono' : ''} ${isEmpty ? 'text-fg-mute italic' : 'text-fg-soft whitespace-pre-wrap leading-relaxed'}`}>
           {displayText}
         </p>
       )}

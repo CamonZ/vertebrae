@@ -47,7 +47,7 @@ function statusClasses(status: ExecutionStatus): string {
     case "failed":
       return "bg-[var(--color-err)]";
     default:
-      return "bg-text-muted";
+      return "bg-fg-mute";
   }
 }
 

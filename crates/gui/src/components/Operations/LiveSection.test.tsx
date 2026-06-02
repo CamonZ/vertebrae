@@ -173,7 +173,7 @@ describe("LiveSection", () => {
     render(<LiveSection items={items} />);
 
     const item = screen.getByTestId("live-item");
-    expect(item.className).toContain("bg-success/5");
-    expect(item.className).toContain("border-l-success/40");
+    expect(item.className).toContain("bg-ok/5");
+    expect(item.className).toContain("border-l-ok/40");
   });
 });

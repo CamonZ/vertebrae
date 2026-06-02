@@ -111,7 +111,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
     };
 
     // Base toggle classes
-    const baseClasses = "relative inline-flex items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2";
+    const baseClasses = "relative inline-flex items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2";
 
     // Size classes
     const sizeClasses = {
@@ -125,11 +125,11 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
       ${baseClasses}
       ${sizeClasses[size]}
       ${value
-        ? "bg-primary text-white"
-        : "bg-background-tertiary text-text-secondary"}
+        ? "bg-accent text-white"
+        : "bg-bg-2 text-fg-soft"}
       ${disabled
         ? "opacity-50 cursor-not-allowed"
-        : "cursor-pointer hover:bg-primary/90"}
+        : "cursor-pointer hover:bg-accent/90"}
     `;
 
     // Hidden checkbox for accessibility (when variant is switch)
@@ -145,11 +145,11 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
         flex items-center gap-2 px-4 py-2 text-sm font-medium
         border border-border rounded-md
         ${value
-          ? "bg-primary text-white border-primary"
-          : "bg-background-primary text-text-primary"}
+          ? "bg-accent text-white border-accent"
+          : "bg-bg text-fg"}
         ${disabled
-          ? "opacity-50 cursor-not-allowed bg-background-secondary"
-          : "hover:bg-background-tertiary cursor-pointer"}
+          ? "opacity-50 cursor-not-allowed bg-bg-1"
+          : "hover:bg-bg-2 cursor-pointer"}
         transition-colors
         ${className}
       `;
@@ -182,8 +182,8 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
                     inline-flex items-center justify-center w-4 h-4
                     border border-border rounded
                     ${value
-                      ? "bg-primary text-white border-primary"
-                      : "bg-background-primary text-text-primary"}
+                      ? "bg-accent text-white border-accent"
+                      : "bg-bg text-fg"}
                   `}
                 >
                   {value && (
@@ -251,7 +251,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
               <div
                 className={`
                   inline-flex items-center justify-center rounded-full
-                  bg-white shadow-sm
+                  bg-white shadow-1
                   ${size === "sm" ? "h-4 w-4" : size === "md" ? "h-5 w-5" : "h-6 w-6"}
                   transform transition-transform
                   ${value ? "translate-x-4 md:translate-x-6 lg:translate-x-8" : "translate-x-0"}
@@ -259,7 +259,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
               >
                 {value && (
                   <svg
-                    className="h-3 w-3 text-primary"
+                    className="h-3 w-3 text-accent"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"

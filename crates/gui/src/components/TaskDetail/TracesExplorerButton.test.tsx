@@ -1,0 +1,68 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { TracesExplorerButton } from "./TracesExplorerButton";
+import type { ExecutionRollups } from "../../utils";
+
+const navigateMock = vi.fn();
+vi.mock("react-router-dom", () => ({
+  useNavigate: () => navigateMock,
+}));
+
+const popOutMock = vi.fn();
+vi.mock("../../utils", () => ({
+  popOut: (...args: unknown[]) => popOutMock(...args),
+}));
+
+const emptyRollups: ExecutionRollups = {
+  totalRuns: 0,
+  totalAttempts: 0,
+  totalCost: 0,
+  totalTokens: 0,
+  totalWallTimeMs: 0,
+};
+let rollups: ExecutionRollups = emptyRollups;
+vi.mock("../../hooks/useSubtreeExecutions", () => ({
+  useSubtreeExecutions: () => ({ rollups, isLoading: false, error: null }),
+}));
+
+describe("TracesExplorerButton", () => {
+  beforeEach(() => {
+    navigateMock.mockReset();
+    popOutMock.mockReset();
+    rollups = { ...emptyRollups, totalRuns: 10, totalAttempts: 104 };
+  });
+
+  it("renders the live subtree run/attempt counts", () => {
+    render(<TracesExplorerButton taskId="task-1" />);
+    const button = screen.getByTestId("task-detail-traces");
+    expect(button).toHaveTextContent(
+      "Explore 10 subtree runs · 104 executions"
+    );
+  });
+
+  it("pluralizes a single run and a single attempt", () => {
+    rollups = { ...emptyRollups, totalRuns: 1, totalAttempts: 1 };
+    render(<TracesExplorerButton taskId="task-1" />);
+    expect(screen.getByTestId("task-detail-traces")).toHaveTextContent(
+      "Explore 1 subtree run · 1 execution"
+    );
+  });
+
+  it("navigates to the in-app traces route when docked", () => {
+    render(<TracesExplorerButton taskId="task-42" />);
+    fireEvent.click(screen.getByTestId("task-detail-traces"));
+    expect(navigateMock).toHaveBeenCalledWith("/traces/task-42");
+    expect(popOutMock).not.toHaveBeenCalled();
+  });
+
+  it("pops out a traces window instead of navigating when standalone", () => {
+    render(<TracesExplorerButton taskId="task-42" standalone />);
+    fireEvent.click(screen.getByTestId("task-detail-traces"));
+    expect(popOutMock).toHaveBeenCalledWith(
+      "/traces-window/task-42",
+      "traces-task-42",
+      expect.objectContaining({ title: "Traces" })
+    );
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+});

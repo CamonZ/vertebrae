@@ -191,7 +191,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
         {/* Modal content */}
         <div
           className={`
-            relative bg-background-secondary rounded-lg shadow-xl
+            relative bg-bg-1 rounded-lg shadow-xl
             ${fullscreen ? 'inset-0 m-0 rounded-none' : 'm-4 max-w-2xl w-full max-h-[90vh] overflow-hidden'}
             ${contentClassName}
           `}
@@ -202,7 +202,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
           <div className={`flex items-center justify-between p-6 border-b border-border ${headerClassName}`}>
             <h2
               id={titleId}
-              className="text-lg font-semibold text-text-primary"
+              className="text-lg font-semibold text-fg"
             >
               {title}
             </h2>
@@ -214,13 +214,13 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 onClick={onClose}
                 disabled={isSubmitting && preventCloseDuringSubmit}
                 className={`
-                  p-1 rounded-md hover:bg-background-tertiary transition-colors
+                  p-1 rounded-md hover:bg-bg-2 transition-colors
                   ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
                 aria-label="Close modal"
               >
                 <svg
-                  className="h-5 w-5 text-text-secondary"
+                  className="h-5 w-5 text-fg-soft"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -240,11 +240,11 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
           {/* Error banner */}
           {error && (
             <div
-              className="flex items-center gap-2 p-4 bg-error/10 border-b border-error"
+              className="flex items-center gap-2 p-4 bg-err/10 border-b border-err"
               role="alert"
             >
               <svg
-                className="h-5 w-5 text-error flex-shrink-0"
+                className="h-5 w-5 text-err flex-shrink-0"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -257,15 +257,15 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <span className="text-sm text-error flex-grow">{error}</span>
+              <span className="text-sm text-err flex-grow">{error}</span>
               <button
                 type="button"
                 onClick={() => {}}
-                className="p-1 hover:bg-error/20 rounded transition-colors cursor-pointer"
+                className="p-1 hover:bg-err/20 rounded transition-colors cursor-pointer"
                 aria-label="Dismiss error"
               >
                 <svg
-                  className="h-4 w-4 text-error"
+                  className="h-4 w-4 text-err"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -297,7 +297,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 disabled={isSubmitting && preventCloseDuringSubmit}
                 className={`
                   px-4 py-2 text-sm font-medium rounded-md border border-border
-                  hover:bg-background-tertiary transition-colors
+                  hover:bg-bg-2 transition-colors
                   ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
               >
@@ -314,8 +314,8 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 className={`
                   px-4 py-2 text-sm font-medium rounded-md border border-transparent
                   ${isSubmitting
-                    ? 'bg-primary/80 cursor-not-allowed'
-                    : 'bg-primary hover:bg-primary/90 text-white cursor-pointer'}
+                    ? 'bg-accent/80 cursor-not-allowed'
+                    : 'bg-accent hover:bg-accent/90 text-white cursor-pointer'}
                   transition-colors flex items-center gap-2
                 `}
               >

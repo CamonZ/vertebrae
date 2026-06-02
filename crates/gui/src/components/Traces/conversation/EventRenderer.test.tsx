@@ -152,7 +152,7 @@ describe("EventRenderer", () => {
     const err: ToolResultEvent = { ...ok, isError: true, result: "boom" };
     rerender(<EventRenderer event={err} previousTimestamp={null} />);
     const text = screen.getByText("boom");
-    expect(text.className).toMatch(/text-error/);
+    expect(text.className).toMatch(/text-err/);
   });
 
   it("renders EventGlyph (brain) for thinking events", () => {
@@ -224,7 +224,7 @@ describe("EventRenderer", () => {
     expect(glyph.getAttribute("data-label")).toBe("tool result");
   });
 
-  it("renders EventGlyph for failing tool_result with error variant + text-error tint", () => {
+  it("renders EventGlyph for failing tool_result with error variant + text-err tint", () => {
     const event: ToolResultEvent = {
       kind: "tool_result",
       timestamp: ts,
@@ -236,7 +236,7 @@ describe("EventRenderer", () => {
     const glyph = screen.getByTestId("event-glyph");
     expect(glyph.getAttribute("data-variant")).toBe("error");
     expect(glyph.getAttribute("data-label")).toBe("tool error");
-    expect(glyph.className).toMatch(/text-error/);
+    expect(glyph.className).toMatch(/text-err/);
   });
 
   it("renders assistant_message text inside its own block, distinct from thinking", () => {
@@ -292,7 +292,7 @@ describe("EventRenderer", () => {
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
     const label = screen.getByText("patch failed");
-    expect(label.className).toMatch(/text-error/);
+    expect(label.className).toMatch(/text-err/);
   });
 
   it("renders todo_list as a checklist with completed items struck through", () => {

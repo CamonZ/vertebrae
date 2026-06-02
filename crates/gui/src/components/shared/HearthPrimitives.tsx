@@ -1,4 +1,11 @@
-import type { CSSProperties, HTMLAttributes, ReactNode } from "react";
+import { useState } from "react";
+import type {
+  CSSProperties,
+  HTMLAttributes,
+  KeyboardEvent,
+  MouseEvent,
+  ReactNode,
+} from "react";
 import type { StepType, TaskLevel, TaskRunStatus } from "../../bindings";
 import {
   deriveHearthRunChipState,
@@ -11,9 +18,8 @@ import {
   stepTypeStyle,
   type HearthStepKind,
 } from "../WorkflowPipeline/stepTypeStyling";
-import { Count } from "../atoms/Count";
 import { Card } from "../molecules/Card";
-import { IdentityBadge } from "./EntityId";
+import { formatEntityId, type EntityIdKind } from "./EntityId";
 import { LevelMark } from "./LevelMark";
 
 type StepDotVariant = "done" | "running" | "waiting" | "queued";
@@ -29,7 +35,7 @@ interface RunChipProps extends HTMLAttributes<HTMLSpanElement> {
 
 interface IdChipProps {
   id: string | null | undefined;
-  kind?: Parameters<typeof IdentityBadge>[0]["kind"];
+  kind?: EntityIdKind;
   level?: TaskLevel | null;
   className?: string;
   testId?: string;
@@ -131,20 +137,6 @@ interface RecentItemProps {
   muted?: boolean;
 }
 
-const runToneClasses: Record<HearthRunChipState["tone"], string> = {
-  neutral:
-    "border-[var(--color-line-strong)] bg-[var(--color-bg-2)] text-[var(--color-fg-soft)]",
-  info: "border-[var(--color-info)] bg-[color-mix(in_oklch,var(--color-info-wash)_35%,var(--color-bg-2))] text-[var(--color-info)]",
-  warning:
-    "border-[var(--color-warn)] bg-[color-mix(in_oklch,var(--color-warn-wash)_35%,var(--color-bg-2))] text-[var(--color-warn)]",
-  success:
-    "border-[var(--color-ok)] bg-[color-mix(in_oklch,var(--color-ok-wash)_35%,var(--color-bg-2))] text-[var(--color-ok)]",
-  error:
-    "border-[var(--color-err)] bg-[color-mix(in_oklch,var(--color-err-wash)_35%,var(--color-bg-2))] text-[var(--color-err)]",
-  muted:
-    "border-[var(--color-line-strong)] bg-[var(--color-bg-2)] text-[var(--color-fg-mute)]",
-};
-
 function classNames(...values: Array<string | false | null | undefined>) {
   return values.filter(Boolean).join(" ");
 }
@@ -225,42 +217,98 @@ export function RunChip({
       data-state={displayChip.state}
       aria-label={`Run status: ${displayChip.label}`}
       className={classNames(
-        "c-run-chip inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] border font-mono font-medium uppercase tracking-[0.08em]",
-        runToneClasses[displayChip.tone],
+        "c-run-chip",
         displayChip.state,
-        small ? "h-[17px] px-1.5 text-2xs" : "h-6 px-2 text-xs",
+        small ? "sm" : "",
         className
       )}
     >
       {displayChip.state === "running" && (
-        <span
-          aria-hidden
-          className="spinner h-2 w-2 animate-spin rounded-full border border-current border-r-transparent"
-        />
+        <span aria-hidden className="spinner" />
       )}
       <span>{displayChip.label}</span>
-      {runtime && (
-        <span className="runtime font-normal opacity-80">· {runtime}</span>
-      )}
+      {runtime && <span className="runtime">· {runtime}</span>}
     </span>
   );
 }
 
 export function IdChip({
   id,
-  kind,
+  kind = "task",
   level,
   className,
   testId,
 }: IdChipProps): ReactNode {
+  const [copied, setCopied] = useState(false);
+
+  if (!id) {
+    return (
+      <span data-testid={testId} className={classNames("c-id-chip", className)}>
+        -
+      </span>
+    );
+  }
+
+  // Lowercase noun for the copy affordance, e.g. "ticket" / "task run".
+  const label = kind === "task" && level ? level : kind;
+
+  const copy = (
+    event: MouseEvent<HTMLSpanElement> | KeyboardEvent<HTMLSpanElement>
+  ) => {
+    event.stopPropagation();
+    const done = () => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1100);
+    };
+    navigator.clipboard?.writeText(id).then(done).catch(done);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      copy(event);
+    }
+  };
+
   return (
-    <IdentityBadge
-      id={id}
-      kind={kind}
-      level={level}
-      testId={testId}
-      className={classNames("c-id-chip", className)}
-    />
+    <span
+      role="button"
+      tabIndex={0}
+      data-testid={testId}
+      data-full-id={id}
+      aria-label={`Copy full ${label} ID`}
+      title="Click to copy"
+      onClick={copy}
+      onKeyDown={handleKeyDown}
+      className={classNames("c-id-chip", copied && "copied", className)}
+    >
+      <span className="id-text">{formatEntityId(id)}</span>
+      <svg
+        className="copy-mark"
+        width="9"
+        height="9"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        aria-hidden
+      >
+        <rect x="9" y="9" width="13" height="13" rx="1" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </svg>
+      <svg
+        className="ok-mark"
+        width="9"
+        height="9"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        aria-hidden
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    </span>
   );
 }
 
@@ -366,11 +414,13 @@ export function StateBreakdown({
   queued = 0,
   className,
 }: StateBreakdownProps): ReactNode {
+  // Glyphs match the design reference (docs/design/lib/lib-primitives.jsx):
+  // ✓ done · ▶ running · ⏸ waiting · ○ queued.
   const parts = [
-    ["b-done text-[var(--color-ok)]", "done", done],
-    ["b-run text-[var(--color-accent)]", "running", running],
-    ["b-wait text-[var(--color-warn)]", "waiting", waiting],
-    ["b-q text-[var(--color-fg-mute)]", "queued", queued],
+    ["b-done text-[var(--color-ok)]", "done", "✓", done],
+    ["b-run text-[var(--color-accent)]", "running", "▶", running],
+    ["b-wait text-[var(--color-warn)]", "waiting", "⏸", waiting],
+    ["b-q text-[var(--color-fg-mute)]", "queued", "○", queued],
   ] as const;
 
   return (
@@ -382,14 +432,14 @@ export function StateBreakdown({
       aria-label={`State breakdown: ${done} done, ${running} running, ${waiting} waiting, ${queued} queued`}
     >
       {parts
-        .filter(([, , value]) => value > 0)
-        .map(([classes, labelText, value], index) => (
+        .filter(([, , , value]) => value > 0)
+        .map(([classes, labelText, glyph, value], index) => (
           <span key={labelText} className="inline-flex items-center gap-1">
             {index > 0 && (
               <span className="sep text-[var(--color-fg-ghost)]">·</span>
             )}
-            <span className={classes}>
-              {labelText[0]} <Count value={value} />
+            <span className={classNames(classes, "tabular-nums")}>
+              <span aria-hidden>{glyph}</span> {value}
             </span>
           </span>
         ))}

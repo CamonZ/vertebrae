@@ -361,14 +361,17 @@ describe("Sidebar rail connection readout", () => {
     });
   }
 
-  it("drops the app icon (LogoMark) and the top separators from the rail", () => {
+  it("drops the app icon but keeps the single design separator above the nav", () => {
     renderSidebar();
     expect(screen.queryByLabelText("Vertebrae")).not.toBeInTheDocument();
     const aside = screen.getByRole("complementary", {
       name: "Sidebar navigation",
     });
+    // Exactly one thin rule — the design rail's 20px `hr` between the project
+    // monogram and the nav icons. No nav-internal dividers.
     const dividers = aside.querySelectorAll("div.h-px");
-    expect(dividers).toHaveLength(0);
+    expect(dividers).toHaveLength(1);
+    expect(dividers[0].className).toContain("w-5");
     expect(aside.querySelectorAll("li.h-px")).toHaveLength(0);
   });
 });

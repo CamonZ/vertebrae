@@ -838,7 +838,7 @@ describe("FlightStrip", () => {
       .getAllByTestId("flight-strip-marker-main")
       .find((m) => m.getAttribute("data-task-id") === "t-tk")!;
     expect(epicMarker.querySelector(".text-info")).toBeTruthy();
-    expect(ticketMarker.querySelector(".text-primary")).toBeTruthy();
+    expect(ticketMarker.querySelector(".text-accent")).toBeTruthy();
   });
 
   it("colors DELEGATION edges by child task level (epic/ticket/task)", () => {
@@ -887,8 +887,8 @@ describe("FlightStrip", () => {
       (e) => e.getAttribute("data-child-task-id") === "t-ts"
     );
     expect(ticketEdge?.getAttribute("data-child-level")).toBe("ticket");
-    expect(ticketEdge?.getAttribute("class")).toContain("text-primary");
+    expect(ticketEdge?.getAttribute("class")).toContain("text-accent");
     expect(taskEdge?.getAttribute("data-child-level")).toBe("task");
-    expect(taskEdge?.getAttribute("class")).toContain("text-text-secondary");
+    expect(taskEdge?.getAttribute("class")).toContain("text-fg-soft");
   });
 });

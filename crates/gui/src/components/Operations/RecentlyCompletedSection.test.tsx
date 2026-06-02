@@ -184,7 +184,7 @@ describe("RecentlyCompletedSection", () => {
     render(<RecentlyCompletedSection items={items} />);
 
     const item = screen.getByTestId("completed-item");
-    expect(item.className).toContain("bg-bg-secondary");
+    expect(item.className).toContain("bg-bg-1");
     expect(item.className).toContain("border-l-border");
     // Ensure no red or green tinting
     expect(item.className).not.toContain("error");

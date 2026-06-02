@@ -306,7 +306,7 @@ export function HearthShowcase() {
               Running
             </Badge>
             <Badge intent="neutral">workflow / step</Badge>
-            <Badge count={3} intent="error" />
+            <Badge count={3} intent="error" bordered />
             <Chip variant="static">tag</Chip>
             <Chip
               variant="filter"

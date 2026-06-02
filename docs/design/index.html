@@ -10,11 +10,11 @@
   .hero { padding: var(--s-12) 0 var(--s-12); position: relative; }
   .hero .pin {
     position: absolute; top: var(--s-4); right: 0;
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+    font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em;
     color: var(--accent); text-transform: uppercase;
   }
   .hero .pin .n {
-    font-family: var(--serif); font-style: italic; font-size: 22px;
+    font-family: var(--serif); font-style: italic; font-size: var(--text-22);
     letter-spacing: 0; font-weight: 400;
   }
   .hero h1 {
@@ -50,16 +50,16 @@
   }
   .art .marker {
     position: absolute; top: 12px; right: 12px;
-    padding: 3px 8px;
+    padding: var(--s-0) var(--s-2);
     background: var(--accent);
     color: var(--bg);
-    font-family: var(--mono); font-size: 10px;
+    font-family: var(--mono); font-size: var(--text-10);
     letter-spacing: 0.14em; text-transform: uppercase;
     font-weight: 600;
   }
   .art .marker .n {
-    font-family: var(--serif); font-style: italic; font-size: 13px;
-    letter-spacing: 0; margin-right: 4px;
+    font-family: var(--serif); font-style: italic; font-size: var(--text-13);
+    letter-spacing: 0; margin-right: var(--s-1);
   }
   .art .glow {
     position: absolute;
@@ -74,7 +74,7 @@
   .art .footer {
     position: absolute; bottom: 16px; left: 0; right: 0;
     text-align: center;
-    font-family: var(--mono); font-size: 9px; letter-spacing: 0.2em;
+    font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.2em;
     color: var(--fg-faint); text-transform: uppercase;
   }
 
@@ -90,7 +90,7 @@
     aspect-ratio: 1 / 1.4;
     padding: var(--s-3);
     display: flex; flex-direction: column; justify-content: space-between;
-    font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+    font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.04em;
     border-right: 1px solid var(--bg);
   }
   .strip > div:last-child { border-right: none; }
@@ -110,14 +110,14 @@
   }
   .stats .stat:last-child { border-right: none; }
   .stats .stat .n {
-    font-family: var(--serif); font-size: 56px; font-weight: 400;
+    font-family: var(--serif); font-size: var(--text-56); font-weight: 400;
     line-height: 1; letter-spacing: -0.025em; color: var(--fg);
   }
   .stats .stat .n .em { font-style: italic; color: var(--accent); }
-  .stats .stat .n small { font-family: var(--sans); font-size: 18px; color: var(--fg-mute); font-weight: 400; letter-spacing: 0; }
+  .stats .stat .n small { font-family: var(--sans); font-size: var(--text-18); color: var(--fg-mute); font-weight: 400; letter-spacing: 0; }
   .stats .stat .lbl {
     margin-top: var(--s-2);
-    font-family: var(--mono); font-size: 10px; color: var(--fg-mute);
+    font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute);
     letter-spacing: 0.14em; text-transform: uppercase;
   }
 
@@ -127,22 +127,22 @@
     display: grid; grid-template-columns: 1fr 2fr;
     gap: var(--s-12);
   }
-  .manifesto .key { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  .manifesto .key { font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
   .manifesto h2 {
     margin-top: var(--s-3);
-    font-family: var(--serif); font-size: 40px; line-height: 1; font-weight: 400;
+    font-family: var(--serif); font-size: var(--text-40); line-height: 1; font-weight: 400;
     letter-spacing: -0.015em; color: var(--fg);
   }
   .manifesto h2 .em { font-style: italic; color: var(--accent); }
   .manifesto .body {
-    font-family: var(--serif); font-size: 22px; line-height: 1.5; color: var(--fg-soft); font-weight: 300;
+    font-family: var(--serif); font-size: var(--text-22); line-height: 1.5; color: var(--fg-soft); font-weight: 300;
   }
   .manifesto .body p { margin-bottom: var(--s-5); }
   .manifesto .body em { color: var(--fg); font-style: italic; }
   .manifesto .body p:first-child::first-letter {
-    font-family: var(--serif); font-size: 88px;
+    font-family: var(--serif); font-size: var(--text-96);
     float: left; line-height: 0.85;
-    padding-right: var(--s-3); padding-top: 8px;
+    padding-right: var(--s-3); padding-top: var(--s-2);
     color: var(--accent);
     font-style: italic;
   }
@@ -157,10 +157,10 @@
     display: grid; grid-template-columns: 1fr 2fr; gap: var(--s-12);
     align-items: baseline;
   }
-  .steps-intro .lead .key { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
-  .steps-intro .lead h2 { font-family: var(--serif); font-size: 36px; font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-3); }
+  .steps-intro .lead .key { font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  .steps-intro .lead h2 { font-family: var(--serif); font-size: var(--text-36); font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-3); }
   .steps-intro .lead h2 .em { font-style: italic; color: var(--accent); }
-  .steps-intro .lead .desc { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); line-height: 1.5; }
+  .steps-intro .lead .desc { font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--fg-mute); line-height: 1.5; }
 
   .step-row {
     margin-top: var(--s-6);
@@ -178,16 +178,16 @@
   .step-card .bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; }
   .step-card .ico {
     margin-top: var(--s-2);
-    font-family: var(--mono); font-size: 14px;
+    font-family: var(--mono); font-size: var(--text-14);
   }
   .step-card .nm {
     margin-top: var(--s-2);
-    font-family: var(--serif); font-size: 22px; font-weight: 400; line-height: 1.1;
+    font-family: var(--serif); font-size: var(--text-22); font-weight: 400; line-height: 1.1;
     letter-spacing: -0.01em;
   }
   .step-card .nm .it { font-style: italic; }
-  .step-card .desc { margin-top: var(--s-2); font-family: var(--sans); font-size: 12px; color: var(--fg-mute); line-height: 1.5; }
-  .step-card .tok { margin-top: var(--s-3); font-family: var(--mono); font-size: 10px; color: var(--fg-faint); letter-spacing: 0.06em; }
+  .step-card .desc { margin-top: var(--s-2); font-family: var(--sans); font-size: var(--text-12); color: var(--fg-mute); line-height: 1.5; }
+  .step-card .tok { margin-top: var(--s-3); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.06em; }
   .step-card .tint {
     position: absolute; bottom: 0; left: 0; right: 0; height: 40%;
     background: linear-gradient(to top, var(--c-wash), transparent);
@@ -204,10 +204,10 @@
     display: grid; grid-template-columns: 1fr 2fr; gap: var(--s-12);
     align-items: baseline;
   }
-  .units-intro .lead .key { font-family: var(--mono); font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
-  .units-intro .lead h2 { font-family: var(--serif); font-size: 36px; font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-3); }
+  .units-intro .lead .key { font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); }
+  .units-intro .lead h2 { font-family: var(--serif); font-size: var(--text-36); font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-3); }
   .units-intro .lead h2 .em { font-style: italic; color: var(--accent); }
-  .units-intro .lead .desc { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); line-height: 1.5; }
+  .units-intro .lead .desc { font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--fg-mute); line-height: 1.5; }
 
   .unit-row {
     margin-top: var(--s-6);
@@ -237,20 +237,20 @@
   }
 
   .unit-card .u-char {
-    font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+    font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint);
     letter-spacing: 0.06em;
     text-align: right; line-height: 1.6;
   }
-  .unit-card .u-char .uc { display: block; font-size: 18px; color: var(--fg-mute); letter-spacing: 0; }
+  .unit-card .u-char .uc { display: block; font-size: var(--text-18); color: var(--fg-mute); letter-spacing: 0; }
 
   .unit-card .u-name {
-    font-family: var(--serif); font-size: 28px; font-weight: 400;
+    font-family: var(--serif); font-size: var(--text-28); font-weight: 400;
     line-height: 1; letter-spacing: -0.015em;
   }
   .unit-card .u-name .it { font-style: italic; color: var(--accent); }
 
   .unit-card .u-desc {
-    font-family: var(--sans); font-size: 13px; color: var(--fg-mute); line-height: 1.55;
+    font-family: var(--sans); font-size: var(--text-13); color: var(--fg-mute); line-height: 1.55;
     flex: 1;
   }
 
@@ -258,37 +258,37 @@
   .u-preview {
     background: var(--bg-2); border: 1px solid var(--line-strong);
     border-radius: var(--r-sm); overflow: hidden;
-    font-family: var(--mono); font-size: 11px;
+    font-family: var(--mono); font-size: var(--text-11);
   }
   .u-preview .u-prev-head {
-    padding: 4px var(--s-3);
+    padding: var(--s-1) var(--s-3);
     border-bottom: 1px solid var(--line);
-    color: var(--fg-faint); font-size: 10px; letter-spacing: 0.12em;
+    color: var(--fg-faint); font-size: var(--text-10); letter-spacing: 0.12em;
     text-transform: uppercase;
   }
   .u-row {
-    display: flex; align-items: center; gap: 6px;
-    padding: 5px var(--s-3);
+    display: flex; align-items: center; gap: var(--s-1h);
+    padding: var(--s-1) var(--s-3);
     border-bottom: 1px solid var(--line);
     color: var(--fg-soft);
   }
   .u-row:last-child { border-bottom: none; }
   .u-row.sel { background: var(--accent-wash); }
-  .u-row .chev { color: var(--fg-faint); width: 10px; flex-shrink: 0; font-size: 8px; }
+  .u-row .chev { color: var(--fg-faint); width: 10px; flex-shrink: 0; font-size: var(--text-8); }
   .u-row .lic { flex-shrink: 0; width: 14px; text-align: center; }
   .u-row .lbl { flex: 1; }
   .u-row .dim { color: var(--fg-faint); }
 
   .unit-card .u-tok {
-    font-family: var(--mono); font-size: 10px; color: var(--fg-faint);
+    font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint);
     letter-spacing: 0.06em;
     padding-top: var(--s-2); border-top: 1px solid var(--line);
     display: flex; align-items: center; justify-content: space-between;
   }
   .unit-card .u-tok .level {
-    padding: 1px 6px;
+    padding: 1px var(--s-1h);
     background: var(--bg-3); border: 1px solid var(--line-strong);
-    border-radius: var(--r-xs); font-size: 10px; color: var(--fg-mute);
+    border-radius: var(--r-xs); font-size: var(--text-10); color: var(--fg-mute);
   }
 
   /* TOC */
@@ -307,11 +307,11 @@
   }
   .toc-item:last-child { border-bottom: none; }
   .toc-item:hover { background: var(--bg-1); padding-left: var(--s-3); padding-right: var(--s-3); margin-left: calc(var(--s-3) * -1); margin-right: calc(var(--s-3) * -1); }
-  .toc-item .ix { font-family: var(--serif); font-style: italic; font-size: 24px; color: var(--accent); }
-  .toc-item .ti { font-family: var(--serif); font-size: 28px; line-height: 1.05; font-weight: 400; letter-spacing: -0.01em; }
+  .toc-item .ix { font-family: var(--serif); font-style: italic; font-size: var(--text-24); color: var(--accent); }
+  .toc-item .ti { font-family: var(--serif); font-size: var(--text-28); line-height: 1.05; font-weight: 400; letter-spacing: -0.01em; }
   .toc-item .ti .it { font-style: italic; color: var(--fg-mute); }
-  .toc-item .desc { font-family: var(--serif); font-style: italic; font-size: 14px; color: var(--fg-mute); line-height: 1.4; }
-  .toc-item .pg { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); text-align: right; }
+  .toc-item .desc { font-family: var(--serif); font-style: italic; font-size: var(--text-14); color: var(--fg-mute); line-height: 1.4; }
+  .toc-item .pg { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint); text-align: right; }
 
   /* CTA */
   .cta {
@@ -322,7 +322,7 @@
     border-radius: var(--r-md);
     display: flex; gap: var(--s-3); align-items: center;
   }
-  .cta .lbl { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); letter-spacing: 0.12em; text-transform: uppercase; }
+  .cta .lbl { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); letter-spacing: 0.12em; text-transform: uppercase; }
 </style>
 </head>
 <body>
@@ -564,12 +564,12 @@
               <span class="lic">◈</span>
               <span class="lbl">Refactor auth system</span>
             </div>
-            <div class="u-row" style="padding-left: 28px;">
+            <div class="u-row" style="padding-left: var(--s-7);">
               <span class="chev">▷</span>
               <span class="lic" style="color:var(--fg-mute);">◇</span>
               <span class="lbl dim">Implement JWT service</span>
             </div>
-            <div class="u-row" style="padding-left: 28px;">
+            <div class="u-row" style="padding-left: var(--s-7);">
               <span class="chev">▷</span>
               <span class="lic" style="color:var(--fg-mute);">◇</span>
               <span class="lbl dim">Approve PR output</span>
@@ -607,17 +607,17 @@
 
           <div class="u-preview">
             <div class="u-prev-head">in context · tree view</div>
-            <div class="u-row" style="padding-left: 16px;">
+            <div class="u-row" style="padding-left: var(--s-4);">
               <span class="chev" style="color:var(--fg-faint);">▼</span>
               <span class="lic" style="color:var(--fg-mute);">◈</span>
               <span class="lbl dim">Refactor auth system</span>
             </div>
-            <div class="u-row sel" style="padding-left: 28px;">
+            <div class="u-row sel" style="padding-left: var(--s-7);">
               <span class="chev">▼</span>
               <span class="lic">◇</span>
               <span class="lbl">Implement JWT service</span>
             </div>
-            <div class="u-row" style="padding-left: 44px;">
+            <div class="u-row" style="padding-left: var(--indent-2);">
               <span class="chev"></span>
               <span class="lic" style="color:var(--fg-faint);">·</span>
               <span class="lbl dim">Create token signing fn</span>
@@ -655,17 +655,17 @@
 
           <div class="u-preview">
             <div class="u-prev-head">in context · tree view</div>
-            <div class="u-row" style="padding-left: 28px;">
+            <div class="u-row" style="padding-left: var(--s-7);">
               <span class="chev" style="color:var(--fg-faint);">▼</span>
               <span class="lic" style="color:var(--fg-mute);">◇</span>
               <span class="lbl dim">Implement JWT service</span>
             </div>
-            <div class="u-row sel" style="padding-left: 44px;">
+            <div class="u-row sel" style="padding-left: var(--indent-2);">
               <span class="chev"></span>
               <span class="lic">·</span>
               <span class="lbl">Create token signing fn</span>
             </div>
-            <div class="u-row" style="padding-left: 44px;">
+            <div class="u-row" style="padding-left: var(--indent-2);">
               <span class="chev"></span>
               <span class="lic" style="color:var(--fg-faint);">·</span>
               <span class="lbl dim">Write signing unit tests</span>
@@ -715,14 +715,14 @@
       <a href="foundations.html" class="btn primary">§ 02 · Foundations →</a>
       <a href="components.html" class="btn">§ 03 · Components</a>
       <a href="patterns.html" class="btn">§ 04 · Patterns</a>
-      <span style="margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--fg-faint);">esc · close</span>
+      <span style="margin-left: auto; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint);">esc · close</span>
     </div>
 
     <!-- Colophon -->
     <footer class="colophon">
       <div>
         <h4>Colophon</h4>
-        <p>Display in <em>Newsreader</em> (Production Type), body in <em>Geist</em> (Vercel), monospaced annotations in <em>JetBrains Mono</em>. Ink is <span class="mono" style="font-size: 11px;"><span class="hx" data-dark="#100e0c" data-light="#faf6ec"></span></span>, accent a hearthfire ember <span class="mono" style="font-size: 11px;"><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></span>.</p>
+        <p>Display in <em>Newsreader</em> (Production Type), body in <em>Geist</em> (Vercel), monospaced annotations in <em>JetBrains Mono</em>. Ink is <span class="mono" style="font-size: var(--text-11);"><span class="hx" data-dark="#100e0c" data-light="#faf6ec"></span></span>, accent a hearthfire ember <span class="mono" style="font-size: var(--text-11);"><span class="hx" data-dark="oklch(.74 .18 40)" data-light="oklch(.62 .18 48)"></span></span>.</p>
       </div>
       <div>
         <h4>Sibling proposals</h4>

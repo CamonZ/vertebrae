@@ -58,7 +58,7 @@ export function EditableList({
   return (
     <div className="space-y-1">
       {items.length === 0 ? (
-        <p className="text-xs italic text-text-muted py-1">{emptyText}</p>
+        <p className="text-xs italic text-fg-mute py-1">{emptyText}</p>
       ) : (
         <ul className="space-y-1">
           {items.map((item, index) => {
@@ -67,7 +67,7 @@ export function EditableList({
             return (
               <li
                 key={`${item}-${index}`}
-                className="group flex items-start gap-2 text-sm text-text-secondary rounded-md p-2 hover:bg-bg-tertiary transition-colors"
+                className="group flex items-start gap-2 text-sm text-fg-soft rounded-md p-2 hover:bg-bg-2 transition-colors"
               >
                 {variant === "step" ? (
                   <button
@@ -76,7 +76,7 @@ export function EditableList({
                     className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs font-medium cursor-pointer transition-colors ${
                       isDone
                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                        : "bg-bg-tertiary text-text-muted hover:border hover:border-primary"
+                        : "bg-bg-2 text-fg-mute hover:border hover:border-accent"
                     }`}
                     title={isDone ? "Mark as not done" : "Mark as done"}
                   >
@@ -93,7 +93,7 @@ export function EditableList({
                     )}
                   </button>
                 ) : (
-                  <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-text-muted" />
+                  <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-fg-mute" />
                 )}
 
                 {editingIndex === index ? (

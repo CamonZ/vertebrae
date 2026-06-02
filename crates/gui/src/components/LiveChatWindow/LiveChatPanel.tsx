@@ -11,7 +11,7 @@ export function LiveChatPanel() {
       storageKey="live-chat-panel-width"
       defaultWidth={420}
       minWidth={320}
-      glowColor="from-primary/0 via-primary/30 to-primary/0"
+      glowColor="from-accent/0 via-accent/30 to-accent/0"
     >
       <LiveChatWindow />
     </ResizablePanel>

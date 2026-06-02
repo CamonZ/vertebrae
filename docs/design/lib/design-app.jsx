@@ -48,17 +48,106 @@
     { d: 'M1136,232 C1153,232 1153,232 1170,232' },
   ];
 
+  // Inter-workflow transitions — how one workflow hands off to / is triggered by another.
+  // [targetId, condition]
+  const XWF = {
+    'chat-runner-lifecycle': {
+      out: [['work-breakdown-draft', 'intent = plan'], ['tracker-mutation', 'tool · mutate'], ['openrouter-stream', 'inference call']],
+      in:  [['session-rehydrate', 'runner rehydrated']],
+    },
+    'work-breakdown-draft': {
+      out: [['authoring-verifier-gate', 'draft ready']],
+      in:  [['chat-runner-lifecycle', 'intent = plan']],
+    },
+    'authoring-verifier-gate': {
+      out: [['tracker-mutation', 'approved → persist']],
+      in:  [['work-breakdown-draft', 'draft ready']],
+    },
+    'investigation-resume': {
+      out: [['human-review', 'needs decision']],
+      in:  [['planning-investigate', 'escalated']],
+    },
+    'human-review': {
+      out: [['tracker-mutation', 'approved']],
+      in:  [['investigation-resume', 'needs decision'], ['authoring-verifier-gate', 'gate failed']],
+    },
+    'tracker-mutation': {
+      out: [],
+      in:  [['chat-runner-lifecycle', 'tool · mutate'], ['authoring-verifier-gate', 'approved'], ['human-review', 'approved']],
+    },
+  };
+  const wfName = (id) => (WORKFLOWS.find(w => w.id === id) || {}).name || id;
+
+  // Workflow-level inspector (vs the per-step inspector) — surfaces purpose,
+  // shape, cross-workflow transitions, and run stats.
+  function WorkflowInspector({ wf, go }) {
+    const x = XWF[wf.id] || { out: [], in: [] };
+    return (
+      <>
+        <header className="inspector-head">
+          <div className="pre">workflow</div>
+          <div className="title">{wf.name}</div>
+          <div className="kind-row">
+            <span className="wf-chip">{wf.steps} steps</span>
+            {wf.runsLive
+              ? <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--accent)' }}>• {wf.runsLive} running</span>
+              : <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--fg-faint)' }}>idle · {wf.runs24h}/24h</span>}
+          </div>
+        </header>
+        <div className="inspector-body">
+          <div className="sub-lbl">Shape</div>
+          <div className="wf-shape">{wf.shape.map((k, i) => <span key={i} className="seg" style={{ background: k === 'terminal' ? 'var(--ok)' : 'var(--step-' + k + ')' }} />)}</div>
+
+          <div className="sub-lbl">Transitions</div>
+          {(x.out.length || x.in.length) ? (
+            <div className="wf-xfers">
+              {x.out.map(([to, when], i) => (
+                <div key={'o' + i} className="wf-xrow" onClick={() => go(to)} title={'Hands off to ' + wfName(to)}>
+                  <span className="arr out">→</span><span className="nm">{wfName(to)}</span><span className="cond">{when}</span>
+                </div>
+              ))}
+              {x.in.map(([from, when], i) => (
+                <div key={'i' + i} className="wf-xrow" onClick={() => go(from)} title={'Triggered by ' + wfName(from)}>
+                  <span className="arr in">←</span><span className="nm">{wfName(from)}</span><span className="cond">{when}</span>
+                </div>
+              ))}
+            </div>
+          ) : <div className="prose" style={{ fontStyle: 'italic', color: 'var(--fg-faint)' }}>No cross-workflow transitions.</div>}
+
+          <div className="sub-lbl">Stats</div>
+          <FieldRow k="Steps" v={String(wf.steps)} />
+          <FieldRow k="Live runs" v={String(wf.runsLive)} tone={wf.runsLive ? 'accent' : undefined} />
+          <FieldRow k="Runs (24h)" v={String(wf.runs24h)} />
+          <FieldRow k="Avg duration" v={wf.avg} />
+        </div>
+      </>
+    );
+  }
+
   function DesignApp() {
     const [query, setQuery] = useState('');
     const [selectedWf, setSelectedWf] = useState('chat-runner-lifecycle');
     const [selectedNode, setSelectedNode] = useState(null);
     const [overlay, setOverlay] = useState('active');
     const [inspectorOpen, setInspectorOpen] = useState(false);
+    const [inspectorMode, setInspectorMode] = useState('step');
     const [selectedRun, setSelectedRun] = useState('40628099');
     const canvasRef = useRef(null);
 
     const live = overlay !== 'off';
     const workflows = useMemo(() => WORKFLOWS.filter(w => !query || w.name.toLowerCase().indexOf(query.toLowerCase()) !== -1), [query]);
+
+    // "/" focuses the in-pane workflow search (scoped filter), unless typing elsewhere
+    useEffect(() => {
+      const onKey = (e) => {
+        if (e.key === '/' && !/^(INPUT|TEXTAREA)$/.test((e.target.tagName || ''))) {
+          const el = document.querySelector('.wf-list .search-bar input');
+          if (el) { e.preventDefault(); el.focus(); }
+        }
+      };
+      window.addEventListener('keydown', onKey);
+      return () => window.removeEventListener('keydown', onKey);
+    }, []);
 
     // center on active node once
     useEffect(() => {
@@ -71,6 +160,12 @@
 
     function openNode(step) {
       setSelectedNode(step);
+      setInspectorMode('step');
+      setInspectorOpen(true);
+    }
+    function openWorkflow(id) {
+      setSelectedWf(id);
+      setInspectorMode('workflow');
       setInspectorOpen(true);
     }
 
@@ -89,13 +184,13 @@
                 <div className="h-title">Workflow Pipelines</div>
                 <div className="h-meta"><b>10</b> definitions</div>
               </div>
-              <SearchBar value={query} onChange={setQuery} placeholder="Search workflows…" hint={null} />
+              <SearchBar value={query} onChange={setQuery} placeholder="Search workflows…" hint="/" />
             </header>
             <div className="wf-list-body">
               {workflows.map(w => (
                 <WorkflowRailItem key={w.id} name={w.name} shape={w.shape}
                   live={w.runsLive} steps={w.steps} daily={w.runs24h} avg={w.avg}
-                  selected={w.id === selectedWf} onClick={() => setSelectedWf(w.id)} />
+                  selected={w.id === selectedWf} onClick={() => openWorkflow(w.id)} />
               ))}
             </div>
           </aside>
@@ -154,18 +249,21 @@
                 <span className="at-step">at step <em>5 · wait</em></span>
                 <IdChip id="40628099" />
               </div>
-              <span style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)', fontSize: 10 }}>10 completions in last 24h · avg 4m 12s</span>
+              <span style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)', fontSize: 'var(--text-10)' }}>10 completions in last 24h · avg 4m 12s</span>
             </footer>
           </section>
 
           {/* Inspector */}
           <aside className={'inspector' + (inspectorOpen ? '' : ' closed')}>
+            {inspectorMode === 'workflow'
+              ? <WorkflowInspector wf={WORKFLOWS.find(w => w.id === selectedWf) || WORKFLOWS[0]} go={openWorkflow} />
+              : (<>
             <header className="inspector-head">
               <div className="pre">step 5 of 7</div>
               <div className="title">wait_for_children</div>
               <div className="kind-row">
                 <KindChip kind="wait" label="wait" />
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--accent)' }}>• 1 running</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 'var(--text-10)', color: 'var(--accent)' }}>• 1 running</span>
               </div>
             </header>
             <div className="inspector-body">
@@ -191,6 +289,7 @@
               <FieldRow k="Error rate" v="0.0%" tone="ok" />
               <FieldRow k="Throughput" v="~3 runs / hr" />
             </div>
+              </>)}
           </aside>
         </main>
       </AppShell>

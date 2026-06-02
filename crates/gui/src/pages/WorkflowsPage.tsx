@@ -14,8 +14,8 @@ export function WorkflowsPage() {
       <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
 
       <div>
-        <h2 className="text-lg font-semibold text-text-primary">Workflows</h2>
-        <p className="mt-1 text-sm text-text-muted">
+        <h2 className="text-lg font-semibold text-fg">Workflows</h2>
+        <p className="mt-1 text-sm text-fg-mute">
           Manage automation pipelines
         </p>
       </div>

@@ -92,7 +92,7 @@ export function ThemeToggle() {
     <button
       type="button"
       onClick={cycleTheme}
-      className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-border-focus"
+      className="flex h-8 w-8 items-center justify-center rounded-md text-fg-soft transition-colors hover:bg-bg-2 hover:text-fg focus:outline-none focus:ring-2 focus:ring-border-focus"
       aria-label={`Current theme: ${currentOption.label}. Click to change.`}
       title={`Theme: ${currentOption.label}`}
     >

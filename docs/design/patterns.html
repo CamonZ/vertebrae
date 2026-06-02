@@ -10,10 +10,10 @@
   .frame { margin-top: var(--s-6); border: 1px solid var(--line-strong); background: var(--bg-1); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-2); }
   .frame .frame-head {
     background: var(--bg-2);
-    padding: 6px var(--s-4);
+    padding: var(--s-1h) var(--s-4);
     display: flex; align-items: center; gap: var(--s-3);
     border-bottom: 1px solid var(--line);
-    font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em;
+    font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.06em;
     color: var(--fg-mute);
   }
   .frame .frame-head .dot { width: 10px; height: 10px; border-radius: 50%; }
@@ -27,32 +27,32 @@
     border-bottom: 1px solid var(--accent);
     display: grid; grid-template-columns: 1fr 2fr; gap: var(--s-8); align-items: baseline;
   }
-  .pattern-head .num { font-family: var(--serif); font-style: italic; font-size: 28px; color: var(--accent); }
-  .pattern-head h2 { font-family: var(--serif); font-size: 40px; font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-2); }
+  .pattern-head .num { font-family: var(--serif); font-style: italic; font-size: var(--text-28); color: var(--accent); }
+  .pattern-head h2 { font-family: var(--serif); font-size: var(--text-40); font-weight: 400; letter-spacing: -0.015em; margin-top: var(--s-2); }
   .pattern-head h2 .em { font-style: italic; color: var(--accent); }
-  .pattern-head .desc { font-family: var(--serif); font-style: italic; font-size: 18px; color: var(--fg-mute); line-height: 1.45; }
+  .pattern-head .desc { font-family: var(--serif); font-style: italic; font-size: var(--text-18); color: var(--fg-mute); line-height: 1.45; }
 
   /* Sidebar */
-  .side { width: 48px; background: var(--bg); border-right: 1px solid var(--line); padding: var(--s-2) 0; display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+  .side { width: 48px; background: var(--bg); border-right: 1px solid var(--line); padding: var(--s-2) 0; display: flex; flex-direction: column; align-items: center; gap: var(--s-1); flex-shrink: 0; }
   .side .item { width: 32px; height: 32px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; color: var(--fg-mute); cursor: pointer; position: relative; }
   .side .item:hover { background: var(--bg-2); color: var(--fg); }
   .side .item.active { background: var(--accent-wash); color: var(--accent); }
   .side .item.active::before { content: ''; position: absolute; left: -2px; top: 4px; bottom: 4px; width: 2px; background: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
-  .side hr { width: 24px; border: none; border-top: 1px solid var(--line); margin: 2px 0; }
-  .side .logo { width: 32px; height: 32px; background: var(--accent); color: var(--bg); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-style: italic; font-size: 18px; font-weight: 500; }
-  .side .avatar { width: 32px; height: 32px; border-radius: var(--r-md); background: var(--step-route); color: var(--bg); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .side hr { width: 24px; border: none; border-top: 1px solid var(--line); margin: var(--s-0) 0; }
+  .side .logo { width: 32px; height: 32px; background: var(--accent); color: var(--bg); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-style: italic; font-size: var(--text-18); font-weight: 500; }
+  .side .avatar { width: 32px; height: 32px; border-radius: var(--r-md); background: var(--step-route); color: var(--bg); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: var(--text-12); font-weight: 600; }
   .side .ndot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; background: var(--err); border-radius: 50%; box-shadow: 0 0 4px var(--err); }
 
   /* App main */
   .app-main { flex: 1; display: flex; flex-direction: column; }
   .app-head { height: 48px; padding: 0 var(--s-5); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: var(--s-3); background: var(--bg); }
-  .crumb { font-family: var(--sans); font-size: 13px; color: var(--fg-mute); }
+  .crumb { font-family: var(--sans); font-size: var(--text-13); color: var(--fg-mute); }
   .crumb .sep { color: var(--fg-faint); margin: 0 var(--s-2); }
-  .crumb .page { font-family: var(--serif); font-size: 22px; color: var(--fg); letter-spacing: -0.01em; font-weight: 400; }
+  .crumb .page { font-family: var(--serif); font-size: var(--text-22); color: var(--fg); letter-spacing: -0.01em; font-weight: 400; }
   .app-body { flex: 1; padding: var(--s-5); overflow: auto; background: var(--bg); }
 
   /* Status pill */
-  .status-pill { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; font-size: 11px; font-weight: 500; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--bg-2); color: var(--fg-mute); white-space: nowrap; }
+  .status-pill { display: inline-flex; align-items: center; gap: var(--s-1h); padding: var(--s-0) var(--s-2); font-size: var(--text-11); font-weight: 500; border-radius: var(--r-sm); border: 1px solid var(--line-strong); background: var(--bg-2); color: var(--fg-mute); white-space: nowrap; }
   .status-pill .spinner { width: 9px; height: 9px; border: 1.5px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .status-pill.running { background: var(--info-wash); color: var(--info); border-color: color-mix(in oklch, var(--info) 35%, transparent); }
@@ -60,22 +60,22 @@
   .status-pill.failed { background: var(--err-wash); color: var(--err); border-color: color-mix(in oklch, var(--err) 40%, transparent); }
   .status-pill.review { background: var(--warn-wash); color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
   .status-pill.queued { background: var(--bg-2); color: var(--fg-mute); }
-  .status-pill.workflow { background: var(--bg); color: var(--fg-mute); border-color: var(--line-strong); font-size: 10px; }
-  .status-pill.workflow .step { color: var(--fg); font-weight: 500; margin-left: 2px; }
+  .status-pill.workflow { background: var(--bg); color: var(--fg-mute); border-color: var(--line-strong); font-size: var(--text-10); }
+  .status-pill.workflow .step { color: var(--fg); font-weight: 500; margin-left: var(--s-0); }
 
   /* Ops sections */
   .ops-sec { margin-bottom: var(--s-6); }
   .ops-sec-head { display: flex; align-items: baseline; gap: var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--line); }
-  .ops-sec-head .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .ops-sec-head .lbl { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.14em; text-transform: uppercase; }
   .ops-sec-head .urgent { color: var(--err); }
   .ops-sec-head .live { color: var(--info); }
   .ops-sec-head .done { color: var(--ok); }
   .ops-sec-head .ready { color: var(--fg); }
-  .ops-sec-head .count { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: 22px; color: var(--accent); line-height: 1; }
-  .ops-row { display: grid; grid-template-columns: 8px 1fr 110px 110px 70px; gap: var(--s-3); padding: var(--s-2); align-items: center; font-size: 13px; cursor: pointer; border-radius: var(--r-xs); }
+  .ops-sec-head .count { margin-left: auto; font-family: var(--serif); font-style: italic; font-size: var(--text-22); color: var(--accent); line-height: 1; }
+  .ops-row { display: grid; grid-template-columns: 8px 1fr 110px 110px 70px; gap: var(--s-3); padding: var(--s-2); align-items: center; font-size: var(--text-13); cursor: pointer; border-radius: var(--r-xs); }
   .ops-row:hover { background: var(--bg-1); }
   .ops-row .pdot { width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
-  .ops-row .when { font-family: var(--mono); font-size: 10px; color: var(--fg-faint); text-align: right; }
+  .ops-row .when { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); text-align: right; }
 
   /* Detail panel for board */
   .pat-detail { width: 360px; background: var(--bg-1); border-left: 1px solid var(--line); flex-shrink: 0; display: flex; flex-direction: column; }
@@ -92,14 +92,14 @@
   .board-col.human { border-left-color: var(--step-human); }
   .board-col.wait { border-left-color: var(--step-wait); }
   .board-col .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: var(--s-3); }
-  .board-col .head .title { font-size: 13px; font-weight: 500; }
-  .board-col .head .count { font-family: var(--mono); font-size: 11px; color: var(--fg-mute); background: var(--bg-2); padding: 1px 6px; border-radius: 9999px; }
+  .board-col .head .title { font-size: var(--text-13); font-weight: 500; }
+  .board-col .head .count { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); background: var(--bg-2); padding: 1px var(--s-1h); border-radius: var(--r-full); }
   .b-card { background: var(--bg-2); border: 1px solid var(--line-strong); padding: var(--s-3); margin-bottom: var(--s-2); cursor: pointer; border-radius: var(--r-sm); transition: all var(--t-fast) var(--ease); }
   .b-card:hover { border-color: var(--fg-faint); }
   .b-card.selected { background: var(--accent-wash); border-color: var(--accent); }
   .b-card.failed { border-left: 3px solid var(--err); }
   .b-card.review { border-left: 3px solid var(--step-human); }
-  .b-card .title { font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--fg); }
+  .b-card .title { font-size: var(--text-13); font-weight: 500; line-height: 1.3; color: var(--fg); }
   .b-card .meta { display: flex; justify-content: space-between; align-items: center; margin-top: var(--s-3); }
 
   /* DAG */
@@ -115,8 +115,8 @@
   .wf-node { width: 180px; border: 1px solid var(--line-strong); background: var(--bg-2); position: absolute; border-radius: var(--r-sm); overflow: hidden; }
   .wf-node .bar { height: 3px; }
   .wf-node .body { padding: var(--s-2) var(--s-3); }
-  .wf-node .name { font-size: 12px; font-weight: 500; display: flex; justify-content: space-between; align-items: center; color: var(--fg); }
-  .wf-node .ftr { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+  .wf-node .name { font-size: var(--text-12); font-weight: 500; display: flex; justify-content: space-between; align-items: center; color: var(--fg); }
+  .wf-node .ftr { display: flex; justify-content: space-between; align-items: center; margin-top: var(--s-1h); font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
   .wf-node.execute .bar { background: var(--step-execute); }
   .wf-node.eval .bar { background: var(--step-eval); }
   .wf-node.route .bar { background: var(--step-route); }
@@ -130,28 +130,28 @@
   .wf-node.selected { border-color: var(--accent); border-width: 2px; box-shadow: 0 0 24px var(--accent-glow); }
 
   /* Tree — rich two-line rows */
-  .t-row { display: flex; flex-direction: column; gap: 3px; padding: 6px var(--s-2); cursor: pointer; border-radius: var(--r-xs); border-left: 2px solid transparent; transition: background var(--t-fast) var(--ease); }
+  .t-row { display: flex; flex-direction: column; gap: var(--s-1); padding: var(--s-1h) var(--s-2); cursor: pointer; border-radius: var(--r-xs); border-left: 2px solid transparent; transition: background var(--t-fast) var(--ease); }
   .t-row:hover { background: var(--bg-1); }
-  .t-row.sel { background: var(--accent-wash); border-left-color: var(--accent); padding-left: calc(var(--s-2) - 2px); }
+  .t-row.sel { background: var(--accent-wash); border-left-color: var(--accent); padding-left: calc(var(--s-2) - var(--s-0)); }
   .t-row.l1 { padding-left: var(--s-5); }
   .t-row.l2 { padding-left: var(--s-10); }
 
   /* Primary line */
-  .t-main { display: flex; align-items: center; gap: var(--s-2); font-size: 13px; }
-  .t-main .chev { font-size: 9px; color: var(--fg-mute); width: 12px; flex-shrink: 0; }
-  .t-main .lic { font-family: var(--mono); font-size: 12px; color: var(--fg-mute); width: 14px; text-align: center; flex-shrink: 0; }
+  .t-main { display: flex; align-items: center; gap: var(--s-2); font-size: var(--text-13); }
+  .t-main .chev { font-size: var(--text-9); color: var(--fg-mute); width: 12px; flex-shrink: 0; }
+  .t-main .lic { font-family: var(--mono); font-size: var(--text-12); color: var(--fg-mute); width: 14px; text-align: center; flex-shrink: 0; }
   .t-main .t-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .t-pri { font-family: var(--mono); font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .t-pri { font-family: var(--mono); font-size: var(--text-12); font-weight: 700; flex-shrink: 0; }
   .t-pri.hi { color: var(--err); }
   .t-pri.md { color: var(--warn); }
   .t-pri.lo { color: var(--fg-faint); }
 
   /* Metadata line — tags · children · pipeline · id · timestamp */
-  .t-meta { display: flex; align-items: center; gap: 6px; margin-left: 36px; font-family: var(--mono); font-size: 10px; color: var(--fg-faint); }
-  .t-tag { padding: 0 5px; height: 15px; line-height: 15px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--fg-mute); white-space: nowrap; }
+  .t-meta { display: flex; align-items: center; gap: var(--s-1h); margin-left: 36px; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+  .t-tag { padding: 0 var(--s-1h); height: 15px; line-height: 15px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--fg-mute); white-space: nowrap; }
   .t-children { white-space: nowrap; }
-  .t-pipe { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-  .pip-track { display: flex; gap: 2px; align-items: center; }
+  .t-pipe { display: flex; align-items: center; gap: var(--s-1); white-space: nowrap; }
+  .pip-track { display: flex; gap: var(--s-0); align-items: center; }
   .pip { width: 9px; height: 2px; border-radius: 1px; background: var(--bg-4); }
   .pip.done { background: color-mix(in oklch, var(--ok) 65%, transparent); }
   .pip.run { background: var(--accent); box-shadow: 0 0 3px var(--accent-glow); }
@@ -160,21 +160,21 @@
 
   /* Traces */
   .tr-rail { width: 200px; border-right: 1px solid var(--line); padding: var(--s-3); background: var(--bg-1); flex-shrink: 0; }
-  .tr-rail h4 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--s-3); }
-  .tr-row { font-size: 12px; padding: 4px var(--s-2); cursor: pointer; border-radius: var(--r-xs); }
+  .tr-rail h4 { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--s-3); }
+  .tr-row { font-size: var(--text-12); padding: var(--s-1) var(--s-2); cursor: pointer; border-radius: var(--r-xs); }
   .tr-row:hover { background: var(--bg-2); }
-  .tr-row.sel { background: var(--accent-wash); color: var(--accent); border-left: 2px solid var(--accent); padding-left: calc(var(--s-2) - 2px); }
-  .run-card { padding: var(--s-2) var(--s-3); margin-bottom: var(--s-2); background: var(--bg-2); border-left: 2px solid transparent; cursor: pointer; font-size: 12px; border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+  .tr-row.sel { background: var(--accent-wash); color: var(--accent); border-left: 2px solid var(--accent); padding-left: calc(var(--s-2) - var(--s-0)); }
+  .run-card { padding: var(--s-2) var(--s-3); margin-bottom: var(--s-2); background: var(--bg-2); border-left: 2px solid transparent; cursor: pointer; font-size: var(--text-12); border-radius: 0 var(--r-sm) var(--r-sm) 0; }
   .run-card.sel { border-left-color: var(--accent); background: var(--accent-wash); }
   .tr-main { flex: 1; padding: var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); overflow: auto; background: var(--bg); }
-  .cm { padding: var(--s-3) var(--s-4); max-width: 80%; font-size: 13px; line-height: 1.55; border-radius: var(--r-md); }
+  .cm { padding: var(--s-3) var(--s-4); max-width: 80%; font-size: var(--text-13); line-height: 1.55; border-radius: var(--r-md); }
   .cm.user { background: var(--bg-2); border: 1px solid var(--line-strong); border-right: 3px solid var(--accent); margin-left: auto; }
   .cm.assist { background: var(--bg-2); border: 1px solid var(--line-strong); border-left: 3px solid var(--step-execute); }
-  .cm .who { font-family: var(--mono); font-size: 10px; color: var(--fg-mute); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 4px; }
+  .cm .who { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: var(--s-1); }
   .cm.user .who { color: var(--accent); }
   .tc { margin-top: var(--s-3); border: 1px solid var(--line-strong); border-left: 3px solid var(--ok); background: var(--bg-1); border-radius: var(--r-sm); }
-  .tc .th { padding: 5px var(--s-3); background: var(--bg-2); font-family: var(--mono); font-size: 11px; display: flex; justify-content: space-between; }
-  .tc .tb { padding: 5px var(--s-3); font-family: var(--mono); font-size: 11px; color: var(--fg-mute); border-top: 1px solid var(--line); }
+  .tc .th { padding: var(--s-1h) var(--s-3); background: var(--bg-2); font-family: var(--mono); font-size: var(--text-11); display: flex; justify-content: space-between; }
+  .tc .tb { padding: var(--s-1h) var(--s-3); font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); border-top: 1px solid var(--line); }
 
   /* Setup */
   .setup-screen { min-height: 460px; background: var(--bg); padding: var(--s-12); display: flex; align-items: center; justify-content: center; flex: 1; position: relative; }
@@ -182,15 +182,15 @@
   .setup-card { width: 440px; padding: var(--s-6); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-3); position: relative; }
 
   /* Chip + check */
-  .chip { display: inline-flex; padding: 3px 9px; font-size: 12px; font-weight: 500; border: 1px solid var(--line-strong); color: var(--fg-mute); cursor: pointer; border-radius: var(--r-sm); }
+  .chip { display: inline-flex; padding: var(--s-1) var(--s-2h); font-size: var(--text-12); font-weight: 500; border: 1px solid var(--line-strong); color: var(--fg-mute); cursor: pointer; border-radius: var(--r-sm); }
   .chip.active { background: var(--accent-wash); color: var(--accent); border-color: var(--accent); }
 
   /* Search */
-  .search-input { display: flex; align-items: center; gap: 6px; padding: 6px var(--s-3); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); font-size: 13px; color: var(--fg-mute); }
+  .search-input { display: flex; align-items: center; gap: var(--s-1h); padding: var(--s-1h) var(--s-3); background: var(--bg-1); border: 1px solid var(--line-strong); border-radius: var(--r-md); font-size: var(--text-13); color: var(--fg-mute); }
 
-  .id-badge { font-family: var(--mono); font-size: 11px; color: var(--fg-faint); }
+  .id-badge { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint); }
 
-  .check { width: 16px; height: 16px; border: 1.5px solid var(--line-strong); background: var(--bg-2); border-radius: var(--r-xs); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; cursor: pointer; color: var(--bg); }
+  .check { width: 16px; height: 16px; border: 1.5px solid var(--line-strong); background: var(--bg-2); border-radius: var(--r-xs); display: inline-flex; align-items: center; justify-content: center; font-size: var(--text-10); cursor: pointer; color: var(--bg); }
   .check.on { background: var(--accent); border-color: var(--accent); }
 </style>
 </head>
@@ -299,29 +299,29 @@
         <div class="app-main">
           <div class="app-head">
             <span class="crumb">acme <span class="sep">›</span> <span class="page">Board</span></span>
-            <div style="margin-left: var(--s-5); display: flex; gap: 6px;"><span class="chip">Epic</span><span class="chip active">Ticket</span><span class="chip">Task</span></div>
+            <div style="margin-left: var(--s-5); display: flex; gap: var(--s-1h);"><span class="chip">Epic</span><span class="chip active">Ticket</span><span class="chip">Task</span></div>
           </div>
           <div class="app-body" style="overflow-x: auto;">
             <div class="board-cols">
               <div class="board-col execute">
-                <div class="head"><div style="display: flex; gap: 6px; align-items: center;"><span class="title">Implement</span><span style="color: var(--step-execute-fg); font-family: var(--mono);">▶</span></div><span class="count">2</span></div>
+                <div class="head"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span class="title">Implement</span><span style="color: var(--step-execute-fg); font-family: var(--mono);">▶</span></div><span class="count">2</span></div>
                 <div class="b-card selected"><div class="title">Implement JWT service</div><div class="meta"><span class="id-badge">i9j0k1l2</span><span class="status-pill running"><span class="spinner"></span>Running</span></div></div>
                 <div class="b-card"><div class="title">Generate migration plan</div><div class="meta"><span class="id-badge">g2h3j4k5</span><span class="status-pill running"><span class="spinner"></span>Running</span></div></div>
               </div>
               <div class="board-col eval">
-                <div class="head"><div style="display: flex; gap: 6px; align-items: center;"><span class="title">Eval</span><span style="color: var(--step-eval-fg); font-family: var(--mono);">⊙</span></div><span class="count">1</span></div>
+                <div class="head"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span class="title">Eval</span><span style="color: var(--step-eval-fg); font-family: var(--mono);">⊙</span></div><span class="count">1</span></div>
                 <div class="b-card"><div class="title">Score auth tests</div><div class="meta"><span class="id-badge">s6t7u8v9</span><span class="status-pill running"><span class="spinner"></span>Running</span></div></div>
               </div>
               <div class="board-col route">
-                <div class="head"><div style="display: flex; gap: 6px; align-items: center;"><span class="title">Route</span><span style="color: var(--step-route-fg); font-family: var(--mono);">⤳</span></div><span class="count">0</span></div>
-                <div style="font-family: var(--mono); font-size: 11px; color: var(--fg-faint); padding: var(--s-2);">// branching point</div>
+                <div class="head"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span class="title">Route</span><span style="color: var(--step-route-fg); font-family: var(--mono);">⤳</span></div><span class="count">0</span></div>
+                <div style="font-family: var(--mono); font-size: var(--text-11); color: var(--fg-faint); padding: var(--s-2);">// branching point</div>
               </div>
               <div class="board-col human">
-                <div class="head"><div style="display: flex; gap: 6px; align-items: center;"><span class="title">Review</span><span style="color: var(--step-human-fg); font-family: var(--mono);">👁</span></div><span class="count">1</span></div>
+                <div class="head"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span class="title">Review</span><span style="color: var(--step-human-fg); font-family: var(--mono);">👁</span></div><span class="count">1</span></div>
                 <div class="b-card review"><div class="title">Approve PR output</div><div class="meta"><span class="id-badge">e5f6g7h8</span><span class="status-pill review">👁 Review</span></div></div>
               </div>
               <div class="board-col wait">
-                <div class="head"><div style="display: flex; gap: 6px; align-items: center;"><span class="title">Wait</span><span style="color: var(--step-wait-fg); font-family: var(--mono);">⏸</span></div><span class="count">3</span></div>
+                <div class="head"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span class="title">Wait</span><span style="color: var(--step-wait-fg); font-family: var(--mono);">⏸</span></div><span class="count">3</span></div>
                 <div class="b-card"><div class="title">Wait for tests</div><div class="meta"><span class="id-badge">w8a9i0t1</span><span class="status-pill queued">Wait 2/4</span></div></div>
               </div>
             </div>
@@ -331,18 +331,18 @@
           <div class="h">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s-2);">
               <div>
-                <div style="font-family: var(--serif); font-size: 22px; font-weight: 400; letter-spacing: -0.01em;">Implement <em class="italic" style="color: var(--accent);">JWT</em> service</div>
-                <div style="display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span class="id-badge">i9j0k1l2</span><span class="status-pill running"><span class="spinner"></span>Execute · 4m</span></div>
+                <div style="font-family: var(--serif); font-size: var(--text-22); font-weight: 400; letter-spacing: -0.01em;">Implement <em class="italic" style="color: var(--accent);">JWT</em> service</div>
+                <div style="display: flex; gap: var(--s-1h); margin-top: var(--s-1); flex-wrap: wrap;"><span class="id-badge">i9j0k1l2</span><span class="status-pill running"><span class="spinner"></span>Execute · 4m</span></div>
               </div>
-              <div style="display: flex; gap: 2px;"><button class="btn ghost" style="padding: 0; width: 24px; height: 24px;">⧉</button><button class="btn ghost" style="padding: 0; width: 24px; height: 24px;">✕</button></div>
+              <div style="display: flex; gap: var(--s-0);"><button class="btn ghost" style="padding: 0; width: 24px; height: 24px;">⧉</button><button class="btn ghost" style="padding: 0; width: 24px; height: 24px;">✕</button></div>
             </div>
           </div>
           <div class="b">
-            <div class="eyebrow" style="font-size: 10px;">Description</div>
-            <p style="margin-top: 8px; font-size: 13px; color: var(--fg-soft); line-height: 1.55;">Implement a JWT signing service that replaces the current session token approach.</p>
+            <div class="eyebrow" style="font-size: var(--text-10);">Description</div>
+            <p style="margin-top: var(--s-2); font-size: var(--text-13); color: var(--fg-soft); line-height: 1.55;">Implement a JWT signing service that replaces the current session token approach.</p>
             <hr style="margin: var(--s-4) 0; border: none; border-top: 1px solid var(--line);">
-            <div class="eyebrow" style="font-size: 10px;">Acceptance · 2 of 4</div>
-            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: var(--s-3); font-size: 13px;">
+            <div class="eyebrow" style="font-size: var(--text-10);">Acceptance · 2 of 4</div>
+            <div style="display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); font-size: var(--text-13);">
               <div style="display: flex; gap: var(--s-2); align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Tokens expire in 24h</span></div>
               <div style="display: flex; gap: var(--s-2); align-items: center;"><span class="check on">✓</span><span style="color: var(--fg-mute); text-decoration: line-through;">Refresh token flow</span></div>
               <div style="display: flex; gap: var(--s-2); align-items: center;"><span class="check"></span><span>Unit tests for validation</span></div>
@@ -373,15 +373,15 @@
           <div class="app-body" style="padding: 0;">
             <div class="dag-canvas">
               <!-- Live banner -->
-              <div style="position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: var(--s-3); padding: 0 var(--s-4); height: 32px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: 9999px; box-shadow: var(--shadow-2), 0 0 24px var(--accent-glow); z-index: 10;">
-                <span style="color: var(--info); display: flex; align-items: center; gap: 6px;"><span style="width: 9px; height: 9px; border: 1.5px solid var(--info); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></span><span style="font-size: 12px; font-weight: 500;">4 running</span></span>
+              <div style="position: absolute; top: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: var(--s-3); padding: 0 var(--s-4); height: 32px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-full); box-shadow: var(--shadow-2), 0 0 24px var(--accent-glow); z-index: 10;">
+                <span style="color: var(--info); display: flex; align-items: center; gap: var(--s-1h);"><span style="width: 9px; height: 9px; border: 1.5px solid var(--info); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></span><span style="font-size: var(--text-12); font-weight: 500;">4 running</span></span>
                 <span style="color: var(--fg-faint);">·</span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--step-execute-fg);">Execute (2)</span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--step-eval-fg);">Eval (1)</span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--step-human-fg);">Review (1)</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--step-execute-fg);">Execute (2)</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--step-eval-fg);">Eval (1)</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--step-human-fg);">Review (1)</span>
               </div>
 
-              <div style="position: absolute; left: 60px; top: 80px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; color: var(--fg-mute); text-transform: uppercase;">// Implementation workflow</div>
+              <div style="position: absolute; left: 60px; top: 80px; font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.12em; color: var(--fg-mute); text-transform: uppercase;">// Implementation workflow</div>
 
               <!-- Nodes: execute → eval → route → (human OR wait) → terminal -->
               <div class="wf-node execute selected" style="left: 60px; top: 120px;"><div class="bar"></div><div class="body"><div class="name">Implement <span style="color: var(--step-execute-fg);">▶</span></div><div class="ftr"><span>2 tasks</span><span style="color: var(--step-execute-fg);">⟳ 2</span></div></div></div>
@@ -408,17 +408,17 @@
 
               <!-- NodeActionPopover (anchored under selected) -->
               <div style="position: absolute; left: 10px; top: 195px; display: flex; align-items: center; gap: var(--s-3); padding: 0 var(--s-3); height: 32px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-2); width: 280px; z-index: 5;">
-                <button class="btn ghost sm" style="padding: 0 6px;">▶ Run next</button>
+                <button class="btn ghost sm" style="padding: 0 var(--s-1h);">▶ Run next</button>
                 <span style="border-left: 1px solid var(--line); height: 14px;"></span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--ok);">✓ 14</span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--err);">✕ 1</span>
-                <span style="font-family: var(--mono); font-size: 11px; color: var(--info);">⟳ 2</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--ok);">✓ 14</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--err);">✕ 1</span>
+                <span style="font-family: var(--mono); font-size: var(--text-11); color: var(--info);">⟳ 2</span>
               </div>
 
               <!-- Zoom toolbar -->
-              <div style="position: absolute; left: 20px; bottom: 20px; display: flex; gap: 4px; padding: 4px; background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-1);">
+              <div style="position: absolute; left: 20px; bottom: 20px; display: flex; gap: var(--s-1); padding: var(--s-1); background: var(--bg-3); border: 1px solid var(--line-strong); border-radius: var(--r-md); box-shadow: var(--shadow-1);">
                 <button class="btn ghost sm" style="padding: 0; width: 26px;">−</button>
-                <span style="padding: 0 var(--s-2); font-family: var(--mono); font-size: 11px; align-self: center; color: var(--fg-mute);">75%</span>
+                <span style="padding: 0 var(--s-2); font-family: var(--mono); font-size: var(--text-11); align-self: center; color: var(--fg-mute);">75%</span>
                 <button class="btn ghost sm" style="padding: 0; width: 26px;">+</button>
                 <span style="border-left: 1px solid var(--line); height: 18px; align-self: center;"></span>
                 <button class="btn ghost sm">⊞ fit</button>
@@ -446,7 +446,7 @@
           <div class="item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg></div>
         </div>
         <div class="app-main">
-          <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Tasks</span></span><span style="margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--fg-mute);">142 tasks</span></div>
+          <div class="app-head"><span class="crumb">acme <span class="sep">›</span> <span class="page">Tasks</span></span><span style="margin-left: auto; font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute);">142 tasks</span></div>
           <div class="app-body">
             <!-- Epic: Refactor authentication system -->
             <div class="t-row">
@@ -497,7 +497,7 @@
                 <span class="t-pri md">→</span>
                 <span class="status-pill queued">Queued</span>
                 <span class="id-badge">m3n4o5p6</span>
-                <span class="t-when" style="font-family:var(--mono);font-size:10px;color:var(--fg-faint);">1h ago</span>
+                <span class="t-when" style="font-family:var(--mono);font-size: var(--text-10);color:var(--fg-faint);">1h ago</span>
               </div>
             </div>
 
@@ -509,7 +509,7 @@
                 <span class="t-pri md">→</span>
                 <span class="status-pill done"><span>✓</span>Done</span>
                 <span class="id-badge">q7r8s9t0</span>
-                <span class="t-when" style="font-family:var(--mono);font-size:10px;color:var(--fg-faint);">3h ago</span>
+                <span class="t-when" style="font-family:var(--mono);font-size: var(--text-10);color:var(--fg-faint);">3h ago</span>
               </div>
             </div>
 
@@ -521,7 +521,7 @@
                 <span class="t-pri lo">↓</span>
                 <span class="status-pill queued">Queued</span>
                 <span class="id-badge">u1v2w3x4</span>
-                <span class="t-when" style="font-family:var(--mono);font-size:10px;color:var(--fg-faint);">1d ago</span>
+                <span class="t-when" style="font-family:var(--mono);font-size: var(--text-10);color:var(--fg-faint);">1d ago</span>
               </div>
             </div>
 
@@ -637,7 +637,7 @@
           <div class="app-head">
             <span class="crumb">acme <span class="sep">›</span> <span class="page">Traces</span></span>
             <span style="margin-left: auto;"></span>
-            <div style="display: flex; padding: 2px; background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
+            <div style="display: flex; padding: var(--s-0); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md);">
               <button class="btn ghost sm" style="background: var(--accent-wash); color: var(--accent);">Thread</button>
               <button class="btn ghost sm">Timeline</button>
             </div>
@@ -649,17 +649,17 @@
               <div class="tr-row sel">↳ Implement JWT</div>
               <div class="tr-row">↳ Update OpenAPI</div>
               <h4 style="margin-top: var(--s-5);">Runs</h4>
-              <div class="run-card sel"><div style="display: flex; gap: 6px; align-items: center;"><span style="width: 9px; height: 9px; border: 1.5px solid var(--info); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></span><span style="font-weight: 500;">Run 3</span></div><div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px;">4m ago · Execute</div></div>
-              <div class="run-card"><div style="display: flex; gap: 6px;"><span style="color: var(--ok);">✓</span><span style="font-weight: 500;">Run 2</span></div><div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px;">2h ago</div></div>
-              <div class="run-card"><div style="display: flex; gap: 6px;"><span style="color: var(--err);">✕</span><span style="font-weight: 500;">Run 1</span></div><div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); margin-top: 2px;">1d ago</div></div>
+              <div class="run-card sel"><div style="display: flex; gap: var(--s-1h); align-items: center;"><span style="width: 9px; height: 9px; border: 1.5px solid var(--info); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></span><span style="font-weight: 500;">Run 3</span></div><div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0);">4m ago · Execute</div></div>
+              <div class="run-card"><div style="display: flex; gap: var(--s-1h);"><span style="color: var(--ok);">✓</span><span style="font-weight: 500;">Run 2</span></div><div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0);">2h ago</div></div>
+              <div class="run-card"><div style="display: flex; gap: var(--s-1h);"><span style="color: var(--err);">✕</span><span style="font-weight: 500;">Run 1</span></div><div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); margin-top: var(--s-0);">1d ago</div></div>
             </div>
             <div class="tr-main">
-              <div style="font-family: var(--mono); font-size: 10px; color: var(--fg-mute); text-align: center; letter-spacing: 0.14em; text-transform: uppercase;">— Step · <span style="color: var(--step-execute-fg);">▶ Execute</span> · 4m ago —</div>
+              <div style="font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); text-align: center; letter-spacing: 0.14em; text-transform: uppercase;">— Step · <span style="color: var(--step-execute-fg);">▶ Execute</span> · 4m ago —</div>
               <div class="cm user"><div class="who">YOU</div>Implement a JWT signing service for the auth middleware.</div>
               <div class="cm assist"><div class="who">AGENT · CLAUDE-SONNET-4-6</div>I'll start by reading the existing middleware code to understand the integration points.
                 <div class="tc"><div class="th"><span>▶ Read file</span><span style="color: var(--ok);">✓ 218 lines</span></div><div class="tb">src/auth/middleware.rs</div></div>
               </div>
-              <div class="cm assist"><div class="who">AGENT</div>The existing middleware uses session tokens stored in Redis. I'll create a parallel JWT path that can be toggled per route.<span style="display: inline-block; vertical-align: middle; margin-left: 6px;"><span style="width: 9px; height: 12px; background: var(--accent); animation: blink 1s steps(2) infinite; display: inline-block;"></span></span></div>
+              <div class="cm assist"><div class="who">AGENT</div>The existing middleware uses session tokens stored in Redis. I'll create a parallel JWT path that can be toggled per route.<span style="display: inline-block; vertical-align: middle; margin-left: var(--s-1h);"><span style="width: 9px; height: 12px; background: var(--accent); animation: blink 1s steps(2) infinite; display: inline-block;"></span></span></div>
             </div>
           </div>
         </div>
@@ -677,17 +677,17 @@
         <div class="setup-screen">
           <div class="setup-card">
             <div style="display: flex; gap: var(--s-2); align-items: center; margin-bottom: var(--s-5);">
-              <div style="width: 32px; height: 32px; background: var(--accent); color: var(--bg); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-style: italic; font-size: 18px; font-weight: 500;">V</div>
-              <span style="font-family: var(--serif); font-style: italic; font-size: 24px;">Vertebrae</span>
+              <div style="width: 32px; height: 32px; background: var(--accent); color: var(--bg); border-radius: var(--r-md); display: flex; align-items: center; justify-content: center; font-family: var(--serif); font-style: italic; font-size: var(--text-18); font-weight: 500;">V</div>
+              <span style="font-family: var(--serif); font-style: italic; font-size: var(--text-24);">Vertebrae</span>
             </div>
-            <h2 style="font-family: var(--serif); font-size: 32px; line-height: 1.05; font-weight: 400; letter-spacing: -0.015em;">Open a <em class="italic" style="color: var(--accent);">project</em>.</h2>
-            <p class="caption" style="margin-top: var(--s-3); font-size: 13px;">Choose a recently opened project, or browse for a directory.</p>
+            <h2 style="font-family: var(--serif); font-size: var(--text-32); line-height: 1.05; font-weight: 400; letter-spacing: -0.015em;">Open a <em class="italic" style="color: var(--accent);">project</em>.</h2>
+            <p class="caption" style="margin-top: var(--s-3); font-size: var(--text-13);">Choose a recently opened project, or browse for a directory.</p>
 
             <div style="margin-top: var(--s-5);">
-              <div class="eyebrow" style="font-size: 10px; margin-bottom: var(--s-2); color: var(--fg-mute);">Recent</div>
-              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">acme</div><div style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); margin-top: 2px;">/home/user/code/acme</div></div><span style="color: var(--fg-faint);">›</span></a>
-              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">blog</div><div style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); margin-top: 2px;">/home/user/code/blog</div></div><span style="color: var(--fg-faint);">›</span></a>
-              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">myproject</div><div style="font-family: var(--mono); font-size: 11px; color: var(--fg-mute); margin-top: 2px;">/home/user/code/myproject</div></div><span style="color: var(--fg-faint);">›</span></a>
+              <div class="eyebrow" style="font-size: var(--text-10); margin-bottom: var(--s-2); color: var(--fg-mute);">Recent</div>
+              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">acme</div><div style="font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); margin-top: var(--s-0);">/home/user/code/acme</div></div><span style="color: var(--fg-faint);">›</span></a>
+              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">blog</div><div style="font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); margin-top: var(--s-0);">/home/user/code/blog</div></div><span style="color: var(--fg-faint);">›</span></a>
+              <a style="display: flex; padding: var(--s-3) var(--s-2); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; justify-content: space-between;"><div><div style="font-weight: 500;">myproject</div><div style="font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); margin-top: var(--s-0);">/home/user/code/myproject</div></div><span style="color: var(--fg-faint);">›</span></a>
             </div>
 
             <button class="btn primary lg" style="margin-top: var(--s-5); width: 100%;">+ Open directory…</button>

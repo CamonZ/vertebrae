@@ -123,7 +123,7 @@
   function LevelSelect({ options = ['All levels', 'Epics only', 'Tickets', 'Tasks'], onChange }) {
     return (
       <select onChange={e => onChange && onChange(e.target.value)}
-        style={{ background: 'var(--bg-1)', border: '1px solid var(--line-strong)', color: 'var(--fg-mute)', padding: '6px 10px', borderRadius: 'var(--r-sm)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+        style={{ background: 'var(--bg-1)', border: '1px solid var(--line-strong)', color: 'var(--fg-mute)', padding: '6px 10px', borderRadius: 'var(--r-sm)', fontFamily: 'var(--mono)', fontSize: 'var(--text-11)' }}>
         {options.map(o => <option key={o}>{o}</option>)}
       </select>
     );
