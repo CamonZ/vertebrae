@@ -1,5 +1,6 @@
 import type { TaskLevel } from "../../bindings";
-import { NavigableReference } from "../shared/EntityId";
+import { IdChip } from "../shared/HearthPrimitives";
+import { LevelMark } from "../shared/LevelMark";
 import { Text } from "../atoms/Text";
 
 interface DependenciesSummaryProps {
@@ -32,13 +33,14 @@ function TaskLink({
       tabIndex={0}
       onClick={() => onClick?.(taskId)}
       onKeyDown={handleKeyDown}
-      className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2 py-0.5 transition-colors hover:bg-[var(--color-accent-wash)] cursor-pointer"
+      data-testid="dependencies-summary-link"
+      className="inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-0.5 transition-colors cursor-pointer"
     >
-      <NavigableReference
+      <LevelMark level={level} className="h-3.5 w-3.5" />
+      <IdChip
         id={taskId}
         kind="task"
         level={level}
-        className="text-eyebrow"
         testId="dependencies-summary-task-id"
       />
     </span>

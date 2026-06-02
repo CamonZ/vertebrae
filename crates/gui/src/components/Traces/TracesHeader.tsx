@@ -3,6 +3,10 @@ import type { TaskLevel } from "../../bindings";
 import { formatCost, formatTokenCount, type ExecutionRollups } from "../../utils";
 import { formatDurationMs } from "../Operations/formatDuration";
 
+/** Temporarily hide the pop-out/detach control on side panels. Flip back to
+ * `true` to restore the Detach button (the onDetach plumbing is left intact). */
+const DETACH_ENABLED = false;
+
 interface TracesHeaderProps {
   taskId: string | null;
   title: string | null;
@@ -109,7 +113,7 @@ export function TracesHeader({
           {displayTitle}
         </h1>
 
-        {onDetach && (
+        {DETACH_ENABLED && onDetach && (
           <button
             type="button"
             onClick={onDetach}

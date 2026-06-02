@@ -18,40 +18,40 @@ import type { ThresholdMarkerKind } from "./timeline";
 
 export const LEVEL_TINT_CLASS: Record<string, string> = {
   epic: "text-info",
-  ticket: "text-primary",
-  task: "text-text-secondary",
+  ticket: "text-accent",
+  task: "text-fg-soft",
 };
 
 export function levelTintClass(level: string | null | undefined): string {
   return level && LEVEL_TINT_CLASS[level]
     ? LEVEL_TINT_CLASS[level]
-    : "text-text-secondary";
+    : "text-fg-soft";
 }
 
 /**
  * Per-kind text-color class for threshold markers and chat boundary
  * affordances. Mirrors the strip's threshold-callout coloring so a rejection
  * reads red in both views, while neutral kinds (transition, retry,
- * model_fallback, execution_start/end) stay text-secondary.
+ * model_fallback, execution_start/end) stay text-fg-soft.
  *
  * Approval is tinted success so the affordance is *visible* (the spec called
  * out "threshold affordance — NOT a blanket gold tint"; per-kind variants
  * coexist with FlightStrip's per-kind callout colors).
  */
 export const THRESHOLD_KIND_CLASS: Record<ThresholdMarkerKind, string> = {
-  approval: "text-success",
-  rejection: "text-error",
-  model_fallback: "text-text-secondary",
-  transition: "text-text-secondary",
-  retry: "text-text-secondary",
-  execution_start: "text-text-secondary",
-  execution_end: "text-text-secondary",
+  approval: "text-ok",
+  rejection: "text-err",
+  model_fallback: "text-fg-soft",
+  transition: "text-fg-soft",
+  retry: "text-fg-soft",
+  execution_start: "text-fg-soft",
+  execution_end: "text-fg-soft",
 };
 
 export function thresholdKindClass(
   kind: ThresholdMarkerKind | null | undefined
 ): string {
-  return kind ? THRESHOLD_KIND_CLASS[kind] : "text-text-secondary";
+  return kind ? THRESHOLD_KIND_CLASS[kind] : "text-fg-soft";
 }
 
 /**
@@ -61,17 +61,17 @@ export function thresholdKindClass(
  */
 export const THRESHOLD_KIND_BORDER_CLASS: Record<ThresholdMarkerKind, string> =
   {
-    approval: "border-success",
-    rejection: "border-error",
-    model_fallback: "border-primary",
-    transition: "border-primary",
-    retry: "border-primary",
-    execution_start: "border-primary",
-    execution_end: "border-primary",
+    approval: "border-ok",
+    rejection: "border-err",
+    model_fallback: "border-accent",
+    transition: "border-accent",
+    retry: "border-accent",
+    execution_start: "border-accent",
+    execution_end: "border-accent",
   };
 
 export function thresholdKindBorderClass(
   kind: ThresholdMarkerKind | null | undefined
 ): string {
-  return kind ? THRESHOLD_KIND_BORDER_CLASS[kind] : "border-primary";
+  return kind ? THRESHOLD_KIND_BORDER_CLASS[kind] : "border-accent";
 }

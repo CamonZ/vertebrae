@@ -64,13 +64,13 @@ export function RecentlyCompletedSection({
         {visibleItems.map((item) => (
           <div
             key={item.execution.id}
-            className="group border-l-2 border-l-border bg-bg-secondary px-4 py-3"
+            className="group border-l-2 border-l-border bg-bg-1 px-4 py-3"
             data-testid="completed-item"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 flex-1 items-start gap-3">
                 <svg
-                  className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
+                  className="mt-0.5 h-4 w-4 shrink-0 text-fg-mute"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -84,10 +84,10 @@ export function RecentlyCompletedSection({
                   />
                 </svg>
                 <div className="min-w-0">
-                  <p className="text-sm text-text-secondary">
+                  <p className="text-sm text-fg-soft">
                     {item.task.title}
                     {item.execution.step_name && (
-                      <span className="text-text-muted">
+                      <span className="text-fg-mute">
                         {" "}&mdash; completed step &apos;{item.execution.step_name}&apos;
                         {item.execution.started_at && (
                           <> ({formatDuration(item.execution.started_at, item.execution.completed_at)})</>
@@ -95,7 +95,7 @@ export function RecentlyCompletedSection({
                       </span>
                     )}
                   </p>
-                  <p className="mt-0.5 text-xs text-text-muted">
+                  <p className="mt-0.5 text-xs text-fg-mute">
                     {item.task.workflow_name && <>{item.task.workflow_name}</>}
                     {item.execution.completed_at && (
                       <> &middot; <RelativeTime date={item.execution.completed_at} className="inline" /></>
@@ -107,7 +107,7 @@ export function RecentlyCompletedSection({
               <button
                 type="button"
                 onClick={() => handleDismiss(item.execution.id!)}
-                className="shrink-0 rounded p-1 text-text-muted opacity-0 transition-all hover:bg-bg-hover hover:text-text-secondary group-hover:opacity-100"
+                className="shrink-0 rounded p-1 text-fg-mute opacity-0 transition-all hover:bg-bg-hover hover:text-fg-soft group-hover:opacity-100"
                 aria-label={`Dismiss ${item.task.title}`}
               >
                 <svg

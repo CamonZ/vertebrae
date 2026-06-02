@@ -6,7 +6,9 @@ import {
 } from "./modelContextWindow";
 
 describe("resolveContextWindow", () => {
-  it("returns 1M for opus 4.7 variants", () => {
+  it("returns 1M for opus 4.7 and 4.8 variants", () => {
+    expect(resolveContextWindow("claude-opus-4-8", undefined)).toBe(1_000_000);
+    expect(resolveContextWindow("opus-4.8", undefined)).toBe(1_000_000);
     expect(resolveContextWindow("claude-opus-4-7-20250115", undefined)).toBe(
       1_000_000
     );

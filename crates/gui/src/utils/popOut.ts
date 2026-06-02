@@ -6,6 +6,12 @@ export interface PopOutOptions {
   height?: number;
   resizable?: boolean;
   focus?: boolean;
+  /** Create a transparent native window (requires app.macOSPrivateApi on macOS). */
+  transparent?: boolean;
+  /** macOS title-bar style. "overlay" floats the traffic lights over content. */
+  titleBarStyle?: "visible" | "transparent" | "overlay";
+  /** Hide the native title text (pairs with an overlay title bar). */
+  hiddenTitle?: boolean;
 }
 
 export interface PopOutResult {

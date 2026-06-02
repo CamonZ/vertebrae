@@ -12,6 +12,8 @@
 // like "claude-opus-4-7-20250115", and dot format (4.7) for aliased names.
 // Both are needed because Claude CLI uses both in different output contexts.
 const MODEL_CONTEXT_WINDOW: Array<{ pattern: string; max: number }> = [
+  { pattern: "opus-4-8", max: 1_000_000 },
+  { pattern: "opus-4.8", max: 1_000_000 },
   { pattern: "opus-4-7", max: 1_000_000 },
   { pattern: "opus-4.7", max: 1_000_000 },
   { pattern: "sonnet-4-6", max: 600_000 },

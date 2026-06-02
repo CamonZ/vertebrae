@@ -180,7 +180,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(textarea).toHaveValue("Test Description for inline editing");
 
       // Should show warning dot (edit indicator)
-      const warningDot = document.querySelector(".bg-warning");
+      const warningDot = document.querySelector(".bg-warn");
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
@@ -209,7 +209,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(input).toHaveValue("tag1, tag2");
 
       // Should show warning dot
-      const warningDot = document.querySelector(".bg-warning");
+      const warningDot = document.querySelector(".bg-warn");
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
@@ -334,29 +334,6 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     });
   });
 
-  describe("Progress section with checklist items", () => {
-    it("displays checklist items in progress section", () => {
-      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
-
-      expect(screen.getByText("First step to do")).toBeInTheDocument();
-      expect(screen.getByText("Second step to do")).toBeInTheDocument();
-    });
-
-    it("completed checklist items have line-through styling", () => {
-      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
-
-      const completedItem = screen.getByText("Second step to do");
-      expect(completedItem.className).toContain("line-through");
-    });
-
-    it("incomplete checklist items do not have line-through", () => {
-      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
-
-      const incompleteItem = screen.getByText("First step to do");
-      expect(incompleteItem.className).not.toContain("line-through");
-    });
-  });
-
   describe("Spec section shows goal and constraints when expanded", () => {
     it("shows goal content in Spec section (open by default)", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
@@ -366,20 +343,21 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
   });
 
   describe("Panel layout preserves existing functionality", () => {
-    it("all sections are rendered in the correct order: criteria, progress, spec, deps, code, details", () => {
+    it("all sections are rendered in the correct order: spec, test criteria, children, deps, code, details", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
       const allText = document.body.textContent ?? "";
-      const criteriaPos = allText.indexOf("Acceptance Criteria");
-      const progressPos = allText.indexOf("Progress");
       const specPos = allText.indexOf("Spec");
+      const criteriaPos = allText.indexOf("Test Criteria");
+      const childrenPos = allText.indexOf("Children");
       const depsPos = allText.indexOf("Dependencies");
       const codePos = allText.indexOf("Code");
       const detailsPos = allText.lastIndexOf("Details");
 
-      expect(criteriaPos).toBeLessThan(progressPos);
-      expect(progressPos).toBeLessThan(specPos);
-      expect(specPos).toBeLessThan(depsPos);
+      expect(specPos).toBeGreaterThanOrEqual(0);
+      expect(specPos).toBeLessThan(criteriaPos);
+      expect(criteriaPos).toBeLessThan(childrenPos);
+      expect(childrenPos).toBeLessThan(depsPos);
       expect(depsPos).toBeLessThan(codePos);
       expect(codePos).toBeLessThan(detailsPos);
     });

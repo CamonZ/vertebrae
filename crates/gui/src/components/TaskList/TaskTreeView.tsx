@@ -1,7 +1,12 @@
 import type { Task } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
-import { TaskTreeNode } from "./TaskTreeNode";
+import { SummaryRow, TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
+import {
+  computeVisibleChildren,
+  computeVisibleRoots,
+} from "../../utils/computeVisibleChildren";
 import { EmptyState } from "../molecules/EmptyState";
 import { useCallback, useMemo } from "react";
 
@@ -12,7 +17,9 @@ interface TaskTreeViewProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
-  hideStatus?: boolean;
+  hideCompleted?: boolean;
+  filtering?: boolean;
+  summaryExpanded?: ReturnType<typeof useSummaryExpanded>;
 }
 
 function LoadingSkeleton() {
@@ -68,12 +75,37 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
+interface FlattenOptions {
+  expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideCompleted: boolean;
+  filtering: boolean;
+  summaryExpanded: ReadonlySet<string>;
+}
+
+/**
+ * Flatten the visible, selectable rows in document order for keyboard
+ * navigation. This shares {@link computeVisibleChildren} with the render path
+ * so the keyboard cursor can never land on a row that isn't drawn — or skip a
+ * row that is. Summary rows are not selectable and carry no task, so they are
+ * intentionally absent from this list (the helper only yields them as
+ * `kind: "summary"`, which we drop here).
+ */
 function flattenVisibleNodes(
   nodes: TaskTreeNodeType[],
-  expandedNodes?: ReturnType<typeof useExpandedNodes>
+  { expandedNodes, hideCompleted, filtering, summaryExpanded }: FlattenOptions
 ): TaskTreeNodeType[] {
   const out: TaskTreeNodeType[] = [];
-  const stack = [...nodes].reverse();
+  // Apply the same root-level collapse the render uses so the keyboard cursor
+  // never lands on a folded-away root node (or skips a visible one).
+  const visibleRoots = computeVisibleRoots(nodes, {
+    hideCompleted,
+    filtering,
+    summaryExpanded,
+  });
+  const stack = visibleRoots
+    .filter((child) => child.kind === "node")
+    .map((child) => child.node)
+    .reverse();
 
   while (stack.length > 0) {
     const node = stack.pop()!;
@@ -82,8 +114,16 @@ function flattenVisibleNodes(
       ? expandedNodes.isNodeExpanded(node.task.id)
       : true;
     if (node.children.length > 0 && isExpanded) {
-      for (let index = node.children.length - 1; index >= 0; index -= 1) {
-        stack.push(node.children[index]);
+      const visible = computeVisibleChildren(node, {
+        hideCompleted,
+        filtering,
+        summaryExpanded,
+      });
+      for (let index = visible.length - 1; index >= 0; index -= 1) {
+        const child = visible[index];
+        if (child.kind === "node") {
+          stack.push(child.node);
+        }
       }
     }
   }
@@ -98,11 +138,39 @@ export function TaskTreeView({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
-  hideStatus,
+  hideCompleted = false,
+  filtering = false,
+  summaryExpanded,
 }: TaskTreeViewProps) {
+  const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
   const visibleNodes = useMemo(
-    () => (onTaskSelect ? flattenVisibleNodes(hierarchy, expandedNodes) : []),
-    [hierarchy, expandedNodes, onTaskSelect]
+    () =>
+      onTaskSelect
+        ? flattenVisibleNodes(hierarchy, {
+            expandedNodes,
+            hideCompleted,
+            filtering,
+            summaryExpanded: summaryExpandedIds ?? new Set<string>(),
+          })
+        : [],
+    [
+      hierarchy,
+      expandedNodes,
+      onTaskSelect,
+      hideCompleted,
+      filtering,
+      summaryExpandedIds,
+    ]
+  );
+
+  const visibleRoots = useMemo(
+    () =>
+      computeVisibleRoots(hierarchy, {
+        hideCompleted,
+        filtering,
+        summaryExpanded: summaryExpandedIds ?? new Set<string>(),
+      }),
+    [hierarchy, hideCompleted, filtering, summaryExpandedIds]
   );
 
   const handleKeyDown = useCallback(
@@ -149,17 +217,30 @@ export function TaskTreeView({
   return (
     <div className="tasks-v2-tree">
       <div role="tree" aria-label="Task hierarchy" onKeyDown={handleKeyDown}>
-        {hierarchy.map((node) => (
-          <TaskTreeNode
-            key={node.task.id}
-            node={node}
-            depth={0}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={onTaskSelect}
-            expandedNodes={expandedNodes}
-            hideStatus={hideStatus}
-          />
-        ))}
+        {visibleRoots.map((child) =>
+          child.kind === "node" ? (
+            <TaskTreeNode
+              key={child.node.task.id}
+              node={child.node}
+              depth={0}
+              selectedTaskId={selectedTaskId}
+              onTaskSelect={onTaskSelect}
+              expandedNodes={expandedNodes}
+              hideCompleted={hideCompleted}
+              filtering={filtering}
+              summaryExpanded={summaryExpanded}
+            />
+          ) : (
+            <SummaryRow
+              key={`summary-${child.parentId}`}
+              parentId={child.parentId}
+              count={child.count}
+              depth={0}
+              open={summaryExpandedIds?.has(child.parentId) ?? false}
+              onToggle={(parentId) => summaryExpanded?.toggleSummary(parentId)}
+            />
+          )
+        )}
       </div>
     </div>
   );

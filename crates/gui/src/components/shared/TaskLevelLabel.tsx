@@ -33,11 +33,11 @@ export function levelTextColor(level: TaskLevel | null): string {
     case "epic":
       return "text-info";
     case "ticket":
-      return "text-primary";
+      return "text-accent";
     case "task":
-      return "text-text-secondary";
+      return "text-fg-soft";
     default:
-      return "text-text-muted";
+      return "text-fg-mute";
   }
 }
 

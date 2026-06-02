@@ -76,7 +76,7 @@ function CreateTaskForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="border-b border-border px-3 py-3 bg-bg-secondary/50">
+    <form onSubmit={handleSubmit} className="border-b border-border px-3 py-3 bg-bg-1/50">
       <div className="space-y-2">
         {/* Title input */}
         <input
@@ -84,7 +84,7 @@ function CreateTaskForm({
           placeholder="Task title..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
           autoFocus
           disabled={isSubmitting}
         />
@@ -95,17 +95,17 @@ function CreateTaskForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 resize-none"
           disabled={isSubmitting}
         />
 
         {/* Level select */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-text-muted">Level:</label>
+          <label className="text-xs text-fg-mute">Level:</label>
           <select
             value={level}
             onChange={(e) => setLevel(e.target.value as TaskLevel)}
-            className="rounded-lg border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-primary transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="rounded-lg border border-border bg-bg-2 px-2 py-1 text-xs text-fg transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
             disabled={isSubmitting}
           >
             <option value="task">Task</option>
@@ -116,7 +116,7 @@ function CreateTaskForm({
 
         {/* Error message */}
         {error && (
-          <p className="text-xs text-error">{error}</p>
+          <p className="text-xs text-err">{error}</p>
         )}
 
         {/* Action buttons */}
@@ -124,14 +124,14 @@ function CreateTaskForm({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+            className="rounded-lg px-3 py-1 text-xs font-medium text-fg-mute transition-colors hover:bg-bg-hover hover:text-fg"
             disabled={isSubmitting}
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+            className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent/90 disabled:opacity-50"
             disabled={isSubmitting || !title.trim()}
           >
             {isSubmitting ? "Creating..." : "Create"}
@@ -213,23 +213,23 @@ export function FilteredTasksPanel({
   return (
     <ResizablePanel
       storageKey="filtered-tasks-panel-width"
-      glowColor="from-primary/0 via-primary/30 to-primary/0"
+      glowColor="from-accent/0 via-accent/30 to-accent/0"
     >
       {/* Header with step info */}
       <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 font-mono text-xs font-bold text-accent">
               {(step.order ?? 0) + 1}
             </span>
-            <h2 className="truncate font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+            <h2 className="truncate font-mono text-xs font-medium uppercase tracking-wider text-fg-mute">
               {step.name}
             </h2>
           </div>
-          <p className="ml-8 text-xs text-text-muted">
+          <p className="ml-8 text-xs text-fg-mute">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             {activeCount > 0 && (
-              <span className="ml-2 text-warning">({activeCount} active)</span>
+              <span className="ml-2 text-warn">({activeCount} active)</span>
             )}
           </p>
         </div>
@@ -238,7 +238,7 @@ export function FilteredTasksPanel({
           <button
             type="button"
             onClick={() => setShowCreateForm(true)}
-            className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-success focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="cursor-pointer rounded-lg p-1.5 text-fg-mute transition-colors hover:bg-bg-hover hover:text-ok focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             aria-label="Create task"
             title="Create new task"
           >
@@ -256,7 +256,7 @@ export function FilteredTasksPanel({
             <button
               type="button"
               onClick={onClose}
-              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              className="cursor-pointer rounded-lg p-1.5 text-fg-mute transition-colors hover:bg-bg-hover hover:text-fg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               aria-label="Close panel"
             >
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -293,11 +293,11 @@ export function FilteredTasksPanel({
               onChange={(e) =>
                 setSearch(e.target.value || null)
               }
-              className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 pl-7 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+              className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 pl-7 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
               aria-label="Search tasks"
             />
             <svg
-              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted"
+              className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-mute"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -329,23 +329,22 @@ export function FilteredTasksPanel({
           selectedTaskId={selectedTaskId}
           onTaskSelect={(task) => onTaskSelect?.(task.id)}
           expandedNodes={expandedNodes}
-          hideStatus
         />
       </div>
 
       {/* Footer with task count */}
       {totalTasks > 0 && (
-        <div className="flex items-center justify-between border-t border-border bg-bg-secondary/50 px-3 py-2">
-          <p className="font-mono text-xs text-text-muted">
+        <div className="flex items-center justify-between border-t border-border bg-bg-1/50 px-3 py-2">
+          <p className="font-mono text-xs text-fg-mute">
             {totalTasks} task{totalTasks !== 1 ? "s" : ""}
           </p>
           {selectedTaskId && (
-            <p className="flex items-center gap-1 font-mono text-xs text-text-muted">
+            <p className="flex items-center gap-1 font-mono text-xs text-fg-mute">
               Selected:{" "}
               <IdentityBadge
                 id={selectedTaskId}
                 kind="task"
-                className="text-primary"
+                className="text-accent"
                 testId="filtered-tasks-selected-task-id"
               />
             </p>

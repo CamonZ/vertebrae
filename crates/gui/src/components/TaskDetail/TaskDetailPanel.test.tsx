@@ -6,6 +6,7 @@ import {
   createMockTaskRun,
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
 import type { Task, TaskRunControls } from "../../bindings";
 import { useTaskStore } from "../../stores";
@@ -119,6 +120,9 @@ vi.mock("../../bindings", () => ({
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
     toggleChecklistItemDone: vi.fn(),
+    // Relation levels/titles are looked up from the store in tests; this stub
+    // just keeps the fallback fetch from throwing when a relation isn't seeded.
+    getTask: vi.fn(async () => ({ status: "error", error: "not mocked" })),
   },
   events: {
     taskChangedEvent: {
@@ -158,6 +162,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     vi.clearAllMocks();
     mockTaskOverrides.current = {};
     mockTaskExecutionsOverrides.current = [];
+    usePanelFocusStore.getState().reset();
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
@@ -168,13 +173,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Header", () => {
-    it("displays workflow -> step breadcrumb when task has workflow", () => {
+    it("shows the current step in the hero status", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      // "Implementation" + "In progress" appear both in the header breadcrumb
-      // and inside TraceMiniView (both via the shared StepBadge formatting) —
-      // assert presence rather than uniqueness.
-      expect(screen.getAllByText("Implementation").length).toBeGreaterThan(0);
+      // The workflow name is no longer surfaced in the panel; the step appears
+      // in the hero status band (formatStepName("in_progress") -> "In progress").
       expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
     });
 
@@ -198,19 +201,40 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("status badge does NOT glow purely from step_name=in_progress without an active run", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+    it("renders the level crumb and a clickable 'under <parent>' link", () => {
+      mockTaskOverrides.current = { level: "ticket", parent_id: "parent-1" };
+      useTaskStore
+        .getState()
+        .setTasks([
+          createMockTask({ id: "parent-1", title: "Vertebrae Web App" }),
+        ]);
+      const onTaskSelect = vi.fn();
 
-      const statusBadge = screen.getByTestId("status-badge");
-      expect(statusBadge).toBeInTheDocument();
-      expect(statusBadge.className).not.toContain("animate-pulse-glow");
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onTaskSelect={onTaskSelect}
+        />
+      );
+
+      expect(screen.getByTestId("task-detail-level")).toHaveTextContent(
+        "ticket"
+      );
+      const parentLink = screen.getByTestId("task-detail-parent-link");
+      expect(parentLink).toHaveTextContent("Vertebrae Web App");
+
+      fireEvent.click(parentLink);
+      expect(onTaskSelect).toHaveBeenCalledWith("parent-1");
     });
 
-    it("status badge glows when an active run is executing, regardless of step_name", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+    it("omits the 'under' crumb when the task has no parent", () => {
+      renderWithTaskOverrides({ parent_id: null });
 
-      const statusBadge = screen.getByTestId("status-badge");
-      expect(statusBadge.className).toContain("animate-pulse-glow");
+      expect(screen.getByTestId("task-detail-level")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("task-detail-parent-link")
+      ).not.toBeInTheDocument();
     });
 
     it("renders back button when onBack is provided", () => {
@@ -286,7 +310,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("renders the Detach button and invokes onDetach when clicked", () => {
+    it("does not render the Detach button even when onDetach is provided (temporarily disabled)", () => {
       const mockOnDetach = vi.fn();
       render(
         <TaskDetailPanel
@@ -296,13 +320,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         />
       );
 
-      const detachButton = screen.getByRole("button", {
-        name: /detach into pop-out window/i,
-      });
-      expect(detachButton).toBeInTheDocument();
-
-      fireEvent.click(detachButton);
-      expect(mockOnDetach).toHaveBeenCalledTimes(1);
+      expect(
+        screen.queryByRole("button", { name: /detach into pop-out window/i })
+      ).not.toBeInTheDocument();
     });
 
     it("renders the standalone wrapper and hides Detach in standalone mode", () => {
@@ -366,6 +386,33 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
   });
 
+  describe("Glass-panel focus (Escape to close)", () => {
+    it("registers as a focused glass panel while open", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+      expect(usePanelFocusStore.getState().stack).toContain("task-detail");
+    });
+
+    it("closes the panel on Escape when not editing", () => {
+      const onClose = vi.fn();
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not close the panel on Escape while an inline edit is open", () => {
+      const onClose = vi.fn();
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
+
+      // Enter title edit mode; its own Escape-to-cancel must win.
+      fireEvent.click(screen.getByText("Test Task"));
+      const input = screen.getByDisplayValue("Test Task");
+      fireEvent.keyDown(input, { key: "Escape" });
+
+      expect(onClose).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Acceptance Criteria section", () => {
     it("is the first section after the title badges", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
@@ -403,23 +450,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       const metCriterion = screen.getByText("App loads without errors");
       expect(metCriterion.className).toContain("line-through");
-    });
-  });
-
-  describe("Progress section", () => {
-    it("shows checklist items in progress section", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      const progressSection = screen.getByTestId("progress-section");
-      expect(progressSection).toBeInTheDocument();
-      expect(screen.getByText("First step")).toBeInTheDocument();
-      expect(screen.getByText("Second step")).toBeInTheDocument();
-    });
-
-    it("shows checklist progress badge", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      expect(screen.getByText("1/2")).toBeInTheDocument();
     });
   });
 
@@ -538,10 +568,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const confirmationHeading = screen.getByRole("heading", {
         name: "Delete Task?",
       });
-      // The Test Criteria heading is the first element of the
-      // scrollable body, below the static panel header chrome.
-      const bodyAnchor = screen.getByRole("heading", {
-        name: "Test Criteria",
+      // The Spec section toggle is the first element of the scrollable
+      // body, below the static panel header chrome.
+      const bodyAnchor = screen.getByRole("button", {
+        name: /toggle spec section/i,
       });
 
       expect(
@@ -588,8 +618,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByTestId("task-detail-id")).toHaveAttribute(
-        "title",
-        `Task ID: ${mockTaskData.id}`
+        "aria-label",
+        `Copy full ${mockTaskData.level} ID`
       );
     });
 

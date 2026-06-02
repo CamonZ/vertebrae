@@ -48,7 +48,7 @@ describe("TransitionMarker", () => {
     const marker = screen.getByTestId("unified-chat-transition");
     expect(marker.getAttribute("data-threshold-kind")).toBe("rejection");
     const chip = marker.querySelector("span.inline-flex");
-    expect(chip?.className).toMatch(/border-error/);
-    expect(chip?.className).toMatch(/text-error/);
+    expect(chip?.className).toMatch(/border-err/);
+    expect(chip?.className).toMatch(/text-err/);
   });
 });

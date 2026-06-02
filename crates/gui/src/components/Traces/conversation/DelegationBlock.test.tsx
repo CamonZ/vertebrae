@@ -44,7 +44,7 @@ describe("DelegationBlock", () => {
     expect(el.className).toContain("border-[var(--color-accent)]");
   });
 
-  it("tints the left border by thresholdKind (rejection → border-error)", () => {
+  it("tints the left border by thresholdKind (rejection → border-err)", () => {
     render(
       <DelegationBlock
         parentTaskId="p"
@@ -56,7 +56,7 @@ describe("DelegationBlock", () => {
     );
     const el = screen.getByTestId("unified-chat-delegation");
     expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
-    expect(el.className).toMatch(/border-error/);
+    expect(el.className).toMatch(/border-err/);
     expect(el.className).not.toContain("border-[var(--color-accent)]");
   });
 

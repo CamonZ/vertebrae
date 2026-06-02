@@ -86,7 +86,7 @@ function RelationSection({
       <div className="mb-2 flex items-center gap-2">
         <span className="text-[var(--color-fg-mute)]">{icon}</span>
         <span className="text-sm font-medium text-[var(--color-fg)]">{title}</span>
-        <Badge count={taskIds.length} intent="neutral" />
+        <Badge count={taskIds.length} intent="neutral" bordered />
       </div>
       {taskIds.length > 0 ? (
         <div className="flex flex-wrap gap-2">
@@ -541,7 +541,7 @@ export function TaskRelations({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
           <span className="text-sm font-medium text-[var(--color-fg)]">Blocked By</span>
-          <Badge count={dependsOnIds.length} intent="neutral" />
+          <Badge count={dependsOnIds.length} intent="neutral" bordered />
         </div>
 
         {isEditingDeps ? (

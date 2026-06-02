@@ -35,6 +35,25 @@ export function isActiveRunStatus(
   return status != null && ACTIVE_RUN_STATUSES.has(status);
 }
 
+/**
+ * Whether a task is considered "done" for the purposes of list scoping and the
+ * hide-done / done-summary list controls.
+ *
+ * This mirrors the "done" scope predicate used by the Tasks page scope chips: a
+ * task counts as done when it has a completion timestamp, has reached the
+ * terminal `done` workflow step, or its active run has finished with a
+ * `completed` status. Centralizing it here keeps the scope filter and the
+ * list-pane done-collapse logic from drifting apart.
+ */
+export function isTaskDone(task: Task): boolean {
+  const status = task.run_controls?.active_run?.status ?? null;
+  return (
+    Boolean(task.completed_at) ||
+    task.step_name === "done" ||
+    status === "completed"
+  );
+}
+
 export function deriveActiveTaskRuns(
   tasks: Task[],
   options: { includeStopping?: boolean; sortNewestFirst?: boolean } = {}
@@ -295,9 +314,9 @@ export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
   switch (chip.tone) {
     case "warning":
       return {
-        bg: "bg-warning/10",
-        text: "text-warning",
-        dot: "bg-warning",
+        bg: "bg-warn/10",
+        text: "text-warn",
+        dot: "bg-warn",
         pulse: false,
       };
     case "info":
@@ -309,30 +328,30 @@ export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
       };
     case "success":
       return {
-        bg: "bg-success/10",
-        text: "text-success",
-        dot: "bg-success",
+        bg: "bg-ok/10",
+        text: "text-ok",
+        dot: "bg-ok",
         pulse: false,
       };
     case "error":
       return {
-        bg: "bg-error/10",
-        text: "text-error",
-        dot: "bg-error",
+        bg: "bg-err/10",
+        text: "text-err",
+        dot: "bg-err",
         pulse: false,
       };
     case "muted":
       return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-muted",
-        dot: "bg-text-muted",
+        bg: "bg-bg-2",
+        text: "text-fg-mute",
+        dot: "bg-fg-mute",
         pulse: chip.status === "stopping",
       };
     default:
       return {
-        bg: "bg-bg-tertiary",
-        text: "text-text-secondary",
-        dot: "bg-text-muted",
+        bg: "bg-bg-2",
+        text: "text-fg-soft",
+        dot: "bg-fg-mute",
         pulse: false,
       };
   }

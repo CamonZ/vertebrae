@@ -48,7 +48,7 @@ const CALLOUT_MIN_GAP_PX = 70;
 const LANE_BAND_CLASS =
   "border-b border-[var(--color-line)]/40 bg-[linear-gradient(90deg,var(--color-line)_1px,transparent_1px)] bg-[length:12.5%_100%]";
 const MARKER_BUTTON_CLASS =
-  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] shadow-sm hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)]";
+  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg)] shadow-1 hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)]";
 
 const THRESHOLD_TITLES: Record<ThresholdMarker["kind"], string | null> = {
   approval: "APPROVAL",
@@ -349,7 +349,7 @@ export function FlightStrip({
     <div
       data-testid="flight-strip"
       data-variant="hearth-v2"
-      className="relative w-full select-none rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] shadow-sm"
+      className="relative w-full select-none rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] shadow-1"
       style={{ paddingLeft: PADDING_X, paddingRight: PADDING_X }}
     >
       <div className="flex items-center justify-between gap-2 border-b border-[var(--color-line)] px-2 py-1.5">

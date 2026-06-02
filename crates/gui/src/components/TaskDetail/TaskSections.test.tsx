@@ -75,8 +75,8 @@ describe("TaskSections", () => {
       // Should show "2" for steps count in the header badge
       const stepsHeader = screen.getByText("Checklist Items").closest("button");
       expect(stepsHeader).toBeInTheDocument();
-      // The count badge is a sibling span
-      expect(stepsHeader?.querySelector(".rounded-full")).toHaveTextContent("2");
+      // The count badge is a sibling span (square Badge atom, mono digits).
+      expect(stepsHeader?.querySelector(".font-mono")).toHaveTextContent("2");
     });
   });
 
@@ -201,7 +201,7 @@ describe("TaskSections", () => {
       await userEvent.click(screen.getByText("Constraints"));
 
       // Should have bullet point (small circle)
-      const bullets = document.querySelectorAll(".rounded-full.bg-text-muted");
+      const bullets = document.querySelectorAll(".rounded-full.bg-fg-mute");
       expect(bullets.length).toBe(1);
     });
   });

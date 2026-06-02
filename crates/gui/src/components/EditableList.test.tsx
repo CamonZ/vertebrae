@@ -36,7 +36,7 @@ describe("EditableList", () => {
       render(<EditableList {...defaultProps} />);
 
       // Bullet points are small circles
-      const bullets = document.querySelectorAll(".rounded-full.bg-text-muted");
+      const bullets = document.querySelectorAll(".rounded-full.bg-fg-mute");
       expect(bullets.length).toBe(3);
     });
 
@@ -52,7 +52,7 @@ describe("EditableList", () => {
     it("shows bullet points for each item", () => {
       render(<EditableList {...defaultProps} variant="bullet" />);
 
-      const bullets = document.querySelectorAll(".rounded-full.bg-text-muted");
+      const bullets = document.querySelectorAll(".rounded-full.bg-fg-mute");
       expect(bullets.length).toBe(3);
     });
   });

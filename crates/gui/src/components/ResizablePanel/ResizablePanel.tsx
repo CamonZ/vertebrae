@@ -10,7 +10,7 @@ interface ResizablePanelProps {
   defaultWidth?: number;
   /** Storage key for persisting width (uses localStorage if provided) */
   storageKey?: string;
-  /** CSS class for the glow edge color (e.g., "from-primary/0 via-primary/30 to-primary/0") */
+  /** CSS class for the glow edge color (e.g., "from-accent/0 via-accent/30 to-accent/0") */
   glowColor?: string;
   /** Additional className for the panel container */
   className?: string;
@@ -31,7 +31,7 @@ export function ResizablePanel({
   maxWidth,
   defaultWidth = DEFAULT_WIDTH,
   storageKey,
-  glowColor = "from-primary/0 via-primary/30 to-primary/0",
+  glowColor = "from-accent/0 via-accent/30 to-accent/0",
   className = "",
   testId,
 }: ResizablePanelProps) {
@@ -108,13 +108,13 @@ export function ResizablePanel({
     <div
       ref={panelRef}
       data-testid={testId}
-      className={`relative flex h-full flex-col border-l border-border bg-bg-secondary ${className}`}
+      className={`relative flex h-full flex-col border-l border-border bg-bg-1 ${className}`}
       style={{ width: `${width}px` }}
     >
       {/* Resize handle */}
       <div
         className={`absolute -left-1 top-0 bottom-0 w-2 cursor-ew-resize z-10 group ${
-          isResizing ? "bg-primary/20" : ""
+          isResizing ? "bg-accent/20" : ""
         }`}
         onMouseDown={handleMouseDown}
         role="separator"
@@ -136,8 +136,8 @@ export function ResizablePanel({
         <div
           className={`absolute left-1 top-0 bottom-0 w-0.5 transition-colors ${
             isResizing
-              ? "bg-primary"
-              : "bg-transparent group-hover:bg-primary/50"
+              ? "bg-accent"
+              : "bg-transparent group-hover:bg-accent/50"
           }`}
         />
       </div>
