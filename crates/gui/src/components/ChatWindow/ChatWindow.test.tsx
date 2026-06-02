@@ -8,6 +8,12 @@ import type { ChatSession } from "../../stores/chatStore";
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
+// Synchronous project so the header's "scoped to" line renders without an async
+// state update (which would otherwise log act() warnings).
+vi.mock("../../hooks/useCurrentProject", () => ({
+  useCurrentProject: () => ({ name: "test-project", path: "/test/project" }),
+}));
+
 // Mock the bindings
 vi.mock("../../bindings", () => ({
   commands: {
@@ -76,7 +82,7 @@ describe("ChatWindow", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders scope breadcrumb with correct scope label", () => {
+  it("renders the session label as the header title with the scope line", () => {
     const session = createSession({ scope: "task", label: "My Task" });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -86,11 +92,12 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByText("Task")).toBeInTheDocument();
     expect(screen.getByText("My Task")).toBeInTheDocument();
+    expect(screen.getByText("scoped to")).toBeInTheDocument();
+    expect(screen.getByText("this task")).toBeInTheDocument();
   });
 
-  it("renders workflow scope breadcrumb", () => {
+  it("renders the workflow scope line", () => {
     const session = createSession({
       scope: "workflow",
       entityId: "wf-1",
@@ -104,8 +111,8 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByText("Workflow")).toBeInTheDocument();
     expect(screen.getByText("Deploy Pipeline")).toBeInTheDocument();
+    expect(screen.getByText("this workflow")).toBeInTheDocument();
   });
 
   it("shows widen button for non-project scopes", () => {
@@ -149,10 +156,10 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(
-      screen.getByText("Chat scoped to task")
+      screen.getByText("Create, edit, and delete tasks, steps, and workflows")
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Type a message and press Enter to begin")
+      screen.getByText("Or run a task through a workflow")
     ).toBeInTheDocument();
   });
 
@@ -343,6 +350,21 @@ describe("ChatWindow", () => {
     expect(
       screen.getByPlaceholderText("Type a message to start...")
     ).toBeInTheDocument();
+  });
+
+  it("focuses the composer on mount, before any session is started", () => {
+    const session = createSession({ claudeSessionId: null });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(
+      screen.getByPlaceholderText("Type a message to start...")
+    ).toHaveFocus();
   });
 
   it("shows placeholder text for active session", () => {
@@ -632,9 +654,11 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByText(/Chat scoped to/)).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Type a message and press Enter to begin")
+      screen.queryByText(/Create, edit, and delete/)
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Or run a task through a workflow")
     ).not.toBeInTheDocument();
   });
 
@@ -651,7 +675,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByText(/Chat scoped to/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Create, edit, and delete/)
+    ).not.toBeInTheDocument();
   });
 
   // --- C) Send button disabled state ---

@@ -29,6 +29,12 @@
      .light override below), not an alias. */
   --color-bg-hover: rgba(232, 229, 221, 0.04);
 
+  /* Task-row hover fill — a PLAIN pre-resolved color (== color-mix(in oklch,
+     --color-bg-1 60%, --color-bg)). Kept plain rather than a live color-mix()
+     because WKWebView flashes a wrong (cool/blue) intermediate when it animates
+     a background TO a color-mix() value; a legacy sRGB hex animates cleanly. */
+  --row-hover: #151210;
+
   /* Text — warm neutral cream, five steps to ghost */
   --color-fg: #e8e5dd;
   --color-fg-soft: #ccc8c0;
@@ -347,6 +353,11 @@
 
   /* Hover wash needs a darker ink-on-paper feel */
   --color-bg-hover: rgba(26, 26, 32, 0.04);
+
+  /* Plain pre-resolved row-hover fill (== color-mix(in oklch, --color-bg-1 60%,
+     --color-bg) in the light ramp). See the dark `--row-hover` note for why this
+     is a plain hex rather than a live color-mix(). */
+  --row-hover: #f5f1e5;
 }
 
 /* =============================================================================
@@ -1253,13 +1264,13 @@ html.window-transparent #root {
 
 .tasks-v2 .t-summary .t-indent .g.l1,
 .tasks-v2 .t-summary .t-indent .g.l2 {
-  border-right-color: var(--line);
+  border-right-color: transparent;
 }
 
 .tasks-v2 .t-summary .sum-chev {
-  width: 10px;
+  width: 18px;
   text-align: center;
-  font-size: var(--text-2xs);
+  font-size: 18px;
   color: var(--ok);
   flex-shrink: 0;
   /* The summary is a flex row (uniform --s-2 gap), but the task rows it sits
@@ -1485,6 +1496,14 @@ html.window-transparent #root {
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 
+/* In the task detail panel, id chips sit directly on the glass surface — keep
+   them transparent on hover/active rather than filling, so they match the rest
+   of the panel. The `.copied` green confirmation wash is preserved. */
+.tasks-v2-detail-shell .c-id-chip:hover:not(.copied),
+.tasks-v2-detail-shell .c-id-chip:active:not(.copied) {
+  background: transparent;
+}
+
 .c-id-chip .copy-mark {
   opacity: 0;
   transition: opacity var(--t-fast) var(--ease);
@@ -1515,6 +1534,365 @@ html.window-transparent #root {
   opacity: 1;
 }
 
+/* ── Floating project chat: launcher pill + glass side panel ──
+   Adapted from docs/design/lib/lib-chat.jsx (.hc-launch / .hc-panel).
+   The pill floats bottom-left, clear of the 48px nav rail; clicking it opens
+   the claude-binary project chat in a fixed floating-glass panel anchored at
+   the same spot. Kept minimal — no drag, no snap-dock. */
+.hc-launch {
+  position: fixed;
+  left: 60px;
+  bottom: 22px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-4) 0 var(--s-3);
+  background: color-mix(in oklch, var(--bg-2) 50%, transparent);
+  color: var(--fg);
+  -webkit-backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
+  backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-2), 0 0 18px var(--accent-glow),
+    inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease), transform var(--t-base) var(--ease);
+}
+.hc-launch:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-2), 0 0 28px var(--accent-glow);
+  transform: translateY(-1px);
+}
+.hc-launch:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--shadow-2), 0 0 0 3px var(--accent-wash);
+}
+.hc-launch .ic {
+  display: inline-flex;
+  color: var(--accent);
+}
+/* Keyboard hint — same chip vocabulary as the search box `/` hint
+   (SearchInput.tsx): mono, line-strong border, bg-2, --text-10. */
+.hc-launch .hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.hc-launch .key {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 1;
+  color: var(--fg-mute);
+  padding: 2px 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklch, var(--bg-2) 70%, transparent);
+}
+.hc-launch .ember {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 7px var(--accent-glow);
+}
+
+.hc-panel {
+  position: fixed;
+  left: 60px;
+  /* Match the task-detail float's vertical insets so the two side panels are
+     exactly the same height (38px clears the shell titlebar; see
+     `.detail-float`). */
+  top: calc(38px + var(--s-3));
+  bottom: var(--s-3);
+  z-index: 40;
+  width: 384px;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--bg-3) 34%, transparent),
+    color-mix(in oklch, var(--bg-2) 28%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
+  backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
+  /* Drill open: slide in from the left edge toward center (the chat is
+     left-anchored). Plays once on mount, i.e. when the panel opens. */
+  animation: panel-drill-left var(--t-slow) var(--ease);
+}
+
+/* Side-panel "drill" open: the panel slides from its anchored screen edge in
+   toward the center, fading as it lands. The chat enters from the left, the
+   task-detail float from the right (see `.detail-float`). */
+@keyframes panel-drill-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes panel-drill-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+/* Exit "drill": reverse the entrance — slide back out to the anchored edge and
+   fade. Faster than the entrance (--t-base vs --t-slow) so dismissing feels
+   snappy; `forwards` holds the off-screen end frame until React unmounts the
+   node (the JS timer in usePanelExitTransition is matched to --t-base = 180ms). */
+.hc-panel.is-closing {
+  animation: panel-drill-left-out var(--t-base) var(--ease) forwards;
+}
+.tasks-v2.detail.detail-float.is-closing {
+  animation: panel-drill-right-out var(--t-base) var(--ease) forwards;
+}
+@keyframes panel-drill-left-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+@keyframes panel-drill-right-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-panel,
+  .hc-panel.is-closing,
+  .tasks-v2.detail.detail-float,
+  .tasks-v2.detail.detail-float.is-closing {
+    animation: none;
+  }
+}
+
+/* Right-edge drag handle for horizontal resize. Sits inside the panel (the
+   surface is overflow-clipped for its rounded corners) and floats above the
+   content. The accent rule only paints on hover / while dragging. Mirrors
+   `.detail-resize-handle` but on the right edge — the chat panel is
+   left-anchored, so the right edge is the one that moves. */
+.hc-panel .hc-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 60;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.hc-panel .hc-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--t-fast, 120ms) var(--ease, ease);
+}
+.hc-panel .hc-resize-handle:hover::after,
+.hc-panel .hc-resize-handle[data-resizing]::after {
+  background: color-mix(in oklch, var(--accent) 60%, transparent);
+}
+
+/* ── Chat header + footer ───────────────────────────────────────────────────
+   Single header band (title + "scoped to …" meta) and the composer footer with
+   its context-utilization bar. Ported from docs/design/lib/lib-chat.jsx
+   (`.hc-head` / `.hc-foot`). The reference's drag/dock affordances are dropped
+   (the panel is fixed-anchored, not draggable), so `.hc-head` is not a grab
+   handle here. */
+.hc-panel .hc-head {
+  flex-shrink: 0;
+  background: color-mix(in oklch, var(--bg-3) 26%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+}
+.hc-panel .hc-head-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.hc-panel .hc-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  font-family: var(--serif);
+  font-size: var(--text-16);
+  letter-spacing: -0.01em;
+  line-height: 1;
+  color: var(--fg);
+}
+.hc-panel .hc-title .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Resting status ember; the active/closed dots reuse this footprint. */
+.hc-panel .hc-title .em {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 7px var(--accent-glow);
+}
+.hc-panel .hc-title .em.ok {
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--ok) 60%, transparent);
+}
+.hc-panel .hc-title .em.mute {
+  background: var(--fg-mute);
+  box-shadow: none;
+}
+.hc-panel .hc-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.hc-panel .hc-ctrl {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-mute);
+  border: none;
+  background: transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.hc-panel .hc-ctrl:hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-ctrl.danger:hover {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.hc-panel .hc-head-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  margin-top: var(--s-1h);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.hc-panel .hc-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  letter-spacing: 0.04em;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-scope .badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 5px color-mix(in oklch, var(--ok) 60%, transparent);
+}
+.hc-panel .hc-scope-id {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+  padding: 1px var(--s-1h);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+}
+.hc-panel .hc-sep {
+  color: var(--fg-ghost);
+  font-size: var(--text-10);
+}
+/* Widen-scope control, kept for entity-scoped chats (no parent for project). */
+.hc-panel .hc-widen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: var(--s-1);
+  padding: 2px;
+  color: var(--fg-mute);
+  border: none;
+  background: transparent;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.hc-panel .hc-widen:hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+
+/* Composer footer: a thin context-utilization bar rides the top edge, the
+   existing composer sits below, and a context-% readout caps the foot. */
+.hc-panel .hc-foot {
+  flex-shrink: 0;
+  background: color-mix(in oklch, var(--bg-2) 24%, transparent);
+  border-top: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+}
+.hc-panel .hc-ctx {
+  height: 2px;
+  background: color-mix(in oklch, var(--bg) 50%, transparent);
+  position: relative;
+  overflow: hidden;
+}
+.hc-panel .hc-ctx-fill {
+  height: 100%;
+  transition: width var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
+}
+.hc-panel .hc-foot-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 0 var(--s-3) var(--s-2);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+  letter-spacing: 0.04em;
+}
+.hc-panel .hc-foot-meta .ctx-lbl {
+  margin-left: auto;
+}
+.hc-panel .hc-foot-meta .ctx-lbl b {
+  color: var(--fg-mute);
+  font-weight: 500;
+}
+
 /* Task rows — ported verbatim from the design reference (docs/design/
    tasks-v2.html). Keep these values in sync with that mockup. The :focus /
    :focus-visible rules and the [data-accent] glyph hook are our a11y/React
@@ -1522,16 +1900,21 @@ html.window-transparent #root {
 .tasks-v2 .t-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr auto 16px;
   align-items: center;
   gap: var(--s-3);
   padding: 0 var(--s-5);
   cursor: pointer;
+  /* Opaque resting fill (== page bg, so visually identical to transparent at
+     rest) so both ends of the hover transition are plain sRGB hex colors. */
+  background: var(--bg);
   transition: background var(--t-fast) var(--ease);
 }
 
 .tasks-v2 .t-row:hover {
-  background: color-mix(in oklch, var(--bg-1) 60%, var(--bg));
+  /* Plain `--row-hover` token, NOT a live color-mix(): WKWebView flashes a cool
+     (blue) intermediate when animating a background toward a color-mix() value. */
+  background: var(--row-hover);
 }
 
 .tasks-v2 .t-row:focus {
@@ -1591,8 +1974,8 @@ html.window-transparent #root {
 }
 
 .tasks-v2 .t-chev {
-  width: 14px;
-  font-size: 12px;
+  width: 18px;
+  font-size: 18px;
   color: var(--fg-mute);
   flex-shrink: 0;
   text-align: center;
@@ -1716,10 +2099,27 @@ html.window-transparent #root {
   border-bottom: 1px dotted var(--fg-ghost);
 }
 
+/* The id chip now leads the meta line. Pull it left by its own inset so its
+   text aligns under the title rather than the chip's padding box. */
+.tasks-v2 .t-meta .t-id {
+  margin-left: -5px;
+}
+
+/* Dedicated, fixed-width column at the row's right edge so every priority glyph
+   lands on one vertical lane regardless of run-chip / timestamp width. The slot
+   reserves its width even when a row has no priority, keeping the lane intact. */
+.tasks-v2 .t-pri-col {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .tasks-v2 .t-pri {
   font-family: var(--mono);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
   opacity: 0.6;
 }
@@ -1829,6 +2229,9 @@ html.window-transparent #root {
     var(--shadow-3),
     -18px 0 44px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
+  /* Drill open: slide in from the right edge toward center (right-anchored).
+     Scoped to `.detail-float` so the standalone pop-out window doesn't slide. */
+  animation: panel-drill-right var(--t-slow) var(--ease);
 }
 
 /* Pop-out (detached) variant: the same floating-glass surface, but inset on
@@ -1865,6 +2268,64 @@ html.window-transparent #root {
   border: none;
   border-radius: 0;
   box-shadow: none;
+}
+
+/* ── Light-theme glass ──────────────────────────────────────────────────────
+   The floating-glass surfaces (detail panels + chat) lean on `brightness(1.4)`
+   in the backdrop filter to lift the dark desktop behind them into a glow. In
+   light mode the backdrop is already bright, so that multiplier clamps it to
+   pure white and the panel reads as a flat opaque slab — "not glass at all".
+   Here we drop the brightness boost (so real content blurs through), warm the
+   frost with a touch of saturation, raise the translucent fill to a legible
+   light tint, and swap the dark inset highlight / drop shadow for light-mode
+   elevation. */
+.light .tasks-v2.detail.detail-float {
+  background: linear-gradient(
+    205deg,
+    color-mix(in oklch, var(--bg) 50%, transparent),
+    color-mix(in oklch, var(--bg-1) 44%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
+  backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
+  border: 1px solid color-mix(in oklch, var(--fg) 14%, transparent);
+  box-shadow:
+    var(--shadow-3),
+    -18px 0 44px rgba(20, 20, 20, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.light .tasks-v2.detail.detail-standalone {
+  background: linear-gradient(
+    205deg,
+    color-mix(in oklch, var(--bg) 88%, transparent),
+    color-mix(in oklch, var(--bg-1) 84%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
+  backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
+}
+
+.light .hc-panel {
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--bg) 46%, transparent),
+    color-mix(in oklch, var(--bg-1) 40%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) saturate(1.3) brightness(1.02);
+  backdrop-filter: blur(30px) saturate(1.3) brightness(1.02);
+  box-shadow:
+    var(--shadow-3),
+    0 0 44px rgba(20, 20, 20, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.light .hc-launch {
+  background: color-mix(in oklch, var(--bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3) brightness(1.02);
+  backdrop-filter: blur(20px) saturate(1.3) brightness(1.02);
+  box-shadow:
+    var(--shadow-2),
+    0 0 18px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 /* Drag handle for the detached window: spans the top title-bar band (the glass
@@ -1971,12 +2432,6 @@ html.window-transparent #root {
   line-height: 1.1;
 }
 
-/* Recessed, darker id chip — the reference id reads as a dark inset, not a
-   light pill. Overrides the IdentityBadge `bg-bg-2` (the lightest surface). */
-.tasks-v2-detail-shell .t-detail-head [data-testid="task-detail-id"] {
-  background: var(--bg-1);
-}
-
 /* Hero sits within the header band: transparent so the accent wash shows
    through, and no divider of its own (the wrapper's gradient line is it). */
 .tasks-v2-detail-shell .t-detail-hero {
@@ -2032,6 +2487,54 @@ html.window-transparent #root {
    match it: a header reporting `aria-expanded="false"` hides its sibling body. */
 .tasks-v2-detail-shell .accordion > button[aria-expanded="false"] + div {
   display: none;
+}
+
+/* Compact traces entry point at the foot of the detail body
+   (docs/design tasks-detail.jsx `.t-traces`): a dashed full-width button that
+   resolves to a solid accent outline on hover. */
+.tasks-v2-detail-shell .t-traces-slot {
+  padding: var(--s-3) var(--s-5) var(--s-5);
+}
+
+.tasks-v2-detail-shell .t-traces {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+
+.tasks-v2-detail-shell .t-traces:hover {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.tasks-v2-detail-shell .t-traces:focus-visible {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.tasks-v2-detail-shell .t-traces em {
+  color: var(--fg);
+  font-family: var(--serif);
+  font-style: italic;
+}
+
+.tasks-v2-detail-shell .t-traces .arr {
+  flex-shrink: 0;
 }
 
 @media (max-width: 980px) {

@@ -9,7 +9,7 @@ import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { LiquidHighlight } from "./LiquidHighlight";
-import { IdentityBadge } from "../shared/EntityId";
+import { IdChip } from "../shared/HearthPrimitives";
 import { Text } from "../atoms/Text";
 import { Chip } from "../atoms/Chip";
 import { Badge } from "../atoms/Badge";
@@ -550,10 +550,10 @@ export function StepDetailPanel({
                     await handleUpdateField({ name: value });
                   }}
                 />
-                <IdentityBadge
+                <IdChip
                   id={step.id}
                   kind="step"
-                  className="mt-1 text-xs text-[var(--color-fg-mute)]"
+                  className="mt-1"
                   testId="step-detail-id"
                 />
               </div>

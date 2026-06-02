@@ -3,7 +3,7 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
-import { ChatWindowManager } from "./ChatWindow";
+import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
 import { LiveChatPanel } from "./LiveChatWindow";
 
 interface AppShellProps {
@@ -22,6 +22,7 @@ export function AppShell({ children }: AppShellProps) {
         </div>
       </div>
       <ChatWindowManager />
+      <FloatingChatLauncher />
       <ToastContainer />
     </div>
   );

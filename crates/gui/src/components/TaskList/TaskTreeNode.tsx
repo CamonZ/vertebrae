@@ -295,33 +295,40 @@ export function TaskTreeNode({
             >
               {task.title}
             </span>
-            {priority && (
-              <span
-                className={`t-pri ${task.priority ?? ""}`}
-                title={priority.label}
-                aria-label={priority.label}
-                data-testid="task-tree-node-priority"
-                data-priority={task.priority}
-              >
-                {priority.glyph}
-              </span>
-            )}
           </div>
           <div className="t-meta">
+            <IdChip
+              id={task.id}
+              kind="task"
+              level={task.level}
+              className="t-id"
+              testId="task-tree-node-id"
+            />
             {childLine && (
-              <span
-                className="tabular-nums"
-                data-testid="task-tree-node-child-summary"
-              >
-                {childLine}
-              </span>
+              <>
+                <span className="sep">·</span>
+                <span
+                  className="tabular-nums"
+                  data-testid="task-tree-node-child-summary"
+                >
+                  {childLine}
+                </span>
+              </>
             )}
-            {childLine && tags.length > 0 && <span className="sep">·</span>}
-            {tags.slice(0, 3).map((tag) => (
-              <span key={tag} data-testid="task-tree-node-tag" className="tag">
-                {tag}
-              </span>
-            ))}
+            {tags.length > 0 && (
+              <>
+                <span className="sep">·</span>
+                {tags.slice(0, 3).map((tag) => (
+                  <span
+                    key={tag}
+                    data-testid="task-tree-node-tag"
+                    className="tag"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </>
+            )}
             {pipeline.length > 0 && (
               <>
                 <span className="sep">·</span>
@@ -352,15 +359,21 @@ export function TaskTreeNode({
               />
             )}
           </span>
-          <IdChip
-            id={task.id}
-            kind="task"
-            level={task.level}
-            className="t-id"
-            testId="task-tree-node-id"
-          />
           {task.updated_at && (
             <span className="when">{formatRelative(task.updated_at)}</span>
+          )}
+        </div>
+        <div className="t-pri-col" aria-hidden={!priority || undefined}>
+          {priority && (
+            <span
+              className={`t-pri ${task.priority ?? ""}`}
+              title={priority.label}
+              aria-label={priority.label}
+              data-testid="task-tree-node-priority"
+              data-priority={task.priority}
+            >
+              {priority.glyph}
+            </span>
           )}
         </div>
       </div>

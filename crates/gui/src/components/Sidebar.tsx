@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
-import { useChatStore } from "../stores/chatStore";
-import { useOpenChat } from "../hooks/useScopedChat";
 import { useStyleguideStore } from "../stores/styleguideStore";
 import {
   useCurrentProject,
@@ -124,48 +122,6 @@ function ProjectAvatar({
         ].join(" ")}
       >
         {name.charAt(0).toUpperCase()}
-      </button>
-    </Tooltip>
-  );
-}
-
-function ProjectChatButton() {
-  const openChat = useOpenChat();
-  const panelOpen = useChatStore((s) => s.panelOpen);
-  const handleClick = useCallback(() => {
-    openChat("project", null, "Project Chat");
-  }, [openChat]);
-
-  return (
-    <Tooltip label="Project Chat" placement="right">
-      <button
-        type="button"
-        onClick={handleClick}
-        aria-label="Project Chat"
-        className={[
-          "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
-          "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
-          panelOpen
-            ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
-            : "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]",
-        ].join(" ")}
-      >
-        <svg
-          width={18}
-          height={18}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.6}
-          aria-hidden
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"
-          />
-        </svg>
       </button>
     </Tooltip>
   );
@@ -538,7 +494,6 @@ export function Sidebar() {
         </ul>
       </nav>
       <div className="flex flex-col items-center gap-1 pb-1">
-        <ProjectChatButton />
         <ThemeToggle />
       </div>
       <RailConnectionStatus />

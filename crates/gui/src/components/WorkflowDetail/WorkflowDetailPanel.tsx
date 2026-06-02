@@ -4,7 +4,7 @@ import { commands } from "../../bindings";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { ResizablePanel } from "../ResizablePanel";
 import { Toggle } from "../Toggle";
-import { IdentityBadge } from "../shared/EntityId";
+import { IdChip } from "../shared/HearthPrimitives";
 import { Text } from "../atoms/Text";
 import { Chip } from "../atoms/Chip";
 import { Badge } from "../atoms/Badge";
@@ -191,10 +191,10 @@ export function WorkflowDetailPanel({
         <h3 className="font-serif text-lg leading-snug text-[var(--color-fg)]">
           {workflow.name}
         </h3>
-        <IdentityBadge
+        <IdChip
           id={workflow.id}
           kind="workflow"
-          className="mt-1 text-xs text-[var(--color-fg-mute)]"
+          className="mt-1"
           testId="workflow-detail-id"
         />
       </div>
