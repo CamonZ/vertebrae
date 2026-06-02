@@ -21,7 +21,7 @@ Feature: Traces THREAD mode polish — live-tail and shared filters
     Then the GUI should show "Live Tail Root Task" within 10 seconds
     When I click on the element containing text "Live Tail Root Task"
     Then the GUI should show "Live Tail Root Task" within 5 seconds
-    When I click on the element with test id "trace-mini-explore"
+    When I click on the element with test id "task-detail-traces"
     Then the GUI should show "Σ Runs" within 10 seconds
     And the GUI should show an element with test id "trace-filter-bar" within 10 seconds
 
