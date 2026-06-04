@@ -1,5 +1,6 @@
 import type { ChangeEvent } from "react";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import type {
   Task,
   TaskLevel,
@@ -12,11 +13,10 @@ import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
+import { SearchInput } from "../components/molecules/SearchInput";
+import { Select } from "../components/atoms/Select";
+import { ViewTabs, type ViewTab } from "../components/shared/ViewTabs";
 import { popOut, stashTask } from "../utils";
-import {
-  deriveHearthStateBreakdown,
-  type HearthStateBreakdown,
-} from "../utils/runState";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -142,10 +142,54 @@ function hasCycle(
   }
 }
 
-const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
-  { value: "epic", label: "Epic" },
-  { value: "ticket", label: "Ticket" },
-  { value: "task", label: "Task" },
+const VIEW_TABS: ViewTab[] = [
+  {
+    id: "list",
+    label: "List",
+    icon: (
+      <svg
+        className="h-3 w-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 6h16M4 12h16M4 18h16"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: "board",
+    label: "Board",
+    icon: (
+      <svg
+        className="h-3 w-3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.75}
+        viewBox="0 0 24 24"
+        aria-hidden="true"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 5h5v14H4zM15 5h5v9h-5z"
+        />
+      </svg>
+    ),
+  },
+];
+
+const LEVEL_SELECT_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "All levels" },
+  { value: "epic", label: "Epics only" },
+  { value: "ticket", label: "Tickets" },
+  { value: "task", label: "Tasks" },
 ];
 
 const TASK_FILTER: TaskFilterOptions = {
@@ -175,8 +219,41 @@ export function BoardPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
   const [search, setSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
   useShellHeader("Board");
+
+  // Focus the search box on "/" (unless already typing in a field), and clear
+  // it on Escape — mirrors the canonical board keyboard affordances.
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable;
+      if (event.key === "/" && !typing) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (
+        event.key === "Escape" &&
+        target === searchInputRef.current
+      ) {
+        searchInputRef.current?.blur();
+        setSearch("");
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const handleViewChange = useCallback(
+    (id: string) => {
+      if (id === "list") navigate("/tasks");
+    },
+    [navigate]
+  );
 
   const {
     tasks,
@@ -222,8 +299,8 @@ export function BoardPage() {
     setLevelFilter(event.target.value as TaskLevel | "");
   };
 
-  const handleSearchChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setSearch(event.target.value);
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
   };
 
   const handleClearFilters = () => {
@@ -250,22 +327,6 @@ export function BoardPage() {
       topologicalColumnSort(allKanbanColumns, transitions, workflowColumnMap),
     [allKanbanColumns, transitions, workflowColumnMap]
   );
-
-  const childBreakdowns = useMemo(() => {
-    const childrenByParent = new Map<string, Task[]>();
-    for (const task of tasks) {
-      if (!task.parent_id) continue;
-      const siblings = childrenByParent.get(task.parent_id) ?? [];
-      siblings.push(task);
-      childrenByParent.set(task.parent_id, siblings);
-    }
-
-    const breakdowns = new Map<string, HearthStateBreakdown>();
-    for (const [parentId, children] of childrenByParent) {
-      breakdowns.set(parentId, deriveHearthStateBreakdown(children));
-    }
-    return breakdowns;
-  }, [tasks]);
 
   // Filter tasks by level and search, then group by kanban_column
   const { columns, columnOrder, totalFiltered } = useMemo(() => {
@@ -348,54 +409,36 @@ export function BoardPage() {
           </div>
 
           <div className="relative flex flex-1 items-center gap-3">
+            {/* List / Board view toggle */}
+            <ViewTabs
+              tabs={VIEW_TABS}
+              value="board"
+              onChange={handleViewChange}
+            />
+
             {/* Search input */}
-            <div className="relative min-w-48 flex-1">
-              <input
-                type="text"
-                placeholder="Search tasks by title or ID..."
+            <div className="min-w-48 max-w-[480px] flex-1">
+              <SearchInput
+                ref={searchInputRef}
                 value={search}
                 onChange={handleSearchChange}
-                className="h-8 w-full rounded-md border border-border bg-bg-2 px-3 pl-9 text-sm text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+                debounceMs={0}
+                hint="/"
+                placeholder="Search tasks by title, id, or tag…"
                 aria-label="Search tasks by title or ID"
                 data-testid="board-task-search-input"
               />
-              <svg
-                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-mute"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
             </div>
 
-            {/* Level filter */}
-            <div className="flex h-8 shrink-0 items-center rounded-md border border-border bg-bg-2/50 px-1">
-              <label
-                htmlFor="board-level-filter"
-                className="px-2 font-mono text-2xs uppercase tracking-wider text-fg-mute"
-              >
-                Level
-              </label>
-              <select
+            {/* Level filter — same Select atom as the Tasks page */}
+            <div className="w-40 shrink-0">
+              <Select
                 id="board-level-filter"
+                options={LEVEL_SELECT_OPTIONS}
                 value={levelFilter}
                 onChange={handleLevelChange}
-                className="rounded-sm border-0 bg-transparent px-1 py-0.5 text-sm text-fg focus:outline-none focus:ring-2 focus:ring-accent/20"
-              >
-                <option value="">All</option>
-                {LEVEL_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                aria-label="Filter by level"
+              />
             </div>
 
             {/* Clear filters */}
@@ -426,7 +469,7 @@ export function BoardPage() {
         </div>
 
         {/* Board content */}
-        <div className="flex-1 overflow-auto bg-bg p-4">
+        <div className="flex-1 overflow-x-auto overflow-y-hidden bg-bg p-4">
           {isLoading ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
@@ -473,7 +516,6 @@ export function BoardPage() {
                   columnName={columnName}
                   tasks={columns.get(columnName) ?? []}
                   selectedTaskId={selectedTaskId}
-                  childBreakdowns={childBreakdowns}
                   onTaskSelect={handleTaskSelect}
                 />
               ))}

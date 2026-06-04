@@ -1,5 +1,4 @@
 import type { Step, Task } from "../../bindings";
-import type { HearthStateBreakdown } from "../../utils/runState";
 import { KanbanCard } from "./KanbanCard";
 import { stepTypeStyle } from "../WorkflowPipeline/stepTypeStyling";
 import { Count } from "../atoms";
@@ -8,7 +7,6 @@ interface KanbanColumnProps {
   columnName: string;
   tasks: Task[];
   selectedTaskId?: string | null;
-  childBreakdowns?: Map<string, HearthStateBreakdown>;
   onTaskSelect?: (task: Task) => void;
   /**
    * The workflow step backing this column. When provided, the column gets a
@@ -22,7 +20,6 @@ export function KanbanColumn({
   columnName,
   tasks,
   selectedTaskId,
-  childBreakdowns,
   onTaskSelect,
   step,
 }: KanbanColumnProps) {
@@ -31,7 +28,7 @@ export function KanbanColumn({
 
   return (
     <div
-      className="flex h-full min-w-72 max-w-md flex-1 flex-col rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg-1)] shadow-[inset_0_1px_0_color-mix(in_oklch,var(--color-fg)_5%,transparent)]"
+      className="flex h-full min-w-72 max-w-md shrink-0 grow basis-0 flex-col overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[color-mix(in_oklch,var(--color-bg-1)_50%,var(--color-bg))]"
       style={{ borderLeft: `2px solid var(${typeStyle.barVar})` }}
       role="region"
       aria-label={`${columnName} column, ${tasks.length} tasks`}
@@ -71,9 +68,9 @@ export function KanbanColumn({
         />
       </div>
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-2">
+      <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
         {isEmpty ? (
-          <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--color-line)] bg-[var(--color-bg-2)] px-3 py-8 text-center font-mono text-eyebrow uppercase tracking-[0.12em] text-[var(--color-fg-faint)]">
+          <div className="flex flex-1 items-center justify-center px-4 py-6 text-center font-serif text-sm italic text-[var(--color-fg-faint)]">
             Nothing here
           </div>
         ) : (
@@ -82,7 +79,6 @@ export function KanbanColumn({
               key={task.id}
               task={task}
               isSelected={selectedTaskId === task.id}
-              childBreakdown={childBreakdowns?.get(task.id)}
               onClick={onTaskSelect}
             />
           ))

@@ -264,7 +264,7 @@ describe("BoardPage", () => {
       expect(screen.getByText("My Task")).toBeInTheDocument();
 
       // Filter to epic only
-      const levelSelect = screen.getByLabelText("Level");
+      const levelSelect = screen.getByLabelText("Filter by level");
       fireEvent.change(levelSelect, { target: { value: "epic" } });
 
       expect(screen.getByText("My Epic")).toBeInTheDocument();
