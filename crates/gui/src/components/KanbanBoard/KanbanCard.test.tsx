@@ -60,36 +60,30 @@ describe("KanbanCard", () => {
       );
     });
 
-    it("renders workflow name when present", () => {
-      const task = createMockTask({ workflow_name: "CI Pipeline" });
-      render(<KanbanCard task={task} />);
-
-      expect(screen.getByText("CI Pipeline")).toBeInTheDocument();
-    });
-
-    it("does not render workflow name when null", () => {
-      const task = createMockTask({ workflow_name: null });
-      render(<KanbanCard task={task} />);
-
-      expect(screen.queryByText("CI Pipeline")).not.toBeInTheDocument();
-    });
-
-    it("renders step name formatted with capitalization", () => {
-      const task = createMockTask({ step_name: "in_progress" });
-      render(<KanbanCard task={task} />);
-
-      expect(screen.getByText("In progress")).toBeInTheDocument();
-    });
-
-    it("renders the workflow segment alone when step_name is null", () => {
+    it("shows only the title and id — no step, workflow, tags, or run chip", () => {
       const task = createMockTask({
+        title: "Compact card",
         workflow_name: "CI Pipeline",
-        step_name: null,
+        step_name: "in_progress",
+        priority: "critical",
+        tags: ["hearth", "gui"],
+        run_controls: createMockTaskRunControls(
+          createMockTaskRun({ status: "executing" })
+        ),
       });
       render(<KanbanCard task={task} />);
 
-      expect(screen.getByText("CI Pipeline")).toBeInTheDocument();
-      expect(screen.queryByText("No step")).not.toBeInTheDocument();
+      expect(screen.getByText("Compact card")).toBeInTheDocument();
+      expect(screen.getByTestId("kanban-card-id")).toBeInTheDocument();
+      expect(screen.queryByText("CI Pipeline")).not.toBeInTheDocument();
+      expect(screen.queryByText("In progress")).not.toBeInTheDocument();
+      expect(screen.queryByText("hearth")).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Critical priority")
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByLabelText("Run status: Running")
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -155,7 +149,7 @@ describe("KanbanCard", () => {
   });
 
   describe("Hearth board states", () => {
-    it("marks active runs and renders the run chip", () => {
+    it("marks active runs via the data attribute (running styling)", () => {
       const activeRun = createMockTaskRun({ status: "executing" });
       const task = createMockTask({
         title: "Running task",
@@ -165,7 +159,6 @@ describe("KanbanCard", () => {
 
       const card = screen.getByRole("button", { name: /Task: Running task/i });
       expect(card).toHaveAttribute("data-running", "true");
-      expect(screen.getByLabelText("Run status: Running")).toBeInTheDocument();
     });
 
     it("marks completed tasks as terminal board cards", () => {
@@ -178,36 +171,6 @@ describe("KanbanCard", () => {
       expect(
         screen.getByRole("button", { name: /Task: Done task/i })
       ).toHaveAttribute("data-completed", "true");
-    });
-
-    it("renders priority and tag vocabulary", () => {
-      const task = createMockTask({
-        title: "Critical task",
-        priority: "critical",
-        tags: ["hearth", "gui", "extra"],
-      });
-      render(<KanbanCard task={task} />);
-
-      expect(screen.getByLabelText("Critical priority")).toHaveTextContent("↑");
-      expect(screen.getByText("hearth")).toBeInTheDocument();
-      expect(screen.getByText("gui")).toBeInTheDocument();
-      expect(screen.getByText("+1")).toBeInTheDocument();
-    });
-
-    it("renders child state breakdowns", () => {
-      const task = createMockTask({ title: "Parent task" });
-      render(
-        <KanbanCard
-          task={task}
-          childBreakdown={{ done: 1, running: 1, waiting: 0, queued: 2 }}
-        />
-      );
-
-      expect(
-        screen.getByLabelText(
-          "State breakdown: 1 done, 1 running, 0 waiting, 2 queued"
-        )
-      ).toBeInTheDocument();
     });
   });
 });

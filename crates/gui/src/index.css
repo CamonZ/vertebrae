@@ -46,6 +46,12 @@
   --color-line: #2c2622;
   --color-line-soft: #221d1a;
   --color-line-strong: #463f38;
+  /* Semantic aliases for the `border-border` / `border-border-focus` (and
+     `ring-border-focus`) utilities. Resolve through the line tokens so they
+     follow the .light override automatically; without them Tailwind v4 falls
+     back to currentColor (bright fg) and borders read white. */
+  --color-border: var(--color-line);
+  --color-border-focus: var(--color-line-strong);
 
   /* Accent — one copper, four stops, anchored at 40° hue (oklch) */
   --color-accent: oklch(0.74 0.18 40);
