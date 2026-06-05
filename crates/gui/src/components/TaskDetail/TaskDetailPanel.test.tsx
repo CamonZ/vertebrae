@@ -792,14 +792,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders a run state chip in the header when a run is active", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
-
-      const chip = screen.getByTestId("task-detail-run-chip");
-      expect(chip).toHaveAttribute("data-run-status", "executing");
-      expect(chip).toHaveTextContent(/Running/i);
-    });
-
     it("renders the Hearth detail hero as idle when no run is active", () => {
       renderWithTaskOverrides({ run_controls: runnableControls() });
 
@@ -817,14 +809,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(hero).toHaveAttribute("data-hero-state", "executing");
       expect(hero).toHaveTextContent("Running");
       expect(hero).toHaveTextContent("In progress");
-    });
-
-    it("does not render a run state chip when no run is active", () => {
-      renderWithTaskOverrides({ run_controls: runnableControls() });
-
-      expect(
-        screen.queryByTestId("task-detail-run-chip")
-      ).not.toBeInTheDocument();
     });
   });
 

@@ -26,7 +26,10 @@ describe("StyleguidePage", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Sidebar navigation")).toBeInTheDocument();
     expect(screen.getByText("App shell content header")).toBeInTheDocument();
-    expect(screen.getByText("Workflow Details")).toBeInTheDocument();
+    // The workflow detail surface is now a floating glass panel rendered as a
+    // fixed overlay, so the Product Frame shows a placeholder pointing at it
+    // rather than embedding the panel inline.
+    expect(screen.getByText("Workflow detail")).toBeInTheDocument();
 
     expect(
       screen.getByRole("heading", { name: "Workflow Diagramming System" })

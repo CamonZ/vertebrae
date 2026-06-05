@@ -72,7 +72,6 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         boxShadow: isExecuting
           ? `0 0 0 1px color-mix(in oklch, var(${typeStyle.barVar}) 55%, transparent), ${NODE_SHADOW_STYLE.boxShadow}`
           : NODE_SHADOW_STYLE.boxShadow,
-        background: `linear-gradient(180deg, color-mix(in oklch, var(${typeStyle.washVar}) 42%, var(--color-bg-2)) 0%, var(--color-bg-2) 58%, var(--color-bg-1) 100%)`,
       }}
     >
       {/* Top step-type accent bar */}

@@ -1171,13 +1171,13 @@ html.window-transparent #root {
    header-chip set — 26px tall, transparent, 1px --line-strong, --r-sm, mono
    --text-2xs, --fg-mute. These rules are unlayered, so they win over the
    components' own Tailwind utilities. */
-.tasks-v2 .scope-level,
+.scope-level,
 .tasks-v2 .scope-expand {
   display: inline-flex;
 }
 
 .tasks-v2 .scope-secondary .hide-done,
-.tasks-v2 .scope-level select,
+.scope-level select,
 .tasks-v2 .scope-expand button {
   height: 26px;
   padding: 0 var(--s-2);
@@ -1203,13 +1203,13 @@ html.window-transparent #root {
 }
 
 /* Native <select> sizes to content and needs right room for the caret overlay. */
-.tasks-v2 .scope-level select {
+.scope-level select {
   width: auto;
   padding-right: var(--s-6);
 }
 
 .tasks-v2 .scope-secondary .hide-done:hover,
-.tasks-v2 .scope-level select:hover,
+.scope-level select:hover,
 .tasks-v2 .scope-expand button:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
@@ -1238,7 +1238,7 @@ html.window-transparent #root {
    whose visible vertex falls ~5px below box center. Recolor it to the muted
    chip text and raise it so it reads at the same height as the "Expand all"
    chevron and the eye. */
-.tasks-v2 .scope-level > span::after {
+.scope-level > span::after {
   border-color: var(--fg-mute);
   margin-top: -5px;
 }
@@ -1667,7 +1667,7 @@ html.window-transparent #root {
 .hc-panel.is-closing {
   animation: panel-drill-left-out var(--t-base) var(--ease) forwards;
 }
-.tasks-v2.detail.detail-float.is-closing {
+.detail.detail-float.is-closing {
   animation: panel-drill-right-out var(--t-base) var(--ease) forwards;
 }
 @keyframes panel-drill-left-out {
@@ -1693,8 +1693,8 @@ html.window-transparent #root {
 @media (prefers-reduced-motion: reduce) {
   .hc-panel,
   .hc-panel.is-closing,
-  .tasks-v2.detail.detail-float,
-  .tasks-v2.detail.detail-float.is-closing {
+  .detail.detail-float,
+  .detail.detail-float.is-closing {
     animation: none;
   }
 }
@@ -2195,7 +2195,7 @@ html.window-transparent #root {
   font-size: 12px;
 }
 
-.tasks-v2.detail {
+.detail {
   width: 420px;
   max-width: min(420px, 36vw);
   background: var(--bg-1);
@@ -2210,7 +2210,7 @@ html.window-transparent #root {
    (horizontal drag-to-resize); the panel is right-anchored so only the left
    edge moves. Scoped to `.detail-float` so the standalone pop-out keeps its
    opaque window fill. */
-.tasks-v2.detail.detail-float {
+.detail.detail-float {
   position: fixed;
   top: calc(38px + var(--s-3));
   right: var(--s-3);
@@ -2245,7 +2245,7 @@ html.window-transparent #root {
    resizable window. `width/max-width: ...` override the docked `.tasks-v2.detail`
    cap (420px) that would otherwise leave the window half-empty. No 38px top
    inset — the pop-out has no in-app titlebar. */
-.tasks-v2.detail.detail-standalone {
+.detail.detail-standalone {
   position: fixed;
   /* Fill the window edge-to-edge: a detached window is self-contained, so the
      glass must cover the whole surface. Any inset gutter would be transparent
@@ -2285,7 +2285,7 @@ html.window-transparent #root {
    frost with a touch of saturation, raise the translucent fill to a legible
    light tint, and swap the dark inset highlight / drop shadow for light-mode
    elevation. */
-.light .tasks-v2.detail.detail-float {
+.light .detail.detail-float {
   background: linear-gradient(
     205deg,
     color-mix(in oklch, var(--bg) 50%, transparent),
@@ -2300,7 +2300,7 @@ html.window-transparent #root {
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.light .tasks-v2.detail.detail-standalone {
+.light .detail.detail-standalone {
   background: linear-gradient(
     205deg,
     color-mix(in oklch, var(--bg) 88%, transparent),
@@ -2337,7 +2337,7 @@ html.window-transparent #root {
 /* Drag handle for the detached window: spans the top title-bar band (the glass
    padding above the header where the overlay traffic lights sit). Sits above
    the surface but below the header content, which starts at padding-top. */
-.tasks-v2.detail.detail-standalone .detail-drag-strip {
+.detail.detail-standalone .detail-drag-strip {
   position: absolute;
   top: 0;
   left: 0;
@@ -2349,7 +2349,7 @@ html.window-transparent #root {
 /* Left-edge drag handle for horizontal resize. Sits inside the panel (the
    surface is overflow-clipped for its rounded corners) and floats above the
    content. The accent rule only paints on hover / while dragging. */
-.tasks-v2.detail.detail-float .detail-resize-handle {
+.detail.detail-float .detail-resize-handle {
   position: absolute;
   left: 0;
   top: 0;
@@ -2360,7 +2360,7 @@ html.window-transparent #root {
   touch-action: none;
 }
 
-.tasks-v2.detail.detail-float .detail-resize-handle::after {
+.detail.detail-float .detail-resize-handle::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2371,8 +2371,8 @@ html.window-transparent #root {
   transition: background var(--t-fast, 120ms) var(--ease, ease);
 }
 
-.tasks-v2.detail.detail-float .detail-resize-handle:hover::after,
-.tasks-v2.detail.detail-float .detail-resize-handle[data-resizing]::after {
+.detail.detail-float .detail-resize-handle:hover::after,
+.detail.detail-float .detail-resize-handle[data-resizing]::after {
   background: color-mix(in oklch, var(--accent) 60%, transparent);
 }
 
@@ -2544,7 +2544,7 @@ html.window-transparent #root {
 }
 
 @media (max-width: 980px) {
-  .tasks-v2.detail {
+  .detail {
     max-width: 48vw;
   }
 

@@ -1,6 +1,5 @@
 import type { ChangeEvent } from "react";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import type {
   Task,
   TaskLevel,
@@ -15,7 +14,6 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
-import { ViewTabs, type ViewTab } from "../components/shared/ViewTabs";
 import { popOut, stashTask } from "../utils";
 
 const UNASSIGNED_COLUMN = "Unassigned";
@@ -142,49 +140,6 @@ function hasCycle(
   }
 }
 
-const VIEW_TABS: ViewTab[] = [
-  {
-    id: "list",
-    label: "List",
-    icon: (
-      <svg
-        className="h-3 w-3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.75}
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M4 6h16M4 12h16M4 18h16"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "board",
-    label: "Board",
-    icon: (
-      <svg
-        className="h-3 w-3"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={1.75}
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M4 5h5v14H4zM15 5h5v9h-5z"
-        />
-      </svg>
-    ),
-  },
-];
-
 const LEVEL_SELECT_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "All levels" },
   { value: "epic", label: "Epics only" },
@@ -220,9 +175,6 @@ export function BoardPage() {
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
   const [search, setSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const navigate = useNavigate();
-
-  useShellHeader("Board");
 
   // Focus the search box on "/" (unless already typing in a field), and clear
   // it on Escape — mirrors the canonical board keyboard affordances.
@@ -247,13 +199,6 @@ export function BoardPage() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  const handleViewChange = useCallback(
-    (id: string) => {
-      if (id === "list") navigate("/tasks");
-    },
-    [navigate]
-  );
 
   const {
     tasks,
@@ -392,32 +337,39 @@ export function BoardPage() {
   const error = tasksError || workflowsError;
   const hasActiveFilters = levelFilter !== "" || search !== "";
 
+  const headerActions = useMemo(
+    () =>
+      totalFiltered > 0 ? (
+        <div className="flex items-center gap-3 text-[11px]">
+          <span className="text-[var(--color-fg-mute)]">
+            <b className="font-semibold text-[var(--color-fg)]">
+              {totalFiltered}
+            </b>{" "}
+            task{totalFiltered !== 1 ? "s" : ""}
+          </span>
+        </div>
+      ) : null,
+    [totalFiltered]
+  );
+
+  useShellHeader("Board", headerActions);
+
   return (
     <div className="flex min-h-0 flex-1">
       {/* Main board area */}
       <div className="flex min-w-0 flex-1 flex-col">
+        {/* Visually-hidden heading: the visible page title lives in the shell
+            header via useShellHeader above. We keep an in-page <h1> so screen
+            readers and route/page-isolation tests see a stable heading even
+            when the AppShell wrapper isn't mounted in a test environment. */}
+        <h1 className="sr-only">Board</h1>
         {/* Title + filters bar */}
         <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg px-6">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative flex shrink-0 items-center gap-3">
-            <h1 className="text-sm font-semibold text-fg">Board</h1>
-            {totalFiltered > 0 && (
-              <span className="font-mono text-xs text-fg-mute">
-                {totalFiltered} task{totalFiltered !== 1 ? "s" : ""}
-              </span>
-            )}
-          </div>
 
           <div className="relative flex flex-1 items-center gap-3">
-            {/* List / Board view toggle */}
-            <ViewTabs
-              tabs={VIEW_TABS}
-              value="board"
-              onChange={handleViewChange}
-            />
-
             {/* Search input */}
-            <div className="min-w-48 max-w-[480px] flex-1">
+            <div className="min-w-48 flex-1">
               <SearchInput
                 ref={searchInputRef}
                 value={search}
@@ -430,8 +382,9 @@ export function BoardPage() {
               />
             </div>
 
-            {/* Level filter — same Select atom as the Tasks page */}
-            <div className="w-40 shrink-0">
+            {/* Level filter — same Select atom + scope-level chip styling as
+                the Tasks page. */}
+            <div className="scope-level">
               <Select
                 id="board-level-filter"
                 options={LEVEL_SELECT_OPTIONS}

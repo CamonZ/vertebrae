@@ -1,0 +1,177 @@
+import {
+  useEffect,
+  useRef,
+  useState,
+  type AnimationEventHandler,
+  type ReactNode,
+} from "react";
+import { useGlassPanel } from "../../hooks/useGlassPanel";
+
+interface FloatingDetailPanelProps {
+  /** Stable id for the shared glass-panel focus stack (single Escape closes the focused panel). */
+  panelId: string;
+  /** localStorage key the panel width is persisted under. */
+  widthStorageKey: string;
+  /** Resize clamp + initial width. */
+  minWidth?: number;
+  maxWidth?: number;
+  defaultWidth?: number;
+  /**
+   * Pop-out window mode: the same glass surface but opaque and inset-filling its
+   * own window, with no float positioning, resize handle, or focus registration.
+   */
+  standalone?: boolean;
+  /** Plays the exit animation; the parent unmounts the node on animation end. */
+  closing?: boolean;
+  onExitAnimationEnd?: AnimationEventHandler<HTMLDivElement>;
+  /** Invoked when Escape lands on the focused panel. */
+  onClose?: () => void;
+  /**
+   * Return `false` to decline an Escape (e.g. while an inline edit or a
+   * confirmation is open, so its own handler wins). Defaults to always handling.
+   */
+  shouldHandleEscape?: () => boolean;
+  /**
+   * Whether the panel is logically open (drives focus registration). Defaults to
+   * mounted-and-not-closing in float mode.
+   */
+  isOpen?: boolean;
+  /** Extra classes on the root — e.g. "tasks-v2" to scope inner content. */
+  className?: string;
+  /** Test id for the float root. */
+  testId?: string;
+  /** Test id for the standalone (pop-out) root. */
+  standaloneTestId?: string;
+  children: ReactNode;
+}
+
+const DEFAULT_MIN_WIDTH = 360;
+const DEFAULT_MAX_WIDTH = 760;
+const DEFAULT_WIDTH = 480;
+const RESIZE_STEP = 16;
+
+/**
+ * The Hearth floating-glass detail surface, shared by the task / step / workflow
+ * detail panels. Owns the right-anchored fixed overlay, horizontal drag/keyboard
+ * resize with localStorage persistence, the shared focus model (Escape-to-close),
+ * and the standalone pop-out variant. Callers supply the panel's content; the
+ * visual chrome (header, body) lives in that content, not here.
+ */
+export function FloatingDetailPanel({
+  panelId,
+  widthStorageKey,
+  minWidth = DEFAULT_MIN_WIDTH,
+  maxWidth = DEFAULT_MAX_WIDTH,
+  defaultWidth = DEFAULT_WIDTH,
+  standalone = false,
+  closing = false,
+  onExitAnimationEnd,
+  onClose,
+  shouldHandleEscape,
+  isOpen,
+  className = "",
+  testId,
+  standaloneTestId,
+  children,
+}: FloatingDetailPanelProps) {
+  // Right-anchored: a drag on the left edge widens the panel as the cursor moves
+  // left. We measure the panel's fixed right edge from the DOM rather than
+  // assuming the inset value.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return defaultWidth;
+    const stored = parseInt(localStorage.getItem(widthStorageKey) ?? "", 10);
+    return Number.isNaN(stored)
+      ? defaultWidth
+      : Math.min(maxWidth, Math.max(minWidth, stored));
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(widthStorageKey, String(panelWidth));
+    }
+  }, [panelWidth, widthStorageKey]);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (event: MouseEvent) => {
+      const rightEdge =
+        panelRef.current?.getBoundingClientRect().right ?? window.innerWidth;
+      setPanelWidth(
+        Math.min(maxWidth, Math.max(minWidth, rightEdge - event.clientX))
+      );
+    };
+    const onUp = () => setIsResizing(false);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ew-resize";
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, [isResizing, minWidth, maxWidth]);
+
+  // Join the shared glass-panel focus model (in-app float only — the pop-out is
+  // its own window). Escape closes the focused panel unless the caller declines.
+  const { isFocused, focusProps } = useGlassPanel({
+    id: panelId,
+    isOpen: isOpen ?? (!standalone && !closing),
+    onClose: onClose ?? (() => {}),
+    shouldHandleEscape,
+  });
+
+  if (standalone) {
+    // Pop-out window: same floating-glass surface, inset on all sides so it
+    // floats within — and grows with — its resizable window.
+    return (
+      <div
+        className={`${className} detail detail-standalone`.trim()}
+        data-testid={standaloneTestId}
+      >
+        <div data-tauri-drag-region className="detail-drag-strip" />
+        {children}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={panelRef}
+      className={`${className} detail detail-float${closing ? " is-closing" : ""}`.trim()}
+      style={{ width: `${panelWidth}px` }}
+      data-testid={testId}
+      data-focused={isFocused || undefined}
+      data-closing={closing || undefined}
+      onAnimationEnd={onExitAnimationEnd}
+      {...focusProps}
+    >
+      <div
+        className="detail-resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panel"
+        aria-valuenow={panelWidth}
+        aria-valuemin={minWidth}
+        aria-valuemax={maxWidth}
+        tabIndex={0}
+        data-resizing={isResizing || undefined}
+        onMouseDown={(event) => {
+          event.preventDefault();
+          setIsResizing(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft") {
+            setPanelWidth((w) => Math.min(maxWidth, w + RESIZE_STEP));
+          } else if (event.key === "ArrowRight") {
+            setPanelWidth((w) => Math.max(minWidth, w - RESIZE_STEP));
+          }
+        }}
+      />
+      {children}
+    </div>
+  );
+}
