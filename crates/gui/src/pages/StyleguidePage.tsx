@@ -38,7 +38,6 @@ import { TaskLevelLabel } from "../components/shared/TaskLevelLabel";
 import { Toggle } from "../components/Toggle";
 import { EventGlyph } from "../components/Traces/EventGlyph";
 import { ModeToggle, type TraceMode } from "../components/Traces/ModeToggle";
-import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { WorkflowCard } from "../components/WorkflowGrid";
 import {
   StepNode,
@@ -324,11 +323,22 @@ function ProductFrameExample() {
                 </div>
               </div>
             </div>
-            <WorkflowDetailPanel
-              workflow={sampleDiagramWorkflow}
-              steps={sampleDiagramSteps}
-              taskCount={12}
-            />
+            {/* The workflow detail surface is now a floating glass panel
+                (FloatingDetailPanel) rendered as a fixed overlay, so it can't be
+                embedded inline here — see it live in the Workflows pipeline. */}
+            <div className="flex w-80 shrink-0 flex-col gap-2 border-l border-border bg-bg-1/40 p-4">
+              <span className="font-mono text-2xs uppercase tracking-wider text-fg-mute">
+                Workflow detail
+              </span>
+              <p className="text-sm text-fg-soft">
+                Now a floating glass panel ({" "}
+                <code className="font-mono text-2xs text-fg-mute">
+                  FloatingDetailPanel
+                </code>{" "}
+                ) that floats over the canvas as a fixed overlay. Shown live in
+                the Workflows pipeline.
+              </p>
+            </div>
           </div>
         </main>
       </div>

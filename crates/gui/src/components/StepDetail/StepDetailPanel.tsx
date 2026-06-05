@@ -4,10 +4,11 @@ import { commands } from "../../bindings";
 import { useStep, useStepChangeListener } from "../../hooks";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { EditableList } from "../EditableList";
-import { ResizablePanel } from "../ResizablePanel";
+import { FloatingDetailPanel } from "../panels";
 import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
+import { isEditableElementFocused } from "../../utils/isEditableElementFocused";
 import { LiquidHighlight } from "./LiquidHighlight";
 import { IdChip } from "../shared/HearthPrimitives";
 import { Text } from "../atoms/Text";
@@ -477,9 +478,15 @@ export function StepDetailPanel({
   }
 
   return (
-    <ResizablePanel
-      storageKey="step-detail-panel-width"
-      glowColor="from-info/0 via-info/30 to-info/0"
+    <FloatingDetailPanel
+      panelId="step-detail"
+      widthStorageKey="step-detail-panel-width"
+      onClose={onClose}
+      // Escape closes the panel, but let an open delete-confirmation or an
+      // in-flight inline edit own Escape (cancel) first.
+      shouldHandleEscape={() =>
+        !showDeleteConfirmation && !isEditableElementFocused()
+      }
       testId="step-detail-panel"
     >
       {/* Header */}
@@ -743,6 +750,6 @@ export function StepDetailPanel({
           </div>
 
         </div>
-    </ResizablePanel>
+    </FloatingDetailPanel>
   );
 }

@@ -68,7 +68,9 @@ function Breadcrumb({
   );
 }
 
-function CommandKChip() {
+// Retained for future use (e.g. a command palette). Not currently rendered in
+// the topbar.
+export function CommandKChip() {
   return (
     <span
       aria-hidden
@@ -113,7 +115,6 @@ export function Header() {
       >
         {headerActions}
         <OpenLiveChatButton />
-        <CommandKChip />
       </div>
     </header>
   );

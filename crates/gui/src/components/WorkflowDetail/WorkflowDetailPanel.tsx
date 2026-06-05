@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
 import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
-import { ResizablePanel } from "../ResizablePanel";
+import { isEditableElementFocused } from "../../utils/isEditableElementFocused";
+import { FloatingDetailPanel } from "../panels";
 import { Toggle } from "../Toggle";
 import { IdChip } from "../shared/HearthPrimitives";
 import { Text } from "../atoms/Text";
@@ -147,9 +148,12 @@ export function WorkflowDetailPanel({
   );
 
   return (
-    <ResizablePanel
-      storageKey="workflow-detail-panel-width"
-      glowColor="from-accent/0 via-accent/30 to-accent/0"
+    <FloatingDetailPanel
+      panelId="workflow-detail"
+      widthStorageKey="workflow-detail-panel-width"
+      onClose={onClose}
+      shouldHandleEscape={() => !isEditableElementFocused()}
+      testId="workflow-detail-panel"
     >
       {/* Header */}
       <div className="flex h-12 items-center justify-between border-b border-[var(--color-line)] px-4">
@@ -363,6 +367,6 @@ export function WorkflowDetailPanel({
           </div>
         </div>
       </div>
-    </ResizablePanel>
+    </FloatingDetailPanel>
   );
 }

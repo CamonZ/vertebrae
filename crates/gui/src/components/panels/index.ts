@@ -5,6 +5,7 @@
  * these provide the standardised visual language.
  */
 
+export { FloatingDetailPanel } from "./FloatingDetailPanel";
 export { PanelHeader } from "./PanelHeader";
 export { ReviewGateBanner } from "./ReviewGateBanner";
 export { ContextMeter } from "./ContextMeter";
