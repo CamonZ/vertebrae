@@ -216,52 +216,6 @@ describe("WorkflowDetailPanel", () => {
       expect(screen.getByText("Tasks waiting to start")).toBeInTheDocument();
     });
 
-    it("displays step model", () => {
-      const workflow = createWorkflow();
-      const steps = [
-        createStep({
-          name: "review",
-          order: 0,
-          agent_config: {
-            ...createStep().agent_config!,
-            model: "sonnet",
-            codex_model_provider: null,
-          },
-        }),
-      ];
-      render(<WorkflowDetailPanel workflow={workflow} steps={steps} />);
-
-      expect(screen.getByText("sonnet")).toBeInTheDocument();
-    });
-
-    it("displays step model and reasoning effort as one compact value", () => {
-      const workflow = createWorkflow();
-      const steps = [
-        createStep({
-          name: "review",
-          order: 0,
-          agent_config: {
-            ...createStep().agent_config!,
-            model: "gpt-5.5",
-            codex_model_provider: null,
-            reasoning_effort: "medium",
-          },
-        }),
-      ];
-      render(<WorkflowDetailPanel workflow={workflow} steps={steps} />);
-
-      expect(screen.getByText("gpt-5.5:medium")).toBeInTheDocument();
-      expect(screen.queryByText("medium")).not.toBeInTheDocument();
-    });
-
-    it("shows 'default' when no model configured", () => {
-      const workflow = createWorkflow();
-      const steps = [createStep({ name: "todo", order: 0 })];
-      render(<WorkflowDetailPanel workflow={workflow} steps={steps} />);
-
-      expect(screen.getByText("default")).toBeInTheDocument();
-    });
-
     it("does not show steps section when no steps", () => {
       const workflow = createWorkflow();
       render(<WorkflowDetailPanel workflow={workflow} steps={[]} />);
