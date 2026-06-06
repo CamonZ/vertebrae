@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
-import { formatAgentModelLabel } from "../../utils/agentConfigLabel";
 import { isEditableElementFocused } from "../../utils/isEditableElementFocused";
 import { FloatingDetailPanel } from "../panels";
 import { Toggle } from "../Toggle";
@@ -301,7 +300,6 @@ export function WorkflowDetailPanel({
               {steps
                 .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
                 .map((step) => {
-                  const modelLabel = formatAgentModelLabel(step.agent_config);
                   return (
                     <div
                       key={step.id || step.name}
@@ -325,12 +323,6 @@ export function WorkflowDetailPanel({
                           </p>
                         )}
                       </div>
-                      <code
-                        className="max-w-[10rem] shrink truncate rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-2xs text-[var(--color-fg-mute)]"
-                        title={modelLabel}
-                      >
-                        {modelLabel}
-                      </code>
                     </div>
                   );
                 })}
