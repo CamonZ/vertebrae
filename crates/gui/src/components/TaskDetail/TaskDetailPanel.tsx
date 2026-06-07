@@ -26,7 +26,15 @@ import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
 import { Text } from "../atoms/Text";
-import { FloatingDetailPanel, PanelHeader, ReviewGateBanner } from "../panels";
+import {
+  CloseIcon,
+  FloatingDetailPanel,
+  IconButton,
+  PanelHeader,
+  PlayIcon,
+  ReviewGateBanner,
+  StopIcon,
+} from "../panels";
 import { SectionGroup } from "../molecules/SectionGroup";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
@@ -107,69 +115,6 @@ function DetailRow({
         {children}
       </span>
     </div>
-  );
-}
-
-/**
- * Header action button. Icon-only, 28×28, with the Hearth hover affordance
- * (docs/design components-lib.css `.icon-btn`): transparent at rest, and on
- * hover a rounded box appears — a faint border plus a `bg-1` fill.
- */
-function IconButton({
-  onClick,
-  ariaLabel,
-  title,
-  testId,
-  disabled = false,
-  children,
-}: {
-  onClick: () => void;
-  ariaLabel: string;
-  title?: string;
-  testId?: string;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      title={title}
-      data-testid={testId}
-      disabled={disabled}
-      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent text-[var(--color-fg-mute)] transition-all hover:border-[var(--color-fg-faint)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Filled play triangle for the Run action (matches the reference run glyph). */
-function PlayIcon() {
-  return (
-    <svg
-      className="h-3 w-3"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
-/** Filled square for the Stop action (matches the reference stop glyph). */
-function StopIcon() {
-  return (
-    <svg
-      className="h-3 w-3"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <rect x="5" y="5" width="14" height="14" rx="1.5" />
-    </svg>
   );
 }
 
@@ -687,20 +632,7 @@ export function TaskDetailPanel({
       )}
       {onClose && (
         <IconButton onClick={onClose} ariaLabel="Close panel">
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
+          <CloseIcon />
         </IconButton>
       )}
     </>

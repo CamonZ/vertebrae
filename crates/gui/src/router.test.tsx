@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
-import { ReactFlowProvider } from "@xyflow/react";
 import * as React from "react";
+
+// The Workflow Atlas (the /design page) lays out via async ELK and is covered
+// in depth by its own suite; here we only assert route wiring, so stub it.
+vi.mock("./components/WorkflowAtlas", () => ({
+  WorkflowAtlas: () => <div data-testid="workflow-atlas">Workflow Atlas</div>,
+}));
 
 // Mock the bindings module
 vi.mock("./bindings", () => ({
@@ -56,12 +61,11 @@ vi.mock("./bindings", () => ({
 import { commands } from "./bindings";
 
 // Import page components
-import { AllWorkflowsPipeline } from "./pages/AllWorkflowsPipeline";
+import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
 import { OperationsPage } from "./pages/OperationsPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
-import { StyleguidePage } from "./pages/StyleguidePage";
 
 /**
  * Helper to create a test router with the new route structure
@@ -83,7 +87,7 @@ function createTestRouter(initialEntries: string[]) {
       },
       {
         path: "/design",
-        element: <AllWorkflowsPipeline />,
+        element: <WorkflowAtlas />,
       },
       {
         path: "/tasks",
@@ -97,10 +101,6 @@ function createTestRouter(initialEntries: string[]) {
         path: "/traces",
         element: <TracesPage />,
       },
-      {
-        path: "/styleguide",
-        element: <StyleguidePage />,
-      },
     ],
     { initialEntries }
   );
@@ -110,7 +110,7 @@ function createTestRouter(initialEntries: string[]) {
  * Wrapper component for tests
  */
 function TestWrapper({ children }: { children: React.ReactNode }) {
-  return <ReactFlowProvider>{children}</ReactFlowProvider>;
+  return <>{children}</>;
 }
 
 describe("Router Acceptance Tests", () => {
@@ -292,7 +292,7 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("Design route ('/design')", () => {
-    it("renders AllWorkflowsPipeline at /design", async () => {
+    it("renders the Workflow Atlas at /design", async () => {
       const router = createTestRouter(["/design"]);
 
       render(
@@ -302,70 +302,7 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Workflow Pipelines")).toBeInTheDocument();
-      });
-    });
-
-    it("shows empty state when no workflows exist", async () => {
-      const router = createTestRouter(["/design"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("No workflows yet")).toBeInTheDocument();
-      });
-    });
-
-    it("displays workflows when they exist", async () => {
-      (
-        commands.getPipelineSummary as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-1",
-              name: "Development Workflow",
-              description: "Main dev workflow",
-              initial_step_id: "step-backlog",
-              kanban_column: null,
-              is_default: false,
-              display_order: 0,
-              workflow_steps: [
-                {
-                  id: "step-backlog",
-                  name: "backlog",
-                  workflow_id: "workflow-1",
-                  goal: null,
-                  step_order: 0,
-                  step_type: "execute",
-                  is_final: false,
-                  transitions_to: [],
-                  task_counts: { epic: 0, ticket: 0, task: 0 },
-                  pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
-                  active_count: 0,
-                },
-              ],
-              transitions: [],
-            },
-          ],
-        },
-      });
-
-      const router = createTestRouter(["/design"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("Development Workflow")).toBeInTheDocument();
+        expect(screen.getByTestId("workflow-atlas")).toBeInTheDocument();
       });
     });
   });
@@ -530,7 +467,7 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Workflow Pipelines")).toBeInTheDocument();
+        expect(screen.getByTestId("workflow-atlas")).toBeInTheDocument();
       });
 
       expect(
@@ -552,7 +489,7 @@ describe("Router Acceptance Tests", () => {
         ).toBeInTheDocument();
       });
 
-      expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
     });
 
     it("'/operations' and '/board' render different placeholder pages", async () => {
@@ -598,7 +535,6 @@ describe("Router Acceptance Tests", () => {
         { path: "/operations", heading: "Operations" },
         { path: "/board", heading: "Board" },
         { path: "/tasks", heading: "Tasks" },
-        { path: "/styleguide", heading: "GUI Styleguide" },
       ];
 
       for (const route of routes) {
@@ -626,7 +562,7 @@ describe("Router Acceptance Tests", () => {
         unmount();
       }
 
-      // Design route uses a different heading pattern
+      // Design route renders the Workflow Atlas (no page heading)
       const designRouter = createTestRouter(["/design"]);
       const { unmount: unmountDesign } = render(
         <TestWrapper>
@@ -635,7 +571,7 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("Workflow Pipelines")).toBeInTheDocument();
+        expect(screen.getByTestId("workflow-atlas")).toBeInTheDocument();
       });
 
       unmountDesign();
@@ -656,131 +592,6 @@ describe("Router Acceptance Tests", () => {
         expect(
           screen.getByRole("heading", { name: "Tasks" })
         ).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("Unified canvas with workflow zones", () => {
-    function makePipelineStep(
-      id: string,
-      workflowId: string,
-      name: string,
-      order: number,
-      isFinal = false
-    ) {
-      return {
-        id,
-        name,
-        workflow_id: workflowId,
-        goal: null,
-        step_order: order,
-        step_type: "execute",
-        is_final: isFinal,
-        transitions_to: [] as string[],
-        task_counts: { epic: 0, ticket: 0, task: 0 },
-        pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
-        active_count: 0,
-      };
-    }
-
-    it("displays multiple workflows as zones in a single canvas", async () => {
-      (
-        commands.getPipelineSummary as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-1",
-              name: "Workflow One",
-              description: null,
-              initial_step_id: "step-1",
-              kanban_column: null,
-              is_default: false,
-              display_order: 0,
-              workflow_steps: [
-                makePipelineStep("step-1", "workflow-1", "backlog", 0),
-              ],
-              transitions: [],
-            },
-            {
-              id: "workflow-2",
-              name: "Workflow Two",
-              description: null,
-              initial_step_id: "step-2",
-              kanban_column: null,
-              is_default: false,
-              display_order: 1,
-              workflow_steps: [
-                makePipelineStep("step-2", "workflow-2", "backlog", 0),
-              ],
-              transitions: [],
-            },
-          ],
-        },
-      });
-
-      const router = createTestRouter(["/design"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("Workflow One")).toBeInTheDocument();
-        expect(screen.getByText("Workflow Two")).toBeInTheDocument();
-      });
-    });
-
-    it("displays workflow zones with step counts", async () => {
-      (
-        commands.getPipelineSummary as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-multi",
-              name: "Multi-Step Workflow",
-              description: null,
-              initial_step_id: "step-backlog",
-              kanban_column: null,
-              is_default: false,
-              display_order: 0,
-              workflow_steps: [
-                makePipelineStep(
-                  "step-backlog",
-                  "workflow-multi",
-                  "backlog",
-                  0
-                ),
-                makePipelineStep("step-todo", "workflow-multi", "todo", 1),
-                makePipelineStep(
-                  "step-done",
-                  "workflow-multi",
-                  "done",
-                  2,
-                  true
-                ),
-              ],
-              transitions: [],
-            },
-          ],
-        },
-      });
-
-      const router = createTestRouter(["/design"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText("Multi-Step Workflow")).toBeInTheDocument();
       });
     });
   });
@@ -888,7 +699,7 @@ describe("Router Acceptance Tests", () => {
       expect(
         screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
-      expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
       expect(
         screen.queryByRole("heading", { name: "Tasks" })
       ).not.toBeInTheDocument();
@@ -909,7 +720,7 @@ describe("Router Acceptance Tests", () => {
       expect(
         screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
-      expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
       expect(
         screen.queryByRole("heading", { name: "Tasks" })
       ).not.toBeInTheDocument();

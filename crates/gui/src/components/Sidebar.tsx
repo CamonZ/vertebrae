@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
-import { useStyleguideStore } from "../stores/styleguideStore";
 import {
   useCurrentProject,
   projectAvatarBucket,
@@ -124,26 +123,6 @@ function ProjectAvatar({
         {name.charAt(0).toUpperCase()}
       </button>
     </Tooltip>
-  );
-}
-
-function StyleguideNavItem() {
-  const location = useLocation();
-  const isVisible = useStyleguideStore((s) => s.isStyleguideNavVisible);
-  const show = isVisible || location.pathname === "/styleguide";
-  if (!show) return null;
-  return (
-    <NavItem
-      to="/styleguide"
-      id="styleguide"
-      label="Styleguide"
-      icon={
-        <Icon size="sm" strokeWidth={1.6}>
-          <path d="M4 5a2 2 0 012-2h4l2 2h6a2 2 0 012 2v2H4V5z" />
-          <path d="M4 9h16v8a2 2 0 01-2 2H6a2 2 0 01-2-2V9zM8 13h3m-3 3h8" />
-        </Icon>
-      }
-    />
   );
 }
 
@@ -402,7 +381,7 @@ const RAIL_NAV_ITEMS = [
   {
     id: "design",
     to: "/design",
-    label: "Design",
+    label: "Atlas",
     icon: (
       <Icon size="sm" strokeWidth={2}>
         <circle cx="5" cy="6" r="3" />
@@ -490,7 +469,6 @@ export function Sidebar() {
           {RAIL_NAV_ITEMS.map((item) => (
             <NavItem key={item.id} {...item} />
           ))}
-          <StyleguideNavItem />
         </ul>
       </nav>
       <div className="flex flex-col items-center gap-1 pb-1">

@@ -289,6 +289,30 @@
   --r-xl: var(--radius-xl);
   --r-full: var(--radius-full);
   --ease: var(--ease-default);
+
+  /* Graph edges — link/transition vocabulary (Atlas map + Workflow graph).
+     One source of truth for the dash/width/opacity values that were previously
+     inlined (and drifting) across the canvas pages. Ported verbatim from
+     docs/design/tokens.css (lines ~137-148). Consumed by the .gedge / .edge-label
+     rules below and by WorkflowAtlas/GraphEdge — never inline these on a path. */
+  --edge-color: var(--line-strong); /* resting stroke */
+  --edge-color-lit: var(--accent); /* forward edge on an active trace */
+  --edge-color-back: var(--fg); /* back/return edge on a trace — max contrast */
+  --edge-color-loop: var(--step-route); /* loop-back hue */
+  --edge-w: 1.5; /* resting width */
+  --edge-w-lit: 2; /* lit width */
+  --edge-o: 0.85; /* resting opacity */
+  --edge-o-loop: 0.72; /* loop-backs rest a touch quieter */
+  --edge-o-dim: 0.15; /* faded out of a trace */
+  --edge-dash: 5 4; /* handoff / cross-workflow */
+  --edge-dash-loop: 3 3; /* loop-back */
+  --edge-glow: drop-shadow(0 0 5px var(--accent-glow));
+  --edge-glow-back: drop-shadow(
+    0 0 5px color-mix(in oklch, var(--fg) 45%, transparent)
+  );
+  --edge-glow-loop: drop-shadow(
+    0 0 4px color-mix(in oklch, var(--step-route) 50%, transparent)
+  );
 }
 
 /* =============================================================================
@@ -2575,4 +2599,120 @@ html.window-transparent #root {
 
 .shadow-glow-sm {
   box-shadow: var(--shadow-glow-sm);
+}
+
+/* =============================================================================
+   WORKFLOW ATLAS / GRAPH — canvas edge + kind vocabulary
+   Ported from docs/design/lib/components-lib.css. The cross-page primitives live
+   here: the .k-<kind> palette carriers, the routed-edge .gedge vocabulary, and
+   the inspector .kindspine. Every value reads through the --edge-* tokens above
+   and the step-kind hues so the canvas never inlines a stroke color and stays in
+   lockstep with both themes. (The page-local chrome — edge labels, the kind
+   legend, column headers — lives in WorkflowAtlas.css alongside its callers.)
+   ============================================================================= */
+
+/* ── Kind palette carriers ──────────────────────────────────────────────────
+   Bind a kind class to the local trio --kc (core hue), --kf (foreground/text),
+   --kw (wash). Every kind-aware surface (edge swatches, the inspector spine,
+   step nodes, strips) reads these three locals rather than the raw step tokens,
+   so one carrier on an ancestor recolors a whole subtree. These are the REAL
+   backend step types — there is no synthetic entry/final kind. */
+.k-execute {
+  --kc: var(--step-execute);
+  --kf: var(--step-execute-fg);
+  --kw: var(--step-execute-wash);
+}
+.k-eval {
+  --kc: var(--step-eval);
+  --kf: var(--step-eval-fg);
+  --kw: var(--step-eval-wash);
+}
+.k-route {
+  --kc: var(--step-route);
+  --kf: var(--step-route-fg);
+  --kw: var(--step-route-wash);
+}
+.k-human {
+  --kc: var(--step-human);
+  --kf: var(--step-human-fg);
+  --kw: var(--step-human-wash);
+}
+.k-wait {
+  --kc: var(--step-wait);
+  --kf: var(--step-wait-fg);
+  --kw: var(--step-wait-wash);
+}
+
+/* ── Edge (.gedge) — link/transition vocabulary ─────────────────────────────
+   A single routed <path>. Style is class-driven off the --edge-* tokens, never
+   inline attributes, so every canvas stays in sync.
+     kind:   k-step (within a workflow) · k-handoff (between workflows, dashed) ·
+             k-loop (back-edge, route hue)
+     state:  (base) · lit (on an active trace) · dim (faded back)
+     .solid  force a handoff to render solid (high-level map edges)
+     .live   legacy animated-accent variant
+   Pair with <GraphMarkers/> in the same <svg> for the arrowheads. */
+.gedge {
+  fill: none;
+  stroke: var(--edge-color);
+  stroke-width: var(--edge-w);
+  stroke-opacity: var(--edge-o);
+  transition:
+    stroke var(--t-fast) var(--ease),
+    stroke-width var(--t-fast) var(--ease),
+    stroke-opacity var(--t-fast) var(--ease);
+}
+.gedge.k-handoff {
+  stroke-dasharray: var(--edge-dash);
+}
+.gedge.k-loop {
+  stroke: var(--edge-color-loop);
+  stroke-dasharray: var(--edge-dash-loop);
+  stroke-opacity: var(--edge-o-loop);
+}
+.gedge.solid {
+  stroke-dasharray: none;
+}
+
+/* trace states — handoffs accent on a live trace; step links only recede.
+   (k-step.lit intentionally has no accent rule: it renders like base.) */
+.gedge.dim {
+  stroke-opacity: var(--edge-o-dim);
+}
+.gedge.k-handoff.lit {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow);
+}
+.gedge.k-loop.lit {
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow-loop);
+}
+
+/* back/return edges on a trace read in max-contrast white instead of the
+   forward accent, so tracing a hub (e.g. Human Review) separates the work
+   flowing forward (accent) from the paths returning back (white). Placed after
+   the kind-lit rules so it wins on equal specificity. */
+.gedge.lit.back {
+  stroke: var(--edge-color-back);
+  filter: var(--edge-glow-back);
+}
+
+/* live — animated dashed accent (kept for backward compatibility) */
+.gedge.live {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-dasharray: 4 4;
+  filter: var(--edge-glow);
+}
+
+/* ── Kind carrier ───────────────────────────────────────────────────────────
+   The inspector (WorkflowInspector / StepInspector) pairs `.kindspine` with a
+   `.k-<kind>` carrier so its accents (eyebrow dot, chips) read --kc; workflow
+   panels fall back to the accent when no kind is set. The class is retained as
+   the positioning context / kind carrier — the left ember line was removed. */
+.kindspine {
+  position: relative;
 }

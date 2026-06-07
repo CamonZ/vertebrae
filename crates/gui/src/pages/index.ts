@@ -1,12 +1,9 @@
 export { ProjectSetupPage } from "./ProjectSetupPage";
 export { WelcomeInstallPage } from "./WelcomeInstallPage";
 export { TasksPage } from "./TasksPage";
-export { WorkflowsPage } from "./WorkflowsPage";
-export { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
 export { OperationsPage } from "./OperationsPage";
 export { BoardPage } from "./BoardPage";
 export { TracesPage } from "./TracesPage";
-export { StyleguidePage } from "./StyleguidePage";
 export { TaskDetailPage } from "./TaskDetailPage";
 export { StandaloneChatWindow } from "./StandaloneChatWindow";
 export { StandaloneLiveChatWindow } from "./StandaloneLiveChatWindow";

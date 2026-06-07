@@ -13,16 +13,15 @@ import {
   ProjectSetupPage,
   WelcomeInstallPage,
   TasksPage,
-  AllWorkflowsPipeline,
   OperationsPage,
   BoardPage,
   TracesPage,
-  StyleguidePage,
   TaskDetailPage,
   StandaloneChatWindow,
   StandaloneLiveChatWindow,
   StandaloneTracesPage,
 } from "./pages";
+import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 
@@ -219,7 +218,7 @@ const appRoutes: RouteObject[] = [
         path: "design",
         element: (
           <GuardedRoute>
-            <AllWorkflowsPipeline />
+            <WorkflowAtlas />
           </GuardedRoute>
         ),
       },
@@ -244,14 +243,6 @@ const appRoutes: RouteObject[] = [
         element: (
           <GuardedRoute>
             <TracesPage />
-          </GuardedRoute>
-        ),
-      },
-      {
-        path: "styleguide",
-        element: (
-          <GuardedRoute>
-            <StyleguidePage />
           </GuardedRoute>
         ),
       },
