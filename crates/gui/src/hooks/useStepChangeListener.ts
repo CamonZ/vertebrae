@@ -45,7 +45,7 @@ interface UseStepChangeListenerOptions {
  * carry the full entity.
  *
  * Optional callbacks allow callers to also update local derived state
- * (e.g. AllWorkflowsPipeline's workflowStepsMap) without a round-trip refetch.
+ * (e.g. a workflow step map) without a round-trip refetch.
  *
  * @param options - Configuration options for the listener
  */

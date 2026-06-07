@@ -1,0 +1,462 @@
+/* ──────────────────────────────────────────────────────────────────
+   Workflow Atlas · Run Console — a docked glass HUD over the workflow canvas.
+   The map shows the *machine* (workflows); this shows the *work* (tasks)
+   flowing through it. Ready ↔ Running, with launch + stop controls.
+   Glass recipe matches the floating detail panels (blur + warm translucency).
+
+   Kind hues come from the shared `k-<kind>` carrier classes (which set --kc),
+   so this sheet never inlines a step colour.
+
+   Ported from docs/design/run-console.css.
+   ────────────────────────────────────────────────────────────────── */
+
+.rc {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  bottom: 14px;
+  width: 354px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(
+    158deg,
+    color-mix(in oklch, var(--bg-3) 42%, transparent),
+    color-mix(in oklch, var(--bg-2) 30%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.6);
+  backdrop-filter: blur(30px) brightness(1.4) saturate(1.6);
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+/* ── Header ── */
+.rc-hd {
+  flex-shrink: 0;
+  padding: var(--s-3) var(--s-3h) var(--s-2h);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+}
+.rc-hd-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.rc-eyebrow {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.rc-eyebrow .ember {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 7px var(--accent-glow);
+}
+.rc-live {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1h);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  color: var(--accent);
+  font-weight: 500;
+}
+.rc-live .pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  animation: rc-pulse 1.6s ease-in-out infinite;
+}
+@keyframes rc-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+/* tabs + search */
+.rc-tabs {
+  display: flex;
+  margin-top: var(--s-2h);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: color-mix(in oklch, var(--bg) 30%, transparent);
+}
+.rc-tab {
+  flex: 1;
+  height: 28px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-1h);
+  border-right: 1px solid var(--line);
+  transition: all var(--t-fast) var(--ease);
+}
+.rc-tab:last-child {
+  border-right: none;
+}
+.rc-tab:hover {
+  color: var(--fg);
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+}
+.rc-tab.on {
+  color: var(--accent);
+  background: var(--accent-wash);
+  font-weight: 500;
+}
+.rc-tab .n {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  min-width: 17px;
+  height: 16px;
+  padding: 0 var(--s-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in oklch, var(--bg) 45%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  color: var(--fg-faint);
+}
+.rc-tab.on .n {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 40%, transparent);
+}
+
+.rc-search {
+  position: relative;
+  margin-top: var(--s-2);
+}
+.rc-search svg {
+  position: absolute;
+  left: var(--s-2h);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--fg-faint);
+  pointer-events: none;
+}
+.rc-search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--s-2h) 0 var(--s-6);
+  background: color-mix(in oklch, var(--bg) 35%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  color: var(--fg);
+  outline: none;
+  transition: all var(--t-fast) var(--ease);
+}
+.rc-search input::placeholder {
+  color: var(--fg-faint);
+}
+.rc-search input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+/* ── List ── */
+.rc-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--s-1h);
+}
+.rc-list::-webkit-scrollbar {
+  width: 5px;
+}
+.rc-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.rc-list::-webkit-scrollbar-thumb {
+  background: var(--bg-4);
+  border-radius: var(--r-xs);
+}
+
+.rc-empty {
+  padding: var(--s-8) var(--s-4);
+  text-align: center;
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  color: var(--fg-faint);
+  line-height: 1.6;
+}
+
+.rc-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s-2h);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-2h);
+  border-radius: var(--r-md);
+  cursor: default;
+  border: 1px solid transparent;
+  transition:
+    background var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+.rc-row + .rc-row {
+  margin-top: var(--s-0);
+}
+.rc-row:hover {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  border-color: color-mix(in oklch, var(--fg) 9%, transparent);
+}
+.rc-row.sel {
+  background: var(--accent-wash);
+  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+}
+
+/* The left tick + pipeline segments read the kind hue via --kc (set by k-*). */
+.rc-kind {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  background: var(--kc, var(--line-strong));
+  align-self: stretch;
+}
+
+.rc-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.rc-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.rc-id {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+  letter-spacing: 0.02em;
+}
+.rc-meta {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1h);
+  white-space: nowrap;
+}
+.rc-meta .pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px var(--accent-glow);
+  animation: rc-pulse 1.6s ease-in-out infinite;
+}
+
+.rc-title {
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  color: var(--fg-soft);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* mini pipeline */
+.rc-pipe {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--s-0);
+}
+.rc-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: color-mix(in oklch, var(--kc) 30%, transparent);
+}
+.rc-seg.done {
+  background: var(--kc);
+}
+.rc-seg.running {
+  background: var(--kc);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--kc) 60%, transparent);
+  animation: rc-pulse 1.4s ease-in-out infinite;
+}
+.rc-seg.queued {
+  background: color-mix(in oklch, var(--fg) 12%, transparent);
+}
+
+/* action button */
+.rc-act {
+  flex-shrink: 0;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  background: color-mix(in oklch, var(--bg) 30%, transparent);
+  color: var(--fg-mute);
+  transition: all var(--t-fast) var(--ease);
+}
+.rc-act.run:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-wash);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.rc-act.stop {
+  color: var(--fg-mute);
+}
+.rc-act.stop:hover {
+  border-color: color-mix(in oklch, var(--err) 55%, transparent);
+  color: var(--err);
+  background: var(--err-wash);
+}
+
+/* ── Footer ── */
+.rc-ft {
+  flex-shrink: 0;
+  padding: var(--s-2h) var(--s-3h);
+  border-top: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  background: color-mix(in oklch, var(--bg) 22%, transparent);
+}
+.rc-ag {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.rc-ag b {
+  color: var(--fg-soft);
+  font-weight: 600;
+}
+.rc-ag .dot {
+  color: var(--fg-faint);
+}
+.rc-runall {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 var(--s-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-family: var(--sans);
+  font-size: var(--text-11);
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in oklch, var(--accent) 36%, transparent);
+  border-radius: var(--r-md);
+  transition: all var(--t-fast) var(--ease);
+}
+.rc-runall:hover {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+
+/* ── Floating launcher (closed state) ── */
+.rc-fab {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  z-index: 9989;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-3) 0 var(--s-2h);
+  background: linear-gradient(
+    158deg,
+    color-mix(in oklch, var(--bg-3) 46%, transparent),
+    color-mix(in oklch, var(--bg-2) 34%, transparent)
+  );
+  -webkit-backdrop-filter: blur(26px) brightness(1.4) saturate(1.55);
+  backdrop-filter: blur(26px) brightness(1.4) saturate(1.55);
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-full);
+  box-shadow: var(--shadow-2), 0 0 22px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  color: var(--fg);
+  transition: all var(--t-fast) var(--ease);
+}
+.rc-fab:hover {
+  border-color: color-mix(in oklch, var(--accent) 42%, transparent);
+  box-shadow: var(--shadow-2), 0 0 24px var(--accent-glow);
+  transform: translateX(-50%) translateY(-1px);
+}
+.rc-fab-ico {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: var(--r-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
+}
+.rc-fab-label {
+  font-family: var(--sans);
+  font-size: var(--text-13);
+  font-weight: 500;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+}
+.rc-fab-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1h);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  font-weight: 500;
+  color: var(--accent);
+  padding: 1px var(--s-1h);
+  border-radius: var(--r-full);
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+}
+.rc-fab-count .pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  animation: rc-pulse 1.6s ease-in-out infinite;
+}
