@@ -384,6 +384,32 @@ pub async fn list_tasks(
     }
 }
 
+/// List tasks that are ready to be worked on.
+///
+/// Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
+/// not completed and have no incomplete blockers; archived tasks are filtered
+/// out here, exactly as the CLI does.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_ready(state: State<'_, AppState>) -> Result<Vec<Task>, CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    match service.tasks().list_ready().await {
+        Ok(mut tasks) => {
+            tasks.retain(|t| !t.archived);
+            log::info!("list_ready returned {} tasks", tasks.len());
+            Ok(tasks.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("list_ready error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
 /// Get a single task by ID with its relations
 ///
 /// Returns the full task details.

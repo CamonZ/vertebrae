@@ -46,14 +46,15 @@ export function KanbanCard({
   const isEpic = task.level === "epic";
   const showLeftBar = isSelected || isRunning;
 
-  // Background: solid surface by default; running gets the accent-wash
-  // gradient, selected gets the accent tint. The step-kind hue lives only in
-  // the 2px top bar (borderTopColor) so the card body stays neutral.
-  const background = isSelected
-    ? "color-mix(in oklch, var(--color-accent) 8%, var(--color-bg-1))"
+  // Background by state. Selected uses the shared accent-wash (same as the Tasks
+  // list / Run Console selected rows); running keeps the live gradient. Resting
+  // is left to a class so `hover:` can override it (an inline style could not).
+  // The step-kind hue lives only in the 2px top bar (borderTopColor).
+  const stateBackground = isSelected
+    ? "var(--color-accent-wash)"
     : isRunning
       ? "linear-gradient(135deg, var(--color-accent-wash), var(--color-bg-2) 50%)"
-      : "var(--color-bg-2)";
+      : undefined;
 
   const handleClick = () => {
     onClick?.(task);
@@ -79,18 +80,18 @@ export function KanbanCard({
       data-priority={task.priority ?? undefined}
       className={`group relative flex shrink-0 cursor-pointer items-start gap-2 overflow-hidden rounded-[var(--radius-md)] border border-t-2 px-3 py-2 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
         isSelected
-          ? "border-[var(--color-accent)] shadow-[0_0_14px_var(--color-accent-glow)]"
+          ? "border-[var(--color-line-strong)]"
           : isRunning
             ? "border-[color-mix(in_oklch,var(--color-accent)_30%,var(--color-line-strong))] shadow-[0_0_18px_color-mix(in_oklch,var(--color-accent)_16%,transparent)]"
-            : "border-[var(--color-line-strong)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklch,var(--color-accent)_30%,var(--color-line-strong))]"
+            : "border-[var(--color-line-strong)] bg-[var(--color-bg-2)] hover:bg-[var(--row-hover)]"
       } ${
         showLeftBar
-          ? "before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:shadow-[0_0_8px_var(--color-accent-glow)] before:content-['']"
+          ? "before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"
           : ""
       } ${isCompleted ? "opacity-65" : ""}`}
       style={{
         borderTopColor: `var(${stepStyle.barVar})`,
-        background,
+        ...(stateBackground ? { background: stateBackground } : {}),
       }}
     >
       <Glyph level={task.level} accent={runChip?.state === "running"} />

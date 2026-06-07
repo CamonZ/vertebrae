@@ -79,8 +79,9 @@ describe("KanbanColumn", () => {
 
       const selectedCard = screen.getByRole("button", { name: /Task: Selected One/i });
       const otherCard = screen.getByRole("button", { name: /Task: Other One/i });
-      expect(selectedCard.className).toContain("border-[var(--color-accent)]");
-      expect(otherCard.className).not.toContain("border-[var(--color-accent)]");
+      // Selection signal is the shared accent left bar (no accent border).
+      expect(selectedCard.className).toContain("before:bg-[var(--color-accent)]");
+      expect(otherCard.className).not.toContain("before:bg-[var(--color-accent)]");
     });
 
     it("calls onTaskSelect when a card is clicked", () => {

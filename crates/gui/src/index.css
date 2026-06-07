@@ -1967,7 +1967,6 @@ html.window-transparent #root {
   bottom: 6px;
   width: 3px;
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
   border-radius: 0 2px 2px 0;
 }
 

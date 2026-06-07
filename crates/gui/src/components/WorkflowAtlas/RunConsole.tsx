@@ -5,8 +5,9 @@
    through it. A FAB toggles a left-docked panel with Ready ↔ Running tabs, each
    driven by REAL task data:
 
-     • task feed   — `useRunConsoleTasks` (listTasks(null), refreshed on the same
-                     realtime events usePipelineSummary uses, debounced).
+     • task feed   — `useRunConsoleTasks` (listReady() — the dependency-aware
+                     `vtb ready` set, refreshed on the same realtime events
+                     usePipelineSummary uses, debounced).
      • tab split   — `splitRunConsole` over `utils/runState` (Running = active
                      TaskRuns; Ready = workflow tasks with no active run).
      • mini-pipe   — each row renders its task's workflow steps through the kind
@@ -24,10 +25,11 @@
 
    Ported from docs/design/run-console.jsx (RunConsole).
    ────────────────────────────────────────────────────────────────── */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type PipelineSummary } from "../../bindings";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
+import { Glyph, IdChip } from "../shared/HearthPrimitives";
 import { TaskDetailPanel } from "../TaskDetail";
 import { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
 import { kindClass } from "./inspector/selection";
@@ -43,6 +45,13 @@ import "./RunConsole.css";
 const RUN_ALL_HEAD = 6;
 /** Live-runtime clock cadence. */
 const TICK_MS = 1000;
+
+/** Horizontal resize clamp + persistence (panel is left-docked; handle on right). */
+const MIN_WIDTH = 300;
+const MAX_WIDTH = 620;
+const DEFAULT_WIDTH = 354;
+const RESIZE_STEP = 16;
+const WIDTH_STORAGE_KEY = "atlas.runConsole.width";
 
 type ConsoleTab = "ready" | "running";
 
@@ -89,16 +98,14 @@ function Row({
   onSelect,
 }: RowProps) {
   const { task } = row;
-  // The row's workflow steps as state-coloured segments — computed once and
-  // reused for both the left tick hue and the mini-pipeline strip.
-  const segments = useMemo(() => miniPipeline(task, summary), [task, summary]);
-  // Left tick hue: the running step's kind on the running tab, else the first.
-  const tickKind =
-    tab === "running"
-      ? (segments.find((s) => s.state === "running")?.kind ??
-        segments[0]?.kind ??
-        "execute")
-      : (segments[0]?.kind ?? "execute");
+  const isRunning = tab === "running";
+  // The row's workflow steps as state-coloured segments for the mini-pipeline
+  // strip. Only an actually-running task animates its current step (Ready rows
+  // stay static).
+  const segments = useMemo(
+    () => miniPipeline(task, summary, isRunning),
+    [task, summary, isRunning],
+  );
   const runtime = runtimeSince(row.startedAt, now);
 
   return (
@@ -107,15 +114,19 @@ function Row({
       onClick={() => onSelect(task.id)}
       data-testid="rc-row"
     >
-      <span className={"rc-kind " + kindClass(tickKind)} />
       <div className="rc-main">
         <div className="rc-top">
-          <span className="rc-id">{task.id.slice(0, 8)}</span>
+          <Glyph level={task.level} accent={tab === "running"} />
+          <IdChip
+            id={task.id}
+            kind="task"
+            level={task.level}
+            testId="rc-row-id"
+          />
           {tab === "running" ? (
-            <span className="rc-meta">
-              <span className="pulse" />
-              {runtime ? <span>{runtime}</span> : <span>running</span>}
-            </span>
+            runtime ? (
+              <span className="rc-meta">{runtime}</span>
+            ) : null
           ) : task.workflow_name ? (
             <span className="rc-meta">{task.workflow_name}</span>
           ) : null}
@@ -179,6 +190,18 @@ export function RunConsole({ summary }: RunConsoleProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  // Horizontal resize. Left-docked, so a drag on the RIGHT edge widens the panel
+  // as the cursor moves right: width = cursorX − fixed-left-edge. Persisted.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return DEFAULT_WIDTH;
+    const stored = parseInt(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "", 10);
+    return Number.isNaN(stored)
+      ? DEFAULT_WIDTH
+      : Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, stored));
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
   // Join the shared glass-panel focus stack so Escape collapses the console when
   // it is the topmost panel (an open task-detail float, opened on top, wins
   // first — same topmost-wins model the detail panels use).
@@ -194,6 +217,35 @@ export function RunConsole({ summary }: RunConsoleProps) {
     const id = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(id);
   }, [open]);
+
+  // Persist the chosen width.
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
+    }
+  }, [panelWidth]);
+
+  // Drag-to-resize: measure the panel's fixed LEFT edge and grow rightward.
+  useEffect(() => {
+    if (!isResizing) return;
+    const onMove = (event: MouseEvent) => {
+      const leftEdge = panelRef.current?.getBoundingClientRect().left ?? 0;
+      setPanelWidth(
+        Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, event.clientX - leftEdge)),
+      );
+    };
+    const onUp = () => setIsResizing(false);
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ew-resize";
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+    };
+  }, [isResizing]);
 
   const { running, ready } = useMemo(() => splitRunConsole(tasks), [tasks]);
 
@@ -240,7 +292,14 @@ export function RunConsole({ summary }: RunConsoleProps) {
   return (
     <>
       {open ? (
-        <div className="rc" data-no-pan data-testid="run-console" {...focusProps}>
+        <div
+          ref={panelRef}
+          className="rc"
+          style={{ width: `${panelWidth}px` }}
+          data-no-pan
+          data-testid="run-console"
+          {...focusProps}
+        >
           <div className="rc-hd">
             <div className="rc-hd-top">
               <span className="rc-eyebrow">
@@ -323,6 +382,29 @@ export function RunConsole({ summary }: RunConsoleProps) {
               </button>
             ) : null}
           </div>
+
+          <div
+            className="rc-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize run console"
+            aria-valuenow={panelWidth}
+            aria-valuemin={MIN_WIDTH}
+            aria-valuemax={MAX_WIDTH}
+            tabIndex={0}
+            data-resizing={isResizing || undefined}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              setIsResizing(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight") {
+                setPanelWidth((w) => Math.min(MAX_WIDTH, w + RESIZE_STEP));
+              } else if (event.key === "ArrowLeft") {
+                setPanelWidth((w) => Math.max(MIN_WIDTH, w - RESIZE_STEP));
+              }
+            }}
+          />
         </div>
       ) : (
         <button

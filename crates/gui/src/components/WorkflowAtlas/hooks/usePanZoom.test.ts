@@ -1,5 +1,6 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { clamp, fitTransform, zoomAt } from "./usePanZoom";
+import { clamp, fitTransform, usePanZoom, zoomAt } from "./usePanZoom";
 
 describe("clamp", () => {
   it("returns the value when within range", () => {
@@ -112,5 +113,52 @@ describe("zoomAt", () => {
   it("is a no-op on scale when already clamped at max", () => {
     const next = zoomAt({ s: 2.4, x: 5, y: 5 }, 2, 50, 50, 0.15, 2.4);
     expect(next.s).toBe(2.4);
+  });
+});
+
+describe("usePanZoom wheel handling", () => {
+  function mount() {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "clientWidth", { value: 800, configurable: true });
+    Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+    const panel = document.createElement("div");
+    panel.setAttribute("data-no-pan", "");
+    el.appendChild(panel);
+    document.body.appendChild(el);
+    const ref = { current: el } as React.RefObject<HTMLElement>;
+    const view = renderHook(() => usePanZoom(ref, { w: 400, h: 300 }));
+    return { el, panel, view, cleanup: () => document.body.removeChild(el) };
+  }
+
+  function dispatchWheel(on: Element): boolean {
+    const ev = new WheelEvent("wheel", {
+      deltaY: -120,
+      bubbles: true,
+      cancelable: true,
+    });
+    let prevented = false;
+    act(() => {
+      on.dispatchEvent(ev);
+      prevented = ev.defaultPrevented;
+    });
+    return prevented;
+  }
+
+  it("zooms the canvas on a wheel over the canvas itself", () => {
+    const { el, view, cleanup } = mount();
+    const before = view.result.current.transform;
+    const prevented = dispatchWheel(el);
+    expect(prevented).toBe(true); // canvas wheel is hijacked for zoom
+    expect(view.result.current.transform).not.toBe(before);
+    cleanup();
+  });
+
+  it("ignores a wheel over [data-no-pan] so the panel scrolls natively", () => {
+    const { panel, view, cleanup } = mount();
+    const before = view.result.current.transform;
+    const prevented = dispatchWheel(panel);
+    expect(prevented).toBe(false); // native scroll preserved
+    expect(view.result.current.transform).toBe(before);
+    cleanup();
   });
 });
