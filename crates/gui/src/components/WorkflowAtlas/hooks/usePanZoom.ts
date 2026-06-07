@@ -136,6 +136,10 @@ export function usePanZoom(
       el.classList.remove("is-grabbing");
     };
     const wheel = (e: WheelEvent) => {
+      // Let docked panels (Run Console, inspectors) scroll natively — don't
+      // hijack the wheel to zoom the canvas underneath them.
+      const target = e.target as Element | null;
+      if (target?.closest?.("[data-no-pan]")) return;
       e.preventDefault();
       moved.current = true;
       const r = el.getBoundingClientRect();

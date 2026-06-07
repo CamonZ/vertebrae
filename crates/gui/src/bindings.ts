@@ -111,6 +111,21 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], Comma
 }
 },
 /**
+ * List tasks that are ready to be worked on.
+ * 
+ * Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
+ * not completed and have no incomplete blockers; archived tasks are filtered
+ * out here, exactly as the CLI does.
+ */
+async listReady() : Promise<Result<Task[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_ready") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get a single task by ID with its relations
  * 
  * Returns the full task details.

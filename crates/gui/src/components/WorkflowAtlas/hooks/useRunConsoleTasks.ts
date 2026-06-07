@@ -18,11 +18,13 @@ export interface UseRunConsoleTasksResult {
 /**
  * Task feed for the Run Console.
  *
- * Loads the full task list (`listTasks(null)`) and keeps it fresh by refetching
- * on the SAME realtime events `usePipelineSummary` reacts to (task / task-run /
- * task-step changes). The events are coalesced through a single debounced
- * refetch path — this is one extra fetcher, not a second poller, and never
- * fires per-event.
+ * Loads the ready task feed (`listReady()`) — the same dependency-aware set
+ * `vtb ready` uses: not completed, no incomplete blockers, not archived. The
+ * console splits that set into Running (has an active run) and Ready (launchable
+ * head). It stays fresh by refetching on the SAME realtime events
+ * `usePipelineSummary` reacts to (task / task-run / task-step changes). The
+ * events are coalesced through a single debounced refetch path — this is one
+ * extra fetcher, not a second poller, and never fires per-event.
  *
  * Unlike `useTasks`, this hook is self-contained (it does not sync the global
  * task store) so the Run Console can hold its own snapshot without perturbing
@@ -39,7 +41,7 @@ export function useRunConsoleTasks(): UseRunConsoleTasksResult {
   const loadTasks = useCallback(async () => {
     const projectScopeGeneration = getProjectScopeGeneration();
     try {
-      const result = await commands.listTasks(null);
+      const result = await commands.listReady();
       if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
       if (result.status === "ok") {
         setTasks(result.data);

@@ -180,13 +180,21 @@ describe("splitRunConsole", () => {
 /* ── miniPipeline ──────────────────────────────────────────────── */
 
 describe("miniPipeline", () => {
-  it("projects the workflow steps relative to current_step_id", () => {
+  it("marks the current step `current` (static) for a parked task", () => {
+    // A Ready task sits at its current step but is not running — it must not
+    // pulse, so the current segment is `current`, never `running`.
     const task = makeTask({ current_step_id: "s2" });
     const segs = miniPipeline(task, SUMMARY);
-    expect(segs.map((s) => s.state)).toEqual(["done", "running", "queued"]);
+    expect(segs.map((s) => s.state)).toEqual(["done", "current", "queued"]);
     // kind is the real backend step type (all execute here) — no synthetic
     // entry/final.
     expect(segs.map((s) => s.kind)).toEqual(["execute", "execute", "execute"]);
+  });
+
+  it("marks the current step `running` only when the run is active", () => {
+    const task = makeTask({ current_step_id: "s2" });
+    const segs = miniPipeline(task, SUMMARY, true);
+    expect(segs.map((s) => s.state)).toEqual(["done", "running", "queued"]);
   });
 
   it("marks every segment queued when the task has no current step", () => {

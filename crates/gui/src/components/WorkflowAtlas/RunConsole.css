@@ -15,7 +15,7 @@
   top: 14px;
   left: 14px;
   bottom: 14px;
-  width: 354px;
+  /* width is state-driven (drag-resizable); see .rc-resize-handle */
   z-index: 6;
   display: flex;
   flex-direction: column;
@@ -30,6 +30,34 @@
   border-radius: var(--r-lg);
   box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+}
+
+/* ── Horizontal resize handle ──
+   Left-docked panel, so the RIGHT edge is the one that moves (mirror of the
+   detail panels' left-edge handle). */
+.rc-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 8;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.rc-resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--t-fast, 120ms) var(--ease, ease);
+}
+.rc-resize-handle:hover::after,
+.rc-resize-handle[data-resizing]::after {
+  background: color-mix(in oklch, var(--accent) 60%, transparent);
 }
 
 /* ── Header ── */
@@ -206,6 +234,7 @@
 }
 
 .rc-row {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: var(--s-2h);
@@ -226,16 +255,18 @@
 }
 .rc-row.sel {
   background: var(--accent-wash);
-  border-color: color-mix(in oklch, var(--accent) 38%, transparent);
 }
-
-/* The left tick + pipeline segments read the kind hue via --kc (set by k-*). */
-.rc-kind {
+/* Selected: a 3px accent left bar — the same selection signal the Tasks list
+   rows and Kanban cards use. No border, no glow, no bar at rest. */
+.rc-row.sel::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
-  flex-shrink: 0;
-  border-radius: var(--r-full);
-  background: var(--kc, var(--line-strong));
-  align-self: stretch;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
 }
 
 .rc-main {
@@ -250,12 +281,6 @@
   align-items: center;
   gap: var(--s-1h);
 }
-.rc-id {
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  color: var(--fg-faint);
-  letter-spacing: 0.02em;
-}
 .rc-meta {
   margin-left: auto;
   font-family: var(--mono);
@@ -266,15 +291,6 @@
   gap: var(--s-1h);
   white-space: nowrap;
 }
-.rc-meta .pulse {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 5px var(--accent-glow);
-  animation: rc-pulse 1.6s ease-in-out infinite;
-}
-
 .rc-title {
   font-family: var(--sans);
   font-size: var(--text-12);
@@ -306,6 +322,11 @@
   background: var(--kc);
   box-shadow: 0 0 6px color-mix(in oklch, var(--kc) 60%, transparent);
   animation: rc-pulse 1.4s ease-in-out infinite;
+}
+/* Parked task: reached this step but not executing — static, no pulse. Sits
+   between `done` (full kind) and resting (30%) so "you are here" still reads. */
+.rc-seg.current {
+  background: color-mix(in oklch, var(--kc) 55%, transparent);
 }
 .rc-seg.queued {
   background: color-mix(in oklch, var(--fg) 12%, transparent);

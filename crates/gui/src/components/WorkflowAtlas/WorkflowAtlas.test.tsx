@@ -18,7 +18,7 @@ import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
 vi.mock("./layout/layoutFull", () => ({ layoutFull: vi.fn() }));
 
-// The Run Console owns its own task feed (listTasks + realtime events) and is
+// The Run Console owns its own task feed (listReady + realtime events) and is
 // covered by RunConsole.test.tsx. Stub it here so the atlas-canvas tests don't
 // have to stand up the Tauri command/event plumbing it needs.
 vi.mock("./RunConsole", () => ({ RunConsole: () => null }));

@@ -129,12 +129,17 @@ describe("KanbanCard", () => {
   });
 
   describe("selected state", () => {
-    it("applies selected styling when isSelected is true", () => {
+    it("applies the shared selection signal (accent bar + wash, no accent border/glow)", () => {
       const task = createMockTask({ title: "Selected task" });
       render(<KanbanCard task={task} isSelected={true} />);
 
       const card = screen.getByRole("button", { name: /Task: Selected task/i });
-      expect(card.className).toContain("border-[var(--color-accent)]");
+      // Same signal as the Tasks list / Run Console: accent left bar + accent-wash
+      // background. No accent border, no glow.
+      expect(card.className).toContain("before:bg-[var(--color-accent)]");
+      expect(card.getAttribute("style")).toContain("var(--color-accent-wash)");
+      expect(card.className).not.toContain("border-[var(--color-accent)]");
+      expect(card.className).not.toContain("shadow-[0_0_14px");
     });
 
     it("does not apply selected styling when isSelected is false", () => {
@@ -144,7 +149,9 @@ describe("KanbanCard", () => {
       const card = screen.getByRole("button", {
         name: /Task: Unselected task/i,
       });
-      expect(card.className).not.toContain("border-[var(--color-accent)]");
+      expect(card.className).not.toContain("before:bg-[var(--color-accent)]");
+      // Resting cards hover to the shared row-hover tint (matches the Tasks list).
+      expect(card.className).toContain("hover:bg-[var(--row-hover)]");
     });
   });
 

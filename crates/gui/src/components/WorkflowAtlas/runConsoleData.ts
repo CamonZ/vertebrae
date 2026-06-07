@@ -29,7 +29,12 @@ export interface RunConsoleSplit {
 /** One segment of a row's mini-pipeline (a workflow step projected to a state). */
 export interface PipelineSegment {
   kind: Kind;
-  state: "done" | "running" | "queued";
+  /**
+   * `done` earlier steps, `queued` later ones. The task's current step is
+   * `running` only when a run is actually active (it pulses); for a parked task
+   * it is `current` — a static "you are here" marker that never animates.
+   */
+  state: "done" | "running" | "current" | "queued";
 }
 
 /**
@@ -72,14 +77,17 @@ export function splitRunConsole(tasks: Task[]): RunConsoleSplit {
 
 /**
  * Build a task's mini-pipeline: its workflow's steps in order, projected to a
- * state relative to the task's `current_step_id` — earlier steps `done`, the
- * current step `running`, later steps `queued`. When the task is not at a known
- * step (no `current_step_id`, or it sits before the first step), every segment
- * reads `queued`.
+ * state relative to the task's `current_step_id` — earlier steps `done`, later
+ * steps `queued`. The current step is `running` (it pulses) only when
+ * `isRunning` is set — i.e. the task actually has an active run; otherwise it is
+ * `current`, a static marker so a parked Ready task does not flash. When the
+ * task is not at a known step (no `current_step_id`, or it sits before the first
+ * step), every segment reads `queued`.
  */
 export function miniPipeline(
   task: Task,
   summary: PipelineSummary | null,
+  isRunning = false,
 ): PipelineSegment[] {
   if (!summary || !task.workflow_id) return [];
   const wf = summary.workflows.find((w) => w.id === task.workflow_id);
@@ -99,7 +107,7 @@ export function miniPipeline(
     let state: PipelineSegment["state"];
     if (currentIdx < 0) state = "queued";
     else if (i < currentIdx) state = "done";
-    else if (i === currentIdx) state = "running";
+    else if (i === currentIdx) state = isRunning ? "running" : "current";
     else state = "queued";
     return { kind, state };
   });
