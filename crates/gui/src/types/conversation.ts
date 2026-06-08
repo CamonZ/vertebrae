@@ -38,6 +38,16 @@ export interface ClaudeRawMessage {
     model?: string;
     role?: string;
   };
+  /**
+   * Subagent linkage. Anthropic stream-json carries this at the TOP LEVEL of
+   * assistant/user messages emitted BY a spawned subagent: it is the
+   * `tool_use` id of the parent `Task` (or other spawn) tool call that
+   * launched the subagent. The parser threads it onto every emitted
+   * {@link ConversationEvent} as `parentToolUseId` so the normalizer can lift
+   * those events into a nested child Thread. Absent/null on the main agent's
+   * own messages.
+   */
+  parent_tool_use_id?: string | null;
   // System init fields
   model?: string;
   session_id?: string;
@@ -54,6 +64,15 @@ export interface ClaudeRawMessage {
 /** Base event with timestamp */
 interface BaseEvent {
   timestamp: string;
+  /**
+   * Subagent linkage (the ONLY intra-run nesting axis). When set, this event
+   * was emitted by a spawned subagent and this is the `tool_use` id of the
+   * parent spawn tool call (Anthropic's top-level `parent_tool_use_id`, or the
+   * Codex `collab_tool_call` id). The normalizer's `groupBySpawn` reads this
+   * (via `readParentToolUseId`) to lift the event into a nested child Thread.
+   * Undefined on the main agent's own events.
+   */
+  parentToolUseId?: string;
 }
 
 /** Session start event - from 'system' type with subtype 'init' */
@@ -335,6 +354,19 @@ export function parseClaudeMessage(
         });
       }
       break;
+  }
+
+  // Thread Anthropic's top-level subagent linkage onto every event emitted
+  // from this message. When a subagent runs, its assistant/user stream-json
+  // lines carry `parent_tool_use_id` = the parent spawn tool's id; tagging the
+  // events lets the normalizer nest them into a child Thread. When absent/null
+  // we leave `parentToolUseId` undefined (main-agent events stay flat).
+  const parentToolUseId =
+    typeof raw.parent_tool_use_id === "string" && raw.parent_tool_use_id.length > 0
+      ? raw.parent_tool_use_id
+      : undefined;
+  if (parentToolUseId) {
+    for (const ev of events) ev.parentToolUseId = parentToolUseId;
   }
 
   return events;
@@ -647,18 +679,38 @@ export function parseCodexMessage(
           if (ev) events.push(ev);
           break;
         }
-        case "collab_tool_call":
-          // Schema for this item is still in flight upstream and the
-          // existing DelegationBlock is parent/child task wrapping, not a
-          // good fit. Drop silently for now; the console.debug surfaces
-          // schema drift during development without throwing in production.
-          if (typeof console !== "undefined") {
-            console.debug(
-              "[codex] dropping collab_tool_call (no renderer yet)",
-              item
-            );
-          }
+        case "collab_tool_call": {
+          // Codex's subagent-spawn vehicle. We surface it as a `tool_call` so
+          // it appears as the PARENT tool in the timeline (mirroring how an
+          // Anthropic `Task` tool_use renders). The id becomes the spawn key.
+          //
+          // TODO(spawn-linkage / codex): the CHILD linkage is NOT implemented.
+          // The upstream `collab_tool_call` schema is still in flight and does
+          // not (in any shape verified in this codebase — no fixtures, no
+          // vendored codex source) expose how a subagent's child events refer
+          // back to this id. Anthropic carries `parent_tool_use_id` on each
+          // child message; the Codex equivalent is unknown. Until the real
+          // shape is confirmed, child events are NOT tagged with
+          // `parentToolUseId`, so the subagent's events (if any) stay flat
+          // rather than being nested incorrectly. Do NOT invent the field.
+          const toolId = item.id ?? "";
+          // Best-effort label: prefer an explicit tool/command name if Codex
+          // provides one, else a generic "subagent".
+          const toolName = item.tool || item.command || "subagent";
+          const args =
+            (item.arguments as Record<string, unknown> | undefined) ?? {};
+          events.push({
+            kind: "tool_call",
+            timestamp,
+            toolId,
+            toolName,
+            displayName: getToolDisplayName(toolName),
+            icon: getToolIcon(toolName),
+            summary: getToolSummary(toolName, args),
+            input: args,
+          });
           break;
+        }
         default:
           // Unknown item types are intentionally dropped from the timeline,
           // but we log via console.debug so schema drift surfaces during

@@ -23,23 +23,20 @@
  *      same `ConversationEvent` union, so this layer is provider-agnostic.
  *
  * ──────────────────────────────────────────────────────────────────────────
- * *** BLOCKER carried over from P0 — subagent linkage is NOT parsed yet. ***
+ * Subagent linkage (constraint #2). The parser now threads the spawn linkage
+ * onto every `ConversationEvent` as `parentToolUseId`:
+ *     · Anthropic: `parseClaudeMessage` reads the message's top-level
+ *       `parent_tool_use_id` and tags every emitted event with it.
+ *     · Codex: `parseCodexMessage` emits a `tool_call` for `collab_tool_call`
+ *       (the parent spawn tool). Child-linkage for Codex is NOT yet wired —
+ *       the upstream shape is unverified — so Codex subagent events stay flat
+ *       for now (see the TODO in conversation.ts).
  *
- *   `conversation.ts` does NOT expose `parent_tool_use_id` (Anthropic) nor a
- *   parsed `collab_tool_call` (Codex) on any `ConversationEvent`. There is
- *   therefore NO data source today for the spawn/nested-Thread axis
- *   (constraint #2). Until the parser threads that linkage through:
- *     (a) ClaudeContentItem + parseClaudeMessage must carry parent_tool_use_id
- *         onto each tool_call/assistant event;
- *     (b) ToolCallEvent / AssistantMessageEvent / ThinkingEvent must gain a
- *         `parentToolUseId?: string` field;
- *     (c) parseCodexMessage must handle collab_tool_call into a spawn shape.
- *
- *   This module is written to USE that linkage when present and to degrade to a
- *   correct FLAT single-level thread when absent (no crash). The linkage is
- *   read defensively via {@link readParentToolUseId}; spawn-grouping in
- *   `runToThreads` activates automatically once the field exists. See
- *   {@link groupBySpawn} and its TODO.
+ * {@link groupBySpawn} reads `parentToolUseId` via {@link readParentToolUseId}
+ * and lifts tagged events into a nested child {@link Thread}, replacing the
+ * parent spawn tool's row with a `SpawnMessage` in place. When no event carries
+ * a parent id it degrades to a correct FLAT single-level thread (no crash) —
+ * identical to the pre-linkage behavior.
  * ──────────────────────────────────────────────────────────────────────────
  */
 
@@ -175,32 +172,18 @@ export function humanDuration(deltaMs: number): string {
 }
 
 // ===========================================================================
-// Subagent linkage (BLOCKER) — read defensively.
+// Subagent linkage — the only intra-run nesting axis (constraint #2).
 // ===========================================================================
 
 /**
- * Best-effort read of a parent tool-use id off a parsed event.
- *
- * The current `ConversationEvent` union has NO such field (see the module
- * header blocker). We read it via an index access so spawn grouping lights up
- * automatically the day the parser threads `parent_tool_use_id` /
- * `collab_tool_call` through — without a type change here.
- *
- * TODO(spawn-linkage): once the parser exposes `parentToolUseId` on
- * ToolCallEvent / AssistantMessageEvent / ThinkingEvent, replace this with a
- * typed field read and delete the cast.
+ * Read the parent spawn tool-use id off a parsed event. Set by the parser on
+ * every event a spawned subagent emitted (Anthropic `parent_tool_use_id`);
+ * undefined on the main agent's own events. {@link groupBySpawn} uses it to
+ * lift the event into a nested child Thread.
  */
 function readParentToolUseId(ev: ConversationEvent): string | undefined {
-  const v = (ev as unknown as { parentToolUseId?: unknown }).parentToolUseId;
+  const v = ev.parentToolUseId;
   return typeof v === "string" && v.length > 0 ? v : undefined;
-}
-
-/** A tool id this event participates in (for spawn keying), when derivable. */
-function eventToolId(ev: ConversationEvent): string | undefined {
-  if (ev.kind === "tool_call") return ev.toolId;
-  if (ev.kind === "tool_result") return ev.toolUseId;
-  if (ev.kind === "file_edit") return ev.toolId;
-  return undefined;
 }
 
 // ===========================================================================
@@ -482,7 +465,8 @@ function eventsToTurns(
   exec: StepExecution,
   runStartMs: number | null
 ): Turn[] {
-  // Pre-index tool_results by id for O(1) pairing.
+  // Pre-index tool_results by id for O(1) pairing across the WHOLE execution
+  // (a subagent's tool_result pairs with the subagent's tool_call by id).
   const resultById = new Map<string, ToolResultEvent>();
   for (const ev of events) {
     if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
@@ -517,6 +501,31 @@ function eventsToTurns(
     messages.push(sys);
   }
 
+  // Build the (possibly nested) message series. groupBySpawn lifts any
+  // subagent events (those carrying parentToolUseId) into child Threads and
+  // replaces the parent spawn tool's row with a SpawnMessage in place; when no
+  // linkage is present it builds a flat series.
+  messages.push(
+    ...groupBySpawn(events, resultById, speaker, model, runStartMs)
+  );
+
+  return [{ id: `${exec.id ?? "exec"}-t0`, messages }];
+}
+
+/**
+ * Build the flat message rows for a contiguous list of events that all belong
+ * to the SAME agent (i.e. share the same parentToolUseId, or none). Subagent
+ * grouping is handled by {@link groupBySpawn}, not here — this just maps each
+ * renderable event to its Message.
+ */
+function eventsToMessages(
+  events: ConversationEvent[],
+  resultById: Map<string, ToolResultEvent>,
+  speaker: string | undefined,
+  model: string | undefined,
+  runStartMs: number | null
+): Message[] {
+  const out: Message[] = [];
   for (const ev of events) {
     switch (ev.kind) {
       case "session_start":
@@ -525,64 +534,172 @@ function eventsToTurns(
         break;
       case "thinking": {
         if (ev.text.startsWith(ERROR_PREFIX)) {
-          messages.push(errorMessage(ev.text, ev.timestamp, runStartMs));
+          out.push(errorMessage(ev.text, ev.timestamp, runStartMs));
         } else {
-          messages.push(
+          out.push(
             agentMessage(ev.text, ev.timestamp, runStartMs, speaker, model, true)
           );
         }
         break;
       }
       case "assistant_message":
-        messages.push(
+        out.push(
           agentMessage(ev.text, ev.timestamp, runStartMs, speaker, model, false)
         );
         break;
       case "tool_call":
-        messages.push(toolMessage(ev, resultById.get(ev.toolId), runStartMs));
+        out.push(toolMessage(ev, resultById.get(ev.toolId), runStartMs));
         break;
       case "tool_result":
         // Merged into its tool_call — not its own row.
         break;
       case "file_edit":
-        messages.push(fileEditMessage(ev, runStartMs));
+        out.push(fileEditMessage(ev, runStartMs));
         break;
       case "todo_list":
-        messages.push(todoMessage(ev, runStartMs));
+        out.push(todoMessage(ev, runStartMs));
         break;
     }
   }
-
-  const nested = groupBySpawn(messages, events);
-  return [{ id: `${exec.id ?? "exec"}-t0`, messages: nested }];
+  return out;
 }
 
 /**
- * Lift subagent events into nested `SpawnMessage` child threads.
+ * Lift subagent events into nested `SpawnMessage` child threads (constraint #2,
+ * the only nesting axis).
  *
- * *** BLOCKER (see module header). *** `parent_tool_use_id` is not exposed by
- * the parser today, so {@link readParentToolUseId} returns undefined for every
- * event and this function is a NO-OP pass-through producing a correct FLAT
- * thread. The grouping logic is intentionally left minimal here: the real
- * lift-into-child-thread implementation cannot be written or tested without a
- * data source. Once the linkage lands, expand this to:
- *   1. partition events by parentToolUseId,
- *   2. build a child Thread per parent tool id (kind "execute", spawnLabel
- *      "subagent"),
- *   3. replace the parent tool_call's ToolMessage with a SpawnMessage at the
- *      same position.
+ * An event carrying a {@link readParentToolUseId} was emitted BY a spawned
+ * subagent; the id points at the PARENT spawn tool's `tool_call` (Anthropic's
+ * `parent_tool_use_id`). We:
+ *   1. partition events into the main agent's events (no parentToolUseId) and
+ *      one group per parent tool id (the subagent's events);
+ *   2. build the main agent's flat message series;
+ *   3. when we reach the parent spawn tool's `tool_call`, REPLACE its
+ *      ToolMessage with a {@link SpawnMessage} whose child Thread is built from
+ *      that group's events (kind "execute", spawnLabel "subagent"), inserted at
+ *      the parent tool's position.
  *
- * TODO(spawn-linkage): implement the lift once the parser threads
- * parent_tool_use_id / collab_tool_call onto ConversationEvent.
+ * When NO event carries a parent id this degrades to a flat series — identical
+ * output to the pre-linkage behavior (the existing flat tests guard this).
  */
-function groupBySpawn(messages: Message[], events: ConversationEvent[]): Message[] {
-  const anyLinked = events.some(
-    (ev) => readParentToolUseId(ev) !== undefined && eventToolId(ev) !== undefined
+function groupBySpawn(
+  events: ConversationEvent[],
+  resultById: Map<string, ToolResultEvent>,
+  speaker: string | undefined,
+  model: string | undefined,
+  runStartMs: number | null
+): Message[] {
+  // Partition: main-agent events vs subagent events keyed by parent tool id.
+  const main: ConversationEvent[] = [];
+  const childGroups = new Map<string, ConversationEvent[]>();
+  for (const ev of events) {
+    const parentId = readParentToolUseId(ev);
+    if (parentId === undefined) {
+      main.push(ev);
+      continue;
+    }
+    let group = childGroups.get(parentId);
+    if (!group) {
+      group = [];
+      childGroups.set(parentId, group);
+    }
+    group.push(ev);
+  }
+
+  // No linkage → flat series (unchanged behavior).
+  if (childGroups.size === 0) {
+    return eventsToMessages(main, resultById, speaker, model, runStartMs);
+  }
+
+  const out: Message[] = [];
+  const spawned = new Set<string>();
+  for (const ev of main) {
+    // When this is the parent spawn tool_call, swap its row for the nested
+    // child Thread carrying the subagent's events.
+    if (ev.kind === "tool_call" && childGroups.has(ev.toolId)) {
+      const childEvents = childGroups.get(ev.toolId)!;
+      out.push(spawnMessage(ev, childEvents, resultById, runStartMs));
+      spawned.add(ev.toolId);
+      continue;
+    }
+    out.push(
+      ...eventsToMessages([ev], resultById, speaker, model, runStartMs)
+    );
+  }
+
+  // Defensive: if a child group references a parent tool_call that never
+  // appeared in the main stream, surface the orphaned subagent at the end
+  // rather than dropping it.
+  for (const [parentId, childEvents] of childGroups) {
+    if (spawned.has(parentId)) continue;
+    out.push(
+      spawnMessage(undefined, childEvents, resultById, runStartMs, parentId)
+    );
+  }
+
+  return out;
+}
+
+/**
+ * Build a {@link SpawnMessage} wrapping a subagent's events in a child Thread.
+ * `parentCall` is the parent spawn tool_call (used for its id/label/clock);
+ * when absent (orphaned group) `fallbackId` keys the thread.
+ */
+function spawnMessage(
+  parentCall: ToolCallEvent | undefined,
+  childEvents: ConversationEvent[],
+  resultById: Map<string, ToolResultEvent>,
+  runStartMs: number | null,
+  fallbackId?: string
+): Message {
+  const threadId = parentCall?.toolId || fallbackId || nextEvt("spawn");
+
+  // The child speaker/model come from the child's own session_start, if any.
+  let childSpeaker: string | undefined;
+  let childModel: string | undefined;
+  for (const ev of childEvents) {
+    if (ev.kind === "session_start") {
+      childModel = ev.model;
+      childSpeaker = ev.model ? `Agent · ${ev.model}` : "Agent";
+      break;
+    }
+  }
+
+  const childMessages = eventsToMessages(
+    childEvents,
+    resultById,
+    childSpeaker,
+    childModel,
+    runStartMs
   );
-  if (!anyLinked) return messages; // flat — no linkage available.
-  // Linkage present: future work. For now, still return flat to avoid a
-  // partially-correct nesting; flip this once the lift is implemented + tested.
-  return messages;
+  const turns: Turn[] = [{ id: `${threadId}-t0`, messages: childMessages }];
+
+  const toolCount = childMessages.filter((m) => m.type === "tool").length;
+  const hasErr = childMessages.some(
+    (m) =>
+      m.type === "error" ||
+      (m.type === "tool" && (m.error || m.status === "err"))
+  );
+  const summary: ThreadSummary = {
+    turns: turns.length,
+    tools: toolCount,
+    status: hasErr ? "err" : "ok",
+  };
+
+  const childThread: Thread = {
+    id: threadId,
+    label: parentCall?.displayName || "subagent",
+    kind: "execute",
+    spawnLabel: "subagent",
+    summary,
+    turns,
+  };
+
+  return {
+    type: "spawn",
+    thread: childThread,
+    evt: parentCall?.toolId || threadId,
+  };
 }
 
 // ===========================================================================

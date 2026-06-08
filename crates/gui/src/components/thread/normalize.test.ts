@@ -11,6 +11,7 @@ import {
 import type { SessionLog, StepExecution, TaskRun } from "../../bindings";
 import type {
   AgentMessage,
+  SpawnMessage,
   SystemMessage,
   ToolMessage,
   WaitMessage,
@@ -355,10 +356,9 @@ describe("runToThreads — wait_children step", () => {
   });
 });
 
-describe("runToThreads — spawn nesting (BLOCKER)", () => {
+describe("runToThreads — spawn nesting", () => {
   it("produces a correct FLAT thread when parent_tool_use_id is absent (no crash)", () => {
-    // The parser does not expose parent_tool_use_id today, so even a stream
-    // that logically contains a subagent normalizes flat — no spawn rows.
+    // A stream with no subagent linkage normalizes flat — no spawn rows.
     const input: RunInput = {
       taskRun: taskRun("2024-01-01T10:00:00Z"),
       stepExecutions: [exec({ id: "e1" })],
@@ -369,6 +369,134 @@ describe("runToThreads — spawn nesting (BLOCKER)", () => {
       turn.messages.some((m) => m.type === "spawn")
     );
     expect(hasSpawn).toBe(false);
+  });
+
+  // A Claude stream where the main agent spawns a subagent via a `Task`
+  // tool_use, and the subagent's subsequent assistant/user lines carry the
+  // top-level `parent_tool_use_id` pointing back at that tool's id.
+  const claudeSpawnLogs = (execId: string): SessionLog[] => [
+    log(
+      execId,
+      { type: "system", subtype: "init", model: "claude-sonnet-4.5", session_id: "s1" },
+      "2024-01-01T10:00:01Z"
+    ),
+    // Main agent spawns a subagent.
+    log(
+      execId,
+      {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "task-1",
+              name: "Task",
+              input: { description: "explore", prompt: "go" },
+            },
+          ],
+        },
+      },
+      "2024-01-01T10:00:02Z"
+    ),
+    // Subagent events — tagged with parent_tool_use_id = task-1.
+    log(
+      execId,
+      {
+        type: "assistant",
+        parent_tool_use_id: "task-1",
+        message: { content: [{ type: "text", text: "Child working." }] },
+      },
+      "2024-01-01T10:00:03Z"
+    ),
+    log(
+      execId,
+      {
+        type: "assistant",
+        parent_tool_use_id: "task-1",
+        message: {
+          content: [
+            { type: "tool_use", id: "child-bash", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      },
+      "2024-01-01T10:00:04Z"
+    ),
+    log(
+      execId,
+      {
+        type: "user",
+        parent_tool_use_id: "task-1",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "child-bash", content: "a b c", is_error: false },
+          ],
+        },
+      },
+      "2024-01-01T10:00:05Z"
+    ),
+    // Main agent resumes after the subagent completes.
+    log(
+      execId,
+      {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Subagent done." }] },
+      },
+      "2024-01-01T10:00:06Z"
+    ),
+  ];
+
+  it("nests a subagent's events into a SpawnMessage child Thread at the parent tool's position", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "e1" })],
+      logsByExecutionId: { e1: claudeSpawnLogs("e1") },
+    };
+    const [t] = runToThreads(input);
+    const msgs = t.turns[0].messages;
+
+    const spawn = msgs.find((m) => m.type === "spawn") as SpawnMessage | undefined;
+    expect(spawn).toBeDefined();
+
+    // The parent Task tool_call row is REPLACED by the spawn (no bare tool row
+    // for task-1 remains).
+    const taskTool = msgs.find(
+      (m) => m.type === "tool" && (m as ToolMessage).evt === "task-1"
+    );
+    expect(taskTool).toBeUndefined();
+
+    // The child Thread carries the subagent's prose + paired tool, not the main
+    // agent's rows.
+    const child = spawn!.thread;
+    expect(child.id).toBe("task-1");
+    expect(child.spawnLabel).toBe("subagent");
+    const childMsgs = child.turns[0].messages;
+    const childProse = childMsgs.find((m) => m.type === "agent") as AgentMessage;
+    expect(childProse.prose).toBe("Child working.");
+    const childTool = childMsgs.find((m) => m.type === "tool") as ToolMessage;
+    expect(childTool.evt).toBe("child-bash");
+    expect(childTool.cmd).toBe("ls");
+    expect(childTool.body).toBe("a b c");
+
+    // The main agent's prose rows stay at the top level (not lifted into child).
+    const mainProse = msgs.filter(
+      (m) => m.type === "agent" && (m as AgentMessage).prose === "Subagent done."
+    );
+    expect(mainProse).toHaveLength(1);
+  });
+
+  it("keeps a stream without linkage flat (no spawn) even alongside the nesting path", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "e1" })],
+      logsByExecutionId: { e1: claudeLogs("e1") },
+    };
+    const [t] = runToThreads(input);
+    expect(
+      t.turns[0].messages.some((m) => m.type === "spawn")
+    ).toBe(false);
+    // sanity: the regular tool row is present and flat.
+    const tools = t.turns[0].messages.filter((m) => m.type === "tool");
+    expect(tools).toHaveLength(1);
   });
 });
 

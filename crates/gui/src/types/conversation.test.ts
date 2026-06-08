@@ -184,6 +184,80 @@ describe("parseClaudeMessage", () => {
     });
   });
 
+  describe("subagent linkage (parent_tool_use_id)", () => {
+    it("threads top-level parent_tool_use_id onto every emitted event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "assistant",
+        parent_tool_use_id: "spawn-tool-1",
+        message: {
+          content: [
+            { type: "text", text: "subagent thinking" },
+            {
+              type: "tool_use",
+              id: "child-tool-9",
+              name: "Read",
+              input: { file_path: "/a.ts" },
+            },
+          ],
+        },
+      };
+
+      const events = parseClaudeMessage(raw, timestamp);
+
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({
+        kind: "assistant_message",
+        parentToolUseId: "spawn-tool-1",
+      });
+      expect(events[1]).toMatchObject({
+        kind: "tool_call",
+        toolId: "child-tool-9",
+        parentToolUseId: "spawn-tool-1",
+      });
+    });
+
+    it("threads parent_tool_use_id onto a subagent's tool_result event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        parent_tool_use_id: "spawn-tool-1",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "child-tool-9",
+              content: "ok",
+              is_error: false,
+            },
+          ],
+        },
+      };
+
+      const [ev] = parseClaudeMessage(raw, timestamp);
+      expect(ev).toMatchObject({
+        kind: "tool_result",
+        parentToolUseId: "spawn-tool-1",
+      });
+    });
+
+    it("leaves parentToolUseId undefined when parent_tool_use_id is absent or null", () => {
+      const absent: ClaudeRawMessage = {
+        type: "assistant",
+        message: { content: [{ type: "text", text: "main agent" }] },
+      };
+      const nulled: ClaudeRawMessage = {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "text", text: "main agent" }] },
+      };
+
+      for (const raw of [absent, nulled]) {
+        const [ev] = parseClaudeMessage(raw, timestamp);
+        expect(ev.parentToolUseId).toBeUndefined();
+        expect(ev).not.toHaveProperty("parentToolUseId");
+      }
+    });
+  });
+
   describe("result messages", () => {
     it("parses success result into session end event", () => {
       const raw: ClaudeRawMessage = {
@@ -615,20 +689,29 @@ describe("parseCodexMessage", () => {
     });
   });
 
-  it("drops collab_tool_call items silently (no renderer yet)", () => {
-    expect(
-      parseCodexMessage(
-        {
-          type: "item.completed",
-          item: {
-            id: "ct1",
-            type: "collab_tool_call",
-          },
+  it("emits a tool_call for collab_tool_call so the spawn shows as the parent tool", () => {
+    // Best-effort spawn handling: the parent tool surfaces, but child linkage
+    // (parentToolUseId on the subagent's events) is intentionally NOT set —
+    // the upstream child-linkage shape is unverified. See parseCodexMessage.
+    const events = parseCodexMessage(
+      {
+        type: "item.completed",
+        item: {
+          id: "ct1",
+          type: "collab_tool_call",
         },
-        timestamp,
-        newState()
-      )
-    ).toEqual([]);
+      },
+      timestamp,
+      newState()
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "ct1",
+      toolName: "subagent",
+    });
+    // No child linkage is fabricated.
+    expect(events[0]).not.toHaveProperty("parentToolUseId");
   });
 
   it("maps command_execution item.completed to a tool_call followed by tool_result", () => {
