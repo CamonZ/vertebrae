@@ -27,6 +27,7 @@ import {
 } from "../components/Traces";
 import { IdentityBadge } from "../components/shared/EntityId";
 import { useTask, useTaskRuns, useRunTrace } from "../hooks";
+import { useTasks } from "../hooks/useTasks";
 import { useTraceFilters } from "../hooks/useTraceFilters";
 import {
   computeViewCounts,
@@ -80,6 +81,9 @@ export function TracesPage({
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Keep the full task list fresh so the picker offers every task, not just
+  // whatever a previously visited page (or realtime run events) left behind.
+  useTasks();
   const tasks = useTaskStore((state) => state.tasks);
 
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -98,28 +102,34 @@ export function TracesPage({
 
   useShellHeader("Traces");
 
-  const safeTaskId = taskId ?? null;
+  // The entry task scopes the rail's TASKS tree to its subtree; the `task`
+  // search param selects which task within that subtree drives the RUNS panel
+  // and the trace stream, so picking a child keeps the parent and siblings
+  // visible in the tree.
+  const rootTaskId = taskId ?? null;
+  const selectedTaskParam = searchParams.get("task");
+  const currentTaskId = rootTaskId ? (selectedTaskParam ?? rootTaskId) : null;
   const {
     task,
     isLoading: isTaskLoading,
     error: taskError,
-  } = useTask(safeTaskId);
+  } = useTask(currentTaskId);
   // Entered for a specific task (e.g. from a task detail panel) → scope the
   // rail's TASKS tree to that task + its descendants. The general /traces
   // browser (no task id) still shows the full tree.
   const traceTasks = useMemo(
     () =>
-      safeTaskId
+      rootTaskId
         ? mergeTasksById(fetchedTraceTasks, task ? [task] : [])
         : mergeTasksById(tasks, fetchedTraceTasks),
-    [safeTaskId, tasks, fetchedTraceTasks, task]
+    [rootTaskId, tasks, fetchedTraceTasks, task]
   );
 
   // Fetch the entry task + its descendants so the rail's TASKS tree is scoped to
   // that subtree. The store is used only as a lookup cache; ancestors and
   // unrelated tasks are intentionally excluded.
   useEffect(() => {
-    if (!safeTaskId) {
+    if (!rootTaskId) {
       setFetchedTraceTasks([]);
       return;
     }
@@ -143,7 +153,7 @@ export function TracesPage({
 
       // Result: the entry task + its descendants only (no ancestors).
       const subtree = new Map<string, Task>();
-      const entry = await fetchTaskById(safeTaskId);
+      const entry = await fetchTaskById(rootTaskId);
       if (entry) subtree.set(entry.id, entry);
 
       const seenDescendants = new Set<string>();
@@ -158,7 +168,7 @@ export function TracesPage({
         }
         for (const child of result.data) await fetchChildren(child.id);
       };
-      await fetchChildren(safeTaskId);
+      await fetchChildren(rootTaskId);
 
       if (!cancelled && seq === traceTaskFetchSeqRef.current) {
         setFetchedTraceTasks(Array.from(subtree.values()));
@@ -169,7 +179,7 @@ export function TracesPage({
     return () => {
       cancelled = true;
     };
-  }, [safeTaskId, task, tasks]);
+  }, [rootTaskId, task, tasks]);
 
   // URL state: `runId` selects a specific TaskRun for the entry-point task.
   const selectedRunId = searchParams.get("runId") ?? null;
@@ -179,7 +189,7 @@ export function TracesPage({
     resolveRun,
     isLoading: isRunsLoading,
     error: runsError,
-  } = useTaskRuns(safeTaskId);
+  } = useTaskRuns(currentTaskId);
 
   // Resolve the single active run (selected → active → latest).
   const resolved = useMemo(
@@ -196,19 +206,19 @@ export function TracesPage({
     logsByExecutionId,
     isLoading: isTraceLoading,
     error: traceError,
-  } = useRunTrace(safeTaskId, activeRunId);
+  } = useRunTrace(currentTaskId, activeRunId);
 
   const { filters, setSearch, setView } = useTraceFilters();
 
   const filteredExecutions = useMemo(() => {
-    if (!safeTaskId) return stepExecutions;
+    if (!currentTaskId) return stepExecutions;
     // Search now filters the message stream (see streamThreads), not executions.
     return filterExecutions(
       stepExecutions,
       { ...filters, search: "" },
-      { rootTaskId: safeTaskId }
+      { rootTaskId: currentTaskId }
     );
-  }, [stepExecutions, filters, safeTaskId]);
+  }, [stepExecutions, filters, currentTaskId]);
 
   // Normalize-on-render: derive the run's Thread[] from the live executions.
   const threads = useMemo<ThreadModel[]>(() => {
@@ -330,26 +340,61 @@ export function TracesPage({
 
   const handleDetach = useCallback(async () => {
     if (!taskId) return;
-    await popOut(`/traces-window/${taskId}`, `traces-${taskId}`, {
+    const selection =
+      currentTaskId && currentTaskId !== taskId
+        ? `?task=${encodeURIComponent(currentTaskId)}`
+        : "";
+    await popOut(`/traces-window/${taskId}${selection}`, `traces-${taskId}`, {
       title: "Traces",
       width: 1100,
       height: 800,
     });
-  }, [taskId]);
+  }, [taskId, currentTaskId]);
 
   const handleToggleRail = useCallback(() => {
     setRailCollapsed((v) => !v);
   }, []);
 
+  // Picker selection: re-enter the page scoped to the picked task's subtree.
   const handlePickTask = useCallback(
     (id: string) => {
       setPickerInRail(false);
       setFocused(null);
       setSelectedEvt(null);
-      if (onPickTask) onPickTask(id);
-      else navigate(`/traces/${id}`);
+      if (onPickTask) {
+        setSearchParams(
+          (prev) => {
+            const params = new URLSearchParams(prev);
+            params.delete("task");
+            params.delete("runId");
+            return params;
+          },
+          { replace: true }
+        );
+        onPickTask(id);
+      } else navigate(`/traces/${id}`);
     },
-    [navigate, onPickTask]
+    [navigate, onPickTask, setSearchParams]
+  );
+
+  // TASKS-tree selection: keep the tree scoped to the entry task and only
+  // switch which task's runs/trace are shown.
+  const handleSelectTreeTask = useCallback(
+    (id: string) => {
+      setFocused(null);
+      setSelectedEvt(null);
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (id === rootTaskId) params.delete("task");
+          else params.set("task", id);
+          params.delete("runId");
+          return params;
+        },
+        { replace: true }
+      );
+    },
+    [rootTaskId, setSearchParams]
   );
 
   const handleSelectRun = useCallback(
@@ -379,7 +424,7 @@ export function TracesPage({
   return (
     <div data-testid="traces-page" className="flex h-full min-h-0 flex-col">
       <TracesHeader
-        taskId={taskId ?? null}
+        taskId={currentTaskId}
         title={task?.title ?? null}
         level={task?.level ?? null}
         rollups={rollups}
@@ -415,13 +460,13 @@ export function TracesPage({
           <RunHistoryRail
             runs={runs}
             tasks={traceTasks}
-            currentTaskId={safeTaskId}
+            currentTaskId={currentTaskId}
             activeRunId={activeRunId}
             activeRunSource={activeRunSource}
             activeRunThreads={threads}
             selectedEvt={selectedEvt}
             onJump={jumpTo}
-            onSelectTask={handlePickTask}
+            onSelectTask={handleSelectTreeTask}
             onSelectRun={handleSelectRun}
             onSwitchTask={() => setPickerInRail(true)}
             collapsed={railCollapsed}

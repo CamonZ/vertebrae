@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen, render as rtlRender } from "@testing-library/react";
+import {
+  fireEvent,
+  screen,
+  render as rtlRender,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   createMockTask,
@@ -21,13 +26,24 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+/** Per-test task fixtures served by the mocked `getTask` / `listTasks`. */
+const taskFixtures: Record<string, ReturnType<typeof createMockTask>> = {};
+
 vi.mock("../bindings", () => ({
   commands: {
-    getTask: vi.fn(async () => ({
-      status: "error",
-      error: { message: "not found" },
-    })),
-    listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTask: vi.fn(async (id: string) =>
+      taskFixtures[id]
+        ? { status: "ok", data: taskFixtures[id] }
+        : { status: "error", error: { message: "not found" } }
+    ),
+    listTasks: vi.fn(async (filter: { children_of?: string | null } | null) => {
+      const all = Object.values(taskFixtures);
+      const parentId = filter?.children_of ?? null;
+      return {
+        status: "ok",
+        data: parentId ? all.filter((t) => t.parent_id === parentId) : all,
+      };
+    }),
     getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
     getTaskExecutions: vi.fn(async () => ({ status: "ok", data: [] })),
     stopRun: vi.fn(async () => ({ status: "ok", data: null })),
@@ -40,6 +56,7 @@ let mockTaskError: string | null = null;
 let mockRuns: ReturnType<typeof createMockTaskRun>[] = [];
 let mockActiveRun: ReturnType<typeof createMockTaskRun> | null = null;
 let mockExecutions: ReturnType<typeof createMockStepExecution>[] = [];
+let lastRunsTaskId: string | null = null;
 
 vi.mock("../hooks", () => ({
   useTask: () => ({
@@ -48,18 +65,21 @@ vi.mock("../hooks", () => ({
     error: mockTaskError,
     refetch: vi.fn(),
   }),
-  useTaskRuns: () => ({
-    runs: mockRuns,
-    activeRun: mockActiveRun,
-    latestRun: null,
-    resolveRun: () =>
-      mockActiveRun
-        ? { run: mockActiveRun, source: "active" as const }
-        : { run: null, source: "none" as const },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
+  useTaskRuns: (taskId: string | null) => {
+    lastRunsTaskId = taskId;
+    return {
+      runs: mockRuns,
+      activeRun: mockActiveRun,
+      latestRun: null,
+      resolveRun: () =>
+        mockActiveRun
+          ? { run: mockActiveRun, source: "active" as const }
+          : { run: null, source: "none" as const },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+  },
   useRunTrace: () => ({
     stepExecutions: mockExecutions,
     logsByExecutionId: {},
@@ -83,14 +103,22 @@ function renderAt(path: string) {
 describe("TracesPage (single-run)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    mockTask = createMockTask({ id: "root", title: "Root Epic", level: "epic" });
+    for (const key of Object.keys(taskFixtures)) delete taskFixtures[key];
+    taskFixtures["root"] = createMockTask({
+      id: "root",
+      title: "Root Epic",
+      level: "epic",
+    });
+    mockTask = taskFixtures["root"];
     mockTaskLoading = false;
     mockTaskError = null;
     mockRuns = [];
     mockActiveRun = null;
     mockExecutions = [];
+    lastRunsTaskId = null;
     useTaskStore.setState({
       tasks: [createMockTask({ id: "root", title: "Root Epic", level: "epic" })],
+      activeFilter: null,
       selectedTaskId: null,
       selectedTask: null,
       isLoading: false,
@@ -149,5 +177,89 @@ describe("TracesPage (single-run)", () => {
     expect(screen.getByTestId("traces-page")).toBeInTheDocument();
     expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
     expect(screen.getByTestId("traces-no-task-hint")).toBeInTheDocument();
+  });
+
+  it("fetches the full task list for the picker instead of relying on store residue", async () => {
+    taskFixtures["other"] = createMockTask({
+      id: "other",
+      title: "Never-run task",
+      level: "ticket",
+    });
+    // Store starts empty — e.g. fresh launch where only realtime events would
+    // otherwise populate it.
+    useTaskStore.setState({ tasks: [] });
+
+    renderAt("/traces");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-picker-option-other")).toBeInTheDocument();
+      expect(screen.getByTestId("task-picker-option-root")).toBeInTheDocument();
+    });
+  });
+
+  describe("TASKS tree selection", () => {
+    function visibleTaskRowIds(): string[] {
+      return screen
+        .queryAllByTestId("run-history-task-row")
+        .map((el) => el.getAttribute("data-task-id") ?? "");
+    }
+
+    beforeEach(() => {
+      taskFixtures["c1"] = createMockTask({
+        id: "c1",
+        title: "Child One",
+        level: "ticket",
+        parent_id: "root",
+      });
+      taskFixtures["c2"] = createMockTask({
+        id: "c2",
+        title: "Child Two",
+        level: "ticket",
+        parent_id: "root",
+      });
+    });
+
+    it("keeps the parent and siblings visible when a child is selected", async () => {
+      renderAt("/traces/root");
+      await waitFor(() => {
+        expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      });
+
+      const childRow = screen
+        .getAllByTestId("run-history-task-row-button")
+        .find((el) => el.closest("li")?.getAttribute("data-task-id") === "c1");
+      fireEvent.click(childRow!);
+
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("c1");
+      });
+      // The tree stays scoped to the entry task's subtree...
+      expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      // ...with the clicked child highlighted as current.
+      const c1Row = screen
+        .getAllByTestId("run-history-task-row")
+        .find((el) => el.getAttribute("data-task-id") === "c1");
+      expect(c1Row?.getAttribute("data-active")).toBe("true");
+      // No navigation happened — selection lives in the `task` search param.
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it("re-selects the entry task when its row is clicked", async () => {
+      renderAt("/traces/root?task=c1");
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("c1");
+      });
+
+      const rootRow = screen
+        .getAllByTestId("run-history-task-row-button")
+        .find(
+          (el) => el.closest("li")?.getAttribute("data-task-id") === "root"
+        );
+      fireEvent.click(rootRow!);
+
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("root");
+      });
+    });
   });
 });
