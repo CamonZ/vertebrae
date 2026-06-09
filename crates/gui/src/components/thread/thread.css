@@ -201,6 +201,14 @@
 }
 .evrow--error .sub { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); }
 
+/* RESULT — a step execution's final structured output. Prominent accent card. */
+.evrow--result .evbody { min-width: 0; }
+.evresult { border: 1px solid color-mix(in oklch, var(--accent) 28%, transparent); border-left: 3px solid var(--accent); border-radius: var(--r-sm); background: color-mix(in oklch, var(--accent-wash) 28%, var(--bg-2)); overflow: hidden; }
+.evresult-hd { padding: var(--s-1h) var(--s-2h); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); border-bottom: 1px solid color-mix(in oklch, var(--accent) 18%, transparent); }
+.evresult-bd { padding: var(--s-2) var(--s-2h); font-size: var(--text-12); line-height: 1.55; color: var(--fg-soft); max-height: 320px; overflow-y: auto; }
+.evresult-bd::-webkit-scrollbar { width: 4px; }
+.evresult-bd::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
+
 /* ════════════════════════════════════════════════════════════════════
    THREAD — from lib-thread.jsx
    ════════════════════════════════════════════════════════════════════ */

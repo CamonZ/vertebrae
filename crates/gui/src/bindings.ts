@@ -1466,6 +1466,11 @@ input_tokens?: number | null;
  */
 output_tokens?: number | null; 
 /**
+ * Cache-read ("cache hit") input tokens. Session-cumulative figure from
+ * Sacrum; aggregate per run by taking the latest execution's value.
+ */
+cache_read_tokens?: number | null; 
+/**
  * Cost in USD, serialized as a string to preserve Decimal precision
  * across the Sacrum WS / GraphQL boundary.
  */

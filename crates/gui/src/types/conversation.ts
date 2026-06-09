@@ -336,7 +336,9 @@ export function parseClaudeMessage(
               timestamp,
               toolUseId: item.tool_use_id,
               isError: item.is_error ?? false,
-              result: truncate(resultText.replace(/\n/g, " "), 200),
+              // Full output, newlines preserved — the tool body renders as a
+              // scrollable card. (The compact one-line tool label is separate.)
+              result: resultText,
             });
           }
         }
@@ -588,10 +590,8 @@ export function parseCodexMessage(
             timestamp,
             toolUseId: toolId,
             isError: typeof item.exit_code === "number" && item.exit_code !== 0,
-            result: truncate(
-              (item.aggregated_output ?? "").replace(/\n/g, " "),
-              200
-            ),
+            // Full output, newlines preserved — rendered in a scrollable card.
+            result: item.aggregated_output ?? "",
           });
           break;
         }

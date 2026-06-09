@@ -282,6 +282,19 @@ export interface ErrorMessage extends BaseMessage {
 }
 
 /**
+ * A RESULT message — a step execution's final structured output (its `output`
+ * or `handoff`). Rendered as a distinct, prominent terminal card with the body
+ * pretty-printed when it parses as JSON / an Elixir map.
+ */
+export interface ResultMessage extends BaseMessage {
+  type: "result";
+  /** Short label, e.g. "output" or "handoff". */
+  label?: string;
+  /** The structured output text (pretty-printed at render time). */
+  body: string;
+}
+
+/**
  * A SPAWN message — the recursion point. Carries a child `Thread` (an
  * intra-run subagent linked by `parent_tool_use_id`). The Turn renderer
  * detects `type === "spawn"` and renders a nested <Thread> in place of an
@@ -303,6 +316,7 @@ export type Message =
   | ToolMessage
   | WaitMessage
   | ErrorMessage
+  | ResultMessage
   | SpawnMessage;
 
 // ===========================================================================

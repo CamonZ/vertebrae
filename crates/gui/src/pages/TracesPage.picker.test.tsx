@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { createMockTask, createMockStepExecution } from "../test/test-utils";
+import { createMockTask, createMockTaskRun } from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
 import { TracesPage } from "./TracesPage";
 
@@ -19,13 +19,19 @@ vi.mock("react-router-dom", async () => {
 
 vi.mock("../bindings", () => ({
   commands: {
-    getTask: vi.fn(async () => ({ status: "error", error: { message: "not found" } })),
+    getTask: vi.fn(async () => ({
+      status: "error",
+      error: { message: "not found" },
+    })),
     listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
     getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTaskExecutions: vi.fn(async () => ({ status: "ok", data: [] })),
   },
 }));
 
 let mockTask: ReturnType<typeof createMockTask> | null = null;
+let mockRuns: ReturnType<typeof createMockTaskRun>[] = [];
+let mockActiveRun: ReturnType<typeof createMockTaskRun> | null = null;
 
 vi.mock("../hooks", () => ({
   useTask: () => ({
@@ -35,42 +41,23 @@ vi.mock("../hooks", () => ({
     refetch: vi.fn(),
   }),
   useTaskRuns: () => ({
-    runs: [],
-    activeRun: null,
+    runs: mockRuns,
+    activeRun: mockActiveRun,
     latestRun: null,
-    resolveRun: () => ({ run: null, source: "none" }),
+    resolveRun: () =>
+      mockActiveRun
+        ? { run: mockActiveRun, source: "active" as const }
+        : { run: null, source: "none" as const },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
   }),
-  useTaskRunsForTasks: () => ({
-    runs: [],
+  useRunTrace: () => ({
+    stepExecutions: [],
+    logsByExecutionId: {},
     isLoading: false,
     error: null,
     refetch: vi.fn(),
-  }),
-  useTaskRunTrace: () => ({
-    trace: null,
-    taskRuns: [],
-    executions: [],
-    sessionLogs: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
-
-vi.mock("../hooks/useSubtreeExecutions", () => ({
-  useSubtreeExecutions: () => ({
-    executions: [
-      createMockStepExecution({ id: "ex-1", task_id: "root" }),
-    ],
-    rollups: { totalRuns: 1, totalAttempts: 1, totalCost: 0, totalTokens: 0, totalWallTimeMs: 0 },
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    subtreeTaskIds: ["root"],
-    isInSubtree: vi.fn(),
   }),
 }));
 
@@ -89,6 +76,8 @@ describe("TracesPage picker (empty state)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockTask = null;
+    mockRuns = [];
+    mockActiveRun = null;
     useTaskStore.setState({
       tasks: [
         createMockTask({ id: "abcd1234-aaaa", title: "Refactor router" }),
@@ -104,7 +93,6 @@ describe("TracesPage picker (empty state)", () => {
     renderAt("/traces");
     expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
     expect(screen.getByTestId("task-picker-input")).toBeInTheDocument();
-    // Both seeded tasks should appear in the listbox.
     expect(screen.getAllByRole("option")).toHaveLength(2);
   });
 
@@ -136,6 +124,8 @@ describe("TracesPage switch-task (rail swap)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockTask = createMockTask({ id: "root", title: "Root", level: "task" });
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
     useTaskStore.setState({
       tasks: [
         createMockTask({ id: "root", title: "Root" }),
@@ -147,23 +137,22 @@ describe("TracesPage switch-task (rail swap)", () => {
     });
   });
 
-  it("Switch button swaps the subtree rail for the picker rail", () => {
+  it("Switch button swaps the run-history rail for the picker rail", () => {
     renderAt("/traces/root");
-    expect(screen.getByTestId("subtree-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("run-history-rail")).toBeInTheDocument();
     expect(screen.queryByTestId("traces-picker-rail")).toBeNull();
-    fireEvent.click(screen.getByTestId("subtree-rail-switch-task"));
+    fireEvent.click(screen.getByTestId("run-history-rail-switch-task"));
     expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
-    expect(screen.queryByTestId("subtree-rail")).toBeNull();
+    expect(screen.queryByTestId("run-history-rail")).toBeNull();
     expect(screen.getByTestId("task-picker-input")).toBeInTheDocument();
   });
 
-  it("selecting a task in the rail picker navigates and restores the subtree rail", () => {
+  it("selecting a task in the rail picker navigates and restores the run rail", () => {
     renderAt("/traces/root");
-    fireEvent.click(screen.getByTestId("subtree-rail-switch-task"));
+    fireEvent.click(screen.getByTestId("run-history-rail-switch-task"));
     fireEvent.click(screen.getByTestId("task-picker-option-other-task-id"));
     expect(mockNavigate).toHaveBeenCalledWith("/traces/other-task-id");
-    // After selection, picker rail closes (subtree rail returns) on the same /traces/root view.
     expect(screen.queryByTestId("traces-picker-rail")).toBeNull();
-    expect(screen.getByTestId("subtree-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("run-history-rail")).toBeInTheDocument();
   });
 });

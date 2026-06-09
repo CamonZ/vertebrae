@@ -745,8 +745,8 @@ describe("parseCodexMessage", () => {
       timestamp,
       toolUseId: "c1",
       isError: false,
-      // newlines collapsed into spaces, like the Claude tool_result mapping does.
-      result: "total 8 foo bar",
+      // full output with newlines preserved — rendered in a scrollable card.
+      result: "total 8\nfoo bar",
     });
   });
 

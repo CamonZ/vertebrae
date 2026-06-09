@@ -610,7 +610,6 @@ describe("Router Acceptance Tests", () => {
         expect(screen.getByTestId("traces-page")).toBeInTheDocument();
       });
       expect(screen.getByTestId("traces-header")).toBeInTheDocument();
-      expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
     });
 
     it("renders the picker rail at bare /traces with no taskId", async () => {

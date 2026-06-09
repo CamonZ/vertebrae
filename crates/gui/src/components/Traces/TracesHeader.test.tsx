@@ -8,16 +8,20 @@ const baseRollups = {
   totalAttempts: 11,
   totalCost: 1.2345,
   totalTokens: 12345,
+  rawInputTokens: 3000,
+  cacheReadTokens: 8000,
+  outputTokens: 1345,
   totalWallTimeMs: 65 * 1000, // 1m 5s
 };
 
 describe("TracesHeader", () => {
-  it("renders title, level, and rollup values", () => {
+  it("renders title, level, and hero stats", () => {
     render(
       <TracesHeader
         taskId="task-1"
         title="Refactor auth"
         level="ticket"
+        runState="waiting"
         rollups={baseRollups}
       />
     );
@@ -27,19 +31,26 @@ describe("TracesHeader", () => {
     expect(screen.getByTestId("traces-breadcrumb-level").textContent).toBe(
       "ticket"
     );
-    expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/7/);
-    // Σ Attempts must be a separate stat so callers don't confuse retries
-    // with new runs.
-    expect(screen.getByTestId("traces-rollup-attempts").textContent).toMatch(
+    expect(screen.getByTestId("traces-hero-state").textContent).toMatch(
+      /Waiting/i
+    );
+    expect(screen.getByTestId("traces-hero-runs").textContent).toMatch(/7/);
+    // Executions are a separate stat so callers don't confuse retries with runs.
+    expect(screen.getByTestId("traces-hero-executions").textContent).toMatch(
       /11/
     );
-    expect(screen.getByTestId("traces-rollup-cost").textContent).toMatch(
-      /\$1\.23/
+    expect(screen.getByTestId("traces-hero-tokens").textContent).toMatch(/12k/);
+    // Raw / cache / output breakdown is surfaced alongside the grand total.
+    expect(screen.getByTestId("traces-hero-tokens-raw").textContent).toMatch(
+      /3k raw/
     );
-    expect(screen.getByTestId("traces-rollup-tokens").textContent).toMatch(
-      /12k/
+    expect(screen.getByTestId("traces-hero-tokens-cache").textContent).toMatch(
+      /8k cache/
     );
-    expect(screen.getByTestId("traces-rollup-walltime").textContent).toMatch(
+    expect(screen.getByTestId("traces-hero-tokens-output").textContent).toMatch(
+      /1k out/
+    );
+    expect(screen.getByTestId("traces-hero-runtime").textContent).toMatch(
       /1m 5s/
     );
   });
@@ -124,6 +135,6 @@ describe("TracesHeader", () => {
         error="boom"
       />
     );
-    expect(screen.getByTestId("traces-rollup-error").textContent).toBe("boom");
+    expect(screen.getByTestId("traces-hero-error").textContent).toBe("boom");
   });
 });

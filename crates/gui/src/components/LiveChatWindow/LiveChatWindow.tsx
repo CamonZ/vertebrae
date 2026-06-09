@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useLiveChatStore } from "../../stores/liveChatStore";
 import { detachLiveChat } from "../../utils/detachLiveChat";
-import { MarkdownContent } from "../shared/MarkdownContent";
-import { ChatMessage } from "../molecules/ChatMessage";
+import { EventLog, Thread } from "../thread";
+import { liveChatToThread } from "./liveChatToThread";
 import { LiveChatHistoryDrawer } from "./LiveChatHistoryDrawer";
 import { ChatInput } from "../ChatInput";
 
@@ -215,6 +215,11 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
   const hasLeavableState = Boolean(session) || messages.length > 0;
   const showResumeLink = !session && messages.length === 0 && !!resumableSessionId;
 
+  // Normalize-on-render: derive the canonical chat Thread from the live store's
+  // flat message list. The store (optimistic send + WS reconcile) stays the
+  // source of truth; this memo only reshapes for the unified <Thread> primitive.
+  const liveChatThread = useMemo(() => liveChatToThread(messages), [messages]);
+
   return (
     <div
       data-testid="live-chat-window"
@@ -253,41 +258,18 @@ export function LiveChatWindow({ standalone = false }: LiveChatWindowProps) {
             </div>
           )}
 
-          {messages.map((message) => {
-            const role = message.role === "user" ? "user" : "assistant";
-            const author = role === "user" ? "YOU" : "CLAUDE";
-            return (
-              <div
-                key={message.id}
-                data-testid={`live-chat-message-${message.role}`}
-                className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <ChatMessage
-                  role={role}
-                  author={author}
-                  timestamp={new Date(message.createdAt).toLocaleTimeString()}
-                  streaming={message.pending}
-                  className={
-                    message.error
-                      ? "ring-1 ring-[var(--color-err)]/40 rounded-[var(--radius-lg)]"
-                      : undefined
-                  }
-                >
-                  <MarkdownContent text={message.content} />
-                  {(message.pending || message.error) && (
-                    <div className="mt-2 flex items-center gap-2 text-eyebrow text-[var(--color-fg-mute)]">
-                      {message.pending && <span>sending…</span>}
-                      {message.error && (
-                        <span className="text-[var(--color-err)]">
-                          {message.error}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </ChatMessage>
-              </div>
-            );
-          })}
+          {messages.length > 0 && (
+            <EventLog mode="bare">
+              <Thread
+                thread={liveChatThread}
+                depth={0}
+                mode="bare"
+                reveal="shallow"
+                interactive
+                showHead={false}
+              />
+            </EventLog>
+          )}
           <div ref={messagesEndRef} />
         </div>
 

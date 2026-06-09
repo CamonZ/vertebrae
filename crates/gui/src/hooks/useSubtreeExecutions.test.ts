@@ -93,6 +93,9 @@ describe("useSubtreeExecutions", () => {
       totalAttempts: 4,
       totalCost: 0.4,
       totalTokens: 4 * 75,
+      rawInputTokens: 4 * 50,
+      cacheReadTokens: 0,
+      outputTokens: 4 * 25,
       totalWallTimeMs: 4000,
     });
   });

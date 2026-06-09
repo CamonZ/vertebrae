@@ -19,11 +19,16 @@
 import { useState, type ReactNode } from "react";
 
 import { IdChip } from "../shared/HearthPrimitives";
+import {
+  MarkdownContent,
+  prettyPrintJsonIfPossible,
+} from "../shared/MarkdownContent";
 
 import type {
   AgentMessage,
   ErrorMessage,
   Message,
+  ResultMessage,
   StepKind,
   SystemMessage,
   ToolMessage,
@@ -86,6 +91,11 @@ function LogProse({
 type ToolRowProps = Omit<ToolMessage, "type" | "evt" | "at" | "rel" | "id">;
 
 export function ToolRow(props: ToolRowProps): ReactNode {
+  // When a surface supplies onToggle (chat) the row is controlled by that
+  // surface; otherwise (read-only Traces) it self-manages its open/closed
+  // state so the result body can still be expanded and collapsed.
+  const controlled = props.onToggle != null;
+  const [localCollapsed, setLocalCollapsed] = useState(!!props.collapsed);
   const status: "err" | "pending" | "ok" = props.error
     ? "err"
     : props.status === "pending"
@@ -109,7 +119,10 @@ export function ToolRow(props: ToolRowProps): ReactNode {
 
   const pending = status === "pending";
   const hasBody = !pending && props.body != null && props.body !== "";
-  const collapsed = !!props.collapsed;
+  const collapsed = controlled ? !!props.collapsed : localCollapsed;
+  const toggle = controlled
+    ? props.onToggle
+    : () => setLocalCollapsed((c) => !c);
   const cls =
     "evtool" +
     (status === "err" ? " err" : pending ? " pending" : "") +
@@ -120,7 +133,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
     <div className={cls}>
       <div
         className="evtool-hd"
-        onClick={hasBody ? props.onToggle : undefined}
+        onClick={hasBody ? toggle : undefined}
       >
         {pending ? (
           <span className="evtool-spin" />
@@ -138,7 +151,13 @@ export function ToolRow(props: ToolRowProps): ReactNode {
         {props.dur ? <span className="evtool-dur">{props.dur}</span> : null}
         {hasBody ? <span className="evtool-chev">▾</span> : null}
       </div>
-      {hasBody ? <div className="evtool-bd">{props.body}</div> : null}
+      {hasBody ? (
+        <div className="evtool-bd">
+          {typeof props.body === "string"
+            ? prettyPrintJsonIfPossible(props.body)
+            : props.body}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -228,7 +247,7 @@ function UserBody({
     <div className="evbody">
       <div className="ev-promptline">
         <span className="ev-you">
-          {label || (isPrompt ? "Prompt · interpolated" : "You")}
+          {label || (isPrompt ? "Prompt" : "You")}
         </span>
         {body ? (
           <button
@@ -308,6 +327,7 @@ export function EventRow(props: EventRowProps): ReactNode {
 
   if (type === "wait") return <WaitRow {...props} />;
   if (type === "error") return <ErrorRow {...props} />;
+  if (type === "result") return <ResultRow {...props} />;
 
   // user / system / agent / tool
   const sel = props.selected ? " sel" : "";
@@ -429,6 +449,34 @@ function ErrorRow(
       <div className="evbody">
         <b>{props.title}</b>
         {props.sub ? <span className="sub">{props.sub}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+// A step execution's final structured output. Shown expanded and prominent;
+// the body is pretty-printed when it parses as JSON / an Elixir map.
+function ResultRow(
+  props: ResultMessage & { selected?: boolean; onClick?: () => void }
+): ReactNode {
+  const sel = props.selected ? " sel" : "";
+  const clickable = props.onClick ? { "data-clickable": "" } : {};
+  return (
+    <div
+      className={"evrow evrow--result" + sel}
+      onClick={props.onClick}
+      {...clickable}
+    >
+      <EventWhen at={props.at} rel={props.rel} id={props.id} />
+      <div className="evbody">
+        <div className="evresult">
+          <div className="evresult-hd">{props.label || "output"}</div>
+          {/* MarkdownContent renders markdown AND pretty-prints bare JSON, so
+              the output is formatted whether it's prose or structured. */}
+          <div className="evresult-bd">
+            <MarkdownContent text={props.body} />
+          </div>
+        </div>
       </div>
     </div>
   );
