@@ -46,6 +46,57 @@ function SectionList({ label, items }: { label: string; items: Section[] }) {
   );
 }
 
+function ChecklistItems({ items }: { items: Section[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5">
+      <SubLabel>Checklist Items</SubLabel>
+      <ul className="space-y-1">
+        {items.map((item, i) => {
+          const done = item.done === true;
+          return (
+            <li
+              key={`${item.type}-${item.order ?? i}`}
+              className="flex items-start gap-2 text-[13px] text-[var(--color-fg-soft)]"
+            >
+              <span
+                className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[var(--radius-xs)] border ${
+                  done
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-bg)]"
+                    : "border-[var(--color-line-strong)] text-transparent"
+                }`}
+                aria-hidden="true"
+              >
+                <svg
+                  className="h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M5 13l4 4L19 7"
+                  />
+                </svg>
+              </span>
+              <span
+                className={
+                  done ? "text-[var(--color-fg-mute)] line-through" : undefined
+                }
+              >
+                {item.content}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function SpecSection({
   description,
   sections,
@@ -58,6 +109,9 @@ export function SpecSection({
       context: [] as Section[],
       currentBehavior: [] as Section[],
       desiredBehavior: [] as Section[],
+      checklistItems: [] as Section[],
+      antiPatterns: [] as Section[],
+      failureTests: [] as Section[],
     };
     for (const s of sections) {
       switch (s.type) {
@@ -75,6 +129,15 @@ export function SpecSection({
           break;
         case "desired_behavior":
           result.desiredBehavior.push(s);
+          break;
+        case "checklist_item":
+          result.checklistItems.push(s);
+          break;
+        case "anti_pattern":
+          result.antiPatterns.push(s);
+          break;
+        case "failure_test":
+          result.failureTests.push(s);
           break;
       }
     }
@@ -138,6 +201,9 @@ export function SpecSection({
       <SectionList label="Context" items={grouped.context} />
       <SectionList label="Current Behavior" items={grouped.currentBehavior} />
       <SectionList label="Desired Behavior" items={grouped.desiredBehavior} />
+      <ChecklistItems items={grouped.checklistItems} />
+      <SectionList label="Anti Patterns" items={grouped.antiPatterns} />
+      <SectionList label="Negative Tests" items={grouped.failureTests} />
     </div>
   );
 }

@@ -72,6 +72,20 @@ vi.mock("../../hooks/useTask", () => ({
             done: false,
             done_at: null,
           },
+          {
+            type: "anti_pattern" as const,
+            content: "Do not bypass orchestration",
+            order: 0,
+            done: null,
+            done_at: null,
+          },
+          {
+            type: "failure_test" as const,
+            content: "Reject invalid workflow payloads",
+            order: 0,
+            done: null,
+            done_at: null,
+          },
         ],
         code_refs: [
           {
@@ -370,6 +384,24 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("Test Task")).toBeInTheDocument();
+    });
+  });
+
+  describe("Spec section display", () => {
+    it("displays checklist items, anti patterns, and negative tests", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+
+      expect(screen.getByText("Checklist Items")).toBeInTheDocument();
+      expect(screen.getByText("First step")).toBeInTheDocument();
+      expect(screen.getByText("Second step")).toBeInTheDocument();
+      expect(screen.getByText("Anti Patterns")).toBeInTheDocument();
+      expect(
+        screen.getByText("Do not bypass orchestration")
+      ).toBeInTheDocument();
+      expect(screen.getByText("Negative Tests")).toBeInTheDocument();
+      expect(
+        screen.getByText("Reject invalid workflow payloads")
+      ).toBeInTheDocument();
     });
   });
 
