@@ -52,25 +52,17 @@ describe("SpecSection", () => {
   describe("description display", () => {
     it("shows description when present", () => {
       render(
-        <SpecSection
-          description="A detailed description"
-          sections={[]}
-        />
+        <SpecSection description="A detailed description" sections={[]} />
       );
 
       expect(screen.getByText("A detailed description")).toBeInTheDocument();
     });
 
     it("shows description alongside goals", () => {
-      const sections = [
-        createSection({ type: "goal", content: "The goal" }),
-      ];
+      const sections = [createSection({ type: "goal", content: "The goal" })];
 
       render(
-        <SpecSection
-          description="Supporting details"
-          sections={sections}
-        />
+        <SpecSection description="Supporting details" sections={sections} />
       );
 
       expect(screen.getByText("The goal")).toBeInTheDocument();
@@ -102,16 +94,12 @@ describe("SpecSection", () => {
   });
 
   describe("filters out non-spec sections", () => {
-    it("does not show testing_criterion or checklist_item sections", () => {
+    it("does not show testing_criterion sections", () => {
       const sections = [
         createSection({ type: "goal", content: "The goal" }),
         createSection({
           type: "testing_criterion",
           content: "Should not appear in spec",
-        }),
-        createSection({
-          type: "checklist_item",
-          content: "Should not appear in spec either",
         }),
       ];
 
@@ -121,9 +109,60 @@ describe("SpecSection", () => {
       expect(
         screen.queryByText("Should not appear in spec")
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("checklist and negative-space sections", () => {
+    it("shows checklist items with completion state", () => {
+      const sections = [
+        createSection({
+          type: "checklist_item",
+          content: "Complete the first step",
+          order: 0,
+          done: true,
+        }),
+        createSection({
+          type: "checklist_item",
+          content: "Complete the second step",
+          order: 1,
+          done: false,
+        }),
+      ];
+
+      render(<SpecSection description={null} sections={sections} />);
+
+      expect(screen.getByText("Checklist Items")).toBeInTheDocument();
+      expect(screen.getByText("Complete the first step")).toHaveClass(
+        "line-through"
+      );
+      expect(screen.getByText("Complete the second step")).toBeInTheDocument();
+      expect(screen.getByText("Complete the second step")).not.toHaveClass(
+        "line-through"
+      );
+    });
+
+    it("shows anti patterns and negative tests", () => {
+      const sections = [
+        createSection({
+          type: "anti_pattern",
+          content: "Do not bypass the service layer",
+        }),
+        createSection({
+          type: "failure_test",
+          content: "Reject malformed task payloads",
+        }),
+      ];
+
+      render(<SpecSection description={null} sections={sections} />);
+
+      expect(screen.getByText("Anti Patterns")).toBeInTheDocument();
       expect(
-        screen.queryByText("Should not appear in spec either")
-      ).not.toBeInTheDocument();
+        screen.getByText("Do not bypass the service layer")
+      ).toBeInTheDocument();
+      expect(screen.getByText("Negative Tests")).toBeInTheDocument();
+      expect(
+        screen.getByText("Reject malformed task payloads")
+      ).toBeInTheDocument();
     });
   });
 
