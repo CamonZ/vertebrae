@@ -53,6 +53,7 @@ import type {
   AgentMessage,
   ErrorMessage,
   Message,
+  ResultMessage,
   Run,
   StepKind,
   Thread,
@@ -220,6 +221,7 @@ function toolMessage(
     rel: rel(runStartMs, atMs),
     status,
     error: result?.isError || undefined,
+    // Collapsed by default; ToolRow self-toggles on click (read-only Traces).
     collapsed: true,
   };
   if (isShell) {
@@ -402,6 +404,7 @@ function stepExecutionToThread(
     const logs = logsByExecutionId[execId] ?? [];
     const events = parseSessionLogs(logs);
     turns = eventsToTurns(events, exec, runStartMs);
+    turns = appendStepResult(turns, exec, execId);
   }
 
   const toolCount = turns.reduce(
@@ -426,6 +429,82 @@ function stepExecutionToThread(
     summary,
     turns,
   };
+}
+
+/** Recursively key-sorted JSON, so two serializations of the same value compare
+ *  equal regardless of whitespace or key order. Returns null for non-JSON. */
+function stableStringify(v: unknown): string {
+  if (v === null || typeof v !== "object") return JSON.stringify(v);
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  const obj = v as Record<string, unknown>;
+  return (
+    "{" +
+    Object.keys(obj)
+      .sort()
+      .map((k) => JSON.stringify(k) + ":" + stableStringify(obj[k]))
+      .join(",") +
+    "}"
+  );
+}
+
+function canonicalJson(s: string): string | null {
+  const t = s.trim();
+  if (t[0] !== "{" && t[0] !== "[") return null;
+  try {
+    return stableStringify(JSON.parse(t));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Append a step execution's final structured output as a terminal ResultMessage
+ * on the last turn (so it reads as the step's final result without opening a new
+ * conversational turn). Prefers `output`; falls back to `handoff`. Rendered
+ * pretty-printed by the EventRow when it parses as JSON / an Elixir map.
+ */
+function appendStepResult(
+  turns: Turn[],
+  exec: StepExecution,
+  execId: string
+): Turn[] {
+  const output = (exec.output ?? "").trim();
+  const handoff = (exec.handoff ?? "").trim();
+  const body = output || handoff;
+  if (!body) return turns;
+
+  // The final output is usually ALSO present as the trailing agent message in
+  // the stream (the agent's final text == exec.output). Drop that duplicate so
+  // the output renders exactly once — as the dedicated card. Matches either an
+  // exact string (markdown / plain text) OR the same JSON value serialized
+  // differently (the model emits compact JSON; the backend stores it
+  // normalized/pretty). Genuinely different output keeps both.
+  const bodyCanon = canonicalJson(body);
+  const isDuplicate = (m: Message): boolean => {
+    if (m.type !== "agent") return false;
+    const prose = (m as AgentMessage).prose;
+    if (typeof prose !== "string") return false;
+    if (prose.trim() === body) return true;
+    return bodyCanon !== null && canonicalJson(prose) === bodyCanon;
+  };
+  const deduped = turns
+    .map((t) => ({ ...t, messages: t.messages.filter((m) => !isDuplicate(m)) }))
+    .filter((t) => t.messages.length > 0);
+
+  const result: ResultMessage = {
+    evt: `${execId}-output`,
+    type: "result",
+    label: output ? "output" : "handoff",
+    body,
+  };
+  if (deduped.length === 0) {
+    return [{ id: `${execId}-result`, messages: [result] }];
+  }
+  const last = deduped[deduped.length - 1];
+  return [
+    ...deduped.slice(0, -1),
+    { ...last, messages: [...last.messages, result] },
+  ];
 }
 
 /** Roll-up status for a step's summary mark. */
@@ -490,13 +569,25 @@ function eventsToTurns(
   // step's interpolated prompt as a SystemMessage. reveal="shallow" (chat)
   // drops these; reveal="deep" (traces) shows them.
   if (exec.prompt && exec.prompt.trim()) {
+    // Keep the row quiet: a one-line summary in `text`, the full interpolated
+    // prompt in the collapsible `body` (revealed via "show input"). Otherwise
+    // the whole multi-KB prompt floods the stream.
+    const fullPrompt = exec.prompt.trim();
+    const firstLine =
+      fullPrompt
+        .split("\n")
+        .map((l) => l.trim())
+        .find((l) => l.length > 0) ?? fullPrompt;
+    const summary =
+      firstLine.length > 140 ? firstLine.slice(0, 139).trimEnd() + "…" : firstLine;
     const sys: Message = {
       evt: `${exec.id ?? "exec"}-prompt`,
       type: "system",
       at: clock(exec.started_at),
       rel: rel(runStartMs, ms(exec.started_at)),
-      label: "System · interpolated",
-      text: exec.prompt,
+      label: "System",
+      text: summary,
+      body: fullPrompt,
     };
     messages.push(sys);
   }

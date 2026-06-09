@@ -11,6 +11,7 @@ import {
 import type { SessionLog, StepExecution, TaskRun } from "../../bindings";
 import type {
   AgentMessage,
+  ResultMessage,
   SpawnMessage,
   SystemMessage,
   ToolMessage,
@@ -215,8 +216,22 @@ describe("runToThreads — Claude (anthropic) turn grouping + tool pairing", () 
     const msgs = t.turns[0].messages;
     const sys = msgs[0] as SystemMessage;
     expect(sys.type).toBe("system");
-    expect(sys.label).toBe("System · interpolated");
+    expect(sys.label).toBe("System");
     expect(sys.text).toBe("do the thing");
+    expect(sys.body).toBe("do the thing");
+  });
+
+  it("summarizes a long multi-line prompt to one line + full collapsible body", () => {
+    const firstLine = "Decide whether the proposed child set is complete ".repeat(4);
+    const prompt = `${firstLine}\n\nApproval gates:\n- every parent ref appears\n- no uncovered rows`;
+    const sys = runToThreads({
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "sp", prompt })],
+      logsByExecutionId: {},
+    })[0].turns[0].messages[0] as SystemMessage;
+    expect((sys.text as string).length).toBeLessThanOrEqual(141);
+    expect((sys.text as string).endsWith("…")).toBe(true);
+    expect(sys.body).toBe(prompt.trim());
   });
 
   it("maps assistant text to an AgentMessage prose row", () => {
@@ -353,6 +368,99 @@ describe("runToThreads — wait_children step", () => {
     expect(wait.type).toBe("wait");
     expect(wait.text).toBe("Waiting on 3 child tasks");
     expect(wait.childRunIds).toEqual([]);
+  });
+
+  it("appends the step's final structured output as a terminal ResultMessage", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [
+        exec({
+          id: "er",
+          step_name: "verify_changes",
+          output: '{"note":"verified","pr_url":null}',
+        }),
+      ],
+      logsByExecutionId: {},
+    };
+    const [t] = runToThreads(input);
+    const result = t.turns
+      .flatMap((turn) => turn.messages)
+      .find((m) => m.type === "result") as ResultMessage | undefined;
+    expect(result).toBeDefined();
+    expect(result?.label).toBe("output");
+    expect(result?.body).toBe('{"note":"verified","pr_url":null}');
+  });
+
+  it("dedups the trailing agent message that duplicates the output", () => {
+    const finalText = "All set — the suite is green.";
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "ed", output: finalText })],
+      logsByExecutionId: {
+        ed: [
+          log(
+            "ed",
+            { type: "system", subtype: "init", model: "m", session_id: "s" },
+            "2024-01-01T10:00:01Z"
+          ),
+          log(
+            "ed",
+            { type: "assistant", message: { content: [{ type: "text", text: finalText }] } },
+            "2024-01-01T10:00:02Z"
+          ),
+        ],
+      },
+    };
+    const msgs = runToThreads(input)[0].turns.flatMap((t) => t.messages);
+    // The output renders once — as the result card, not also as agent prose.
+    expect(msgs.filter((m) => m.type === "result")).toHaveLength(1);
+    expect(
+      msgs.some(
+        (m) => m.type === "agent" && (m as AgentMessage).prose === finalText
+      )
+    ).toBe(false);
+  });
+
+  it("dedups a JSON output that the agent emitted with different serialization", () => {
+    // Model emits compact JSON; backend stores it normalized/pretty — same value.
+    const compact = '{"verdict":"pass","covered_by":["a","b"]}';
+    const pretty =
+      '{\n  "covered_by": [\n    "a",\n    "b"\n  ],\n  "verdict": "pass"\n}';
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "ej", output: pretty })],
+      logsByExecutionId: {
+        ej: [
+          log(
+            "ej",
+            { type: "system", subtype: "init", model: "m", session_id: "s" },
+            "2024-01-01T10:00:01Z"
+          ),
+          log(
+            "ej",
+            { type: "assistant", message: { content: [{ type: "text", text: compact }] } },
+            "2024-01-01T10:00:02Z"
+          ),
+        ],
+      },
+    };
+    const msgs = runToThreads(input)[0].turns.flatMap((t) => t.messages);
+    expect(msgs.filter((m) => m.type === "result")).toHaveLength(1);
+    // The compact agent prose is recognised as the same JSON and dropped.
+    expect(msgs.some((m) => m.type === "agent")).toBe(false);
+  });
+
+  it("falls back to handoff when output is absent", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: "eh", handoff: '{"workspace":"/tmp"}' })],
+      logsByExecutionId: {},
+    };
+    const result = runToThreads(input)[0]
+      .turns.flatMap((turn) => turn.messages)
+      .find((m) => m.type === "result") as ResultMessage | undefined;
+    expect(result?.label).toBe("handoff");
+    expect(result?.body).toBe('{"workspace":"/tmp"}');
   });
 });
 

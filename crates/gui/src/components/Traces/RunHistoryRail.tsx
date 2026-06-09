@@ -10,6 +10,8 @@ import type { Task, TaskRun, TaskRunStatus } from "../../bindings";
 import type { ResolvedRunSource } from "../../hooks/useTaskRuns";
 import { isActiveRunStatus, runStatusLabel } from "../../utils/runState";
 import { IdentityBadge, ScanIdentifier } from "../shared/EntityId";
+import { flattenThreads } from "../thread/Thread";
+import type { Thread as ThreadModel } from "../thread/types";
 import { safeMs } from "./timeUtils";
 
 const RAIL_STORAGE_KEY = "vertebrae.traces.runHistoryRail.width";
@@ -25,8 +27,8 @@ const HEADER_COUNT_CLASS =
 
 interface RunHistoryRailProps {
   /**
-   * Tasks in the current trace tree (ancestors + self + descendants).
-   * Used to render the top TASKS tree.
+   * Tasks shown in the top TASKS tree: the entry task + its descendants when
+   * scoped to a task (e.g. from a detail panel), or the full tree on /traces.
    */
   tasks: readonly Task[];
   /** All known runs across every task in the trace tree. */
@@ -46,10 +48,49 @@ interface RunHistoryRailProps {
   onSelectTask: (taskId: string) => void;
   /** Select a run from the RUNS panel (scopes the trace to it). */
   onSelectRun: (runId: string) => void;
+  /** The active run's root threads — expanded inline under the active run. */
+  activeRunThreads?: ThreadModel[];
+  /** Currently selected evt / thread id (drives the .sel ring in the tree). */
+  selectedEvt?: string | null;
+  /** Jump to a thread node in the stream (select + scroll-into-view). */
+  onJump?: (id: string) => void;
   /** Switch to the task picker without losing the rail. */
   onSwitchTask?: () => void;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+}
+
+type DayGroup = "Today" | "Yesterday" | "Earlier";
+
+/** Bucket a run's start into Today / Yesterday / Earlier (local time). */
+function dayGroupOf(iso: string | null): DayGroup {
+  const ms = safeMs(iso);
+  if (ms === null) return "Earlier";
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
+  const startOfYesterday = startOfToday - 24 * 3600 * 1000;
+  if (ms >= startOfToday) return "Today";
+  if (ms >= startOfYesterday) return "Yesterday";
+  return "Earlier";
+}
+
+function stepKindColorVar(kind: string): string {
+  switch (kind) {
+    case "eval":
+      return "var(--color-step-eval, var(--color-info))";
+    case "route":
+      return "var(--color-step-route, var(--color-warn))";
+    case "human":
+      return "var(--color-step-human, var(--color-info))";
+    case "wait":
+      return "var(--color-step-wait, var(--color-fg-mute))";
+    default:
+      return "var(--color-step-execute, var(--color-accent))";
+  }
 }
 
 function statusClasses(status: TaskRunStatus): string {
@@ -230,22 +271,33 @@ function TaskRow({ row, isCurrent, onSelect }: TaskRowProps): ReactNode {
   );
 }
 
-interface RunRowProps {
+interface RunNodeProps {
   run: TaskRun;
   isActive: boolean;
   activeRunSource: ResolvedRunSource;
   onSelect: () => void;
+  /** Active run's threads — expanded inline when this row is the active one. */
+  activeRunThreads?: ThreadModel[];
+  selectedEvt?: string | null;
+  onJump?: (id: string) => void;
 }
 
-function RunRow({
+function RunNode({
   run,
   isActive,
   activeRunSource,
   onSelect,
-}: RunRowProps): ReactNode {
+  activeRunThreads,
+  selectedEvt,
+  onJump,
+}: RunNodeProps): ReactNode {
   const terminal = !isActiveRunStatus(run.status);
   const label = runStatusLabel(run.status);
   const glyph = statusGlyph(run.status);
+  const nodes =
+    isActive && activeRunThreads
+      ? flattenThreads(activeRunThreads, 0, [])
+      : null;
   return (
     <li
       data-testid="run-history-row"
@@ -299,6 +351,49 @@ function RunRow({
           </span>
         </span>
       </button>
+      {nodes && nodes.length > 0 && (
+        <div
+          data-testid="run-history-run-threads"
+          className="mx-2 mb-2 ml-4 border-l border-[var(--color-line)] pl-1"
+        >
+          {nodes.map((node) => {
+            const depth = Math.min(node.depth, 2);
+            const sel = selectedEvt === node.id;
+            return (
+              <button
+                type="button"
+                key={node.id}
+                data-testid="run-history-trace-thread"
+                data-thread-id={node.id}
+                data-depth={depth}
+                data-selected={sel ? "true" : "false"}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onJump?.(node.id);
+                }}
+                className={`flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1 text-left font-mono text-2xs transition-colors hover:bg-[var(--color-bg-3)] ${
+                  sel
+                    ? "bg-[var(--color-accent)]/10 text-[var(--color-fg)] shadow-[inset_2px_0_0_var(--color-accent)]"
+                    : "text-[var(--color-fg-soft)]"
+                }`}
+                style={{ paddingLeft: `${8 + depth * 14}px` }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-1.5 w-1.5 shrink-0 rounded-[2px]"
+                  style={{ background: stepKindColorVar(node.kind) }}
+                />
+                <span className="min-w-0 flex-1 truncate">{node.label}</span>
+                {node.summary.turns != null && (
+                  <span className="shrink-0 text-[var(--color-fg-mute)]">
+                    {node.summary.turns}t
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </li>
   );
 }
@@ -311,6 +406,9 @@ export function RunHistoryRail({
   activeRunSource,
   onSelectTask,
   onSelectRun,
+  activeRunThreads,
+  selectedEvt,
+  onJump,
   onSwitchTask,
   collapsed,
   onToggleCollapsed,
@@ -359,6 +457,21 @@ export function RunHistoryRail({
     () => currentTaskRuns.find((r) => r.id === activeRunId) ?? null,
     [activeRunId, currentTaskRuns]
   );
+
+  // Group the task's runs by day (Today / Yesterday / Earlier), newest first.
+  const groupedRuns = useMemo(() => {
+    const order: DayGroup[] = ["Today", "Yesterday", "Earlier"];
+    const buckets = new Map<DayGroup, TaskRun[]>();
+    for (const run of currentTaskRuns) {
+      const g = dayGroupOf(run.started_at ?? run.inserted_at ?? null);
+      const bucket = buckets.get(g);
+      if (bucket) bucket.push(run);
+      else buckets.set(g, [run]);
+    }
+    return order
+      .filter((g) => (buckets.get(g)?.length ?? 0) > 0)
+      .map((g) => ({ group: g, runs: buckets.get(g)! }));
+  }, [currentTaskRuns]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -663,18 +776,30 @@ export function RunHistoryRail({
               No runs for this task yet.
             </div>
           ) : (
-            <ul
-              data-testid="run-history-rail-list"
-              className="divide-y divide-border"
-            >
-              {currentTaskRuns.map((run) => (
-                <RunRow
-                  key={run.id}
-                  run={run}
-                  isActive={run.id === activeRunId}
-                  activeRunSource={activeRunSource}
-                  onSelect={() => onSelectRun(run.id)}
-                />
+            <ul data-testid="run-history-rail-list">
+              {groupedRuns.map(({ group, runs: groupRuns }) => (
+                <li key={group} data-testid="run-history-day-group">
+                  <div
+                    data-testid="run-history-day-label"
+                    className="px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-fg-mute)]"
+                  >
+                    {group}
+                  </div>
+                  <ul>
+                    {groupRuns.map((run) => (
+                      <RunNode
+                        key={run.id}
+                        run={run}
+                        isActive={run.id === activeRunId}
+                        activeRunSource={activeRunSource}
+                        onSelect={() => onSelectRun(run.id)}
+                        activeRunThreads={activeRunThreads}
+                        selectedEvt={selectedEvt}
+                        onJump={onJump}
+                      />
+                    ))}
+                  </ul>
+                </li>
               ))}
             </ul>
           )}

@@ -12,7 +12,7 @@ import type {
   MainMarker,
   DelegationEdge,
   ThresholdMarkerKind,
-} from "./timeline";
+} from "./legacyMarkers";
 
 function threshold(kind: ThresholdMarkerKind): ThresholdMarker {
   return {

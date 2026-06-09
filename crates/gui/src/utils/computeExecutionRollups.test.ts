@@ -37,6 +37,9 @@ describe("computeExecutionRollups", () => {
       totalAttempts: 0,
       totalCost: 0,
       totalTokens: 0,
+      rawInputTokens: 0,
+      cacheReadTokens: 0,
+      outputTokens: 0,
       totalWallTimeMs: 0,
     });
   });
@@ -52,8 +55,59 @@ describe("computeExecutionRollups", () => {
     expect(rollups.totalRuns).toBe(1);
     expect(rollups.totalAttempts).toBe(3);
     expect(rollups.totalCost).toBeCloseTo(0.85, 10);
+    expect(rollups.rawInputTokens).toBe(100 + 200 + 10);
+    expect(rollups.outputTokens).toBe(50 + 75 + 5);
+    expect(rollups.cacheReadTokens).toBe(0);
+    // With no cache reads, the grand total still equals raw input + output.
     expect(rollups.totalTokens).toBe(100 + 50 + 200 + 75 + 10 + 5);
     expect(rollups.totalWallTimeMs).toBe(2100);
+  });
+
+  it("breaks tokens into raw input / cache hits / output and folds cache into the total", () => {
+    const rollups = computeExecutionRollups([
+      exec({
+        task_run_id: "run-A",
+        input_tokens: 100,
+        output_tokens: 40,
+        cache_read_tokens: 5000,
+      }),
+    ]);
+    expect(rollups.rawInputTokens).toBe(100);
+    expect(rollups.outputTokens).toBe(40);
+    expect(rollups.cacheReadTokens).toBe(5000);
+    expect(rollups.totalTokens).toBe(100 + 5000 + 40);
+  });
+
+  it("takes each run's latest cache_read (session-cumulative), not the sum of attempts", () => {
+    // cache_read_tokens is cumulative across the provider session, so the
+    // newest attempt already reflects the run's full cache reads. Summing all
+    // three attempts (3000+6000+9000) would triple-count.
+    const rollups = computeExecutionRollups([
+      exec({
+        task_run_id: "run-X",
+        completed_at: "2026-01-01T00:00:01.000Z",
+        cache_read_tokens: 3000,
+      }),
+      exec({
+        task_run_id: "run-X",
+        completed_at: "2026-01-01T00:00:03.000Z",
+        cache_read_tokens: 9000,
+      }),
+      exec({
+        task_run_id: "run-X",
+        completed_at: "2026-01-01T00:00:02.000Z",
+        cache_read_tokens: 6000,
+      }),
+    ]);
+    expect(rollups.cacheReadTokens).toBe(9000);
+  });
+
+  it("sums latest cache_read across distinct runs", () => {
+    const rollups = computeExecutionRollups([
+      exec({ task_run_id: "run-A", cache_read_tokens: 1000 }),
+      exec({ task_run_id: "run-B", cache_read_tokens: 2000 }),
+    ]);
+    expect(rollups.cacheReadTokens).toBe(3000);
   });
 
   it("counts distinct task_run_ids as totalRuns and StepExecutions as totalAttempts", () => {

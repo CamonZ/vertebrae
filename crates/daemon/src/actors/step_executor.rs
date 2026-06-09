@@ -236,6 +236,25 @@ pub fn build_claude_command_with_settings(
     Ok(cmd)
 }
 
+/// Convert a Codex `turn.completed` usage into the daemon's [`StreamMetrics`].
+///
+/// Codex's `input_tokens` already includes the cached portion —
+/// `cached_input_tokens` is a *subset* of it (see codex-rs
+/// `TokenUsage::non_cached_input`, which derives non-cached as
+/// `input_tokens - cached_input_tokens`). So `input_tokens` maps straight
+/// across as the total input; adding `cached_input_tokens` on top would
+/// double-count the cache. Codex emits neither `cost_usd` nor `duration_ms`.
+fn codex_usage_to_metrics(
+    usage: &crate::codex_jsonl::CodexUsage,
+) -> crate::stream_json::StreamMetrics {
+    crate::stream_json::StreamMetrics {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cost_usd: 0.0,
+        duration_ms: 0,
+    }
+}
+
 /// Emit the verbose `claude_argv` checkpoint with the resolved program/argv
 /// and selected provider; returns the formatted argv so call sites and tests
 /// can observe what was logged. Shared by every built-in provider command
@@ -556,18 +575,10 @@ impl StepExecutor {
                                         &mut codex_aggregate,
                                     ) && let Ok(mut slot) = result_slot.lock()
                                     {
-                                        // Codex reports cached input tokens separately; roll
-                                        // them into input_tokens so Sacrum sees total input
-                                        // cost. cost_usd/duration_ms aren't emitted by Codex.
-                                        slot.metrics = codex_aggregate.usage.as_ref().map(|u| {
-                                            crate::stream_json::StreamMetrics {
-                                                input_tokens: u.input_tokens
-                                                    + u.cached_input_tokens,
-                                                output_tokens: u.output_tokens,
-                                                cost_usd: 0.0,
-                                                duration_ms: 0,
-                                            }
-                                        });
+                                        slot.metrics = codex_aggregate
+                                            .usage
+                                            .as_ref()
+                                            .map(codex_usage_to_metrics);
                                         slot.result_text = codex_aggregate.final_output.clone();
                                         slot.provider_error = codex_aggregate.error.clone();
                                         if codex_aggregate.output_schema_used {
@@ -856,6 +867,24 @@ mod tests {
             shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         }
+    }
+
+    #[test]
+    fn codex_usage_to_metrics_does_not_double_count_cached_input() {
+        // codex-rs `input_tokens` already includes `cached_input_tokens` (the
+        // cached tokens are a subset of total input). The metric must pass
+        // `input_tokens` through as-is — adding cached on top double-counts.
+        let usage = crate::codex_jsonl::CodexUsage {
+            input_tokens: 1500,
+            cached_input_tokens: 200,
+            output_tokens: 800,
+            reasoning_output_tokens: 120,
+        };
+        let metrics = codex_usage_to_metrics(&usage);
+        assert_eq!(metrics.input_tokens, 1500); // not 1700
+        assert_eq!(metrics.output_tokens, 800);
+        assert_eq!(metrics.cost_usd, 0.0);
+        assert_eq!(metrics.duration_ms, 0);
     }
 
     #[test]

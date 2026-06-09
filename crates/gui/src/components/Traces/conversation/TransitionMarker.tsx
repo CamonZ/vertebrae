@@ -14,7 +14,7 @@ import {
   thresholdKindBorderClass,
   thresholdKindClass,
 } from "../levelColors";
-import type { ThresholdMarkerKind } from "../timeline";
+import type { ThresholdMarkerKind } from "../legacyMarkers";
 import { humanizeStepName } from "./EventRenderer";
 
 interface TransitionMarkerProps {

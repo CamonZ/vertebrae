@@ -82,14 +82,21 @@ impl SacrumExecutionService {
             transition_result: response.transition_result.clone(),
             model_used: response.model.clone(),
             session_id: None,
-            token_usage: (response.effective_input_tokens().is_some()
-                || response.effective_output_tokens().is_some())
-            .then(|| {
-                vertebrae_core::TokenUsage::new(
-                    response.effective_input_tokens().unwrap_or(0).max(0) as u64,
-                    response.effective_output_tokens().unwrap_or(0).max(0) as u64,
-                )
-            }),
+            token_usage: {
+                let input = response.effective_input_tokens();
+                let output = response.effective_output_tokens();
+                let cache_read = response.effective_cache_read_tokens();
+                (input.is_some() || output.is_some() || cache_read.is_some()).then(|| {
+                    let mut usage = vertebrae_core::TokenUsage::new(
+                        input.unwrap_or(0).max(0) as u64,
+                        output.unwrap_or(0).max(0) as u64,
+                    );
+                    if let Some(cr) = cache_read {
+                        usage = usage.with_cache_read(cr.max(0) as u64);
+                    }
+                    usage
+                })
+            },
             cost_usd: response.cost,
             duration_ms: response.duration_ms.map(|v| v as u64),
             model_provider: response.model_provider.clone(),
@@ -563,6 +570,48 @@ mod tests {
         let token_usage = execution.token_usage.expect("token_usage populated");
         assert_eq!(token_usage.input_tokens, 1200);
         assert_eq!(token_usage.output_tokens, 200);
+        // Cache-read ("cache hit") tokens are carried through from the session
+        // rollup rather than dropped.
+        assert_eq!(token_usage.cache_read_input_tokens, Some(300));
+    }
+
+    #[test]
+    fn test_response_to_execution_carries_cache_read_when_only_field() {
+        // Even with no input/output, a present cache-read figure builds a
+        // TokenUsage so the GUI can surface cache hits.
+        let response = StepExecutionResponse {
+            id: "exec-cache".to_string(),
+            task_id: "task-1".to_string(),
+            task_run_id: None,
+            workflow_id: "wf-1".to_string(),
+            step_name: "implement".to_string(),
+            step_type: None,
+            status: "completed".to_string(),
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model: None,
+            model_provider: None,
+            input_tokens: None,
+            output_tokens: None,
+            session_input_tokens: None,
+            session_cache_read_input_tokens: None,
+            session_output_tokens: None,
+            session_total_tokens: None,
+            context_window_input_tokens: None,
+            context_window_cache_read_input_tokens: Some(4096),
+            context_window_total_tokens: None,
+            cost: None,
+            duration_ms: None,
+            handoff: None,
+            inserted_at: None,
+            updated_at: None,
+        };
+
+        let execution = SacrumExecutionService::response_to_execution(&response);
+        let token_usage = execution.token_usage.expect("token_usage populated");
+        assert_eq!(token_usage.cache_read_input_tokens, Some(4096));
     }
 
     #[test]

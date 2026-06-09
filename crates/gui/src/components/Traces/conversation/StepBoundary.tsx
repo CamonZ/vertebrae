@@ -18,7 +18,7 @@ import {
   thresholdKindBorderClass,
   thresholdKindClass,
 } from "../levelColors";
-import type { ThresholdMarkerKind } from "../timeline";
+import type { ThresholdMarkerKind } from "../legacyMarkers";
 import { formatDurationShort, humanizeStepName } from "./EventRenderer";
 
 /**

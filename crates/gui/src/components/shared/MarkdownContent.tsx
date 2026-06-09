@@ -279,7 +279,7 @@ function looksLikeJsonOrMap(trimmed: string): boolean {
   return firstChar === "%" && trimmed[1] === "{";
 }
 
-function prettyPrintJsonIfPossible(source: string): string {
+export function prettyPrintJsonIfPossible(source: string): string {
   const trimmed = source.trim();
   if (!trimmed || !looksLikeJsonOrMap(trimmed)) return source;
   try {

@@ -11,8 +11,8 @@ export type {
   UseTaskRunsForTasksResult,
   UseTaskRunsResult,
 } from "./useTaskRuns";
-export { useTaskRunTrace } from "./useTaskRunTrace";
-export type { UseTaskRunTraceResult } from "./useTaskRunTrace";
+export { useRunTrace } from "./useRunTrace";
+export type { UseRunTraceResult } from "./useRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";

@@ -323,6 +323,18 @@ impl StepExecutionResponse {
                 }
             })
     }
+
+    /// Cache-read ("cache hit") input tokens for this execution.
+    ///
+    /// There is no per-step cache column, so we read the session-cumulative
+    /// figure (preferred) and fall back to the context-window snapshot. Because
+    /// the session figure is cumulative across the provider session, callers
+    /// aggregating per TaskRun should take the run's *latest* execution value
+    /// rather than summing across attempts.
+    pub fn effective_cache_read_tokens(&self) -> Option<i64> {
+        self.session_cache_read_input_tokens
+            .or(self.context_window_cache_read_input_tokens)
+    }
 }
 
 /// TaskRun response from Sacrum API (matches TaskRun GraphQL fields).

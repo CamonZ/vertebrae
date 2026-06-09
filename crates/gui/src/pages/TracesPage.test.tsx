@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, render as rtlRender } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { render as rtlRender } from "@testing-library/react";
-import { createMockTask, createMockStepExecution } from "../test/test-utils";
+import {
+  createMockTask,
+  createMockTaskRun,
+  createMockStepExecution,
+} from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
 import { TracesPage } from "./TracesPage";
 
@@ -20,15 +23,23 @@ vi.mock("react-router-dom", async () => {
 
 vi.mock("../bindings", () => ({
   commands: {
-    getTask: vi.fn(async () => ({ status: "error", error: { message: "not found" } })),
+    getTask: vi.fn(async () => ({
+      status: "error",
+      error: { message: "not found" },
+    })),
     listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
     getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTaskExecutions: vi.fn(async () => ({ status: "ok", data: [] })),
+    stopRun: vi.fn(async () => ({ status: "ok", data: null })),
   },
 }));
 
 let mockTask: ReturnType<typeof createMockTask> | null = null;
 let mockTaskLoading = false;
 let mockTaskError: string | null = null;
+let mockRuns: ReturnType<typeof createMockTaskRun>[] = [];
+let mockActiveRun: ReturnType<typeof createMockTaskRun> | null = null;
+let mockExecutions: ReturnType<typeof createMockStepExecution>[] = [];
 
 vi.mock("../hooks", () => ({
   useTask: () => ({
@@ -38,71 +49,23 @@ vi.mock("../hooks", () => ({
     refetch: vi.fn(),
   }),
   useTaskRuns: () => ({
-    runs: [],
-    activeRun: null,
+    runs: mockRuns,
+    activeRun: mockActiveRun,
     latestRun: null,
-    resolveRun: () => ({ run: null, source: "none" }),
+    resolveRun: () =>
+      mockActiveRun
+        ? { run: mockActiveRun, source: "active" as const }
+        : { run: null, source: "none" as const },
     isLoading: false,
     error: null,
     refetch: vi.fn(),
   }),
-  useTaskRunsForTasks: () => ({
-    runs: [],
+  useRunTrace: () => ({
+    stepExecutions: mockExecutions,
+    logsByExecutionId: {},
     isLoading: false,
     error: null,
     refetch: vi.fn(),
-  }),
-  useTaskRunTrace: () => ({
-    trace: null,
-    taskRuns: [],
-    executions: [],
-    sessionLogs: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
-
-const subtreeExecutions = [
-  createMockStepExecution({
-    id: "ex-1",
-    task_id: "root",
-    task_run_id: "run-root",
-    status: "completed",
-    step_name: "in_progress",
-    cost: "0.2",
-    duration_ms: 10000,
-  }),
-  createMockStepExecution({
-    id: "ex-2",
-    task_id: "child",
-    task_run_id: "run-child",
-    status: "failed",
-    step_name: "in_progress",
-    cost: "0.22",
-    duration_ms: 20000,
-  }),
-];
-
-// TracesPage recomputes its own rollups from executions + logs, so this
-// hook field only satisfies the mock shape — the page no longer reads it.
-const subtreeRollups = {
-  totalRuns: subtreeExecutions.length,
-  totalAttempts: subtreeExecutions.length,
-  totalCost: 0.42,
-  totalTokens: 8000,
-  totalWallTimeMs: 30000,
-};
-
-vi.mock("../hooks/useSubtreeExecutions", () => ({
-  useSubtreeExecutions: () => ({
-    executions: subtreeExecutions,
-    rollups: subtreeRollups,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    subtreeTaskIds: ["root", "child"],
-    isInSubtree: vi.fn(),
   }),
 }));
 
@@ -117,82 +80,62 @@ function renderAt(path: string) {
   );
 }
 
-describe("TracesPage", () => {
+describe("TracesPage (single-run)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    mockTask = createMockTask({
-      id: "root",
-      title: "Root Epic",
-      level: "epic",
-    });
+    mockTask = createMockTask({ id: "root", title: "Root Epic", level: "epic" });
     mockTaskLoading = false;
     mockTaskError = null;
+    mockRuns = [];
+    mockActiveRun = null;
+    mockExecutions = [];
     useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "root", title: "Root Epic", level: "epic" }),
-        createMockTask({
-          id: "child",
-          title: "Child Ticket",
-          level: "ticket",
-          parent_id: "root",
-        }),
-      ],
+      tasks: [createMockTask({ id: "root", title: "Root Epic", level: "epic" })],
       selectedTaskId: null,
       selectedTask: null,
       isLoading: false,
     });
   });
 
-  it("renders header with task title and subtree rollup", () => {
+  it("renders the header with the task title", () => {
     renderAt("/traces/root");
     expect(screen.getByTestId("traces-title").textContent).toBe("Root Epic");
-    expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/2/);
-    expect(screen.getByTestId("traces-rollup-cost").textContent).toMatch(
-      /\$0\.42/
-    );
   });
 
-  it("renders the subtree rail with depth-ordered groups", () => {
+  it("renders the run-history rail when the task has runs", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
     renderAt("/traces/root");
-    const groups = screen.getAllByTestId("subtree-rail-group");
-    expect(groups.map((g) => g.getAttribute("data-task-id"))).toEqual([
-      "root",
-      "child",
-    ]);
+    expect(screen.getByTestId("run-history-rail")).toBeInTheDocument();
   });
 
-  it("renders the mode toggle and switches between THREAD and CORRIDOR", () => {
+  it("renders the empty stream when the run has no executions", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
     renderAt("/traces/root");
-    expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
-    // STRIP mode has been removed from the toggle.
-    expect(screen.queryByTestId("trace-mode-option-strip")).toBeNull();
-    // THREAD mode renders the UnifiedChatView.
     expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
-    // CORRIDOR mode renders the real CorridorView.
-    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
-    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
   });
 
-  it("renders the FlightStrip in THREAD mode but not in CORRIDOR mode", () => {
+  it("renders the FlightStrip when the run has threads", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
+    mockExecutions = [
+      createMockStepExecution({
+        id: "ex-1",
+        task_id: "root",
+        task_run_id: "run-1",
+        status: "completed",
+        step_name: "in_progress",
+        step_type: "execute",
+      }),
+    ];
     renderAt("/traces/root");
-    // THREAD: FlightStrip is mounted above the chat view.
     expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
-    // CORRIDOR: per-task lanes don't have a chronological axis, so the
-    // chronological minimap is intentionally hidden.
-    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
-    expect(screen.queryByTestId("flight-strip")).toBeNull();
-    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
   });
 
-  it("collapses and expands the subtree rail", () => {
+  it("does not render any mode toggle (single trace surface)", () => {
     renderAt("/traces/root");
-    expect(screen.getByTestId("subtree-rail").getAttribute("data-collapsed")).toBe(
-      "false"
-    );
-    fireEvent.click(screen.getByTestId("subtree-rail-toggle"));
-    expect(screen.getByTestId("subtree-rail").getAttribute("data-collapsed")).toBe(
-      "true"
-    );
+    expect(screen.queryByTestId("trace-mode-toggle")).toBeNull();
   });
 
   it("navigates back when the back button is clicked", () => {
