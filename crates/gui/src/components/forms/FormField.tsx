@@ -77,7 +77,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
         {/* Optional help text — Hearth field hint: small muted serif italic
             (cursive role C). */}
         {helpText && (
-          <small className="font-serif text-[13px] italic text-fg-mute">
+          <small className="font-serif text-13 italic text-fg-mute">
             {helpText}
           </small>
         )}

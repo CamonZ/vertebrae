@@ -35,7 +35,7 @@ export function KanbanColumn({
       data-step-kind={typeStyle.kind}
     >
       <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
-        <h2 className="flex min-w-0 items-center gap-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
+        <h2 className="flex min-w-0 items-center gap-2 font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-fg-mute)]">
           <span
             aria-hidden
             className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_10px_currentColor]"
@@ -47,7 +47,7 @@ export function KanbanColumn({
           {step && (
             <span
               aria-hidden
-              className="text-[12px] leading-none"
+              className="text-xs leading-none"
               style={{ color: `var(${typeStyle.fgVar})` }}
               title={typeStyle.label}
             >
@@ -64,7 +64,7 @@ export function KanbanColumn({
         <Count
           data-testid="kanban-column-count"
           value={tasks.length}
-          className="text-[16px]"
+          className="text-lg"
         />
       </div>
 

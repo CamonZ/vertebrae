@@ -109,7 +109,7 @@ export function TracesHeader({
               <span aria-hidden="true">/</span>
               <span
                 data-testid="traces-breadcrumb-level"
-                className="font-mono uppercase tracking-[0.12em]"
+                className="font-mono uppercase tracking-wider"
               >
                 {displayLevel}
               </span>
@@ -160,7 +160,7 @@ export function TracesHeader({
         >
           <span
             data-testid="traces-hero-state"
-            className="font-semibold uppercase tracking-[0.08em]"
+            className="font-semibold uppercase tracking-wider"
             style={{ color: hero.color }}
           >
             {hero.label}

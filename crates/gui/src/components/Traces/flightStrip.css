@@ -37,8 +37,8 @@
   top: 50%;
   transform: translateY(-50%);
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: var(--text-9);
+  letter-spacing: var(--tracking-wider);
   text-transform: uppercase;
   color: var(--color-fg-mute);
   background: var(--color-bg-1);

@@ -33,7 +33,7 @@ export function ViewTabs({ tabs, value, onChange }: ViewTabsProps) {
             role="tab"
             aria-selected={active}
             onClick={() => onChange(tab.id)}
-            className={`inline-flex items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 font-mono text-[11px] tracking-[0.04em] transition-all duration-[var(--t-fast)] ${
+            className={`inline-flex items-center gap-1.5 rounded-[var(--radius-xs)] px-2.5 py-1 font-mono text-eyebrow tracking-[0.04em] transition-all duration-[var(--t-fast)] ${
               active
                 ? "bg-[var(--color-bg-3)] text-[var(--color-fg)] shadow-[0_1px_3px_rgba(0,0,0,0.15)]"
                 : "bg-transparent text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"

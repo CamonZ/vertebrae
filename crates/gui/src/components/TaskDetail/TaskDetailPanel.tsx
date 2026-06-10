@@ -53,7 +53,6 @@ function SectionLabel({ children }: { children: string }) {
     <Text
       variant="eyebrow"
       color="tertiary"
-      style={{ fontSize: "var(--text-2xs)" }}
     >
       {children}
     </Text>
@@ -951,7 +950,7 @@ export function TaskDetailPanel({
                       copyable={false}
                       testId={`child-task-id-${child.id}`}
                     />
-                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-soft)]">
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
                       {child.title}
                     </span>
                     {(child.workflow_name || child.step_name) && (
@@ -1009,7 +1008,7 @@ export function TaskDetailPanel({
           >
             <div className="divide-y divide-[var(--color-line)] py-2">
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Priority
                 </h4>
                 {editingField === "priority" ? (
@@ -1048,7 +1047,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Level
                 </h4>
                 {editingField === "level" ? (
@@ -1092,7 +1091,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Tags
                 </h4>
                 <InlineEditField
@@ -1109,7 +1108,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Timeline
                 </h4>
                 <div className="space-y-1">
@@ -1134,7 +1133,7 @@ export function TaskDetailPanel({
 
               {taskData.worktree && (
                 <div className="py-3">
-                  <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                     Worktree
                   </h4>
                   <p className="break-all font-mono text-xs text-[var(--color-fg-soft)]">

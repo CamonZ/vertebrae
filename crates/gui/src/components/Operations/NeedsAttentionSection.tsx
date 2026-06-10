@@ -23,7 +23,7 @@ export function NeedsAttentionSection({
 
   return (
     <section aria-label="Needs attention">
-      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-err)]">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-err)]">
         <span
           className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-err)]"
           aria-hidden="true"

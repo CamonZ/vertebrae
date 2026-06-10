@@ -58,7 +58,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
 
   return (
     <section aria-label="Ready to start">
-      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
+      <h2 className="mb-3 flex items-baseline gap-2 border-b border-[var(--color-line)] pb-2 font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-fg-mute)]">
         <span
           className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-fg-faint)]"
           aria-hidden="true"

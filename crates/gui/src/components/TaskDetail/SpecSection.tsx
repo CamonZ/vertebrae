@@ -18,7 +18,6 @@ function SubLabel({ children }: { children: string }) {
       variant="eyebrow"
       color="faint"
       as="h4"
-      style={{ fontSize: "var(--text-2xs)" }}
     >
       {children}
     </Text>
@@ -35,7 +34,7 @@ function SectionList({ label, items }: { label: string; items: Section[] }) {
         {items.map((item, i) => (
           <li
             key={`${item.type}-${item.order ?? i}`}
-            className="flex items-start gap-2 text-[13px] text-[var(--color-fg-soft)]"
+            className="flex items-start gap-2 text-sm text-[var(--color-fg-soft)]"
           >
             <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--color-fg-faint)]" />
             <span>{item.content}</span>
@@ -58,7 +57,7 @@ function ChecklistItems({ items }: { items: Section[] }) {
           return (
             <li
               key={`${item.type}-${item.order ?? i}`}
-              className="flex items-start gap-2 text-[13px] text-[var(--color-fg-soft)]"
+              className="flex items-start gap-2 text-sm text-[var(--color-fg-soft)]"
             >
               <span
                 className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[var(--radius-xs)] border ${
@@ -160,7 +159,7 @@ export function SpecSection({
           {grouped.goals.map((goal, i) => (
             <p
               key={`goal-${goal.order ?? i}`}
-              className="text-[13px] text-[var(--color-fg)] leading-relaxed"
+              className="text-sm text-[var(--color-fg)] leading-relaxed"
             >
               {goal.content}
             </p>
@@ -181,13 +180,13 @@ export function SpecSection({
             // description lines up with the Goal body and the subtitle above it.
             displayPadding="p-0"
             renderDisplay={(v) => (
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--color-fg-soft)]">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-fg-soft)]">
                 {v}
               </p>
             )}
           />
         ) : (
-          <p className="whitespace-pre-wrap text-[13px] text-[var(--color-fg-soft)] leading-relaxed">
+          <p className="whitespace-pre-wrap text-sm text-[var(--color-fg-soft)] leading-relaxed">
             {description || (
               <span className="italic text-[var(--color-fg-mute)]">
                 No description

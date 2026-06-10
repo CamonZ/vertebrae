@@ -6,6 +6,7 @@ describe("uiStore", () => {
     // Reset store state before each test
     useUIStore.setState({
       theme: "system",
+      density: "auto",
     });
   });
 
@@ -15,6 +16,10 @@ describe("uiStore", () => {
       expect(state.theme).toBe("system");
     });
 
+    it("has auto density by default", () => {
+      const state = useUIStore.getState();
+      expect(state.density).toBe("auto");
+    });
   });
 
   describe("setTheme", () => {
@@ -39,6 +44,36 @@ describe("uiStore", () => {
     });
   });
 
+  describe("setDensity", () => {
+    it("sets density to comfortable", () => {
+      useUIStore.getState().setDensity("comfortable");
+
+      expect(useUIStore.getState().density).toBe("comfortable");
+    });
+
+    it("sets density to compact", () => {
+      useUIStore.getState().setDensity("compact");
+
+      expect(useUIStore.getState().density).toBe("compact");
+    });
+
+    it("sets density to default", () => {
+      useUIStore.setState({ density: "comfortable" });
+
+      useUIStore.getState().setDensity("default");
+
+      expect(useUIStore.getState().density).toBe("default");
+    });
+
+    it("sets density to auto", () => {
+      useUIStore.setState({ density: "compact" });
+
+      useUIStore.getState().setDensity("auto");
+
+      expect(useUIStore.getState().density).toBe("auto");
+    });
+  });
+
   describe("persistence", () => {
     it("partializes theme into persisted state", () => {
       const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
@@ -50,7 +85,7 @@ describe("uiStore", () => {
       );
       expect(persistCall).toBeDefined();
       const persisted = JSON.parse(persistCall![1]);
-      expect(persisted.state).toEqual({ theme: "dark" });
+      expect(persisted.state).toEqual({ theme: "dark", density: "auto" });
 
       setItemSpy.mockRestore();
     });

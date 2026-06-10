@@ -23,7 +23,7 @@ const DEFAULT_TASKS_HEIGHT = 220;
 const MIN_TASKS_HEIGHT = 80;
 const MAX_TASKS_HEIGHT = 600;
 const HEADER_COUNT_CLASS =
-  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-[9px] text-[var(--color-fg-mute)]";
+  "rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-[length:var(--text-9)] text-[var(--color-fg-mute)]";
 
 interface RunHistoryRailProps {
   /**
@@ -334,7 +334,7 @@ function RunNode({
             {isActive && activeRunSource !== "selected" && (
               <span
                 data-testid="run-history-row-source"
-                className="rounded bg-[var(--color-bg-2)] px-1 font-mono text-[9px] uppercase tracking-wider text-[var(--color-fg-mute)]"
+                className="rounded bg-[var(--color-bg-2)] px-1 font-mono text-[length:var(--text-9)] uppercase tracking-wider text-[var(--color-fg-mute)]"
               >
                 {activeRunSource}
               </span>
@@ -746,7 +746,7 @@ export function RunHistoryRail({
                 {activeRunSource} run
               </span>
               <span
-                className={`rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ${statusClasses(
+                className={`rounded-full border px-2 py-0.5 font-mono text-[length:var(--text-9)] uppercase tracking-wider ${statusClasses(
                   activeRun.status
                 )}`}
               >
@@ -781,7 +781,7 @@ export function RunHistoryRail({
                 <li key={group} data-testid="run-history-day-group">
                   <div
                     data-testid="run-history-day-label"
-                    className="px-3 pb-0.5 pt-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-fg-mute)]"
+                    className="px-3 pb-0.5 pt-2 font-mono text-[length:var(--text-9)] uppercase tracking-eyebrow text-[var(--color-fg-mute)]"
                   >
                     {group}
                   </div>
