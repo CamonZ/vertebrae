@@ -5,6 +5,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { replaceTaskRunControlsInQueryCache } from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 interface UseTaskRunChangeListenerOptions {
@@ -39,6 +40,11 @@ export function useTaskRunChangeListener(
         upsertTaskRun(task_run);
       }
 
+      replaceTaskRunControlsInQueryCache(
+        task_id,
+        run_controls,
+        projectScopeGeneration
+      );
       replaceTaskRunControls(task_id, run_controls);
       if (!useTaskStore.getState().tasks.some((task) => task.id === task_id)) {
         void fetchAndReconcileTask(task_id);

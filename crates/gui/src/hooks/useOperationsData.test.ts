@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { useTaskStore } from "../stores/taskStore";
 import { useExecutionStore } from "../stores/executionStore";
 import { createMockTask, createMockTaskRun } from "../test/test-utils";
 import type { TaskRun, TaskRunStatus } from "../bindings";
+import { queryClient } from "../query/queryClient";
 
 const mockListTasks = vi.fn();
 const mockGetTaskExecutions = vi.fn();
@@ -16,6 +19,14 @@ vi.mock("../bindings", () => ({
 }));
 
 import { useOperationsData } from "./useOperationsData";
+
+function QueryWrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children);
+}
+
+function renderOperationsDataHook() {
+  return renderHook(() => useOperationsData(), { wrapper: QueryWrapper });
+}
 
 function withActiveRun(
   taskId: string,
@@ -60,7 +71,7 @@ describe("useOperationsData", () => {
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [failedTask] });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -87,7 +98,7 @@ describe("useOperationsData", () => {
       data: [taskWithoutFailedRun],
     });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -144,7 +155,7 @@ describe("useOperationsData", () => {
       data: [queuedTask, executingTask, waitingTask, stoppingTask],
     });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -170,7 +181,7 @@ describe("useOperationsData", () => {
       data: [idleTaskWithLegacyExec],
     });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -209,7 +220,7 @@ describe("useOperationsData", () => {
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [readyTask] });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -234,7 +245,7 @@ describe("useOperationsData", () => {
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [notRunnable] });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -254,7 +265,7 @@ describe("useOperationsData", () => {
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [running] });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -290,7 +301,7 @@ describe("useOperationsData", () => {
       data: [blocker, blocked],
     });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -327,7 +338,7 @@ describe("useOperationsData", () => {
       data: [blocker, blocked],
     });
 
-    const { result } = renderHook(() => useOperationsData());
+    const { result } = renderOperationsDataHook();
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

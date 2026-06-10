@@ -11,6 +11,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { removeTaskFromQueryCache, upsertTaskInQueryCache } from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for task change type */
@@ -74,11 +75,13 @@ export function useTaskChangeListener(
       addToast(getTaskChangeMessage(change_type, task_id), toastType);
 
       if (change_type === "Deleted" || archived) {
+        removeTaskFromQueryCache(task_id, projectScopeGeneration);
         removeTask(task_id);
       } else if (task) {
         if (!task.workflow_name || !task.step_name) {
           void fetchAndReconcileTask(task_id);
         } else {
+          upsertTaskInQueryCache(task, projectScopeGeneration);
           reconcileTask(task);
         }
       } else {

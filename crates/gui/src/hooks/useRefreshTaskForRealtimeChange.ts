@@ -5,6 +5,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { upsertTaskInQueryCache } from "../query";
 
 const taskRefreshesInFlight = new Set<string>();
 
@@ -23,6 +24,7 @@ export function useRefreshTaskForRealtimeChange(logPrefix: string) {
         const result = await commands.getTask(taskId);
         if (requestGeneration !== getProjectScopeGeneration()) return;
         if (result.status === "ok") {
+          upsertTaskInQueryCache(result.data, requestGeneration);
           reconcileTask(result.data);
         } else {
           console.warn(

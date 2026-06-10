@@ -9,6 +9,10 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import {
+  removeWorkflowFromQueryCache,
+  upsertWorkflowInQueryCache,
+} from "../query";
 
 /** Get toast message for workflow change type */
 function getWorkflowChangeMessage(
@@ -71,8 +75,10 @@ export function useWorkflowChangeListener(
       addToast(getWorkflowChangeMessage(change_type, workflow_id), toastType);
 
       if (change_type === "Deleted") {
+        removeWorkflowFromQueryCache(workflow_id, projectScopeGeneration);
         removeWorkflow(workflow_id);
       } else if (workflow) {
+        upsertWorkflowInQueryCache(workflow, projectScopeGeneration);
         upsertWorkflow(workflow);
       }
     },

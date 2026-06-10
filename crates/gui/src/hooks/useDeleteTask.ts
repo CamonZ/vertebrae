@@ -1,6 +1,7 @@
-import { useState, useCallback } from 'react';
-import { commands } from '../bindings';
-import { useTaskStore } from '../stores';
+import { useState, useCallback } from "react";
+import { commands } from "../bindings";
+import { removeTaskFromQueryCache } from "../query";
+import { useTaskStore } from "../stores";
 
 interface UseDeleteTaskOptions {
   onDeleted?: () => void;
@@ -48,7 +49,8 @@ export function useDeleteTask(
 
     try {
       const result = await commands.deleteTask(taskId, cascade);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
+        removeTaskFromQueryCache(taskId);
         removeTask(taskId);
         setIsDeleteDialogOpen(false);
         onDeleted?.();
@@ -56,7 +58,9 @@ export function useDeleteTask(
         setDeleteError(result.error.message);
       }
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete task');
+      setDeleteError(
+        err instanceof Error ? err.message : "Failed to delete task"
+      );
     } finally {
       setIsDeleting(false);
     }
