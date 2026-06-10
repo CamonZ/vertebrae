@@ -1,0 +1,176 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import type { TaskFilterOptions, WorkflowWithTasks } from "../bindings";
+import {
+  createMockTask,
+  createMockTaskRun,
+  createMockTaskRunControls,
+  createMockWorkflow,
+} from "../test/test-utils";
+import { queryClient } from "./queryClient";
+import { queryKeys } from "./queryKeys";
+import {
+  removeTaskFromQueryCache,
+  removeWorkflowFromQueryCache,
+  replaceTaskRunControlsInQueryCache,
+  upsertTaskInQueryCache,
+  upsertWorkflowInQueryCache,
+} from "./serverCache";
+
+describe("server cache helpers", () => {
+  beforeEach(() => {
+    queryClient.clear();
+  });
+
+  it("upserts tasks into matching lists and detail cache", () => {
+    const generation = 12;
+    const ticketFilter: TaskFilterOptions = {
+      levels: ["ticket"],
+      step_names: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    };
+    const task = createMockTask({
+      id: "task-1",
+      title: "Query task",
+      level: "ticket",
+    });
+    const taskOutsideFilter = createMockTask({
+      id: "task-2",
+      level: "epic",
+    });
+
+    queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
+      taskOutsideFilter,
+    ]);
+    queryClient.setQueryData(
+      queryKeys.tasks.list(generation, ticketFilter),
+      []
+    );
+
+    upsertTaskInQueryCache(task, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, task.id))
+    ).toEqual(task);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([taskOutsideFilter, task]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
+    ).toEqual([task]);
+  });
+
+  it("removes tasks from detail and list caches", () => {
+    const generation = 4;
+    const task = createMockTask({ id: "task-1" });
+    const otherTask = createMockTask({ id: "task-2" });
+
+    queryClient.setQueryData(queryKeys.tasks.detail(generation, task.id), task);
+    queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
+      task,
+      otherTask,
+    ]);
+
+    removeTaskFromQueryCache(task.id, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, task.id))
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([otherTask]);
+  });
+
+  it("replaces task run controls in detail and list caches", () => {
+    const generation = 9;
+    const task = createMockTask({ id: "task-1", run_controls: null });
+    const otherTask = createMockTask({ id: "task-2", run_controls: null });
+    const runControls = createMockTaskRunControls(
+      createMockTaskRun({ id: "run-1", task_id: task.id })
+    );
+
+    queryClient.setQueryData(queryKeys.tasks.detail(generation, task.id), task);
+    queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
+      task,
+      otherTask,
+    ]);
+
+    replaceTaskRunControlsInQueryCache(task.id, runControls, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, task.id))
+    ).toMatchObject({ id: task.id, run_controls: runControls });
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
+  });
+
+  it("upserts workflows into list cache and existing matching detail caches", () => {
+    const generation = 15;
+    const workflowId = "workflow-1";
+    const workflow = createMockWorkflow({
+      id: workflowId,
+      name: "Before",
+    });
+    const updatedWorkflow = { ...workflow, name: "After" };
+    const otherWorkflow = createMockWorkflow({ id: "workflow-2" });
+    const workflowDetail: WorkflowWithTasks = {
+      workflow,
+      tasks: [createMockTask({ workflow_id: workflowId })],
+    };
+
+    queryClient.setQueryData(queryKeys.workflows.list(generation), [
+      workflow,
+      otherWorkflow,
+    ]);
+    queryClient.setQueryData(
+      queryKeys.workflows.detail(generation, workflowId),
+      workflowDetail
+    );
+
+    upsertWorkflowInQueryCache(updatedWorkflow, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.workflows.list(generation))
+    ).toEqual([updatedWorkflow, otherWorkflow]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.workflows.detail(generation, workflowId)
+      )
+    ).toEqual({ ...workflowDetail, workflow: updatedWorkflow });
+  });
+
+  it("removes workflows from detail and list caches", () => {
+    const generation = 2;
+    const workflowId = "workflow-1";
+    const workflow = createMockWorkflow({ id: workflowId });
+    const otherWorkflow = createMockWorkflow({ id: "workflow-2" });
+
+    queryClient.setQueryData(queryKeys.workflows.list(generation), [
+      workflow,
+      otherWorkflow,
+    ]);
+    queryClient.setQueryData(
+      queryKeys.workflows.detail(generation, workflowId),
+      {
+        workflow,
+        tasks: [],
+      }
+    );
+
+    removeWorkflowFromQueryCache(workflowId, generation);
+
+    expect(
+      queryClient.getQueryData(
+        queryKeys.workflows.detail(generation, workflowId)
+      )
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.workflows.list(generation))
+    ).toEqual([otherWorkflow]);
+  });
+});
