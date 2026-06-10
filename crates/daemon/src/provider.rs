@@ -424,6 +424,7 @@ mod tests {
         // And the well-known stream-json knobs are still there.
         assert!(resolved_argv.contains(&"--output-format".to_string()));
         assert!(resolved_argv.contains(&"stream-json".to_string()));
+        assert!(resolved_argv.contains(&"--verbose".to_string()));
         assert!(resolved_argv.contains(&"-p".to_string()));
         assert!(resolved_argv.contains(&"Implement feature Y".to_string()));
         assert!(resolved_argv.contains(&"--model".to_string()));
@@ -492,6 +493,7 @@ mod tests {
         assert!(!argv.contains(&"-p".to_string()));
         assert!(!argv.contains(&"--output-format".to_string()));
         assert!(!argv.contains(&"stream-json".to_string()));
+        assert!(!argv.contains(&"--verbose".to_string()));
         assert!(!argv.contains(&"--permission-mode".to_string()));
         assert!(
             !argv

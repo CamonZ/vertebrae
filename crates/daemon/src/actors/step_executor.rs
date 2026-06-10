@@ -3,7 +3,7 @@
 //! Spawned by ProjectSupervisor upon receiving an execute_step channel event from Sacrum.
 //! Each StepExecutor:
 //! - Receives step config (prompt, model), execution_id, and task_id from its parent
-//! - Spawns `claude -p <prompt> --output-format stream-json` as a child process
+//! - Spawns `claude -p <prompt> --output-format stream-json --verbose` as a child process
 //! - Streams stdout line by line, posting each line as a SessionLog to the ExecutionService
 //! - Reports StepCompleted or StepFailed to the parent ProjectSupervisor on exit
 //! - Kills the child process on Cancel or actor stop
@@ -208,11 +208,13 @@ pub fn build_claude_command_with_settings(
         cmd.arg("--agent").arg(agent);
     }
 
-    // Prompt and output format.
+    // Prompt and output format. Claude Code requires --verbose whenever
+    // --print is combined with --output-format=stream-json.
     cmd.arg("-p")
         .arg(&step.prompt)
         .arg("--output-format")
         .arg("stream-json")
+        .arg("--verbose")
         .current_dir(config.working_dir())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -1136,6 +1138,9 @@ mod tests {
         assert!(args.contains(&"Implement feature Y".to_string()));
         assert!(args.contains(&"--output-format".to_string()));
         assert!(args.contains(&"stream-json".to_string()));
+
+        // --print + stream-json requires --verbose on Claude Code >= 2.x.
+        assert!(args.contains(&"--verbose".to_string()));
     }
 
     #[test]
@@ -2360,6 +2365,7 @@ mod tests {
         assert!(argv.contains(&"-p".to_string()));
         assert!(argv.contains(&"--output-format".to_string()));
         assert!(argv.contains(&"stream-json".to_string()));
+        assert!(argv.contains(&"--verbose".to_string()));
     }
 
     #[test]
