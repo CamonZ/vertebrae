@@ -1,84 +1,11 @@
-<!doctype html>
-<!-- @dsCard group="Brand" name="Tasks v2 (Hearth)" subtitle="Hierarchy ledger + workflow shape + ember-on-now" viewport="1440x900" -->
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Vertebrae · Hearth — Tasks (v2 · components)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="tokens.css">
-<link rel="stylesheet" href="components-v2.css">
-<link rel="stylesheet" href="lib/components-lib.css">
-<style>
-  html, body { height: 100%; }
-  body { display: flex; flex-direction: column; overflow: hidden; font-size: var(--text-13); }
-  #root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+/* ──────────────────────────────────────────────────────────────────
+   Hearth · Task Detail panel styles — extracted from tasks-v2.html so the
+   canonical window.TaskDetail renders identically anywhere it is reused
+   (Tasks list, and the Run Console's right-docked detail on the canvas).
+   The floating glass shell is provided by the host (.rd / .detail).
+   ────────────────────────────────────────────────────────────────── */
 
-  /* ── List column ── */
-  .list-col { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); border-right: 1px solid var(--line); }
-  .list-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); background: var(--bg); display: flex; flex-direction: column; gap: var(--s-3); }
-
-  .scope-row { display: flex; align-items: center; gap: var(--s-0); }
-  .scope-row .secondary { margin-left: auto; display: flex; align-items: center; gap: var(--s-2); }
-  .scope-row .secondary select { background: transparent; border: 1px solid var(--line-strong); color: var(--fg-mute); padding: var(--s-0) var(--s-2); border-radius: var(--r-sm); font-family: var(--mono); font-size: var(--text-11); cursor: pointer; }
-  .list { flex: 1; overflow-y: auto; padding: var(--s-2) 0 var(--s-6); position: relative; }
-  .list::-webkit-scrollbar { width: 6px; }
-  .list::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-sm); }
-
-  /* ── Task row (app composition; chips/pipeline come from the library) ── */
-  .t-row { position: relative; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--s-3); padding: 0 var(--s-5); cursor: pointer; transition: background var(--t-fast) var(--ease); }
-  .t-row:hover { background: color-mix(in oklch, var(--bg-1) 60%, var(--bg)); }
-  .t-row.sel { background: var(--accent-wash); }
-  .t-row.sel::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); border-radius: 0 var(--r-xs) var(--r-xs) 0; }
-  .t-indent { display: flex; align-items: stretch; flex-shrink: 0; }
-  .t-indent .g { width: 18px; align-self: stretch; border-right: 1px dashed transparent; }
-  .t-row.l1 .t-indent .g.l1, .t-row.l2 .t-indent .g.l1, .t-row.l2 .t-indent .g.l2 { border-right-color: var(--line); }
-  .t-body { display: flex; flex-direction: column; gap: var(--s-0); min-width: 0; }
-  .t-top { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
-  .t-chev { width: 10px; font-size: var(--text-9); color: var(--fg-faint); flex-shrink: 0; text-align: center; cursor: pointer; }
-  .t-glyph { width: 14px; flex-shrink: 0; text-align: center; font-family: var(--mono); color: var(--fg-mute); font-size: var(--text-13); line-height: 1; }
-  .t-row.l0 { padding-top: var(--s-2h); padding-bottom: var(--s-2); }
-  .t-row.l0 .t-title { font-family: var(--serif); font-style: italic; font-size: var(--text-18); font-weight: 400; color: var(--fg); letter-spacing: -0.01em; line-height: 1.15; }
-  .t-row.l0 .t-glyph { color: var(--fg); font-size: var(--text-14); }
-  .t-row.l1 { padding-top: var(--s-1h); padding-bottom: var(--s-1h); }
-  .t-row.l1 .t-title { font-family: var(--sans); font-size: var(--text-14); font-weight: 500; color: var(--fg); letter-spacing: -0.005em; }
-  .t-row.l1 .t-glyph { color: var(--fg-soft); }
-  .t-row.l2 { padding-top: var(--s-1); padding-bottom: var(--s-1); }
-  .t-row.l2 .t-title { font-family: var(--sans); font-size: var(--text-13); font-weight: 400; color: var(--fg-soft); }
-  .t-row.l2 .t-glyph { font-size: var(--text-16); color: var(--fg-faint); line-height: 0.6; }
-  .t-row.l2.sel .t-title { color: var(--fg); }
-  .t-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1; }
-  .t-title.done { color: var(--fg-faint); }
-  .t-row.l0 .t-title.done { font-style: italic; }
-  .t-meta { margin-top: 1px; margin-left: var(--s-10); display: flex; align-items: center; gap: var(--s-2); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.02em; flex-wrap: wrap; row-gap: var(--s-0); }
-  .t-meta > span, .t-meta .c-breakdown, .t-meta .c-pipeline { white-space: nowrap; }
-  .t-meta .sep { color: var(--fg-ghost); }
-  .t-meta .tag { color: var(--fg-mute); border-bottom: 1px dotted var(--fg-ghost); }
-  .t-pri { display: inline-flex; align-items: center; justify-content: center; line-height: 1; height: 1em; font-family: var(--mono); font-size: var(--text-12); font-weight: 700; flex-shrink: 0; opacity: 0.6; transform: translateY(0.12em); }
-  .t-pri.hi { color: var(--err); opacity: 0.9; }
-  .t-pri.md { color: var(--warn); }
-  .t-pri.lo { color: var(--fg-faint); }
-  .t-right { display: flex; align-items: center; gap: var(--s-3); justify-content: flex-end; flex-shrink: 0; }
-  .t-right .chip-slot { display: flex; justify-content: flex-end; }
-  .t-right .when { min-width: 50px; text-align: right; color: var(--fg-faint); font-family: var(--mono); font-size: var(--text-10); white-space: nowrap; }
-
-  .caption-strip { flex-shrink: 0; border-top: 1px solid var(--line); padding: var(--s-1) var(--s-5); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.06em; background: var(--bg); display: flex; align-items: center; gap: var(--s-3); }
-  .caption-strip .plate { color: var(--accent); }
-  .caption-strip em { font-style: italic; color: var(--fg-mute); }
-
-  /* ── Detail panel — floating glass (mirrors the chat / Design inspector) ── */
-  .detail {
-    position: fixed; top: calc(38px + var(--s-3)); right: var(--s-3); bottom: var(--s-3);
-    width: 560px; z-index: 50;
-    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
-    background: linear-gradient(205deg, color-mix(in oklch, var(--bg-3) 40%, transparent), color-mix(in oklch, var(--bg-2) 34%, transparent));
-    -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.5); backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
-    border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent); border-right: 3px solid var(--accent);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-3), -18px 0 44px rgba(0,0,0,0.34), inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
-    animation: detail-in var(--t-med, 200ms) var(--ease);
-  }
-  @keyframes detail-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
-  .t-detail-head { flex-shrink: 0; padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, color-mix(in oklch, var(--accent-wash) 25%, var(--bg-1)), var(--bg-1)); position: relative; }
+.t-detail-head { flex-shrink: 0; padding: var(--s-4) var(--s-5); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, color-mix(in oklch, var(--accent-wash) 25%, var(--bg-1)), var(--bg-1)); position: relative; }
   .t-detail-head::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(to right, var(--accent), transparent 60%); opacity: 0.5; }
   .t-detail-top { display: flex; gap: var(--s-3); align-items: flex-start; }
   .t-detail-head .dh-title { font-size: var(--text-22); }
@@ -321,47 +248,3 @@
   .dg-node .dg-n-foot { display: flex; align-items: center; gap: var(--s-2); }
   .dg-node .dg-n-foot .blocked-tag { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.02em; color: var(--warn); display: inline-flex; align-items: center; gap: 3px; margin-left: auto; }
   .dg-empty { font-family: var(--serif); font-style: italic; color: var(--fg-faint); font-size: var(--text-14); text-align: center; max-width: 340px; line-height: 1.5; }
-</style>
-</head>
-<body>
-
-  <div id="root"></div>
-
-  <script src="tasks-data.js"></script>
-
-  <!-- React + Babel (pinned) -->
-  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
-
-  <!-- Component library -->
-  <script type="text/babel" src="lib/lib-primitives.jsx"></script>
-  <script type="text/babel" src="lib/lib-eventlog.jsx"></script>
-  <script type="text/babel" src="lib/lib-detail.jsx"></script>
-  <script type="text/babel" src="lib/lib-controls.jsx"></script>
-  <script type="text/babel" src="lib/lib-project-switcher.jsx"></script>
-  <script type="text/babel" src="lib/lib-palette.jsx"></script>
-  <script type="text/babel" src="lib/lib-thread.jsx"></script>
-  <script type="text/babel" src="lib/lib-chat.jsx"></script>
-  <script type="text/babel" src="lib/lib-theme.jsx"></script>
-  <script type="text/babel" src="lib/lib-shell.jsx"></script>
-  <script type="text/babel" src="lib/tweaks-panel.jsx"></script>
-  <!-- Tasks app -->
-  <script type="text/babel" src="lib/tasks-detail.jsx"></script>
-  <script type="text/babel" src="lib/tasks-app.jsx"></script>
-
-  <script>
-    // Anti-flash boot: resolve & apply theme before paint. Full control lives in lib-theme.jsx.
-    (function(){
-      var key = 'hearth-theme';
-      var html = document.documentElement;
-      function resolve(p){ return p === 'system'
-        ? ((window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark')
-        : p; }
-      var pref = 'dark';
-      try { pref = localStorage.getItem(key) || 'dark'; } catch(e){}
-      html.classList.toggle('theme-light', resolve(pref) === 'light');
-    })();
-  </script>
-</body>
-</html>

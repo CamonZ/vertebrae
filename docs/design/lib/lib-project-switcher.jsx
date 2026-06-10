@@ -24,7 +24,7 @@
     width: 288px; max-height: calc(100vh - 64px);
     display: flex; flex-direction: column; overflow: hidden;
     background: var(--bg-2);
-    border: 1px solid var(--line-strong); border-left: 3px solid var(--accent);
+    border: 1px solid var(--line-strong);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-3), 0 0 36px rgba(0,0,0,0.34);
     animation: ps-pop-in var(--t-base) var(--ease);

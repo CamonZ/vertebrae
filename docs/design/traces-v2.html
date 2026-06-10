@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- @dsCard group="Brand" name="Traces v2 (Hearth)" subtitle="Recursive thread tree · Run › Thread › Turn › Message, subagents spine-nested" viewport="1440x900" -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -20,6 +21,7 @@
   .rail-sec { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
   .rail-sec.tasks-sec { flex: 1.4; min-height: 240px; }
   .rail-sec.runs-sec { flex: 1; min-height: 200px; }
+  .rail-sec.threads-sec { flex: 1.2; min-height: 220px; }
   .rail-hd { padding: var(--s-3) var(--s-4); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: var(--bg); }
   .rail-hd .name { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-mute); }
   .rail-hd .meta { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
@@ -37,6 +39,53 @@
   .trace-task .ttext { font-family: var(--sans); font-size: var(--text-12); color: var(--fg-soft); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .trace-task.sel .ttext { color: var(--fg); }
   .trace-task.l2 .ttext { color: var(--fg-mute); }
+
+  /* Runs list (time-ordered) → each run expands into its thread tree */
+  .run-group { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); padding: var(--s-2h) var(--s-2) var(--s-1); }
+  .run-group:first-child { padding-top: var(--s-1); }
+  .run-node { border-radius: var(--r-sm); }
+  .rn-head { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1h) var(--s-2); cursor: pointer; border-radius: var(--r-sm); position: relative; transition: background var(--t-fast) var(--ease); }
+  .rn-head:hover { background: var(--bg-1); }
+  .run-node.active > .rn-head { background: var(--accent-wash); }
+  .run-node.active > .rn-head::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); border-radius: 0 var(--r-xs) var(--r-xs) 0; }
+  .rn-mark { width: 17px; height: 17px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: var(--text-9); font-weight: 700; flex-shrink: 0; color: var(--bg); background: var(--fg-faint); }
+  .rn-mark.completed { background: var(--ok); }
+  .rn-mark.failed { background: var(--err); }
+  .rn-mark.waiting { background: var(--warn); }
+  .rn-mark.running { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); }
+  .rn-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .rn-row1 { display: flex; align-items: center; gap: var(--s-1h); min-width: 0; }
+  .rn-time { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); font-weight: 500; letter-spacing: 0.01em; white-space: nowrap; flex-shrink: 0; }
+  .rn-state { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap; }
+  .rn-state.completed { color: var(--ok); }
+  .rn-state.failed { color: var(--err); }
+  .rn-state.waiting { color: var(--warn); }
+  .rn-state.running { color: var(--accent); }
+  .rn-dur { margin-left: auto; font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); flex-shrink: 0; padding-left: var(--s-1h); white-space: nowrap; }
+  .rn-row2 { display: flex; align-items: center; gap: var(--s-1h); font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rn-ts { color: var(--fg-mute); }
+  .rn-att { color: var(--fg-faint); }
+  .rn-att .u { color: var(--fg-ghost); letter-spacing: 0.04em; }
+  .rn-runlbl { font-family: var(--mono); font-size: var(--text-12); color: var(--fg); font-weight: 500; letter-spacing: 0.01em; white-space: nowrap; flex-shrink: 0; }
+  .rn-sep { color: var(--fg-ghost); }
+  .rn-reason { color: var(--err); overflow: hidden; text-overflow: ellipsis; }
+  .rn-chev { flex-shrink: 0; color: var(--fg-faint); font-size: var(--text-9); transition: transform var(--t-fast) var(--ease); }
+  .run-node:not(.active) .rn-chev { transform: rotate(-90deg); }
+  .run-threads { padding: var(--s-1) 0 var(--s-2) var(--s-1h); margin: var(--s-1) 0 var(--s-1) var(--s-3); border-left: 1px solid var(--line); }
+  .trace-thread { display: grid; grid-template-columns: 10px 1fr auto; gap: var(--s-2); align-items: center; padding: var(--s-1) var(--s-2); border-radius: var(--r-sm); cursor: pointer; transition: background var(--t-fast) var(--ease); position: relative; }
+  .trace-thread:hover { background: var(--bg-1); }
+  .trace-thread.sel { background: var(--accent-wash); }
+  .trace-thread.sel::before { content: ''; position: absolute; left: 0; top: 5px; bottom: 5px; width: 2px; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); border-radius: 0 var(--r-xs) var(--r-xs) 0; }
+  .trace-thread.l1 { padding-left: var(--s-5); }
+  .trace-thread.l2 { padding-left: var(--s-8); }
+  .trace-thread .tk { width: 7px; height: 7px; border-radius: 2px; background: var(--kc, var(--step-execute)); justify-self: center; }
+  .trace-thread.l1 .tk, .trace-thread.l2 .tk { width: 6px; height: 6px; border-radius: 50%; }
+  .trace-thread .ttext { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trace-thread.sel .ttext { color: var(--fg); }
+  .trace-thread.l1 .ttext, .trace-thread.l2 .ttext { color: var(--fg-mute); }
+  .trace-thread .tmeta { font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); }
+  .run-threads .trace-thread.l1 { padding-left: var(--s-4); }
+  .run-threads .trace-thread.l2 { padding-left: var(--s-6); }
 
   /* Center column */
   .center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-1); }
@@ -70,6 +119,17 @@
   .stream::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-md); }
   /* traces stream events get a wider time gutter */
 
+  /* Focus bar — drilled into a subthread (read-only drill) */
+  .focus-bar { flex-shrink: 0; display: flex; align-items: center; gap: var(--s-2); flex-wrap: nowrap; padding: var(--s-2) var(--s-5); border-bottom: 1px solid var(--line); background: color-mix(in oklch, var(--accent-wash) 40%, var(--bg)); font-family: var(--mono); font-size: var(--text-11); white-space: nowrap; }
+  .focus-bar .fb-crumb { color: var(--fg-mute); border-bottom: 1px dotted var(--fg-faint); cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+  .focus-bar .fb-here { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .focus-bar .fb-crumb:hover { color: var(--accent); }
+  .focus-bar .fb-sep { color: var(--fg-ghost); }
+  .focus-bar .fb-here { display: inline-flex; align-items: center; gap: var(--s-1h); color: var(--fg-soft); }
+  .focus-bar .fb-here b { color: var(--fg); font-weight: 500; }
+  .focus-bar .fb-here .tk { width: 7px; height: 7px; border-radius: 2px; background: var(--kc, var(--step-execute)); }
+  .focus-bar .fb-tag { margin-left: auto; font-size: var(--text-9); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-faint); padding: 1px var(--s-1h); border: 1px solid var(--line-strong); border-radius: var(--r-xs); }
+
 </style>
 </head>
 <body>
@@ -85,9 +145,11 @@
 
   <!-- Component library -->
   <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-eventlog.jsx"></script>
   <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
   <script type="text/babel" src="lib/lib-detail.jsx"></script>
   <script type="text/babel" src="lib/lib-traces.jsx"></script>
+  <script type="text/babel" src="lib/lib-thread.jsx"></script>
   <script type="text/babel" src="lib/lib-controls.jsx"></script>
   <script type="text/babel" src="lib/lib-project-switcher.jsx"></script>
   <script type="text/babel" src="lib/lib-palette.jsx"></script>

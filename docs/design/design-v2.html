@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- @dsCard group="Brand" name="Design v2 (Hearth)" subtitle="Workflow graph with runtime overlay" viewport="1440x900" -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -50,6 +51,7 @@
   .strip-run .run-title { font-family: var(--sans); font-size: var(--text-12); color: var(--fg-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .strip-run .at-step { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); flex-shrink: 0; border-left: 1px solid var(--line); padding-left: var(--s-2); white-space: nowrap; }
   .strip-run .at-step em { font-style: normal; color: var(--step-wait-fg); }
+  .runs-summary { flex-shrink: 0; margin-left: var(--s-2); padding-left: var(--s-3); border-left: 1px solid var(--line); color: var(--fg-faint); font-family: var(--mono); font-size: var(--text-10); white-space: nowrap; }
 
   /* Inspector — floating glass panel (mirrors the chat: detached, full-height,
      frosted, ember spine on the right edge nearest the screen border) */
@@ -102,12 +104,14 @@
 
   <!-- Component library -->
   <script type="text/babel" src="lib/lib-primitives.jsx"></script>
+  <script type="text/babel" src="lib/lib-eventlog.jsx"></script>
   <script type="text/babel" src="lib/lib-surfaces.jsx"></script>
   <script type="text/babel" src="lib/lib-detail.jsx"></script>
   <script type="text/babel" src="lib/lib-graph.jsx"></script>
   <script type="text/babel" src="lib/lib-controls.jsx"></script>
   <script type="text/babel" src="lib/lib-project-switcher.jsx"></script>
   <script type="text/babel" src="lib/lib-palette.jsx"></script>
+  <script type="text/babel" src="lib/lib-thread.jsx"></script>
   <script type="text/babel" src="lib/lib-chat.jsx"></script>
   <script type="text/babel" src="lib/lib-theme.jsx"></script>
   <script type="text/babel" src="lib/lib-shell.jsx"></script>

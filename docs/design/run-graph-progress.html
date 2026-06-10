@@ -1,0 +1,286 @@
+<!doctype html>
+<!-- @dsCard group="Brand" name="RunHero · graph progress" subtitle="Trajectory + run-map + graph-of-graphs" -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Run progress on a graph</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg-1); color: var(--fg);
+    font-family: var(--sans); font-size: var(--text-13);
+    display: flex; justify-content: center; overflow-y: auto;
+    background-image: radial-gradient(circle, var(--line) 0.7px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .wrap { width: 940px; max-width: 94vw; padding: var(--s-8) 0 var(--s-10); }
+
+  .doc-h { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: var(--text-28); letter-spacing: -0.02em; margin: 0 0 var(--s-2); }
+  .doc-h em { color: var(--accent); }
+  .doc-sub { font-family: var(--sans); font-size: var(--text-14); line-height: 1.6; color: var(--fg-soft); margin: 0 0 var(--s-6); max-width: 64ch; }
+  .doc-sub b { color: var(--fg); font-weight: 600; }
+  .doc-sub code, .mono { font-family: var(--mono); }
+
+  section { margin-top: var(--s-8); }
+  .sec-k { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--s-2); }
+  .sec-h { font-family: var(--serif); font-style: italic; font-size: var(--text-20); color: var(--fg); margin: 0 0 var(--s-1h); }
+  .sec-p { font-size: var(--text-13); line-height: 1.6; color: var(--fg-soft); max-width: 64ch; margin: 0 0 var(--s-4); }
+  .sec-p b { color: var(--fg); font-weight: 600; }
+
+  .panel { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-4) var(--s-4h); }
+  .cap { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-faint); display: flex; align-items: center; gap: var(--s-2); margin-bottom: var(--s-3); }
+  .cap .x { color: var(--err); }
+  .cap .ok { color: var(--ok); }
+  .cap .tag { padding: 1px var(--s-1h); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--fg-mute); letter-spacing: 0.04em; }
+
+  .stack { display: flex; flex-direction: column; gap: var(--s-4h); }
+
+  /* hero status line reused look */
+  .hl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .hl .state { font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; font-size: var(--text-11); }
+  .hl .sep { color: var(--fg-ghost); }
+  .hl .at em { font-family: var(--serif); font-style: italic; }
+  .hl .right { margin-left: auto; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+
+  /* ── the dishonest bar ── */
+  .dishonest { margin-top: var(--s-2); display: flex; align-items: center; gap: 10px; opacity: 0.96; }
+  .dishonest .meta { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+  .strike { position: relative; }
+  .strike::after { content: ''; position: absolute; left: -4px; right: -4px; top: 50%; height: 1px; background: var(--err); opacity: 0.65; }
+
+  /* ── trajectory chips ── */
+  .traj { margin-top: var(--s-2); display: flex; align-items: center; gap: var(--s-1h); flex-wrap: wrap; }
+  .tchip { display: inline-flex; align-items: center; gap: var(--s-1h); padding: 2px var(--s-2); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-full); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-soft); white-space: nowrap; }
+  .tchip .d { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .tchip.loop { color: var(--fg-mute); border-style: dashed; }
+  .tchip .loopmark { color: var(--step-route-fg); font-size: var(--text-11); }
+  .tchip.now { border-color: color-mix(in oklch, var(--accent) 55%, transparent); background: var(--accent-wash); color: var(--fg); box-shadow: 0 0 0 1px color-mix(in oklch,var(--accent) 18%, transparent), 0 0 10px var(--accent-glow); }
+  .tchip.now .nowdot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: tp 1.5s ease-in-out infinite; }
+  .arr { color: var(--fg-ghost); font-family: var(--mono); font-size: var(--text-11); }
+  @keyframes tp { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .k-execute { background: var(--step-execute); }
+  .k-eval { background: var(--step-eval); }
+  .k-route { background: var(--step-route); }
+  .k-human { background: var(--step-human); }
+  .k-wait { background: var(--step-wait); }
+  .k-terminal { background: var(--ok); }
+  .traj-meta { margin-top: var(--s-2h); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.02em; }
+  .traj-meta b { color: var(--fg-soft); font-weight: 600; }
+
+  /* ── run-map graph ── */
+  .map { position: relative; height: 300px; background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+  .map::before { content:''; position:absolute; inset:0; background-image: radial-gradient(circle, var(--line) 0.6px, transparent 1px); background-size: 22px 22px; opacity:.5; }
+  .map svg.edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .gnode { position: absolute; width: 122px; padding: var(--s-2) var(--s-2h) var(--s-2h); background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-sm); }
+  .gnode::before { content:''; position:absolute; left:0; right:0; top:0; height:2px; border-radius: var(--r-sm) var(--r-sm) 0 0; }
+  .gnode.kind-execute::before { background: var(--step-execute); }
+  .gnode.kind-eval::before { background: var(--step-eval); }
+  .gnode.kind-route::before { background: var(--step-route); }
+  .gnode.kind-human::before { background: var(--step-human); }
+  .gnode.kind-wait::before { background: var(--step-wait); }
+  .gnode.kind-terminal::before { background: var(--ok); }
+  .gnode .gk { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); }
+  .gnode.kind-execute .gk { color: var(--step-execute-fg); }
+  .gnode.kind-eval .gk { color: var(--step-eval-fg); }
+  .gnode.kind-route .gk { color: var(--step-route-fg); }
+  .gnode.kind-human .gk { color: var(--step-human-fg); }
+  .gnode.kind-wait .gk { color: var(--step-wait-fg); }
+  .gnode.kind-terminal .gk { color: var(--ok); }
+  .gnode .gt { font-family: var(--sans); font-size: var(--text-12); font-weight: 500; color: var(--fg); margin-top: 1px; }
+  .gnode .gv { position: absolute; top: var(--s-2); right: var(--s-2h); font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); }
+  .gnode.visited .gv { color: var(--ok); }
+  .gnode.future { opacity: 0.42; }
+  .gnode.skip { opacity: 0.34; border-style: dashed; }
+  .gnode.current { border-color: color-mix(in oklch, var(--accent) 45%, var(--line-strong)); background: linear-gradient(135deg, var(--accent-wash), var(--bg-2) 60%); box-shadow: 0 0 14px var(--accent-glow); }
+  .gnode.current::after { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); border-radius: 0 var(--r-xs) var(--r-xs) 0; animation: tp 1.5s ease-in-out infinite; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-5); margin-top: var(--s-3); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); }
+  .legend span { display: inline-flex; align-items: center; gap: var(--s-1h); }
+  .swatch { width: 22px; height: 0; border-top-width: 2px; border-top-style: solid; }
+  .sw-live { border-color: var(--accent); border-top-style: dashed; }
+  .sw-next { border-color: var(--line-strong); }
+  .sw-skip { border-color: var(--fg-faint); border-top-style: dotted; }
+
+  /* child sub-graph clusters (composition) */
+  .child-cluster { position: absolute; display: flex; flex-direction: column; gap: 7px; }
+  .subchain { display: flex; align-items: center; gap: 5px; padding: 5px var(--s-2); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-sm); }
+  .subchain .nm { font-family: var(--sans); font-size: var(--text-10); color: var(--fg-soft); width: 78px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .subchain .pips { display: inline-flex; gap: 3px; margin-left: auto; }
+  .pip { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--fg-faint); }
+  .pip.done { background: var(--ok); border-color: var(--ok); }
+  .pip.run { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: tp 1.5s ease-in-out infinite; }
+  .pip.q { background: transparent; }
+  .cluster-frame { position: absolute; border: 1px dashed color-mix(in oklch, var(--step-wait) 50%, transparent); border-radius: var(--r-md); background: color-mix(in oklch, var(--step-wait) 7%, transparent); }
+  .cluster-cap { position: absolute; font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.12em; text-transform: uppercase; color: var(--step-wait-fg); }
+
+  .rule { margin-top: var(--s-8); padding: var(--s-5); border: 1px solid color-mix(in oklch, var(--accent) 28%, transparent); border-radius: var(--r-md); background: color-mix(in oklch, var(--accent-wash) 35%, transparent); }
+  .rule h3 { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin: 0 0 var(--s-3); }
+  .rule ul { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: var(--s-2h); }
+  .rule li { font-size: var(--text-13); line-height: 1.55; color: var(--fg-soft); padding-left: var(--s-5); position: relative; }
+  .rule li::before { content: attr(data-n); position: absolute; left: 0; top: 0; font-family: var(--mono); font-size: var(--text-10); color: var(--accent); }
+  .rule li b { color: var(--fg); font-weight: 600; }
+  .rule code { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 4px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="doc-h">Run progress when the workflow is a <em>graph</em></h1>
+    <p class="doc-sub">The step-trail I shipped reused the linear <code>Pipeline</code> bar and a <code>step 4 of 7</code> caption. That's the exact <b>"X of Y"</b> the system already banned — <code>StateBreakdown</code> exists because a graph that branches and loops has <b>no honest denominator</b>. So the run zone has to stop measuring "how far" and start describing <b>where the run is, where it's been, and what's still reachable.</b></p>
+
+    <!-- ── 1. DIAGNOSIS ── -->
+    <section>
+      <div class="sec-k">01 · the regression</div>
+      <h2 class="sec-h">A bar can't tell the truth about a graph</h2>
+      <p class="sec-p">A route step forks; an eval can loop back; a run may visit <code>execute</code> three times and never touch a branch. A flat bar collapses all of that into a fake fraction.</p>
+      <div class="stack">
+        <div class="panel">
+          <div class="cap"><span class="x">✗</span> what I shipped — implies a fixed line of 7</div>
+          <div class="dishonest">
+            <span class="c-pipeline" style="width:188px;height:7px;">
+              <span class="seg kind-route s-completed"></span><span class="seg kind-execute s-completed"></span><span class="seg kind-eval s-completed"></span><span class="seg kind-execute s-running"></span><span class="seg kind-human s-queued"></span><span class="seg kind-wait s-queued"></span><span class="seg kind-execute s-queued"></span>
+            </span>
+            <span class="meta">step <span class="strike">4 of 7</span> · 12 step executions</span>
+          </div>
+          <p class="sec-p" style="margin:var(--s-3) 0 0;">The bar hides the loop (this run hit <code>execute</code> twice), invents an order the branch may never follow, and the <code>of 7</code> is a lie the moment the run reroutes.</p>
+        </div>
+
+        <div class="panel">
+          <div class="cap"><span class="ok">✓</span> trajectory — the path actually walked <span class="tag">leaf · running</span></div>
+          <div class="hl">
+            <span class="state" style="color:var(--accent);">Running</span>
+            <span class="sep">·</span><span class="runtime" style="color:var(--accent);font-weight:500;">2m 14s</span>
+            <span class="sep">·</span><span class="at">at step <em style="color:var(--step-eval-fg);">eval</em></span>
+            <span class="right">leaf · no children</span>
+          </div>
+          <div class="traj">
+            <span class="tchip"><span class="d k-route"></span>triage</span><span class="arr">→</span>
+            <span class="tchip"><span class="d k-execute"></span>draft</span><span class="arr">→</span>
+            <span class="tchip"><span class="d k-eval"></span>score</span><span class="arr">→</span>
+            <span class="tchip loop"><span class="d k-execute"></span>revise <span class="loopmark">↺</span></span><span class="arr">→</span>
+            <span class="tchip loop"><span class="d k-execute"></span>draft <span class="loopmark">↺</span></span><span class="arr">→</span>
+            <span class="tchip now"><span class="nowdot"></span>score</span>
+          </div>
+          <div class="traj-meta"><b>9 step executions</b> · at <b>eval</b>, 2nd pass · 1 branch still open</div>
+          <p class="sec-p" style="margin:var(--s-3) 0 0;">No denominator. It grows as the run moves, repeats show the loop honestly (<span class="mono">↺</span>), and the live node pulses. Truthful at a glance, fits one line.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 2. RUN-MAP ── -->
+    <section>
+      <div class="sec-k">02 · the full picture</div>
+      <h2 class="sec-h">"You are here" on the real graph</h2>
+      <p class="sec-p">The compact trajectory answers <em>where am I</em>. For <em>what's left</em>, the inspector carries a <b>run-map</b> — the actual workflow topology (same <code>StepNode</code> / <code>GraphEdge</code> vocabulary as the canvas) with the run overlaid: visited nodes solid, current pulsing, traversed edges lit, branches not taken dimmed. Honest about what's reachable without faking a percentage.</p>
+      <div class="panel">
+        <div class="cap">run-map · expandable inspector section</div>
+        <div class="map">
+          <svg class="edges" viewBox="0 0 860 300" preserveAspectRatio="none">
+            <defs>
+              <marker id="ah" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--line-strong)"/></marker>
+              <marker id="ahl" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--accent)"/></marker>
+              <marker id="ahs" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="var(--fg-faint)"/></marker>
+            </defs>
+            <!-- live (traversed) edges -->
+            <g fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#ahl)" style="filter:drop-shadow(0 0 3px var(--accent-glow));">
+              <path d="M152,150 L200,80"><animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/></path>
+              <path d="M322,73 L380,73"><animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/></path>
+              <path d="M441,99 L441,210"><animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/></path>
+              <path d="M380,233 C300,233 280,120 261,99"><animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/></path>
+            </g>
+            <!-- future edges -->
+            <g fill="none" stroke="var(--line-strong)" stroke-width="1.5" marker-end="url(#ah)">
+              <path d="M502,73 L560,73"/>
+              <path d="M682,73 L720,73"/>
+            </g>
+            <!-- not-taken branch -->
+            <g fill="none" stroke="var(--fg-faint)" stroke-width="1.4" stroke-dasharray="2 3" marker-end="url(#ahs)" opacity="0.5">
+              <path d="M152,150 L200,227"/>
+            </g>
+          </svg>
+          <!-- nodes -->
+          <div class="gnode kind-route visited"  style="left:30px;  top:127px;"><span class="gv">✓</span><div class="gk">route</div><div class="gt">triage</div></div>
+          <div class="gnode kind-execute visited" style="left:200px; top:50px;"><span class="gv">✓ ×2</span><div class="gk">execute</div><div class="gt">draft</div></div>
+          <div class="gnode kind-execute skip"    style="left:200px; top:204px;"><div class="gk">execute</div><div class="gt">lookup</div></div>
+          <div class="gnode kind-eval current"    style="left:380px; top:50px;"><div class="gk">eval</div><div class="gt">score · 2nd</div></div>
+          <div class="gnode kind-execute visited" style="left:380px; top:204px;"><span class="gv">✓</span><div class="gk">execute</div><div class="gt">revise</div></div>
+          <div class="gnode kind-human future"    style="left:560px; top:50px;"><div class="gk">human</div><div class="gt">review</div></div>
+          <div class="gnode kind-terminal future" style="left:720px; top:50px;"><div class="gk">done</div><div class="gt">ship</div></div>
+        </div>
+        <div class="legend">
+          <span><span class="swatch sw-live"></span> traversed (live)</span>
+          <span><span class="swatch sw-next"></span> reachable ahead</span>
+          <span><span class="swatch sw-skip"></span> branch not taken</span>
+          <span><span class="d k-eval" style="display:inline-block;width:8px;height:8px;border-radius:50%;"></span> current · pulsing</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 3. COMPOSITION ── -->
+    <section>
+      <div class="sec-k">03 · multiple workflows</div>
+      <h2 class="sec-h">A graph of graphs</h2>
+      <p class="sec-p">This is the heart of your question. When a task fans out, it isn't one graph — the <code>wait</code> node <b>nests N child sub-workflows</b>, each running its own graph, that fan back in to a merge. So the run-map is <b>recursive</b>: a parent node can expand to reveal the children's sub-graphs. The hero stays compact (fan-out dots for the immediate children — the design we already have); the run-map lets you drill in.</p>
+      <div class="panel">
+        <div class="cap">parent run-map · <span class="mono" style="color:var(--step-wait-fg);">fan-out node expanded</span></div>
+        <div class="map" style="height:328px;">
+          <svg class="edges" viewBox="0 0 860 328" preserveAspectRatio="none">
+            <g fill="none" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#ahl)" style="filter:drop-shadow(0 0 3px var(--accent-glow));">
+              <path d="M152,150 L200,150"><animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/></path>
+            </g>
+            <!-- fan-out spokes into the cluster -->
+            <g fill="none" stroke="var(--step-wait)" stroke-width="1.5" opacity="0.7" marker-end="url(#ah)">
+              <path d="M322,150 C350,150 350,52 380,52"/>
+              <path d="M322,150 C350,150 350,108 380,108"/>
+              <path d="M322,150 C350,150 350,164 380,164"/>
+              <path d="M322,150 C350,150 350,220 380,220"/>
+            </g>
+            <!-- fan-in to merge (future, gated) -->
+            <g fill="none" stroke="var(--line-strong)" stroke-width="1.5" marker-end="url(#ah)" opacity="0.7">
+              <path d="M636,52  C672,52  672,150 700,150"/>
+              <path d="M636,108 C672,108 672,150 700,150"/>
+              <path d="M636,164 C672,164 672,150 700,150"/>
+              <path d="M636,220 C672,220 672,150 700,150"/>
+            </g>
+          </svg>
+          <div class="cluster-frame" style="left:366px; top:24px; width:276px; height:280px;"></div>
+          <div class="cluster-cap" style="left:374px; top:8px;">4 child workflows · running</div>
+
+          <div class="gnode kind-execute visited" style="left:30px;  top:127px;"><span class="gv">✓</span><div class="gk">execute</div><div class="gt">plan</div></div>
+          <div class="gnode kind-wait current"    style="left:200px; top:127px;"><div class="gk">wait</div><div class="gt">fan-out · 4</div></div>
+
+          <div class="child-cluster" style="left:380px; top:34px; width:248px;">
+            <div class="subchain"><span class="nm">auth schema</span><span class="pips"><span class="pip done"></span><span class="pip done"></span><span class="pip done"></span><span class="pip done"></span></span></div>
+            <div class="subchain"><span class="nm">token mint</span><span class="pips"><span class="pip done"></span><span class="pip done"></span><span class="pip run"></span><span class="pip q"></span></span></div>
+            <div class="subchain"><span class="nm">revoke list</span><span class="pips"><span class="pip done"></span><span class="pip run"></span><span class="pip q"></span><span class="pip q"></span></span></div>
+            <div class="subchain"><span class="nm">audit log</span><span class="pips"><span class="pip q"></span><span class="pip q"></span><span class="pip q"></span><span class="pip q"></span></span></div>
+          </div>
+
+          <div class="gnode kind-execute future" style="left:700px; top:106px; width:128px;"><div class="gk">execute</div><div class="gt">merge</div></div>
+          <div class="gnode kind-terminal future" style="left:700px; top:182px; width:128px;"><div class="gk">done</div><div class="gt">return</div></div>
+        </div>
+        <div class="legend">
+          <span><span class="d k-wait" style="display:inline-block;width:8px;height:8px;border-radius:50%;"></span> fan-out / fan-in barrier</span>
+          <span>each child carries its <b style="color:var(--fg-soft);font-weight:600;">own</b> trajectory + run-map</span>
+          <span>merge gated until all children resolve</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── THE RULE ── -->
+    <div class="rule">
+      <h3>The honesty rule</h3>
+      <ul>
+        <li data-n="A —"><b>Never a forward fraction.</b> No <code>X of N</code> against a graph — there's no honest N when the path branches or loops.</li>
+        <li data-n="B —"><b>Compact = trajectory.</b> The hero shows the path <em>walked</em> as kind-coloured chips, loops repeated with <code>↺</code>, current node live. It grows; it never claims completeness.</li>
+        <li data-n="C —"><b>Full = run-map.</b> The inspector overlays the run on the real topology: visited solid, current pulsing, traversed edges lit, untaken branches dimmed.</li>
+        <li data-n="D —"><b>Composition is recursive.</b> A fan-out is a graph of graphs — the <code>wait</code> node nests child sub-workflows; the hero shows fan-out dots, the run-map drills in. Each child owns its trajectory.</li>
+        <li data-n="E —"><b>Numbers describe, never divide.</b> step executions, loop count, attempts, per-state counts — all honest. A percentage of an unknowable whole is not.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

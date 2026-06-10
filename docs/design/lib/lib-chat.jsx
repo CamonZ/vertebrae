@@ -35,13 +35,13 @@
     height: 38px; padding: 0 var(--s-4) 0 var(--s-3);
     background: color-mix(in oklch, var(--bg-2) 50%, transparent); color: var(--fg);
     -webkit-backdrop-filter: blur(20px) brightness(1.5) saturate(1.5); backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
-    border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent); border-left: 3px solid var(--accent);
+    border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
     border-radius: var(--r-full);
     box-shadow: var(--shadow-2), 0 0 18px var(--accent-glow), inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
     cursor: pointer; user-select: none;
     transition: all var(--t-base) var(--ease);
   }
-  .hc-launch:hover { border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 28px var(--accent-glow); transform: translateY(-1px); }
+  .hc-launch:hover { border-color: color-mix(in oklch, var(--accent) 36%, transparent); box-shadow: var(--shadow-2), 0 0 28px var(--accent-glow); transform: translateY(-1px); }
   .hc-launch .ic { display: inline-flex; color: var(--accent); }
   .hc-launch .lbl { font-family: var(--serif); font-style: italic; font-size: var(--text-15); letter-spacing: -0.01em; }
   .hc-launch .ember { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent-glow); }
@@ -53,7 +53,7 @@
     display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(155deg, color-mix(in oklch, var(--bg-3) 34%, transparent), color-mix(in oklch, var(--bg-2) 28%, transparent));
     -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1.6); backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
-    border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent); border-left: 3px solid var(--accent);
+    border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-3), 0 0 44px rgba(0,0,0,0.34), inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   }
@@ -63,7 +63,7 @@
     left: 44px !important; top: 38px !important; bottom: 0 !important;
     height: auto !important; width: 372px;
     border-radius: 0; border-left: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
-    border-right: 3px solid var(--accent);
+    border-right: 1px solid color-mix(in oklch, var(--line) 70%, transparent);
     box-shadow: 18px 0 44px rgba(0,0,0,0.34);
   }
 
@@ -97,54 +97,9 @@
 
   .hc-day { align-self: center; font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-faint); padding: var(--s-0) 0; }
 
-  /* Message turn */
-  .hc-turn { display: flex; flex-direction: column; gap: var(--s-1h); max-width: 100%; }
-  .hc-turn.user { align-items: flex-end; }
-  .hc-turn.assistant { align-items: flex-start; }
-
-  .hc-bubble { max-width: 86%; padding: var(--s-2) var(--s-3); font-size: var(--text-13); line-height: 1.55; border-radius: var(--r-lg); }
-  .hc-turn.user .hc-bubble {
-    background: var(--accent-wash); color: var(--fg);
-    border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
-    border-bottom-right-radius: var(--r-xs);
-  }
-  .hc-turn.assistant .hc-speaker {
-    font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--fg-mute); display: flex; align-items: center; gap: var(--s-1h); margin-bottom: var(--s-0);
-  }
-  .hc-turn.assistant .hc-speaker .model { color: var(--fg-faint); font-size: var(--text-9); padding: 1px var(--s-1); border: 1px solid var(--line); border-radius: var(--r-xs); letter-spacing: 0.04em; text-transform: none; }
-  .hc-turn.assistant .hc-prose {
-    width: 100%; color: var(--fg-soft); font-size: var(--text-13); line-height: 1.6;
-    border-left: 2px solid var(--line-strong); padding: 1px 0 1px var(--s-3);
-  }
-  .hc-prose strong { color: var(--fg); font-weight: 600; }
-  .hc-prose code { font-family: var(--mono); font-size: var(--text-12); color: var(--accent); background: var(--accent-wash); padding: 1px var(--s-1); border-radius: var(--r-xs); }
-  .hc-cursor { display: inline-block; width: 7px; height: 14px; background: var(--accent); margin-left: var(--s-0); vertical-align: -2px; box-shadow: 0 0 6px var(--accent-glow); animation: hc-blink 1s step-end infinite; }
-  @keyframes hc-blink { 50% { opacity: 0; } }
-
-  /* Tool call block */
-  .hc-tool { width: 100%; border: 1px solid color-mix(in oklch, var(--step-execute) 28%, var(--line-strong)); border-radius: var(--r-sm); overflow: hidden; }
-  .hc-tool-hd { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-1h) var(--s-2); cursor: pointer; background: color-mix(in oklch, var(--step-execute-wash) 28%, var(--bg-2)); transition: background var(--t-fast) var(--ease); }
-  .hc-tool-hd:hover { background: color-mix(in oklch, var(--step-execute-wash) 42%, var(--bg-2)); }
-  .hc-tool-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--step-execute); flex-shrink: 0; }
-  .hc-tool-name { font-family: var(--mono); font-size: var(--text-11); font-weight: 500; color: var(--step-execute-fg); }
-  .hc-tool-sum { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 48%; }
-  .hc-tool-chev { color: var(--fg-faint); font-size: var(--text-9); flex-shrink: 0; transition: transform var(--t-fast) var(--ease); }
-  .hc-tool.collapsed .hc-tool-chev { transform: rotate(-90deg); }
-  .hc-tool-bd { padding: var(--s-2) var(--s-2h); background: var(--bg); border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--text-11); line-height: 1.55; color: var(--fg-mute); white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
-  .hc-tool-bd::-webkit-scrollbar { width: 4px; }
-  .hc-tool-bd::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
-  .hc-tool.collapsed .hc-tool-bd { display: none; }
-  .hc-tool.pending { border-color: color-mix(in oklch, var(--accent) 32%, transparent); }
-  .hc-tool.pending .hc-tool-hd { background: color-mix(in oklch, var(--accent-wash) 50%, var(--bg-2)); }
-  .hc-tool.pending .hc-tool-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent-glow); }
-  .hc-tool.pending .hc-tool-name { color: var(--accent); }
-  .hc-tool.err { border-color: color-mix(in oklch, var(--err) 38%, transparent); }
-  .hc-tool.err .hc-tool-hd { background: color-mix(in oklch, var(--err-wash) 32%, var(--bg-2)); }
-  .hc-tool.err .hc-tool-dot { background: var(--err); }
-  .hc-tool.err .hc-tool-name { color: var(--err); }
-  .hc-spin { width: 9px; height: 9px; border: 1.5px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: hc-spin 0.7s linear infinite; flex-shrink: 0; }
-  @keyframes hc-spin { to { transform: rotate(360deg); } }
+  /* Message body is rendered by the shared <Thread>/<EventRow> primitive
+     (lib-thread · lib-eventlog) in bare mode — chat and Traces are one
+     component. Per-message CSS lives there, not here. */
 
   /* Footer / composer */
   .hc-foot { flex-shrink: 0; background: color-mix(in oklch, var(--bg-2) 24%, transparent); border-top: 1px solid color-mix(in oklch, var(--fg) 8%, transparent); }
@@ -203,58 +158,27 @@
     },
   ];
 
-  /* ── Tool block ── */
-  function ToolBlock({ tool, onToggle }) {
-    const cls = 'hc-tool' + (tool.status === 'pending' ? ' pending' : tool.status === 'err' ? ' err' : '') + (tool.collapsed ? ' collapsed' : '');
-    return (
-      <div className={cls}>
-        <div className="hc-tool-hd" onClick={onToggle}>
-          {tool.status === 'pending' ? <span className="hc-spin" /> : <span className="hc-tool-dot" />}
-          <span className="hc-tool-name">{tool.name}</span>
-          <span className="hc-tool-sum">{tool.status === 'pending' ? 'running…' : tool.summary}</span>
-          {tool.status !== 'pending' ? <span className="hc-tool-chev">▾</span> : null}
-        </div>
-        {tool.status !== 'pending' ? <div className="hc-tool-bd">{tool.body}</div> : null}
-      </div>
-    );
-  }
-
-  /* minimal inline markdown: **bold** and `code` */
-  function renderProse(text) {
-    const nodes = [];
-    let i = 0, key = 0;
-    const re = /\*\*([^*]+)\*\*|`([^`]+)`/g;
-    let m, last = 0;
-    while ((m = re.exec(text)) !== null) {
-      if (m.index > last) nodes.push(text.slice(last, m.index));
-      if (m[1] != null) nodes.push(<strong key={'b' + key++}>{m[1]}</strong>);
-      else nodes.push(<code key={'c' + key++}>{m[2]}</code>);
-      last = re.lastIndex;
-    }
-    if (last < text.length) nodes.push(text.slice(last));
-    return nodes;
-  }
-
-  function Turn({ m, streaming, onToggleTool }) {
-    if (m.role === 'user') {
-      return <div className="hc-turn user"><div className="hc-bubble">{m.text}</div></div>;
-    }
-    return (
-      <div className="hc-turn assistant">
-        <div className="hc-speaker">
-          {m.streaming ? <span className="hc-spin" /> : <span className="badge-ember" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 6px var(--accent-glow)' }} />}
-          {m.speaker || 'sacrum'}
-          {m.model ? <span className="model">{m.model}</span> : null}
-        </div>
-        {(m.tools || []).map((t, ti) => <ToolBlock key={ti} tool={t} onToggle={() => onToggleTool(m.id, ti)} />)}
-        {m.prose || m.streaming ? (
-          <div className="hc-prose">
-            {renderProse(m.prose || '')}
-            {m.streaming ? <span className="hc-cursor" /> : null}
-          </div>
-        ) : null}
-      </div>
-    );
+  /* ── msgs → a recursive Thread (bare mode). Group the flat history into
+     conversational turns: each user message opens a new turn; assistant
+     messages attach to the open turn. Each message is mapped to an
+     <EventRow>-shaped node so chat renders through the SAME primitive as
+     the Traces stream — only the capability flags differ (bare · shallow ·
+     no step head). Tool toggles are wired per (msgId, toolIndex). ── */
+  function msgsToThread(msgs, onToggleTool) {
+    const turns = [];
+    let cur = null;
+    msgs.forEach((m) => {
+      if (m.role === 'user') {
+        cur = { id: 't' + m.id, messages: [] };
+        turns.push(cur);
+        cur.messages.push({ evt: m.id, type: 'user', role: 'human', text: m.text });
+      } else {
+        if (!cur) { cur = { id: 't' + m.id, messages: [] }; turns.push(cur); }
+        const tools = (m.tools || []).map((t, ti) => ({ ...t, onToggle: () => onToggleTool(m.id, ti) }));
+        cur.messages.push({ evt: m.id, type: 'agent', speaker: m.speaker || 'sacrum', model: m.model, streaming: m.streaming, tools, prose: m.prose });
+      }
+    });
+    return { id: 'chat-thread', turns };
   }
 
   /* ── Main ── */
@@ -432,10 +356,13 @@
           </div>
         </div>
 
-        {/* Thread */}
-        <div className="hc-body" ref={bodyRef}>
+        {/* Thread — the shared recursive <Thread> in bare mode (no step head,
+            shallow reveal, right-aligned user bubbles). Same primitive as Traces. */}
+        <div className="hc-body evlog evlog--bare" ref={bodyRef}>
           <div className="hc-day">Today</div>
-          {msgs.map((m) => <Turn key={m.id} m={m} streaming={streaming} onToggleTool={toggleTool} />)}
+          {window.Thread
+            ? <window.Thread thread={msgsToThread(msgs, toggleTool)} depth={0} mode="bare" reveal="shallow" showHead={false} />
+            : null}
         </div>
 
         {/* Composer */}

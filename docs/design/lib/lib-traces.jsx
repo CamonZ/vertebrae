@@ -33,95 +33,16 @@
   }
 
   // ── EventCard ───────────────────────────────────────────────
-  // Discriminated by `type`: step | agent | tool | wait | error
-  function EventWhen({ at, rel, id }) {
-    return (
-      <div className="when">
-        {at}<span className="rel">{rel}</span>
-        {id ? <window.IdChip id={id} /> : null}
-      </div>
-    );
-  }
-
-  function StepEvent({ at, rel, pre, to, kind, selected, onClick }) {
-    return (
-      <div className={'event step kind-' + kind + (selected ? ' sel' : '')} onClick={onClick}>
-        <EventWhen at={at} rel={rel} />
-        <div className="body">
-          {pre ? <span className="pre">{pre}</span> : null}
-          <span className="arr">→</span>
-          <span className="to">{to}</span>
-          <span className="tag">{kind}</span>
-        </div>
-      </div>
-    );
-  }
-
-  function AgentEvent({ at, rel, id, speaker, model, prose, selected, onClick }) {
-    return (
-      <div className={'event agent' + (selected ? ' sel' : '')} onClick={onClick}>
-        <EventWhen at={at} rel={rel} id={id} />
-        <div className="body">
-          <div className="speaker">{speaker}{model ? <span className="model">{model}</span> : null}</div>
-          <div className="prose">{prose}</div>
-        </div>
-      </div>
-    );
-  }
-
-  // cmd parts: { prompt, cmd, flag, em, dur }
-  function ToolEvent({ at, rel, error, prompt = '$', cmd, flag, em, dur, selected, onClick }) {
-    return (
-      <div className={'event tool' + (error ? ' err' : '') + (selected ? ' sel' : '')} onClick={onClick}>
-        <EventWhen at={at} rel={rel} />
-        <div className="body">
-          <span className="sd" />
-          <span className="prompt">{prompt}</span>
-          {cmd}{flag ? <span className="flag"> {flag}</span> : null} {em ? <em>{em}</em> : null}
-          {dur ? <span className="dur">{dur}</span> : null}
-        </div>
-      </div>
-    );
-  }
-
-  function WaitEvent({ at, rel, id, text, wid, selected, onClick }) {
-    return (
-      <div className={'event wait' + (selected ? ' sel' : '')} onClick={onClick}>
-        <EventWhen at={at} rel={rel} id={id} />
-        <div className="body">
-          <span>{text}</span>
-          <span className="flow" />
-          {wid ? <span className="wid">{wid}</span> : null}
-        </div>
-      </div>
-    );
-  }
-
-  function ErrorEvent({ at, rel, id, title, sub, selected, onClick }) {
-    return (
-      <div className={'event error' + (selected ? ' sel' : '')} onClick={onClick}>
-        <EventWhen at={at} rel={rel} id={id} />
-        <div className="body">
-          <b>{title}</b>
-          {sub ? <span className="sub">{sub}</span> : null}
-        </div>
-      </div>
-    );
-  }
-
-  // Dispatcher — `type` ∈ step | agent | tool | wait | error
+  // The event stream is now rendered by the shared <EventRow> atom
+  // (lib-eventlog.jsx) — chat thread + Traces stream are one log, one
+  // visual language. EventCard is kept as a back-compat alias that
+  // delegates to EventRow. Traces wraps the stream in <EventLog mode="timed">
+  // so the time/rel/id gutter shows; chat uses mode="bare".
   function EventCard(props) {
-    switch (props.type) {
-      case 'agent': return <AgentEvent {...props} />;
-      case 'tool': return <ToolEvent {...props} />;
-      case 'wait': return <WaitEvent {...props} />;
-      case 'error': return <ErrorEvent {...props} />;
-      case 'step':
-      default: return <StepEvent {...props} />;
-    }
+    const EventRow = window.EventRow;
+    if (!EventRow) return null;
+    return <EventRow {...props} />;
   }
 
-  Object.assign(window, {
-    FlightStrip, EventCard, StepEvent, AgentEvent, ToolEvent, WaitEvent, ErrorEvent,
-  });
+  Object.assign(window, { FlightStrip, EventCard });
 })();

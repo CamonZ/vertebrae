@@ -130,6 +130,22 @@
   --t-fast: 100ms;
   --t-base: 180ms;
   --t-slow: 280ms;
+
+  /* Graph edges — link/transition vocabulary (Atlas map + Workflow graph).
+     One source of truth for the dash/width/opacity values that were
+     previously inlined (and drifting) across the canvas pages. */
+  --edge-color:      var(--line-strong);  /* resting stroke */
+  --edge-color-lit:  var(--accent);       /* on an active trace */
+  --edge-color-loop: var(--step-route);   /* loop-back hue */
+  --edge-w:          1.5;                  /* resting width */
+  --edge-w-lit:      2;                    /* lit width */
+  --edge-o:          0.85;                 /* resting opacity */
+  --edge-o-loop:     0.72;                 /* loop-backs rest a touch quieter */
+  --edge-o-dim:      0.15;                 /* faded out of a trace */
+  --edge-dash:       5 4;                  /* handoff / cross-workflow */
+  --edge-dash-loop:  3 3;                  /* loop-back */
+  --edge-glow:       drop-shadow(0 0 5px var(--accent-glow));
+  --edge-glow-loop:  drop-shadow(0 0 4px color-mix(in oklch, var(--step-route) 50%, transparent));
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
