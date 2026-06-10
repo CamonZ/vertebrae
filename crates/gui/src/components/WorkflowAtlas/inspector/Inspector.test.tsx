@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PipelineStep,
@@ -6,6 +12,7 @@ import type {
   PipelineWorkflow,
   Step,
 } from "../../../bindings";
+import { commands } from "../../../bindings";
 import { buildAtlasModel } from "../adapter/buildAtlasModel";
 import { StepInspector } from "./StepInspector";
 import { WorkflowInspector } from "./WorkflowInspector";
@@ -21,7 +28,7 @@ function makeStep(
   id: string,
   workflowId: string,
   order: number,
-  overrides: Partial<PipelineStep> = {},
+  overrides: Partial<PipelineStep> = {}
 ): PipelineStep {
   return {
     id,
@@ -42,7 +49,7 @@ function makeStep(
 function makeWorkflow(
   id: string,
   steps: PipelineStep[],
-  overrides: Partial<PipelineWorkflow> = {},
+  overrides: Partial<PipelineWorkflow> = {}
 ): PipelineWorkflow {
   return {
     id,
@@ -78,12 +85,12 @@ const SUMMARY: PipelineSummary = {
           step_type: "route",
         }),
       ],
-      { kanban_column: "Build", description: "Builds things." },
+      { kanban_column: "Build", description: "Builds things." }
     ),
     makeWorkflow(
       "wf-review",
       [makeStep("r1", "wf-review", 0, { name: "Review" })],
-      { kanban_column: "Review" },
+      { kanban_column: "Review" }
     ),
   ],
 };
@@ -152,7 +159,7 @@ describe("WorkflowInspector", () => {
         workflowId="wf-build"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
 
     expect(screen.getByText("wf-build")).toBeInTheDocument();
@@ -188,7 +195,7 @@ describe("WorkflowInspector", () => {
         workflowId="wf-build"
         onSelect={onSelect}
         onClose={vi.fn()}
-      />,
+      />
     );
 
     const stepList = container.querySelector(".wfd-steps") as HTMLElement;
@@ -208,7 +215,7 @@ describe("WorkflowInspector", () => {
         workflowId="wf-build"
         onSelect={onSelect}
         onClose={vi.fn()}
-      />,
+      />
     );
 
     fireEvent.click(screen.getByText("wf-review"));
@@ -226,7 +233,7 @@ describe("WorkflowInspector", () => {
         workflowId="wf-build"
         onSelect={vi.fn()}
         onClose={onClose}
-      />,
+      />
     );
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -241,7 +248,7 @@ describe("WorkflowInspector", () => {
         onSelect={vi.fn()}
         onClose={vi.fn()}
         onHoverEdge={onHoverEdge}
-      />,
+      />
     );
     // the single out-route row → wf-review
     const row = screen.getByText("wf-review").closest("button")!;
@@ -264,7 +271,7 @@ describe("WorkflowInspector", () => {
         workflowId="wf-build"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
     expect(screen.queryByText("default")).not.toBeInTheDocument();
 
@@ -273,7 +280,7 @@ describe("WorkflowInspector", () => {
         makeWorkflow(
           "wf-def",
           [makeStep("s1", "wf-def", 0, { name: "Plan" })],
-          { is_default: true, kanban_column: "Build" },
+          { is_default: true, kanban_column: "Build" }
         ),
       ],
     });
@@ -283,9 +290,50 @@ describe("WorkflowInspector", () => {
         workflowId="wf-def"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
     expect(screen.getByText("default")).toBeInTheDocument();
+  });
+
+  it("updates the final workflow setting through the GUI command", async () => {
+    const updateWorkflow = vi
+      .spyOn(commands, "updateWorkflow")
+      .mockResolvedValue({ status: "ok", data: null });
+    const onRefresh = vi.fn().mockResolvedValue(undefined);
+
+    try {
+      render(
+        <WorkflowInspector
+          model={MODEL}
+          workflowId="wf-build"
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+          onRefresh={onRefresh}
+        />
+      );
+
+      const toggle = screen.getByRole("switch", {
+        name: "Final workflow: disabled",
+      });
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+
+      fireEvent.click(toggle);
+
+      await waitFor(() => {
+        expect(updateWorkflow).toHaveBeenCalledWith({
+          workflow_id: "wf-build",
+          name: null,
+          description: null,
+          order: null,
+          is_default: null,
+          is_final: true,
+          kanban_column: null,
+        });
+      });
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+    } finally {
+      updateWorkflow.mockRestore();
+    }
   });
 });
 
@@ -298,7 +346,7 @@ describe("StepInspector", () => {
         stepId="s1"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
 
     expect(screen.getByText("Plan")).toBeInTheDocument();
@@ -322,7 +370,7 @@ describe("StepInspector", () => {
 
   it("shows placeholders when config is absent", () => {
     mockUseStep(
-      stepFixture({ goal: null, prompt: null, agents: [], skills: [] }),
+      stepFixture({ goal: null, prompt: null, agents: [], skills: [] })
     );
     render(
       <StepInspector
@@ -331,7 +379,7 @@ describe("StepInspector", () => {
         stepId="s1"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
     expect(screen.getByText("No goal set")).toBeInTheDocument();
     expect(screen.getByText("No prompt")).toBeInTheDocument();
@@ -348,7 +396,7 @@ describe("StepInspector", () => {
           properties: { verdict: { type: "string" } },
           required: ["verdict"],
         },
-      }),
+      })
     );
     render(
       <StepInspector
@@ -357,7 +405,7 @@ describe("StepInspector", () => {
         stepId="s1"
         onSelect={vi.fn()}
         onClose={vi.fn()}
-      />,
+      />
     );
     expect(screen.getByText("Output Schema")).toBeInTheDocument();
     expect(screen.getByTestId("schema-tree")).toBeInTheDocument();
@@ -373,7 +421,7 @@ describe("StepInspector", () => {
         stepId="s1"
         onSelect={onSelect}
         onClose={vi.fn()}
-      />,
+      />
     );
     fireEvent.click(screen.getByText("Execute"));
     expect(onSelect).toHaveBeenCalledWith({
@@ -393,10 +441,10 @@ describe("StepInspector", () => {
         stepId="s2"
         onSelect={onSelect}
         onClose={vi.fn()}
-      />,
+      />
     );
     const loopChip = document.querySelector(
-      ".wfd-trans.loop",
+      ".wfd-trans.loop"
     ) as HTMLElement | null;
     expect(loopChip).not.toBeNull();
     expect(loopChip!.textContent).toContain("Plan");
@@ -419,7 +467,7 @@ describe("StepInspector", () => {
         stepId="s1"
         onSelect={vi.fn()}
         onClose={onClose}
-      />,
+      />
     );
     fireEvent.click(screen.getByRole("button", { name: "Close panel" }));
     expect(onClose).toHaveBeenCalledTimes(1);

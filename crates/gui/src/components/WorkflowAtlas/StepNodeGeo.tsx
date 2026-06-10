@@ -17,6 +17,7 @@
  *
  * Ported from docs/design/workflow-views.jsx (StepNode).
  */
+import type { KeyboardEvent } from "react";
 import { TaskCount } from "./TaskCount";
 import type { PlacedStep } from "./layout/types";
 
@@ -51,17 +52,31 @@ export function StepNodeGeo({
     step.kind +
     (state ? " s-" + state : "") +
     (hovered ? " s-hover" : "");
+  const select = () => onSelect?.(step.workflowId, step.stepId);
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onSelect) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    select();
+  };
+
   return (
     <div
       className={cls}
+      data-testid={`step-node-${step.name}`}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      aria-label={`Step ${step.name}`}
       style={{ left: step.x, top: step.y, width: step.w, height: step.h }}
       onMouseEnter={onHover ? () => onHover(step) : undefined}
       onMouseLeave={onHover ? () => onHover(null) : undefined}
+      onKeyDown={handleKeyDown}
       onClick={
         onSelect
           ? (e) => {
               e.stopPropagation();
-              onSelect(step.workflowId, step.stepId);
+              select();
             }
           : undefined
       }

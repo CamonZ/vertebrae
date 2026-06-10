@@ -20,6 +20,7 @@
  *
  * Ported from docs/design/workflow-views.jsx (WfBox).
  */
+import type { MouseEvent } from "react";
 import { StepStrip } from "./StepStrip";
 import { TaskCount } from "./TaskCount";
 import { shortId } from "./layout/geometry";
@@ -57,14 +58,21 @@ export function WfBox({
   const w = workflow;
   const cls = "uv-wf" + (state ? " " + state : "");
   const stepWord = stepCount === 1 ? "step" : "steps";
+  const select = () => onSelect?.(w.id);
+  const selectFromName = (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    select();
+  };
 
   return (
     <div
       className={cls}
+      data-testid={`workflow-node-${w.name}`}
+      aria-label={`Workflow ${w.name}`}
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
       onMouseEnter={onHover ? () => onHover(w.id) : undefined}
       onMouseLeave={onHover ? () => onHover(null) : undefined}
-      onClick={onSelect ? () => onSelect(w.id) : undefined}
+      onClick={onSelect ? select : undefined}
     >
       {/* graph face */}
       <div
@@ -72,9 +80,20 @@ export function WfBox({
       >
         <div className="ag-wf-hd">
           <div className="ag-wf-top">
-            <span className="ag-wf-name">{w.name}</span>
+            <button
+              type="button"
+              className="ag-wf-name"
+              onClick={selectFromName}
+            >
+              {w.name}
+            </button>
+            {w.isFinal ? <span className="uv-final">Final</span> : null}
             {w.isDefault ? <span className="uv-default">default</span> : null}
-            <TaskCount total={w.total} running={w.running} className="uv-tc-wf" />
+            <TaskCount
+              total={w.total}
+              running={w.running}
+              className="uv-tc-wf"
+            />
           </div>
           <div className="ag-wf-meta">
             <span className="id">{shortId(w.id)}</span>
@@ -92,7 +111,10 @@ export function WfBox({
       {/* map face */}
       <div className={"uv-face uv-face-map" + (view === "map" ? "" : " hide")}>
         <div className="al-card-hd">
-          <span className="al-name">{w.name}</span>
+          <button type="button" className="al-name" onClick={selectFromName}>
+            {w.name}
+          </button>
+          {w.isFinal ? <span className="uv-final">Final</span> : null}
           {w.isDefault ? <span className="uv-default">default</span> : null}
           <TaskCount total={w.total} running={w.running} className="uv-tc-wf" />
         </div>

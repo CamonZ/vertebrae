@@ -33,7 +33,7 @@ describe("WfBox default badge", () => {
         rect={RECT}
         shape={SHAPE}
         stepCount={2}
-      />,
+      />
     );
     expect(getAllByText("default")).toHaveLength(2);
   });
@@ -45,25 +45,43 @@ describe("WfBox default badge", () => {
         rect={RECT}
         shape={SHAPE}
         stepCount={2}
-      />,
+      />
     );
     expect(queryByText("default")).not.toBeInTheDocument();
   });
 });
 
+describe("WfBox final badge", () => {
+  it("shows the Final badge next to workflow-name buttons on both faces", () => {
+    const { getAllByRole, getAllByText } = render(
+      <WfBox
+        workflow={makeWorkflow({ isFinal: true })}
+        rect={RECT}
+        shape={SHAPE}
+        stepCount={2}
+      />
+    );
+
+    expect(getAllByRole("button", { name: "Backlog" })).toHaveLength(2);
+    expect(getAllByText("Final")).toHaveLength(2);
+  });
+});
+
 describe("WfBox task counts", () => {
   it("shows the total badge and a running pill on both faces when work is parked", () => {
-    const { getAllByText } = render(
+    const { getAllByText, getAllByTitle } = render(
       <WfBox
         workflow={makeWorkflow({ total: 12, running: 3 })}
         rect={RECT}
         shape={SHAPE}
         stepCount={2}
-      />,
+      />
     );
     // once per face (graph + map)
     expect(getAllByText("12")).toHaveLength(2);
     expect(getAllByText("3")).toHaveLength(2);
+    expect(getAllByTitle("12 task(s)")).toHaveLength(2);
+    expect(getAllByTitle("3 active")).toHaveLength(2);
   });
 
   it("omits the running pill when nothing is running but keeps the total", () => {
@@ -73,7 +91,7 @@ describe("WfBox task counts", () => {
         rect={RECT}
         shape={SHAPE}
         stepCount={2}
-      />,
+      />
     );
     expect(getAllByText("5")).toHaveLength(2);
     // "0" running pill is never rendered
@@ -87,7 +105,7 @@ describe("WfBox task counts", () => {
         rect={RECT}
         shape={SHAPE}
         stepCount={2}
-      />,
+      />
     );
     expect(container.querySelector(".uv-tc")).toBeNull();
   });

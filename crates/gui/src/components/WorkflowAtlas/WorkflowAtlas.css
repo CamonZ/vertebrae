@@ -206,7 +206,9 @@
 }
 .uv-wf.lit {
   border-color: var(--accent);
-  box-shadow: var(--shadow-2), 0 0 26px var(--accent-glow);
+  box-shadow:
+    var(--shadow-2),
+    0 0 26px var(--accent-glow);
 }
 .uv-wf.dim {
   opacity: 0.3;
@@ -234,6 +236,15 @@
   display: flex;
   align-items: center;
   gap: var(--s-2);
+}
+.ag-wf-name,
+.al-name {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
 }
 .ag-wf-name {
   /* Match the Map card title (.al-name): Newsreader italic, one voice for the
@@ -294,6 +305,18 @@
 .uv-default {
   flex-shrink: 0;
   margin-left: auto;
+  font-family: var(--mono);
+  font-size: var(--text-8);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 var(--s-1);
+  border-radius: var(--r-xs);
+  color: var(--accent);
+  background: var(--accent-wash);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+}
+.uv-final {
+  flex-shrink: 0;
   font-family: var(--mono);
   font-size: var(--text-8);
   letter-spacing: 0.08em;
@@ -666,7 +689,8 @@
   height: 6px;
   border-radius: 50%;
   background: var(--kc, var(--accent));
-  box-shadow: 0 0 6px color-mix(in oklch, var(--kc, var(--accent)) 60%, transparent);
+  box-shadow: 0 0 6px
+    color-mix(in oklch, var(--kc, var(--accent)) 60%, transparent);
 }
 /* "default workflow" badge — surfaces the backend is_default flag. */
 .wfd-badge {
@@ -1019,7 +1043,8 @@
   font-weight: 600;
   color: var(--kf, var(--accent));
   background: var(--kw, var(--accent-wash));
-  border: 1px solid color-mix(in oklch, var(--kc, var(--accent)) 38%, transparent);
+  border: 1px solid
+    color-mix(in oklch, var(--kc, var(--accent)) 38%, transparent);
 }
 .wfd-step-name {
   min-width: 0;
@@ -1103,20 +1128,31 @@
   color: var(--kf, var(--fg));
   padding: 2px var(--s-2);
   background: var(--kw, var(--bg-2));
-  border: 1px solid color-mix(in oklch, var(--kc, var(--line-strong)) 32%, transparent);
+  border: 1px solid
+    color-mix(in oklch, var(--kc, var(--line-strong)) 32%, transparent);
   border-radius: var(--r-sm);
 }
 
-/* faux toggle (read-only state indicator) */
+.wfd-tag[data-testid="step-type-badge"] {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .wfd-toggle {
   width: 34px;
   height: 18px;
   flex-shrink: 0;
+  padding: 0;
   border-radius: var(--r-full);
   background: color-mix(in oklch, var(--fg) 14%, transparent);
   border: 1px solid var(--line-strong);
   position: relative;
+  cursor: pointer;
   transition: background var(--t-fast) var(--ease);
+}
+.wfd-toggle:disabled {
+  cursor: wait;
+  opacity: 0.7;
 }
 .wfd-toggle .knob {
   position: absolute;
@@ -1135,6 +1171,12 @@
 .wfd-toggle.on .knob {
   left: 17px;
   background: #fff;
+}
+.wfd-error {
+  margin-top: var(--s-1h);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--err, var(--accent));
 }
 
 /* ── Chip rows (agents · skills · transitions) ── */

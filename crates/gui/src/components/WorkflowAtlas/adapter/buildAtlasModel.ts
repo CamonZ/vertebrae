@@ -92,7 +92,7 @@ function phaseOf(wf: PipelineWorkflow): string {
  * for determinism.
  */
 function orderPhases(
-  workflows: PipelineWorkflow[],
+  workflows: PipelineWorkflow[]
 ): { name: string; members: PipelineWorkflow[] }[] {
   const byPhase = new Map<string, PipelineWorkflow[]>();
   for (const wf of workflows) {
@@ -104,9 +104,7 @@ function orderPhases(
 
   const cols = [...byPhase.entries()].map(([name, members]) => ({
     name,
-    members: members
-      .slice()
-      .sort((a, b) => a.display_order - b.display_order),
+    members: members.slice().sort((a, b) => a.display_order - b.display_order),
     minOrder: Math.min(...members.map((w) => w.display_order)),
   }));
 
@@ -148,13 +146,10 @@ function resolveSourceStep(wf: PipelineWorkflow): string | null {
  */
 function resolveTargetStep(
   wf: PipelineWorkflow,
-  targetStepId: string | null,
+  targetStepId: string | null
 ): string | null {
   const steps = wf.workflow_steps;
-  if (
-    targetStepId !== null &&
-    steps.some((s) => s.id === targetStepId)
-  ) {
+  if (targetStepId !== null && steps.some((s) => s.id === targetStepId)) {
     return targetStepId;
   }
   if (wf.initial_step_id !== null) return wf.initial_step_id;
@@ -214,6 +209,7 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
         stepId: s.id,
         workflowId: wf.id,
         name: s.name,
+        stepType: s.step_type,
         kind,
         role,
         order: s.step_order,

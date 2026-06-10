@@ -26,12 +26,12 @@ export function TaskCount({ total, running, className }: TaskCountProps) {
   return (
     <span className={"uv-tc" + (className ? " " + className : "")}>
       {total > 0 ? (
-        <span className="uv-tasks" title={`${total} tasks parked here`}>
+        <span className="uv-tasks" title={`${total} task(s)`}>
           {total}
         </span>
       ) : null}
       {running > 0 ? (
-        <span className="uv-running" title={`${running} running`}>
+        <span className="uv-running" title={`${running} active`}>
           <span className="pulse" />
           {running}
         </span>

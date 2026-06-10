@@ -34,6 +34,8 @@ export interface AtlasStep {
   stepId: string;
   workflowId: string;
   name: string;
+  /** Raw backend step type, preserved for detail panels and test hooks. */
+  stepType: string | null;
   kind: Kind;
   role: Role;
   /** Backend ordering within the workflow (ascending). */

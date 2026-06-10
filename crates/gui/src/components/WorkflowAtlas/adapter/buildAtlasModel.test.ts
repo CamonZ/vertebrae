@@ -6,12 +6,7 @@ import type {
   PipelineWorkflowTransition,
 } from "../../../bindings";
 import { UNPHASED } from "../layout/types";
-import {
-  buildAtlasModel,
-  kindFor,
-  roleFor,
-  stepRef,
-} from "./buildAtlasModel";
+import { buildAtlasModel, kindFor, roleFor, stepRef } from "./buildAtlasModel";
 
 /* ── fixtures ──────────────────────────────────────────────────── */
 
@@ -19,7 +14,7 @@ function makeStep(
   id: string,
   workflowId: string,
   order: number,
-  overrides: Partial<PipelineStep> = {},
+  overrides: Partial<PipelineStep> = {}
 ): PipelineStep {
   return {
     id,
@@ -40,7 +35,7 @@ function makeStep(
 function makeWorkflow(
   id: string,
   steps: PipelineStep[],
-  overrides: Partial<PipelineWorkflow> = {},
+  overrides: Partial<PipelineWorkflow> = {}
 ): PipelineWorkflow {
   return {
     id,
@@ -59,7 +54,7 @@ function makeWorkflow(
 
 function makeTransition(
   overrides: Partial<PipelineWorkflowTransition> &
-    Pick<PipelineWorkflowTransition, "from_workflow_id" | "to_workflow_id">,
+    Pick<PipelineWorkflowTransition, "from_workflow_id" | "to_workflow_id">
 ): PipelineWorkflowTransition {
   return {
     id: `${overrides.from_workflow_id}->${overrides.to_workflow_id}`,
@@ -123,7 +118,7 @@ describe("buildAtlasModel", () => {
             makeStep("router", "wf", 3, { step_type: "route" }),
             makeStep("done", "wf", 4, { is_final: true }),
           ],
-          { initial_step_id: "entry" },
+          { initial_step_id: "entry" }
         ),
       ],
     };
@@ -138,6 +133,8 @@ describe("buildAtlasModel", () => {
     expect(byId.get("gate")!.kind).toBe("eval");
     expect(byId.get("router")!.kind).toBe("route");
     expect(byId.get("done")!.kind).toBe("execute");
+    expect(byId.get("gate")!.stepType).toBe("evaluate");
+    expect(byId.get("router")!.stepType).toBe("route");
 
     // role still carries flow position (first → entry, route/terminal → exit).
     expect(byId.get("entry")!.role).toBe("entry");
@@ -210,7 +207,7 @@ describe("buildAtlasModel", () => {
             makeStep("b", "wf", 1, { transitions_to: ["c", "a"] }), // forward + loop
             makeStep("c", "wf", 2, { transitions_to: ["b"] }), // loop
           ],
-          { initial_step_id: "a" },
+          { initial_step_id: "a" }
         ),
       ],
     };
@@ -260,12 +257,12 @@ describe("buildAtlasModel", () => {
                 to_workflow_id: "ghost", // dangling target → dropped
               }),
             ],
-          },
+          }
         ),
         makeWorkflow(
           "dst",
           [makeStep("d0", "dst", 0), makeStep("d1", "dst", 1)],
-          { initial_step_id: "d0" },
+          { initial_step_id: "d0" }
         ),
       ],
     };
