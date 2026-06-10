@@ -122,7 +122,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           hint && (
             <kbd
               aria-hidden
-              className="pointer-events-none absolute right-2 rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-1.5 py-px font-mono text-[0.625rem] text-[var(--color-fg-mute)]"
+              className="pointer-events-none absolute right-2 rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-1.5 py-px font-mono text-2xs text-[var(--color-fg-mute)]"
             >
               {hint}
             </kbd>

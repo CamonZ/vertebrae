@@ -114,7 +114,7 @@ function ProjectAvatar({
           // the design's `.app-rail .logo`); the 0.5px right→left translate is
           // an optical nudge to counter the italic slant pushing the glyph
           // visually right.
-          "font-serif text-[15px] italic leading-none text-white",
+          "font-serif text-base italic leading-none text-white",
           "[transform:translateX(-0.5px)]",
           "ring-0 transition-shadow duration-[var(--t-fast)] hover:ring-2 hover:ring-[var(--color-accent-wash)]",
           palette[bucket],
@@ -337,7 +337,7 @@ function RailConnectionStatus() {
       title={accessibleName}
       aria-label={accessibleName}
       data-testid="rail-connection-status"
-      className="mt-auto flex flex-col items-center gap-1.5 pb-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[var(--color-fg-faint)] [writing-mode:vertical-rl] rotate-180"
+      className="mt-auto flex flex-col items-center gap-1.5 pb-1.5 font-mono text-[length:var(--text-9)] uppercase tracking-[0.08em] text-[var(--color-fg-faint)] [writing-mode:vertical-rl] rotate-180"
     >
       <span
         aria-hidden

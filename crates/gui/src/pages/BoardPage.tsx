@@ -340,7 +340,7 @@ export function BoardPage() {
   const headerActions = useMemo(
     () =>
       totalFiltered > 0 ? (
-        <div className="flex items-center gap-3 text-[11px]">
+        <div className="flex items-center gap-3 text-eyebrow">
           <span className="text-[var(--color-fg-mute)]">
             <b className="font-semibold text-[var(--color-fg)]">
               {totalFiltered}

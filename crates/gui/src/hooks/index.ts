@@ -26,6 +26,7 @@ export { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 export { useStepTransitionChangeListener } from "./useStepTransitionChangeListener";
 export { useLiveChatChangeListener } from "./useLiveChatChangeListener";
 export { useTheme } from "./useTheme";
+export { useDensity } from "./useDensity";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
 export { useOperationsData } from "./useOperationsData";

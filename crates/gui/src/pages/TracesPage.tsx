@@ -558,7 +558,7 @@ export function TracesPage({
                     focused on{" "}
                     <b className="text-[var(--color-fg)]">{focused.label}</b>
                   </span>
-                  <span className="ml-auto rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] px-1 text-[9px] uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <span className="ml-auto rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] px-1 text-[length:var(--text-9)] uppercase tracking-wider text-[var(--color-fg-mute)]">
                     read-only
                   </span>
                 </div>

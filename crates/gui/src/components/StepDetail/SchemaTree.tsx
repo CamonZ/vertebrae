@@ -135,7 +135,7 @@ function SchemaNode({
       {/* Description */}
       {description && depth > 0 && (
         <div className="ml-8 pl-1">
-          <span className="text-2xs italic leading-tight text-[var(--color-fg-mute)]">
+          <span className="text-xs italic leading-tight text-[var(--color-fg-mute)]">
             {description}
           </span>
         </div>

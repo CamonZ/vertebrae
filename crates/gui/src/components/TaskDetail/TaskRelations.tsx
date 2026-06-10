@@ -95,7 +95,7 @@ function RelationSection({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-[var(--color-fg-mute)]">{emptyMessage}</p>
+        <p className="text-sm text-[var(--color-fg-mute)]">{emptyMessage}</p>
       )}
     </div>
   );
@@ -192,7 +192,7 @@ function ParentPicker({
                   key={task.id}
                   type="button"
                   onClick={() => onParentChange(task.id)}
-                  className="block w-full rounded-[var(--radius-sm)] px-3 py-2 text-left text-xs text-[var(--color-fg)] hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
+                  className="block w-full rounded-[var(--radius-sm)] px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
                 >
                   <ScanIdentifier
                     id={task.id}
@@ -320,7 +320,7 @@ function DependencyPicker({
                       className="text-2xs"
                       testId="dependency-picker-task-id"
                     />
-                    <div className="truncate text-xs text-[var(--color-fg)]">{task.title}</div>
+                    <div className="truncate text-sm text-[var(--color-fg)]">{task.title}</div>
                   </div>
                 </label>
               ))}
@@ -515,7 +515,7 @@ export function TaskRelations({
             {parentId ? (
               <TaskLink taskId={parentId} onClick={onTaskSelect} />
             ) : (
-              <p className="text-xs text-[var(--color-fg-mute)] italic">No parent (root task)</p>
+              <p className="text-sm text-[var(--color-fg-mute)] italic">No parent (root task)</p>
             )}
           </div>
         )}
@@ -564,7 +564,7 @@ export function TaskRelations({
                 ))}
               </div>
             ) : (
-              <p className="text-xs text-[var(--color-fg-mute)] italic">No blockers</p>
+              <p className="text-sm text-[var(--color-fg-mute)] italic">No blockers</p>
             )}
           </div>
         )}
