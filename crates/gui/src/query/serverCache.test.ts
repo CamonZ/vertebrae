@@ -21,18 +21,24 @@ describe("server cache helpers", () => {
     queryClient.clear();
   });
 
+  const ticketFilter: TaskFilterOptions = {
+    levels: ["ticket"],
+    step_names: null,
+    tags: null,
+    root_only: null,
+    children_of: null,
+    search: null,
+    workflow_id: null,
+    step_id: null,
+  };
+
+  const epicFilter: TaskFilterOptions = {
+    ...ticketFilter,
+    levels: ["epic"],
+  };
+
   it("upserts tasks into matching lists and detail cache", () => {
     const generation = 12;
-    const ticketFilter: TaskFilterOptions = {
-      levels: ["ticket"],
-      step_names: null,
-      tags: null,
-      root_only: null,
-      children_of: null,
-      search: null,
-      workflow_id: null,
-      step_id: null,
-    };
     const task = createMockTask({
       id: "task-1",
       title: "Query task",
@@ -50,6 +56,9 @@ describe("server cache helpers", () => {
       queryKeys.tasks.list(generation, ticketFilter),
       []
     );
+    queryClient.setQueryData(queryKeys.tasks.list(generation, epicFilter), [
+      taskOutsideFilter,
+    ]);
 
     upsertTaskInQueryCache(task, generation);
 
@@ -62,6 +71,61 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
     ).toEqual([task]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, epicFilter))
+    ).toEqual([taskOutsideFilter]);
+  });
+
+  it("merges existing tasks without duplicating the first list entry", () => {
+    const generation = 12;
+    const existingTask = createMockTask({
+      id: "task-1",
+      title: "Before",
+      level: "ticket",
+      tags: ["kept"],
+    });
+    const update = createMockTask({
+      id: existingTask.id,
+      title: "After",
+      level: "ticket",
+      tags: [],
+    });
+
+    queryClient.setQueryData(queryKeys.tasks.list(generation, ticketFilter), [
+      existingTask,
+    ]);
+
+    upsertTaskInQueryCache(update, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
+    ).toEqual([{ ...existingTask, ...update, tags: existingTask.tags }]);
+  });
+
+  it("removes existing tasks from filtered lists when updates no longer match", () => {
+    const generation = 12;
+    const task = createMockTask({
+      id: "task-1",
+      title: "Moved task",
+      level: "ticket",
+    });
+    const otherTask = createMockTask({
+      id: "task-2",
+      title: "Still a ticket",
+      level: "ticket",
+    });
+    const movedTask = { ...task, level: "epic" as const };
+
+    queryClient.setQueryData(queryKeys.tasks.list(generation, ticketFilter), [
+      otherTask,
+      task,
+    ]);
+
+    upsertTaskInQueryCache(movedTask, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
+    ).toEqual([otherTask]);
   });
 
   it("removes tasks from detail and list caches", () => {
@@ -122,18 +186,39 @@ describe("server cache helpers", () => {
       workflow,
       tasks: [createMockTask({ workflow_id: workflowId })],
     };
-
-    queryClient.setQueryData(queryKeys.workflows.list(generation), [
+    const otherWorkflowDetail: WorkflowWithTasks = {
+      workflow: otherWorkflow,
+      tasks: [createMockTask({ workflow_id: otherWorkflow.id ?? undefined })],
+    };
+    const otherGenerationWorkflowDetail: WorkflowWithTasks = {
       workflow,
-      otherWorkflow,
-    ]);
+      tasks: [createMockTask({ id: "other-generation-task" })],
+    };
+    const originalList = [workflow, otherWorkflow];
+
+    queryClient.setQueryData(
+      queryKeys.workflows.list(generation),
+      originalList
+    );
     queryClient.setQueryData(
       queryKeys.workflows.detail(generation, workflowId),
       workflowDetail
     );
+    queryClient.setQueryData(
+      queryKeys.workflows.detail(generation, otherWorkflow.id!),
+      otherWorkflowDetail
+    );
+    queryClient.setQueryData(
+      queryKeys.workflows.detail(generation + 1, workflowId),
+      otherGenerationWorkflowDetail
+    );
 
     upsertWorkflowInQueryCache(updatedWorkflow, generation);
 
+    expect(originalList).toEqual([workflow, otherWorkflow]);
+    expect(
+      queryClient.getQueryData(queryKeys.workflows.list(generation))
+    ).not.toBe(originalList);
     expect(
       queryClient.getQueryData(queryKeys.workflows.list(generation))
     ).toEqual([updatedWorkflow, otherWorkflow]);
@@ -142,6 +227,16 @@ describe("server cache helpers", () => {
         queryKeys.workflows.detail(generation, workflowId)
       )
     ).toEqual({ ...workflowDetail, workflow: updatedWorkflow });
+    expect(
+      queryClient.getQueryData(
+        queryKeys.workflows.detail(generation, otherWorkflow.id!)
+      )
+    ).toEqual(otherWorkflowDetail);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.workflows.detail(generation + 1, workflowId)
+      )
+    ).toEqual(otherGenerationWorkflowDetail);
   });
 
   it("removes workflows from detail and list caches", () => {

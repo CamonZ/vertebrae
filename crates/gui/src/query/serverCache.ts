@@ -33,9 +33,7 @@ function reconcileTaskList(
   const mergedTask = index >= 0 ? mergeTask(current[index], task) : task;
 
   if (!taskMatchesFilter(mergedTask, filter)) {
-    return index === -1
-      ? current.slice()
-      : current.filter((item) => item.id !== task.id);
+    return current.filter((item) => item.id !== task.id);
   }
 
   if (index === -1) return [...current, mergedTask];
