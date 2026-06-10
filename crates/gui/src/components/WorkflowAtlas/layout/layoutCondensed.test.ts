@@ -16,7 +16,7 @@ function wf(
   id: string,
   phase: string,
   displayOrder: number,
-  stepIds: string[],
+  stepIds: string[]
 ): AtlasWorkflow {
   return {
     id,
@@ -39,6 +39,7 @@ function step(id: string, workflowId: string, order: number): AtlasStep {
     stepId: id,
     workflowId,
     name: id,
+    stepType: "execute",
     kind: "execute",
     role: "process",
     order,
@@ -54,7 +55,7 @@ function crossEdge(
   fromStep: string,
   toWf: string,
   toStep: string,
-  label: string | null = null,
+  label: string | null = null
 ): AtlasEdge {
   return {
     id: `${fromWf}.${fromStep}->${toWf}.${toStep}`,
@@ -80,7 +81,7 @@ function phasesFromWorkflows(workflows: AtlasWorkflow[]): AtlasPhase[] {
 function model(
   workflows: AtlasWorkflow[],
   steps: AtlasStep[],
-  edges: AtlasEdge[],
+  edges: AtlasEdge[]
 ): AtlasModel {
   return { workflows, steps, edges, phases: phasesFromWorkflows(workflows) };
 }
@@ -188,10 +189,7 @@ describe("layoutCondensed — vertical centring", () => {
   });
 
   it("stacks members in display order within a column", () => {
-    const workflows = [
-      wf("second", "A", 1, ["s"]),
-      wf("first", "A", 0, ["s"]),
-    ];
+    const workflows = [wf("second", "A", 1, ["s"]), wf("first", "A", 0, ["s"])];
     const steps = workflows.map((w) => step("s", w.id, 0));
     const out = layoutCondensed(model(workflows, steps, []));
     const byId = new Map(out.nodes.map((n) => [n.id, n]));
@@ -239,10 +237,7 @@ describe("layoutCondensed — router", () => {
   });
 
   it("routes a same-column edge through the left side-bus (4 points)", () => {
-    const workflows = [
-      wf("a1", "A", 0, ["s"]),
-      wf("a2", "A", 1, ["s"]),
-    ];
+    const workflows = [wf("a1", "A", 0, ["s"]), wf("a2", "A", 1, ["s"])];
     const steps = workflows.map((w) => step("s", w.id, 0));
     const edges = [crossEdge("a1", "s", "a2", "s", "loop")];
     const out = layoutCondensed(model(workflows, steps, edges));

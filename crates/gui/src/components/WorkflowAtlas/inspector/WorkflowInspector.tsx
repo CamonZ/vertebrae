@@ -12,7 +12,8 @@
 
    Ported from docs/design/wf-detail.jsx (WfInspector, workflow branch).
    ────────────────────────────────────────────────────────────────── */
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { commands } from "../../../bindings";
 import { CloseIcon, IconButton } from "../../panels";
 import { splitRef } from "../layout/geometry";
 import type { AtlasModel, AtlasWorkflow } from "../layout/types";
@@ -26,6 +27,8 @@ export interface WorkflowInspectorProps {
   onSelect: (sel: AtlasSelection) => void;
   /** Close the panel (also reachable via Escape through the glass-panel stack). */
   onClose: () => void;
+  /** Refresh authoritative pipeline data after inspector-side mutations. */
+  onRefresh?: () => Promise<void> | void;
   /** Highlight the matching edge in the canvas while a transition row is hovered.
    *  Called with the model edge id on enter, `null` on leave. */
   onHoverEdge?: (edgeId: string | null) => void;
@@ -46,8 +49,12 @@ export function WorkflowInspector({
   workflowId,
   onSelect,
   onClose,
+  onRefresh,
   onHoverEdge,
 }: WorkflowInspectorProps) {
+  const [savingFinal, setSavingFinal] = useState(false);
+  const [finalError, setFinalError] = useState<string | null>(null);
+
   const wfById = useMemo(() => {
     const m = new Map<string, AtlasWorkflow>();
     model.workflows.forEach((w) => m.set(w.id, w));
@@ -102,6 +109,32 @@ export function WorkflowInspector({
     onSelect({ type: "workflow", workflowId: id });
   const selectStep = (stepId: string) => () =>
     onSelect({ type: "step", workflowId: wf.id, stepId });
+  const finalState = wf.isFinal ? "enabled" : "disabled";
+  const toggleFinalWorkflow = async () => {
+    if (savingFinal) return;
+    setSavingFinal(true);
+    setFinalError(null);
+    try {
+      const result = await commands.updateWorkflow({
+        workflow_id: wf.id,
+        name: null,
+        description: null,
+        order: null,
+        is_default: null,
+        is_final: !wf.isFinal,
+        kanban_column: null,
+      });
+      if (result.status === "error") {
+        setFinalError(result.error?.message ?? "Failed to update workflow");
+        return;
+      }
+      await onRefresh?.();
+    } catch (e) {
+      setFinalError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingFinal(false);
+    }
+  };
 
   return (
     <div className="wfd kindspine" data-no-pan>
@@ -109,7 +142,7 @@ export function WorkflowInspector({
         <div className="wfd-hd-top">
           <span className="wfd-eyebrow">
             <span className="dot" />
-            Workflow · {wf.phase}
+            Workflow Details · {wf.phase}
           </span>
           {wf.isDefault ? <span className="wfd-badge">default</span> : null}
           <span className={"wfd-status" + (wf.running > 0 ? " live" : "")}>
@@ -173,6 +206,31 @@ export function WorkflowInspector({
               <div className="k">loop-backs</div>
               <div className="v">{loops.length}</div>
             </div>
+          </div>
+        </section>
+
+        <section className="wfd-sec">
+          <div className="wfd-lbl">Workflow Settings</div>
+          <div className="wfd-rows">
+            <div className="wfd-row">
+              <span className="rk">Final workflow</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={wf.isFinal}
+                aria-label={`Final workflow: ${finalState}`}
+                className={"wfd-toggle" + (wf.isFinal ? " on" : "")}
+                disabled={savingFinal}
+                onClick={toggleFinalWorkflow}
+              >
+                <span className="knob" />
+              </button>
+            </div>
+            {finalError ? (
+              <div className="wfd-error" role="alert">
+                {finalError}
+              </div>
+            ) : null}
           </div>
         </section>
 
@@ -300,7 +358,9 @@ function FlowRow({
     <button
       className={"wfd-tr " + variant}
       onClick={onClick}
-      onMouseEnter={onHoverEdge && edgeId ? () => onHoverEdge(edgeId) : undefined}
+      onMouseEnter={
+        onHoverEdge && edgeId ? () => onHoverEdge(edgeId) : undefined
+      }
       onMouseLeave={onHoverEdge ? () => onHoverEdge(null) : undefined}
       type="button"
     >

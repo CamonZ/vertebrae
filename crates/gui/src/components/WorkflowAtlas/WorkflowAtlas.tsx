@@ -101,7 +101,7 @@ export function layoutKey(model: AtlasModel): string {
 }
 
 export function WorkflowAtlas() {
-  const { summary, isLoading, error } = usePipelineSummary();
+  const { summary, isLoading, error, refetch } = usePipelineSummary();
 
   const [view, setView] = useState<AtlasView>("graph");
   const [query, setQuery] = useState("");
@@ -126,7 +126,7 @@ export function WorkflowAtlas() {
   // too (for the `live` ember) but do NOT feed the layout key below.
   const model = useMemo(
     () => (summary ? buildAtlasModel(summary) : null),
-    [summary],
+    [summary]
   );
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
@@ -135,7 +135,9 @@ export function WorkflowAtlas() {
   // the model (not the layout) so it tracks live count churn without re-laying.
   const stepCountById = useMemo(() => {
     const m = new Map<string, { total: number; running: number }>();
-    model?.steps.forEach((s) => m.set(s.id, { total: s.total, running: s.running }));
+    model?.steps.forEach((s) =>
+      m.set(s.id, { total: s.total, running: s.running })
+    );
     return m;
   }, [model]);
 
@@ -183,7 +185,7 @@ export function WorkflowAtlas() {
   const cond = useMemo<CondensedLayout | null>(
     () => (model && key !== "" ? layoutCondensed(model, COND_OPTS) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [key],
+    [key]
   );
 
   // ── Camera: fits whichever layout is active. The board is sized to the union
@@ -222,17 +224,19 @@ export function WorkflowAtlas() {
     () =>
       full
         ? full.workflows.flatMap((w) =>
-            w.intra.map((e) => ({ ...e, wf: w.id })),
+            w.intra.map((e) => ({ ...e, wf: w.id }))
           )
         : [],
-    [full],
+    [full]
   );
 
   // Per-workflow placement lookups for each view (the persistent box reads its
   // rect for the active view from these every render → CSS transitions the move).
   const graphRectById = useMemo(() => {
     const m = new Map<string, Rect>();
-    full?.workflows.forEach((w) => m.set(w.id, { x: w.x, y: w.y, w: w.w, h: w.h }));
+    full?.workflows.forEach((w) =>
+      m.set(w.id, { x: w.x, y: w.y, w: w.w, h: w.h })
+    );
     return m;
   }, [full]);
 
@@ -258,7 +262,7 @@ export function WorkflowAtlas() {
           w.stepIds
             .map((sid) => model.steps.find((s) => s.id === `${w.id}.${sid}`))
             .filter((s): s is NonNullable<typeof s> => !!s)
-            .map((s) => s.kind),
+            .map((s) => s.kind)
         );
       }
     }
@@ -304,10 +308,11 @@ export function WorkflowAtlas() {
       hoverEdge && model
         ? (model.edges.find((e) => e.id === hoverEdge) ?? null)
         : null,
-    [hoverEdge, model],
+    [hoverEdge, model]
   );
   const activeHoverEdge =
-    hoveredEdge && (isGraph || hoveredEdge.fromWorkflow !== hoveredEdge.toWorkflow)
+    hoveredEdge &&
+    (isGraph || hoveredEdge.fromWorkflow !== hoveredEdge.toWorkflow)
       ? hoveredEdge
       : null;
   const hoverEndpoints = activeHoverEdge
@@ -495,7 +500,9 @@ export function WorkflowAtlas() {
               {/* ── MAP chrome: aggregated workflow→workflow handoffs ─── */}
               {cond && (
                 <svg
-                  className={"al-edges uv-layer" + (showMapChrome ? "" : " hide")}
+                  className={
+                    "al-edges uv-layer" + (showMapChrome ? "" : " hide")
+                  }
                   width={board.w}
                   height={board.h}
                   viewBox={`0 0 ${board.w} ${board.h}`}
@@ -506,7 +513,7 @@ export function WorkflowAtlas() {
                     .sort(
                       (a, b) =>
                         litLast(condEdgeState(a.from, a.to)) -
-                        litLast(condEdgeState(b.from, b.to)),
+                        litLast(condEdgeState(b.from, b.to))
                     )
                     .map((e) => (
                       <GraphEdge
@@ -535,7 +542,7 @@ export function WorkflowAtlas() {
                     .slice()
                     .sort(
                       (a, b) =>
-                        litLast(crossEdgeState(a)) - litLast(crossEdgeState(b)),
+                        litLast(crossEdgeState(a)) - litLast(crossEdgeState(b))
                     )
                     .map((e) => {
                       const st = crossEdgeState(e);
@@ -617,7 +624,9 @@ export function WorkflowAtlas() {
                     view={view}
                     state={wfState(w.id)}
                     onHover={setHover}
-                    onSelect={(id) => setSel({ type: "workflow", workflowId: id })}
+                    onSelect={(id) =>
+                      setSel({ type: "workflow", workflowId: id })
+                    }
                   />
                 );
               })}
@@ -704,6 +713,7 @@ export function WorkflowAtlas() {
               workflowId={sel.workflowId}
               onSelect={setSel}
               onClose={() => setSel(null)}
+              onRefresh={refetch}
               onHoverEdge={setHoverEdge}
             />
           ) : (

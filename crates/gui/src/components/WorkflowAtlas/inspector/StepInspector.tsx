@@ -40,6 +40,32 @@ interface Transition {
   onClick: () => void;
 }
 
+function backendTypeForKind(kind: string): string {
+  switch (kind) {
+    case "eval":
+      return "evaluate";
+    case "human":
+      return "human_input";
+    case "wait":
+      return "wait_children";
+    case "route":
+      return "route";
+    default:
+      return "execute";
+  }
+}
+
+function stepTypeLabelFor(value: unknown): string | null {
+  if (typeof value === "string" && value.length > 0) return value;
+  if (value === null || typeof value !== "object") return null;
+  if (!("unsupported" in value)) return null;
+
+  const unsupported = (value as { unsupported?: unknown }).unsupported;
+  return typeof unsupported === "string" && unsupported.length > 0
+    ? unsupported
+    : null;
+}
+
 export function StepInspector({
   model,
   workflowId,
@@ -65,9 +91,8 @@ export function StepInspector({
     if (!wf || !step) return [];
     const list: Transition[] = [];
     // implicit forward step (next in order)
-    const nextStepId = idx >= 0 && idx < wf.stepIds.length - 1
-      ? wf.stepIds[idx + 1]
-      : null;
+    const nextStepId =
+      idx >= 0 && idx < wf.stepIds.length - 1 ? wf.stepIds[idx + 1] : null;
     if (nextStepId) {
       const next = model.steps.find((s) => s.id === `${wf.id}.${nextStepId}`);
       list.push({
@@ -108,6 +133,10 @@ export function StepInspector({
   const agents = cfg?.agents ?? [];
   const skills = cfg?.skills ?? [];
   const model_ = cfg?.agent_config?.model ?? null;
+  const stepTypeLabel =
+    stepTypeLabelFor(step.stepType) ??
+    stepTypeLabelFor(cfg?.step_type) ??
+    backendTypeForKind(step.kind);
 
   return (
     <div className={"wfd kindspine " + kindCls} data-no-pan>
@@ -162,7 +191,12 @@ export function StepInspector({
           <div className="wfd-rows">
             <div className="wfd-row">
               <span className="rk">Type</span>
-              <span className={"wfd-tag " + kindCls}>{step.kind}</span>
+              <span
+                data-testid="step-type-badge"
+                className={"wfd-tag " + kindCls}
+              >
+                {stepTypeLabel}
+              </span>
             </div>
             <div className="wfd-row">
               <span className="rk">Order</span>
