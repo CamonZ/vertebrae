@@ -2,10 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useWorkflowStore } from "../stores/workflowStore";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 import {
   queryClient,
+  queryKeys,
   removeWorkflowFromQueryCache,
   upsertWorkflowInQueryCache,
 } from "../query";
@@ -28,14 +31,9 @@ const wrapper = ({ children }: { children: ReactNode }) =>
 describe("useWorkflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useWorkflowStore.setState({
-      workflows: [],
-      currentWorkflow: null,
-      isLoading: false,
-    });
   });
 
-  it("returns workflows from the query cache and syncs the Zustand bridge", async () => {
+  it("returns workflows from the query cache", async () => {
     const wf1 = createMockWorkflow({ id: "wf-1", name: "Alpha" });
     mockListWorkflows.mockResolvedValue({ status: "ok", data: [wf1] });
 
@@ -48,10 +46,6 @@ describe("useWorkflows", () => {
     expect(result.current.workflows).toHaveLength(1);
     expect(result.current.workflows[0].id).toBe("wf-1");
     expect(result.current.workflows[0].name).toBe("Alpha");
-
-    const storeWorkflows = useWorkflowStore.getState().workflows;
-    expect(storeWorkflows).toHaveLength(1);
-    expect(storeWorkflows[0].id).toBe("wf-1");
   });
 
   it("reflects query cache mutations (e.g. from WebSocket upserts)", async () => {
@@ -102,13 +96,7 @@ describe("useWorkflows", () => {
     expect(result.current.workflows[0].name).toBe("Will Stay");
   });
 
-  it("sets error state on fetch failure without corrupting the store", async () => {
-    const existing = createMockWorkflow({
-      id: "wf-existing",
-      name: "Existing",
-    });
-    useWorkflowStore.setState({ workflows: [existing] });
-
+  it("sets error state on fetch failure without returning stale store data", async () => {
     mockListWorkflows.mockResolvedValue({
       status: "error",
       error: { message: "Server error" },
@@ -120,14 +108,15 @@ describe("useWorkflows", () => {
       expect(result.current.error).toBe("Server error");
     });
 
-    // Store should still have the pre-existing workflow
-    expect(useWorkflowStore.getState().workflows).toHaveLength(1);
-    expect(useWorkflowStore.getState().workflows[0].id).toBe("wf-existing");
+    expect(result.current.workflows).toEqual([]);
   });
 
-  it("replaces stale store data with fresh fetch results", async () => {
+  it("replaces stale query data with fresh fetch results", async () => {
     const stale = createMockWorkflow({ id: "wf-stale", name: "Stale" });
-    useWorkflowStore.setState({ workflows: [stale] });
+    upsertWorkflowInQueryCache(stale);
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.workflows.list(getProjectScopeGeneration()),
+    });
 
     const fresh = createMockWorkflow({ id: "wf-fresh", name: "Fresh" });
     mockListWorkflows.mockResolvedValue({ status: "ok", data: [fresh] });
@@ -138,8 +127,10 @@ describe("useWorkflows", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
+    await waitFor(() => {
+      expect(result.current.workflows[0].id).toBe("wf-fresh");
+    });
     expect(result.current.workflows).toHaveLength(1);
-    expect(result.current.workflows[0].id).toBe("wf-fresh");
     expect(result.current.workflows[0].name).toBe("Fresh");
   });
 
@@ -174,7 +165,6 @@ describe("useWorkflows", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(useWorkflowStore.getState().workflows).toEqual([]);
     expect(result.current.workflows).toEqual([]);
   });
 

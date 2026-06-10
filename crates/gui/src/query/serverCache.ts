@@ -1,4 +1,5 @@
 import type {
+  Section,
   Task,
   TaskFilterOptions,
   TaskRunControls,
@@ -102,6 +103,70 @@ export function replaceTaskRunControlsInQueryCache(
       key,
       (tasks ?? []).map((task) =>
         task.id === taskId ? replaceControls(task) : task
+      )
+    );
+  }
+}
+
+export function hasTaskInQueryCache(
+  taskId: string,
+  generation = getProjectScopeGeneration()
+) {
+  if (queryClient.getQueryData(queryKeys.tasks.detail(generation, taskId))) {
+    return true;
+  }
+
+  const lists = queryClient.getQueriesData<Task[]>({
+    queryKey: queryKeys.tasks.lists(generation),
+  });
+
+  return lists.some(([, tasks]) =>
+    (tasks ?? []).some((task) => task.id === taskId)
+  );
+}
+
+export function updateTaskSectionsInQueryCache(
+  taskId: string,
+  section: Section,
+  action: "upsert" | "remove",
+  generation = getProjectScopeGeneration()
+) {
+  const updateSections = (task: Task): Task => {
+    const sections = task.sections ?? [];
+    const index = sections.findIndex(
+      (item) => item.type === section.type && item.order === section.order
+    );
+
+    if (action === "remove") {
+      if (index === -1) return task;
+      return {
+        ...task,
+        sections: sections.filter((_, sectionIndex) => sectionIndex !== index),
+      };
+    }
+
+    if (index === -1) {
+      return { ...task, sections: [...sections, section] };
+    }
+
+    const nextSections = sections.slice();
+    nextSections[index] = section;
+    return { ...task, sections: nextSections };
+  };
+
+  queryClient.setQueryData<Task | undefined>(
+    queryKeys.tasks.detail(generation, taskId),
+    (task) => (task ? updateSections(task) : task)
+  );
+
+  const lists = queryClient.getQueriesData<Task[]>({
+    queryKey: queryKeys.tasks.lists(generation),
+  });
+  for (const [key, tasks] of lists) {
+    queryClient.setQueryData(
+      key,
+      (tasks ?? []).map((task) =>
+        task.id === taskId ? updateSections(task) : task
       )
     );
   }

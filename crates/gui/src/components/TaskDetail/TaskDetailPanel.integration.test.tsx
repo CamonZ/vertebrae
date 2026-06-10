@@ -8,7 +8,12 @@ import {
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
-import { useTaskStore } from "../../stores";
+import type { Task } from "../../bindings";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../../query";
 
 const FULL_TASK_ID = "860cde1b-9093-42ff-a19d-7453f3b7891b";
 
@@ -119,6 +124,7 @@ vi.mock("../../bindings", () => ({
     stopRun: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     stopOrchestrator: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    listTasks: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
   },
   events: {
     taskChangedEvent: {
@@ -127,9 +133,17 @@ vi.mock("../../bindings", () => ({
   },
 }));
 
+function seedTaskList(tasks: Task[]) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), null),
+    tasks
+  );
+}
+
 describe("TaskDetailPanel - Inline Editing Integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetProjectScopedStores();
     mockTaskData.id = "task-123";
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
@@ -141,7 +155,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
   });
 
   afterEach(() => {
-    useTaskStore.getState().setTasks([]);
+    queryClient.clear();
   });
 
   it("copies the full rendered task ID from the panel chrome", async () => {
@@ -363,7 +377,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     });
 
     it("sections include Children between Spec and Dependencies when task has children", () => {
-      useTaskStore.getState().setTasks([
+      seedTaskList([
         createMockTask({
           id: "child-integ-1",
           title: "Integration child",

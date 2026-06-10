@@ -34,7 +34,6 @@ import {
   filterThreadsByView,
 } from "../components/Traces/viewFilter";
 import { useShellHeader } from "../hooks/useShellHeader";
-import { useTaskStore } from "../stores/taskStore";
 import { runToThreads, type ThreadModel } from "../components/thread";
 import { computeExecutionRollups, popOut } from "../utils";
 import { isEditableShortcutTarget } from "../utils/keyboard";
@@ -83,8 +82,7 @@ export function TracesPage({
   const [searchParams, setSearchParams] = useSearchParams();
   // Keep the full task list fresh so the picker offers every task, not just
   // whatever a previously visited page (or realtime run events) left behind.
-  useTasks();
-  const tasks = useTaskStore((state) => state.tasks);
+  const { tasks } = useTasks();
 
   const [railCollapsed, setRailCollapsed] = useState(false);
   const [autoScroll, setAutoScroll] = useState(false);
@@ -126,8 +124,7 @@ export function TracesPage({
   );
 
   // Fetch the entry task + its descendants so the rail's TASKS tree is scoped to
-  // that subtree. The store is used only as a lookup cache; ancestors and
-  // unrelated tasks are intentionally excluded.
+  // that subtree. Ancestors and unrelated tasks are intentionally excluded.
   useEffect(() => {
     if (!rootTaskId) {
       setFetchedTraceTasks([]);
@@ -139,7 +136,8 @@ export function TracesPage({
     const fetchTraceTasks = async (): Promise<void> => {
       // Lookup cache (store + on-demand fetches) — NOT the result set.
       const cache = new Map<string, Task>();
-      for (const existingTask of tasks) cache.set(existingTask.id, existingTask);
+      for (const existingTask of tasks)
+        cache.set(existingTask.id, existingTask);
       if (task) cache.set(task.id, task);
 
       const fetchTaskById = async (id: string): Promise<Task | null> => {

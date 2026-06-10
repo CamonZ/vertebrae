@@ -4,7 +4,8 @@ import {
   type SectionChangedEvent,
   type SectionChangeType,
 } from "../bindings";
-import { useTaskStore, useToastStore } from "../stores";
+import { updateTaskSectionsInQueryCache } from "../query";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -34,8 +35,7 @@ interface UseSectionChangeListenerOptions {
 
 /**
  * Hook that listens to SectionChangedEvent from Tauri and updates the
- * selected task's sections directly in the task store when the section
- * belongs to the currently selected task.
+ * task's cached sections in TanStack Query when section payloads arrive.
  *
  * @param options - Configuration options for the listener
  */
@@ -64,44 +64,13 @@ export function useSectionChangeListener(
             : "info";
       addToast(getSectionChangeMessage(change_type, task_id), toastType);
 
-      // Read current state inside the callback to avoid stale closures
-      // and prevent listener churn from selectedTask changes
-      const { selectedTaskId, selectedTask, selectTask } =
-        useTaskStore.getState();
-
-      if (task_id !== selectedTaskId || !selectedTask) {
-        return;
-      }
-
-      const existingSections = selectedTask.sections ?? [];
-
-      if (change_type === "Deleted") {
-        if (section) {
-          const updatedSections = existingSections.filter(
-            (s) => !(s.type === section.type && s.order === section.order)
-          );
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: updatedSections,
-          });
-        }
-      } else if (section) {
-        const index = existingSections.findIndex(
-          (s) => s.type === section.type && s.order === section.order
+      if (section) {
+        updateTaskSectionsInQueryCache(
+          task_id,
+          section,
+          change_type === "Deleted" ? "remove" : "upsert",
+          projectScopeGeneration
         );
-        if (index >= 0) {
-          const updatedSections = [...existingSections];
-          updatedSections[index] = section;
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: updatedSections,
-          });
-        } else {
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: [...existingSections, section],
-          });
-        }
       }
     },
     [addToast, projectScopeGeneration]

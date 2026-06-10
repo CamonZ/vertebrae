@@ -12,8 +12,10 @@ import {
   createMockTaskRun,
   createMockStepExecution,
 } from "../test/test-utils";
-import { useTaskStore } from "../stores/taskStore";
 import { queryClient } from "../query/queryClient";
+import { queryKeys } from "../query/queryKeys";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
+import type { Task } from "../bindings";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
@@ -105,6 +107,13 @@ function renderAt(path: string) {
   );
 }
 
+function seedPickerTasks(tasks: Task[]) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), null),
+    tasks
+  );
+}
+
 describe("TracesPage (single-run)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
@@ -115,21 +124,13 @@ describe("TracesPage (single-run)", () => {
       level: "epic",
     });
     mockTask = taskFixtures["root"];
+    seedPickerTasks([taskFixtures["root"]]);
     mockTaskLoading = false;
     mockTaskError = null;
     mockRuns = [];
     mockActiveRun = null;
     mockExecutions = [];
     lastRunsTaskId = null;
-    useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "root", title: "Root Epic", level: "epic" }),
-      ],
-      activeFilter: null,
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
   });
 
   it("renders the header with the task title", () => {
@@ -192,10 +193,7 @@ describe("TracesPage (single-run)", () => {
       title: "Never-run task",
       level: "ticket",
     });
-    // Store starts empty — e.g. fresh launch where only realtime events would
-    // otherwise populate it.
-    useTaskStore.setState({ tasks: [] });
-
+    seedPickerTasks([taskFixtures["root"], taskFixtures["other"]]);
     renderAt("/traces");
 
     await waitFor(() => {

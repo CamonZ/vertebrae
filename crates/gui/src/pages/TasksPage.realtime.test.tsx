@@ -1,10 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, waitFor, screen, render } from "../test/test-utils";
-import type { TaskStepChangedEvent } from "../bindings";
+import type {
+  Task,
+  TaskFilterOptions,
+  TaskStepChangedEvent,
+} from "../bindings";
 import { createMockTask } from "../test/test-utils";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
-import { useTaskStore } from "../stores/taskStore";
+import { queryClient, queryKeys } from "../query";
 import { TasksPage } from "./TasksPage";
 
 const mockListTasks = vi.fn();
@@ -37,6 +44,17 @@ vi.mock("../bindings", () => ({
 vi.mock("../components/TaskDetail", () => ({
   TaskDetailPanel: () => null,
 }));
+
+const INITIAL_FILTERS: TaskFilterOptions = {
+  step_names: null,
+  levels: null,
+  tags: null,
+  root_only: null,
+  children_of: null,
+  search: null,
+  workflow_id: null,
+  step_id: null,
+};
 
 function TasksPageWithRealtime() {
   useTaskChangeListener();
@@ -74,7 +92,8 @@ describe("TasksPage realtime task membership", () => {
       expect(screen.getByText("Realtime ticket")).toBeInTheDocument();
     });
 
-    if (!taskStepChangedHandler) throw new Error("step listener not registered");
+    if (!taskStepChangedHandler)
+      throw new Error("step listener not registered");
     act(() => {
       taskStepChangedHandler!({
         payload: {
@@ -88,12 +107,14 @@ describe("TasksPage realtime task membership", () => {
     });
 
     // The row no longer surfaces the step, so assert the in-place update via the
-    // store and confirm the event did not trigger a refetch.
+    // query cache and confirm the event did not trigger a page-list refetch.
     await waitFor(() => {
       expect(
-        useTaskStore
-          .getState()
-          .tasks.find((t) => t.id === "task-realtime-step")?.step_name
+        queryClient
+          .getQueryData<
+            Task[]
+          >(queryKeys.tasks.list(getProjectScopeGeneration(), INITIAL_FILTERS))
+          ?.find((t) => t.id === "task-realtime-step")?.step_name
       ).toBe("pending_review");
     });
     expect(mockListTasks).toHaveBeenCalledTimes(1);

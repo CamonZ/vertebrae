@@ -1,11 +1,14 @@
 import { useEffect, useCallback } from "react";
 import { events, type TaskRunChangedEvent } from "../bindings";
-import { useTaskRunStore, useTaskStore } from "../stores";
+import { useTaskRunStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-import { replaceTaskRunControlsInQueryCache } from "../query";
+import {
+  hasTaskInQueryCache,
+  replaceTaskRunControlsInQueryCache,
+} from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 interface UseTaskRunChangeListenerOptions {
@@ -15,16 +18,14 @@ interface UseTaskRunChangeListenerOptions {
 
 /**
  * Applies TaskRun websocket payloads directly to GUI state. The server-provided
- * run_controls payload is the source of truth for task row controls.
+ * run_controls payload is the source of truth for task row controls in the
+ * TanStack Query cache.
  */
 export function useTaskRunChangeListener(
   options: UseTaskRunChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
   const upsertTaskRun = useTaskRunStore((state) => state.upsertTaskRun);
-  const replaceTaskRunControls = useTaskStore(
-    (state) => state.replaceTaskRunControls
-  );
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask = useRefreshTaskForRealtimeChange(
     "TaskRunChangeListener"
@@ -40,22 +41,20 @@ export function useTaskRunChangeListener(
         upsertTaskRun(task_run);
       }
 
+      const taskWasCached = hasTaskInQueryCache(
+        task_id,
+        projectScopeGeneration
+      );
       replaceTaskRunControlsInQueryCache(
         task_id,
         run_controls,
         projectScopeGeneration
       );
-      replaceTaskRunControls(task_id, run_controls);
-      if (!useTaskStore.getState().tasks.some((task) => task.id === task_id)) {
+      if (!taskWasCached) {
         void fetchAndReconcileTask(task_id);
       }
     },
-    [
-      fetchAndReconcileTask,
-      replaceTaskRunControls,
-      upsertTaskRun,
-      projectScopeGeneration,
-    ]
+    [fetchAndReconcileTask, upsertTaskRun, projectScopeGeneration]
   );
 
   useEffect(() => {
