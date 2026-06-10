@@ -25,6 +25,12 @@ describe("queryKeys", () => {
       "list",
       filter,
     ]);
+    expect(queryKeys.tasks.ready(3)).toEqual([
+      "project",
+      3,
+      "tasks",
+      "ready",
+    ]);
     expect(queryKeys.tasks.details(3)).toEqual([
       "project",
       3,

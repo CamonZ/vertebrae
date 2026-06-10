@@ -64,6 +64,9 @@ describe("server cache helpers", () => {
     queryClient.setQueryData(queryKeys.tasks.list(generation, epicFilter), [
       taskOutsideFilter,
     ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
+      taskOutsideFilter,
+    ]);
 
     upsertTaskInQueryCache(task, generation);
 
@@ -78,6 +81,9 @@ describe("server cache helpers", () => {
     ).toEqual([task]);
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, epicFilter))
+    ).toEqual([taskOutsideFilter]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
     ).toEqual([taskOutsideFilter]);
   });
 
@@ -99,11 +105,17 @@ describe("server cache helpers", () => {
     queryClient.setQueryData(queryKeys.tasks.list(generation, ticketFilter), [
       existingTask,
     ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
+      existingTask,
+    ]);
 
     upsertTaskInQueryCache(update, generation);
 
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
+    ).toEqual([{ ...existingTask, ...update, tags: existingTask.tags }]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
     ).toEqual([{ ...existingTask, ...update, tags: existingTask.tags }]);
   });
 
@@ -143,6 +155,10 @@ describe("server cache helpers", () => {
       task,
       otherTask,
     ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
+      task,
+      otherTask,
+    ]);
 
     removeTaskFromQueryCache(task.id, generation);
 
@@ -151,6 +167,9 @@ describe("server cache helpers", () => {
     ).toBeUndefined();
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([otherTask]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
     ).toEqual([otherTask]);
   });
 
@@ -167,6 +186,10 @@ describe("server cache helpers", () => {
       task,
       otherTask,
     ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
+      task,
+      otherTask,
+    ]);
 
     replaceTaskRunControlsInQueryCache(task.id, runControls, generation);
 
@@ -175,6 +198,9 @@ describe("server cache helpers", () => {
     ).toMatchObject({ id: task.id, run_controls: runControls });
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
     ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
   });
 
@@ -203,6 +229,10 @@ describe("server cache helpers", () => {
       task,
       otherTask,
     ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
+      task,
+      otherTask,
+    ]);
 
     updateTaskSectionsInQueryCache(
       task.id,
@@ -217,6 +247,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([{ ...task, sections: [updatedSection] }, otherTask]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
+    ).toEqual([{ ...task, sections: [updatedSection] }, otherTask]);
 
     updateTaskSectionsInQueryCache(
       task.id,
@@ -230,6 +263,9 @@ describe("server cache helpers", () => {
     ).toMatchObject({ id: task.id, sections: [] });
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([{ ...task, sections: [] }, otherTask]);
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
     ).toEqual([{ ...task, sections: [] }, otherTask]);
   });
 

@@ -9,6 +9,8 @@ export const queryKeys = {
       [...queryKeys.tasks.all(generation), "list"] as const,
     list: (generation: number, filter: TaskFilterOptions | null) =>
       [...queryKeys.tasks.lists(generation), filter] as const,
+    ready: (generation: number) =>
+      [...queryKeys.tasks.all(generation), "ready"] as const,
     details: (generation: number) =>
       [...queryKeys.tasks.all(generation), "detail"] as const,
     detail: (generation: number, id: string) =>

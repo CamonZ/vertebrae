@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo } from "react";
 import { commands, events, type Task } from "../../../bindings";
 import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../../../stores/projectScopedStores";
+  errorMessage,
+  queryClient,
+  queryKeys,
+  unwrapCommand,
+} from "../../../query";
+import { useProjectScopeGeneration } from "../../../stores/projectScopedStores";
 
 /** Debounce window for collapsing a burst of realtime events into one refetch. */
 const REFRESH_DEBOUNCE_MS = 150;
@@ -26,62 +30,28 @@ export interface UseRunConsoleTasksResult {
  * events are coalesced through a single debounced refetch path — this is one
  * extra fetcher, not a second poller, and never fires per-event.
  *
- * Unlike `useTasks`, this hook is self-contained (it does not sync the global
- * task store) so the Run Console can hold its own snapshot without perturbing
- * the Tasks page's scoped list.
+ * TanStack Query owns the ready feed so realtime task/run-control payloads can
+ * update this surface immediately, without waiting for the debounced refetch.
  */
 export function useRunConsoleTasks(): UseRunConsoleTasksResult {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const projectScopeGeneration = useProjectScopeGeneration();
+  const queryKey = useMemo(
+    () => queryKeys.tasks.ready(projectScopeGeneration),
+    [projectScopeGeneration]
+  );
+  const query = useQuery({
+    queryKey,
+    queryFn: () => unwrapCommand(commands.listReady()),
+  });
+  const { data, error, isLoading, refetch: refetchQuery } = query;
 
-  const isFetchInFlightRef = useRef(false);
-  const hasPendingFetchRef = useRef(false);
+  const refetch = useCallback(() => {
+    void refetchQuery();
+  }, [refetchQuery]);
 
-  const loadTasks = useCallback(async () => {
-    const projectScopeGeneration = getProjectScopeGeneration();
-    try {
-      const result = await commands.listReady();
-      if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
-      if (result.status === "ok") {
-        setTasks(result.data);
-        setError(null);
-      } else {
-        setError(result.error.message);
-      }
-    } catch (e) {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setIsLoading(false);
-      }
-    }
-  }, []);
-
-  // Single-flight refetch: while a fetch is running, mark a pending request and
-  // re-run once on completion so a burst of events collapses to at most one
-  // trailing refetch.
-  const fetchTasks = useCallback(async () => {
-    if (isFetchInFlightRef.current) {
-      hasPendingFetchRef.current = true;
-      return;
-    }
-    isFetchInFlightRef.current = true;
-    try {
-      do {
-        hasPendingFetchRef.current = false;
-        await loadTasks();
-      } while (hasPendingFetchRef.current);
-    } finally {
-      isFetchInFlightRef.current = false;
-    }
-  }, [loadTasks]);
-
-  useEffect(() => {
-    void fetchTasks();
-  }, [fetchTasks]);
+  const invalidateReadyTasks = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey });
+  }, [queryKey]);
 
   // Debounced realtime refresh. All task-shaped events funnel through one timer.
   useEffect(() => {
@@ -93,7 +63,7 @@ export function useRunConsoleTasks(): UseRunConsoleTasksResult {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = null;
-        void fetchTasks();
+        invalidateReadyTasks();
       }, REFRESH_DEBOUNCE_MS);
     };
 
@@ -111,7 +81,12 @@ export function useRunConsoleTasks(): UseRunConsoleTasksResult {
         void promise.then((unlisten) => unlisten()).catch(() => {});
       });
     };
-  }, [fetchTasks]);
+  }, [invalidateReadyTasks]);
 
-  return { tasks, isLoading, error, refetch: fetchTasks };
+  return {
+    tasks: data ?? [],
+    isLoading,
+    error: error ? errorMessage(error) : null,
+    refetch,
+  };
 }

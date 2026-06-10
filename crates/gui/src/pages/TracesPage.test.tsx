@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   fireEvent,
   screen,
   render as rtlRender,
@@ -249,6 +250,43 @@ describe("TracesPage (single-run)", () => {
       expect(c1Row?.getAttribute("data-active")).toBe("true");
       // No navigation happened — selection lives in the `task` search param.
       expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it("overlays scoped subtree rows with live query task updates", async () => {
+      renderAt("/traces/root");
+      await waitFor(() => {
+        expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      });
+
+      const activeRun = createMockTaskRun({
+        id: "run-c1",
+        task_id: "c1",
+        status: "executing",
+      });
+      const updatedChild = {
+        ...taskFixtures["c1"],
+        title: "Child One Running",
+        run_controls: {
+          runnable: false,
+          stoppable: true,
+          disabled_reason_code: "active_run" as const,
+          disabled_reason: "A TaskRun is already active",
+          active_run: activeRun,
+        },
+      };
+
+      act(() => {
+        seedPickerTasks([
+          taskFixtures["root"],
+          updatedChild,
+          taskFixtures["c2"],
+        ]);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Child One Running")).toBeInTheDocument();
+      });
+      expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
     });
 
     it("re-selects the entry task when its row is clicked", async () => {
