@@ -1,50 +1,45 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
 import { useTaskStore } from "../stores";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
+import { errorMessage, queryKeys, unwrapCommand } from "../query";
 
 /**
  * Hook for fetching a single task.
- * Automatically syncs the selected task to the Zustand store.
  *
- * @param id - The task ID to fetch. If null/undefined, no fetch is performed.
- * @returns Object containing task data, loading state, error state, and refetch function
+ * TanStack Query owns the server-state cache. The selected-task store write is
+ * retained while detail panels and pop-outs finish migrating off store-backed
+ * entity state.
  */
 export function useTask(id: string | null | undefined) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const projectScopeGeneration = useProjectScopeGeneration();
   const { selectedTask, selectTask, clearSelection } = useTaskStore();
 
-  const fetchTask = useCallback(async () => {
+  const query = useQuery({
+    queryKey: queryKeys.tasks.detail(projectScopeGeneration, id ?? ""),
+    queryFn: () => unwrapCommand(commands.getTask(id!)),
+    enabled: Boolean(id),
+  });
+
+  useEffect(() => {
     if (!id) {
       clearSelection();
       return;
     }
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await commands.getTask(id);
-      if (result.status === "ok") {
-        selectTask(id, result.data);
-      } else {
-        setError(result.error.message);
-        clearSelection();
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      clearSelection();
-    } finally {
-      setIsLoading(false);
-    }
-  }, [id, selectTask, clearSelection]);
+    if (query.data) selectTask(id, query.data);
+  }, [id, query.data, selectTask, clearSelection]);
 
   useEffect(() => {
-    fetchTask();
-  }, [fetchTask]);
+    if (query.error) clearSelection();
+  }, [query.error, clearSelection]);
 
-  const refetch = useCallback(() => {
-    fetchTask();
-  }, [fetchTask]);
-
-  return { task: selectedTask, isLoading, error, refetch };
+  return {
+    task: query.data ?? (selectedTask?.id === id ? selectedTask : null),
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }

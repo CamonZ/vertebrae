@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useTaskStore } from "../stores/taskStore";
 import { resetProjectScopedStores } from "../stores/projectScopedStores";
+import { queryClient, upsertTaskInQueryCache } from "../query";
 
 const mockListTasks = vi.fn();
 
@@ -15,6 +18,9 @@ import { useTasks } from "./useTasks";
 import type { Task, TaskFilterOptions } from "../bindings";
 import { createMockTask } from "../test/test-utils";
 
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(QueryClientProvider, { client: queryClient }, children);
+
 describe("useTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,11 +33,11 @@ describe("useTasks", () => {
     });
   });
 
-  it("returns tasks from the Zustand store, not a local copy", async () => {
+  it("returns tasks from the query cache and syncs the Zustand bridge", async () => {
     const task1 = createMockTask({ id: "t-1", title: "Store Task" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [task1] });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -41,33 +47,29 @@ describe("useTasks", () => {
     expect(result.current.tasks[0].id).toBe("t-1");
     expect(result.current.tasks[0].title).toBe("Store Task");
 
-    // Verify the store contains the same data
     const storeTasks = useTaskStore.getState().tasks;
     expect(storeTasks).toHaveLength(1);
     expect(storeTasks[0].id).toBe("t-1");
-
-    // The hook's tasks reference should be the same as the store's
-    expect(result.current.tasks).toBe(storeTasks);
   });
 
-  it("reflects external store mutations (e.g. from WebSocket upserts)", async () => {
+  it("reflects query cache mutations (e.g. from WebSocket upserts)", async () => {
     const task1 = createMockTask({ id: "t-1", title: "Original" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [task1] });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.tasks).toHaveLength(1);
     });
 
-    // Simulate an external store mutation (like a WebSocket-driven upsert)
     const newTask = createMockTask({ id: "t-2", title: "WebSocket Task" });
     act(() => {
-      useTaskStore.getState().upsertTask(newTask);
+      upsertTaskInQueryCache(newTask);
     });
 
-    // The hook should immediately reflect the store change
-    expect(result.current.tasks).toHaveLength(2);
+    await waitFor(() => {
+      expect(result.current.tasks).toHaveLength(2);
+    });
     expect(result.current.tasks.map((t: Task) => t.id)).toContain("t-2");
     expect(result.current.tasks.find((t: Task) => t.id === "t-2")?.title).toBe(
       "WebSocket Task"
@@ -85,7 +87,7 @@ describe("useTasks", () => {
       return { status: "ok", data: [task1] };
     });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);
@@ -99,13 +101,14 @@ describe("useTasks", () => {
 
   it("ignores stale fetch results after project-scoped stores reset", async () => {
     let resolveFetch!: (value: { status: "ok"; data: Task[] }) => void;
-    mockListTasks.mockReturnValue(
+    mockListTasks.mockResolvedValueOnce(
       new Promise((resolve) => {
         resolveFetch = resolve;
       })
     );
+    mockListTasks.mockResolvedValueOnce({ status: "ok", data: [] });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledTimes(1);
@@ -136,13 +139,14 @@ describe("useTasks", () => {
       status: "error";
       error: { message: string };
     }) => void;
-    mockListTasks.mockReturnValue(
+    mockListTasks.mockResolvedValueOnce(
       new Promise((resolve) => {
         resolveFetch = resolve;
       })
     );
+    mockListTasks.mockResolvedValueOnce({ status: "ok", data: [] });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledTimes(1);
@@ -180,7 +184,7 @@ describe("useTasks", () => {
       step_id: null,
     };
 
-    renderHook(() => useTasks(filter));
+    renderHook(() => useTasks(filter), { wrapper });
 
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledWith(filter);
@@ -198,7 +202,7 @@ describe("useTasks", () => {
       error: { message: "Network error" },
     });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.error).toBe("Network error");
@@ -216,7 +220,7 @@ describe("useTasks", () => {
     const fresh = createMockTask({ id: "t-fresh", title: "Fresh" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [fresh] });
 
-    const { result } = renderHook(() => useTasks());
+    const { result } = renderHook(() => useTasks(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.isLoading).toBe(false);

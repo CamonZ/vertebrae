@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import * as React from "react";
+import { queryClient } from "./query/queryClient";
 
 // The Workflow Atlas (the /design page) lays out via async ELK and is covered
 // in depth by its own suite; here we only assert route wiring, so stub it.
@@ -110,7 +112,9 @@ function createTestRouter(initialEntries: string[]) {
  * Wrapper component for tests
  */
 function TestWrapper({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
 }
 
 describe("Router Acceptance Tests", () => {
@@ -370,9 +374,12 @@ describe("Router Acceptance Tests", () => {
         })
       );
 
-      fireEvent.change(screen.getByLabelText("Search tasks by title, id, or tag"), {
-        target: { value: "release" },
-      });
+      fireEvent.change(
+        screen.getByLabelText("Search tasks by title, id, or tag"),
+        {
+          target: { value: "release" },
+        }
+      );
 
       await waitFor(() => {
         expect(commands.listTasks).toHaveBeenCalledWith(

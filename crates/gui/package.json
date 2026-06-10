@@ -22,6 +22,7 @@
     "tauri:prepare-sidecars": "node scripts/prepare-sidecars.mjs"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-log": "^2.8.0",

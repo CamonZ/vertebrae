@@ -5,6 +5,7 @@ import {
   render as rtlRender,
   waitFor,
 } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   createMockTask,
@@ -12,14 +13,16 @@ import {
   createMockStepExecution,
 } from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
+import { queryClient } from "../query/queryClient";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  );
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    );
   return {
     ...actual,
     useNavigate: () => mockNavigate,
@@ -91,12 +94,14 @@ vi.mock("../hooks", () => ({
 
 function renderAt(path: string) {
   return rtlRender(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/traces/:taskId" element={<TracesPage />} />
-        <Route path="/traces" element={<TracesPage />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/traces/:taskId" element={<TracesPage />} />
+          <Route path="/traces" element={<TracesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -117,7 +122,9 @@ describe("TracesPage (single-run)", () => {
     mockExecutions = [];
     lastRunsTaskId = null;
     useTaskStore.setState({
-      tasks: [createMockTask({ id: "root", title: "Root Epic", level: "epic" })],
+      tasks: [
+        createMockTask({ id: "root", title: "Root Epic", level: "epic" }),
+      ],
       activeFilter: null,
       selectedTaskId: null,
       selectedTask: null,
@@ -192,7 +199,9 @@ describe("TracesPage (single-run)", () => {
     renderAt("/traces");
 
     await waitFor(() => {
-      expect(screen.getByTestId("task-picker-option-other")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-picker-option-other")
+      ).toBeInTheDocument();
       expect(screen.getByTestId("task-picker-option-root")).toBeInTheDocument();
     });
   });

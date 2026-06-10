@@ -1,16 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { createMockTask, createMockTaskRun } from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
+import { queryClient } from "../query/queryClient";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  );
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    );
   return {
     ...actual,
     useNavigate: () => mockNavigate,
@@ -63,12 +66,14 @@ vi.mock("../hooks", () => ({
 
 function renderAt(path: string) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/traces/:taskId" element={<TracesPage />} />
-        <Route path="/traces" element={<TracesPage />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/traces/:taskId" element={<TracesPage />} />
+          <Route path="/traces" element={<TracesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
