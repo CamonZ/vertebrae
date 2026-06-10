@@ -23,6 +23,9 @@ export interface TraceFilters {
   search: string;
   rootOnly: boolean;
   lineageScope: TraceLineageScope | null;
+  /** Stream scope chip ("all" | "threads" | "turns" | "tools" | "system" |
+   *  "errors" | a model id). Narrows the rendered thread stream. */
+  view: string;
 }
 
 export interface UseTraceFiltersResult {
@@ -33,6 +36,7 @@ export interface UseTraceFiltersResult {
   setSearch: (v: string) => void;
   setRootOnly: (v: boolean) => void;
   setLineageScope: (v: TraceLineageScope | null) => void;
+  setView: (v: string) => void;
   clear: () => void;
 }
 
@@ -62,6 +66,7 @@ const FILTER_PARAM_KEYS = [
   "q",
   "rootOnly",
   "scope",
+  "view",
 ] as const;
 
 export function useTraceFilters(): UseTraceFiltersResult {
@@ -106,6 +111,7 @@ export function useTraceFilters(): UseTraceFiltersResult {
       search: searchDraft,
       rootOnly: searchParams.get("rootOnly") === "1",
       lineageScope: parseLineageScope(searchParams.get("scope")),
+      view: searchParams.get("view") || "all",
     }),
     [searchDraft, searchParams]
   );
@@ -133,6 +139,10 @@ export function useTraceFilters(): UseTraceFiltersResult {
     (v: TraceLineageScope | null) => updateParam("scope", v),
     [updateParam]
   );
+  const setView = useCallback(
+    (v: string) => updateParam("view", v === "all" ? null : v),
+    [updateParam]
+  );
 
   const clear = useCallback(() => {
     setSearchParams(
@@ -153,6 +163,7 @@ export function useTraceFilters(): UseTraceFiltersResult {
     setSearch,
     setRootOnly,
     setLineageScope,
+    setView,
     clear,
   };
 }

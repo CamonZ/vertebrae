@@ -1,8 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  screen,
+  render as rtlRender,
+  waitFor,
+} from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { render as rtlRender } from "@testing-library/react";
-import { createMockTask, createMockStepExecution } from "../test/test-utils";
+import {
+  createMockTask,
+  createMockTaskRun,
+  createMockStepExecution,
+} from "../test/test-utils";
 import { useTaskStore } from "../stores/taskStore";
 import { TracesPage } from "./TracesPage";
 
@@ -18,17 +26,37 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
+/** Per-test task fixtures served by the mocked `getTask` / `listTasks`. */
+const taskFixtures: Record<string, ReturnType<typeof createMockTask>> = {};
+
 vi.mock("../bindings", () => ({
   commands: {
-    getTask: vi.fn(async () => ({ status: "error", error: { message: "not found" } })),
-    listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTask: vi.fn(async (id: string) =>
+      taskFixtures[id]
+        ? { status: "ok", data: taskFixtures[id] }
+        : { status: "error", error: { message: "not found" } }
+    ),
+    listTasks: vi.fn(async (filter: { children_of?: string | null } | null) => {
+      const all = Object.values(taskFixtures);
+      const parentId = filter?.children_of ?? null;
+      return {
+        status: "ok",
+        data: parentId ? all.filter((t) => t.parent_id === parentId) : all,
+      };
+    }),
     getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTaskExecutions: vi.fn(async () => ({ status: "ok", data: [] })),
+    stopRun: vi.fn(async () => ({ status: "ok", data: null })),
   },
 }));
 
 let mockTask: ReturnType<typeof createMockTask> | null = null;
 let mockTaskLoading = false;
 let mockTaskError: string | null = null;
+let mockRuns: ReturnType<typeof createMockTaskRun>[] = [];
+let mockActiveRun: ReturnType<typeof createMockTaskRun> | null = null;
+let mockExecutions: ReturnType<typeof createMockStepExecution>[] = [];
+let lastRunsTaskId: string | null = null;
 
 vi.mock("../hooks", () => ({
   useTask: () => ({
@@ -37,72 +65,27 @@ vi.mock("../hooks", () => ({
     error: mockTaskError,
     refetch: vi.fn(),
   }),
-  useTaskRuns: () => ({
-    runs: [],
-    activeRun: null,
-    latestRun: null,
-    resolveRun: () => ({ run: null, source: "none" }),
+  useTaskRuns: (taskId: string | null) => {
+    lastRunsTaskId = taskId;
+    return {
+      runs: mockRuns,
+      activeRun: mockActiveRun,
+      latestRun: null,
+      resolveRun: () =>
+        mockActiveRun
+          ? { run: mockActiveRun, source: "active" as const }
+          : { run: null, source: "none" as const },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+  },
+  useRunTrace: () => ({
+    stepExecutions: mockExecutions,
+    logsByExecutionId: {},
     isLoading: false,
     error: null,
     refetch: vi.fn(),
-  }),
-  useTaskRunsForTasks: () => ({
-    runs: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-  useTaskRunTrace: () => ({
-    trace: null,
-    taskRuns: [],
-    executions: [],
-    sessionLogs: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
-
-const subtreeExecutions = [
-  createMockStepExecution({
-    id: "ex-1",
-    task_id: "root",
-    task_run_id: "run-root",
-    status: "completed",
-    step_name: "in_progress",
-    cost: "0.2",
-    duration_ms: 10000,
-  }),
-  createMockStepExecution({
-    id: "ex-2",
-    task_id: "child",
-    task_run_id: "run-child",
-    status: "failed",
-    step_name: "in_progress",
-    cost: "0.22",
-    duration_ms: 20000,
-  }),
-];
-
-// TracesPage recomputes its own rollups from executions + logs, so this
-// hook field only satisfies the mock shape — the page no longer reads it.
-const subtreeRollups = {
-  totalRuns: subtreeExecutions.length,
-  totalAttempts: subtreeExecutions.length,
-  totalCost: 0.42,
-  totalTokens: 8000,
-  totalWallTimeMs: 30000,
-};
-
-vi.mock("../hooks/useSubtreeExecutions", () => ({
-  useSubtreeExecutions: () => ({
-    executions: subtreeExecutions,
-    rollups: subtreeRollups,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-    subtreeTaskIds: ["root", "child"],
-    isInSubtree: vi.fn(),
   }),
 }));
 
@@ -117,82 +100,70 @@ function renderAt(path: string) {
   );
 }
 
-describe("TracesPage", () => {
+describe("TracesPage (single-run)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
-    mockTask = createMockTask({
+    for (const key of Object.keys(taskFixtures)) delete taskFixtures[key];
+    taskFixtures["root"] = createMockTask({
       id: "root",
       title: "Root Epic",
       level: "epic",
     });
+    mockTask = taskFixtures["root"];
     mockTaskLoading = false;
     mockTaskError = null;
+    mockRuns = [];
+    mockActiveRun = null;
+    mockExecutions = [];
+    lastRunsTaskId = null;
     useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "root", title: "Root Epic", level: "epic" }),
-        createMockTask({
-          id: "child",
-          title: "Child Ticket",
-          level: "ticket",
-          parent_id: "root",
-        }),
-      ],
+      tasks: [createMockTask({ id: "root", title: "Root Epic", level: "epic" })],
+      activeFilter: null,
       selectedTaskId: null,
       selectedTask: null,
       isLoading: false,
     });
   });
 
-  it("renders header with task title and subtree rollup", () => {
+  it("renders the header with the task title", () => {
     renderAt("/traces/root");
     expect(screen.getByTestId("traces-title").textContent).toBe("Root Epic");
-    expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/2/);
-    expect(screen.getByTestId("traces-rollup-cost").textContent).toMatch(
-      /\$0\.42/
-    );
   });
 
-  it("renders the subtree rail with depth-ordered groups", () => {
+  it("renders the run-history rail when the task has runs", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
     renderAt("/traces/root");
-    const groups = screen.getAllByTestId("subtree-rail-group");
-    expect(groups.map((g) => g.getAttribute("data-task-id"))).toEqual([
-      "root",
-      "child",
-    ]);
+    expect(screen.getByTestId("run-history-rail")).toBeInTheDocument();
   });
 
-  it("renders the mode toggle and switches between THREAD and CORRIDOR", () => {
+  it("renders the empty stream when the run has no executions", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
     renderAt("/traces/root");
-    expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
-    // STRIP mode has been removed from the toggle.
-    expect(screen.queryByTestId("trace-mode-option-strip")).toBeNull();
-    // THREAD mode renders the UnifiedChatView.
     expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
-    // CORRIDOR mode renders the real CorridorView.
-    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
-    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
   });
 
-  it("renders the FlightStrip in THREAD mode but not in CORRIDOR mode", () => {
+  it("renders the FlightStrip when the run has threads", () => {
+    mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
+    mockActiveRun = mockRuns[0];
+    mockExecutions = [
+      createMockStepExecution({
+        id: "ex-1",
+        task_id: "root",
+        task_run_id: "run-1",
+        status: "completed",
+        step_name: "in_progress",
+        step_type: "execute",
+      }),
+    ];
     renderAt("/traces/root");
-    // THREAD: FlightStrip is mounted above the chat view.
     expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
-    // CORRIDOR: per-task lanes don't have a chronological axis, so the
-    // chronological minimap is intentionally hidden.
-    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
-    expect(screen.queryByTestId("flight-strip")).toBeNull();
-    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
   });
 
-  it("collapses and expands the subtree rail", () => {
+  it("does not render any mode toggle (single trace surface)", () => {
     renderAt("/traces/root");
-    expect(screen.getByTestId("subtree-rail").getAttribute("data-collapsed")).toBe(
-      "false"
-    );
-    fireEvent.click(screen.getByTestId("subtree-rail-toggle"));
-    expect(screen.getByTestId("subtree-rail").getAttribute("data-collapsed")).toBe(
-      "true"
-    );
+    expect(screen.queryByTestId("trace-mode-toggle")).toBeNull();
   });
 
   it("navigates back when the back button is clicked", () => {
@@ -206,5 +177,89 @@ describe("TracesPage", () => {
     expect(screen.getByTestId("traces-page")).toBeInTheDocument();
     expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
     expect(screen.getByTestId("traces-no-task-hint")).toBeInTheDocument();
+  });
+
+  it("fetches the full task list for the picker instead of relying on store residue", async () => {
+    taskFixtures["other"] = createMockTask({
+      id: "other",
+      title: "Never-run task",
+      level: "ticket",
+    });
+    // Store starts empty — e.g. fresh launch where only realtime events would
+    // otherwise populate it.
+    useTaskStore.setState({ tasks: [] });
+
+    renderAt("/traces");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-picker-option-other")).toBeInTheDocument();
+      expect(screen.getByTestId("task-picker-option-root")).toBeInTheDocument();
+    });
+  });
+
+  describe("TASKS tree selection", () => {
+    function visibleTaskRowIds(): string[] {
+      return screen
+        .queryAllByTestId("run-history-task-row")
+        .map((el) => el.getAttribute("data-task-id") ?? "");
+    }
+
+    beforeEach(() => {
+      taskFixtures["c1"] = createMockTask({
+        id: "c1",
+        title: "Child One",
+        level: "ticket",
+        parent_id: "root",
+      });
+      taskFixtures["c2"] = createMockTask({
+        id: "c2",
+        title: "Child Two",
+        level: "ticket",
+        parent_id: "root",
+      });
+    });
+
+    it("keeps the parent and siblings visible when a child is selected", async () => {
+      renderAt("/traces/root");
+      await waitFor(() => {
+        expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      });
+
+      const childRow = screen
+        .getAllByTestId("run-history-task-row-button")
+        .find((el) => el.closest("li")?.getAttribute("data-task-id") === "c1");
+      fireEvent.click(childRow!);
+
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("c1");
+      });
+      // The tree stays scoped to the entry task's subtree...
+      expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      // ...with the clicked child highlighted as current.
+      const c1Row = screen
+        .getAllByTestId("run-history-task-row")
+        .find((el) => el.getAttribute("data-task-id") === "c1");
+      expect(c1Row?.getAttribute("data-active")).toBe("true");
+      // No navigation happened — selection lives in the `task` search param.
+      expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it("re-selects the entry task when its row is clicked", async () => {
+      renderAt("/traces/root?task=c1");
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("c1");
+      });
+
+      const rootRow = screen
+        .getAllByTestId("run-history-task-row-button")
+        .find(
+          (el) => el.closest("li")?.getAttribute("data-task-id") === "root"
+        );
+      fireEvent.click(rootRow!);
+
+      await waitFor(() => {
+        expect(lastRunsTaskId).toBe("root");
+      });
+    });
   });
 });

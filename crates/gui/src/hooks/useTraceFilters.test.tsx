@@ -26,6 +26,7 @@ describe("useTraceFilters", () => {
       search: "foo",
       rootOnly: true,
       lineageScope: null,
+      view: "all",
     });
   });
 
@@ -40,6 +41,7 @@ describe("useTraceFilters", () => {
       search: "",
       rootOnly: false,
       lineageScope: null,
+      view: "all",
     });
   });
 
@@ -107,6 +109,7 @@ describe("useTraceFilters", () => {
       search: "",
       rootOnly: false,
       lineageScope: null,
+      view: "all",
     });
   });
 });

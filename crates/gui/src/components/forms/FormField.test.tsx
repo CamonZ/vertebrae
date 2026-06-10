@@ -236,7 +236,7 @@ describe("FormField", () => {
         </FormField>
       );
       const helpText = screen.getByText("Help text");
-      expect(helpText).toHaveClass("font-serif", "italic", "text-[13px]");
+      expect(helpText).toHaveClass("font-serif", "italic", "text-13");
     });
   });
 

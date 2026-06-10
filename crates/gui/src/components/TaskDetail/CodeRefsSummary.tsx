@@ -62,7 +62,7 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
           />
         </svg>
-        <code className="truncate font-mono text-eyebrow text-[var(--color-fg-soft)]">
+        <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
           {codeRef.path.split("/").pop() ?? codeRef.path}
         </code>
         {lineRange && (
@@ -71,7 +71,7 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
           </span>
         )}
         {codeRef.name && (
-          <span className="truncate text-2xs text-[var(--color-fg-mute)]">
+          <span className="truncate text-xs text-[var(--color-fg-mute)]">
             {codeRef.name}
           </span>
         )}
@@ -121,7 +121,7 @@ export function CodeRefsSummary({ codeRefs }: CodeRefsSummaryProps) {
   if (codeRefs.length === 0) {
     return (
       <div className="px-4 py-3">
-        <p className="text-xs text-[var(--color-fg-mute)] italic">
+        <p className="text-sm text-[var(--color-fg-mute)] italic">
           No code references
         </p>
       </div>

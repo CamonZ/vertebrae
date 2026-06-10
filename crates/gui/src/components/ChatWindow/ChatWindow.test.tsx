@@ -24,6 +24,7 @@ vi.mock("../../bindings", () => ({
     createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
     getTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     getStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     getWorkflowWithTasks: vi
@@ -497,7 +498,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(document.querySelector(".animate-pulse")).toBeInTheDocument();
+    expect(document.querySelector(".ev-cursor")).toBeInTheDocument();
   });
 
   it("does not show partial cursor for complete assistant messages", () => {
@@ -519,7 +520,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(document.querySelector(".animate-pulse")).not.toBeInTheDocument();
+    expect(document.querySelector(".ev-cursor")).not.toBeInTheDocument();
   });
 
   it("shows thinking indicator when waiting for response", () => {
@@ -755,5 +756,175 @@ describe("ChatWindow", () => {
 
     expect(screen.getByTitle("Start session")).toBeInTheDocument();
     expect(screen.queryByTitle("Send message")).not.toBeInTheDocument();
+  });
+
+  // --- E) Tool toggling (interactive collapse) ---
+
+  it("merges a tool_call + tool_result into one collapsible tool row", () => {
+    const session = createSession({
+      messages: [
+        {
+          kind: "assistant",
+          text: "Reading file",
+          timestamp: "2024-01-01T12:00:00Z",
+          isPartial: false,
+        },
+        {
+          kind: "tool_call",
+          toolName: "Read",
+          toolId: "tool-1",
+          input: '{"file_path":"/test.ts"}',
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+        {
+          kind: "tool_result",
+          toolId: "tool-1",
+          result: "RESULT BODY",
+          isError: false,
+          timestamp: "2024-01-01T12:00:02Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    // One tool row carrying the result body (a "has-body" card).
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(document.querySelector(".evtool.has-body")).toBeInTheDocument();
+    // Body is visible by default (not collapsed).
+    expect(screen.getByText("RESULT BODY")).toBeInTheDocument();
+  });
+
+  it("toggles a tool body when its header is clicked (collapsed by default)", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Read",
+          toolId: "tool-1",
+          input: "{}",
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+        {
+          kind: "tool_result",
+          toolId: "tool-1",
+          result: "RESULT BODY",
+          isError: false,
+          timestamp: "2024-01-01T12:00:02Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const header = document.querySelector(".evtool-hd") as HTMLElement;
+    expect(header).toBeTruthy();
+    // Collapsed by default.
+    expect(document.querySelector(".evtool.collapsed")).toBeInTheDocument();
+
+    // Click expands…
+    await user.click(header);
+    expect(document.querySelector(".evtool.collapsed")).toBeNull();
+
+    // …and click again collapses.
+    await user.click(header);
+    expect(document.querySelector(".evtool.collapsed")).toBeInTheDocument();
+  });
+
+  // --- F) Permission request (interactive sibling of <Thread>) ---
+
+  it("renders a permission request with approve / deny controls", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "permission_request",
+          requestId: "req-1",
+          toolName: "Bash",
+          message: "Allow running ls?",
+          input: '{"command":"ls"}',
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByText("Permission required")).toBeInTheDocument();
+    expect(screen.getByText("Allow running ls?")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("resolves a permission request when Approve is clicked", async () => {
+    const user = userEvent.setup();
+    const { commands } = await import("../../bindings");
+    (commands.resolvePermissionRequest as ReturnType<typeof vi.fn>).mockResolvedValue(
+      { status: "ok" }
+    );
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "permission_request",
+          requestId: "req-1",
+          toolName: "Bash",
+          message: "Allow running ls?",
+          input: '{"command":"ls"}',
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(commands.resolvePermissionRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ request_id: "req-1", behavior: "allow" })
+    );
+    expect(await screen.findByText("Resolved")).toBeInTheDocument();
+  });
+
+  // --- G) Context fill bar ---
+
+  it("fills the context bar to the utilization percentage", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      model: "claude-sonnet-4.5",
+      tokenUsage: { used: 50, max: 100 },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const fill = screen.getByTestId("chat-context-fill");
+    expect(fill).toHaveStyle({ width: "50%" });
+    expect(screen.getByText("50%")).toBeInTheDocument();
   });
 });

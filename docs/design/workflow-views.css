@@ -1,0 +1,181 @@
+/* ──────────────────────────────────────────────────────────────────
+   Hearth · Workflow Views — unified Map + Graph on ONE canvas.
+   Toggling Map⇄Graph is an in-place shared-element morph (no reload):
+   workflow boxes travel/resize between their two ELK layouts, step nodes
+   + graph edges dissolve out while condensed edges + columns dissolve in,
+   and the camera glides to reframe. Reuses .ag-* (graph face) and .al-*
+   (map face) vocabularies from the two original pages.
+   ────────────────────────────────────────────────────────────────── */
+
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; font-size: var(--text-13); }
+#root { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+.uv-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+/* ── Header ── */
+.uv-head { flex-shrink: 0; padding: var(--s-4) var(--s-5) var(--s-3); border-bottom: 1px solid var(--line); background: var(--bg); display: flex; align-items: center; gap: var(--s-4); }
+.uv-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-1); }
+.uv-name .crumb { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.1em; text-transform: uppercase; }
+.uv-name h1 { font-family: var(--serif); font-size: var(--text-22); font-style: italic; font-weight: 400; color: var(--fg); letter-spacing: -0.015em; line-height: 1.1; margin: 0; transition: color var(--t-base) var(--ease); }
+.uv-name h1 em { color: var(--accent); }
+.uv-controls { display: flex; align-items: center; gap: var(--s-3); }
+
+/* view toggle (Map / Graph) — now a stateful segmented control, not links */
+.uv-modes { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; }
+.uv-modes button { font-family: var(--sans); font-size: var(--text-12); color: var(--fg-mute); padding: 0 var(--s-3); height: 28px; display: flex; align-items: center; gap: var(--s-1h); border: none; border-right: 1px solid var(--line); transition: all var(--t-fast) var(--ease); cursor: pointer; background: transparent; }
+.uv-modes button:last-child { border-right: none; }
+.uv-modes button:hover { color: var(--fg); background: var(--bg-2); }
+.uv-modes button.on { color: var(--accent); background: var(--accent-wash); font-weight: 500; }
+.uv-modes button svg { opacity: 0.85; }
+
+/* contextual control group — crossfades with the view */
+.uv-ctxgroup { display: flex; align-items: center; gap: var(--s-3); transition: opacity var(--t-base) var(--ease); }
+
+.uv-toggle { display: inline-flex; align-items: center; gap: var(--s-1h); font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-mute); cursor: pointer; user-select: none; padding: 0 var(--s-1); }
+.uv-toggle .knob { width: 30px; height: 17px; background: var(--bg-4); border: 1px solid var(--line-strong); border-radius: var(--r-full); position: relative; transition: all var(--t-base) var(--ease); }
+.uv-toggle .knob::after { content: ''; position: absolute; top: 1px; left: 1px; width: 13px; height: 13px; background: var(--fg-faint); border-radius: 50%; transition: all var(--t-base) var(--ease); }
+.uv-toggle.on .knob { background: var(--accent-wash); border-color: var(--accent-mute); box-shadow: 0 0 8px var(--accent-glow); }
+.uv-toggle.on .knob::after { background: var(--accent); transform: translateX(13px); box-shadow: 0 0 5px var(--accent-glow); }
+.uv-toggle.on { color: var(--accent); }
+
+/* segmented (step grouping) */
+.al-seg { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; background: var(--bg-1); }
+.al-seg .lab { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-faint); display: flex; align-items: center; padding: 0 var(--s-2) 0 var(--s-2h); border-right: 1px solid var(--line); }
+.al-seg button { font-family: var(--sans); font-size: var(--text-12); color: var(--fg-mute); background: transparent; border: none; border-right: 1px solid var(--line); padding: 0 var(--s-2h); height: 28px; cursor: pointer; transition: all var(--t-fast) var(--ease); white-space: nowrap; }
+.al-seg button:last-child { border-right: none; }
+.al-seg button:hover { color: var(--fg); background: var(--bg-2); }
+.al-seg button.on { color: var(--accent); background: var(--accent-wash); font-weight: 500; }
+
+/* ── Canvas / scaler / board ── */
+.uv-canvas { flex: 1; min-height: 0; position: relative; overflow: hidden; cursor: grab; background: radial-gradient(circle at 50% 28%, var(--bg-1) 0%, var(--bg) 92%); touch-action: none; }
+.uv-canvas.is-grabbing { cursor: grabbing; }
+.uv-loading { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-3); color: var(--fg-faint); font-family: var(--mono); font-size: var(--text-11); letter-spacing: 0.1em; text-transform: uppercase; }
+.uv-loading .sp { width: 22px; height: 22px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: uv-spin 0.7s linear infinite; }
+@keyframes uv-spin { to { transform: rotate(360deg); } }
+
+.uv-scaler { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+/* during a view morph the camera glides instead of snapping */
+.uv-scaler.morphing { transition: transform 0.66s cubic-bezier(0.66, 0, 0.16, 1); }
+
+.uv-board { position: relative; }
+.uv-board::before { content: ''; position: absolute; inset: 0; background-image: radial-gradient(circle, var(--line) 0.6px, transparent 1px); background-size: 28px 28px; opacity: 0.4; pointer-events: none; }
+
+/* layer crossfade wrappers — quick fade so edges clear before boxes travel */
+.uv-layer { position: absolute; inset: 0; transition: opacity 0.28s var(--ease); }
+.uv-layer.hide { opacity: 0; pointer-events: none; }
+/* step nodes must paint above the workflow boxes (z-index 2) — they ARE the box contents */
+.uv-steplayer { z-index: 3; }
+
+/* ── Edges (shared) ── */
+.ag-edges, .al-edges { position: absolute; inset: 0; pointer-events: none; z-index: 1; overflow: visible; }
+.ag-edges-top { position: absolute; inset: 0; pointer-events: none; z-index: 3; overflow: visible; }
+
+.ag-elabel { position: absolute; z-index: 4; transform: translate(-50%, -50%); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.02em; color: var(--fg-mute); background: color-mix(in oklch, var(--bg) 90%, transparent); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 var(--s-1); white-space: nowrap; pointer-events: none; transition: all var(--t-fast) var(--ease); }
+.ag-elabel.lit { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 45%, transparent); background: color-mix(in oklch, var(--accent-wash) 82%, var(--bg)); box-shadow: 0 0 10px var(--accent-glow); }
+.ag-elabel.dim { opacity: 0.12; }
+
+.al-cond { position: absolute; z-index: 4; transform: translate(-50%, -50%); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.02em; color: var(--fg-mute); background: color-mix(in oklch, var(--bg) 88%, transparent); border: 1px solid var(--line-strong); border-radius: var(--r-xs); padding: 1px var(--s-1h); white-space: nowrap; pointer-events: none; transition: all var(--t-fast) var(--ease); }
+.al-cond.lit { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 45%, transparent); background: color-mix(in oklch, var(--accent-wash) 80%, var(--bg)); box-shadow: 0 0 12px var(--accent-glow); }
+.al-cond.dim { opacity: 0.2; }
+
+/* column headers (map only) */
+.al-stagehd { position: absolute; z-index: 1; font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-faint); display: flex; align-items: center; gap: var(--s-2); }
+.al-stagehd .n { color: var(--fg-ghost); }
+.al-stagehd .ln { flex: 1; height: 1px; background: var(--line); }
+
+/* ── Workflow box (the traveling element) ── */
+.uv-wf { position: absolute; z-index: 2; border-radius: var(--r-lg); overflow: hidden; cursor: pointer; box-shadow: var(--shadow-1);
+  background: color-mix(in oklch, var(--bg-1) 92%, transparent);
+  border: 1px solid var(--line-strong);
+  transition: left 0.66s cubic-bezier(0.66, 0, 0.16, 1), top 0.66s cubic-bezier(0.66, 0, 0.16, 1),
+              width 0.66s cubic-bezier(0.66, 0, 0.16, 1), height 0.66s cubic-bezier(0.66, 0, 0.16, 1),
+              border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); }
+.uv-wf:hover { border-color: var(--fg-faint); }
+.uv-wf.active { border-color: color-mix(in oklch, var(--accent) 45%, var(--line-strong)); }
+.uv-wf.live { background: linear-gradient(150deg, var(--accent-wash), color-mix(in oklch, var(--bg-1) 92%, transparent) 62%); }
+.uv-wf.lit { border-color: var(--accent); box-shadow: var(--shadow-2), 0 0 26px var(--accent-glow); }
+.uv-wf.dim { opacity: 0.3; }
+
+/* faces stack and crossfade */
+.uv-face { position: absolute; inset: 0; display: flex; flex-direction: column; transition: opacity 0.34s var(--ease); }
+.uv-face.hide { opacity: 0; pointer-events: none; }
+
+/* — graph face — */
+.uv-face-graph { }
+.ag-wf-hd { padding: var(--s-3) var(--s-3h) var(--s-2h); border-bottom: 1px solid var(--line); background: color-mix(in oklch, var(--bg-1) 60%, transparent); }
+.ag-wf-top { display: flex; align-items: center; gap: var(--s-2); }
+.ag-wf-name { font-family: var(--sans); font-size: var(--text-14); font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.uv-wf.active .ag-wf-name { color: var(--accent); }
+.ag-status { margin-left: auto; font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.1em; text-transform: uppercase; padding: 1px var(--s-1h); border-radius: var(--r-xs); border: 1px solid var(--line-strong); color: var(--fg-mute); background: var(--bg-2); white-space: nowrap; display: inline-flex; align-items: center; gap: var(--s-1); }
+.ag-status .pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.ag-status.s-active { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 35%, transparent); background: var(--ok-wash); }
+.ag-status.s-active .pulse { box-shadow: 0 0 5px color-mix(in oklch, var(--ok) 70%, transparent); animation: ag-pulse 1.6s ease-in-out infinite; }
+.ag-status.s-progress { color: var(--step-execute-fg); border-color: color-mix(in oklch, var(--step-execute) 35%, transparent); background: var(--step-execute-wash); }
+.ag-status.s-review { color: var(--step-eval-fg); border-color: color-mix(in oklch, var(--step-eval) 35%, transparent); background: var(--step-eval-wash); }
+.ag-status.s-human { color: var(--step-human-fg); border-color: color-mix(in oklch, var(--step-human) 35%, transparent); background: var(--step-human-wash); }
+.ag-status.s-plan { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 35%, transparent); background: var(--accent-wash); }
+@keyframes ag-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.ag-wf-meta { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-1h); font-family: var(--mono); font-size: var(--text-9); color: var(--fg-faint); }
+.ag-wf-meta .id, .ag-wf-meta .sep { color: var(--fg-ghost); }
+.ag-wf-desc { margin-top: var(--s-1h); font-family: var(--sans); font-size: var(--text-11); color: var(--fg-mute); line-height: 1.4; max-width: 64ch; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* — map face — */
+.uv-face-map { padding: var(--s-3) var(--s-3h); gap: var(--s-2h); }
+.al-card-hd { display: flex; align-items: flex-start; gap: var(--s-2); }
+.al-name { flex: 1; min-width: 0; font-family: var(--serif); font-style: italic; font-size: var(--text-15); color: var(--fg); letter-spacing: -0.01em; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.uv-wf.live .al-name { color: var(--accent); }
+.al-live { flex-shrink: 0; display: inline-flex; align-items: center; gap: var(--s-1); font-family: var(--mono); font-size: var(--text-10); color: var(--accent); margin-top: 2px; }
+.al-live .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 5px var(--accent-glow); animation: ag-pulse 1.6s ease-in-out infinite; }
+.al-steps { flex: 1; display: flex; align-items: center; min-height: 30px; }
+.al-meta { display: flex; align-items: center; gap: var(--s-1h); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); white-space: nowrap; overflow: hidden; }
+.al-meta .sep { color: var(--fg-ghost); }
+.al-ribbon { display: flex; gap: 1px; width: 100%; height: 6px; border-radius: var(--r-xs); overflow: hidden; }
+.al-ribbon .seg { flex: 1; background: var(--kc); opacity: 0.72; }
+.al-pipe { display: flex; align-items: center; width: 100%; }
+.al-pipe .al-dot { width: 13px; height: 13px; border-radius: var(--r-sm); background: var(--kc); flex-shrink: 0; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--bg) 30%, transparent); }
+.al-pipe .al-dot.k-final { border-radius: 50%; }
+.al-pipe .al-link { flex: 1; height: 1.5px; background: var(--line-strong); min-width: 4px; }
+.al-chips { display: flex; align-items: center; gap: var(--s-1); flex-wrap: wrap; }
+.al-chip { display: inline-flex; align-items: center; gap: 3px; font-family: var(--mono); font-size: var(--text-10); color: var(--kf); background: color-mix(in oklch, var(--kw) 42%, transparent); border: 1px solid color-mix(in oklch, var(--kc) 40%, transparent); border-radius: var(--r-xs); padding: 1px var(--s-1h); white-space: nowrap; }
+.al-chip b { font-weight: 400; opacity: 0.7; }
+.al-arrow { color: var(--fg-ghost); font-size: var(--text-11); }
+
+/* ── Step node (graph layer; positioned by ELK) ── */
+.ag-step { position: absolute; background: var(--bg-2); border: 1px solid var(--line-strong); border-top: 2px solid var(--kc); border-radius: var(--r-sm); padding: var(--s-2) var(--s-2h) var(--s-1h); display: flex; flex-direction: column; gap: var(--s-1h); z-index: 2; transition: opacity var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease); box-sizing: border-box; }
+.ag-step.s-lit { border-color: color-mix(in oklch, var(--kc) 48%, var(--line-strong)); }
+.ag-step.s-dim { opacity: 0.3; }
+.ag-step-top { display: flex; align-items: center; gap: var(--s-1h); }
+.ag-step-num { width: 16px; height: 16px; flex-shrink: 0; border-radius: var(--r-xs); background: color-mix(in oklch, var(--kc) 22%, var(--bg)); color: var(--kf); font-family: var(--mono); font-size: var(--text-9); display: flex; align-items: center; justify-content: center; border: 1px solid color-mix(in oklch, var(--kc) 40%, transparent); }
+.ag-step-name { font-family: var(--mono); font-size: var(--text-10); color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.ag-kind { font-family: var(--mono); font-size: var(--text-8); letter-spacing: 0.08em; text-transform: uppercase; color: var(--kf); border: 1px solid color-mix(in oklch, var(--kc) 40%, transparent); border-radius: var(--r-xs); padding: 0 3px; background: color-mix(in oklch, var(--kw) 40%, transparent); flex-shrink: 0; margin-left: auto; }
+.ag-step-rule { height: 1px; background: var(--line); margin: auto 0 0; }
+.ag-step-foot { display: flex; align-items: center; gap: var(--s-1); font-family: var(--mono); font-size: var(--text-8); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-faint); }
+.ag-step-foot .rdot { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-ghost); }
+.ag-step.run .ag-step-foot .rdot { background: var(--accent); box-shadow: 0 0 5px var(--accent-glow); }
+
+/* kind palette */
+.k-entry    { --kc: var(--accent);           --kf: var(--accent);           --kw: var(--accent-wash); }
+.k-execute  { --kc: var(--step-execute);      --kf: var(--step-execute-fg);  --kw: var(--step-execute-wash); }
+.k-eval     { --kc: var(--step-eval);         --kf: var(--step-eval-fg);     --kw: var(--step-eval-wash); }
+.k-route    { --kc: var(--step-route);        --kf: var(--step-route-fg);    --kw: var(--step-route-wash); }
+.k-wait     { --kc: var(--step-wait);         --kf: var(--step-wait-fg);     --kw: var(--step-wait-wash); }
+.k-human    { --kc: var(--step-human);        --kf: var(--step-human-fg);    --kw: var(--step-human-wash); }
+.k-final    { --kc: var(--ok);                --kf: var(--ok);               --kw: var(--ok-wash); }
+.k-terminal { --kc: var(--ok);                --kf: var(--ok);               --kw: var(--ok-wash); }
+
+/* ── Zoom widget + legend ── */
+.uv-zoom { position: absolute; left: 16px; bottom: 16px; z-index: 5; display: flex; flex-direction: column; background: var(--bg-2); border: 1px solid var(--line-strong); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--shadow-2); }
+.uv-zoom button { width: 30px; height: 28px; background: transparent; border: none; border-bottom: 1px solid var(--line); color: var(--fg-mute); font-size: var(--text-14); cursor: pointer; transition: all var(--t-fast) var(--ease); display: flex; align-items: center; justify-content: center; }
+.uv-zoom button:last-child { border-bottom: none; font-size: var(--text-11); }
+.uv-zoom button:hover { color: var(--accent); background: var(--bg-3); }
+
+.uv-legend { flex-shrink: 0; display: flex; align-items: center; gap: var(--s-4); padding: var(--s-2h) var(--s-5); border-top: 1px solid var(--line); background: var(--bg); font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+.uv-legend .lg-item { display: inline-flex; align-items: center; gap: var(--s-1h); }
+.uv-legend .sw { width: 9px; height: 9px; border-radius: var(--r-xs); background: var(--kc); }
+.uv-legend .lg-sep { flex: 1; }
+.uv-legend .hint { color: var(--fg-ghost); }
+
+@media (prefers-reduced-motion: reduce) {
+  .uv-wf, .uv-scaler.morphing, .uv-face, .uv-layer { transition: none !important; }
+}

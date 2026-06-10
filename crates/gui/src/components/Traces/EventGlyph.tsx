@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ConversationEvent } from "../../types/conversation";
-import type { TimelineMarker, DelegationEdge } from "./timeline";
+import type { TimelineMarker, DelegationEdge } from "./legacyMarkers";
 
 export type GlyphName =
   | "play"

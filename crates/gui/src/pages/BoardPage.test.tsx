@@ -1,7 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, createMockTask, createMockWorkflow } from "../test/test-utils";
 import { BoardPage, topologicalColumnSort } from "./BoardPage";
+import { useShellStore } from "../stores/shellStore";
 import type { Task, Workflow, WorkflowTransition } from "../bindings";
+
+/**
+ * The page title ("Board") and the task-count readout live in the shell header
+ * now, surfaced via useShellHeader. The shell chrome isn't mounted in this
+ * isolated render, so we mount the stored header actions alongside the page to
+ * assert on them.
+ */
+function BoardPageWithHeader() {
+  const headerActions = useShellStore((s) => s.headerActions);
+  return (
+    <>
+      <BoardPage />
+      <div data-testid="shell-header-actions">{headerActions}</div>
+    </>
+  );
+}
 
 // Track the mock return values so tests can override them
 let mockTasks: Task[] = [];
@@ -264,7 +281,7 @@ describe("BoardPage", () => {
       expect(screen.getByText("My Task")).toBeInTheDocument();
 
       // Filter to epic only
-      const levelSelect = screen.getByLabelText("Level");
+      const levelSelect = screen.getByLabelText("Filter by level");
       fireEvent.change(levelSelect, { target: { value: "epic" } });
 
       expect(screen.getByText("My Epic")).toBeInTheDocument();
@@ -525,10 +542,10 @@ describe("BoardPage", () => {
   });
 
   describe("header", () => {
-    it("renders Board title", () => {
-      render(<BoardPage />);
+    it("sets the Board page title in the shell header", () => {
+      render(<BoardPageWithHeader />);
 
-      expect(screen.getByRole("heading", { name: "Board" })).toBeInTheDocument();
+      expect(useShellStore.getState().pageTitle).toBe("Board");
     });
 
     it("shows total task count", () => {
@@ -539,9 +556,11 @@ describe("BoardPage", () => {
         createMockTask({ id: "t-1", title: "Task 1", workflow_id: "wf-1" }),
         createMockTask({ id: "t-2", title: "Task 2", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      render(<BoardPageWithHeader />);
 
-      expect(screen.getByText("2 tasks")).toBeInTheDocument();
+      expect(screen.getByTestId("shell-header-actions")).toHaveTextContent(
+        "2 tasks"
+      );
     });
 
     it("shows singular 'task' for one task", () => {
@@ -551,9 +570,11 @@ describe("BoardPage", () => {
       mockTasks = [
         createMockTask({ id: "t-1", title: "Only One", workflow_id: "wf-1" }),
       ];
-      render(<BoardPage />);
+      render(<BoardPageWithHeader />);
 
-      expect(screen.getByText("1 task")).toBeInTheDocument();
+      expect(screen.getByTestId("shell-header-actions")).toHaveTextContent(
+        "1 task"
+      );
     });
   });
 

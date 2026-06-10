@@ -4,7 +4,6 @@ import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
-import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { useTaskStore } from "../../stores";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
@@ -17,8 +16,6 @@ import { TracesExplorerButton } from "./TracesExplorerButton";
 import {
   deriveRunControlsState,
   deriveHearthStateBreakdown,
-  deriveRunStateChip,
-  getRunChipStyles,
   hasHearthStateBreakdown,
   hearthBreakdownVariantForTask,
   runStatusLabel,
@@ -29,7 +26,15 @@ import { resolveHumanInputGate } from "../../utils/humanInputGate";
 import { HumanInputGate } from "../Traces/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
 import { Text } from "../atoms/Text";
-import { PanelHeader, ReviewGateBanner } from "../panels";
+import {
+  CloseIcon,
+  FloatingDetailPanel,
+  IconButton,
+  PanelHeader,
+  PlayIcon,
+  ReviewGateBanner,
+  StopIcon,
+} from "../panels";
 import { SectionGroup } from "../molecules/SectionGroup";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
@@ -48,7 +53,6 @@ function SectionLabel({ children }: { children: string }) {
     <Text
       variant="eyebrow"
       color="tertiary"
-      style={{ fontSize: "var(--text-2xs)" }}
     >
       {children}
     </Text>
@@ -57,14 +61,6 @@ function SectionLabel({ children }: { children: string }) {
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
-
-/** Floating detail-panel width: persistence key and clamp bounds (px). */
-const WIDTH_STORAGE_KEY = "task-detail-panel-width";
-const MIN_PANEL_WIDTH = 360;
-const MAX_PANEL_WIDTH = 760;
-const DEFAULT_PANEL_WIDTH = 480;
-/** Keyboard resize step (px) for the drag handle. */
-const RESIZE_STEP = 16;
 
 /** Temporarily hide the pop-out/detach control on side panels. Flip back to
  * `true` to restore the Detach button (the onDetach plumbing is left intact). */
@@ -122,69 +118,6 @@ function DetailRow({
 }
 
 /**
- * Header action button. Icon-only, 28×28, with the Hearth hover affordance
- * (docs/design components-lib.css `.icon-btn`): transparent at rest, and on
- * hover a rounded box appears — a faint border plus a `bg-1` fill.
- */
-function IconButton({
-  onClick,
-  ariaLabel,
-  title,
-  testId,
-  disabled = false,
-  children,
-}: {
-  onClick: () => void;
-  ariaLabel: string;
-  title?: string;
-  testId?: string;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={ariaLabel}
-      title={title}
-      data-testid={testId}
-      disabled={disabled}
-      className="inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-[var(--radius-sm)] border border-transparent text-[var(--color-fg-mute)] transition-all hover:border-[var(--color-fg-faint)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-transparent disabled:hover:text-[var(--color-fg-mute)]"
-    >
-      {children}
-    </button>
-  );
-}
-
-/** Filled play triangle for the Run action (matches the reference run glyph). */
-function PlayIcon() {
-  return (
-    <svg
-      className="h-3 w-3"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <polygon points="5 3 19 12 5 21 5 3" />
-    </svg>
-  );
-}
-
-/** Filled square for the Stop action (matches the reference stop glyph). */
-function StopIcon() {
-  return (
-    <svg
-      className="h-3 w-3"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <rect x="5" y="5" width="14" height="14" rx="1.5" />
-    </svg>
-  );
-}
-
-/**
  * TaskDetailPanel displays comprehensive task information in a side panel.
  * Uses an operator-first single-scroll layout with acceptance criteria
  * as the most prominent section, followed by execution progress.
@@ -216,60 +149,6 @@ export function TaskDetailPanel({
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
-
-  // Horizontal resize for the floating panel. The panel is right-anchored, so a
-  // drag on its left edge widens it as the cursor moves left. We measure the
-  // panel's fixed right edge from the DOM rather than assuming the inset value.
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [panelWidth, setPanelWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return DEFAULT_PANEL_WIDTH;
-    const stored = parseInt(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "", 10);
-    return Number.isNaN(stored)
-      ? DEFAULT_PANEL_WIDTH
-      : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, stored));
-  });
-  const [isResizing, setIsResizing] = useState(false);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
-    }
-  }, [panelWidth]);
-
-  useEffect(() => {
-    if (!isResizing) return;
-    const onMove = (event: MouseEvent) => {
-      const rightEdge =
-        panelRef.current?.getBoundingClientRect().right ?? window.innerWidth;
-      setPanelWidth(
-        Math.min(
-          MAX_PANEL_WIDTH,
-          Math.max(MIN_PANEL_WIDTH, rightEdge - event.clientX)
-        )
-      );
-    };
-    const onUp = () => setIsResizing(false);
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    document.body.style.userSelect = "none";
-    document.body.style.cursor = "ew-resize";
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-  }, [isResizing]);
-
-  // Join the shared glass-panel focus model (in-app float only — the pop-out is
-  // its own window). Escape closes the panel unless an inline edit is open, in
-  // which case its own Escape-to-cancel handler wins.
-  const { isFocused, focusProps } = useGlassPanel({
-    id: "task-detail",
-    isOpen: !standalone && taskId != null && !closing,
-    onClose: onClose ?? (() => {}),
-    shouldHandleEscape: () => editingField === null && onClose != null,
-  });
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { executions: taskExecutions } = useTaskExecutions(taskId);
@@ -617,10 +496,6 @@ export function TaskDetailPanel({
     taskData?.run_controls ?? null,
     { hasWorkflow: Boolean(taskData?.workflow_id) }
   );
-  const runChip = taskData
-    ? deriveRunStateChip(taskData, { includeTerminal: false })
-    : null;
-  const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
   const heroStatus = activeRun?.status ?? null;
   const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
   const childBreakdown = deriveHearthStateBreakdown(children);
@@ -756,20 +631,7 @@ export function TaskDetailPanel({
       )}
       {onClose && (
         <IconButton onClick={onClose} ariaLabel="Close panel">
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
+          <CloseIcon />
         </IconButton>
       )}
     </>
@@ -884,16 +746,6 @@ export function TaskDetailPanel({
           aria-label={priorityIndicator.label}
         >
           {priorityIndicator.glyph}
-        </span>
-      )}
-      {runChip && runChipStyles && (
-        <span
-          data-testid="task-detail-run-chip"
-          data-run-status={runChip.status}
-          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
-          aria-label={`Run state: ${runChip.label}`}
-        >
-          {runChip.label}
         </span>
       )}
     </>
@@ -1098,7 +950,7 @@ export function TaskDetailPanel({
                       copyable={false}
                       testId={`child-task-id-${child.id}`}
                     />
-                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--color-fg-soft)]">
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
                       {child.title}
                     </span>
                     {(child.workflow_name || child.step_name) && (
@@ -1156,7 +1008,7 @@ export function TaskDetailPanel({
           >
             <div className="divide-y divide-[var(--color-line)] py-2">
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Priority
                 </h4>
                 {editingField === "priority" ? (
@@ -1195,7 +1047,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Level
                 </h4>
                 {editingField === "level" ? (
@@ -1239,7 +1091,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Tags
                 </h4>
                 <InlineEditField
@@ -1256,7 +1108,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                   Timeline
                 </h4>
                 <div className="space-y-1">
@@ -1281,7 +1133,7 @@ export function TaskDetailPanel({
 
               {taskData.worktree && (
                 <div className="py-3">
-                  <h4 className="mb-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
                     Worktree
                   </h4>
                   <p className="break-all font-mono text-xs text-[var(--color-fg-soft)]">
@@ -1298,61 +1150,25 @@ export function TaskDetailPanel({
     </div>
   );
 
-  if (standalone) {
-    // Pop-out window: same floating-glass surface as the docked panel, but
-    // inset on all sides so it floats within — and grows with — its resizable
-    // window instead of being capped at the docked column width.
-    return (
-      <div
-        className="tasks-v2 detail detail-standalone"
-        data-testid="task-detail-panel-standalone"
-      >
-        <div data-tauri-drag-region className="detail-drag-strip" />
-        {content}
-      </div>
-    );
-  }
-
   // Floating glass overlay (mirrors the chat / Design inspector), per
-  // docs/design/tasks-v2.html `.detail`: a fixed, full-height translucent
-  // surface that floats over the full-width list. Closeable via the header X
-  // and horizontally resizable via the left-edge handle (kept inside the panel
-  // so the rounded, overflow-clipped surface doesn't hide it).
+  // docs/design/tasks-v2.html `.detail`. The shared FloatingDetailPanel owns the
+  // surface, drag/keyboard resize, focus model, and the standalone pop-out
+  // variant; `tasks-v2` scopes the inner content's typography and section styles.
   return (
-    <div
-      ref={panelRef}
-      className={`tasks-v2 detail detail-float${closing ? " is-closing" : ""}`}
-      style={{ width: `${panelWidth}px` }}
-      data-testid="task-detail-panel"
-      data-focused={isFocused || undefined}
-      data-closing={closing || undefined}
-      onAnimationEnd={onExitAnimationEnd}
-      {...focusProps}
+    <FloatingDetailPanel
+      panelId="task-detail"
+      widthStorageKey="task-detail-panel-width"
+      standalone={standalone}
+      closing={closing}
+      onExitAnimationEnd={onExitAnimationEnd}
+      onClose={onClose}
+      isOpen={!standalone && taskId != null && !closing}
+      shouldHandleEscape={() => editingField === null && onClose != null}
+      className="tasks-v2"
+      testId="task-detail-panel"
+      standaloneTestId="task-detail-panel-standalone"
     >
-      <div
-        className="detail-resize-handle"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize panel"
-        aria-valuenow={panelWidth}
-        aria-valuemin={MIN_PANEL_WIDTH}
-        aria-valuemax={MAX_PANEL_WIDTH}
-        tabIndex={0}
-        data-resizing={isResizing || undefined}
-        data-testid="task-detail-resize-handle"
-        onMouseDown={(event) => {
-          event.preventDefault();
-          setIsResizing(true);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowLeft") {
-            setPanelWidth((w) => Math.min(MAX_PANEL_WIDTH, w + RESIZE_STEP));
-          } else if (event.key === "ArrowRight") {
-            setPanelWidth((w) => Math.max(MIN_PANEL_WIDTH, w - RESIZE_STEP));
-          }
-        }}
-      />
       {content}
-    </div>
+    </FloatingDetailPanel>
   );
 }

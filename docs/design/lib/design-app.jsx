@@ -249,7 +249,19 @@
                 <span className="at-step">at step <em>5 · wait</em></span>
                 <IdChip id="40628099" />
               </div>
-              <span style={{ color: 'var(--fg-faint)', fontFamily: 'var(--mono)', fontSize: 'var(--text-10)' }}>10 completions in last 24h · avg 4m 12s</span>
+              <div className={'strip-run' + (selectedRun === 'c794b783' ? ' sel' : '')} onClick={() => setSelectedRun('c794b783')}>
+                <RunChip state="running" label="Running" runtime="2m 04s" />
+                <span className="run-title">Hydrate chat runner state and resume pending work</span>
+                <span className="at-step">at step <em>3 · execute</em></span>
+                <IdChip id="c794b783" />
+              </div>
+              <div className={'strip-run' + (selectedRun === 'f0546c38' ? ' sel' : '')} onClick={() => setSelectedRun('f0546c38')}>
+                <RunChip state="running" label="Running" runtime="14m 51s" />
+                <span className="run-title">Plumb OpenRouter provider routing through chat</span>
+                <span className="at-step">at step <em>2 · route</em></span>
+                <IdChip id="f0546c38" />
+              </div>
+              <span className="runs-summary">10 completions in last 24h · avg 4m 12s</span>
             </footer>
           </section>
 

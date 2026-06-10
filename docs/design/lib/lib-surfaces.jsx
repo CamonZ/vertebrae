@@ -37,7 +37,7 @@
       <div className={cls} onClick={onClick}>
         <div className="bc-title">
           <window.Glyph level={level} accent={running} />
-          <span className="ttl">{title}</span>
+          <span className="ttl" title={title}>{title}</span>
           {priority ? <span className={'bc-pri ' + priority} title={priority + ' priority'}>{PRI_SYM[priority]}</span> : null}
         </div>
         {stepLabel ? <span className={'step-tag kind-' + kind}>step · {stepLabel}</span> : null}

@@ -18,6 +18,9 @@ const emptyRollups: ExecutionRollups = {
   totalAttempts: 0,
   totalCost: 0,
   totalTokens: 0,
+  rawInputTokens: 0,
+  cacheReadTokens: 0,
+  outputTokens: 0,
   totalWallTimeMs: 0,
 };
 let rollups: ExecutionRollups = emptyRollups;

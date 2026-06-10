@@ -1,0 +1,191 @@
+<!doctype html>
+<!-- @dsCard group="Brand" name="RunHero · childless states" subtitle="Leaf active-run recommendation" -->
+<html lang="en" class="">
+<head>
+<meta charset="utf-8">
+<title>RunHero · childless active run</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components-v2.css">
+<link rel="stylesheet" href="lib/components-lib.css">
+<style>
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg-1); color: var(--fg);
+    font-family: var(--sans); font-size: var(--text-13);
+    display: flex; justify-content: center;
+    overflow-y: auto;
+    background-image: radial-gradient(circle, var(--line) 0.7px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .wrap { width: 880px; max-width: 92vw; padding: var(--s-8) 0 var(--s-10); }
+
+  .doc-h { font-family: var(--serif); font-style: italic; font-weight: 400; font-size: var(--text-28); letter-spacing: -0.02em; margin: 0 0 var(--s-2); }
+  .doc-h em { color: var(--accent); }
+  .doc-sub { font-family: var(--sans); font-size: var(--text-14); line-height: 1.6; color: var(--fg-soft); margin: 0 0 var(--s-7); max-width: 60ch; }
+  .doc-sub b { color: var(--fg); font-weight: 600; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-5); }
+
+  .case { display: flex; flex-direction: column; gap: var(--s-2h); }
+  .case-cap { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-faint); display: flex; align-items: baseline; gap: var(--s-2); }
+  .case-cap .tag { padding: 1px var(--s-1h); border: 1px solid var(--line-strong); border-radius: var(--r-xs); color: var(--fg-mute); letter-spacing: 0.04em; }
+  .case.reco .case-cap { color: var(--accent); }
+  .case.reco .case-cap .tag { border-color: color-mix(in oklch, var(--accent) 45%, transparent); color: var(--accent); }
+
+  /* a small panel frame to read each hero in the context of the inspector */
+  .panel { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-3h); }
+  .case.reco .panel { border-color: color-mix(in oklch, var(--accent) 30%, transparent); box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 12%, transparent), var(--shadow-2); }
+
+  .ttl-row { display: flex; align-items: baseline; gap: var(--s-2); margin-bottom: var(--s-1h); }
+  .ttl-row .t { font-family: var(--serif); font-style: italic; font-size: var(--text-16); color: var(--fg); }
+  .ttl-row .lvl { font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-faint); }
+
+  /* hero lower zone helpers reused from the lib vocabulary */
+  .hero-sub { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: var(--s-1); }
+  .hero-meta { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); letter-spacing: 0.02em; }
+  .hero-right { margin-left: auto; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+  .dots { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+  .note { margin-top: var(--s-3); font-family: var(--sans); font-size: var(--text-12); line-height: 1.5; color: var(--fg-mute); }
+  .note b { color: var(--fg-soft); font-weight: 600; }
+
+  .legend { margin-top: var(--s-8); padding-top: var(--s-5); border-top: 1px solid var(--line); }
+  .legend h3 { font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); margin: 0 0 var(--s-3); }
+  .legend ul { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: var(--s-2h); }
+  .legend li { font-size: var(--text-13); line-height: 1.55; color: var(--fg-soft); padding-left: var(--s-4); position: relative; }
+  .legend li::before { content: '→'; position: absolute; left: 0; color: var(--accent); font-family: var(--mono); }
+  .legend li b { color: var(--fg); font-weight: 600; }
+  .legend code { font-family: var(--mono); font-size: var(--text-11); color: var(--fg-mute); background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 4px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="doc-h">RunHero — <em>a leaf with an active run</em></h1>
+    <p class="doc-sub">The hero's lower zone today is built <b>entirely from children</b>: the <code style="font-family:var(--mono)">✓ N</code> breakdown, the dot strip, and the "N&nbsp;children" label. A leaf task has no fan-out, so all three collapse to nothing — leaving the status line floating over dead space. The fix: a leaf's only progress <b>is its own run</b>, so re-target that zone from <em>children&nbsp;progress</em> to <em>this run's step&nbsp;trail</em>.</p>
+
+    <div class="grid">
+
+      <!-- ───────── A: current — parent, no run ───────── -->
+      <div class="case">
+        <div class="case-cap">A · today <span class="tag">parent · no run</span></div>
+        <div class="panel">
+          <div class="ttl-row"><span class="t">Refactor auth middleware</span><span class="lvl">ticket</span></div>
+          <div class="hero-status edge-none">
+            <div class="hero-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+              <span class="icon faint" style="color:var(--fg-faint);display:inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.7"><circle cx="12" cy="12" r="9"/></svg></span>
+              <span class="state" style="color:var(--fg-faint);">No active run</span>
+              <span class="sep">·</span>
+              <span class="at">at step <em style="color:var(--fg-mute);">todo</em></span>
+              <span class="hero-right">55 children</span>
+            </div>
+            <div class="hero-sub"><span class="c-breakdown"><span class="b-done">✓ 55</span></span></div>
+            <div class="dots" style="margin-top:var(--s-1);">
+              <span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span>
+            </div>
+          </div>
+        </div>
+        <div class="note">The state you sent. Dots = one per child, breakdown = children grouped by state.</div>
+      </div>
+
+      <!-- ───────── B: parent, active run ───────── -->
+      <div class="case">
+        <div class="case-cap">B · today <span class="tag">parent · running</span></div>
+        <div class="panel">
+          <div class="ttl-row"><span class="t">Build ingest pipeline</span><span class="lvl">ticket</span></div>
+          <div class="hero-status edge-wait">
+            <div class="hero-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+              <span class="icon" style="color:var(--warn);display:inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+              <span class="state" style="color:var(--warn);">Waiting</span>
+              <span class="sep">·</span>
+              <span class="runtime" style="color:var(--warn);">7h 36m</span>
+              <span class="sep">·</span>
+              <span class="at">at step <em style="color:var(--step-wait-fg);">5 · wait</em></span>
+              <span class="hero-right">12 children</span>
+            </div>
+            <div class="hero-sub"><span class="c-breakdown"><span class="b-done">✓ 7</span><span class="sep">·</span><span class="b-run">▶ 3</span><span class="sep">·</span><span class="b-q">○ 2</span></span></div>
+            <div class="dots" style="margin-top:var(--s-1);">
+              <span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot done"></span><span class="c-dot running"></span><span class="c-dot running"></span><span class="c-dot running"></span><span class="c-dot queued"></span><span class="c-dot queued"></span>
+            </div>
+          </div>
+        </div>
+        <div class="note">Fan-out makes sense here — the parent is literally waiting on its children.</div>
+      </div>
+
+      <!-- ───────── C: RECOMMENDED — leaf, active run ───────── -->
+      <div class="case reco">
+        <div class="case-cap">C · proposed <span class="tag">leaf · running</span></div>
+        <div class="panel">
+          <div class="ttl-row"><span class="t">Patch JWT expiry check</span><span class="lvl">task</span></div>
+          <div class="hero-status edge-execute">
+            <div class="hero-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+              <span class="icon" style="color:var(--accent);display:inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M8 5v14l11-7z"/></svg></span>
+              <span class="state" style="color:var(--accent);">Running</span>
+              <span class="sep">·</span>
+              <span class="runtime">2m 14s</span>
+              <span class="sep">·</span>
+              <span class="at">at step <em style="color:var(--step-execute-fg);">4 · execute</em></span>
+              <span class="hero-right">leaf · no children</span>
+            </div>
+            <!-- lower zone re-targeted: this RUN's trail through its own workflow -->
+            <div class="hero-sub">
+              <span class="c-pipeline" style="width:188px;height:7px;">
+                <span class="seg kind-route s-completed"></span>
+                <span class="seg kind-execute s-completed"></span>
+                <span class="seg kind-eval s-completed"></span>
+                <span class="seg kind-execute s-running"></span>
+                <span class="seg kind-human s-queued"></span>
+                <span class="seg kind-wait s-queued"></span>
+                <span class="seg kind-execute s-queued"></span>
+              </span>
+              <span class="hero-meta">step 4 of 7 · attempt 1 · 12 step executions</span>
+            </div>
+          </div>
+        </div>
+        <div class="note"><b>The dot strip becomes the run's own step trail.</b> Same pip vocabulary as the task list — segments coloured by step kind, current step pulsing. Stats switch from child counts to run-scoped: step N of M, attempt, executions.</div>
+      </div>
+
+      <!-- ───────── D: leaf, idle ───────── -->
+      <div class="case">
+        <div class="case-cap">D · proposed <span class="tag">leaf · idle</span></div>
+        <div class="panel">
+          <div class="ttl-row"><span class="t">Document rotation policy</span><span class="lvl">task</span></div>
+          <div class="hero-status edge-none">
+            <div class="hero-line" style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+              <span class="icon" style="color:var(--fg-faint);display:inline-flex;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.7"><circle cx="12" cy="12" r="9"/></svg></span>
+              <span class="state" style="color:var(--fg-faint);">No active run</span>
+              <span class="sep">·</span>
+              <span class="at">at step <em style="color:var(--fg-mute);">todo</em></span>
+              <span class="hero-right">leaf · no children</span>
+            </div>
+            <div class="hero-sub">
+              <span class="c-pipeline" style="width:188px;height:7px;">
+                <span class="seg kind-route s-queued"></span>
+                <span class="seg kind-execute s-queued"></span>
+                <span class="seg kind-eval s-queued"></span>
+                <span class="seg kind-execute s-queued"></span>
+                <span class="seg kind-human s-queued"></span>
+                <span class="seg kind-wait s-queued"></span>
+                <span class="seg kind-execute s-queued"></span>
+              </span>
+              <span class="hero-meta">7 steps defined · never run</span>
+            </div>
+          </div>
+        </div>
+        <div class="note">Idle leaf still shows the workflow it <em>would</em> run — dimmed, so the zone never goes empty.</div>
+      </div>
+
+    </div>
+
+    <div class="legend">
+      <h3>The rule</h3>
+      <ul>
+        <li><b>Has children</b> → lower zone = fan-out: dot strip + <code>✓ / ▶ / ○</code> breakdown + "N children".</li>
+        <li><b>Leaf</b> → lower zone = this run's <b>step trail</b> (a <code>Pipeline</code>) + run-scoped stats + "leaf · no children".</li>
+        <li>The status line (icon · state · runtime · at step) is <b>identical</b> in both — only the zone beneath it swaps meaning.</li>
+        <li>Never render an empty hero: an idle leaf shows its defined-but-unrun workflow, dimmed.</li>
+      </ul>
+    </div>
+  </div>
+</body>
+</html>

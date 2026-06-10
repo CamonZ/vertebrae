@@ -21,8 +21,24 @@ export interface ExecutionRollups {
   totalAttempts: number;
   /** Sum of `cost` (USD), missing values treated as 0. */
   totalCost: number;
-  /** Sum of `input_tokens + output_tokens`, missing values treated as 0. */
+  /**
+   * Grand total of tokens processed across the set:
+   * `rawInputTokens + cacheReadTokens + outputTokens`. Unlike the old
+   * input+output sum, this includes cache-read ("cache hit") tokens, which
+   * typically dominate and were previously invisible.
+   */
   totalTokens: number;
+  /** Σ `input_tokens` — raw (non-cached) prompt tokens. */
+  rawInputTokens: number;
+  /**
+   * Cache-read ("cache hit") input tokens. Sacrum reports this as a
+   * session-cumulative figure, so we take each run's *latest* execution value
+   * and sum those across runs rather than summing every attempt (which would
+   * multiply-count the shared session total).
+   */
+  cacheReadTokens: number;
+  /** Σ `output_tokens` — generated output tokens. */
+  outputTokens: number;
   /**
    * Sum of wall-clock durations in milliseconds.
    *
@@ -57,6 +73,39 @@ function durationMs(execution: StepExecution): number {
 }
 
 /**
+ * Sortable timestamp for "which attempt is latest within a run" — prefers
+ * `completed_at`, falls back to `started_at`, then 0 so unparseable rows sort
+ * to the start and yield to any timestamped sibling.
+ */
+function execOrder(execution: StepExecution): number {
+  const t = execution.completed_at ?? execution.started_at;
+  const ms = t ? Date.parse(t) : NaN;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Cache-read tokens for the set, taking each run's latest execution value and
+ * summing across runs. Sacrum's `cache_read_tokens` is session-cumulative, so
+ * the newest attempt in a run already reflects that run's full cache reads;
+ * summing every attempt would multiply-count it.
+ */
+function cacheReadByLatestPerRun(
+  executions: readonly StepExecution[]
+): number {
+  const latest = new Map<string | null, StepExecution>();
+  for (const exec of executions) {
+    const key = exec.task_run_id ?? null;
+    const cur = latest.get(key);
+    if (!cur || execOrder(exec) >= execOrder(cur)) latest.set(key, exec);
+  }
+  let sum = 0;
+  for (const exec of latest.values()) {
+    if (typeof exec.cache_read_tokens === "number") sum += exec.cache_read_tokens;
+  }
+  return sum;
+}
+
+/**
  * Sum `costUsd` across all `session_end` events in the given session logs.
  * Returns 0 when no parseable session_end entries exist.
  */
@@ -88,7 +137,8 @@ export function computeExecutionRollups(
   logsByExecutionId?: Readonly<Record<string, SessionLog[]>>
 ): ExecutionRollups {
   let totalCost = 0;
-  let totalTokens = 0;
+  let rawInputTokens = 0;
+  let outputTokens = 0;
   let totalWallTimeMs = 0;
   // Executions with no `task_run_id` (legacy rows predating TaskRun lineage)
   // all share the `null` key, so they collapse into one pseudo-run rather
@@ -101,17 +151,21 @@ export function computeExecutionRollups(
     } else if (logsByExecutionId && exec.id) {
       totalCost += costFromSessionLogs(logsByExecutionId[exec.id]);
     }
-    if (typeof exec.input_tokens === "number") totalTokens += exec.input_tokens;
+    if (typeof exec.input_tokens === "number") rawInputTokens += exec.input_tokens;
     if (typeof exec.output_tokens === "number")
-      totalTokens += exec.output_tokens;
+      outputTokens += exec.output_tokens;
     totalWallTimeMs += durationMs(exec);
     distinctRunIds.add(exec.task_run_id ?? null);
   }
+  const cacheReadTokens = cacheReadByLatestPerRun(executions);
   return {
     totalRuns: distinctRunIds.size,
     totalAttempts: executions.length,
     totalCost,
-    totalTokens,
+    totalTokens: rawInputTokens + cacheReadTokens + outputTokens,
+    rawInputTokens,
+    cacheReadTokens,
+    outputTokens,
     totalWallTimeMs,
   };
 }

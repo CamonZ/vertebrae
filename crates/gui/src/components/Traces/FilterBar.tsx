@@ -1,103 +1,82 @@
 /**
- * FilterBar — shared, URL-backed filter UI for the Traces explorer.
+ * FilterBar — the Traces scope-chip row (canonical design).
  *
- * Drives status / step / model filters plus a free-text search and a
- * "Root only" toggle. The same filter state feeds THREAD, FLIGHT-STRIP and
- * CORRIDOR rendering, so a filter change narrows all three consistently.
+ * A single `view` scope narrows the rendered thread stream by message type
+ * (Threads · Turns · Tools · System · Errors) or by agent model, with live
+ * counts on each chip, plus a free-text search.
  */
 
-import { forwardRef, useMemo, type ChangeEvent, type ReactNode } from "react";
-import type { StepExecution } from "../../bindings";
-import type { TraceFilters } from "../../hooks/useTraceFilters";
+import { forwardRef, type ReactNode } from "react";
+import type { ViewCounts } from "./viewFilter";
 
 interface FilterBarProps {
-  filters: TraceFilters;
-  executions: readonly StepExecution[];
-  onStatusChange: (value: string | null) => void;
-  onStepNameChange: (value: string | null) => void;
-  onModelChange: (value: string | null) => void;
+  view: string;
+  counts: ViewCounts;
+  search: string;
+  onViewChange: (value: string) => void;
   onSearchChange: (value: string) => void;
-  onRootOnlyChange: (value: boolean) => void;
 }
 
-const FILTER_LABEL_CLASS =
-  "flex items-center gap-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-[var(--color-fg-soft)]";
-const FILTER_SELECT_CLASS =
-  "border-0 bg-transparent px-1 py-0 text-xs text-[var(--color-fg)] outline-none";
-
-function uniqueSorted(values: Iterable<string | null | undefined>): string[] {
-  const set = new Set<string>();
-  for (const v of values) {
-    if (v && v.trim().length > 0) set.add(v);
-  }
-  return Array.from(set).sort();
-}
-
-function FilterSelect({
-  testId,
+function ScopeChip({
+  id,
   label,
-  value,
-  options,
-  onChange,
+  n,
+  active,
+  err,
+  onClick,
 }: {
-  testId: string;
+  id: string;
   label: string;
-  value: string | null | undefined;
-  options: readonly string[];
-  onChange: (value: string | null) => void;
+  n: number | null;
+  active: boolean;
+  err?: boolean;
+  onClick: () => void;
 }): ReactNode {
-  const handleChange = (e: ChangeEvent<HTMLSelectElement>): void => {
-    const val = e.target.value;
-    onChange(val === "" ? null : val);
-  };
-
+  const base =
+    "inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2.5 py-1 font-sans text-xs cursor-pointer transition-colors";
+  const tone = active
+    ? err
+      ? "border-[color-mix(in_oklch,var(--color-err)_35%,transparent)] bg-[var(--color-err-wash)] text-[var(--color-err)]"
+      : "border-[color-mix(in_oklch,var(--color-accent)_30%,transparent)] bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
+    : "border-transparent text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-1)]";
+  const badge = active
+    ? err
+      ? "bg-[color-mix(in_oklch,var(--color-err)_25%,var(--color-bg))] text-[var(--color-err)]"
+      : "bg-[color-mix(in_oklch,var(--color-accent)_25%,var(--color-bg))] text-[var(--color-accent)]"
+    : "bg-[var(--color-bg-3)] text-[var(--color-fg-faint)]";
   return (
-    <label className={FILTER_LABEL_CLASS}>
-      <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
-        {label}
-      </span>
-      <select
-        data-testid={testId}
-        className={FILTER_SELECT_CLASS}
-        value={value ?? ""}
-        onChange={handleChange}
-      >
-        <option value="">All</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
+    <span
+      role="button"
+      tabIndex={0}
+      data-testid={`trace-scope-${id}`}
+      data-active={active ? "true" : "false"}
+      className={`${base} ${tone}`}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
+      {label}
+      {n != null && (
+        <span
+          className={`rounded-[var(--radius-xs)] px-1 font-mono text-2xs ${badge}`}
+        >
+          {n}
+        </span>
+      )}
+    </span>
   );
 }
 
 export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
   function FilterBar(
-    {
-      filters,
-      executions,
-      onStatusChange,
-      onStepNameChange,
-      onModelChange,
-      onSearchChange,
-      onRootOnlyChange,
-    },
+    { view, counts, search, onViewChange, onSearchChange },
     searchRef
   ): ReactNode {
-    const statuses = useMemo(
-      () => uniqueSorted(executions.map((e) => e.status ?? null)),
-      [executions]
-    );
-    const stepNames = useMemo(
-      () => uniqueSorted(executions.map((e) => e.step_name ?? null)),
-      [executions]
-    );
-    const models = useMemo(
-      () => uniqueSorted(executions.map((e) => e.model ?? null)),
-      [executions]
-    );
+    const modelIds = Object.keys(counts.models).sort();
 
     return (
       <div
@@ -105,55 +84,36 @@ export const FilterBar = forwardRef<HTMLInputElement, FilterBarProps>(
         data-variant="hearth-v2"
         className="flex flex-wrap items-center gap-2 border-b border-[var(--color-line)] bg-[var(--color-bg-1)] px-4 py-2 text-xs"
       >
-        <FilterSelect
-          testId="trace-filter-status"
-          label="Status"
-          value={filters.status}
-          options={statuses}
-          onChange={onStatusChange}
-        />
-        <FilterSelect
-          testId="trace-filter-step"
-          label="Step"
-          value={filters.stepName}
-          options={stepNames}
-          onChange={onStepNameChange}
-        />
-        <FilterSelect
-          testId="trace-filter-model"
-          label="Model"
-          value={filters.model}
-          options={models}
-          onChange={onModelChange}
-        />
+        <ScopeChip id="all" label="All" n={counts.all} active={view === "all"} onClick={() => onViewChange("all")} />
+        <ScopeChip id="threads" label="Threads" n={counts.threads} active={view === "threads"} onClick={() => onViewChange("threads")} />
+        <ScopeChip id="turns" label="Turns" n={counts.turns} active={view === "turns"} onClick={() => onViewChange("turns")} />
+        <ScopeChip id="tools" label="Tools" n={counts.tools} active={view === "tools"} onClick={() => onViewChange("tools")} />
+        <ScopeChip id="system" label="System" n={counts.system} active={view === "system"} onClick={() => onViewChange("system")} />
+        <ScopeChip id="errors" label="Errors" n={counts.errors} err active={view === "errors"} onClick={() => onViewChange("errors")} />
+
+        {modelIds.length > 0 && (
+          <span className="mx-1 h-3.5 w-px bg-[var(--color-line)]" aria-hidden="true" />
+        )}
+        {modelIds.map((id) => (
+          <ScopeChip
+            key={id}
+            id={id}
+            label={id}
+            n={counts.models[id]}
+            active={view === id}
+            onClick={() => onViewChange(id)}
+          />
+        ))}
 
         <input
           ref={searchRef}
           data-testid="trace-filter-search"
           type="text"
-          placeholder="Search events… (press / to focus)"
-          className="min-w-[180px] flex-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-3 py-1 text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
-          value={filters.search}
+          placeholder="Search the thread… (press / to focus)"
+          className="ml-auto min-w-[180px] max-w-[360px] flex-1 rounded-full border border-[var(--color-line)] bg-[var(--color-bg-2)] px-3 py-1 text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
+          value={search}
           onChange={(e) => onSearchChange(e.target.value)}
         />
-
-        <label
-          data-testid="trace-filter-root-only-label"
-          className={`flex cursor-pointer items-center gap-1 rounded-full border px-2 py-1 text-[var(--color-fg-soft)] ${
-            filters.rootOnly
-              ? "border-[var(--color-accent)] bg-[var(--color-accent)]/10"
-              : "border-[var(--color-line)] bg-[var(--color-bg-2)]"
-          }`}
-        >
-          <input
-            data-testid="trace-filter-root-only"
-            type="checkbox"
-            checked={filters.rootOnly}
-            onChange={(e) => onRootOnlyChange(e.target.checked)}
-            className="h-3 w-3"
-          />
-          Root only
-        </label>
       </div>
     );
   }

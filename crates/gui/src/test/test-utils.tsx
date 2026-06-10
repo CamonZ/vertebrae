@@ -1,5 +1,4 @@
 import { render, type RenderOptions } from "@testing-library/react";
-import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
 import type {
@@ -20,9 +19,7 @@ function customRender(
   options?: Omit<RenderOptions, "wrapper">
 ) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <BrowserRouter>
-      <ReactFlowProvider>{children}</ReactFlowProvider>
-    </BrowserRouter>
+    <BrowserRouter>{children}</BrowserRouter>
   );
 
   return render(ui, { wrapper: Wrapper, ...options });

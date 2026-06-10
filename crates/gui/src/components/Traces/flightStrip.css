@@ -1,0 +1,128 @@
+/* ==================================================================
+   FLIGHT STRIP (single-run) — Steps · Tools · Turns · Subagents
+   Ported from docs/design prototype FLIGHT STRIP block, extended with
+   a 4th (subagent) lane that collapses when there are no subagents.
+   ================================================================== */
+.flight-strip {
+  position: relative;
+  background: var(--color-bg-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  width: 100%;
+  user-select: none;
+  cursor: pointer;
+}
+.flight-strip.dragging {
+  cursor: grabbing;
+}
+
+.flight-strip .fs-lanes {
+  position: relative;
+}
+
+.flight-strip .lane {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  border-bottom: 1px dashed color-mix(in oklch, var(--color-line) 50%, transparent);
+}
+.flight-strip .lane.last {
+  border-bottom: none;
+}
+.flight-strip .lane-label {
+  position: absolute;
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--text-9);
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--color-fg-mute);
+  background: var(--color-bg-1);
+  padding: 0 4px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.flight-strip .mk {
+  position: absolute;
+  height: 14px;
+  border-radius: var(--radius-sm);
+  top: 4px;
+  cursor: pointer;
+}
+.flight-strip .mk.kind-execute {
+  background: var(--color-step-execute, var(--color-accent));
+}
+.flight-strip .mk.kind-eval {
+  background: var(--color-step-eval, var(--color-info));
+}
+.flight-strip .mk.kind-route {
+  background: var(--color-step-route, var(--color-warn));
+}
+.flight-strip .mk.kind-human {
+  background: var(--color-step-human, var(--color-info));
+}
+.flight-strip .mk.kind-wait {
+  background: var(--color-step-wait, var(--color-fg-mute));
+}
+.flight-strip .mk.live {
+  box-shadow: 0 0 8px var(--color-accent-glow, var(--color-accent));
+  border: 1px solid var(--color-accent);
+}
+.flight-strip .mk.sel {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.flight-strip .pip {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+.flight-strip .pip.tool {
+  background: color-mix(in oklch, var(--color-step-execute, var(--color-accent)) 80%, var(--color-bg));
+}
+.flight-strip .pip.agent {
+  background: var(--color-fg-mute);
+}
+.flight-strip .pip.error {
+  background: var(--color-err);
+  box-shadow: 0 0 3px var(--color-err-wash, var(--color-err));
+}
+.flight-strip .pip.sel {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.flight-strip .spawn-edge {
+  position: absolute;
+  width: 1.5px;
+  border-left: 1.5px dashed color-mix(in oklch, var(--color-fg-mute) 80%, transparent);
+  pointer-events: none;
+}
+
+.flight-strip .ruler {
+  position: relative;
+  height: 0;
+}
+
+.flight-strip .vp-line {
+  position: absolute;
+  top: 0;
+  width: 0;
+  border-left: 1.5px solid var(--color-accent);
+  box-shadow: 0 0 4px var(--color-accent-glow, var(--color-accent));
+  transform: translateX(-0.75px);
+  pointer-events: none;
+  z-index: 3;
+}

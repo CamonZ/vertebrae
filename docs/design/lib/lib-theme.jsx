@@ -58,7 +58,7 @@
     position: fixed; left: 52px; bottom: 16px; z-index: 9995;
     width: 210px;
     background: var(--bg-2);
-    border: 1px solid var(--line-strong); border-left: 3px solid var(--accent);
+    border: 1px solid var(--line-strong);
     border-radius: var(--r-lg);
     box-shadow: var(--shadow-3), 0 0 30px rgba(0,0,0,0.34);
     padding: var(--s-2); animation: ap-in var(--t-base) var(--ease);

@@ -117,23 +117,31 @@
     const isCompleted = t.runState === 'completed';
     const accentGlyph = selected || t.runState === 'running';
 
-    let meta = null;
+    let metaExtra = null;
     if (t.level <= 1) {
       const ccount = (t.childCount || (t.children && t.children.length) || 0);
       const ccLabel = t.level === 0 ? (ccount === 1 ? '1 ticket' : ccount + ' tickets') : (ccount === 1 ? '1 task' : ccount + ' tasks');
       const tags = (t.tags || []).slice(0, 3);
       const bd = childBreakdown(t);
       const hasBd = bd.done || bd.running || bd.waiting || bd.queued;
-      meta = (
-        <div className="t-meta">
+      const hasExtra = ccount || tags.length || (t.pipeline && t.pipeline.length) || hasBd;
+      metaExtra = hasExtra ? (
+        <>
           {ccount ? <span>{ccLabel}</span> : null}
           {ccount && tags.length ? <span className="sep">·</span> : null}
           {tags.map((x, i) => <span key={i} className="tag">{x}</span>)}
           {t.pipeline && t.pipeline.length ? <><span className="sep">·</span><Pipeline width={120} segments={t.pipeline.map(s => ({ kind: s.kind, state: s.state }))} /></> : null}
           {hasBd ? <><span className="sep">·</span><StateBreakdown {...bd} /></> : null}
-        </div>
-      );
+        </>
+      ) : null;
     }
+    // ID lives in the meta line (reference metadata), not on the title line.
+    const meta = (
+      <div className="t-meta">
+        <IdChip id={t.id} />
+        {metaExtra ? <><span className="sep">·</span>{metaExtra}</> : null}
+      </div>
+    );
 
     const pri = t.priority ? (t.priority === 'hi' ? '↑' : t.priority === 'md' ? '→' : '↓') : null;
 
@@ -155,7 +163,6 @@
         </div>
         <div className="t-right">
           <div className="chip-slot"><CompletionMark t={t} /></div>
-          <IdChip id={t.id} />
           <div className="when">{t.when || ''}</div>
         </div>
       </div>
@@ -199,6 +206,8 @@
 
   // ── App ─────────────────────────────────────────────────────
   function TasksApp() {
+    const TWEAK_DEFAULTS = { uniformTitleSize: false, titleSize: 14, depShowResolved: true };
+    const [tw, setTweak] = useTweaks(TWEAK_DEFAULTS);
     const initialId = (location.hash && location.hash.length > 1 && byId[location.hash.slice(1)]) ? location.hash.slice(1) : '40628099';
     const [selectedId, setSelectedId] = useState(initialId);
     const [expanded, setExpanded] = useState(() => new Set(['2b064abb', '40628099']));
@@ -211,8 +220,8 @@
     const listRef = useRef(null);
 
     const counts = useMemo(scopeCounts, []);
-    const total = TASKS.length;
-    const roots = useMemo(() => TASKS.filter(t => !t.parent).length, []);
+    const total = useMemo(() => TASKS.length, [rev]);
+    const roots = useMemo(() => TASKS.filter(t => !t.parent).length, [rev]);
     const items = useMemo(() => computeItems(scope, query, expanded, hideCompleted, summaryExpanded),
       [scope, query, expanded, hideCompleted, summaryExpanded, rev]);
     const rowIds = useMemo(() => items.filter(i => i.type === 'row').map(i => i.id), [items]);
@@ -250,6 +259,46 @@
       setExpanded(prev => { const n = new Set(prev); n.add(parentId); return n; });
       setRev(r => r + 1);
       // keep the parent in focus so the freshly-added child appears in its Children section
+    }, []);
+
+    // Delete a task. mode 'cascade' removes the whole subtree; 'promote' lifts direct
+    // children up one level to the grandparent (or top level) and removes only this node.
+    const deleteTask = useCallback((id, mode) => {
+      const t = byId[id]; if (!t) return;
+      const parentId = t.parent || null;
+      const parent = parentId ? byId[parentId] : null;
+
+      function removeNode(nid) {
+        const n = byId[nid]; if (!n) return;
+        (n.children || []).slice().forEach(removeNode);
+        delete byId[nid];
+        const idx = TASKS.indexOf(n); if (idx >= 0) TASKS.splice(idx, 1);
+      }
+
+      if (mode === 'promote' && t.children && t.children.length) {
+        // Lift each child's whole subtree up one level (keeps depth === level invariant).
+        function lift(nid) {
+          const n = byId[nid]; if (!n) return;
+          n.level = Math.max(0, n.level - 1);
+          (n.children || []).forEach(lift);
+        }
+        t.children.slice().forEach(cid => {
+          const c = byId[cid]; if (!c) return;
+          c.parent = parentId || undefined;
+          lift(cid);
+          if (parent) parent.children = (parent.children || []).concat(cid);
+        });
+        if (parent && parent.childCount != null) parent.childCount = parent.children.length;
+        t.children = [];   // detach so removeNode doesn't cascade into the promoted subtrees
+      }
+
+      if (parent && parent.children) parent.children = parent.children.filter(c => c !== id);
+      if (parent && parent.childCount != null) parent.childCount = parent.children.length;
+      removeNode(id);
+
+      setSelectedId(parentId && byId[parentId] ? parentId : null);
+      if (parentId && byId[parentId]) setExpanded(prev => { const n = new Set(prev); n.add(parentId); return n; });
+      setRev(r => r + 1);
     }, []);
 
     // keep selected row in view (no scrollIntoView)
@@ -292,6 +341,13 @@
 
     const selectedTask = byId[selectedId];
 
+    // Apply the uniform-title-size tweak to the list via a root class + CSS var.
+    useEffect(() => {
+      const root = document.documentElement;
+      root.classList.toggle('uniform-titles', !!tw.uniformTitleSize);
+      root.style.setProperty('--uniform-title-size', tw.titleSize + 'px');
+    }, [tw.uniformTitleSize, tw.titleSize]);
+
     return (
       <AppShell page="Tasks" active="tasks" activity={
         <>
@@ -329,9 +385,23 @@
                 : <div style={{ padding: 'var(--s-8) var(--s-5)', fontFamily: 'var(--serif)', fontStyle: 'italic', color: 'var(--fg-faint)' }}>No tasks match that filter.</div>}
             </div>
           </main>
-          <aside className="detail">
-            <TaskDetail task={selectedTask} onSelect={select} onClose={() => setSelectedId(null)} onTraces={() => { location.href = 'traces-v2.html'; }} onAddChild={addChild} />
-          </aside>
+          {selectedTask ? (
+            <aside className="detail">
+              <TaskDetail task={selectedTask} onSelect={select} onClose={() => setSelectedId(null)} onTraces={() => { location.href = 'traces-v2.html'; }} onAddChild={addChild} onDelete={deleteTask} graphShowResolved={tw.depShowResolved} />
+            </aside>
+          ) : null}
+          <TweaksPanel>
+            <TweakSection label="Task list type" />
+            <TweakToggle label="Uniform title size" value={tw.uniformTitleSize}
+              onChange={(v) => setTweak('uniformTitleSize', v)} />
+            {tw.uniformTitleSize ? (
+              <TweakSlider label="Title size" value={tw.titleSize} min={12} max={18} step={1} unit="px"
+                onChange={(v) => setTweak('titleSize', v)} />
+            ) : null}
+            <TweakSection label="Dependency graph" />
+            <TweakToggle label="Show resolved blockers" value={tw.depShowResolved}
+              onChange={(v) => setTweak('depShowResolved', v)} />
+          </TweaksPanel>
         </AppShell>
     );
   }

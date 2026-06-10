@@ -60,28 +60,26 @@
 
     // GraphEdge
     html += '<div class="card">' +
-      '<div class="card-head"><div class="card-name">GraphEdge</div></div>' +
-      '<div class="card-desc">SVG bezier between node anchors. Variants: neutral (line-strong) and live (animated dashed accent with glow).</div>' +
-      '<div class="card-canvas" style="min-height: 140px;">' +
-        '<svg width="100%" height="120" viewBox="0 0 320 120">' +
+      '<div class="card-head"><div class="card-name">GraphEdge <em>· + GraphMarkers</em></div></div>' +
+      '<div class="card-desc">One routed SVG path, styled entirely from the <code>--edge-*</code> tokens via the <code>.gedge</code> classes — never inline attributes. Three kinds × three trace states, plus the legacy animated <b>live</b> variant. Drop one <code>&lt;GraphMarkers/&gt;</code> in the same canvas for the arrowheads.</div>' +
+      '<div class="card-canvas" style="min-height: 176px;">' +
+        '<svg width="100%" height="164" viewBox="0 0 320 164">' +
           '<defs>' +
-            '<marker id="ar1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"/></marker>' +
+            '<marker id="ge-n" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--line-strong)"/></marker>' +
+            '<marker id="ge-a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>' +
+            '<marker id="ge-r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--step-route)"/></marker>' +
           '</defs>' +
-          // Neutral edge
-          '<path d="M30,40 C90,40 110,40 150,40" stroke="var(--line-strong)" stroke-width="1.5" fill="none" marker-end="url(#ar1)"/>' +
-          '<text x="22" y="34" font-family="var(--mono)" font-size="9" fill="var(--fg-faint)">A</text>' +
-          '<text x="155" y="34" font-family="var(--mono)" font-size="9" fill="var(--fg-faint)">B</text>' +
-          '<text x="90" y="58" font-family="var(--mono)" font-size="9" fill="var(--fg-faint)" text-anchor="middle">neutral</text>' +
-          // Live edge
-          '<path class="live-edge" d="M30,90 C90,90 110,90 150,90" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 4" fill="none" style="filter: drop-shadow(0 0 4px var(--accent-glow));">' +
-            '<animate attributeName="stroke-dashoffset" from="0" to="-16" dur="1.4s" repeatCount="indefinite"/>' +
-          '</path>' +
-          '<text x="22" y="84" font-family="var(--mono)" font-size="9" fill="var(--fg-faint)">A</text>' +
-          '<text x="155" y="84" font-family="var(--mono)" font-size="9" fill="var(--accent)">B</text>' +
-          '<text x="90" y="108" font-family="var(--mono)" font-size="9" fill="var(--accent)" text-anchor="middle">live · flowing</text>' +
+          '<path d="M20,28 H150" stroke="var(--line-strong)" stroke-width="1.5" stroke-opacity="0.85" fill="none" marker-end="url(#ge-n)"/>' +
+          '<text x="166" y="32" font-family="var(--mono)" font-size="10" fill="var(--fg-mute)">step · within a workflow</text>' +
+          '<path d="M20,64 H150" stroke="var(--line-strong)" stroke-width="1.5" stroke-opacity="0.85" stroke-dasharray="5 4" fill="none" marker-end="url(#ge-n)"/>' +
+          '<text x="166" y="68" font-family="var(--mono)" font-size="10" fill="var(--fg-mute)">handoff · between workflows</text>' +
+          '<path d="M20,100 H150" stroke="var(--accent)" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#ge-a)" style="filter:drop-shadow(0 0 5px var(--accent-glow));"/>' +
+          '<text x="166" y="104" font-family="var(--mono)" font-size="10" fill="var(--accent)">handoff · lit (on a trace)</text>' +
+          '<path d="M20,136 H150" stroke="var(--step-route)" stroke-width="1.5" stroke-opacity="0.72" stroke-dasharray="3 3" fill="none" marker-end="url(#ge-r)"/>' +
+          '<text x="166" y="140" font-family="var(--mono)" font-size="10" fill="var(--step-route-fg)">loop · back-edge</text>' +
         '</svg>' +
       '</div>' +
-      '<div class="card-foot"><b>Live</b> marks the edge the current run came through; animated dash + ember filter-shadow.</div>' +
+      '<div class="card-foot"><b>kind</b> step / handoff / loop · <b>state</b> base / lit / dim · <b>solid</b> forces a handoff undashed (the high-level map). Handoffs accent on a live trace; step links only recede. <span class="rule">Rule — endpoints anchor to the workflow bounding box, never its interior (wf-elk.js).</span></div>' +
     '</div>';
 
     // RunPellet
@@ -137,11 +135,97 @@
           '<button style="width:28px;height:28px;background:transparent;border:none;color:var(--fg-mute);cursor:pointer;font-family:var(--mono);font-size:14px;">⊡</button>' +
         '</div>' +
       '</div>' +
-      '<div class="card-foot"><b>Buttons:</b> zoom-in · zoom-out · fit-to-content.</div>' +
+      '<div class="card-foot"><b>Buttons:</b> zoom-in · zoom-out · fit-to-content. <span class="rule">Add the <code>floating</code> prop / <code>.floating</code> modifier to pin it to a canvas corner (Atlas + Graph).</span></div>' +
+    '</div>';
+
+    // graph-step (dense ELK vertex)
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">graph-step <em>· dense ELK vertex</em></div></div>' +
+      '<div class="card-desc">The compact step box ELK positions inside the Graph topology. Distinct from StepNode (the roomier catalog vertex): kind reads as a 2px top rule + an inline tag, with a role footer. Reads the <code>.k-*</code> palette.</div>' +
+      '<div class="card-canvas" style="gap:10px;">' +
+        graphStepMini('1', 'inbox', 'entry', 'var(--accent)', 'var(--accent)', 'var(--accent-wash)') +
+        graphStepMini('2', 'classify', 'eval', 'var(--step-eval)', 'var(--step-eval-fg)', 'var(--step-eval-wash)') +
+      '</div>' +
+      '<div class="card-foot"><b>Footer dot</b> turns ember when a run is live at the step. <span class="rule">Rule — kind colours the top rule + tag, never the body.</span></div>' +
+    '</div>';
+
+    // graph-wf (workflow container)
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">graph-wf <em>· + gw-status</em></div></div>' +
+      '<div class="card-desc">The titled container ELK sizes around a workflow\u2019s step cluster: name, run-status badge, id · step-count meta, and a clamped description. States: active (live) · lit / dim (trace focus).</div>' +
+      '<div class="card-canvas">' +
+        '<div style="width:100%;max-width:430px;background:color-mix(in oklch,var(--bg-1) 90%,transparent);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-1);overflow:hidden;">' +
+          '<div style="padding:12px 14px 10px;border-bottom:1px solid var(--line);background:color-mix(in oklch,var(--bg-1) 60%,transparent);">' +
+            '<div style="display:flex;align-items:center;gap:8px;">' +
+              '<span style="font-family:var(--sans);font-size:14px;font-weight:600;letter-spacing:-0.01em;color:var(--fg);">Backlog</span>' +
+              '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:4px;padding:1px 6px;font-family:var(--mono);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--step-execute-fg);border:1px solid color-mix(in oklch,var(--step-execute) 35%,transparent);background:var(--step-execute-wash);border-radius:var(--r-xs);">in progress</span>' +
+            '</div>' +
+            '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-family:var(--mono);font-size:9px;color:var(--fg-faint);"><span style="color:var(--fg-ghost);">eb4e20fd</span><span style="color:var(--fg-ghost);">·</span><span>3 steps</span></div>' +
+            '<div style="margin-top:6px;font-family:var(--sans);font-size:11px;line-height:1.4;color:var(--fg-mute);">Default intake for new tickets. Triage from the inbox, evaluate, and route to the right place.</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card-foot"><b>gw-status</b> hues by phase: <em>active</em> (ok, pulsing) · <em>in progress</em> · <em>review</em> · <em>human</em> · <em>plan</em>.</div>' +
+    '</div>';
+
+    // value-stream card (Atlas) + StepStrip
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">value-stream card <em>· Atlas + StepStrip</em></div></div>' +
+      '<div class="card-desc">One workflow as a card on the Atlas value-stream map: serif name, optional live ember, a StepStrip reduction of its step kinds, and a mono meta line. States: live · lit · dim.</div>' +
+      '<div class="card-canvas">' +
+        '<div style="width:230px;display:flex;flex-direction:column;gap:8px;padding:12px 13px;border:1px solid color-mix(in oklch,var(--accent) 40%,var(--line-strong));border-radius:var(--r-md);background-image:linear-gradient(150deg,var(--accent-wash),var(--bg-1) 60%);">' +
+          '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+            '<span style="flex:1;font-family:var(--serif);font-style:italic;font-size:15px;line-height:1.2;color:var(--accent);">Backlog</span>' +
+            '<span style="display:inline-flex;align-items:center;gap:4px;margin-top:2px;font-family:var(--mono);font-size:10px;color:var(--accent);"><span style="width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 5px var(--accent-glow);"></span>live</span>' +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">' +
+            vsChip('entry', 'var(--accent)', 'var(--accent)', 'var(--accent-wash)') + vsArrow() +
+            vsChip('eval', 'var(--step-eval)', 'var(--step-eval-fg)', 'var(--step-eval-wash)') + vsArrow() +
+            vsChip('route', 'var(--step-route)', 'var(--step-route-fg)', 'var(--step-route-wash)') +
+          '</div>' +
+          '<div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--fg-faint);"><span>3 steps</span><span style="color:var(--fg-ghost);">·</span><span>12/24h</span><span style="color:var(--fg-ghost);">·</span><span>3m 12s</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card-foot"><b>StepStrip</b> reduces the step kinds four ways: <em>ribbon</em> (proportion) · <em>pipeline</em> (ordered dots) · <em>grouped</em> (run-length, shown) · <em>tally</em> (counts).</div>' +
+    '</div>';
+
+    // KindLegend
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">KindLegend</div></div>' +
+      '<div class="card-desc">Footer strip mapping kind swatches to labels (reads the <code>.k-*</code> palette), with a trailing hint. Anchors the bottom of both canvas pages.</div>' +
+      '<div class="card-canvas">' +
+        '<div style="display:flex;align-items:center;gap:16px;font-family:var(--mono);font-size:10px;color:var(--fg-faint);flex-wrap:wrap;">' +
+          legendItem('entry', 'var(--accent)') + legendItem('execute', 'var(--step-execute)') +
+          legendItem('eval', 'var(--step-eval)') + legendItem('route', 'var(--step-route)') +
+          legendItem('wait', 'var(--step-wait)') + legendItem('human', 'var(--step-human)') +
+          legendItem('done', 'var(--ok)') +
+        '</div>' +
+      '</div>' +
+      '<div class="card-foot"><b>One palette, everywhere</b> \u2014 the same <code>--step-*</code> hues drive StepNode, graph-step, StepStrip and these swatches.</div>' +
     '</div>';
 
     html += '</div></section>';
     return html;
+  }
+
+  // mini helpers for the graph cards
+  function graphStepMini(num, name, kind, kc, kf, kw) {
+    return '<div style="width:150px;box-sizing:border-box;display:flex;flex-direction:column;gap:5px;padding:8px 9px 6px;background:var(--bg-2);border:1px solid var(--line-strong);border-top:2px solid ' + kc + ';border-radius:var(--r-sm);">' +
+      '<div style="display:flex;align-items:center;gap:5px;">' +
+        '<span style="width:16px;height:16px;display:flex;align-items:center;justify-content:center;border-radius:var(--r-xs);background:color-mix(in oklch,' + kc + ' 22%,var(--bg));border:1px solid color-mix(in oklch,' + kc + ' 40%,transparent);font-family:var(--mono);font-size:9px;color:' + kf + ';">' + num + '</span>' +
+        '<span style="flex:1;min-width:0;font-family:var(--mono);font-size:10px;font-weight:500;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + name + '</span>' +
+        '<span style="padding:0 3px;font-family:var(--mono);font-size:8px;letter-spacing:0.08em;text-transform:uppercase;color:' + kf + ';background:color-mix(in oklch,' + kw + ' 40%,transparent);border:1px solid color-mix(in oklch,' + kc + ' 40%,transparent);border-radius:var(--r-xs);">' + kind + '</span>' +
+      '</div>' +
+      '<div style="height:1px;background:var(--line);"></div>' +
+      '<div style="display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:8px;letter-spacing:0.1em;text-transform:uppercase;color:var(--fg-faint);"><span style="width:4px;height:4px;border-radius:50%;background:var(--fg-ghost);"></span>' + kind + '</div>' +
+    '</div>';
+  }
+  function vsChip(label, kc, kf, kw) {
+    return '<span style="display:inline-flex;align-items:center;padding:1px 6px;font-family:var(--mono);font-size:10px;color:' + kf + ';background:color-mix(in oklch,' + kw + ' 42%,transparent);border:1px solid color-mix(in oklch,' + kc + ' 40%,transparent);border-radius:var(--r-xs);">' + label + '</span>';
+  }
+  function vsArrow() { return '<span style="color:var(--fg-ghost);font-size:11px;">\u203a</span>'; }
+  function legendItem(label, kc) {
+    return '<span style="display:inline-flex;align-items:center;gap:6px;"><span style="width:9px;height:9px;border-radius:var(--r-xs);background:' + kc + ';"></span>' + label + '</span>';
   }
 
   // ── 10 · TRACES ────────────────────────────────────────────────
@@ -351,6 +435,25 @@
       '<div class="card-foot"><b>Used in:</b> design-v2 graph header. <b>Off</b> hides the live edges and active-step ember — useful for authoring the workflow itself.</div>' +
     '</div>';
 
+    // SegControl
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">SegControl</div></div>' +
+      '<div class="card-desc">Accent-on segmented switch for the canvas pages — the Map ⇄ Graph view switch and the Atlas step-grouping switch. Items can be links (navigational) or buttons (stateful); an optional mono caption caps the left edge.</div>' +
+      '<div class="card-canvas" style="flex-direction:column;gap:10px;align-items:flex-start;">' +
+        '<div style="display:inline-flex;border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden;background:var(--bg-1);">' +
+          '<a style="display:flex;align-items:center;height:28px;padding:0 12px;border-right:1px solid var(--line);background:var(--accent-wash);color:var(--accent);font-family:var(--sans);font-size:12px;font-weight:500;">Map</a>' +
+          '<a style="display:flex;align-items:center;height:28px;padding:0 12px;background:transparent;color:var(--fg-mute);font-family:var(--sans);font-size:12px;">Graph</a>' +
+        '</div>' +
+        '<div style="display:inline-flex;align-items:stretch;border:1px solid var(--line-strong);border-radius:var(--r-md);overflow:hidden;background:var(--bg-1);">' +
+          '<span style="display:flex;align-items:center;padding:0 8px;border-right:1px solid var(--line);font-family:var(--mono);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--fg-faint);">Steps</span>' +
+          '<button style="height:28px;padding:0 10px;border:none;border-right:1px solid var(--line);background:var(--accent-wash);color:var(--accent);font-family:var(--sans);font-size:12px;font-weight:500;cursor:pointer;">Grouped</button>' +
+          '<button style="height:28px;padding:0 10px;border:none;border-right:1px solid var(--line);background:transparent;color:var(--fg-mute);font-family:var(--sans);font-size:12px;cursor:pointer;">Pipeline</button>' +
+          '<button style="height:28px;padding:0 10px;border:none;background:transparent;color:var(--fg-mute);font-family:var(--sans);font-size:12px;cursor:pointer;">Ribbon</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card-foot"><b>Not ViewTabs</b> — same job, different skin: SegControl is sans + accent-active; ViewTabs is mono + bg-3-active. Use SegControl on the Atlas/Graph canvas, ViewTabs in list/board toolbars. <span class="rule">window.SegControl({ items, label }).</span></div>' +
+    '</div>';
+
     // AutoScrollSwitch
     html += '<div class="card">' +
       '<div class="card-head"><div class="card-name">AutoScrollSwitch</div></div>' +
@@ -360,6 +463,23 @@
         '<div class="auto-mini off"><span class="sw"></span>Auto-scroll</div>' +
       '</div>' +
       '<div class="card-foot"><b>Active by default</b> on live runs. Toggling off pins the viewport.</div>' +
+    '</div>';
+
+    // KnobToggle
+    html += '<div class="card">' +
+      '<div class="card-head"><div class="card-name">KnobToggle</div></div>' +
+      '<div class="card-desc">Inline pill switch with a trailing mono label — the Atlas <em>Conditions</em> and Graph <em>Labels</em> toggles. Knob and label turn ember when on.</div>' +
+      '<div class="card-canvas">' +
+        '<div style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--accent);">' +
+          '<span style="position:relative;width:30px;height:17px;background:var(--accent-wash);border:1px solid var(--accent-mute);border-radius:var(--r-full);box-shadow:0 0 8px var(--accent-glow);">' +
+            '<span style="position:absolute;top:1px;left:1px;width:13px;height:13px;border-radius:50%;background:var(--accent);transform:translateX(13px);box-shadow:0 0 5px var(--accent-glow);"></span>' +
+          '</span>Conditions</div>' +
+        '<div style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--fg-mute);">' +
+          '<span style="position:relative;width:30px;height:17px;background:var(--bg-4);border:1px solid var(--line-strong);border-radius:var(--r-full);">' +
+            '<span style="position:absolute;top:1px;left:1px;width:13px;height:13px;border-radius:50%;background:var(--fg-faint);"></span>' +
+          '</span>Labels</div>' +
+      '</div>' +
+      '<div class="card-foot"><b>Sibling of AutoScrollSwitch</b> — same knob, but reads as a persistent overlay toggle on the canvas rather than a follow-the-head pill. <span class="rule">window.KnobToggle({ on, onToggle, label }).</span></div>' +
     '</div>';
 
     // IconButton

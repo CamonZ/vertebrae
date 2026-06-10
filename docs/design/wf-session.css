@@ -1,0 +1,84 @@
+/* ─────────────────────────────────────────────────────────────────
+   Hearth · Workflow Graph — Session dock
+   Extends the inspector glass panel (wf-detail.css) with a Config ↔
+   Session tab bar, a wider dock for the event stream, the session
+   sub-header, and the canvas states the live log drives (running pulse
+   on the current step, trace ring on the hovered one).
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Tabs in the panel header ── */
+.wfd-tabs { display: flex; gap: var(--s-1); margin-top: var(--s-3); }
+.wfd-tab {
+  flex: 1; padding: var(--s-1h) var(--s-2); border-radius: var(--r-sm);
+  font-family: var(--mono); font-size: var(--text-10); letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--fg-mute); background: color-mix(in oklch, var(--bg) 24%, transparent);
+  border: 1px solid var(--line); cursor: pointer; transition: all var(--t-fast) var(--ease);
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--s-1h);
+}
+.wfd-tab:hover { color: var(--fg); border-color: var(--line-strong); }
+.wfd-tab.on { color: var(--accent); background: var(--accent-wash); border-color: color-mix(in oklch, var(--accent) 42%, transparent); }
+.wfd-tab .livedot { display: inline-flex; }
+.wfd-tab .livedot .pulse { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: wfd-pulse 1.6s ease-in-out infinite; }
+
+/* ── Wider dock while the Session tab is open ── */
+.wfd--session { width: 480px; }
+/* keep the workflow sub-stats on one line in the wider dock */
+.wfd--session .wfd-sub { flex-wrap: nowrap; }
+.wfd--session .wfd-sub > span { white-space: nowrap; }
+
+/* ── Session body: pinned sub-header + scrolling stream ── */
+.wfd-session { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.wfsx-hd { flex-shrink: 0; padding: var(--s-3) var(--s-3h) var(--s-3); border-bottom: 1px solid color-mix(in oklch, var(--fg) 10%, transparent); background: color-mix(in oklch, var(--bg) 18%, transparent); }
+.wfsx-row { display: flex; align-items: center; gap: var(--s-2); }
+.wfsx-eyebrow { display: inline-flex; align-items: center; gap: var(--s-1h); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.16em; text-transform: uppercase; color: var(--fg-faint); }
+.wfsx-eyebrow .ember { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 7px var(--accent-glow); }
+
+.wfsx-status { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-1); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.1em; text-transform: uppercase; padding: 1px var(--s-1h); border-radius: var(--r-xs); border: 1px solid var(--line-strong); color: var(--fg-mute); background: color-mix(in oklch, var(--bg) 30%, transparent); white-space: nowrap; }
+.wfsx-status.live { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: var(--accent-wash); }
+.wfsx-status.s-waiting.live { color: var(--step-wait-fg); border-color: color-mix(in oklch, var(--step-wait) 42%, transparent); background: var(--step-wait-wash); }
+.wfsx-status .pulse { width: 5px; height: 5px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; animation: wfd-pulse 1.6s ease-in-out infinite; }
+
+.wfsx-task { margin-top: var(--s-2h); font-family: var(--sans); font-size: var(--text-13); font-weight: 500; line-height: 1.4; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wfsx-meta { margin-top: var(--s-1h); display: flex; align-items: center; gap: var(--s-1h); flex-wrap: wrap; row-gap: 3px; font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+.wfsx-meta > span { white-space: nowrap; display: inline-flex; align-items: center; gap: var(--s-1h); }
+.wfsx-meta .sep { color: var(--fg-ghost); }
+
+.wfsx-progress { margin-top: var(--s-2h); display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; row-gap: var(--s-1h); }
+.wfsx-step { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-mute); white-space: nowrap; }
+.wfsx-step b { color: var(--accent); font-weight: 600; }
+.wfsx-step .cur { color: var(--fg-faint); }
+.wfsx-elapsed { font-family: var(--mono); font-size: var(--text-10); color: var(--fg-faint); }
+.wfsx-follow { margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-1h); padding: 2px var(--s-2); border-radius: var(--r-full); font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: all var(--t-fast) var(--ease); border: 1px solid var(--line-strong); background: color-mix(in oklch, var(--bg) 30%, transparent); color: var(--fg-mute); }
+.wfsx-follow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-ghost); }
+.wfsx-follow.on { color: var(--accent); border-color: color-mix(in oklch, var(--accent) 40%, transparent); background: var(--accent-wash); }
+.wfsx-follow.on .dot { background: var(--accent); box-shadow: 0 0 6px var(--accent-glow); animation: wfd-pulse 1.6s ease-in-out infinite; }
+.wfsx-follow:hover { color: var(--fg); }
+
+/* ── The stream (reuses .evlog vocabulary) ── */
+.wfsx-stream { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s-2) var(--s-3h) var(--s-4); }
+.wfsx-stream::-webkit-scrollbar { width: 6px; }
+.wfsx-stream::-webkit-scrollbar-track { background: transparent; }
+.wfsx-stream::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
+.wfsx-stream .evstep-head { cursor: pointer; }
+.wfsx-stream > div[data-clickable], .wfsx-stream .evstep { transition: background var(--t-fast) var(--ease); }
+
+/* live footer under the stream */
+.wfsx-tail { display: flex; align-items: center; gap: var(--s-2); margin-top: var(--s-3); padding-top: var(--s-2); }
+.wfsx-tail .bar { flex: 1; height: 2px; border-radius: var(--r-xs); background: linear-gradient(to right, var(--accent) 30%, transparent); background-size: 220% 100%; animation: ev-flow 2.4s ease-in-out infinite; }
+.wfsx-tail .lbl { flex-shrink: 0; font-family: var(--mono); font-size: var(--text-9); letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-faint); }
+
+/* ════ Canvas states the log drives ════ */
+
+/* the step a live run currently sits on — quiet pulsing accent ring */
+.graph-step.running { border-color: color-mix(in oklch, var(--accent) 55%, var(--line-strong)); animation: gs-livepulse 1.9s ease-in-out infinite; }
+.graph-step .gs-live { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; display: flex; align-items: center; justify-content: center; }
+.graph-step .gs-live .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); animation: wfd-pulse 1.6s ease-in-out infinite; }
+@keyframes gs-livepulse {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent), 0 0 14px color-mix(in oklch, var(--accent) 24%, transparent); }
+  50%      { box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 60%, transparent), 0 0 26px color-mix(in oklch, var(--accent) 42%, transparent); }
+}
+
+/* the step the docked log is hovering / framing — strong ring, raised */
+.graph-step.trace { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), 0 0 26px var(--accent-glow); z-index: 4; }
+.graph-step.trace.running { animation: none; }
