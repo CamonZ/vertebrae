@@ -278,7 +278,7 @@ function CodeRefItem({ codeRef, onEdit }: CodeRefItemProps) {
           )}
         </div>
         {codeRef.description && (
-          <p className="mt-1 text-xs text-[var(--color-fg-mute)]">{codeRef.description}</p>
+          <p className="mt-1 text-sm text-[var(--color-fg-mute)]">{codeRef.description}</p>
         )}
       </div>
       <button

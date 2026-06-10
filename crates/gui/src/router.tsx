@@ -8,27 +8,28 @@ import {
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
 import { StyleguideShortcut } from "./components/StyleguideShortcut";
-import { useTheme } from "./hooks";
+import { useTheme, useDensity } from "./hooks";
 import {
   ProjectSetupPage,
   WelcomeInstallPage,
   TasksPage,
-  AllWorkflowsPipeline,
   OperationsPage,
   BoardPage,
   TracesPage,
-  StyleguidePage,
   TaskDetailPage,
   StandaloneChatWindow,
   StandaloneLiveChatWindow,
   StandaloneTracesPage,
 } from "./pages";
+import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 
 function RootLayout() {
   // Initialize theme management at the app root
   useTheme();
+  // Initialize density management (Retina-aware type scale) at the app root
+  useDensity();
 
   return (
     <AppShell>
@@ -219,7 +220,7 @@ const appRoutes: RouteObject[] = [
         path: "design",
         element: (
           <GuardedRoute>
-            <AllWorkflowsPipeline />
+            <WorkflowAtlas />
           </GuardedRoute>
         ),
       },
@@ -244,14 +245,6 @@ const appRoutes: RouteObject[] = [
         element: (
           <GuardedRoute>
             <TracesPage />
-          </GuardedRoute>
-        ),
-      },
-      {
-        path: "styleguide",
-        element: (
-          <GuardedRoute>
-            <StyleguidePage />
           </GuardedRoute>
         ),
       },

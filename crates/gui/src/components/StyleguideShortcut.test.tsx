@@ -1,35 +1,15 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { act } from "react";
-import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { StyleguideShortcut } from "./StyleguideShortcut";
 import { useStyleguideStore } from "../stores/styleguideStore";
 
-function LocationDisplay() {
-  const location = useLocation();
-  return <div data-testid="location">{location.pathname}</div>;
-}
-
 function Harness() {
   return (
-    <MemoryRouter initialEntries={["/operations"]}>
+    <>
       <StyleguideShortcut />
       <input aria-label="Title" />
-      <Routes>
-        <Route path="*" element={<LocationDisplay />} />
-      </Routes>
-    </MemoryRouter>
-  );
-}
-
-function HarnessOnStyleguide() {
-  return (
-    <MemoryRouter initialEntries={["/styleguide"]}>
-      <StyleguideShortcut />
-      <Routes>
-        <Route path="*" element={<LocationDisplay />} />
-      </Routes>
-    </MemoryRouter>
+    </>
   );
 }
 
@@ -55,32 +35,17 @@ describe("StyleguideShortcut", () => {
     });
   });
 
-  it("reveals the chrome shortcuts and navigates with Ctrl+Alt+Cmd+Shift+0", async () => {
+  it("reveals the chrome shortcuts with Ctrl+Alt+Cmd+Shift+0", async () => {
     render(<Harness />);
 
     await act(async () => {
       dispatchShortcut();
     });
 
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(true);
     expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(true);
-    expect(screen.getByTestId("location")).toHaveTextContent("/styleguide");
   });
 
-  it("hides the chrome shortcuts and returns to /board when toggled from /styleguide", async () => {
-    useStyleguideStore.getState().revealChromeShortcuts();
-    render(<HarnessOnStyleguide />);
-
-    await act(async () => {
-      dispatchShortcut();
-    });
-
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
-    expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/board");
-  });
-
-  it("hides the chrome shortcuts without navigating when toggled from another page", async () => {
+  it("hides the chrome shortcuts when toggled while revealed", async () => {
     useStyleguideStore.getState().revealChromeShortcuts();
     render(<Harness />);
 
@@ -90,7 +55,6 @@ describe("StyleguideShortcut", () => {
 
     expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
     expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
   });
 
   it("does not conflict with Cmd+Shift+D debug shortcut", () => {
@@ -105,8 +69,7 @@ describe("StyleguideShortcut", () => {
       })
     );
 
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
+    expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
   });
 
   it("does not fire when the full modifier chord is incomplete", async () => {
@@ -124,9 +87,7 @@ describe("StyleguideShortcut", () => {
       );
     });
 
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
     expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
   });
 
   it("ignores repeated shortcut events while the keys are held", async () => {
@@ -146,8 +107,7 @@ describe("StyleguideShortcut", () => {
       );
     });
 
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
+    expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
   });
 
   it("does not fire while typing in editable controls", () => {
@@ -166,7 +126,6 @@ describe("StyleguideShortcut", () => {
       })
     );
 
-    expect(useStyleguideStore.getState().isStyleguideNavVisible).toBe(false);
-    expect(screen.getByTestId("location")).toHaveTextContent("/operations");
+    expect(useStyleguideStore.getState().isLiveChatButtonVisible).toBe(false);
   });
 });

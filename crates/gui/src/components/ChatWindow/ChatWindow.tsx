@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { commands } from "../../bindings";
 import type { JsonValue } from "../../bindings";
@@ -10,13 +10,9 @@ import {
   formatTokenCount,
   utilizationLevel,
 } from "../../utils/modelContextWindow";
-import { MarkdownContent } from "../shared/MarkdownContent";
-import { ChatMessage as ChatBubble } from "../molecules/ChatMessage";
-import {
-  ToolCallBlock,
-  type ToolCallState,
-} from "../molecules/ToolCallBlock";
+import { Thread } from "../thread";
 import { ChatInput } from "../ChatInput";
+import { chatMessagesToThread } from "./chatMessagesToThread";
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -40,152 +36,14 @@ function ThinkingIndicator() {
 // Turn grouping
 // ---------------------------------------------------------------------------
 //
-// chatStore emits each Claude event as a sibling `ChatMessage`. The UI groups
-// tool_call + tool_result siblings INTO the preceding assistant message so the
-// conversation reads as turns (one bubble per assistant reply, tool calls
-// nested as `ToolCallBlock` children) rather than a flat event list.
-
-interface PendingTool {
-  toolName: string;
-  toolId: string;
-  input: string;
-  state: ToolCallState;
-  result?: string;
-  timestamp: string;
-}
-
-interface AssistantTurn {
-  kind: "assistant";
-  text: string;
-  timestamp: string;
-  isPartial?: boolean;
-  tools: PendingTool[];
-}
-
-interface SimpleTurn {
-  kind: "user" | "permission_request" | "error";
-  message: ChatMessage;
-}
-
-type Turn = AssistantTurn | SimpleTurn;
-
-function groupChatMessages(messages: readonly ChatMessage[]): Turn[] {
-  const turns: Turn[] = [];
-  let activeAssistant: AssistantTurn | null = null;
-
-  for (const m of messages) {
-    switch (m.kind) {
-      case "session_start":
-      case "session_end":
-        continue;
-      case "user":
-        activeAssistant = null;
-        turns.push({ kind: "user", message: m });
-        continue;
-      case "assistant":
-        activeAssistant = {
-          kind: "assistant",
-          text: m.text,
-          timestamp: m.timestamp,
-          isPartial: m.isPartial,
-          tools: [],
-        };
-        turns.push(activeAssistant);
-        continue;
-      case "tool_call":
-        if (!activeAssistant) {
-          // Tool call before any assistant turn — open a headless assistant
-          // bubble so the tool block has a container.
-          activeAssistant = {
-            kind: "assistant",
-            text: "",
-            timestamp: m.timestamp,
-            tools: [],
-          };
-          turns.push(activeAssistant);
-        }
-        activeAssistant.tools.push({
-          toolName: m.toolName,
-          toolId: m.toolId,
-          input: m.input,
-          state: "pending",
-          timestamp: m.timestamp,
-        });
-        continue;
-      case "tool_result": {
-        const slot = activeAssistant?.tools.find(
-          (t) => t.toolId === m.toolId && t.state === "pending"
-        );
-        if (slot) {
-          slot.result = m.result;
-          slot.state = m.isError ? "error" : "success";
-        }
-        continue;
-      }
-      case "permission_request":
-      case "error":
-        activeAssistant = null;
-        turns.push({ kind: m.kind, message: m });
-        continue;
-    }
-  }
-  return turns;
-}
-
-function renderTurn(turn: Turn, key: string): ReactNode {
-  if (turn.kind === "user") {
-    const msg = turn.message as Extract<ChatMessage, { kind: "user" }>;
-    return (
-      <ChatBubble
-        key={key}
-        role="user"
-        author="YOU"
-        timestamp={new Date(msg.timestamp).toLocaleTimeString()}
-      >
-        <MarkdownContent text={msg.text} />
-      </ChatBubble>
-    );
-  }
-
-  if (turn.kind === "assistant") {
-    return (
-      <ChatBubble
-        key={key}
-        role="assistant"
-        author="CLAUDE"
-        timestamp={new Date(turn.timestamp).toLocaleTimeString()}
-        streaming={turn.isPartial}
-      >
-        {turn.text.length > 0 && <MarkdownContent text={turn.text} />}
-        {turn.tools.map((t, i) => (
-          <ToolCallBlock
-            key={`${t.toolId}-${i}`}
-            toolName={t.toolName}
-            state={t.state}
-            input={t.input}
-            result={t.result}
-          />
-        ))}
-      </ChatBubble>
-    );
-  }
-
-  if (turn.kind === "permission_request") {
-    const msg = turn.message as Extract<
-      ChatMessage,
-      { kind: "permission_request" }
-    >;
-    return <PermissionRequestTurn key={key} message={msg} />;
-  }
-
-  // error
-  const msg = turn.message as Extract<ChatMessage, { kind: "error" }>;
-  return (
-    <ChatBubble key={key} role="system" author="ERROR">
-      <p className="text-sm text-[var(--color-err)]">{msg.message}</p>
-    </ChatBubble>
-  );
-}
+// chatStore emits each Claude event as a sibling `ChatMessage`. The pure adapter
+// `chatMessagesToThread` groups those siblings into the canonical Thread tree
+// (one Turn per user message; tool_call/tool_result merged into nested tools)
+// so the chat renders through the SAME recursive <Thread> primitive as Traces.
+//
+// `permission_request` is the one event the adapter SKIPS: it is interactive,
+// not a Message kind, so ChatWindow renders the PermissionRequestTurn nodes as
+// siblings of <Thread> below.
 
 function PermissionRequestTurn({
   message,
@@ -232,7 +90,10 @@ function PermissionRequestTurn({
   const disabled = status === "allowing" || status === "denying" || status === "resolved";
 
   return (
-    <ChatBubble role="system" author="PERMISSION REQUIRED">
+    <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
+      <p className="mb-2 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+        Permission required
+      </p>
       <div className="space-y-3">
         <div>
           <p className="font-mono text-xs text-[var(--color-fg)]">{message.toolName}</p>
@@ -270,7 +131,7 @@ function PermissionRequestTurn({
           )}
         </div>
       </div>
-    </ChatBubble>
+    </div>
   );
 }
 
@@ -358,18 +219,35 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
     );
   }, [session, sessionId, widenScope]);
 
-  const turns = useMemo(
-    () => groupChatMessages(session?.messages ?? []),
-    [session?.messages]
+  const messages = session?.messages;
+  const isWaiting =
+    isActive &&
+    !!messages &&
+    messages.length > 0 &&
+    messages[messages.length - 1].kind === "user";
+
+  // Normalize-on-render: derive the canonical Thread from the live store
+  // messages. The permission_request events are SKIPPED here and rendered as
+  // interactive siblings of <Thread> below.
+  const thread = useMemo(
+    () => chatMessagesToThread(messages ?? [], { isWaiting }),
+    [messages, isWaiting]
+  );
+
+  // The interactive permission requests are pulled out of the message stream
+  // and rendered as siblings of <Thread> (they are not Message kinds).
+  const permissionRequests = useMemo(
+    () =>
+      (messages ?? []).filter(
+        (m): m is Extract<ChatMessage, { kind: "permission_request" }> =>
+          m.kind === "permission_request"
+      ),
+    [messages]
   );
 
   if (!session) return null;
 
   const canWiden = getParentScope(session.scope) !== null;
-  const isWaiting =
-    isActive &&
-    session.messages.length > 0 &&
-    session.messages[session.messages.length - 1].kind === "user";
 
   const { chip: scopeChip, description: scopeDescription } = scopeMeta(
     session.scope,
@@ -547,7 +425,20 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
         )}
 
         <div className="flex flex-col gap-3">
-          {turns.map((turn, i) => renderTurn(turn, `${turn.kind}-${i}`))}
+          <Thread
+            thread={thread}
+            depth={0}
+            mode="bare"
+            reveal="shallow"
+            showHead={false}
+            interactive
+          />
+          {permissionRequests.map((m, i) => (
+            <PermissionRequestTurn
+              key={m.requestId ?? `perm-${i}`}
+              message={m}
+            />
+          ))}
           {isWaiting && <ThinkingIndicator />}
           <div ref={messagesEndRef} />
         </div>

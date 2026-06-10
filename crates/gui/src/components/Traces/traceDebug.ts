@@ -1,5 +1,4 @@
 import type { StepExecution, TaskRun } from "../../bindings";
-import type { TaskRunTraceProjection } from "./taskRunTrace";
 
 type ExecutionSummary = {
   count: number;
@@ -75,24 +74,6 @@ export function summarizeRuns(runs: readonly TaskRun[]): RunSummary {
     ids,
     duplicateIds: duplicates(ids),
     parentByRun,
-  };
-}
-
-export function summarizeProjection(
-  projection: TaskRunTraceProjection | null
-): unknown {
-  if (!projection) return null;
-  return {
-    orderedRuns: projection.orderedRuns.map((node) => ({
-      runId: node.run.id,
-      parentRunId: node.run.parent_task_run_id ?? null,
-      depth: node.depth,
-      executionIds: node.executions.map((exec) => exec.id ?? "(missing-id)"),
-      duplicateExecutionIds: summarizeExecutions(node.executions).duplicateIds,
-      childRunIds: node.childRunIds,
-    })),
-    orphanExecutions: summarizeExecutions(projection.orphanExecutions),
-    delegationEdges: projection.delegationEdges,
   };
 }
 

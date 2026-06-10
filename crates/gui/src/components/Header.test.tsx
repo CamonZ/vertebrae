@@ -81,11 +81,9 @@ describe("Header (Hearth v2 AppTopBar)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders a static ⌘K command chip in the activity slot", () => {
+  it("does not render the ⌘K command chip in the activity slot", () => {
     render(<Header />);
-    const kbd = screen.getByTestId("topbar-kbd");
-    expect(kbd.textContent).toBe("⌘K");
-    expect(screen.getByTestId("topbar-activity")).toContainElement(kbd);
+    expect(screen.queryByTestId("topbar-kbd")).not.toBeInTheDocument();
   });
 
   it("is a 38px full-width banner over the rail", () => {

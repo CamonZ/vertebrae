@@ -123,7 +123,8 @@ staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
 
 1. Detects the build target triple (honoring `TAURI_ENV_TARGET_TRIPLE`, else
    parsing `rustc -vV`). Supported triples: `aarch64-apple-darwin`,
-   `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`.
+   `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`,
+   `x86_64-unknown-linux-gnu`.
 2. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon -p vtb-gate`.
 3. Copies the release binaries to
    `src-tauri/binaries/<bin>-<target-triple>` — the naming Tauri's

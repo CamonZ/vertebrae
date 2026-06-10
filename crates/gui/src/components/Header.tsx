@@ -15,7 +15,7 @@ function BrandMark() {
   return (
     <span
       data-testid="topbar-brand"
-      className="pointer-events-none flex shrink-0 items-center gap-[5px] font-serif text-[15px] italic leading-none tracking-[-0.01em] text-[var(--color-fg)]"
+      className="pointer-events-none flex shrink-0 items-center gap-[5px] font-serif text-base italic leading-none tracking-tight text-[var(--color-fg)]"
     >
       Vertebrae
       <span
@@ -60,7 +60,7 @@ function Breadcrumb({
       )}
       <span
         data-testid="topbar-breadcrumb-page"
-        className="truncate pl-0.5 font-serif text-[15px] italic tracking-[-0.01em] text-[var(--color-fg)]"
+        className="truncate pl-0.5 font-serif text-base italic tracking-tight text-[var(--color-fg)]"
       >
         {page}
       </span>
@@ -68,17 +68,19 @@ function Breadcrumb({
   );
 }
 
-function CommandKChip() {
+// Retained for future use (e.g. a command palette). Not currently rendered in
+// the topbar.
+export function CommandKChip() {
   return (
     <span
       aria-hidden
       data-testid="topbar-kbd"
       className="hidden items-center gap-1 text-[var(--color-fg-faint)] sm:inline-flex"
     >
-      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-[10px] text-[var(--color-fg-mute)]">
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-2xs text-[var(--color-fg-mute)]">
         ⌘
       </kbd>
-      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-[10px] text-[var(--color-fg-mute)]">
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-2xs text-[var(--color-fg-mute)]">
         K
       </kbd>
     </span>
@@ -98,7 +100,7 @@ export function Header() {
         "titlebar relative flex h-[38px] shrink-0 items-center gap-4",
         "border-b border-[var(--color-line)] bg-[var(--color-bg)] pr-4",
         IS_MACOS ? "pl-[78px]" : "pl-4",
-        "font-mono text-[11px] tracking-[0.04em] text-[var(--color-fg-mute)]",
+        "font-mono text-eyebrow tracking-[0.04em] text-[var(--color-fg-mute)]",
       ].join(" ")}
     >
       <BrandMark />
@@ -113,7 +115,6 @@ export function Header() {
       >
         {headerActions}
         <OpenLiveChatButton />
-        <CommandKChip />
       </div>
     </header>
   );

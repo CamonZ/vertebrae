@@ -34,7 +34,7 @@ const codeBlockStyle: React.CSSProperties = {
   margin: 0,
   padding: "0.75rem",
   background: "var(--color-bg)",
-  fontSize: "13px",
+  fontSize: "var(--text-13)",
   lineHeight: "1.6",
   overflow: "auto",
   maxHeight: "24rem",
@@ -42,13 +42,13 @@ const codeBlockStyle: React.CSSProperties = {
 };
 
 const codeTagStyle = {
-  style: { fontFamily: "var(--font-mono)" },
+  className: "font-mono",
 };
 
 const components = {
   p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
     <p
-      className="mb-2 text-[15px] leading-relaxed text-fg antialiased last:mb-0"
+      className="mb-2 text-base leading-relaxed text-fg antialiased last:mb-0"
       {...props}
     >
       {children}
@@ -88,7 +88,7 @@ const components = {
   ),
   ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
     <ul
-      className="mb-2 ml-4 list-disc space-y-1 text-[15px] text-fg"
+      className="mb-2 ml-4 list-disc space-y-1 text-base text-fg"
       {...props}
     >
       {children}
@@ -96,7 +96,7 @@ const components = {
   ),
   ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
     <ol
-      className="mb-2 ml-4 list-decimal space-y-1 text-[15px] text-fg"
+      className="mb-2 ml-4 list-decimal space-y-1 text-base text-fg"
       {...props}
     >
       {children}
@@ -206,7 +206,7 @@ const components = {
 
     return (
       <code
-        className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-[13px] text-accent"
+        className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-13 text-accent"
         {...props}
       >
         {children}
@@ -279,7 +279,7 @@ function looksLikeJsonOrMap(trimmed: string): boolean {
   return firstChar === "%" && trimmed[1] === "{";
 }
 
-function prettyPrintJsonIfPossible(source: string): string {
+export function prettyPrintJsonIfPossible(source: string): string {
   const trimmed = source.trim();
   if (!trimmed || !looksLikeJsonOrMap(trimmed)) return source;
   try {

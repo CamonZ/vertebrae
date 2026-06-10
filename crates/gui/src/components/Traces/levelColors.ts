@@ -14,7 +14,7 @@
  *     TransitionMarker / DelegationBlock affordances so the user sees the
  *     same "kind = color" mapping in both places.
  */
-import type { ThresholdMarkerKind } from "./timeline";
+import type { ThresholdMarkerKind } from "./legacyMarkers";
 
 export const LEVEL_TINT_CLASS: Record<string, string> = {
   epic: "text-info",

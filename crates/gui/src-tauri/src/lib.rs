@@ -72,6 +72,7 @@ fn create_builder() -> Builder {
             commands::has_project_selected,
             // Task commands
             commands::list_tasks,
+            commands::list_ready,
             commands::get_task,
             // Task relationship commands
             commands::set_parent,

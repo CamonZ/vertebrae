@@ -40,14 +40,14 @@ export function ToastContainer() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2">
       {toasts.map((toast) => {
         const config = toastConfig[toast.type];
         return (
           <div
             key={toast.id}
             className={`
-              flex items-center gap-3 px-4 py-3 rounded-lg border
+              pointer-events-none flex items-center gap-3 px-4 py-3 rounded-lg border
               shadow-3 backdrop-blur-sm
               animate-in slide-in-from-right-5 fade-in duration-200
               ${config.bgClass} ${config.borderClass}
@@ -58,7 +58,7 @@ export function ToastContainer() {
             <span className="text-sm text-fg">{toast.message}</span>
             <button
               onClick={() => removeToast(toast.id)}
-              className="ml-2 text-fg-mute hover:text-fg transition-colors"
+              className="pointer-events-auto ml-2 text-fg-mute hover:text-fg transition-colors"
               aria-label="Dismiss"
             >
               <span className="text-sm">{"\u2715"}</span>

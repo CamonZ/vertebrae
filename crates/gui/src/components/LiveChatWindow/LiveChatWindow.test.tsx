@@ -66,6 +66,16 @@ function makeMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   };
 }
 
+// The rewritten window renders messages through the unified <Thread> primitive
+// (EventLog → EventRow), not per-message data-testids. Message text also leaks
+// into the history-drawer session titles, so scope transcript assertions to the
+// chat EventLog to avoid matching the drawer copy.
+function transcript() {
+  const log = document.querySelector(".evlog");
+  if (!log) throw new Error("chat transcript (.evlog) not rendered");
+  return within(log as HTMLElement);
+}
+
 describe("LiveChatWindow", () => {
   beforeEach(() => {
     useLiveChatStore.getState().reset();
@@ -93,6 +103,28 @@ describe("LiveChatWindow", () => {
     expect(
       screen.getByText("Start a live chat")
     ).toBeInTheDocument();
+  });
+
+  it("renders assistant markdown prose (**bold** → <strong>)", () => {
+    useLiveChatStore.setState({
+      currentSession: makeSession(),
+      messages: [
+        {
+          id: "a-md",
+          role: "assistant",
+          content: "this is **bold** text",
+          content_format: "plain",
+          createdAt: "2026-05-10T12:00:00Z",
+          pending: false,
+          error: null,
+        },
+      ],
+    });
+
+    render(<LiveChatWindow />);
+
+    const strong = screen.getByText("bold");
+    expect(strong.tagName).toBe("STRONG");
   });
 
   it("renders the new header buttons: History, New chat, Detach, Close", () => {
@@ -135,8 +167,8 @@ describe("LiveChatWindow", () => {
     expect(contentFormat).toBeNull();
     expect(typeof clientId).toBe("string");
 
-    const userMsg = screen.getByTestId("live-chat-message-user");
-    expect(within(userMsg).getByText("hello there")).toBeInTheDocument();
+    expect(transcript().getByText("You")).toBeInTheDocument();
+    expect(transcript().getByText("hello there")).toBeInTheDocument();
     await waitFor(() =>
       expect(useLiveChatStore.getState().currentSession?.id).toBe(session.id)
     );
@@ -238,15 +270,15 @@ describe("LiveChatWindow", () => {
 
     render(<LiveChatWindow />);
 
-    const userMsg = screen.getByTestId("live-chat-message-user");
-    expect(within(userMsg).getByText("leftover")).toBeInTheDocument();
+    expect(transcript().getByText("leftover")).toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Start new chat"));
 
     expect(useLiveChatStore.getState().currentSession).toBeNull();
     expect(useLiveChatStore.getState().messages).toEqual([]);
     expect(mockedSetActive).toHaveBeenCalledWith(null);
-    expect(screen.queryByTestId("live-chat-message-user")).not.toBeInTheDocument();
+    // The transcript is gone (no messages) — empty state shows instead.
+    expect(document.querySelector(".evlog")).toBeNull();
     expect(
       screen.getByText("Start a live chat")
     ).toBeInTheDocument();
@@ -338,8 +370,7 @@ describe("LiveChatWindow", () => {
     });
     expect(mockedSetActive).toHaveBeenCalledWith("sess-past");
     await waitFor(() => {
-      const userMsg = screen.getByTestId("live-chat-message-user");
-      expect(within(userMsg).getByText("past transcript")).toBeInTheDocument();
+      expect(transcript().getByText("past transcript")).toBeInTheDocument();
     });
 
     const drawer = screen.getByTestId("live-chat-history-drawer");
@@ -429,8 +460,7 @@ describe("LiveChatWindow", () => {
       expect(mockedGetSession).toHaveBeenCalledWith("sess-resume");
     });
     await waitFor(() => {
-      const userMsg = screen.getByTestId("live-chat-message-user");
-      expect(within(userMsg).getByText("resumed transcript")).toBeInTheDocument();
+      expect(transcript().getByText("resumed transcript")).toBeInTheDocument();
     });
   });
 
@@ -467,8 +497,9 @@ describe("LiveChatWindow", () => {
     });
     expect(mockedGetSession).toHaveBeenCalledWith("sess-resume");
     expect(mockedListMessages).toHaveBeenCalledWith("sess-resume", 200, null);
-    const userMsg = await screen.findByTestId("live-chat-message-user");
-    expect(within(userMsg).getByText("prior transcript")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(transcript().getByText("prior transcript")).toBeInTheDocument()
+    );
 
     // Now that currentSession is set, a remote reply for that session must
     // render — this is the bug the ticket fixes.
@@ -482,8 +513,12 @@ describe("LiveChatWindow", () => {
       useLiveChatStore.getState().applyRemoteMessage(reply, null);
     });
 
-    const assistantMsg = await screen.findByTestId("live-chat-message-assistant");
-    expect(within(assistantMsg).getByText("live reply after detach")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(transcript().getByText("Claude")).toBeInTheDocument()
+    );
+    expect(
+      transcript().getByText("live reply after detach")
+    ).toBeInTheDocument();
   });
 
   it("standalone mount with no cached active session shows empty state and does not auto-create", async () => {

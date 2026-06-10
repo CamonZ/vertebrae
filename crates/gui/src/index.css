@@ -46,6 +46,12 @@
   --color-line: #2c2622;
   --color-line-soft: #221d1a;
   --color-line-strong: #463f38;
+  /* Semantic aliases for the `border-border` / `border-border-focus` (and
+     `ring-border-focus`) utilities. Resolve through the line tokens so they
+     follow the .light override automatically; without them Tailwind v4 falls
+     back to currentColor (bright fg) and borders read white. */
+  --color-border: var(--color-line);
+  --color-border-focus: var(--color-line-strong);
 
   /* Accent — one copper, four stops, anchored at 40° hue (oklch) */
   --color-accent: oklch(0.74 0.18 40);
@@ -111,7 +117,18 @@
   --text-3xl: 1.5rem; /* 24px */
   --text-4xl: 2.25rem; /* 36px — h2 */
   --text-5xl: 3.5rem; /* 56px — h1 */
-  --text-display: clamp(72px, 11vw, 140px);
+  --text-13: 0.8125rem; /* 13px — promoted so Tailwind emits text-13 utility */
+  --text-display: clamp(4.5rem, 11vw, 8.75rem); /* rem so it breathes with root font-size */
+
+  /* letter-spacing scale — collapses the hardcoded 0.01/0.04/0.08/0.16em variants */
+  --tracking-tight: -0.01em;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.08em;
+  --tracking-eyebrow: 0.16em;
+  /* line-height scale */
+  --leading-tight: 1.35;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
 
   /* ---------------------------------------------------------------------------
      SPACING — 4px base unit, Hearth scale
@@ -236,20 +253,21 @@
   --caption: var(--text-xs);
   /* Pixel-named type scale — mirror docs/design/tokens.css so the v2 prototype
      vocabulary stays defined in the production adapter (see
-     styles/hearthTokenAdapter). Where a Hearth rem token has the same size it
-     is aliased; the off-scale sizes carry literal px. */
+     styles/hearthTokenAdapter). --text-8/9 are intentional sub-text decoration
+     glyphs and stay as literal px; all others now alias @theme rem tokens so
+     they ride the root font-size ladder. */
   --text-8: 8px;
   --text-9: 9px;
   --text-10: var(--text-2xs); /* 10px */
   --text-11: var(--text-eyebrow); /* 11px */
   --text-12: var(--text-xs); /* 12px */
-  --text-13: 13px;
+  --text-13: var(--text-13); /* 13px — from @theme */
   --text-14: var(--text-sm); /* 14px */
   --text-15: var(--text-base); /* 15px */
   --text-16: var(--text-lg); /* 16px */
   --text-20: var(--text-2xl); /* 20px */
-  --text-22: 22px;
-  --text-40: 40px;
+  --text-22: 1.375rem; /* 22px — rem so it scales with root */
+  --text-40: 2.5rem; /* 40px — rem so it scales with root */
 
   /* Space */
   --s-1: var(--spacing-1);
@@ -283,6 +301,46 @@
   --r-xl: var(--radius-xl);
   --r-full: var(--radius-full);
   --ease: var(--ease-default);
+
+  /* Graph edges — link/transition vocabulary (Atlas map + Workflow graph).
+     One source of truth for the dash/width/opacity values that were previously
+     inlined (and drifting) across the canvas pages. Ported verbatim from
+     docs/design/tokens.css (lines ~137-148). Consumed by the .gedge / .edge-label
+     rules below and by WorkflowAtlas/GraphEdge — never inline these on a path. */
+  --edge-color: var(--line-strong); /* resting stroke */
+  --edge-color-lit: var(--accent); /* forward edge on an active trace */
+  --edge-color-back: var(--fg); /* back/return edge on a trace — max contrast */
+  --edge-color-loop: var(--step-route); /* loop-back hue */
+  --edge-w: 1.5; /* resting width */
+  --edge-w-lit: 2; /* lit width */
+  --edge-o: 0.85; /* resting opacity */
+  --edge-o-loop: 0.72; /* loop-backs rest a touch quieter */
+  --edge-o-dim: 0.15; /* faded out of a trace */
+  --edge-dash: 5 4; /* handoff / cross-workflow */
+  --edge-dash-loop: 3 3; /* loop-back */
+  --edge-glow: drop-shadow(0 0 5px var(--accent-glow));
+  --edge-glow-back: drop-shadow(
+    0 0 5px color-mix(in oklch, var(--fg) 45%, transparent)
+  );
+  --edge-glow-loop: drop-shadow(
+    0 0 4px color-mix(in oklch, var(--step-route) 50%, transparent)
+  );
+}
+
+/* ── Density attribute (Retina-aware + manual). Auto-set by useDensity():
+   comfortable when scaleFactor < 1.5 (non-Retina) OR innerWidth < 1400.
+   Placed after the :root adapter so these overrides win the cascade. ── */
+:root[data-density="comfortable"] {
+  --text-2xs: 0.6875rem;   /* 10→11 */
+  --text-eyebrow: 0.75rem; /* 11→12 */
+  --text-xs: 0.8125rem;    /* 12→13 */
+  --text-sm: 0.9375rem;    /* 14→15 */
+}
+:root[data-density="compact"] {
+  --text-2xs: 0.5625rem;
+  --text-eyebrow: 0.625rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
 }
 
 /* =============================================================================
@@ -368,6 +426,12 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+@media (width >= 1600px) {
+  html {
+    font-size: 17px;
+  }
 }
 
 body {
@@ -551,7 +615,7 @@ html.window-transparent #root {
   /* Lede / subtitle — muted, light-weight serif italic (cursive role c). */
   .lede {
     font-family: var(--font-serif);
-    font-size: 1.375rem; /* 22px */
+    font-size: var(--text-22); /* 22px */
     font-weight: 300;
     font-style: italic;
     line-height: 1.45;
@@ -1165,13 +1229,13 @@ html.window-transparent #root {
    header-chip set — 26px tall, transparent, 1px --line-strong, --r-sm, mono
    --text-2xs, --fg-mute. These rules are unlayered, so they win over the
    components' own Tailwind utilities. */
-.tasks-v2 .scope-level,
+.scope-level,
 .tasks-v2 .scope-expand {
   display: inline-flex;
 }
 
 .tasks-v2 .scope-secondary .hide-done,
-.tasks-v2 .scope-level select,
+.scope-level select,
 .tasks-v2 .scope-expand button {
   height: 26px;
   padding: 0 var(--s-2);
@@ -1197,13 +1261,13 @@ html.window-transparent #root {
 }
 
 /* Native <select> sizes to content and needs right room for the caret overlay. */
-.tasks-v2 .scope-level select {
+.scope-level select {
   width: auto;
   padding-right: var(--s-6);
 }
 
 .tasks-v2 .scope-secondary .hide-done:hover,
-.tasks-v2 .scope-level select:hover,
+.scope-level select:hover,
 .tasks-v2 .scope-expand button:hover {
   color: var(--fg);
   border-color: var(--fg-faint);
@@ -1232,7 +1296,7 @@ html.window-transparent #root {
    whose visible vertex falls ~5px below box center. Recolor it to the muted
    chip text and raise it so it reads at the same height as the "Expand all"
    chevron and the eye. */
-.tasks-v2 .scope-level > span::after {
+.scope-level > span::after {
   border-color: var(--fg-mute);
   margin-top: -5px;
 }
@@ -1270,7 +1334,7 @@ html.window-transparent #root {
 .tasks-v2 .t-summary .sum-chev {
   width: 18px;
   text-align: center;
-  font-size: 18px;
+  font-size: var(--text-xl);
   color: var(--ok);
   flex-shrink: 0;
   /* The summary is a flex row (uniform --s-2 gap), but the task rows it sits
@@ -1360,7 +1424,7 @@ html.window-transparent #root {
   height: 20px;
   padding: 0 8px 0 9px;
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--text-eyebrow);
   font-weight: 500;
   background: var(--bg-2);
   color: var(--fg-mute);
@@ -1449,7 +1513,7 @@ html.window-transparent #root {
 .c-run-chip.sm {
   height: 17px;
   padding: 0 6px 0 7px;
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .c-run-chip.sm .spinner {
@@ -1471,7 +1535,7 @@ html.window-transparent #root {
   align-items: center;
   gap: 3px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--fg-faint);
   padding: 2px 5px;
   border-radius: var(--r-xs);
@@ -1661,7 +1725,7 @@ html.window-transparent #root {
 .hc-panel.is-closing {
   animation: panel-drill-left-out var(--t-base) var(--ease) forwards;
 }
-.tasks-v2.detail.detail-float.is-closing {
+.detail.detail-float.is-closing {
   animation: panel-drill-right-out var(--t-base) var(--ease) forwards;
 }
 @keyframes panel-drill-left-out {
@@ -1687,8 +1751,8 @@ html.window-transparent #root {
 @media (prefers-reduced-motion: reduce) {
   .hc-panel,
   .hc-panel.is-closing,
-  .tasks-v2.detail.detail-float,
-  .tasks-v2.detail.detail-float.is-closing {
+  .detail.detail-float,
+  .detail.detail-float.is-closing {
     animation: none;
   }
 }
@@ -1937,7 +2001,6 @@ html.window-transparent #root {
   bottom: 6px;
   width: 3px;
   background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
   border-radius: 0 2px 2px 0;
 }
 
@@ -1975,7 +2038,7 @@ html.window-transparent #root {
 
 .tasks-v2 .t-chev {
   width: 18px;
-  font-size: 18px;
+  font-size: var(--text-xl);
   color: var(--fg-mute);
   flex-shrink: 0;
   text-align: center;
@@ -2000,7 +2063,7 @@ html.window-transparent #root {
   text-align: center;
   font-family: var(--mono);
   color: var(--fg-mute);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1;
 }
 
@@ -2015,7 +2078,7 @@ html.window-transparent #root {
 
 .tasks-v2 .t-row.l0 .t-glyph {
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 
 .tasks-v2 .t-row.l1 {
@@ -2033,7 +2096,7 @@ html.window-transparent #root {
 }
 
 .tasks-v2 .t-row.l2 .t-glyph {
-  font-size: 16px;
+  font-size: var(--text-lg);
   color: var(--fg-faint);
   line-height: 0.6;
 }
@@ -2077,7 +2140,7 @@ html.window-transparent #root {
   align-items: center;
   gap: 8px;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--fg-faint);
   letter-spacing: 0.02em;
   flex-wrap: wrap;
@@ -2117,7 +2180,7 @@ html.window-transparent #root {
 
 .tasks-v2 .t-pri {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   font-weight: 700;
   line-height: 1;
   flex-shrink: 0;
@@ -2161,7 +2224,7 @@ html.window-transparent #root {
   text-align: right;
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   white-space: nowrap;
 }
 
@@ -2175,7 +2238,7 @@ html.window-transparent #root {
   background: color-mix(in oklch, var(--bg-1) 55%, var(--bg));
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
 }
 
 .tasks-v2 .caption-strip .plate {
@@ -2186,10 +2249,10 @@ html.window-transparent #root {
 
 .tasks-v2 .caption-strip em {
   font-family: var(--serif);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 
-.tasks-v2.detail {
+.detail {
   width: 420px;
   max-width: min(420px, 36vw);
   background: var(--bg-1);
@@ -2204,7 +2267,7 @@ html.window-transparent #root {
    (horizontal drag-to-resize); the panel is right-anchored so only the left
    edge moves. Scoped to `.detail-float` so the standalone pop-out keeps its
    opaque window fill. */
-.tasks-v2.detail.detail-float {
+.detail.detail-float {
   position: fixed;
   top: calc(38px + var(--s-3));
   right: var(--s-3);
@@ -2239,7 +2302,7 @@ html.window-transparent #root {
    resizable window. `width/max-width: ...` override the docked `.tasks-v2.detail`
    cap (420px) that would otherwise leave the window half-empty. No 38px top
    inset — the pop-out has no in-app titlebar. */
-.tasks-v2.detail.detail-standalone {
+.detail.detail-standalone {
   position: fixed;
   /* Fill the window edge-to-edge: a detached window is self-contained, so the
      glass must cover the whole surface. Any inset gutter would be transparent
@@ -2279,7 +2342,7 @@ html.window-transparent #root {
    frost with a touch of saturation, raise the translucent fill to a legible
    light tint, and swap the dark inset highlight / drop shadow for light-mode
    elevation. */
-.light .tasks-v2.detail.detail-float {
+.light .detail.detail-float {
   background: linear-gradient(
     205deg,
     color-mix(in oklch, var(--bg) 50%, transparent),
@@ -2294,7 +2357,7 @@ html.window-transparent #root {
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.light .tasks-v2.detail.detail-standalone {
+.light .detail.detail-standalone {
   background: linear-gradient(
     205deg,
     color-mix(in oklch, var(--bg) 88%, transparent),
@@ -2331,7 +2394,7 @@ html.window-transparent #root {
 /* Drag handle for the detached window: spans the top title-bar band (the glass
    padding above the header where the overlay traffic lights sit). Sits above
    the surface but below the header content, which starts at padding-top. */
-.tasks-v2.detail.detail-standalone .detail-drag-strip {
+.detail.detail-standalone .detail-drag-strip {
   position: absolute;
   top: 0;
   left: 0;
@@ -2343,7 +2406,7 @@ html.window-transparent #root {
 /* Left-edge drag handle for horizontal resize. Sits inside the panel (the
    surface is overflow-clipped for its rounded corners) and floats above the
    content. The accent rule only paints on hover / while dragging. */
-.tasks-v2.detail.detail-float .detail-resize-handle {
+.detail.detail-float .detail-resize-handle {
   position: absolute;
   left: 0;
   top: 0;
@@ -2354,7 +2417,7 @@ html.window-transparent #root {
   touch-action: none;
 }
 
-.tasks-v2.detail.detail-float .detail-resize-handle::after {
+.detail.detail-float .detail-resize-handle::after {
   content: "";
   position: absolute;
   left: 0;
@@ -2365,8 +2428,8 @@ html.window-transparent #root {
   transition: background var(--t-fast, 120ms) var(--ease, ease);
 }
 
-.tasks-v2.detail.detail-float .detail-resize-handle:hover::after,
-.tasks-v2.detail.detail-float .detail-resize-handle[data-resizing]::after {
+.detail.detail-float .detail-resize-handle:hover::after,
+.detail.detail-float .detail-resize-handle[data-resizing]::after {
   background: color-mix(in oklch, var(--accent) 60%, transparent);
 }
 
@@ -2427,7 +2490,7 @@ html.window-transparent #root {
 .tasks-v2-detail-shell .t-detail-head h3 {
   font-family: var(--serif);
   font-style: italic;
-  font-size: 18px;
+  font-size: var(--text-xl);
   font-weight: 400;
   line-height: 1.1;
 }
@@ -2538,7 +2601,7 @@ html.window-transparent #root {
 }
 
 @media (max-width: 980px) {
-  .tasks-v2.detail {
+  .detail {
     max-width: 48vw;
   }
 
@@ -2569,4 +2632,120 @@ html.window-transparent #root {
 
 .shadow-glow-sm {
   box-shadow: var(--shadow-glow-sm);
+}
+
+/* =============================================================================
+   WORKFLOW ATLAS / GRAPH — canvas edge + kind vocabulary
+   Ported from docs/design/lib/components-lib.css. The cross-page primitives live
+   here: the .k-<kind> palette carriers, the routed-edge .gedge vocabulary, and
+   the inspector .kindspine. Every value reads through the --edge-* tokens above
+   and the step-kind hues so the canvas never inlines a stroke color and stays in
+   lockstep with both themes. (The page-local chrome — edge labels, the kind
+   legend, column headers — lives in WorkflowAtlas.css alongside its callers.)
+   ============================================================================= */
+
+/* ── Kind palette carriers ──────────────────────────────────────────────────
+   Bind a kind class to the local trio --kc (core hue), --kf (foreground/text),
+   --kw (wash). Every kind-aware surface (edge swatches, the inspector spine,
+   step nodes, strips) reads these three locals rather than the raw step tokens,
+   so one carrier on an ancestor recolors a whole subtree. These are the REAL
+   backend step types — there is no synthetic entry/final kind. */
+.k-execute {
+  --kc: var(--step-execute);
+  --kf: var(--step-execute-fg);
+  --kw: var(--step-execute-wash);
+}
+.k-eval {
+  --kc: var(--step-eval);
+  --kf: var(--step-eval-fg);
+  --kw: var(--step-eval-wash);
+}
+.k-route {
+  --kc: var(--step-route);
+  --kf: var(--step-route-fg);
+  --kw: var(--step-route-wash);
+}
+.k-human {
+  --kc: var(--step-human);
+  --kf: var(--step-human-fg);
+  --kw: var(--step-human-wash);
+}
+.k-wait {
+  --kc: var(--step-wait);
+  --kf: var(--step-wait-fg);
+  --kw: var(--step-wait-wash);
+}
+
+/* ── Edge (.gedge) — link/transition vocabulary ─────────────────────────────
+   A single routed <path>. Style is class-driven off the --edge-* tokens, never
+   inline attributes, so every canvas stays in sync.
+     kind:   k-step (within a workflow) · k-handoff (between workflows, dashed) ·
+             k-loop (back-edge, route hue)
+     state:  (base) · lit (on an active trace) · dim (faded back)
+     .solid  force a handoff to render solid (high-level map edges)
+     .live   legacy animated-accent variant
+   Pair with <GraphMarkers/> in the same <svg> for the arrowheads. */
+.gedge {
+  fill: none;
+  stroke: var(--edge-color);
+  stroke-width: var(--edge-w);
+  stroke-opacity: var(--edge-o);
+  transition:
+    stroke var(--t-fast) var(--ease),
+    stroke-width var(--t-fast) var(--ease),
+    stroke-opacity var(--t-fast) var(--ease);
+}
+.gedge.k-handoff {
+  stroke-dasharray: var(--edge-dash);
+}
+.gedge.k-loop {
+  stroke: var(--edge-color-loop);
+  stroke-dasharray: var(--edge-dash-loop);
+  stroke-opacity: var(--edge-o-loop);
+}
+.gedge.solid {
+  stroke-dasharray: none;
+}
+
+/* trace states — handoffs accent on a live trace; step links only recede.
+   (k-step.lit intentionally has no accent rule: it renders like base.) */
+.gedge.dim {
+  stroke-opacity: var(--edge-o-dim);
+}
+.gedge.k-handoff.lit {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow);
+}
+.gedge.k-loop.lit {
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow-loop);
+}
+
+/* back/return edges on a trace read in max-contrast white instead of the
+   forward accent, so tracing a hub (e.g. Human Review) separates the work
+   flowing forward (accent) from the paths returning back (white). Placed after
+   the kind-lit rules so it wins on equal specificity. */
+.gedge.lit.back {
+  stroke: var(--edge-color-back);
+  filter: var(--edge-glow-back);
+}
+
+/* live — animated dashed accent (kept for backward compatibility) */
+.gedge.live {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-dasharray: 4 4;
+  filter: var(--edge-glow);
+}
+
+/* ── Kind carrier ───────────────────────────────────────────────────────────
+   The inspector (WorkflowInspector / StepInspector) pairs `.kindspine` with a
+   `.k-<kind>` carrier so its accents (eyebrow dot, chips) read --kc; workflow
+   panels fall back to the accent when no kind is set. The class is retained as
+   the positioning context / kind carrier — the left ember line was removed. */
+.kindspine {
+  position: relative;
 }

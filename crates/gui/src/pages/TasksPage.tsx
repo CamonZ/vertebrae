@@ -356,7 +356,7 @@ export function TasksPage() {
 
   const headerActions = useMemo(
     () => (
-      <div className="flex items-center gap-3 text-[11px]">
+      <div className="flex items-center gap-3 text-eyebrow">
         <LiveCount running={runningCount} />
         {!currentIsLoading && !currentError && taskCount > 0 && (
           <span className="text-[var(--color-fg-mute)]">

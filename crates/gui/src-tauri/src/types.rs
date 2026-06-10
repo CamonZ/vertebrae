@@ -883,6 +883,10 @@ pub struct StepExecution {
     /// Output tokens emitted
     #[serde(default)]
     pub output_tokens: Option<u32>,
+    /// Cache-read ("cache hit") input tokens. Session-cumulative figure from
+    /// Sacrum; aggregate per run by taking the latest execution's value.
+    #[serde(default)]
+    pub cache_read_tokens: Option<u32>,
     /// Cost in USD, serialized as a string to preserve Decimal precision
     /// across the Sacrum WS / GraphQL boundary.
     #[serde(default)]
@@ -910,12 +914,13 @@ fn saturating_u64_to_u32(v: u64) -> u32 {
 
 impl From<vertebrae_core::StepExecution> for StepExecution {
     fn from(exec: vertebrae_core::StepExecution) -> Self {
-        let (input_tokens, output_tokens) = match exec.token_usage.as_ref() {
+        let (input_tokens, output_tokens, cache_read_tokens) = match exec.token_usage.as_ref() {
             Some(tu) => (
                 Some(saturating_u64_to_u32(tu.input_tokens)),
                 Some(saturating_u64_to_u32(tu.output_tokens)),
+                tu.cache_read_input_tokens.map(saturating_u64_to_u32),
             ),
-            None => (None, None),
+            None => (None, None, None),
         };
         StepExecution {
             id: exec.id,
@@ -935,6 +940,7 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             model_provider: exec.model_provider,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
             cost: exec.cost_usd.map(|c| c.to_string()),
             duration_ms: exec.duration_ms.map(saturating_u64_to_u32),
             handoff: exec.handoff,

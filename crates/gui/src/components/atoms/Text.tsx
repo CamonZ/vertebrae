@@ -36,16 +36,16 @@ interface TextProps extends Omit<HTMLAttributes<HTMLElement>, "color"> {
 }
 
 const variantClass: Record<TextVariant, string> = {
-  display: "font-serif text-[clamp(72px,11vw,140px)] leading-[0.92] tracking-tight font-normal",
+  display: "font-serif text-display leading-[0.92] tracking-tight font-normal",
   "heading-xl": "font-serif text-5xl leading-none tracking-tight font-normal",
   "heading-lg": "font-serif text-4xl leading-[1.05] tracking-tight font-normal",
   "heading-md": "font-sans text-xl leading-tight font-medium",
-  lede: "font-serif text-[1.375rem] leading-[1.45] font-light italic",
+  lede: "font-serif text-[length:var(--text-22)] leading-[1.45] font-light italic",
   body: "font-sans text-base leading-relaxed font-normal",
   "body-sm": "font-sans text-sm leading-snug font-normal",
   label: "font-sans text-sm leading-snug font-medium",
   caption: "font-sans text-xs leading-snug font-normal",
-  eyebrow: "font-mono text-[0.6875rem] uppercase tracking-[0.16em] font-medium",
+  eyebrow: "font-mono text-eyebrow uppercase tracking-[0.16em] font-medium",
   mono: "font-mono text-sm leading-relaxed font-normal",
   "mono-sm": "font-mono text-xs leading-snug font-normal",
 };

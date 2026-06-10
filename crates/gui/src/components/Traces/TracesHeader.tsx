@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { TaskLevel } from "../../bindings";
-import { formatCost, formatTokenCount, type ExecutionRollups } from "../../utils";
+import { formatTokenCount, type ExecutionRollups } from "../../utils";
 import { formatDurationMs } from "../Operations/formatDuration";
 
 /** Temporarily hide the pop-out/detach control on side panels. Flip back to
@@ -12,32 +12,41 @@ interface TracesHeaderProps {
   title: string | null;
   level: TaskLevel | null;
   rollups: ExecutionRollups;
+  /** Status of the active run, drives the hero status pill. */
+  runState?: string | null;
   isLoading?: boolean;
   error?: string | null;
   onBack?: () => void;
   onDetach?: () => void;
 }
 
-interface RollupStatProps {
+/** Map a run status to a hero pill: label, accent colour and left-edge colour. */
+function heroState(state: string | null | undefined): {
   label: string;
-  value: string;
-  testId: string;
-}
-
-function RollupStat({ label, value, testId }: RollupStatProps): ReactNode {
-  return (
-    <div
-      data-testid={testId}
-      className="flex flex-col rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)]/50 px-3 py-1.5"
-    >
-      <span className="font-mono text-2xs font-medium uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
-        {label}
-      </span>
-      <span className="text-sm font-medium text-[var(--color-fg)]">
-        {value}
-      </span>
-    </div>
-  );
+  color: string;
+  edge: string;
+} {
+  switch (state) {
+    case "waiting":
+      return { label: "Waiting", color: "var(--color-warn)", edge: "var(--color-step-wait)" };
+    case "executing":
+    case "in_progress":
+    case "running":
+      return { label: "Running", color: "var(--color-accent)", edge: "var(--color-accent)" };
+    case "completed":
+      return { label: "Completed", color: "var(--color-ok)", edge: "var(--color-ok)" };
+    case "failed":
+      return { label: "Failed", color: "var(--color-err)", edge: "var(--color-err)" };
+    case "stopped":
+    case "stopping":
+      return { label: "Stopped", color: "var(--color-fg-mute)", edge: "var(--color-line-strong)" };
+    default:
+      return {
+        label: state ? state.replace(/_/g, " ") : "—",
+        color: "var(--color-fg-mute)",
+        edge: "var(--color-line-strong)",
+      };
+  }
 }
 
 export function TracesHeader({
@@ -45,6 +54,7 @@ export function TracesHeader({
   title,
   level,
   rollups,
+  runState,
   isLoading,
   error,
   onBack,
@@ -53,6 +63,7 @@ export function TracesHeader({
   const hasTask = taskId != null;
   const displayTitle = hasTask ? (title ?? "Unknown task") : "Pick a task to explore traces";
   const displayLevel = level ?? "task";
+  const hero = heroState(runState);
 
   return (
     <header
@@ -98,7 +109,7 @@ export function TracesHeader({
               <span aria-hidden="true">/</span>
               <span
                 data-testid="traces-breadcrumb-level"
-                className="font-mono uppercase tracking-[0.12em]"
+                className="font-mono uppercase tracking-wider"
               >
                 {displayLevel}
               </span>
@@ -108,7 +119,7 @@ export function TracesHeader({
 
         <h1
           data-testid="traces-title"
-          className="truncate font-serif text-base font-normal text-[var(--color-fg)]"
+          className="truncate font-serif text-base font-normal italic text-[var(--color-fg)]"
         >
           {displayTitle}
         </h1>
@@ -142,52 +153,79 @@ export function TracesHeader({
       </div>
 
       {hasTask && (
-      <div
-        data-testid="traces-rollup"
-        className="flex flex-wrap items-stretch gap-2 border-t border-[var(--color-line)] px-6 py-2"
-      >
-        <RollupStat
-          testId="traces-rollup-runs"
-          label="Σ Runs"
-          value={String(rollups.totalRuns)}
-        />
-        <RollupStat
-          testId="traces-rollup-attempts"
-          label="Σ Attempts"
-          value={String(rollups.totalAttempts)}
-        />
-        <RollupStat
-          testId="traces-rollup-cost"
-          label="Σ Cost"
-          value={formatCost(rollups.totalCost)}
-        />
-        <RollupStat
-          testId="traces-rollup-tokens"
-          label="Σ Tokens"
-          value={formatTokenCount(rollups.totalTokens)}
-        />
-        <RollupStat
-          testId="traces-rollup-walltime"
-          label="Σ Wall Time"
-          value={formatDurationMs(rollups.totalWallTimeMs)}
-        />
-        {isLoading && (
+        <div
+          data-testid="traces-hero"
+          className="mx-6 mb-2 flex flex-wrap items-center gap-2.5 rounded-[var(--radius-md)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-3.5 py-2 font-mono text-xs text-[var(--color-fg-soft)]"
+          style={{ borderLeft: `3px solid ${hero.edge}` }}
+        >
           <span
-            data-testid="traces-rollup-loading"
-            className="self-center text-2xs italic text-[var(--color-fg-mute)]"
+            data-testid="traces-hero-state"
+            className="font-semibold uppercase tracking-wider"
+            style={{ color: hero.color }}
           >
-            Loading...
+            {hero.label}
           </span>
-        )}
-        {error && !isLoading && (
+          <span className="text-[var(--color-fg-ghost)]">·</span>
           <span
-            data-testid="traces-rollup-error"
-            className="self-center rounded-[var(--radius-sm)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] px-2 py-1 text-2xs text-[var(--color-err)]"
+            data-testid="traces-hero-runtime"
+            className="font-medium text-[var(--color-accent)]"
           >
-            {error}
+            {formatDurationMs(rollups.totalWallTimeMs)}
           </span>
-        )}
-      </div>
+
+          <span className="ml-auto flex items-center gap-1.5 text-[var(--color-fg-mute)]">
+            <span data-testid="traces-hero-runs">
+              <b className="font-semibold text-[var(--color-fg)]">{rollups.totalRuns}</b> runs
+            </span>
+            <span className="text-[var(--color-fg-ghost)]">·</span>
+            <span data-testid="traces-hero-executions">
+              <b className="font-semibold text-[var(--color-fg)]">{rollups.totalAttempts}</b>{" "}
+              executions
+            </span>
+            <span className="text-[var(--color-fg-ghost)]">·</span>
+            <span
+              data-testid="traces-hero-tokens"
+              title="raw input · cache hits · output"
+            >
+              <b className="font-semibold text-[var(--color-fg)]">
+                {formatTokenCount(rollups.totalTokens)}
+              </b>{" "}
+              tokens
+              <span className="ml-1 text-[var(--color-fg-ghost)]">
+                (
+                <span data-testid="traces-hero-tokens-raw">
+                  {formatTokenCount(rollups.rawInputTokens)} raw
+                </span>
+                <span className="px-1">·</span>
+                <span data-testid="traces-hero-tokens-cache">
+                  {formatTokenCount(rollups.cacheReadTokens)} cache
+                </span>
+                <span className="px-1">·</span>
+                <span data-testid="traces-hero-tokens-output">
+                  {formatTokenCount(rollups.outputTokens)} out
+                </span>
+                )
+              </span>
+            </span>
+          </span>
+
+          {isLoading && (
+            <span
+              data-testid="traces-hero-loading"
+              className="text-2xs italic text-[var(--color-fg-mute)]"
+            >
+              Loading…
+            </span>
+          )}
+          {error && !isLoading && (
+            <span
+              data-testid="traces-hero-error"
+              className="rounded-[var(--radius-sm)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] px-2 py-0.5 text-2xs text-[var(--color-err)]"
+            >
+              {error}
+            </span>
+          )}
+        </div>
       )}
     </header>
   );

@@ -1,13 +1,15 @@
 import { useEffect } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
 import { useStyleguideStore } from "../stores/styleguideStore";
 import { isEditableShortcutTarget } from "../utils/keyboard";
 import { isStyleguideShortcut } from "../utils/styleguideShortcut";
 
+/**
+ * Toggles the hidden dev-chrome shortcuts (currently just the live-chat debug
+ * button) via the global keystroke. The styleguide page it once also navigated
+ * to has been removed — the canonical design now lives in docs/design — so this
+ * only flips the store's chrome-visibility flags.
+ */
 export function StyleguideShortcut() {
-  const navigate = useNavigate();
-  const location = useLocation();
-
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!isStyleguideShortcut(event)) return;
@@ -16,20 +18,16 @@ export function StyleguideShortcut() {
 
       event.preventDefault();
       const styleguideStore = useStyleguideStore.getState();
-      if (styleguideStore.isStyleguideNavVisible) {
+      if (styleguideStore.isLiveChatButtonVisible) {
         styleguideStore.hideChromeShortcuts();
-        if (location.pathname === "/styleguide") {
-          navigate("/board");
-        }
       } else {
         styleguideStore.revealChromeShortcuts();
-        navigate("/styleguide");
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [location.pathname, navigate]);
+  }, []);
 
   return null;
 }

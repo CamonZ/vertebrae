@@ -9,7 +9,6 @@ export {
   TaskCodeRefs,
   TaskRelations,
 } from "./TaskDetail";
-export { WorkflowCard, WorkflowGrid } from "./WorkflowGrid";
 export { ToastContainer } from "./Toast";
 export { FormField } from "./forms";
 export type { FormFieldProps } from "./forms";

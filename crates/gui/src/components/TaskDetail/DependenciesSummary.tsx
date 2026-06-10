@@ -99,7 +99,7 @@ export function DependenciesSummary({
   if (!hasAnyRelation) {
     return (
       <div className="px-4 py-3">
-        <p className="text-xs text-[var(--color-fg-mute)] italic">
+        <p className="text-sm text-[var(--color-fg-mute)] italic">
           No dependencies
         </p>
       </div>

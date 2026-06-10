@@ -112,52 +112,6 @@ describe("Sidebar Traces nav", () => {
       expect(screen.getByTestId("loc")).toHaveTextContent("/traces");
     });
   });
-
-  it("hides the Styleguide nav until it has been revealed", () => {
-    render(
-      <MemoryRouter initialEntries={["/operations"]}>
-        <Sidebar />
-      </MemoryRouter>
-    );
-
-    expect(
-      screen.queryByTestId("sidebar-nav-styleguide")
-    ).not.toBeInTheDocument();
-  });
-
-  it("renders a Styleguide nav link pointing at /styleguide when revealed", () => {
-    useStyleguideStore.getState().revealStyleguideNav();
-
-    render(
-      <MemoryRouter initialEntries={["/operations"]}>
-        <Sidebar />
-      </MemoryRouter>
-    );
-
-    const link = screen.getByTestId("sidebar-nav-styleguide");
-    expect(link).toBeInTheDocument();
-    expect(link.getAttribute("href")).toBe("/styleguide");
-  });
-
-  it("clicking the Styleguide nav navigates to /styleguide", async () => {
-    const user = userEvent.setup();
-    useStyleguideStore.getState().revealStyleguideNav();
-
-    render(
-      <MemoryRouter initialEntries={["/operations"]}>
-        <Sidebar />
-        <Routes>
-          <Route path="*" element={<LocationDisplay />} />
-        </Routes>
-      </MemoryRouter>
-    );
-
-    await user.click(screen.getByTestId("sidebar-nav-styleguide"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("loc")).toHaveTextContent("/styleguide");
-    });
-  });
 });
 
 describe("Sidebar project switcher", () => {

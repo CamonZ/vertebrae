@@ -11,8 +11,8 @@ export type {
   UseTaskRunsForTasksResult,
   UseTaskRunsResult,
 } from "./useTaskRuns";
-export { useTaskRunTrace } from "./useTaskRunTrace";
-export type { UseTaskRunTraceResult } from "./useTaskRunTrace";
+export { useRunTrace } from "./useRunTrace";
+export type { UseRunTraceResult } from "./useRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";
@@ -26,6 +26,7 @@ export { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 export { useStepTransitionChangeListener } from "./useStepTransitionChangeListener";
 export { useLiveChatChangeListener } from "./useLiveChatChangeListener";
 export { useTheme } from "./useTheme";
+export { useDensity } from "./useDensity";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
 export { useOperationsData } from "./useOperationsData";
