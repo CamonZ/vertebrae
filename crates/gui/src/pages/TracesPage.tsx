@@ -115,12 +115,21 @@ export function TracesPage({
   // Entered for a specific task (e.g. from a task detail panel) → scope the
   // rail's TASKS tree to that task + its descendants. The general /traces
   // browser (no task id) still shows the full tree.
+  const liveFetchedTraceTasks = useMemo(() => {
+    if (!rootTaskId || fetchedTraceTasks.length === 0) return fetchedTraceTasks;
+    const liveTasksById = new Map(tasks.map((item) => [item.id, item]));
+    return fetchedTraceTasks.map((fetchedTask) => ({
+      ...fetchedTask,
+      ...liveTasksById.get(fetchedTask.id),
+    }));
+  }, [rootTaskId, fetchedTraceTasks, tasks]);
+
   const traceTasks = useMemo(
     () =>
       rootTaskId
-        ? mergeTasksById(fetchedTraceTasks, task ? [task] : [])
+        ? mergeTasksById(liveFetchedTraceTasks, task ? [task] : [])
         : mergeTasksById(tasks, fetchedTraceTasks),
-    [rootTaskId, tasks, fetchedTraceTasks, task]
+    [rootTaskId, tasks, fetchedTraceTasks, liveFetchedTraceTasks, task]
   );
 
   // Fetch the entry task + its descendants so the rail's TASKS tree is scoped to
@@ -134,7 +143,7 @@ export function TracesPage({
     let cancelled = false;
 
     const fetchTraceTasks = async (): Promise<void> => {
-      // Lookup cache (store + on-demand fetches) — NOT the result set.
+      // Lookup cache (query data + on-demand fetches) — NOT the result set.
       const cache = new Map<string, Task>();
       for (const existingTask of tasks)
         cache.set(existingTask.id, existingTask);

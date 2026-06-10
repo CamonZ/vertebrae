@@ -44,11 +44,33 @@ function reconcileTaskList(
   return next;
 }
 
+function updateExistingReadyTask(
+  task: Task,
+  generation: number
+): void {
+  queryClient.setQueryData<Task[] | undefined>(
+    queryKeys.tasks.ready(generation),
+    (tasks) =>
+      tasks?.map((item) => (item.id === task.id ? mergeTask(item, task) : item))
+  );
+}
+
+function mapReadyTasks(
+  generation: number,
+  mapTask: (task: Task) => Task
+): void {
+  queryClient.setQueryData<Task[] | undefined>(
+    queryKeys.tasks.ready(generation),
+    (tasks) => tasks?.map(mapTask)
+  );
+}
+
 export function upsertTaskInQueryCache(
   task: Task,
   generation = getProjectScopeGeneration()
 ) {
   queryClient.setQueryData(queryKeys.tasks.detail(generation, task.id), task);
+  updateExistingReadyTask(task, generation);
 
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
@@ -78,6 +100,11 @@ export function removeTaskFromQueryCache(
       (tasks ?? []).filter((task) => task.id !== taskId)
     );
   }
+
+  queryClient.setQueryData<Task[] | undefined>(
+    queryKeys.tasks.ready(generation),
+    (tasks) => tasks?.filter((task) => task.id !== taskId)
+  );
 }
 
 export function replaceTaskRunControlsInQueryCache(
@@ -106,6 +133,10 @@ export function replaceTaskRunControlsInQueryCache(
       )
     );
   }
+
+  mapReadyTasks(generation, (task) =>
+    task.id === taskId ? replaceControls(task) : task
+  );
 }
 
 export function hasTaskInQueryCache(
@@ -120,9 +151,19 @@ export function hasTaskInQueryCache(
     queryKey: queryKeys.tasks.lists(generation),
   });
 
-  return lists.some(([, tasks]) =>
-    (tasks ?? []).some((task) => task.id === taskId)
+  if (
+    lists.some(([, tasks]) =>
+      (tasks ?? []).some((task) => task.id === taskId)
+    )
+  ) {
+    return true;
+  }
+
+  const readyTasks = queryClient.getQueryData<Task[]>(
+    queryKeys.tasks.ready(generation)
   );
+
+  return (readyTasks ?? []).some((task) => task.id === taskId);
 }
 
 export function updateTaskSectionsInQueryCache(
@@ -170,6 +211,10 @@ export function updateTaskSectionsInQueryCache(
       )
     );
   }
+
+  mapReadyTasks(generation, (task) =>
+    task.id === taskId ? updateSections(task) : task
+  );
 }
 
 export function upsertWorkflowInQueryCache(
