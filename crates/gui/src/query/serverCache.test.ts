@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { TaskFilterOptions, WorkflowWithTasks } from "../bindings";
+import type {
+  Section,
+  TaskFilterOptions,
+  WorkflowWithTasks,
+} from "../bindings";
 import {
   createMockTask,
   createMockTaskRun,
@@ -12,6 +16,7 @@ import {
   removeTaskFromQueryCache,
   removeWorkflowFromQueryCache,
   replaceTaskRunControlsInQueryCache,
+  updateTaskSectionsInQueryCache,
   upsertTaskInQueryCache,
   upsertWorkflowInQueryCache,
 } from "./serverCache";
@@ -171,6 +176,61 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
+  });
+
+  it("updates task sections in detail and list caches", () => {
+    const generation = 10;
+    const originalSection: Section = {
+      type: "checklist_item",
+      content: "Original",
+      order: 1,
+      done: false,
+      done_at: null,
+    };
+    const updatedSection: Section = {
+      ...originalSection,
+      content: "Updated",
+      done: true,
+    };
+    const task = createMockTask({
+      id: "task-1",
+      sections: [originalSection],
+    });
+    const otherTask = createMockTask({ id: "task-2", sections: [] });
+
+    queryClient.setQueryData(queryKeys.tasks.detail(generation, task.id), task);
+    queryClient.setQueryData(queryKeys.tasks.list(generation, null), [
+      task,
+      otherTask,
+    ]);
+
+    updateTaskSectionsInQueryCache(
+      task.id,
+      updatedSection,
+      "upsert",
+      generation
+    );
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, task.id))
+    ).toMatchObject({ id: task.id, sections: [updatedSection] });
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([{ ...task, sections: [updatedSection] }, otherTask]);
+
+    updateTaskSectionsInQueryCache(
+      task.id,
+      updatedSection,
+      "remove",
+      generation
+    );
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, task.id))
+    ).toMatchObject({ id: task.id, sections: [] });
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, null))
+    ).toEqual([{ ...task, sections: [] }, otherTask]);
   });
 
   it("upserts workflows into list cache and existing matching detail caches", () => {

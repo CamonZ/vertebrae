@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
-import { useTaskStore } from "../stores/taskStore";
 import { useExecutionStore } from "../stores/executionStore";
 import { createMockTask, createMockTaskRun } from "../test/test-utils";
 import type { TaskRun, TaskRunStatus } from "../bindings";
@@ -50,12 +49,6 @@ function withActiveRun(
 describe("useOperationsData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTaskStore.setState({
-      tasks: [],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
     useExecutionStore.setState({ executions: [] });
     mockListTasks.mockResolvedValue({ status: "ok", data: [] });
     mockGetTaskExecutions.mockResolvedValue({ status: "ok", data: [] });

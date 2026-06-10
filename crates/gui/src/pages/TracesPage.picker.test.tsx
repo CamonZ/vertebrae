@@ -3,8 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { createMockTask, createMockTaskRun } from "../test/test-utils";
-import { useTaskStore } from "../stores/taskStore";
+import type { Task } from "../bindings";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { queryClient } from "../query/queryClient";
+import { queryKeys } from "../query/queryKeys";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
@@ -77,21 +79,23 @@ function renderAt(path: string) {
   );
 }
 
+function seedPickerTasks(tasks: Task[]) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), null),
+    tasks
+  );
+}
+
 describe("TracesPage picker (empty state)", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockTask = null;
     mockRuns = [];
     mockActiveRun = null;
-    useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "abcd1234-aaaa", title: "Refactor router" }),
-        createMockTask({ id: "ef567890-bbbb", title: "Add Traces nav" }),
-      ],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
+    seedPickerTasks([
+      createMockTask({ id: "abcd1234-aaaa", title: "Refactor router" }),
+      createMockTask({ id: "ef567890-bbbb", title: "Add Traces nav" }),
+    ]);
   });
 
   it("renders the TaskPicker on /traces with no taskId", () => {
@@ -131,15 +135,10 @@ describe("TracesPage switch-task (rail swap)", () => {
     mockTask = createMockTask({ id: "root", title: "Root", level: "task" });
     mockRuns = [createMockTaskRun({ id: "run-1", task_id: "root" })];
     mockActiveRun = mockRuns[0];
-    useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "root", title: "Root" }),
-        createMockTask({ id: "other-task-id", title: "Other Task" }),
-      ],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
+    seedPickerTasks([
+      createMockTask({ id: "root", title: "Root" }),
+      createMockTask({ id: "other-task-id", title: "Other Task" }),
+    ]);
   });
 
   it("Switch button swaps the run-history rail for the picker rail", () => {

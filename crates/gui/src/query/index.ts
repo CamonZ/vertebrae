@@ -6,9 +6,11 @@ export {
   unwrapCommand,
 } from "./commandResult";
 export {
+  hasTaskInQueryCache,
   removeTaskFromQueryCache,
   removeWorkflowFromQueryCache,
   replaceTaskRunControlsInQueryCache,
+  updateTaskSectionsInQueryCache,
   upsertTaskInQueryCache,
   upsertWorkflowInQueryCache,
 } from "./serverCache";

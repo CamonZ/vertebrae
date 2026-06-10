@@ -6,7 +6,7 @@ import {
   type TaskRunStepChangedEvent,
   type TaskStepChangedEvent,
 } from "../bindings";
-import { useTaskStore, useToastStore } from "../stores";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -40,7 +40,7 @@ interface UseTaskChangeListenerOptions {
 
 /**
  * Hook that listens to TaskChangedEvent from Tauri and applies entity data
- * directly to the task store. If a realtime payload is incomplete, the hook
+ * directly to the TanStack Query cache. If a realtime payload is incomplete, the hook
  * hydrates the task before reconciling it into the current list.
  *
  * @param options - Configuration options for the listener
@@ -49,8 +49,6 @@ export function useTaskChangeListener(
   options: UseTaskChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const reconcileTask = useTaskStore((state) => state.reconcileTask);
-  const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask =
@@ -76,25 +74,17 @@ export function useTaskChangeListener(
 
       if (change_type === "Deleted" || archived) {
         removeTaskFromQueryCache(task_id, projectScopeGeneration);
-        removeTask(task_id);
       } else if (task) {
         if (!task.workflow_name || !task.step_name) {
           void fetchAndReconcileTask(task_id);
         } else {
           upsertTaskInQueryCache(task, projectScopeGeneration);
-          reconcileTask(task);
         }
       } else {
         void fetchAndReconcileTask(task_id);
       }
     },
-    [
-      addToast,
-      fetchAndReconcileTask,
-      reconcileTask,
-      removeTask,
-      projectScopeGeneration,
-    ]
+    [addToast, fetchAndReconcileTask, projectScopeGeneration]
   );
 
   const handleTaskStepChanged = useCallback(

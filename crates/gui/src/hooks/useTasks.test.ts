@@ -2,9 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useTaskStore } from "../stores/taskStore";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
-import { queryClient, upsertTaskInQueryCache } from "../query";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
+import { queryClient, queryKeys, upsertTaskInQueryCache } from "../query";
 
 const mockListTasks = vi.fn();
 
@@ -24,17 +26,10 @@ const wrapper = ({ children }: { children: ReactNode }) =>
 describe("useTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTaskStore.setState({
-      tasks: [],
-      activeFilter: null,
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
   });
 
-  it("returns tasks from the query cache and syncs the Zustand bridge", async () => {
-    const task1 = createMockTask({ id: "t-1", title: "Store Task" });
+  it("returns tasks from the query cache", async () => {
+    const task1 = createMockTask({ id: "t-1", title: "Query Task" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [task1] });
 
     const { result } = renderHook(() => useTasks(), { wrapper });
@@ -45,11 +40,7 @@ describe("useTasks", () => {
 
     expect(result.current.tasks).toHaveLength(1);
     expect(result.current.tasks[0].id).toBe("t-1");
-    expect(result.current.tasks[0].title).toBe("Store Task");
-
-    const storeTasks = useTaskStore.getState().tasks;
-    expect(storeTasks).toHaveLength(1);
-    expect(storeTasks[0].id).toBe("t-1");
+    expect(result.current.tasks[0].title).toBe("Query Task");
   });
 
   it("reflects query cache mutations (e.g. from WebSocket upserts)", async () => {
@@ -83,7 +74,7 @@ describe("useTasks", () => {
     mockListTasks.mockImplementation(async () => {
       // Simulate a WebSocket upsert arriving during the fetch
       const wsTask = createMockTask({ id: "t-2", title: "During Flight" });
-      useTaskStore.getState().upsertTask(wsTask);
+      upsertTaskInQueryCache(wsTask);
       return { status: "ok", data: [task1] };
     });
 
@@ -130,7 +121,6 @@ describe("useTasks", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(useTaskStore.getState().tasks).toEqual([]);
     expect(result.current.tasks).toEqual([]);
   });
 
@@ -189,14 +179,9 @@ describe("useTasks", () => {
     await waitFor(() => {
       expect(mockListTasks).toHaveBeenCalledWith(filter);
     });
-    expect(useTaskStore.getState().activeFilter).toEqual(filter);
   });
 
-  it("sets error state on fetch failure without corrupting the store", async () => {
-    // Pre-seed the store with existing tasks
-    const existing = createMockTask({ id: "t-existing", title: "Existing" });
-    useTaskStore.setState({ tasks: [existing] });
-
+  it("sets error state on fetch failure without returning stale store data", async () => {
     mockListTasks.mockResolvedValue({
       status: "error",
       error: { message: "Network error" },
@@ -208,14 +193,15 @@ describe("useTasks", () => {
       expect(result.current.error).toBe("Network error");
     });
 
-    // Store should still have the pre-existing task (not wiped by the error)
-    expect(useTaskStore.getState().tasks).toHaveLength(1);
-    expect(useTaskStore.getState().tasks[0].id).toBe("t-existing");
+    expect(result.current.tasks).toEqual([]);
   });
 
-  it("drops pre-existing store tasks that are absent from a fresh project fetch", async () => {
+  it("drops pre-existing query tasks that are absent from a fresh project fetch", async () => {
     const preExisting = createMockTask({ id: "t-pre", title: "Pre-existing" });
-    useTaskStore.setState({ tasks: [preExisting] });
+    upsertTaskInQueryCache(preExisting);
+    await queryClient.invalidateQueries({
+      queryKey: queryKeys.tasks.lists(getProjectScopeGeneration()),
+    });
 
     const fresh = createMockTask({ id: "t-fresh", title: "Fresh" });
     mockListTasks.mockResolvedValue({ status: "ok", data: [fresh] });
