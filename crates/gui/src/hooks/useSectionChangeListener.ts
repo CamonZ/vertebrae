@@ -10,6 +10,7 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for section change type */
 function getSectionChangeMessage(
@@ -36,6 +37,9 @@ interface UseSectionChangeListenerOptions {
 /**
  * Hook that listens to SectionChangedEvent from Tauri and updates the
  * task's cached sections in TanStack Query when section payloads arrive.
+ * Section payloads do not include a stable section id, and delete events carry
+ * no section body, so every section event also refreshes the full task in the
+ * background to reconcile ordering, refs, deletes, and task metadata.
  *
  * @param options - Configuration options for the listener
  */
@@ -45,6 +49,8 @@ export function useSectionChangeListener(
   const { enabled = true } = options;
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
+  const fetchAndReconcileTask =
+    useRefreshTaskForRealtimeChange("SectionChangeListener");
 
   const handleSectionChanged = useCallback(
     (event: { payload: SectionChangedEvent }) => {
@@ -72,8 +78,10 @@ export function useSectionChangeListener(
           projectScopeGeneration
         );
       }
+
+      void fetchAndReconcileTask(task_id);
     },
-    [addToast, projectScopeGeneration]
+    [addToast, fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {
