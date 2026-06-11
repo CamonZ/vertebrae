@@ -113,10 +113,93 @@ describe("server cache helpers", () => {
 
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
-    ).toEqual([{ ...existingTask, ...update, tags: existingTask.tags }]);
+    ).toEqual([{ ...existingTask, ...update, tags: [] }]);
     expect(
       queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([{ ...existingTask, ...update, tags: existingTask.tags }]);
+    ).toEqual([{ ...existingTask, ...update, tags: [] }]);
+  });
+
+  it("merges detail cache entries without wiping omitted hydrated fields", () => {
+    const generation = 12;
+    const existingTask = createMockTask({
+      id: "task-1",
+      title: "Before",
+      sections: [
+        {
+          type: "goal",
+          content: "Keep me",
+          order: 1,
+          done: null,
+          done_at: null,
+        },
+      ],
+      code_refs: [
+        {
+          path: "src/main.rs",
+          line_start: 1,
+          line_end: null,
+          name: null,
+          description: null,
+        },
+      ],
+    });
+    const update = createMockTask({
+      id: existingTask.id,
+      title: "After",
+      workflow_name: "Implementation",
+      step_name: "todo",
+    });
+    delete update.sections;
+    delete update.code_refs;
+
+    queryClient.setQueryData(
+      queryKeys.tasks.detail(generation, existingTask.id),
+      existingTask
+    );
+
+    upsertTaskInQueryCache(update, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.detail(generation, existingTask.id))
+    ).toEqual({
+      ...existingTask,
+      ...update,
+      sections: existingTask.sections,
+      code_refs: existingTask.code_refs,
+    });
+  });
+
+  it("inserts runnable tasks into an existing ready feed", () => {
+    const generation = 12;
+    const task = createMockTask({
+      id: "task-ready",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+    });
+    const otherTask = createMockTask({ id: "task-other" });
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [otherTask]);
+
+    upsertTaskInQueryCache(task, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.ready(generation))
+    ).toEqual([otherTask, task]);
+  });
+
+  it("leaves loading list queries undefined during cache patches", () => {
+    const generation = 12;
+    const key = queryKeys.tasks.list(generation, ticketFilter);
+    const task = createMockTask({ id: "task-1", level: "ticket" });
+    queryClient.setQueryData(key, undefined);
+
+    upsertTaskInQueryCache(task, generation);
+
+    expect(queryClient.getQueryData(key)).toBeUndefined();
   });
 
   it("removes existing tasks from filtered lists when updates no longer match", () => {

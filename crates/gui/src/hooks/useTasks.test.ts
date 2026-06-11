@@ -90,6 +90,63 @@ describe("useTasks", () => {
     expect(ids).toContain("t-2");
   });
 
+  it("preserves existing task updates that arrive during fetch flight", async () => {
+    const serverTask = createMockTask({
+      id: "t-1",
+      title: "Server stale",
+      updated_at: "2026-06-11T10:00:00Z",
+    });
+    const websocketTask = {
+      ...serverTask,
+      title: "WebSocket fresh",
+      updated_at: "2026-06-11T10:00:01Z",
+    };
+    mockListTasks.mockResolvedValueOnce({ status: "ok", data: [serverTask] });
+
+    const { result } = renderHook(() => useTasks(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.tasks[0]?.title).toBe("Server stale");
+    });
+
+    mockListTasks.mockImplementationOnce(async () => {
+      upsertTaskInQueryCache(websocketTask);
+      return { status: "ok", data: [serverTask] };
+    });
+
+    act(() => {
+      result.current.refetch();
+    });
+
+    await waitFor(() => {
+      expect(result.current.tasks[0]?.title).toBe("WebSocket fresh");
+    });
+    expect(mockListTasks).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves same-id detail upserts that arrive during the first list fetch", async () => {
+    const serverTask = createMockTask({
+      id: "t-1",
+      title: "Server stale",
+      updated_at: "2026-06-11T10:00:00Z",
+    });
+    const websocketTask = {
+      ...serverTask,
+      title: "WebSocket first fetch",
+      updated_at: "2026-06-11T10:00:01Z",
+    };
+    mockListTasks.mockImplementationOnce(async () => {
+      upsertTaskInQueryCache(websocketTask);
+      return { status: "ok", data: [serverTask] };
+    });
+
+    const { result } = renderHook(() => useTasks(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.tasks[0]?.title).toBe("WebSocket first fetch");
+    });
+  });
+
   it("ignores stale fetch results after project-scoped stores reset", async () => {
     let resolveFetch!: (value: { status: "ok"; data: Task[] }) => void;
     mockListTasks.mockResolvedValueOnce(

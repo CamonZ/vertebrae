@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { commands } from "../bindings";
+import { removeTaskFromQueryCache } from "../query";
 
 interface UseDeleteTaskOptions {
   onDeleted?: () => void;
@@ -12,7 +13,7 @@ interface UseDeleteTaskOptions {
  * - Confirmation dialog state (open/closed)
  * - Cascade delete option (delete children or orphan them)
  * - Loading and error states
- * - Cache removal via the subsequent websocket confirmation event
+ * - Immediate cache removal on success (idempotent with the websocket event)
  *
  * @param taskId - The task ID to delete
  * @returns Object containing delete state and handlers
@@ -47,6 +48,7 @@ export function useDeleteTask(
     try {
       const result = await commands.deleteTask(taskId, cascade);
       if (result.status === "ok") {
+        removeTaskFromQueryCache(taskId);
         setIsDeleteDialogOpen(false);
         onDeleted?.();
       } else {

@@ -395,6 +395,64 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
   });
 
+  it("hydrates routable task payloads when empty arrays would clear cached data", async () => {
+    const existing = createMockTask({
+      id: "lean-empty-arrays",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-review",
+      step_name: "review",
+      tags: ["old-tag"],
+      sections: [
+        {
+          type: "goal",
+          content: "Old goal",
+          order: 1,
+          done: null,
+          done_at: null,
+        },
+      ],
+    });
+    const leanPayload = {
+      ...existing,
+      title: "Lean payload",
+      tags: [],
+      sections: [],
+    };
+    const hydrated = {
+      ...leanPayload,
+      title: "Hydrated payload",
+    };
+    seedTaskList([existing]);
+    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "lean-empty-arrays",
+      change_type: "Updated",
+      task: leanPayload,
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    await waitFor(() => {
+      expect(mockGetTask).toHaveBeenCalledWith("lean-empty-arrays");
+    });
+    await waitFor(() => {
+      expect(cachedTasks()[0]).toMatchObject({
+        title: "Hydrated payload",
+        tags: [],
+        sections: [],
+      });
+    });
+  });
+
   it("hydrates task changed events when payload task data is absent", async () => {
     const hydrated = createMockTask({
       id: "missing-task",

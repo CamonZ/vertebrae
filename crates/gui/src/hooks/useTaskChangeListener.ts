@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import {
   events,
+  type Task,
   type TaskChangedEvent,
   type TaskChangeType,
   type TaskRunStepChangedEvent,
@@ -11,7 +12,12 @@ import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
-import { removeTaskFromQueryCache, upsertTaskInQueryCache } from "../query";
+import {
+  queryClient,
+  queryKeys,
+  removeTaskFromQueryCache,
+  upsertTaskInQueryCache,
+} from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for task change type */
@@ -30,6 +36,45 @@ function getTaskChangeMessage(
     case "StatusChanged":
       return `Task ${shortId} status changed`;
   }
+}
+
+function cachedTasksFor(taskId: string, generation: number): Task[] {
+  const detail = queryClient.getQueryData<Task>(
+    queryKeys.tasks.detail(generation, taskId)
+  );
+  const lists = queryClient.getQueriesData<Task[]>({
+    queryKey: queryKeys.tasks.lists(generation),
+  });
+  const ready = queryClient.getQueryData<Task[]>(
+    queryKeys.tasks.ready(generation)
+  );
+
+  return [
+    ...(detail ? [detail] : []),
+    ...lists.flatMap(([, tasks]) =>
+      (tasks ?? []).filter((task) => task.id === taskId)
+    ),
+    ...(ready ?? []).filter((task) => task.id === taskId),
+  ];
+}
+
+function hasSuspiciousEmptyArrayPayload(task: Task, generation: number) {
+  const cachedTasks = cachedTasksFor(task.id, generation);
+  return cachedTasks.some(
+    (cachedTask) =>
+      (task.sections !== undefined &&
+        task.sections.length === 0 &&
+        (cachedTask.sections?.length ?? 0) > 0) ||
+      (task.code_refs !== undefined &&
+        task.code_refs.length === 0 &&
+        (cachedTask.code_refs?.length ?? 0) > 0) ||
+      (task.dependency_ids !== undefined &&
+        task.dependency_ids.length === 0 &&
+        (cachedTask.dependency_ids?.length ?? 0) > 0) ||
+      (task.tags !== undefined &&
+        task.tags.length === 0 &&
+        (cachedTask.tags?.length ?? 0) > 0)
+  );
 }
 
 /** Options for the task change listener hook */
@@ -75,7 +120,11 @@ export function useTaskChangeListener(
       if (change_type === "Deleted" || archived) {
         removeTaskFromQueryCache(task_id, projectScopeGeneration);
       } else if (task) {
-        if (!task.workflow_name || !task.step_name) {
+        if (
+          !task.workflow_name ||
+          !task.step_name ||
+          hasSuspiciousEmptyArrayPayload(task, projectScopeGeneration)
+        ) {
           void fetchAndReconcileTask(task_id);
         } else {
           upsertTaskInQueryCache(task, projectScopeGeneration);

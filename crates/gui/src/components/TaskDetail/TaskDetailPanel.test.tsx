@@ -599,6 +599,11 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           false
         );
       });
+      expect(
+        queryClient.getQueryData(
+          queryKeys.tasks.list(getProjectScopeGeneration(), null)
+        )
+      ).toEqual([]);
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     });
 
