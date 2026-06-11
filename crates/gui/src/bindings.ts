@@ -897,6 +897,7 @@ liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
+sessionLogUpdatedEvent: SessionLogUpdatedEvent,
 stepChangedEvent: StepChangedEvent,
 stepExecutionChangedEvent: StepExecutionChangedEvent,
 stepTransitionChangedEvent: StepTransitionChangedEvent,
@@ -921,6 +922,7 @@ liveChatSessionChangedEvent: "live-chat-session-changed-event",
 permissionRequestEvent: "permission-request-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
+sessionLogUpdatedEvent: "session-log-updated-event",
 stepChangedEvent: "step-changed-event",
 stepExecutionChangedEvent: "step-execution-changed-event",
 stepTransitionChangedEvent: "step-transition-changed-event",
@@ -1297,6 +1299,10 @@ export type SessionLog = {
  */
 id: string | null; 
 /**
+ * Stable key for ephemeral logs that replace earlier snapshots
+ */
+logical_key?: string | null;
+/**
  * Step execution ID this log belongs to
  */
 step_execution_id?: string; 
@@ -1314,6 +1320,12 @@ created_at?: string }
  * `session_log` carries the full deserialized entity when available.
  */
 export type SessionLogCreatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
+/**
+ * Event payload for session log updates.
+ * Emitted when an existing ephemeral session log snapshot is replaced.
+ * `session_log` carries the full deserialized entity when available.
+ */
+export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
 /**
  * Workflow step entity - mirrors db::Step
  */

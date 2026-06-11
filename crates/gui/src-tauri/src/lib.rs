@@ -30,9 +30,9 @@ use claude_session::{
 use commands::AppState;
 use events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
-    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent,
-    StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent,
-    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
+    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
+    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
     WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
@@ -157,6 +157,7 @@ fn create_builder() -> Builder {
             StepTransitionChangedEvent,
             WorkflowTransitionChangedEvent,
             SessionLogCreatedEvent,
+            SessionLogUpdatedEvent,
             SectionChangedEvent,
             // Sacrum live chat events
             LiveChatSessionChangedEvent,

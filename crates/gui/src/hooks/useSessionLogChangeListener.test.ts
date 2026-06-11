@@ -22,6 +22,7 @@ const { mockEvents, eventListeners, emitEvent } = vi.hoisted(() => {
   return {
     mockEvents: {
       sessionLogCreatedEvent: createEventListener("sessionLogCreated"),
+      sessionLogUpdatedEvent: createEventListener("sessionLogUpdated"),
     },
     eventListeners: listeners,
     emitEvent: (eventName: string, payload: Record<string, unknown>) => {
@@ -50,7 +51,7 @@ describe("useSessionLogChangeListener", () => {
     useToastStore.getState().clearToasts();
   });
 
-  it("calls appendLog when session_log is present in the event", async () => {
+  it("calls appendLog when a created event has session_log", async () => {
     renderHook(() => useSessionLogChangeListener());
 
     // Wait for the listener to be registered
@@ -81,7 +82,7 @@ describe("useSessionLogChangeListener", () => {
     expect(logs[0].step_execution_id).toBe("exec-001");
   });
 
-  it("does not call appendLog when session_log is null", async () => {
+  it("does not call appendLog when a created event has null session_log", async () => {
     renderHook(() => useSessionLogChangeListener());
 
     await act(async () => {
@@ -108,6 +109,7 @@ describe("useSessionLogChangeListener", () => {
     });
 
     expect(mockEvents.sessionLogCreatedEvent.listen).not.toHaveBeenCalled();
+    expect(mockEvents.sessionLogUpdatedEvent.listen).not.toHaveBeenCalled();
 
     // Emit an event anyway to be thorough
     act(() => {
@@ -178,6 +180,78 @@ describe("useSessionLogChangeListener", () => {
     expect(betaLogs[0].content).toBe("Beta log entry");
   });
 
+  it("upserts updated events without growing or reordering existing logs", async () => {
+    renderHook(() => useSessionLogChangeListener());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const originalLog = {
+      id: "log-ephemeral-old",
+      logical_key: "thinking:sess-1",
+      step_execution_id: "exec-001",
+      content: "old snapshot",
+      created_at: "2026-03-17T10:00:00Z",
+    };
+    const durableLog = {
+      id: "log-durable",
+      step_execution_id: "exec-001",
+      content: "durable row",
+      created_at: "2026-03-17T10:01:00Z",
+    };
+    const updatedLog = {
+      id: "log-ephemeral-new",
+      logical_key: "thinking:sess-1",
+      step_execution_id: "exec-001",
+      content: "new snapshot",
+      created_at: "2026-03-17T10:02:00Z",
+    };
+
+    useSessionLogStore.getState().setLogs("exec-001", [originalLog, durableLog]);
+
+    act(() => {
+      emitEvent("sessionLogUpdated", {
+        log_id: "log-ephemeral-new",
+        step_execution_id: "exec-001",
+        session_log: updatedLog,
+      });
+    });
+
+    const logs = useSessionLogStore.getState().logsByExecutionId["exec-001"];
+    expect(logs).toHaveLength(2);
+    expect(logs[0]).toEqual(updatedLog);
+    expect(logs[1]).toEqual(durableLog);
+  });
+
+  it("inserts updated events when the created event was missed", async () => {
+    renderHook(() => useSessionLogChangeListener());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const updatedLog = {
+      id: "log-first-seen-as-update",
+      logical_key: "thinking:sess-2",
+      step_execution_id: "exec-002",
+      content: "first snapshot seen by GUI",
+      created_at: "2026-03-17T10:02:00Z",
+    };
+
+    act(() => {
+      emitEvent("sessionLogUpdated", {
+        log_id: "log-first-seen-as-update",
+        step_execution_id: "exec-002",
+        session_log: updatedLog,
+      });
+    });
+
+    const logs = useSessionLogStore.getState().logsByExecutionId["exec-002"];
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toEqual(updatedLog);
+  });
+
   it("does not fire any toasts", async () => {
     renderHook(() => useSessionLogChangeListener());
 
@@ -213,6 +287,7 @@ describe("useSessionLogChangeListener", () => {
 
     // Listener should be registered
     expect(eventListeners["sessionLogCreated"]).toHaveLength(1);
+    expect(eventListeners["sessionLogUpdated"]).toHaveLength(1);
 
     unmount();
 
@@ -222,5 +297,6 @@ describe("useSessionLogChangeListener", () => {
     });
 
     expect(eventListeners["sessionLogCreated"]).toHaveLength(0);
+    expect(eventListeners["sessionLogUpdated"]).toHaveLength(0);
   });
 });
