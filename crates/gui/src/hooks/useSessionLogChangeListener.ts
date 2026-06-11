@@ -1,5 +1,9 @@
 import { useEffect, useCallback } from "react";
-import { events, type SessionLogCreatedEvent } from "../bindings";
+import {
+  events,
+  type SessionLogCreatedEvent,
+  type SessionLogUpdatedEvent,
+} from "../bindings";
 import { useSessionLogStore } from "../stores";
 import {
   getProjectScopeGeneration,
@@ -13,9 +17,10 @@ interface UseSessionLogChangeListenerOptions {
 }
 
 /**
- * Hook that listens to SessionLogCreatedEvent from Tauri and appends incoming
- * session logs directly to the sessionLogStore. Consumers read logs from the
- * store rather than via callbacks.
+ * Hook that listens to session log Tauri events and writes incoming logs
+ * directly to the sessionLogStore. Created events append new rows; updated
+ * events upsert rows by id or logical_key. Consumers read logs from the store
+ * rather than via callbacks.
  *
  * @param options - Configuration options for the listener
  */
@@ -24,6 +29,7 @@ export function useSessionLogChangeListener(
 ) {
   const { enabled = true } = options;
   const appendLog = useSessionLogStore((state) => state.appendLog);
+  const upsertLog = useSessionLogStore((state) => state.upsertLog);
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleSessionLogCreated = useCallback(
@@ -47,17 +53,42 @@ export function useSessionLogChangeListener(
     [appendLog, projectScopeGeneration]
   );
 
+  const handleSessionLogUpdated = useCallback(
+    (event: { payload: SessionLogUpdatedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
+      const { log_id, step_execution_id, session_log } = event.payload;
+
+      console.debug(
+        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} updated for execution ${step_execution_id.slice(0, 6)}`
+      );
+
+      if (session_log) {
+        upsertLog(step_execution_id, session_log);
+      } else {
+        console.debug(
+          `[SessionLogChangeListener] session_log is null for log ${log_id.slice(0, 6)}, skipping upsert`
+        );
+      }
+    },
+    [projectScopeGeneration, upsertLog]
+  );
+
   useEffect(() => {
     if (!enabled) {
       return;
     }
 
-    const unlistenPromise = events.sessionLogCreatedEvent.listen(
+    const unlistenCreatedPromise = events.sessionLogCreatedEvent.listen(
       handleSessionLogCreated
+    );
+    const unlistenUpdatedPromise = events.sessionLogUpdatedEvent.listen(
+      handleSessionLogUpdated
     );
 
     return () => {
-      unlistenPromise.then((unlisten) => unlisten());
+      unlistenCreatedPromise.then((unlisten) => unlisten());
+      unlistenUpdatedPromise.then((unlisten) => unlisten());
     };
-  }, [enabled, handleSessionLogCreated]);
+  }, [enabled, handleSessionLogCreated, handleSessionLogUpdated]);
 }

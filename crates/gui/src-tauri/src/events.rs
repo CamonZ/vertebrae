@@ -217,6 +217,16 @@ pub struct SessionLogCreatedEvent {
     pub session_log: Option<types::SessionLog>,
 }
 
+/// Event payload for session log updates.
+/// Emitted when an existing ephemeral session log snapshot is replaced.
+/// `session_log` carries the full deserialized entity when available.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SessionLogUpdatedEvent {
+    pub log_id: String,
+    pub step_execution_id: String,
+    pub session_log: Option<types::SessionLog>,
+}
+
 /// Event payload for section changes.
 /// Emitted when a section is created, updated, or deleted.
 /// For create/update events, `section` carries the full deserialized entity.

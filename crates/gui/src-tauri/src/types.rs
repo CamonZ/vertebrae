@@ -954,6 +954,9 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
 pub struct SessionLog {
     /// Log ID (string form)
     pub id: Option<String>,
+    /// Stable key for ephemeral logs that replace earlier snapshots
+    #[serde(default)]
+    pub logical_key: Option<String>,
     /// Step execution ID this log belongs to
     #[serde(default)]
     pub step_execution_id: String,
@@ -969,6 +972,7 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
     fn from(log: vertebrae_core::SessionLog) -> Self {
         SessionLog {
             id: log.id,
+            logical_key: log.logical_key,
             step_execution_id: log.step_execution_id,
             content: log.content,
             created_at: log.created_at.to_rfc3339(),

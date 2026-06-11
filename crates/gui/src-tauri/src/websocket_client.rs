@@ -15,11 +15,12 @@ use uuid::Uuid;
 use crate::events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangeType,
     LiveChatSessionChangedEvent, PermissionRequestEvent, SectionChangeType, SectionChangedEvent,
-    SessionLogCreatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
-    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
-    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskRunChangeType,
-    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType,
-    WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
+    SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType, StepChangedEvent,
+    StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
+    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
+    TaskRunChangeType, TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent,
+    WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -379,8 +380,8 @@ impl SacrumSocket {
                 "task_step_changed" => {
                     Self::handle_task_step_changed(payload, app_handle)?;
                 }
-                "session_log_created" => {
-                    Self::handle_session_log_event(payload, app_handle)?;
+                "session_log_created" | "session_log_updated" => {
+                    Self::handle_session_log_event(event, payload, app_handle)?;
                 }
                 "section_created" | "section_updated" | "section_deleted" => {
                     Self::handle_section_event(event, payload, app_handle)?;
@@ -1056,6 +1057,7 @@ impl SacrumSocket {
 
     /// Handle session log events and emit to Tauri
     fn handle_session_log_event<R: Runtime>(
+        event_name: &str,
         payload: &serde_json::Value,
         app_handle: &tauri::AppHandle<R>,
     ) -> Result<(), String> {
@@ -1073,17 +1075,35 @@ impl SacrumSocket {
 
         let session_log = try_deserialize::<types::SessionLog>(payload, "SessionLog");
 
-        let event = SessionLogCreatedEvent {
-            log_id,
-            step_execution_id,
-            session_log,
-        };
+        match event_name {
+            "session_log_created" => {
+                let event = SessionLogCreatedEvent {
+                    log_id,
+                    step_execution_id,
+                    session_log,
+                };
 
-        log::debug!("[WebSocket] Emitting SessionLogCreatedEvent: {:?}", event);
+                log::debug!("[WebSocket] Emitting SessionLogCreatedEvent: {:?}", event);
 
-        app_handle
-            .emit("session-log-created-event", &event)
-            .map_err(|e| format!("Failed to emit event: {}", e))?;
+                app_handle
+                    .emit("session-log-created-event", &event)
+                    .map_err(|e| format!("Failed to emit event: {}", e))?;
+            }
+            "session_log_updated" => {
+                let event = SessionLogUpdatedEvent {
+                    log_id,
+                    step_execution_id,
+                    session_log,
+                };
+
+                log::debug!("[WebSocket] Emitting SessionLogUpdatedEvent: {:?}", event);
+
+                app_handle
+                    .emit("session-log-updated-event", &event)
+                    .map_err(|e| format!("Failed to emit event: {}", e))?;
+            }
+            _ => return Err(format!("Unsupported session log event: {}", event_name)),
+        }
 
         Ok(())
     }
@@ -2444,7 +2464,22 @@ mod tests {
             "id": "log123",
             "step_execution_id": "exec123"
         });
-        let result = SacrumSocket::handle_session_log_event(&payload, handle);
+        let result =
+            SacrumSocket::handle_session_log_event("session_log_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_session_log_updated_event() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "log123",
+            "logical_key": "thinking:sess-1",
+            "step_execution_id": "exec123"
+        });
+        let result =
+            SacrumSocket::handle_session_log_event("session_log_updated", &payload, handle);
         assert!(result.is_ok());
     }
 
@@ -2453,7 +2488,8 @@ mod tests {
         let app = build_test_app();
         let handle = app.handle();
         let payload = serde_json::json!({"step_execution_id": "exec123"});
-        let result = SacrumSocket::handle_session_log_event(&payload, handle);
+        let result =
+            SacrumSocket::handle_session_log_event("session_log_created", &payload, handle);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing id"));
     }
@@ -2531,6 +2567,15 @@ mod tests {
         let app = build_test_app();
         let handle = app.handle();
         let msg = r#"["ref1", "1", "project:test", "session_log_created", {"id": "log123", "step_execution_id": "exec123"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_session_log_updated() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "session_log_updated", {"id": "log123", "logical_key": "thinking:sess-1", "step_execution_id": "exec123"}]"#;
         let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
         assert!(result.is_ok());
     }
