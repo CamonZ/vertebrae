@@ -8,6 +8,7 @@ interface SessionLogState {
 interface SessionLogActions {
   setLogs: (executionId: string, logs: SessionLog[]) => void;
   appendLog: (executionId: string, log: SessionLog) => void;
+  upsertLog: (executionId: string, log: SessionLog) => void;
   clearLogs: (executionId: string) => void;
   reset: () => void;
 }
@@ -33,6 +34,34 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
         [executionId]: [...(state.logsByExecutionId[executionId] ?? []), log],
       },
     })),
+
+  upsertLog: (executionId, log) =>
+    set((state) => {
+      const existingLogs = state.logsByExecutionId[executionId] ?? [];
+      const existingIndex = existingLogs.findIndex((existingLog) => {
+        if (log.id && existingLog.id === log.id) {
+          return true;
+        }
+
+        return Boolean(
+          log.logical_key && existingLog.logical_key === log.logical_key
+        );
+      });
+
+      const nextLogs =
+        existingIndex >= 0
+          ? existingLogs.map((existingLog, index) =>
+              index === existingIndex ? log : existingLog
+            )
+          : [...existingLogs, log];
+
+      return {
+        logsByExecutionId: {
+          ...state.logsByExecutionId,
+          [executionId]: nextLogs,
+        },
+      };
+    }),
 
   clearLogs: (executionId) =>
     set((state) => {

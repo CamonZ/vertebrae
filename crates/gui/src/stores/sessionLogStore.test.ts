@@ -123,6 +123,63 @@ describe("sessionLogStore", () => {
     });
   });
 
+  describe("upsertLog", () => {
+    it("replaces an existing log by id without growing or reordering", () => {
+      useSessionLogStore.getState().setLogs("exec-1", [
+        createMockSessionLog({ id: "log-1", content: "first" }),
+        createMockSessionLog({ id: "log-2", content: "second" }),
+      ]);
+
+      useSessionLogStore
+        .getState()
+        .upsertLog("exec-1", createMockSessionLog({ id: "log-1", content: "updated" }));
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      expect(logs).toHaveLength(2);
+      expect(logs[0].id).toBe("log-1");
+      expect(logs[0].content).toBe("updated");
+      expect(logs[1].id).toBe("log-2");
+      expect(logs[1].content).toBe("second");
+    });
+
+    it("replaces an existing log by logical_key without growing or reordering", () => {
+      useSessionLogStore.getState().setLogs("exec-1", [
+        createMockSessionLog({
+          id: "old-id",
+          logical_key: "thinking:sess-1",
+          content: "old snapshot",
+        }),
+        createMockSessionLog({ id: "durable-id", content: "durable" }),
+      ]);
+
+      useSessionLogStore.getState().upsertLog(
+        "exec-1",
+        createMockSessionLog({
+          id: "new-id",
+          logical_key: "thinking:sess-1",
+          content: "new snapshot",
+        })
+      );
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      expect(logs).toHaveLength(2);
+      expect(logs[0].id).toBe("new-id");
+      expect(logs[0].content).toBe("new snapshot");
+      expect(logs[1].id).toBe("durable-id");
+    });
+
+    it("inserts when the log is absent", () => {
+      useSessionLogStore
+        .getState()
+        .upsertLog("exec-new", createMockSessionLog({ id: "log-1", content: "first update" }));
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-new"];
+      expect(logs).toHaveLength(1);
+      expect(logs[0].id).toBe("log-1");
+      expect(logs[0].content).toBe("first update");
+    });
+  });
+
   describe("clearLogs", () => {
     it("removes logs for the given execution ID", () => {
       useSessionLogStore
