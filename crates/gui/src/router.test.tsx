@@ -65,7 +65,6 @@ import { commands } from "./bindings";
 // Import page components
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
-import { OperationsPage } from "./pages/OperationsPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
 
@@ -78,10 +77,6 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/",
         element: <Navigate to="/tasks" replace />,
-      },
-      {
-        path: "/operations",
-        element: <OperationsPage />,
       },
       {
         path: "/board",
@@ -251,29 +246,6 @@ describe("Router Acceptance Tests", () => {
           updated_at: null,
         },
       ],
-    });
-  });
-
-  describe("Operations route ('/operations')", () => {
-    it("renders OperationsPage at /operations", async () => {
-      const router = createTestRouter(["/operations"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Operations" })
-        ).toBeInTheDocument();
-      });
-
-      // With no tasks or executions, shows the empty "All clear" state
-      await waitFor(() => {
-        expect(screen.getByText("All clear")).toBeInTheDocument();
-      });
     });
   });
 
@@ -499,47 +471,8 @@ describe("Router Acceptance Tests", () => {
       expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
     });
 
-    it("'/operations' and '/board' render different placeholder pages", async () => {
-      const opsRouter = createTestRouter(["/operations"]);
-      const { unmount: unmountOps } = render(
-        <TestWrapper>
-          <RouterProvider router={opsRouter} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Operations" })
-        ).toBeInTheDocument();
-      });
-
-      expect(
-        screen.queryByRole("heading", { name: "Board" })
-      ).not.toBeInTheDocument();
-
-      unmountOps();
-
-      const boardRouter = createTestRouter(["/board"]);
-      render(
-        <TestWrapper>
-          <RouterProvider router={boardRouter} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Board" })
-        ).toBeInTheDocument();
-      });
-
-      expect(
-        screen.queryByRole("heading", { name: "Operations" })
-      ).not.toBeInTheDocument();
-    });
-
     it("primary routes render distinct pages", async () => {
       const routes = [
-        { path: "/operations", heading: "Operations" },
         { path: "/board", heading: "Board" },
         { path: "/tasks", heading: "Tasks" },
       ];
