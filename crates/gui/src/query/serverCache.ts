@@ -17,10 +17,14 @@ import { queryKeys } from "./queryKeys";
 
 type TaskListKey = ReturnType<typeof queryKeys.tasks.list>;
 type WorkflowDetailKey = ReturnType<typeof queryKeys.workflows.detail>;
+const TASK_LIST_KEY_LENGTH = queryKeys.tasks.list(0, null).length;
 
 function taskListFilterFromKey(
   key: readonly unknown[]
 ): TaskFilterOptions | null {
+  if (key.length !== TASK_LIST_KEY_LENGTH || key[3] !== "list") {
+    throw new Error(`Unexpected task list query key: ${JSON.stringify(key)}`);
+  }
   return (key as TaskListKey)[4] ?? null;
 }
 
@@ -44,14 +48,37 @@ function reconcileTaskList(
   return next;
 }
 
-function updateExistingReadyTask(
+function isRetiredFromReadyFeed(task: Task): boolean {
+  return task.archived === true || Boolean(task.completed_at);
+}
+
+function shouldAppendToReadyFeed(task: Task): boolean {
+  return (
+    !isRetiredFromReadyFeed(task) &&
+    (task.run_controls?.runnable === true || task.run_controls?.active_run != null)
+  );
+}
+
+function upsertReadyTask(
   task: Task,
   generation: number
 ): void {
   queryClient.setQueryData<Task[] | undefined>(
     queryKeys.tasks.ready(generation),
-    (tasks) =>
-      tasks?.map((item) => (item.id === task.id ? mergeTask(item, task) : item))
+    (tasks) => {
+      if (!tasks) return tasks;
+      const index = tasks.findIndex((item) => item.id === task.id);
+      if (index === -1) {
+        return shouldAppendToReadyFeed(task) ? [...tasks, task] : tasks;
+      }
+      const mergedTask = mergeTask(tasks[index], task);
+      if (isRetiredFromReadyFeed(mergedTask)) {
+        return tasks.filter((item) => item.id !== task.id);
+      }
+      const next = tasks.slice();
+      next[index] = mergedTask;
+      return next;
+    }
   );
 }
 
@@ -69,16 +96,23 @@ export function upsertTaskInQueryCache(
   task: Task,
   generation = getProjectScopeGeneration()
 ) {
-  queryClient.setQueryData(queryKeys.tasks.detail(generation, task.id), task);
-  updateExistingReadyTask(task, generation);
+  queryClient.setQueryData<Task | undefined>(
+    queryKeys.tasks.detail(generation, task.id),
+    (existing) => (existing ? mergeTask(existing, task) : task)
+  );
+  upsertReadyTask(task, generation);
 
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
-  for (const [key, tasks] of lists) {
-    queryClient.setQueryData(
+  for (const [key] of lists) {
+    const filter = taskListFilterFromKey(key);
+    queryClient.setQueryData<Task[] | undefined>(
       key,
-      reconcileTaskList(tasks, task, taskListFilterFromKey(key))
+      (currentTasks) =>
+        currentTasks === undefined
+          ? undefined
+          : reconcileTaskList(currentTasks, task, filter)
     );
   }
 }
@@ -94,10 +128,10 @@ export function removeTaskFromQueryCache(
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
-  for (const [key, tasks] of lists) {
-    queryClient.setQueryData(
+  for (const [key] of lists) {
+    queryClient.setQueryData<Task[] | undefined>(
       key,
-      (tasks ?? []).filter((task) => task.id !== taskId)
+      (currentTasks) => currentTasks?.filter((task) => task.id !== taskId)
     );
   }
 
@@ -125,12 +159,13 @@ export function replaceTaskRunControlsInQueryCache(
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
-  for (const [key, tasks] of lists) {
-    queryClient.setQueryData(
+  for (const [key] of lists) {
+    queryClient.setQueryData<Task[] | undefined>(
       key,
-      (tasks ?? []).map((task) =>
-        task.id === taskId ? replaceControls(task) : task
-      )
+      (currentTasks) =>
+        currentTasks?.map((task) =>
+          task.id === taskId ? replaceControls(task) : task
+        )
     );
   }
 
@@ -203,12 +238,13 @@ export function updateTaskSectionsInQueryCache(
   const lists = queryClient.getQueriesData<Task[]>({
     queryKey: queryKeys.tasks.lists(generation),
   });
-  for (const [key, tasks] of lists) {
-    queryClient.setQueryData(
+  for (const [key] of lists) {
+    queryClient.setQueryData<Task[] | undefined>(
       key,
-      (tasks ?? []).map((task) =>
-        task.id === taskId ? updateSections(task) : task
-      )
+      (currentTasks) =>
+        currentTasks?.map((task) =>
+          task.id === taskId ? updateSections(task) : task
+        )
     );
   }
 

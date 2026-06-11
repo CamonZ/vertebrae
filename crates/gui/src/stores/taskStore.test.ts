@@ -142,7 +142,7 @@ describe("taskStore", () => {
       expect(state.tasks[0].title).toBe("Updated");
     });
 
-    it("preserves existing sections when WS payload has empty sections", () => {
+    it("preserves existing sections when payload omits sections", () => {
       const sections = [
         {
           type: "checklist_item" as const,
@@ -162,13 +162,35 @@ describe("taskStore", () => {
       const wsPayload = createMockTask({
         id: "task-1",
         title: "Task Updated",
-        sections: [],
       });
+      delete wsPayload.sections;
       useTaskStore.getState().upsertTask(wsPayload);
 
       const state = useTaskStore.getState();
       expect(state.tasks[0].title).toBe("Task Updated");
       expect(state.tasks[0].sections).toEqual(sections);
+    });
+
+    it("clears existing sections when payload has empty sections", () => {
+      const original = createMockTask({
+        id: "task-1",
+        sections: [
+          {
+            type: "checklist_item" as const,
+            content: "Do thing",
+            order: 1,
+            done: false,
+            done_at: null,
+          },
+        ],
+      });
+      useTaskStore.getState().setTasks([original]);
+
+      useTaskStore
+        .getState()
+        .upsertTask(createMockTask({ id: "task-1", sections: [] }));
+
+      expect(useTaskStore.getState().tasks[0].sections).toEqual([]);
     });
 
     it("replaces sections when WS payload has non-empty sections", () => {
@@ -199,7 +221,7 @@ describe("taskStore", () => {
       expect(useTaskStore.getState().tasks[0].sections).toEqual(newSections);
     });
 
-    it("preserves existing code_refs when WS payload has empty code_refs", () => {
+    it("preserves existing code_refs when payload omits code_refs", () => {
       const codeRefs = [
         {
           path: "src/main.rs",
@@ -215,14 +237,14 @@ describe("taskStore", () => {
       const wsPayload = createMockTask({
         id: "task-1",
         title: "Updated",
-        code_refs: [],
       });
+      delete wsPayload.code_refs;
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].code_refs).toEqual(codeRefs);
     });
 
-    it("preserves existing dependency_ids when WS payload has empty dependency_ids", () => {
+    it("preserves existing dependency_ids when payload omits dependency_ids", () => {
       const depIds = ["dep-1", "dep-2"];
       const original = createMockTask({ id: "task-1", dependency_ids: depIds });
       useTaskStore.getState().setTasks([original]);
@@ -230,8 +252,8 @@ describe("taskStore", () => {
       const wsPayload = createMockTask({
         id: "task-1",
         title: "Updated",
-        dependency_ids: [],
       });
+      delete wsPayload.dependency_ids;
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual(depIds);
@@ -256,7 +278,7 @@ describe("taskStore", () => {
       ]);
     });
 
-    it("preserves existing tags when WS payload has empty tags", () => {
+    it("preserves existing tags when payload omits tags", () => {
       const tags = ["frontend", "urgent"];
       const original = createMockTask({ id: "task-1", tags });
       useTaskStore.getState().setTasks([original]);
@@ -264,11 +286,22 @@ describe("taskStore", () => {
       const wsPayload = createMockTask({
         id: "task-1",
         title: "Updated",
-        tags: [],
       });
+      delete wsPayload.tags;
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].tags).toEqual(tags);
+    });
+
+    it("clears existing tags when payload has empty tags", () => {
+      const original = createMockTask({ id: "task-1", tags: ["old-tag"] });
+      useTaskStore.getState().setTasks([original]);
+
+      useTaskStore
+        .getState()
+        .upsertTask(createMockTask({ id: "task-1", tags: [] }));
+
+      expect(useTaskStore.getState().tasks[0].tags).toEqual([]);
     });
 
     it("replaces tags when WS payload has non-empty tags", () => {

@@ -3,6 +3,8 @@ import { commands } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { errorMessage, queryKeys, unwrapCommand } from "../query";
 
+const NO_TASK_SELECTED_KEY = "__vertebrae_no_task_selected__";
+
 /**
  * Hook for fetching a single task.
  *
@@ -10,9 +12,10 @@ import { errorMessage, queryKeys, unwrapCommand } from "../query";
  */
 export function useTask(id: string | null | undefined) {
   const projectScopeGeneration = useProjectScopeGeneration();
+  const taskId = id ?? NO_TASK_SELECTED_KEY;
 
   const query = useQuery({
-    queryKey: queryKeys.tasks.detail(projectScopeGeneration, id ?? ""),
+    queryKey: queryKeys.tasks.detail(projectScopeGeneration, taskId),
     queryFn: () => unwrapCommand(commands.getTask(id!)),
     enabled: Boolean(id),
   });

@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import {
+  commands,
   events,
   type StepExecutionChangedEvent,
   type StepExecutionStatus,
@@ -54,7 +55,7 @@ export function useStepExecutionChangeListener(
     (event: { payload: StepExecutionChangedEvent }) => {
       if (projectScopeGeneration !== getProjectScopeGeneration()) return;
 
-      const { execution_id, step_name, status, change_type, execution } =
+      const { execution_id, task_id, step_name, status, change_type, execution } =
         event.payload;
 
       console.debug(
@@ -74,7 +75,20 @@ export function useStepExecutionChangeListener(
 
       if (execution) {
         upsertExecution(execution);
+        return;
       }
+
+      if (!task_id) return;
+      void commands
+        .getTaskExecutions(task_id)
+        .then((result) => {
+          if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+          if (result.status !== "ok") return;
+          for (const fetchedExecution of result.data) {
+            upsertExecution(fetchedExecution);
+          }
+        })
+        .catch(() => {});
     },
     [addToast, upsertExecution, projectScopeGeneration]
   );
