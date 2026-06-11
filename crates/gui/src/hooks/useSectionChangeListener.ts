@@ -4,11 +4,13 @@ import {
   type SectionChangedEvent,
   type SectionChangeType,
 } from "../bindings";
-import { useTaskStore, useToastStore } from "../stores";
+import { updateTaskSectionsInQueryCache } from "../query";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for section change type */
 function getSectionChangeMessage(
@@ -34,8 +36,10 @@ interface UseSectionChangeListenerOptions {
 
 /**
  * Hook that listens to SectionChangedEvent from Tauri and updates the
- * selected task's sections directly in the task store when the section
- * belongs to the currently selected task.
+ * task's cached sections in TanStack Query when section payloads arrive.
+ * Section payloads do not include a stable section id, and delete events carry
+ * no section body, so every section event also refreshes the full task in the
+ * background to reconcile ordering, refs, deletes, and task metadata.
  *
  * @param options - Configuration options for the listener
  */
@@ -45,6 +49,8 @@ export function useSectionChangeListener(
   const { enabled = true } = options;
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
+  const fetchAndReconcileTask =
+    useRefreshTaskForRealtimeChange("SectionChangeListener");
 
   const handleSectionChanged = useCallback(
     (event: { payload: SectionChangedEvent }) => {
@@ -64,47 +70,18 @@ export function useSectionChangeListener(
             : "info";
       addToast(getSectionChangeMessage(change_type, task_id), toastType);
 
-      // Read current state inside the callback to avoid stale closures
-      // and prevent listener churn from selectedTask changes
-      const { selectedTaskId, selectedTask, selectTask } =
-        useTaskStore.getState();
-
-      if (task_id !== selectedTaskId || !selectedTask) {
-        return;
-      }
-
-      const existingSections = selectedTask.sections ?? [];
-
-      if (change_type === "Deleted") {
-        if (section) {
-          const updatedSections = existingSections.filter(
-            (s) => !(s.type === section.type && s.order === section.order)
-          );
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: updatedSections,
-          });
-        }
-      } else if (section) {
-        const index = existingSections.findIndex(
-          (s) => s.type === section.type && s.order === section.order
+      if (section) {
+        updateTaskSectionsInQueryCache(
+          task_id,
+          section,
+          change_type === "Deleted" ? "remove" : "upsert",
+          projectScopeGeneration
         );
-        if (index >= 0) {
-          const updatedSections = [...existingSections];
-          updatedSections[index] = section;
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: updatedSections,
-          });
-        } else {
-          selectTask(selectedTaskId, {
-            ...selectedTask,
-            sections: [...existingSections, section],
-          });
-        }
       }
+
+      void fetchAndReconcileTask(task_id);
     },
-    [addToast, projectScopeGeneration]
+    [addToast, fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {

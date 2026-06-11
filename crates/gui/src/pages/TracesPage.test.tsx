@@ -1,25 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   fireEvent,
   screen,
   render as rtlRender,
   waitFor,
 } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   createMockTask,
   createMockTaskRun,
   createMockStepExecution,
 } from "../test/test-utils";
-import { useTaskStore } from "../stores/taskStore";
+import { queryClient } from "../query/queryClient";
+import { queryKeys } from "../query/queryKeys";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
+import type { Task } from "../bindings";
 import { TracesPage } from "./TracesPage";
 
 const mockNavigate = vi.fn();
 
 vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>(
-    "react-router-dom"
-  );
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom"
+    );
   return {
     ...actual,
     useNavigate: () => mockNavigate,
@@ -91,12 +97,21 @@ vi.mock("../hooks", () => ({
 
 function renderAt(path: string) {
   return rtlRender(
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/traces/:taskId" element={<TracesPage />} />
-        <Route path="/traces" element={<TracesPage />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/traces/:taskId" element={<TracesPage />} />
+          <Route path="/traces" element={<TracesPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
+function seedPickerTasks(tasks: Task[]) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), null),
+    tasks
   );
 }
 
@@ -110,19 +125,13 @@ describe("TracesPage (single-run)", () => {
       level: "epic",
     });
     mockTask = taskFixtures["root"];
+    seedPickerTasks([taskFixtures["root"]]);
     mockTaskLoading = false;
     mockTaskError = null;
     mockRuns = [];
     mockActiveRun = null;
     mockExecutions = [];
     lastRunsTaskId = null;
-    useTaskStore.setState({
-      tasks: [createMockTask({ id: "root", title: "Root Epic", level: "epic" })],
-      activeFilter: null,
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
   });
 
   it("renders the header with the task title", () => {
@@ -185,14 +194,13 @@ describe("TracesPage (single-run)", () => {
       title: "Never-run task",
       level: "ticket",
     });
-    // Store starts empty — e.g. fresh launch where only realtime events would
-    // otherwise populate it.
-    useTaskStore.setState({ tasks: [] });
-
+    seedPickerTasks([taskFixtures["root"], taskFixtures["other"]]);
     renderAt("/traces");
 
     await waitFor(() => {
-      expect(screen.getByTestId("task-picker-option-other")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("task-picker-option-other")
+      ).toBeInTheDocument();
       expect(screen.getByTestId("task-picker-option-root")).toBeInTheDocument();
     });
   });
@@ -242,6 +250,43 @@ describe("TracesPage (single-run)", () => {
       expect(c1Row?.getAttribute("data-active")).toBe("true");
       // No navigation happened — selection lives in the `task` search param.
       expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it("overlays scoped subtree rows with live query task updates", async () => {
+      renderAt("/traces/root");
+      await waitFor(() => {
+        expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
+      });
+
+      const activeRun = createMockTaskRun({
+        id: "run-c1",
+        task_id: "c1",
+        status: "executing",
+      });
+      const updatedChild = {
+        ...taskFixtures["c1"],
+        title: "Child One Running",
+        run_controls: {
+          runnable: false,
+          stoppable: true,
+          disabled_reason_code: "active_run" as const,
+          disabled_reason: "A TaskRun is already active",
+          active_run: activeRun,
+        },
+      };
+
+      act(() => {
+        seedPickerTasks([
+          taskFixtures["root"],
+          updatedChild,
+          taskFixtures["c2"],
+        ]);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Child One Running")).toBeInTheDocument();
+      });
+      expect(visibleTaskRowIds()).toEqual(["root", "c1", "c2"]);
     });
 
     it("re-selects the entry task when its row is clicked", async () => {

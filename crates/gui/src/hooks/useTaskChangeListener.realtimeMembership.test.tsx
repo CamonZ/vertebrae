@@ -1,14 +1,18 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  Task,
   TaskChangedEvent,
   TaskFilterOptions,
   TaskRunStepChangedEvent,
   TaskStepChangedEvent,
 } from "../bindings";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
-import { useTaskStore } from "../stores/taskStore";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 import { useToastStore } from "../stores/toastStore";
+import { queryClient, queryKeys } from "../query";
 import { createMockTask } from "../test/test-utils";
 
 const mockGetTask = vi.fn();
@@ -16,8 +20,9 @@ const taskChangedListen = vi.fn();
 const taskStepChangedListen = vi.fn();
 const taskRunStepChangedListen = vi.fn();
 
-let taskChangedHandler: ((event: { payload: TaskChangedEvent }) => void) | null =
-  null;
+let taskChangedHandler:
+  | ((event: { payload: TaskChangedEvent }) => void)
+  | null = null;
 let taskStepChangedHandler:
   | ((event: { payload: TaskStepChangedEvent }) => void)
   | null = null;
@@ -46,7 +51,7 @@ vi.mock("../bindings", () => ({
     },
     taskRunStepChangedEvent: {
       listen: (
-        handler: (event: { payload: TaskRunStepChangedEvent }) => void,
+        handler: (event: { payload: TaskRunStepChangedEvent }) => void
       ) => {
         taskRunStepChangedHandler = handler;
         taskRunStepChangedListen(handler);
@@ -66,7 +71,8 @@ function emitTaskChanged(payload: TaskChangedEvent) {
 }
 
 function emitTaskStepChanged(payload: TaskStepChangedEvent) {
-  if (!taskStepChangedHandler) throw new Error("taskStepChanged handler missing");
+  if (!taskStepChangedHandler)
+    throw new Error("taskStepChanged handler missing");
   act(() => {
     taskStepChangedHandler!({ payload });
   });
@@ -82,7 +88,7 @@ function emitTaskRunStepChanged(payload: TaskRunStepChangedEvent) {
 }
 
 function taskFilter(
-  overrides: Partial<TaskFilterOptions> = {},
+  overrides: Partial<TaskFilterOptions> = {}
 ): TaskFilterOptions {
   return {
     step_names: null,
@@ -95,6 +101,21 @@ function taskFilter(
     step_id: null,
     ...overrides,
   };
+}
+
+function seedTaskList(tasks: Task[], filter = taskFilter()) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), filter),
+    tasks
+  );
+}
+
+function cachedTasks(filter = taskFilter()): Task[] {
+  return (
+    queryClient.getQueryData<Task[]>(
+      queryKeys.tasks.list(getProjectScopeGeneration(), filter)
+    ) ?? []
+  );
 }
 
 describe("useTaskChangeListener realtime list membership", () => {
@@ -126,8 +147,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-review",
       step_name: "pending_review",
     };
-    useTaskStore.getState().setActiveFilter(taskFilter());
-    useTaskStore.getState().setTasks([original]);
+    seedTaskList([original]);
     mockGetTask.mockResolvedValue({ status: "ok", data: updated });
 
     renderHook(() => useTaskChangeListener());
@@ -145,11 +165,9 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
 
     await waitFor(() => {
-      expect(useTaskStore.getState().tasks[0].step_name).toBe(
-        "pending_review",
-      );
+      expect(cachedTasks()[0].step_name).toBe("pending_review");
     });
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    expect(cachedTasks()[0]).toMatchObject({
       id: "task-step",
       workflow_id: "workflow-1",
       workflow_name: "Workflow",
@@ -178,7 +196,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-review",
       step_name: "review",
     };
-    useTaskStore.getState().setTasks([parent, child]);
+    seedTaskList([parent, child]);
     mockGetTask.mockResolvedValue({ status: "ok", data: updatedChild });
 
     renderHook(() => useTaskChangeListener());
@@ -197,13 +215,12 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
 
     await waitFor(() => {
-      expect(
-        useTaskStore.getState().tasks.find((task) => task.id === "child")
-          ?.step_name,
-      ).toBe("review");
+      expect(cachedTasks().find((task) => task.id === "child")?.step_name).toBe(
+        "review"
+      );
     });
 
-    const flat = useTaskStore.getState().tasks;
+    const flat = cachedTasks();
     const treeChild = flat
       .filter((task) => task.parent_id === "parent")
       .find((task) => task.id === "child");
@@ -219,16 +236,14 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    useTaskStore.getState().setActiveFilter(
-      taskFilter({
-        step_names: ["todo"],
-        levels: ["ticket"],
-        search: "visible",
-        workflow_id: "workflow-1",
-        step_id: "step-todo",
-      }),
-    );
-    useTaskStore.getState().setTasks([visible]);
+    const filter = taskFilter({
+      step_names: ["todo"],
+      levels: ["ticket"],
+      search: "visible",
+      workflow_id: "workflow-1",
+      step_id: "step-todo",
+    });
+    seedTaskList([visible], filter);
 
     renderHook(() => useTaskChangeListener());
     await waitFor(() => {
@@ -252,9 +267,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       level: "ticket",
       archived: false,
     });
-    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual([
-      "visible",
-    ]);
+    expect(cachedTasks(filter).map((task) => task.id)).toEqual(["visible"]);
 
     const movedToDone = {
       ...visible,
@@ -271,10 +284,10 @@ describe("useTaskChangeListener realtime list membership", () => {
       level: "ticket",
       archived: false,
     });
-    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(cachedTasks(filter)).toEqual([]);
 
     const archived = { ...visible, archived: true };
-    useTaskStore.getState().setTasks([visible]);
+    seedTaskList([visible], filter);
     emitTaskChanged({
       task_id: "visible",
       change_type: "Updated",
@@ -284,9 +297,9 @@ describe("useTaskChangeListener realtime list membership", () => {
       level: "ticket",
       archived: true,
     });
-    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(cachedTasks(filter)).toEqual([]);
 
-    useTaskStore.getState().setTasks([visible]);
+    seedTaskList([visible], filter);
     emitTaskChanged({
       task_id: "visible",
       change_type: "Deleted",
@@ -296,7 +309,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       level: "ticket",
       archived: false,
     });
-    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(cachedTasks(filter)).toEqual([]);
   });
 
   it("keeps a task visible when realtime moves it to done under the default list filter", async () => {
@@ -309,8 +322,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    useTaskStore.getState().setActiveFilter(taskFilter());
-    useTaskStore.getState().setTasks([visible]);
+    seedTaskList([visible]);
 
     renderHook(() => useTaskChangeListener());
     await waitFor(() => {
@@ -333,8 +345,8 @@ describe("useTaskChangeListener realtime list membership", () => {
       archived: false,
     });
 
-    expect(useTaskStore.getState().tasks).toHaveLength(1);
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    expect(cachedTasks()).toHaveLength(1);
+    expect(cachedTasks()[0]).toMatchObject({
       id: "visible-done",
       workflow_name: "Finished",
       current_step_id: "step-done",
@@ -355,6 +367,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Implementation",
       step_name: "review",
     };
+    seedTaskList([]);
     mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
 
     renderHook(() => useTaskChangeListener());
@@ -375,10 +388,68 @@ describe("useTaskChangeListener realtime list membership", () => {
     await waitFor(() => {
       expect(mockGetTask).toHaveBeenCalledWith("needs-hydration");
     });
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    expect(cachedTasks()[0]).toMatchObject({
       id: "needs-hydration",
       workflow_name: "Implementation",
       step_name: "review",
+    });
+  });
+
+  it("hydrates routable task payloads when empty arrays would clear cached data", async () => {
+    const existing = createMockTask({
+      id: "lean-empty-arrays",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-review",
+      step_name: "review",
+      tags: ["old-tag"],
+      sections: [
+        {
+          type: "goal",
+          content: "Old goal",
+          order: 1,
+          done: null,
+          done_at: null,
+        },
+      ],
+    });
+    const leanPayload = {
+      ...existing,
+      title: "Lean payload",
+      tags: [],
+      sections: [],
+    };
+    const hydrated = {
+      ...leanPayload,
+      title: "Hydrated payload",
+    };
+    seedTaskList([existing]);
+    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "lean-empty-arrays",
+      change_type: "Updated",
+      task: leanPayload,
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    await waitFor(() => {
+      expect(mockGetTask).toHaveBeenCalledWith("lean-empty-arrays");
+    });
+    await waitFor(() => {
+      expect(cachedTasks()[0]).toMatchObject({
+        title: "Hydrated payload",
+        tags: [],
+        sections: [],
+      });
     });
   });
 
@@ -390,6 +461,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-review",
       step_name: "review",
     });
+    seedTaskList([]);
     mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
 
     renderHook(() => useTaskChangeListener());
@@ -410,7 +482,7 @@ describe("useTaskChangeListener realtime list membership", () => {
     await waitFor(() => {
       expect(mockGetTask).toHaveBeenCalledWith("missing-task");
     });
-    expect(useTaskStore.getState().tasks[0]).toMatchObject({
+    expect(cachedTasks()[0]).toMatchObject({
       id: "missing-task",
       workflow_name: "Implementation",
       step_name: "review",

@@ -46,7 +46,16 @@ vi.mock("../bindings", () => ({
 }));
 
 import { useTaskRunChangeListener } from "./useTaskRunChangeListener";
-import { useTaskRunStore, useTaskStore } from "../stores";
+import { useTaskRunStore } from "../stores";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
+import { queryClient, queryKeys, upsertTaskInQueryCache } from "../query";
+import type { Task } from "../bindings";
+
+function cachedTask(taskId: string): Task | undefined {
+  return queryClient.getQueryData<Task>(
+    queryKeys.tasks.detail(getProjectScopeGeneration(), taskId)
+  );
+}
 
 describe("useTaskRunChangeListener", () => {
   beforeEach(() => {
@@ -56,10 +65,9 @@ describe("useTaskRunChangeListener", () => {
     });
     mockGetTask.mockReset();
     useTaskRunStore.setState({ taskRuns: [], taskRunsByTaskId: {} });
-    useTaskStore.getState().reset();
   });
 
-  it("upserts the TaskRun and replaces task run_controls from the payload", async () => {
+  it("upserts the TaskRun and replaces cached task run_controls from the payload", async () => {
     const task = createMockTask({ id: "task-1", run_controls: null });
     const taskRun = createMockTaskRun({
       id: "run-1",
@@ -67,7 +75,7 @@ describe("useTaskRunChangeListener", () => {
       status: "executing",
     });
     const runControls = createMockTaskRunControls(taskRun);
-    useTaskStore.getState().setTasks([task]);
+    upsertTaskInQueryCache(task);
 
     renderHook(() => useTaskRunChangeListener());
     await act(async () => {
@@ -89,20 +97,19 @@ describe("useTaskRunChangeListener", () => {
     expect(runState.taskRuns.map((run) => run.id)).toEqual(["run-1"]);
     expect(runState.taskRunsByTaskId["task-1"][0]).toEqual(taskRun);
 
-    const taskState = useTaskStore.getState();
-    expect(taskState.tasks[0].run_controls).toEqual(runControls);
-    expect(taskState.tasks[0].run_controls?.active_run?.id).toBe("run-1");
+    expect(cachedTask("task-1")?.run_controls).toEqual(runControls);
+    expect(cachedTask("task-1")?.run_controls?.active_run?.id).toBe("run-1");
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
-  it("replaces selectedTask controls without requiring a task refetch", async () => {
+  it("replaces cached detail controls without requiring a task refetch", async () => {
     const task = createMockTask({ id: "task-selected", run_controls: null });
     const taskRun = createMockTaskRun({
       id: "run-selected",
       task_id: "task-selected",
     });
     const runControls = createMockTaskRunControls(taskRun);
-    useTaskStore.getState().setTasks([task]);
-    useTaskStore.getState().selectTask("task-selected", task);
+    upsertTaskInQueryCache(task);
 
     renderHook(() => useTaskRunChangeListener());
     await act(async () => {
@@ -120,9 +127,8 @@ describe("useTaskRunChangeListener", () => {
       });
     });
 
-    expect(useTaskStore.getState().selectedTask?.run_controls).toEqual(
-      runControls
-    );
+    expect(cachedTask("task-selected")?.run_controls).toEqual(runControls);
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
   it("applies null run_controls from the payload", async () => {
@@ -135,7 +141,7 @@ describe("useTaskRunChangeListener", () => {
       id: "task-1",
       run_controls: createMockTaskRunControls(taskRun),
     });
-    useTaskStore.getState().setTasks([task]);
+    upsertTaskInQueryCache(task);
 
     renderHook(() => useTaskRunChangeListener());
     await act(async () => {
@@ -153,8 +159,9 @@ describe("useTaskRunChangeListener", () => {
       });
     });
 
-    expect(useTaskStore.getState().tasks[0].run_controls).toBeNull();
+    expect(cachedTask("task-1")?.run_controls).toBeNull();
     expect(useTaskRunStore.getState().taskRuns[0].status).toBe("completed");
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
   it("still replaces task controls when the TaskRun entity is absent", async () => {
@@ -164,7 +171,7 @@ describe("useTaskRunChangeListener", () => {
       task_id: "task-1",
     });
     const runControls = createMockTaskRunControls(activeRun);
-    useTaskStore.getState().setTasks([task]);
+    upsertTaskInQueryCache(task);
 
     renderHook(() => useTaskRunChangeListener());
     await act(async () => {
@@ -183,10 +190,11 @@ describe("useTaskRunChangeListener", () => {
     });
 
     expect(useTaskRunStore.getState().taskRuns).toEqual([]);
-    expect(useTaskStore.getState().tasks[0].run_controls).toEqual(runControls);
+    expect(cachedTask("task-1")?.run_controls).toEqual(runControls);
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
-  it("hydrates a missing task on run start so store-derived active run surfaces can render it", async () => {
+  it("hydrates a missing task on run start so query-derived active run surfaces can render it", async () => {
     const taskRun = createMockTaskRun({
       id: "run-new",
       task_id: "task-new",
@@ -223,7 +231,7 @@ describe("useTaskRunChangeListener", () => {
     });
 
     expect(mockGetTask).toHaveBeenCalledWith("task-new");
-    expect(useTaskStore.getState().tasks).toEqual([task]);
+    expect(cachedTask("task-new")).toEqual(task);
     expect(useTaskRunStore.getState().taskRuns[0]).toEqual(taskRun);
   });
 

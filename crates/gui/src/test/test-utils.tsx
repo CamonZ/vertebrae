@@ -1,4 +1,5 @@
 import { render, type RenderOptions } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
 import type {
@@ -10,6 +11,7 @@ import type {
   TaskRunControls,
   Workflow,
 } from "../bindings";
+import { queryClient } from "../query/queryClient";
 
 /**
  * Custom render function that wraps components with necessary providers
@@ -19,7 +21,9 @@ function customRender(
   options?: Omit<RenderOptions, "wrapper">
 ) {
   const Wrapper = ({ children }: { children: ReactNode }) => (
-    <BrowserRouter>{children}</BrowserRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>{children}</BrowserRouter>
+    </QueryClientProvider>
   );
 
   return render(ui, { wrapper: Wrapper, ...options });

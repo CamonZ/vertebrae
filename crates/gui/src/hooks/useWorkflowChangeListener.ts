@@ -4,11 +4,15 @@ import {
   type WorkflowChangedEvent,
   type WorkflowChangeType,
 } from "../bindings";
-import { useWorkflowStore, useToastStore } from "../stores";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import {
+  removeWorkflowFromQueryCache,
+  upsertWorkflowInQueryCache,
+} from "../query";
 
 /** Get toast message for workflow change type */
 function getWorkflowChangeMessage(
@@ -38,7 +42,7 @@ interface UseWorkflowChangeListenerOptions {
 
 /**
  * Hook that listens to WorkflowChangedEvent from Tauri and applies entity data
- * directly to the workflow store. No REST refetch is needed since WS payloads
+ * directly to the TanStack Query cache. No REST refetch is needed since WS payloads
  * carry the full entity.
  *
  * @param options - Configuration options for the listener
@@ -47,8 +51,6 @@ export function useWorkflowChangeListener(
   options: UseWorkflowChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const upsertWorkflow = useWorkflowStore((state) => state.upsertWorkflow);
-  const removeWorkflow = useWorkflowStore((state) => state.removeWorkflow);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
 
@@ -71,12 +73,12 @@ export function useWorkflowChangeListener(
       addToast(getWorkflowChangeMessage(change_type, workflow_id), toastType);
 
       if (change_type === "Deleted") {
-        removeWorkflow(workflow_id);
+        removeWorkflowFromQueryCache(workflow_id, projectScopeGeneration);
       } else if (workflow) {
-        upsertWorkflow(workflow);
+        upsertWorkflowInQueryCache(workflow, projectScopeGeneration);
       }
     },
-    [addToast, upsertWorkflow, removeWorkflow, projectScopeGeneration]
+    [addToast, projectScopeGeneration]
   );
 
   useEffect(() => {

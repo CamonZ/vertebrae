@@ -13,7 +13,6 @@ import {
   ProjectSetupPage,
   WelcomeInstallPage,
   TasksPage,
-  OperationsPage,
   BoardPage,
   TracesPage,
   TaskDetailPage,
@@ -199,14 +198,6 @@ const appRoutes: RouteObject[] = [
         index: true,
         // Operations is hidden for now (needs more work); land on tasks.
         element: <Navigate to="/tasks" replace />,
-      },
-      {
-        path: "operations",
-        element: (
-          <GuardedRoute>
-            <OperationsPage />
-          </GuardedRoute>
-        ),
       },
       {
         path: "board",

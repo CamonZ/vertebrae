@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import * as React from "react";
+import { queryClient } from "./query/queryClient";
 
 // The Workflow Atlas (the /design page) lays out via async ELK and is covered
 // in depth by its own suite; here we only assert route wiring, so stub it.
@@ -63,7 +65,6 @@ import { commands } from "./bindings";
 // Import page components
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
-import { OperationsPage } from "./pages/OperationsPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
 
@@ -76,10 +77,6 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/",
         element: <Navigate to="/tasks" replace />,
-      },
-      {
-        path: "/operations",
-        element: <OperationsPage />,
       },
       {
         path: "/board",
@@ -110,7 +107,9 @@ function createTestRouter(initialEntries: string[]) {
  * Wrapper component for tests
  */
 function TestWrapper({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
 }
 
 describe("Router Acceptance Tests", () => {
@@ -250,29 +249,6 @@ describe("Router Acceptance Tests", () => {
     });
   });
 
-  describe("Operations route ('/operations')", () => {
-    it("renders OperationsPage at /operations", async () => {
-      const router = createTestRouter(["/operations"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Operations" })
-        ).toBeInTheDocument();
-      });
-
-      // With no tasks or executions, shows the empty "All clear" state
-      await waitFor(() => {
-        expect(screen.getByText("All clear")).toBeInTheDocument();
-      });
-    });
-  });
-
   describe("Board route ('/board')", () => {
     it("renders BoardPage at /board", async () => {
       const router = createTestRouter(["/board"]);
@@ -370,9 +346,12 @@ describe("Router Acceptance Tests", () => {
         })
       );
 
-      fireEvent.change(screen.getByLabelText("Search tasks by title, id, or tag"), {
-        target: { value: "release" },
-      });
+      fireEvent.change(
+        screen.getByLabelText("Search tasks by title, id, or tag"),
+        {
+          target: { value: "release" },
+        }
+      );
 
       await waitFor(() => {
         expect(commands.listTasks).toHaveBeenCalledWith(
@@ -492,47 +471,8 @@ describe("Router Acceptance Tests", () => {
       expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
     });
 
-    it("'/operations' and '/board' render different placeholder pages", async () => {
-      const opsRouter = createTestRouter(["/operations"]);
-      const { unmount: unmountOps } = render(
-        <TestWrapper>
-          <RouterProvider router={opsRouter} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Operations" })
-        ).toBeInTheDocument();
-      });
-
-      expect(
-        screen.queryByRole("heading", { name: "Board" })
-      ).not.toBeInTheDocument();
-
-      unmountOps();
-
-      const boardRouter = createTestRouter(["/board"]);
-      render(
-        <TestWrapper>
-          <RouterProvider router={boardRouter} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(
-          screen.getByRole("heading", { name: "Board" })
-        ).toBeInTheDocument();
-      });
-
-      expect(
-        screen.queryByRole("heading", { name: "Operations" })
-      ).not.toBeInTheDocument();
-    });
-
     it("primary routes render distinct pages", async () => {
       const routes = [
-        { path: "/operations", heading: "Operations" },
         { path: "/board", heading: "Board" },
         { path: "/tasks", heading: "Tasks" },
       ];

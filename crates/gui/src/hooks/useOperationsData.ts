@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
-import { useTaskStore, useExecutionStore } from "../stores";
+import { useExecutionStore } from "../stores";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
@@ -35,15 +35,14 @@ interface OperationsData {
 /**
  * Hook that aggregates data for the Operations dashboard.
  *
- * Uses the same store-based pattern as BoardPage and TasksPage:
- * - useTasks() fetches and syncs to TaskStore
- * - GlobalListeners keeps TaskStore and ExecutionStore live via WebSocket
+ * Uses TanStack Query for task server state:
+ * - useTasks() fetches the task list
+ * - GlobalListeners keeps query task data and ExecutionStore live via WebSocket
  * - Executions for active tasks are seeded on mount
- * - Sections are derived from store state
+ * - Sections are derived from query task data
  */
 export function useOperationsData(): OperationsData {
-  const { isLoading, error, refetch } = useTasks(ALL_TASKS_FILTER);
-  const tasks = useTaskStore((s) => s.tasks);
+  const { tasks, isLoading, error, refetch } = useTasks(ALL_TASKS_FILTER);
   const executions = useExecutionStore((s) => s.executions);
   const upsertExecution = useExecutionStore((s) => s.upsertExecution);
 

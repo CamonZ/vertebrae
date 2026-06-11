@@ -6,7 +6,7 @@ import {
   isCurrentProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import { useSessionLogStore } from "../stores/sessionLogStore";
-import { useTaskStore } from "../stores/taskStore";
+import { useTasks } from "./useTasks";
 import {
   computeExecutionRollups,
   getDescendantTaskIds,
@@ -31,7 +31,7 @@ export interface UseSubtreeExecutionsResult {
 export function useSubtreeExecutions(
   rootTaskId: string | null | undefined
 ): UseSubtreeExecutionsResult {
-  const tasks = useTaskStore((state) => state.tasks);
+  const { tasks } = useTasks();
 
   const subtreeTaskIds = useMemo(() => {
     if (!rootTaskId) return [];

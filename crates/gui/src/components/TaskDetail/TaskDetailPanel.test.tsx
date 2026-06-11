@@ -9,7 +9,11 @@ import { TaskDetailPanel } from "./TaskDetailPanel";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
 import type { Task, TaskRunControls } from "../../bindings";
-import { useTaskStore } from "../../stores";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../../query";
 
 const mockTaskOverrides = vi.hoisted(() => ({
   current: {} as Partial<Task>,
@@ -133,6 +137,7 @@ vi.mock("../../bindings", () => ({
     orchestrateTask: vi.fn(),
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
+    listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
     toggleChecklistItemDone: vi.fn(),
     // Relation levels/titles are looked up from the store in tests; this stub
     // just keeps the fallback fetch from throwing when a relation isn't seeded.
@@ -171,9 +176,17 @@ function renderWithTaskOverrides(overrides: Partial<Task>) {
   return render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 }
 
+function seedTaskList(tasks: Task[]) {
+  queryClient.setQueryData(
+    queryKeys.tasks.list(getProjectScopeGeneration(), null),
+    tasks
+  );
+}
+
 describe("TaskDetailPanel - Restructured Layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetProjectScopedStores();
     mockTaskOverrides.current = {};
     mockTaskExecutionsOverrides.current = [];
     usePanelFocusStore.getState().reset();
@@ -183,7 +196,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   afterEach(() => {
-    useTaskStore.getState().setTasks([]);
+    queryClient.clear();
   });
 
   describe("Header", () => {
@@ -217,11 +230,9 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("renders the level crumb and a clickable 'under <parent>' link", () => {
       mockTaskOverrides.current = { level: "ticket", parent_id: "parent-1" };
-      useTaskStore
-        .getState()
-        .setTasks([
-          createMockTask({ id: "parent-1", title: "Vertebrae Web App" }),
-        ]);
+      seedTaskList([
+        createMockTask({ id: "parent-1", title: "Vertebrae Web App" }),
+      ]);
       const onTaskSelect = vi.fn();
 
       render(
@@ -570,7 +581,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         status: "ok",
         data: null,
       });
-      useTaskStore.getState().setTasks([mockTaskData]);
+      seedTaskList([mockTaskData]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={onClose} />);
 
@@ -588,8 +599,12 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           false
         );
       });
+      expect(
+        queryClient.getQueryData(
+          queryKeys.tasks.list(getProjectScopeGeneration(), null)
+        )
+      ).toEqual([]);
       await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-      expect(useTaskStore.getState().tasks).toEqual([]);
     });
 
     it("renders confirmation before the scrollable task body when opened from the header", () => {
@@ -622,7 +637,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         status: "ok",
         data: null,
       });
-      useTaskStore.getState().setTasks([mockTaskData, childTask]);
+      seedTaskList([mockTaskData, childTask]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -864,7 +879,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Children section with child count badge when task has children", () => {
-      useTaskStore.getState().setTasks([childTask1, childTask2]);
+      seedTaskList([childTask1, childTask2]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -875,7 +890,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("displays each child with its id badge, title, and step name", () => {
-      useTaskStore.getState().setTasks([childTask1, childTask2]);
+      seedTaskList([childTask1, childTask2]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -898,7 +913,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("calls onTaskSelect when a child task is clicked", () => {
-      useTaskStore.getState().setTasks([childTask1]);
+      seedTaskList([childTask1]);
       const mockOnTaskSelect = vi.fn();
 
       render(
@@ -917,7 +932,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Children section with a 0 count badge when task has no children", () => {
-      useTaskStore.getState().setTasks([]);
+      seedTaskList([]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -929,7 +944,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Children toggle button for accessibility", () => {
-      useTaskStore.getState().setTasks([childTask1]);
+      seedTaskList([childTask1]);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 

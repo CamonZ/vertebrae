@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { WindowLayout } from "../components/WindowLayout";
 import { useTasks } from "../hooks";
-import { useTaskStore } from "../stores";
+import { upsertTaskInQueryCache } from "../query";
 import { takeStashedTask } from "../utils";
 
 /**
@@ -11,7 +11,7 @@ import { takeStashedTask } from "../utils";
  * a dependency task updates local state in place so the window keeps its
  * label/identity instead of triggering a route change.
  *
- * Seeds the per-window task store synchronously from the `localStorage`
+ * Seeds the per-window query cache synchronously from the `localStorage`
  * stash written by the parent so the first paint has full data without a
  * backend round-trip. `useTasks()` then refreshes in the background and
  * also acts as the fall-back when the stash is missing (e.g. the window
@@ -20,7 +20,7 @@ import { takeStashedTask } from "../utils";
 export function TaskDetailPage() {
   const { taskId: routeTaskId } = useParams<{ taskId: string }>();
   const [activeTaskId, setActiveTaskId] = useState<string | null>(
-    routeTaskId ?? null,
+    routeTaskId ?? null
   );
 
   const seededRef = useRef(false);
@@ -28,7 +28,10 @@ export function TaskDetailPage() {
     seededRef.current = true;
     const stashed = takeStashedTask(routeTaskId);
     if (stashed) {
-      useTaskStore.getState().setTasks([stashed.task, ...stashed.related]);
+      upsertTaskInQueryCache(stashed.task);
+      for (const related of stashed.related) {
+        upsertTaskInQueryCache(related);
+      }
     }
   }
 
