@@ -257,6 +257,28 @@ fn codex_usage_to_metrics(
     }
 }
 
+fn session_log_for_provider_line(
+    execution_id: &str,
+    line: String,
+    parser_kind: ParserKind,
+) -> SessionLog {
+    let log_format = match parser_kind {
+        ParserKind::CodexJsonl => "openai",
+        ParserKind::StreamJson => "anthropic",
+    };
+    let mut log = SessionLog::new(execution_id, line).with_format(log_format);
+
+    if let ParserKind::StreamJson = parser_kind
+        && let Some(parsed) = crate::stream_json::parse_stream_log_line(&log.content)
+        && let crate::stream_json::StreamLogPersistence::Ephemeral { logical_key } =
+            crate::stream_json::classify_stream_log_line(&parsed)
+    {
+        log = log.with_logical_key(logical_key);
+    }
+
+    log
+}
+
 /// Emit the verbose `claude_argv` checkpoint with the resolved program/argv
 /// and selected provider; returns the formatted argv so call sites and tests
 /// can observe what was logged. Shared by every built-in provider command
@@ -595,12 +617,8 @@ impl StepExecutor {
                                 }
                             }
 
-                            let log_format = match parser_kind {
-                                ParserKind::CodexJsonl => "openai",
-                                ParserKind::StreamJson => "anthropic",
-                            };
                             let log =
-                                SessionLog::new(execution_id.clone(), line).with_format(log_format);
+                                session_log_for_provider_line(&execution_id, line, parser_kind);
 
                             if let Err(e) = execution_service.add_log(log).await {
                                 tracing::warn!(
@@ -887,6 +905,43 @@ mod tests {
         assert_eq!(metrics.output_tokens, 800);
         assert_eq!(metrics.cost_usd, 0.0);
         assert_eq!(metrics.duration_ms, 0);
+    }
+
+    #[test]
+    fn stream_json_session_log_line_adds_logical_key_for_ephemeral_snapshot() {
+        let log = session_log_for_provider_line(
+            "exec-1",
+            r#"{"type":"system","subtype":"task_progress","tool_use_id":"toolu-1"}"#.to_string(),
+            ParserKind::StreamJson,
+        );
+
+        assert_eq!(log.step_execution_id, "exec-1");
+        assert_eq!(log.format.as_deref(), Some("anthropic"));
+        assert_eq!(log.logical_key.as_deref(), Some("task_progress:toolu-1"));
+    }
+
+    #[test]
+    fn stream_json_session_log_line_keeps_durable_lines_append_only() {
+        let log = session_log_for_provider_line(
+            "exec-1",
+            r#"{"type":"assistant","message":{}}"#.to_string(),
+            ParserKind::StreamJson,
+        );
+
+        assert_eq!(log.format.as_deref(), Some("anthropic"));
+        assert!(log.logical_key.is_none());
+    }
+
+    #[test]
+    fn codex_jsonl_session_log_line_never_adds_logical_key() {
+        let log = session_log_for_provider_line(
+            "exec-1",
+            r#"{"type":"system","subtype":"thinking_tokens","session_id":"sess-1"}"#.to_string(),
+            ParserKind::CodexJsonl,
+        );
+
+        assert_eq!(log.format.as_deref(), Some("openai"));
+        assert!(log.logical_key.is_none());
     }
 
     #[test]
