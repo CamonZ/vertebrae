@@ -129,6 +129,15 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
       };
     case "todo_list":
       return { glyph: "file-text", variant: "default", label: "plan" };
+    case "thinking_heartbeat":
+      return { glyph: "brain", variant: "default", label: "thinking heartbeat" };
+    case "task_progress":
+    case "task_started":
+      return { glyph: "git-branch", variant: "default", label: "subagent activity" };
+    case "task_notification":
+      return { glyph: "flag", variant: "default", label: "task notification" };
+    case "rate_limit":
+      return { glyph: "flag", variant: "default", label: "rate limit" };
   }
 }
 

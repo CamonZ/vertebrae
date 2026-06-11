@@ -28,16 +28,41 @@ export type ClaudeContentItem =
       is_error?: boolean;
     };
 
+export interface ClaudeMessageEnvelope {
+  id?: string;
+  content?: ClaudeContentItem[];
+  model?: string;
+  role?: string;
+}
+
+export interface ClaudeRateLimitInfo {
+  status?: string;
+  resetsAt?: number;
+  rateLimitType?: string;
+  overageStatus?: string;
+  overageDisabledReason?: string;
+  isUsingOverage?: boolean;
+}
+
 /** Raw Claude message structure from --jsonl */
 export interface ClaudeRawMessage {
-  type: "system" | "assistant" | "user" | "result";
-  subtype?: "init" | "success" | "error" | "task_notification";
-  message?: {
-    id?: string;
-    content?: ClaudeContentItem[];
-    model?: string;
-    role?: string;
-  };
+  type:
+    | "system"
+    | "assistant"
+    | "user"
+    | "result"
+    | "task_notification"
+    | "rate_limit_event";
+  subtype?:
+    | "init"
+    | "success"
+    | "error"
+    | "thinking_tokens"
+    | "task_progress"
+    | "task_started"
+    | "task_notification"
+    | string;
+  message?: ClaudeMessageEnvelope | string;
   /**
    * Subagent linkage. Anthropic stream-json carries this at the TOP LEVEL of
    * assistant/user messages emitted BY a spawned subagent: it is the
@@ -51,6 +76,14 @@ export interface ClaudeRawMessage {
   // System init fields
   model?: string;
   session_id?: string;
+  // Claude Code 2.1.x live telemetry fields
+  estimated_tokens?: number;
+  estimated_tokens_delta?: number;
+  tool_use_id?: string;
+  task_id?: string;
+  description?: string;
+  subagent_type?: string;
+  rate_limit_info?: ClaudeRateLimitInfo;
   // Result fields
   duration_ms?: number;
   num_turns?: number;
@@ -96,15 +129,54 @@ export interface ThinkingEvent extends BaseEvent {
   text: string;
 }
 
-/**
- * Final assistant text intended for the user. Codex emits this as
- * `agent_message` (distinct from `reasoning`); Claude `text` content items
- * map here too since they're the user-facing reply (Claude's extended
- * thinking lives in a separate content type that --jsonl doesn't surface).
- */
+/** Final assistant text intended for the user. */
 export interface AssistantMessageEvent extends BaseEvent {
   kind: "assistant_message";
   text: string;
+}
+
+/** Claude Code thinking-token heartbeat. */
+export interface ThinkingHeartbeatEvent extends BaseEvent {
+  kind: "thinking_heartbeat";
+  sessionId: string;
+  estimatedTokens: number;
+  estimatedTokensDelta: number;
+}
+
+/** Claude Code subagent progress snapshot. */
+export interface TaskProgressEvent extends BaseEvent {
+  kind: "task_progress";
+  toolUseId: string;
+  taskId?: string;
+  description: string;
+  subagentType?: string;
+}
+
+/** Claude Code subagent start event. */
+export interface TaskStartedEvent extends BaseEvent {
+  kind: "task_started";
+  toolUseId?: string;
+  taskId?: string;
+  description: string;
+  subagentType?: string;
+}
+
+/** Claude Code task-level notification event. */
+export interface TaskNotificationEvent extends BaseEvent {
+  kind: "task_notification";
+  message: string;
+}
+
+/** Claude Code rate-limit status snapshot. */
+export interface RateLimitEvent extends BaseEvent {
+  kind: "rate_limit";
+  sessionId?: string;
+  status?: string;
+  rateLimitType?: string;
+  resetsAt?: number;
+  overageStatus?: string;
+  overageDisabledReason?: string;
+  isUsingOverage?: boolean;
 }
 
 /** Tool icons by tool name */
@@ -216,7 +288,12 @@ export type ConversationEvent =
   | ToolCallEvent
   | ToolResultEvent
   | FileEditEvent
-  | TodoListEvent;
+  | TodoListEvent
+  | ThinkingHeartbeatEvent
+  | TaskProgressEvent
+  | TaskStartedEvent
+  | TaskNotificationEvent
+  | RateLimitEvent;
 
 // ============================================================================
 // Parsing Utilities
@@ -271,6 +348,60 @@ function truncate(s: string, maxLen: number): string {
   return s.slice(0, maxLen - 3) + "...";
 }
 
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0
+    ? value
+    : undefined;
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function readClaudeMessageContent(
+  message: ClaudeRawMessage["message"]
+): ClaudeContentItem[] | undefined {
+  return typeof message === "object" && message !== null && "content" in message
+    ? message.content
+    : undefined;
+}
+
+function readNotificationMessage(raw: ClaudeRawMessage): string | undefined {
+  const record = raw as unknown as Record<string, unknown>;
+  return (
+    readString(raw.description) ??
+    readString(raw.message) ??
+    readString(record.content) ??
+    readString(record.text)
+  );
+}
+
+function rateLimitEvent(
+  raw: ClaudeRawMessage,
+  timestamp: string
+): RateLimitEvent {
+  const info =
+    raw.rate_limit_info && typeof raw.rate_limit_info === "object"
+      ? raw.rate_limit_info
+      : {};
+  return {
+    kind: "rate_limit",
+    timestamp,
+    sessionId: readString(raw.session_id),
+    status: readString(info.status),
+    rateLimitType: readString(info.rateLimitType),
+    resetsAt: readNumber(info.resetsAt),
+    overageStatus: readString(info.overageStatus),
+    overageDisabledReason: readString(info.overageDisabledReason),
+    isUsingOverage:
+      typeof info.isUsingOverage === "boolean"
+        ? info.isUsingOverage
+        : undefined,
+  };
+}
+
 /**
  * Parse a single Claude JSON message into conversation events.
  * Returns an array because one message can contain multiple content items.
@@ -290,56 +421,98 @@ export function parseClaudeMessage(
           model: raw.model,
           sessionId: raw.session_id,
         });
+      } else if (raw.subtype === "thinking_tokens") {
+        const sessionId = readString(raw.session_id);
+        const estimatedTokens = readNumber(raw.estimated_tokens);
+        if (sessionId && estimatedTokens !== undefined) {
+          events.push({
+            kind: "thinking_heartbeat",
+            timestamp,
+            sessionId,
+            estimatedTokens,
+            estimatedTokensDelta: readNumber(raw.estimated_tokens_delta) ?? 0,
+          });
+        }
+      } else if (raw.subtype === "task_progress") {
+        const toolUseId = readString(raw.tool_use_id);
+        const description = readString(raw.description);
+        if (toolUseId && description) {
+          events.push({
+            kind: "task_progress",
+            timestamp,
+            toolUseId,
+            taskId: readString(raw.task_id),
+            description,
+            subagentType: readString(raw.subagent_type),
+          });
+        }
+      } else if (raw.subtype === "task_started") {
+        events.push({
+          kind: "task_started",
+          timestamp,
+          toolUseId: readString(raw.tool_use_id),
+          taskId: readString(raw.task_id),
+          description:
+            readString(raw.description) ??
+            readString(raw.subagent_type) ??
+            "Subagent started",
+          subagentType: readString(raw.subagent_type),
+        });
+      } else if (raw.subtype === "task_notification") {
+        const message = readNotificationMessage(raw);
+        if (message) {
+          events.push({ kind: "task_notification", timestamp, message });
+        }
       }
       break;
 
     case "assistant":
-      if (raw.message?.content) {
-        for (const item of raw.message.content) {
-          if (item.type === "text" && item.text) {
-            // Claude's `text` content items are its user-facing reply (extended
-            // thinking has its own separate content type, not surfaced in
-            // --jsonl). Map them to `assistant_message` so they render in the
-            // chat bubble layout the same way Codex's `agent_message` does.
-            events.push({
-              kind: "assistant_message",
-              timestamp,
-              text: item.text,
-            });
-          } else if (item.type === "tool_use") {
-            events.push({
-              kind: "tool_call",
-              timestamp,
-              toolId: item.id,
-              toolName: item.name,
-              displayName: getToolDisplayName(item.name),
-              icon: getToolIcon(item.name),
-              summary: getToolSummary(item.name, item.input),
-              input: item.input,
-            });
+      {
+        const content = readClaudeMessageContent(raw.message);
+        if (content) {
+          for (const item of content) {
+            if (item.type === "text" && item.text) {
+              events.push({
+                kind: "assistant_message",
+                timestamp,
+                text: item.text,
+              });
+            } else if (item.type === "tool_use") {
+              events.push({
+                kind: "tool_call",
+                timestamp,
+                toolId: item.id,
+                toolName: item.name,
+                displayName: getToolDisplayName(item.name),
+                icon: getToolIcon(item.name),
+                summary: getToolSummary(item.name, item.input),
+                input: item.input,
+              });
+            }
           }
         }
       }
       break;
 
     case "user":
-      if (raw.message?.content) {
-        for (const item of raw.message.content) {
-          if (item.type === "tool_result") {
-            const content = item.content;
-            const resultText =
-              typeof content === "string"
-                ? content
-                : JSON.stringify(content);
-            events.push({
-              kind: "tool_result",
-              timestamp,
-              toolUseId: item.tool_use_id,
-              isError: item.is_error ?? false,
-              // Full output, newlines preserved — the tool body renders as a
-              // scrollable card. (The compact one-line tool label is separate.)
-              result: resultText,
-            });
+      {
+        const content = readClaudeMessageContent(raw.message);
+        if (content) {
+          for (const item of content) {
+            if (item.type === "tool_result") {
+              const content = item.content;
+              const resultText =
+                typeof content === "string" ? content : JSON.stringify(content);
+              events.push({
+                kind: "tool_result",
+                timestamp,
+                toolUseId: item.tool_use_id,
+                isError: item.is_error ?? false,
+                // Full output, newlines preserved — the tool body renders as a
+                // scrollable card. (The compact one-line tool label is separate.)
+                result: resultText,
+              });
+            }
           }
         }
       }
@@ -356,6 +529,17 @@ export function parseClaudeMessage(
         });
       }
       break;
+
+    case "task_notification": {
+      const message = readNotificationMessage(raw);
+      if (message)
+        events.push({ kind: "task_notification", timestamp, message });
+      break;
+    }
+
+    case "rate_limit_event":
+      events.push(rateLimitEvent(raw, timestamp));
+      break;
   }
 
   // Thread Anthropic's top-level subagent linkage onto every event emitted
@@ -364,11 +548,19 @@ export function parseClaudeMessage(
   // events lets the normalizer nest them into a child Thread. When absent/null
   // we leave `parentToolUseId` undefined (main-agent events stay flat).
   const parentToolUseId =
-    typeof raw.parent_tool_use_id === "string" && raw.parent_tool_use_id.length > 0
+    typeof raw.parent_tool_use_id === "string" &&
+    raw.parent_tool_use_id.length > 0
       ? raw.parent_tool_use_id
       : undefined;
   if (parentToolUseId) {
     for (const ev of events) ev.parentToolUseId = parentToolUseId;
+  } else {
+    for (const ev of events) {
+      if (ev.kind === "task_progress" || ev.kind === "task_started") {
+        const toolUseId = ev.toolUseId;
+        if (toolUseId) ev.parentToolUseId = toolUseId;
+      }
+    }
   }
 
   return events;
@@ -607,7 +799,8 @@ export function parseCodexMessage(
               ? `mcp__${server}__${tool}`
               : tool || server || "mcp";
           const args = item.arguments ?? {};
-          const isError = typeof item.error === "string" && item.error.length > 0;
+          const isError =
+            typeof item.error === "string" && item.error.length > 0;
           const resultText = isError
             ? (item.error as string)
             : codexResultToString(item.result);
@@ -634,7 +827,8 @@ export function parseCodexMessage(
           const toolId = item.id ?? "";
           const query = item.query ?? "";
           const action = item.action ?? "search";
-          const isError = typeof item.error === "string" && item.error.length > 0;
+          const isError =
+            typeof item.error === "string" && item.error.length > 0;
           const resultText = isError
             ? (item.error as string)
             : codexResultToString(item.result);
@@ -801,6 +995,26 @@ export interface CodexParseState {
   todoListByItemId: Map<string, number>;
 }
 
+interface ClaudeParseState {
+  latestSnapshotByKey: Map<string, number>;
+}
+
+function claudeSnapshotKey(
+  ev: ConversationEvent,
+  executionId: string
+): string | null {
+  switch (ev.kind) {
+    case "thinking_heartbeat":
+      return `thinking:${ev.sessionId || executionId}`;
+    case "task_progress":
+      return `task_progress:${ev.toolUseId}`;
+    case "rate_limit":
+      return `rate_limit:${ev.sessionId || executionId}`;
+    default:
+      return null;
+  }
+}
+
 /**
  * Parse an array of SessionLog entries into conversation events.
  *
@@ -815,6 +1029,7 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
   // One Codex state per (step_execution_id) so concurrent executions don't
   // share turn counts. Anthropic logs ignore this map.
   const codexStateByExecution = new Map<string, CodexParseState>();
+  const claudeStateByExecution = new Map<string, ClaudeParseState>();
 
   for (const log of logs) {
     let raw: unknown;
@@ -844,7 +1059,24 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
         events.push(ev);
       }
     } else {
-      events.push(...parseClaudeMessage(raw as ClaudeRawMessage, ts));
+      const execId = log.step_execution_id ?? "";
+      let state = claudeStateByExecution.get(execId);
+      if (!state) {
+        state = { latestSnapshotByKey: new Map() };
+        claudeStateByExecution.set(execId, state);
+      }
+      for (const ev of parseClaudeMessage(raw as ClaudeRawMessage, ts)) {
+        const key = claudeSnapshotKey(ev, execId);
+        if (key) {
+          const priorIndex = state.latestSnapshotByKey.get(key);
+          if (priorIndex !== undefined) {
+            events[priorIndex] = ev;
+            continue;
+          }
+          state.latestSnapshotByKey.set(key, events.length);
+        }
+        events.push(ev);
+      }
     }
   }
 

@@ -56,6 +56,21 @@ export function matchesSearch(
       return ev.model.toLowerCase().includes(needle);
     case "session_end":
       return false;
+    case "task_progress":
+    case "task_started":
+      return (
+        ev.description.toLowerCase().includes(needle) ||
+        (ev.subagentType ?? "").toLowerCase().includes(needle)
+      );
+    case "task_notification":
+      return ev.message.toLowerCase().includes(needle);
+    case "rate_limit":
+      return (
+        (ev.status ?? "").toLowerCase().includes(needle) ||
+        (ev.rateLimitType ?? "").toLowerCase().includes(needle)
+      );
+    case "thinking_heartbeat":
+      return String(ev.estimatedTokens).includes(needle);
     default:
       return false;
   }
