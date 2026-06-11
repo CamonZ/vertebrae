@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
+import { useTasks } from "../../hooks/useTasks";
 import { useTaskExecutions } from "../../hooks/useTaskExecutions";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
-import { useTaskStore } from "../../stores";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
 import { InlineEditField } from "./InlineEditField";
@@ -50,10 +50,7 @@ import {
  * the same tone as the in-section subtitles' parent step. */
 function SectionLabel({ children }: { children: string }) {
   return (
-    <Text
-      variant="eyebrow"
-      color="tertiary"
-    >
+    <Text variant="eyebrow" color="tertiary">
       {children}
     </Text>
   );
@@ -79,7 +76,10 @@ interface TaskDetailPanelProps {
    *  parent (TasksPage) keeps the panel mounted through this window. */
   closing?: boolean;
   /** Fires when the float's exit animation ends, so the parent can unmount. */
-  onExitAnimationEnd?: (event: { target: EventTarget; currentTarget: EventTarget }) => void;
+  onExitAnimationEnd?: (event: {
+    target: EventTarget;
+    currentTarget: EventTarget;
+  }) => void;
 }
 
 function formatDateTime(isoString: string | null): string {
@@ -152,7 +152,7 @@ export function TaskDetailPanel({
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { executions: taskExecutions } = useTaskExecutions(taskId);
-  const allTasks = useTaskStore((s) => s.tasks);
+  const { tasks: allTasks } = useTasks();
   const {
     isDeleteDialogOpen,
     openDeleteDialog,
@@ -182,7 +182,7 @@ export function TaskDetailPanel({
     Record<string, Task["level"]>
   >({});
   // Titles for related tasks (e.g. the parent) fetched alongside their levels
-  // when they aren't already in the store — backs the header "under <parent>"
+  // when they aren't already in query data — backs the header "under <parent>"
   // crumb.
   const [fetchedTitles, setFetchedTitles] = useState<Record<string, string>>(
     {}
@@ -200,7 +200,7 @@ export function TaskDetailPanel({
     [taskLevelById]
   );
 
-  // Parent title for the header "under <parent>" crumb. Prefer the store, fall
+  // Parent title for the header "under <parent>" crumb. Prefer query data, fall
   // back to the title fetched alongside relation levels above.
   const parentTitle = useMemo(() => {
     const pid = taskData?.parent_id;
@@ -1062,10 +1062,11 @@ export function TaskDetailPanel({
                             handleFieldSave("level");
                           }}
                           disabled={isSubmitting}
-                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors ${editValues.level === level
+                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors ${
+                            editValues.level === level
                               ? "bg-[var(--color-accent)] text-[var(--color-bg)]"
                               : "border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
-                            } disabled:cursor-not-allowed disabled:opacity-50`}
+                          } disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                           {level.charAt(0).toUpperCase() + level.slice(1)}
                         </button>
@@ -1084,7 +1085,7 @@ export function TaskDetailPanel({
                   >
                     {taskData.level
                       ? taskData.level.charAt(0).toUpperCase() +
-                      taskData.level.slice(1)
+                        taskData.level.slice(1)
                       : "Unknown"}
                   </p>
                 )}

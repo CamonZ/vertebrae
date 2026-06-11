@@ -1,19 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 
 const mockGetTaskExecutions = vi.fn();
 
 vi.mock("../bindings", () => ({
   commands: {
+    listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
     getTaskExecutions: (...args: unknown[]) => mockGetTaskExecutions(...args),
   },
 }));
 
 import { useSubtreeExecutions } from "./useSubtreeExecutions";
-import { useTaskStore } from "../stores/taskStore";
 import { useExecutionStore } from "../stores/executionStore";
 import { createMockTask } from "../test/test-utils";
-import type { StepExecution } from "../bindings";
+import type { StepExecution, Task } from "../bindings";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../query";
+
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(QueryClientProvider, { client: queryClient }, children);
 
 function exec(overrides: Partial<StepExecution> = {}): StepExecution {
   return {
@@ -31,28 +41,22 @@ function exec(overrides: Partial<StepExecution> = {}): StepExecution {
 describe("useSubtreeExecutions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTaskStore.setState({
-      tasks: [],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
+    resetProjectScopedStores();
     useExecutionStore.setState({ executions: [], executionsByTaskId: {} });
   });
 
   function seedTree() {
-    useTaskStore.setState({
-      tasks: [
-        createMockTask({ id: "epic", parent_id: null }),
-        createMockTask({ id: "ticket-1", parent_id: "epic" }),
-        createMockTask({ id: "ticket-2", parent_id: "epic" }),
-        createMockTask({ id: "task-1", parent_id: "ticket-1" }),
-        createMockTask({ id: "unrelated", parent_id: null }),
-      ],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
+    const tasks: Task[] = [
+      createMockTask({ id: "epic", parent_id: null }),
+      createMockTask({ id: "ticket-1", parent_id: "epic" }),
+      createMockTask({ id: "ticket-2", parent_id: "epic" }),
+      createMockTask({ id: "task-1", parent_id: "ticket-1" }),
+      createMockTask({ id: "unrelated", parent_id: null }),
+    ];
+    queryClient.setQueryData(
+      queryKeys.tasks.list(getProjectScopeGeneration(), null),
+      tasks
+    );
   }
 
   it("fans out parallel getTaskExecutions calls and merges results", async () => {
@@ -75,7 +79,9 @@ describe("useSubtreeExecutions", () => {
       })
     );
 
-    const { result } = renderHook(() => useSubtreeExecutions("epic"));
+    const { result } = renderHook(() => useSubtreeExecutions("epic"), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -84,7 +90,9 @@ describe("useSubtreeExecutions", () => {
     const calledIds = new Set(
       mockGetTaskExecutions.mock.calls.map((c) => c[0])
     );
-    expect(calledIds).toEqual(new Set(["epic", "ticket-1", "ticket-2", "task-1"]));
+    expect(calledIds).toEqual(
+      new Set(["epic", "ticket-1", "ticket-2", "task-1"])
+    );
     expect(calledIds.has("unrelated")).toBe(false);
 
     expect(result.current.executions).toHaveLength(4);
@@ -109,10 +117,15 @@ describe("useSubtreeExecutions", () => {
       maxConcurrent = Math.max(maxConcurrent, inFlight);
       await new Promise((resolve) => setTimeout(resolve, 10));
       inFlight--;
-      return { status: "ok", data: [exec({ id: `${taskId}-e`, task_id: taskId })] };
+      return {
+        status: "ok",
+        data: [exec({ id: `${taskId}-e`, task_id: taskId })],
+      };
     });
 
-    const { result } = renderHook(() => useSubtreeExecutions("epic"));
+    const { result } = renderHook(() => useSubtreeExecutions("epic"), {
+      wrapper,
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(maxConcurrent).toBeGreaterThan(1);
@@ -138,7 +151,9 @@ describe("useSubtreeExecutions", () => {
       })
     );
 
-    const { result } = renderHook(() => useSubtreeExecutions("epic"));
+    const { result } = renderHook(() => useSubtreeExecutions("epic"), {
+      wrapper,
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.rollups.totalRuns).toBe(4);
@@ -171,14 +186,18 @@ describe("useSubtreeExecutions", () => {
     seedTree();
     mockGetTaskExecutions.mockResolvedValue({ status: "ok", data: [] });
 
-    const { result } = renderHook(() => useSubtreeExecutions("epic"));
+    const { result } = renderHook(() => useSubtreeExecutions("epic"), {
+      wrapper,
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.executions).toHaveLength(0);
 
     act(() => {
       useExecutionStore
         .getState()
-        .upsertExecution(exec({ id: "stray", task_id: "unrelated", cost: "99" }));
+        .upsertExecution(
+          exec({ id: "stray", task_id: "unrelated", cost: "99" })
+        );
     });
 
     expect(result.current.executions).toHaveLength(0);
@@ -189,8 +208,9 @@ describe("useSubtreeExecutions", () => {
 
   it("returns no executions and does not fetch when rootTaskId is null", async () => {
     seedTree();
-    const { result } = renderHook(() =>
-      useSubtreeExecutions(null as string | null)
+    const { result } = renderHook(
+      () => useSubtreeExecutions(null as string | null),
+      { wrapper }
     );
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(mockGetTaskExecutions).not.toHaveBeenCalled();
@@ -210,7 +230,9 @@ describe("useSubtreeExecutions", () => {
       return Promise.resolve({ status: "ok", data: [] });
     });
 
-    const { result } = renderHook(() => useSubtreeExecutions("epic"));
+    const { result } = renderHook(() => useSubtreeExecutions("epic"), {
+      wrapper,
+    });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.error).toBe("boom");
   });

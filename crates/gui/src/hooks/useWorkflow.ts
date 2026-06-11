@@ -1,61 +1,28 @@
-import { useEffect, useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
-import { useWorkflowStore } from "../stores";
-import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../stores/projectScopedStores";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
+import { errorMessage, queryKeys, unwrapCommand } from "../query";
 
 /**
  * Hook for fetching a single workflow with its associated tasks.
- * Automatically syncs the current workflow to the Zustand store.
  *
- * @param id - The workflow ID to fetch. If null/undefined, no fetch is performed.
- * @returns Object containing workflow data with tasks, loading state, error state, and refetch function
+ * TanStack Query owns the server-state cache for workflow detail data.
  */
 export function useWorkflow(id: string | null | undefined) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { currentWorkflow, setCurrentWorkflow, clearCurrentWorkflow } =
-    useWorkflowStore();
+  const projectScopeGeneration = useProjectScopeGeneration();
 
-  const fetchWorkflow = useCallback(async () => {
-    if (!id) {
-      clearCurrentWorkflow();
-      return;
-    }
+  const query = useQuery({
+    queryKey: queryKeys.workflows.detail(projectScopeGeneration, id ?? ""),
+    queryFn: () => unwrapCommand(commands.getWorkflowWithTasks(id!)),
+    enabled: Boolean(id),
+  });
 
-    const projectScopeGeneration = getProjectScopeGeneration();
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await commands.getWorkflowWithTasks(id);
-      if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
-
-      if (result.status === "ok") {
-        setCurrentWorkflow(result.data);
-      } else {
-        setError(result.error.message);
-        clearCurrentWorkflow();
-      }
-    } catch (e) {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setError(e instanceof Error ? e.message : String(e));
-        clearCurrentWorkflow();
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [id, setCurrentWorkflow, clearCurrentWorkflow]);
-
-  useEffect(() => {
-    fetchWorkflow();
-  }, [fetchWorkflow]);
-
-  const refetch = useCallback(() => {
-    fetchWorkflow();
-  }, [fetchWorkflow]);
-
-  return { workflow: currentWorkflow, isLoading, error, refetch };
+  return {
+    workflow: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }

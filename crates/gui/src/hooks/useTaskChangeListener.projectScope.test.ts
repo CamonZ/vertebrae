@@ -1,9 +1,12 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskChangedEvent } from "../bindings";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
-import { useTaskStore } from "../stores/taskStore";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 import { useToastStore } from "../stores/toastStore";
+import { queryClient, queryKeys } from "../query";
 import { createMockTask } from "../test/test-utils";
 
 const mockListen = vi.fn();
@@ -81,7 +84,11 @@ describe("useTaskChangeListener project scope hygiene", () => {
       });
     });
 
-    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(getProjectScopeGeneration(), staleTask.id)
+      )
+    ).toBeUndefined();
 
     const currentTask = createMockTask({
       id: "new-project-task",
@@ -104,8 +111,10 @@ describe("useTaskChangeListener project scope hygiene", () => {
       });
     });
 
-    expect(useTaskStore.getState().tasks.map((task) => task.id)).toEqual([
-      "new-project-task",
-    ]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(getProjectScopeGeneration(), currentTask.id)
+      )
+    ).toMatchObject({ id: "new-project-task" });
   });
 });

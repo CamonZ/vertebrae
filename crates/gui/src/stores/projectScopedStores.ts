@@ -7,6 +7,7 @@ import { useStepStore } from "./stepStore";
 import { useTaskRunStore } from "./taskRunStore";
 import { useTaskStore } from "./taskStore";
 import { useWorkflowStore } from "./workflowStore";
+import { queryClient } from "../query/queryClient";
 
 interface ProjectScopeState {
   generation: number;
@@ -37,6 +38,7 @@ export function useProjectScopeGeneration() {
  */
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
+  queryClient.clear();
   useTaskStore.getState().reset();
   useWorkflowStore.getState().reset();
   useStepStore.getState().reset();

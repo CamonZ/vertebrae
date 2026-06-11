@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, render as rtlRender } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { TaskDetailPage } from "./TaskDetailPage";
-import { useTaskStore } from "../stores";
 import type { Task } from "../bindings";
 import { createMockTask } from "../test/test-utils";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../query";
 
 // Stub WindowLayout so we don't pull in GlobalListeners + ToastContainer
 // (and their backend wiring) in this focused test.
@@ -18,9 +22,8 @@ vi.mock("../components/WindowLayout", () => ({
 // vars referenced inside them must come from vi.hoisted.
 const { useTasksMock, takeStashedTaskMock } = vi.hoisted(() => ({
   useTasksMock: vi.fn(),
-  takeStashedTaskMock: vi.fn<
-    (taskId: string) => { task: Task; related: Task[] } | null
-  >(),
+  takeStashedTaskMock:
+    vi.fn<(taskId: string) => { task: Task; related: Task[] } | null>(),
 }));
 
 vi.mock("../hooks", () => ({
@@ -70,7 +73,7 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/task/:taskId" element={<TaskDetailPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -80,7 +83,7 @@ describe("TaskDetailPage", () => {
     useTasksMock.mockClear();
     takeStashedTaskMock.mockReset();
     takeStashedTaskMock.mockReturnValue(null);
-    useTaskStore.getState().setTasks([]);
+    resetProjectScopedStores();
   });
 
   it("renders TaskDetailPanel with the route taskId in standalone mode inside WindowLayout", () => {
@@ -100,11 +103,11 @@ describe("TaskDetailPage", () => {
     fireEvent.click(screen.getByTestId("navigate-dep"));
 
     expect(screen.getByTestId("active-task-id")).toHaveTextContent(
-      "dep-task-456",
+      "dep-task-456"
     );
   });
 
-  it("seeds the task store from the parent's stash so the first paint has full data", () => {
+  it("seeds the query cache from the parent's stash so the first paint has full data", () => {
     const focal = createMockTask({ id: "abc-123", title: "Focal" });
     const child = createMockTask({ id: "child-1", parent_id: "abc-123" });
     takeStashedTaskMock.mockReturnValue({ task: focal, related: [child] });
@@ -112,15 +115,27 @@ describe("TaskDetailPage", () => {
     renderAt("/task/abc-123");
 
     expect(takeStashedTaskMock).toHaveBeenCalledWith("abc-123");
-    const ids = useTaskStore.getState().tasks.map((t) => t.id).sort();
-    expect(ids).toEqual(["abc-123", "child-1"]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(getProjectScopeGeneration(), "abc-123")
+      )
+    ).toEqual(focal);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(getProjectScopeGeneration(), "child-1")
+      )
+    ).toEqual(child);
   });
 
-  it("leaves the store empty when no stash is present (background fetch handles hydration)", () => {
+  it("leaves the query cache empty when no stash is present (background fetch handles hydration)", () => {
     renderAt("/task/abc-123");
 
     expect(takeStashedTaskMock).toHaveBeenCalledWith("abc-123");
-    expect(useTaskStore.getState().tasks).toEqual([]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(getProjectScopeGeneration(), "abc-123")
+      )
+    ).toBeUndefined();
     expect(useTasksMock).toHaveBeenCalled();
   });
 });

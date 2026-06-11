@@ -1,54 +1,31 @@
-import { useEffect, useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { commands } from "../bindings";
-import { useWorkflowStore } from "../stores";
-import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../stores/projectScopedStores";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
+import type { Workflow } from "../bindings";
+import { errorMessage, queryKeys, unwrapCommand } from "../query";
+
+// Stable fallback for no-data renders; see NO_TASKS in useTasks.ts.
+const NO_WORKFLOWS: Workflow[] = [];
 
 /**
  * Hook for fetching and managing the workflow list.
- * Automatically syncs fetched workflows to the Zustand store.
  *
- * @returns Object containing workflows array, loading state, error state, and refetch function
+ * TanStack Query owns the server-state cache for workflow list data.
  */
 export function useWorkflows() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { workflows, setWorkflows } = useWorkflowStore();
+  const projectScopeGeneration = useProjectScopeGeneration();
 
-  const fetchWorkflows = useCallback(async () => {
-    const projectScopeGeneration = getProjectScopeGeneration();
+  const query = useQuery({
+    queryKey: queryKeys.workflows.list(projectScopeGeneration),
+    queryFn: () => unwrapCommand(commands.listWorkflows()),
+  });
 
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await commands.listWorkflows();
-      if (result.status === "ok") {
-        if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-          setWorkflows(result.data);
-        }
-      } else {
-        if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-          setError(result.error.message);
-        }
-      }
-    } catch (e) {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setWorkflows]);
-
-  useEffect(() => {
-    fetchWorkflows();
-  }, [fetchWorkflows]);
-
-  const refetch = useCallback(() => {
-    fetchWorkflows();
-  }, [fetchWorkflows]);
-
-  return { workflows, isLoading, error, refetch };
+  return {
+    workflows: query.data ?? NO_WORKFLOWS,
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }

@@ -1,16 +1,23 @@
 import { useEffect, useCallback } from "react";
 import {
   events,
+  type Task,
   type TaskChangedEvent,
   type TaskChangeType,
   type TaskRunStepChangedEvent,
   type TaskStepChangedEvent,
 } from "../bindings";
-import { useTaskStore, useToastStore } from "../stores";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import {
+  queryClient,
+  queryKeys,
+  removeTaskFromQueryCache,
+  upsertTaskInQueryCache,
+} from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 /** Get toast message for task change type */
@@ -31,6 +38,45 @@ function getTaskChangeMessage(
   }
 }
 
+function cachedTasksFor(taskId: string, generation: number): Task[] {
+  const detail = queryClient.getQueryData<Task>(
+    queryKeys.tasks.detail(generation, taskId)
+  );
+  const lists = queryClient.getQueriesData<Task[]>({
+    queryKey: queryKeys.tasks.lists(generation),
+  });
+  const ready = queryClient.getQueryData<Task[]>(
+    queryKeys.tasks.ready(generation)
+  );
+
+  return [
+    ...(detail ? [detail] : []),
+    ...lists.flatMap(([, tasks]) =>
+      (tasks ?? []).filter((task) => task.id === taskId)
+    ),
+    ...(ready ?? []).filter((task) => task.id === taskId),
+  ];
+}
+
+function hasSuspiciousEmptyArrayPayload(task: Task, generation: number) {
+  const cachedTasks = cachedTasksFor(task.id, generation);
+  return cachedTasks.some(
+    (cachedTask) =>
+      (task.sections !== undefined &&
+        task.sections.length === 0 &&
+        (cachedTask.sections?.length ?? 0) > 0) ||
+      (task.code_refs !== undefined &&
+        task.code_refs.length === 0 &&
+        (cachedTask.code_refs?.length ?? 0) > 0) ||
+      (task.dependency_ids !== undefined &&
+        task.dependency_ids.length === 0 &&
+        (cachedTask.dependency_ids?.length ?? 0) > 0) ||
+      (task.tags !== undefined &&
+        task.tags.length === 0 &&
+        (cachedTask.tags?.length ?? 0) > 0)
+  );
+}
+
 /** Options for the task change listener hook */
 interface UseTaskChangeListenerOptions {
   /** Whether the listener is enabled (default: true) */
@@ -39,7 +85,7 @@ interface UseTaskChangeListenerOptions {
 
 /**
  * Hook that listens to TaskChangedEvent from Tauri and applies entity data
- * directly to the task store. If a realtime payload is incomplete, the hook
+ * directly to the TanStack Query cache. If a realtime payload is incomplete, the hook
  * hydrates the task before reconciling it into the current list.
  *
  * @param options - Configuration options for the listener
@@ -48,8 +94,6 @@ export function useTaskChangeListener(
   options: UseTaskChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const reconcileTask = useTaskStore((state) => state.reconcileTask);
-  const removeTask = useTaskStore((state) => state.removeTask);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask =
@@ -74,24 +118,22 @@ export function useTaskChangeListener(
       addToast(getTaskChangeMessage(change_type, task_id), toastType);
 
       if (change_type === "Deleted" || archived) {
-        removeTask(task_id);
+        removeTaskFromQueryCache(task_id, projectScopeGeneration);
       } else if (task) {
-        if (!task.workflow_name || !task.step_name) {
+        if (
+          !task.workflow_name ||
+          !task.step_name ||
+          hasSuspiciousEmptyArrayPayload(task, projectScopeGeneration)
+        ) {
           void fetchAndReconcileTask(task_id);
         } else {
-          reconcileTask(task);
+          upsertTaskInQueryCache(task, projectScopeGeneration);
         }
       } else {
         void fetchAndReconcileTask(task_id);
       }
     },
-    [
-      addToast,
-      fetchAndReconcileTask,
-      reconcileTask,
-      removeTask,
-      projectScopeGeneration,
-    ]
+    [addToast, fetchAndReconcileTask, projectScopeGeneration]
   );
 
   const handleTaskStepChanged = useCallback(

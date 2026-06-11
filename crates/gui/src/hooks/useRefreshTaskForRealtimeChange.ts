@@ -1,15 +1,14 @@
 import { useCallback } from "react";
 import { commands } from "../bindings";
-import { useTaskStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { upsertTaskInQueryCache } from "../query";
 
 const taskRefreshesInFlight = new Set<string>();
 
 export function useRefreshTaskForRealtimeChange(logPrefix: string) {
-  const reconcileTask = useTaskStore((state) => state.reconcileTask);
   const projectScopeGeneration = useProjectScopeGeneration();
 
   return useCallback(
@@ -23,7 +22,7 @@ export function useRefreshTaskForRealtimeChange(logPrefix: string) {
         const result = await commands.getTask(taskId);
         if (requestGeneration !== getProjectScopeGeneration()) return;
         if (result.status === "ok") {
-          reconcileTask(result.data);
+          upsertTaskInQueryCache(result.data, requestGeneration);
         } else {
           console.warn(
             `[${logPrefix}] Failed to refresh task ${taskId.slice(0, 6)} after realtime change: ${result.error.message}`
@@ -33,6 +32,6 @@ export function useRefreshTaskForRealtimeChange(logPrefix: string) {
         taskRefreshesInFlight.delete(refreshKey);
       }
     },
-    [logPrefix, projectScopeGeneration, reconcileTask]
+    [logPrefix, projectScopeGeneration]
   );
 }

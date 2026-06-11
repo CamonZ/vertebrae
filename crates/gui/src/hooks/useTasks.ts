@@ -1,75 +1,115 @@
-import { useEffect, useState, useCallback } from "react";
-import { commands, type TaskFilterOptions } from "../bindings";
-import { useTaskStore } from "../stores";
-import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../stores/projectScopedStores";
+import { useQuery } from "@tanstack/react-query";
+import { commands, type Task, type TaskFilterOptions } from "../bindings";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
+import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
+import { mergeTask, taskMatchesFilter } from "../stores/taskStore";
+
+// Stable fallback for renders where the query has no data yet (loading or
+// error). A fresh `[]` per render changes identity every time and re-fires
+// any effect/memo that depends on `tasks`, which can loop render → effect →
+// state update → render.
+const NO_TASKS: Task[] = [];
+
+function updatedAtMs(task: Task): number | null {
+  if (!task.updated_at) return null;
+  const ms = Date.parse(task.updated_at);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function preferCurrentTaskWhenNewer(fetched: Task, current: Task): Task {
+  const fetchedMs = updatedAtMs(fetched);
+  const currentMs = updatedAtMs(current);
+  if (currentMs === null || fetchedMs === null || currentMs >= fetchedMs) {
+    return mergeTask(fetched, current);
+  }
+  return mergeTask(current, fetched);
+}
 
 /**
  * Hook for fetching and managing the task list.
- * Automatically syncs fetched tasks to the Zustand store.
  *
- * After the fetch completes, tasks newly inserted into the store via WebSocket
- * events while the fetch was in flight are preserved rather than discarded by
- * the bulk setTasks call.
- *
- * @param filter - Optional filter options for the task list
- * @returns Object containing tasks array, loading state, error state, and refetch function
+ * TanStack Query owns the server-state cache for task list data.
  */
 export function useTasks(filter?: TaskFilterOptions) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const { tasks, setTasks, setActiveFilter } = useTaskStore();
+  const activeFilter = filter ?? null;
+  const projectScopeGeneration = useProjectScopeGeneration();
+  const queryKey = queryKeys.tasks.list(projectScopeGeneration, activeFilter);
 
-  const fetchTasks = useCallback(async () => {
-    const activeFilter = filter ?? null;
-    const projectScopeGeneration = getProjectScopeGeneration();
-    const taskIdsAtFetchStart = new Set(
-      useTaskStore.getState().tasks.map((task) => task.id)
-    );
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const tasksAtFetchStart = new Map(
+        (queryClient.getQueryData<Task[]>(queryKey) ?? []).map((task) => [
+          task.id,
+          task,
+        ])
+      );
+      const detailTasksAtFetchStart = new Map(
+        queryClient
+          .getQueriesData<Task>({
+            queryKey: queryKeys.tasks.details(projectScopeGeneration),
+          })
+          .map(([, task]) => task)
+          .filter((task): task is Task => Boolean(task))
+          .map((task) => [task.id, task])
+      );
+      const tasks = await unwrapCommand(commands.listTasks(activeFilter));
 
-    setActiveFilter(activeFilter);
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await commands.listTasks(activeFilter);
-      if (result.status === "ok") {
-        if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-          return;
-        }
+      // Preserve only tasks newly inserted while this request was in flight.
+      // Pre-existing query entries can belong to a previously selected
+      // project and must not be re-added after the scoped fetch completes.
+      const currentQueryTasks =
+        queryClient.getQueryData<Task[]>(queryKey) ?? [];
+      const currentDetailTasks = queryClient
+        .getQueriesData<Task>({
+          queryKey: queryKeys.tasks.details(projectScopeGeneration),
+        })
+        .map(([, task]) => task)
+        .filter((task): task is Task => Boolean(task));
+      const fetchedIds = new Set(tasks.map((task) => task.id));
+      const currentTasksById = new Map(
+        currentQueryTasks.map((task) => [task.id, task])
+      );
+      const currentDetailTasksById = new Map(
+        currentDetailTasks.map((task) => [task.id, task])
+      );
+      const reconciledFetchedTasks = tasks.map((task) => {
+        const currentTask =
+          currentTasksById.get(task.id) ?? currentDetailTasksById.get(task.id);
+        const taskAtFetchStart =
+          tasksAtFetchStart.get(task.id) ?? detailTasksAtFetchStart.get(task.id);
+        if (!currentTask || currentTask === taskAtFetchStart) return task;
+        return preferCurrentTaskWhenNewer(task, currentTask);
+      });
+      const upsertedDuringFetch = currentQueryTasks.filter(
+        (task) => !fetchedIds.has(task.id) && !tasksAtFetchStart.has(task.id)
+      );
+      const upsertedDuringFetchIds = new Set(
+        upsertedDuringFetch.map((task) => task.id)
+      );
+      const detailUpsertsDuringFetch = currentDetailTasks.filter(
+        (task) =>
+          !fetchedIds.has(task.id) &&
+          !upsertedDuringFetchIds.has(task.id) &&
+          !tasksAtFetchStart.has(task.id) &&
+          !detailTasksAtFetchStart.has(task.id) &&
+          taskMatchesFilter(task, activeFilter)
+      );
 
-        // Preserve only tasks newly inserted while this request was in flight.
-        // Pre-existing store entries can belong to a previously selected
-        // project and must not be re-added after the scoped fetch completes.
-        const currentStoreTasks = useTaskStore.getState().tasks;
-        const fetchedIds = new Set(result.data.map((t) => t.id));
-        const upsertedDuringFetch = currentStoreTasks.filter(
-          (t) => !fetchedIds.has(t.id) && !taskIdsAtFetchStart.has(t.id)
-        );
+      return [
+        ...reconciledFetchedTasks,
+        ...upsertedDuringFetch,
+        ...detailUpsertsDuringFetch,
+      ];
+    },
+  });
 
-        setTasks([...result.data, ...upsertedDuringFetch]);
-      } else {
-        if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-          setError(result.error.message);
-        }
-      }
-    } catch (e) {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [filter, setActiveFilter, setTasks]);
-
-  useEffect(() => {
-    fetchTasks();
-  }, [fetchTasks]);
-
-  const refetch = useCallback(() => {
-    fetchTasks();
-  }, [fetchTasks]);
-
-  return { tasks, isLoading, error, refetch };
+  return {
+    tasks: query.data ?? NO_TASKS,
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
 }

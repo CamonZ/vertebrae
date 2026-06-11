@@ -811,6 +811,12 @@ pub struct StopRunRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionStatus {
+    #[serde(
+        alias = "started",
+        alias = "running",
+        alias = "waiting",
+        alias = "cancelled"
+    )]
     InProgress,
     Completed,
     Failed,
@@ -2272,6 +2278,20 @@ mod tests {
         assert_eq!(exec.status, ExecutionStatus::InProgress);
         assert_eq!(exec.started_at, "2026-03-15T10:00:00.000000Z");
         assert_eq!(exec.completed_at, None);
+    }
+
+    #[test]
+    fn step_execution_deserializes_live_status_aliases() {
+        for status in ["started", "running", "waiting", "cancelled"] {
+            let payload = serde_json::json!({
+                "id": format!("exec-{status}"),
+                "status": status
+            });
+
+            let exec: StepExecution =
+                serde_json::from_value(payload).expect("live status alias should deserialize");
+            assert_eq!(exec.status, ExecutionStatus::InProgress);
+        }
     }
 
     #[test]

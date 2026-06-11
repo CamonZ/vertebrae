@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { queryClient } from "../query/queryClient";
 
 const createStorageMock = (): Storage => {
   let store: Record<string, string> = {};
@@ -76,6 +77,7 @@ if (globalThis !== window) {
 // Cleanup after each test
 afterEach(() => {
   cleanup();
+  queryClient.clear();
   localStorage.clear();
 });
 
@@ -96,7 +98,8 @@ class ResizeObserverMock {
   disconnect() {}
 }
 
-globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+globalThis.ResizeObserver =
+  ResizeObserverMock as unknown as typeof ResizeObserver;
 
 // Mock matchMedia
 Object.defineProperty(window, "matchMedia", {

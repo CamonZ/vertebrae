@@ -1,4 +1,5 @@
 import { StrictMode, useState, useEffect } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import "./index.css";
@@ -8,6 +9,7 @@ import { DebugConsole } from "./components/DebugConsole";
 import { commands } from "./bindings";
 import { useDebugLogger } from "./hooks/useDebugLogger";
 import { useDebugStore } from "./stores/debugStore";
+import { queryClient } from "./query/queryClient";
 
 function App() {
   const [booting, setBooting] = useState(true);
@@ -66,6 +68,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
   </StrictMode>
 );

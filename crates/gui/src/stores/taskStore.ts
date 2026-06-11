@@ -54,7 +54,7 @@ function normalizeText(value: string | null | undefined): string {
   return value?.trim().toLocaleLowerCase() ?? "";
 }
 
-function taskMatchesFilter(
+export function taskMatchesFilter(
   task: Task,
   filter: TaskFilterOptions | null
 ): boolean {
@@ -97,16 +97,17 @@ function taskMatchesFilter(
   return true;
 }
 
-function mergeTask(existing: Task, task: Task): Task {
+export function mergeTask(existing: Task, task: Task): Task {
   return {
     ...existing,
     ...task,
-    sections: task.sections?.length ? task.sections : existing.sections,
-    code_refs: task.code_refs?.length ? task.code_refs : existing.code_refs,
-    dependency_ids: task.dependency_ids?.length
-      ? task.dependency_ids
-      : existing.dependency_ids,
-    tags: task.tags?.length ? task.tags : existing.tags,
+    sections: task.sections !== undefined ? task.sections : existing.sections,
+    code_refs: task.code_refs !== undefined ? task.code_refs : existing.code_refs,
+    dependency_ids:
+      task.dependency_ids !== undefined
+        ? task.dependency_ids
+        : existing.dependency_ids,
+    tags: task.tags !== undefined ? task.tags : existing.tags,
   };
 }
 
@@ -114,7 +115,7 @@ function taskObjectsEqual(a: Task, b: Task): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-function taskRunControlsEqual(
+export function taskRunControlsEqual(
   a: TaskRunControls | null | undefined,
   b: TaskRunControls | null | undefined
 ): boolean {

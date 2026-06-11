@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
-import { commands } from '../bindings';
-import { useTaskStore } from '../stores';
+import { useState, useCallback } from "react";
+import { commands } from "../bindings";
+import { removeTaskFromQueryCache } from "../query";
 
 interface UseDeleteTaskOptions {
   onDeleted?: () => void;
@@ -13,7 +13,7 @@ interface UseDeleteTaskOptions {
  * - Confirmation dialog state (open/closed)
  * - Cascade delete option (delete children or orphan them)
  * - Loading and error states
- * - Automatic UI store updates after successful deletion
+ * - Immediate cache removal on success (idempotent with the websocket event)
  *
  * @param taskId - The task ID to delete
  * @returns Object containing delete state and handlers
@@ -27,7 +27,6 @@ export function useDeleteTask(
   const [cascade, setCascade] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const { removeTask } = useTaskStore();
 
   const openDeleteDialog = useCallback(() => {
     setIsDeleteDialogOpen(true);
@@ -48,19 +47,21 @@ export function useDeleteTask(
 
     try {
       const result = await commands.deleteTask(taskId, cascade);
-      if (result.status === 'ok') {
-        removeTask(taskId);
+      if (result.status === "ok") {
+        removeTaskFromQueryCache(taskId);
         setIsDeleteDialogOpen(false);
         onDeleted?.();
       } else {
         setDeleteError(result.error.message);
       }
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete task');
+      setDeleteError(
+        err instanceof Error ? err.message : "Failed to delete task"
+      );
     } finally {
       setIsDeleting(false);
     }
-  }, [taskId, cascade, removeTask, onDeleted]);
+  }, [taskId, cascade, onDeleted]);
 
   return {
     isDeleteDialogOpen,

@@ -43,6 +43,46 @@ fn try_deserialize<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// Derive `started_at`/`completed_at` for a step execution WS payload.
+///
+/// Sacrum's `step_executions` table has no timing columns — the channel
+/// payload carries `inserted_at`/`updated_at` instead. Mirror the REST
+/// path (`sacrum-client::execution_service::response_to_execution`):
+/// `started_at := inserted_at`, and `completed_at := updated_at` once the
+/// status is terminal (`completed`/`failed`). Fields already present and
+/// non-empty are left untouched.
+fn normalize_step_execution_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let mut normalized = payload.clone();
+    let Some(obj) = normalized.as_object_mut() else {
+        return normalized;
+    };
+
+    let is_blank = |value: Option<&serde_json::Value>| match value {
+        None => true,
+        Some(serde_json::Value::Null) => true,
+        Some(serde_json::Value::String(s)) => s.is_empty(),
+        Some(_) => false,
+    };
+
+    if is_blank(obj.get("started_at")) {
+        if let Some(inserted_at) = obj.get("inserted_at").cloned() {
+            obj.insert("started_at".to_string(), inserted_at);
+        }
+    }
+
+    let is_terminal = matches!(
+        obj.get("status").and_then(|v| v.as_str()),
+        Some("completed") | Some("failed")
+    );
+    if is_terminal && is_blank(obj.get("completed_at")) {
+        if let Some(updated_at) = obj.get("updated_at").cloned() {
+            obj.insert("completed_at".to_string(), updated_at);
+        }
+    }
+
+    normalized
+}
+
 /// Default heartbeat interval (30 seconds as per Phoenix protocol)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -825,7 +865,8 @@ impl SacrumSocket {
             _ => StepExecutionChangeType::Created,
         };
 
-        let execution = try_deserialize::<types::StepExecution>(payload, "StepExecution");
+        let normalized = normalize_step_execution_payload(payload);
+        let execution = try_deserialize::<types::StepExecution>(&normalized, "StepExecution");
 
         let event = StepExecutionChangedEvent {
             execution_id,
@@ -1537,6 +1578,98 @@ mod tests {
         assert!(exec.prompt.is_none());
         assert!(exec.handoff.is_none());
         assert!(exec.session_id.is_none());
+    }
+
+    /// Sacrum-shaped payload: no `started_at`/`completed_at`, only row
+    /// timestamps. A freshly created execution must derive `started_at`
+    /// from `inserted_at` and leave `completed_at` unset.
+    #[test]
+    fn step_execution_payload_derives_started_at_from_inserted_at() {
+        let payload = serde_json::json!({
+            "id": "exec-live-1",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "implement",
+            "status": "started",
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:00:00Z",
+        });
+
+        let normalized = normalize_step_execution_payload(&payload);
+        let exec = try_deserialize::<types::StepExecution>(&normalized, "StepExecution")
+            .expect("created payload must deserialize");
+
+        assert_eq!(exec.status, types::ExecutionStatus::InProgress);
+        assert_eq!(exec.started_at, "2026-05-09T10:00:00Z");
+        assert!(exec.completed_at.is_none());
+    }
+
+    /// Terminal payload must derive `completed_at` from `updated_at`.
+    #[test]
+    fn step_execution_payload_derives_completed_at_when_terminal() {
+        let payload = serde_json::json!({
+            "id": "exec-live-2",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "implement",
+            "status": "completed",
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:05:00Z",
+        });
+
+        let normalized = normalize_step_execution_payload(&payload);
+        let exec = try_deserialize::<types::StepExecution>(&normalized, "StepExecution")
+            .expect("terminal payload must deserialize");
+
+        assert_eq!(exec.status, types::ExecutionStatus::Completed);
+        assert_eq!(exec.started_at, "2026-05-09T10:00:00Z");
+        assert_eq!(exec.completed_at.as_deref(), Some("2026-05-09T10:05:00Z"));
+    }
+
+    /// Non-terminal updates (e.g. `waiting`) must NOT set `completed_at`,
+    /// matching `ExecutionStatus::is_terminal` on the REST path.
+    #[test]
+    fn step_execution_payload_keeps_completed_at_unset_when_not_terminal() {
+        let payload = serde_json::json!({
+            "id": "exec-live-3",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "status": "waiting",
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:03:00Z",
+        });
+
+        let normalized = normalize_step_execution_payload(&payload);
+        let exec = try_deserialize::<types::StepExecution>(&normalized, "StepExecution")
+            .expect("waiting payload must deserialize");
+
+        assert_eq!(exec.status, types::ExecutionStatus::InProgress);
+        assert_eq!(exec.started_at, "2026-05-09T10:00:00Z");
+        assert!(exec.completed_at.is_none());
+    }
+
+    /// Explicit timing fields win over row timestamps when both are present.
+    #[test]
+    fn step_execution_payload_prefers_explicit_timing_fields() {
+        let payload = serde_json::json!({
+            "id": "exec-live-4",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "status": "completed",
+            "started_at": "2026-05-09T09:59:00Z",
+            "completed_at": "2026-05-09T10:04:00Z",
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:05:00Z",
+        });
+
+        let normalized = normalize_step_execution_payload(&payload);
+        let exec = try_deserialize::<types::StepExecution>(&normalized, "StepExecution")
+            .expect("payload with explicit timing must deserialize");
+
+        assert_eq!(exec.started_at, "2026-05-09T09:59:00Z");
+        assert_eq!(exec.completed_at.as_deref(), Some("2026-05-09T10:04:00Z"));
     }
 
     #[test]
