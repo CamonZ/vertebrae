@@ -1907,6 +1907,10 @@ pub struct SessionLog {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
 
+    /// Stable key for log entries that should be updated in place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_key: Option<String>,
+
     /// When created
     #[serde(alias = "inserted_at")]
     pub created_at: DateTime<Utc>,
@@ -1920,6 +1924,7 @@ impl SessionLog {
             step_execution_id: step_execution_id.into(),
             content: content.into(),
             format: None,
+            logical_key: None,
             created_at: Utc::now(),
         }
     }
@@ -1927,6 +1932,12 @@ impl SessionLog {
     /// Set log format
     pub fn with_format(mut self, format: impl Into<String>) -> Self {
         self.format = Some(format.into());
+        self
+    }
+
+    /// Set logical key for upsertable session logs
+    pub fn with_logical_key(mut self, logical_key: impl Into<String>) -> Self {
+        self.logical_key = Some(logical_key.into());
         self
     }
 
@@ -2572,9 +2583,14 @@ mod tests {
     #[test]
     fn session_log_new_and_builders() {
         let t = Utc::now();
-        let log = SessionLog::new("exec1", "log content").with_created_at(t);
+        let log = SessionLog::new("exec1", "log content")
+            .with_format("anthropic")
+            .with_logical_key("thinking:sess-1")
+            .with_created_at(t);
         assert_eq!(log.step_execution_id, "exec1");
         assert_eq!(log.content, "log content");
+        assert_eq!(log.format.as_deref(), Some("anthropic"));
+        assert_eq!(log.logical_key.as_deref(), Some("thinking:sess-1"));
         assert_eq!(log.created_at, t);
     }
 

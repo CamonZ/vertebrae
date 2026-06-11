@@ -134,6 +134,7 @@ impl SacrumExecutionService {
             step_execution_id: response.step_execution_id.clone(),
             content: response.content.clone(),
             format: response.format.clone(),
+            logical_key: response.logical_key.clone(),
             created_at,
         }
     }
@@ -261,6 +262,7 @@ impl ExecutionService for SacrumExecutionService {
             "step_execution_id": log.step_execution_id,
             "content": log.content,
             "format": log.format,
+            "logicalKey": log.logical_key,
         });
 
         let result: IdOnly = self
@@ -621,6 +623,7 @@ mod tests {
             step_execution_id: "exec-1".to_string(),
             content: "Log content".to_string(),
             format: Some("openai".to_string()),
+            logical_key: Some("rate_limit:sess-1".to_string()),
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
             updated_at: None,
         };
@@ -631,6 +634,7 @@ mod tests {
         assert_eq!(log.step_execution_id, "exec-1");
         assert_eq!(log.content, "Log content");
         assert_eq!(log.format.as_deref(), Some("openai"));
+        assert_eq!(log.logical_key.as_deref(), Some("rate_limit:sess-1"));
     }
 
     #[test]
@@ -937,6 +941,71 @@ mod tests {
         let result = service.add_log(log).await.unwrap();
 
         assert_eq!(result, "log-new");
+    }
+
+    #[tokio::test]
+    async fn test_add_log_sends_logical_key_for_ephemeral_log() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_session_log": {
+                        "id": "log-ephemeral"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let log = SessionLog::new(
+            "exec-1",
+            r#"{"type":"system","subtype":"thinking_tokens","session_id":"sess-1"}"#,
+        )
+        .with_format("anthropic")
+        .with_logical_key("thinking:sess-1");
+
+        let result = service.add_log(log).await.unwrap();
+
+        assert_eq!(result, "log-ephemeral");
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["step_execution_id"], "exec-1");
+        assert_eq!(variables["format"], "anthropic");
+        assert_eq!(variables["logicalKey"], "thinking:sess-1");
+    }
+
+    #[tokio::test]
+    async fn test_add_log_sends_null_logical_key_for_durable_log() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_session_log": {
+                        "id": "log-durable"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let log = SessionLog::new("exec-1", r#"{"type":"assistant","message":{}}"#)
+            .with_format("anthropic");
+
+        let result = service.add_log(log).await.unwrap();
+
+        assert_eq!(result, "log-durable");
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["step_execution_id"], "exec-1");
+        assert_eq!(variables["format"], "anthropic");
+        assert!(
+            variables["logicalKey"].is_null(),
+            "durable logs should send null logicalKey, got: {variables:?}"
+        );
     }
 
     #[tokio::test]
