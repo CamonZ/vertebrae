@@ -126,6 +126,8 @@ function messageText(m: Message): string {
       return m.text ?? "";
     case "result":
       return m.body ?? "";
+    case "activity":
+      return [m.label, m.text].join(" ");
     default:
       return "";
   }

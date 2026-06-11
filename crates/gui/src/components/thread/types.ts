@@ -295,6 +295,19 @@ export interface ResultMessage extends BaseMessage {
 }
 
 /**
+ * Compact live activity sourced from provider telemetry. These rows are status
+ * signals rather than transcript prose: thinking heartbeats, subagent progress,
+ * task notifications, and rate-limit banners.
+ */
+export interface ActivityMessage extends BaseMessage {
+  type: "activity";
+  variant: "heartbeat" | "progress" | "banner" | "notification";
+  label: string;
+  text: string;
+  tone?: "info" | "warn";
+}
+
+/**
  * A SPAWN message — the recursion point. Carries a child `Thread` (an
  * intra-run subagent linked by `parent_tool_use_id`). The Turn renderer
  * detects `type === "spawn"` and renders a nested <Thread> in place of an
@@ -317,6 +330,7 @@ export type Message =
   | WaitMessage
   | ErrorMessage
   | ResultMessage
+  | ActivityMessage
   | SpawnMessage;
 
 // ===========================================================================

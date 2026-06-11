@@ -10,6 +10,7 @@ import {
 } from "./normalize";
 import type { SessionLog, StepExecution, TaskRun } from "../../bindings";
 import type {
+  ActivityMessage,
   AgentMessage,
   ResultMessage,
   SpawnMessage,
@@ -85,7 +86,12 @@ function log(execId: string, obj: unknown, createdAt: string): SessionLog {
 const claudeLogs = (execId: string): SessionLog[] => [
   log(
     execId,
-    { type: "system", subtype: "init", model: "claude-sonnet-4.5", session_id: "s1" },
+    {
+      type: "system",
+      subtype: "init",
+      model: "claude-sonnet-4.5",
+      session_id: "s1",
+    },
     "2024-01-01T10:00:01Z"
   ),
   log(
@@ -102,7 +108,12 @@ const claudeLogs = (execId: string): SessionLog[] => [
       type: "assistant",
       message: {
         content: [
-          { type: "tool_use", id: "tu-1", name: "Bash", input: { command: "mix test" } },
+          {
+            type: "tool_use",
+            id: "tu-1",
+            name: "Bash",
+            input: { command: "mix test" },
+          },
         ],
       },
     },
@@ -114,7 +125,12 @@ const claudeLogs = (execId: string): SessionLog[] => [
       type: "user",
       message: {
         content: [
-          { type: "tool_result", tool_use_id: "tu-1", content: "41 tests, 0 failures", is_error: false },
+          {
+            type: "tool_result",
+            tool_use_id: "tu-1",
+            content: "41 tests, 0 failures",
+            is_error: false,
+          },
         ],
       },
     },
@@ -122,31 +138,53 @@ const claudeLogs = (execId: string): SessionLog[] => [
   ),
   log(
     execId,
-    { type: "result", subtype: "success", duration_ms: 5000, num_turns: 1, total_cost_usd: 0.01 },
+    {
+      type: "result",
+      subtype: "success",
+      duration_ms: 5000,
+      num_turns: 1,
+      total_cost_usd: 0.01,
+    },
     "2024-01-01T10:00:06Z"
   ),
 ];
 
 // --- Codex (openai) exec --json lines ---
 const codexLogs = (execId: string): SessionLog[] => [
-  log(execId, { type: "thread.started", thread_id: "t1" }, "2024-01-01T10:00:01Z"),
+  log(
+    execId,
+    { type: "thread.started", thread_id: "t1" },
+    "2024-01-01T10:00:01Z"
+  ),
   log(execId, { type: "turn.started" }, "2024-01-01T10:00:01Z"),
   log(
     execId,
-    { type: "item.completed", item: { id: "r1", type: "reasoning", text: "Planning the patch." } },
+    {
+      type: "item.completed",
+      item: { id: "r1", type: "reasoning", text: "Planning the patch." },
+    },
     "2024-01-01T10:00:02Z"
   ),
   log(
     execId,
     {
       type: "item.completed",
-      item: { id: "c1", type: "command_execution", command: "mix test", exit_code: 1, aggregated_output: "2 failed" },
+      item: {
+        id: "c1",
+        type: "command_execution",
+        command: "mix test",
+        exit_code: 1,
+        aggregated_output: "2 failed",
+      },
     },
     "2024-01-01T10:00:03Z"
   ),
   log(
     execId,
-    { type: "item.completed", item: { id: "m1", type: "agent_message", text: "Tests are red; fixing." } },
+    {
+      type: "item.completed",
+      item: { id: "m1", type: "agent_message", text: "Tests are red; fixing." },
+    },
     "2024-01-01T10:00:04Z"
   ),
 ];
@@ -179,8 +217,16 @@ describe("runToThreads — ordering & step head", () => {
     const input: RunInput = {
       taskRun: taskRun("2024-01-01T10:00:00Z"),
       stepExecutions: [
-        exec({ id: "e2", step_name: "second", started_at: "2024-01-01T10:05:00Z" }),
-        exec({ id: "e1", step_name: "first", started_at: "2024-01-01T10:00:00Z" }),
+        exec({
+          id: "e2",
+          step_name: "second",
+          started_at: "2024-01-01T10:05:00Z",
+        }),
+        exec({
+          id: "e1",
+          step_name: "first",
+          started_at: "2024-01-01T10:00:00Z",
+        }),
       ],
       logsByExecutionId: {},
     };
@@ -194,7 +240,9 @@ describe("runToThreads — ordering & step head", () => {
   it("derives the step head kind/runtime from step_type/duration_ms", () => {
     const input: RunInput = {
       taskRun: taskRun("2024-01-01T10:00:00Z"),
-      stepExecutions: [exec({ id: "e1", step_type: "evaluate", duration_ms: 9000 })],
+      stepExecutions: [
+        exec({ id: "e1", step_type: "evaluate", duration_ms: 9000 }),
+      ],
       logsByExecutionId: {},
     };
     const [t] = runToThreads(input);
@@ -222,7 +270,8 @@ describe("runToThreads — Claude (anthropic) turn grouping + tool pairing", () 
   });
 
   it("summarizes a long multi-line prompt to one line + full collapsible body", () => {
-    const firstLine = "Decide whether the proposed child set is complete ".repeat(4);
+    const firstLine =
+      "Decide whether the proposed child set is complete ".repeat(4);
     const prompt = `${firstLine}\n\nApproval gates:\n- every parent ref appears\n- no uncovered rows`;
     const sys = runToThreads({
       taskRun: taskRun("2024-01-01T10:00:00Z"),
@@ -236,14 +285,18 @@ describe("runToThreads — Claude (anthropic) turn grouping + tool pairing", () 
 
   it("maps assistant text to an AgentMessage prose row", () => {
     const [t] = runToThreads(input);
-    const agent = t.turns[0].messages.find((m) => m.type === "agent") as AgentMessage;
+    const agent = t.turns[0].messages.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
     expect(agent.prose).toBe("Let me run the tests.");
     expect(agent.speaker).toBe("Agent · claude-sonnet-4.5");
   });
 
   it("pairs tool_call + tool_result into ONE ToolMessage card", () => {
     const [t] = runToThreads(input);
-    const tools = t.turns[0].messages.filter((m) => m.type === "tool") as ToolMessage[];
+    const tools = t.turns[0].messages.filter(
+      (m) => m.type === "tool"
+    ) as ToolMessage[];
     expect(tools).toHaveLength(1);
     expect(tools[0].evt).toBe("tu-1");
     expect(tools[0].kind).toBe("shell");
@@ -264,7 +317,9 @@ describe("runToThreads — Codex (openai) shapes", () => {
 
   it("maps reasoning to a quieter agent prose and agent_message to reply prose", () => {
     const [t] = runToThreads(input);
-    const agents = t.turns[0].messages.filter((m) => m.type === "agent") as AgentMessage[];
+    const agents = t.turns[0].messages.filter(
+      (m) => m.type === "agent"
+    ) as AgentMessage[];
     expect(agents).toHaveLength(2);
     expect(agents[0].speaker).toContain("reasoning");
     expect(agents[0].prose).toBe("Planning the patch.");
@@ -274,7 +329,9 @@ describe("runToThreads — Codex (openai) shapes", () => {
 
   it("turns a failing command_execution into a shell ToolMessage with err status", () => {
     const [t] = runToThreads(input);
-    const tool = t.turns[0].messages.find((m) => m.type === "tool") as ToolMessage;
+    const tool = t.turns[0].messages.find(
+      (m) => m.type === "tool"
+    ) as ToolMessage;
     expect(tool.cmd).toBe("mix test");
     expect(tool.status).toBe("err");
     expect(tool.error).toBe(true);
@@ -289,7 +346,13 @@ describe("runToThreads — error encoding + file_edit + todo_list", () => {
       taskRun: taskRun("2024-01-01T10:00:00Z"),
       stepExecutions: [exec({ id: "e1" })],
       logsByExecutionId: {
-        e1: [log("e1", { type: "turn.failed", error: { message: "boom" } }, "2024-01-01T10:00:02Z")],
+        e1: [
+          log(
+            "e1",
+            { type: "turn.failed", error: { message: "boom" } },
+            "2024-01-01T10:00:02Z"
+          ),
+        ],
       },
     };
     const [t] = runToThreads(input);
@@ -311,7 +374,9 @@ describe("runToThreads — error encoding + file_edit + todo_list", () => {
                 id: "f1",
                 type: "file_change",
                 status: "completed",
-                changes: [{ path: "lib/x.ex", kind: "update", diff: "@@ -1 +1 @@" }],
+                changes: [
+                  { path: "lib/x.ex", kind: "update", diff: "@@ -1 +1 @@" },
+                ],
               },
             },
             "2024-01-01T10:00:02Z"
@@ -335,7 +400,9 @@ describe("runToThreads — error encoding + file_edit + todo_list", () => {
       },
     };
     const [t] = runToThreads(input);
-    const tools = t.turns[0].messages.filter((m) => m.type === "tool") as ToolMessage[];
+    const tools = t.turns[0].messages.filter(
+      (m) => m.type === "tool"
+    ) as ToolMessage[];
     const patch = tools.find((m) => m.cmd === "apply_patch")!;
     expect(patch.em).toBe("lib/x.ex");
     expect(patch.body).toContain("@@");
@@ -405,7 +472,10 @@ describe("runToThreads — wait_children step", () => {
           ),
           log(
             "ed",
-            { type: "assistant", message: { content: [{ type: "text", text: finalText }] } },
+            {
+              type: "assistant",
+              message: { content: [{ type: "text", text: finalText }] },
+            },
             "2024-01-01T10:00:02Z"
           ),
         ],
@@ -438,7 +508,10 @@ describe("runToThreads — wait_children step", () => {
           ),
           log(
             "ej",
-            { type: "assistant", message: { content: [{ type: "text", text: compact }] } },
+            {
+              type: "assistant",
+              message: { content: [{ type: "text", text: compact }] },
+            },
             "2024-01-01T10:00:02Z"
           ),
         ],
@@ -485,7 +558,12 @@ describe("runToThreads — spawn nesting", () => {
   const claudeSpawnLogs = (execId: string): SessionLog[] => [
     log(
       execId,
-      { type: "system", subtype: "init", model: "claude-sonnet-4.5", session_id: "s1" },
+      {
+        type: "system",
+        subtype: "init",
+        model: "claude-sonnet-4.5",
+        session_id: "s1",
+      },
       "2024-01-01T10:00:01Z"
     ),
     // Main agent spawns a subagent.
@@ -523,7 +601,12 @@ describe("runToThreads — spawn nesting", () => {
         parent_tool_use_id: "task-1",
         message: {
           content: [
-            { type: "tool_use", id: "child-bash", name: "Bash", input: { command: "ls" } },
+            {
+              type: "tool_use",
+              id: "child-bash",
+              name: "Bash",
+              input: { command: "ls" },
+            },
           ],
         },
       },
@@ -536,7 +619,12 @@ describe("runToThreads — spawn nesting", () => {
         parent_tool_use_id: "task-1",
         message: {
           content: [
-            { type: "tool_result", tool_use_id: "child-bash", content: "a b c", is_error: false },
+            {
+              type: "tool_result",
+              tool_use_id: "child-bash",
+              content: "a b c",
+              is_error: false,
+            },
           ],
         },
       },
@@ -562,7 +650,9 @@ describe("runToThreads — spawn nesting", () => {
     const [t] = runToThreads(input);
     const msgs = t.turns[0].messages;
 
-    const spawn = msgs.find((m) => m.type === "spawn") as SpawnMessage | undefined;
+    const spawn = msgs.find((m) => m.type === "spawn") as
+      | SpawnMessage
+      | undefined;
     expect(spawn).toBeDefined();
 
     // The parent Task tool_call row is REPLACED by the spawn (no bare tool row
@@ -578,7 +668,9 @@ describe("runToThreads — spawn nesting", () => {
     expect(child.id).toBe("task-1");
     expect(child.spawnLabel).toBe("subagent");
     const childMsgs = child.turns[0].messages;
-    const childProse = childMsgs.find((m) => m.type === "agent") as AgentMessage;
+    const childProse = childMsgs.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
     expect(childProse.prose).toBe("Child working.");
     const childTool = childMsgs.find((m) => m.type === "tool") as ToolMessage;
     expect(childTool.evt).toBe("child-bash");
@@ -587,7 +679,8 @@ describe("runToThreads — spawn nesting", () => {
 
     // The main agent's prose rows stay at the top level (not lifted into child).
     const mainProse = msgs.filter(
-      (m) => m.type === "agent" && (m as AgentMessage).prose === "Subagent done."
+      (m) =>
+        m.type === "agent" && (m as AgentMessage).prose === "Subagent done."
     );
     expect(mainProse).toHaveLength(1);
   });
@@ -599,12 +692,121 @@ describe("runToThreads — spawn nesting", () => {
       logsByExecutionId: { e1: claudeLogs("e1") },
     };
     const [t] = runToThreads(input);
-    expect(
-      t.turns[0].messages.some((m) => m.type === "spawn")
-    ).toBe(false);
+    expect(t.turns[0].messages.some((m) => m.type === "spawn")).toBe(false);
     // sanity: the regular tool row is present and flat.
     const tools = t.turns[0].messages.filter((m) => m.type === "tool");
     expect(tools).toHaveLength(1);
+  });
+
+  it("nests task_progress activity under the parent subagent thread", () => {
+    const execId = "e1";
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: execId })],
+      logsByExecutionId: {
+        [execId]: [
+          log(
+            execId,
+            {
+              type: "assistant",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "task-1",
+                    name: "Task",
+                    input: { description: "review" },
+                  },
+                ],
+              },
+            },
+            "2024-01-01T10:00:01Z"
+          ),
+          log(
+            execId,
+            {
+              type: "system",
+              subtype: "task_progress",
+              tool_use_id: "task-1",
+              description: "Reading crates/gui/src/types/conversation.ts",
+              subagent_type: "general-purpose",
+            },
+            "2024-01-01T10:00:02Z"
+          ),
+        ],
+      },
+    };
+
+    const [t] = runToThreads(input);
+    const spawn = t.turns[0].messages.find(
+      (m) => m.type === "spawn"
+    ) as SpawnMessage;
+    const activity = spawn.thread.turns[0].messages.find(
+      (m) => m.type === "activity"
+    ) as ActivityMessage;
+
+    expect(activity).toMatchObject({
+      type: "activity",
+      variant: "progress",
+      label: "general-purpose",
+      text: "Reading crates/gui/src/types/conversation.ts",
+    });
+  });
+});
+
+describe("runToThreads — Claude 2.1 live activity", () => {
+  it("renders thinking heartbeat and rate-limit banner as activity messages", () => {
+    const execId = "e1";
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [exec({ id: execId })],
+      logsByExecutionId: {
+        [execId]: [
+          log(
+            execId,
+            {
+              type: "system",
+              subtype: "thinking_tokens",
+              session_id: "sess-1",
+              estimated_tokens: 2333,
+              estimated_tokens_delta: 23,
+            },
+            "2024-01-01T10:00:01Z"
+          ),
+          log(
+            execId,
+            {
+              type: "rate_limit_event",
+              session_id: "sess-1",
+              rate_limit_info: {
+                status: "allowed",
+                rateLimitType: "five_hour",
+              },
+            },
+            "2024-01-01T10:00:02Z"
+          ),
+        ],
+      },
+    };
+
+    const [t] = runToThreads(input);
+    const activity = t.turns[0].messages.filter(
+      (m) => m.type === "activity"
+    ) as ActivityMessage[];
+
+    expect(activity).toEqual([
+      expect.objectContaining({
+        variant: "heartbeat",
+        label: "Thinking",
+        text: "2,333 tokens",
+      }),
+      expect.objectContaining({
+        variant: "banner",
+        tone: "warn",
+        label: "Rate limit",
+        text: "five hour · allowed",
+      }),
+    ]);
   });
 });
 

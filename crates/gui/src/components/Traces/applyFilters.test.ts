@@ -113,4 +113,68 @@ describe("matchesSearch", () => {
       )
     ).toBe(true);
   });
+
+  it("matches task progress by description and subagent type", () => {
+    const event = tag({
+      kind: "task_progress",
+      timestamp: "",
+      toolUseId: "tool-1",
+      description: "Reading trace artifacts",
+      subagentType: "reviewer",
+    } as never);
+
+    expect(matchesSearch(event, "trace")).toBe(true);
+    expect(matchesSearch(event, "reviewer")).toBe(true);
+  });
+
+  it("matches task started by description and subagent type", () => {
+    const event = tag({
+      kind: "task_started",
+      timestamp: "",
+      toolUseId: "tool-1",
+      description: "Investigate parser behavior",
+      subagentType: "researcher",
+    } as never);
+
+    expect(matchesSearch(event, "parser")).toBe(true);
+    expect(matchesSearch(event, "researcher")).toBe(true);
+  });
+
+  it("matches task notifications by message", () => {
+    expect(
+      matchesSearch(
+        tag({
+          kind: "task_notification",
+          timestamp: "",
+          message: "Subagent completed review",
+        } as never),
+        "completed"
+      )
+    ).toBe(true);
+  });
+
+  it("matches rate limits by status and type", () => {
+    const event = tag({
+      kind: "rate_limit",
+      timestamp: "",
+      status: "active",
+      rateLimitType: "tokens_per_minute",
+    } as never);
+
+    expect(matchesSearch(event, "active")).toBe(true);
+    expect(matchesSearch(event, "tokens")).toBe(true);
+  });
+
+  it("matches thinking heartbeat by raw and displayed token counts", () => {
+    const event = tag({
+      kind: "thinking_heartbeat",
+      timestamp: "",
+      sessionId: "session-1",
+      estimatedTokens: 2333,
+      estimatedTokensDelta: 17,
+    } as never);
+
+    expect(matchesSearch(event, "2333")).toBe(true);
+    expect(matchesSearch(event, "2,333")).toBe(true);
+  });
 });
