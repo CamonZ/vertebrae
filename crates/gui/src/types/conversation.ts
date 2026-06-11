@@ -500,9 +500,11 @@ export function parseClaudeMessage(
         if (content) {
           for (const item of content) {
             if (item.type === "tool_result") {
-              const content = item.content;
+              const toolResultContent = item.content;
               const resultText =
-                typeof content === "string" ? content : JSON.stringify(content);
+                typeof toolResultContent === "string"
+                  ? toolResultContent
+                  : JSON.stringify(toolResultContent);
               events.push({
                 kind: "tool_result",
                 timestamp,

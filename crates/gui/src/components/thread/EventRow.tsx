@@ -3,12 +3,12 @@
  *
  * A faithful React/TS port of docs/design/lib/lib-eventlog.jsx. One row in the
  * log, dispatched by its message `type`:
- *   step · user · system · agent · tool · wait · error
+ *   step · user · system · agent · tool · wait · error · activity
  *
  * NOTE on `spawn`: EventRow does NOT handle `type: "spawn"`. The enclosing Turn
  * (Thread.tsx) intercepts a SpawnMessage and renders a nested <Thread> instead.
- * EventRow only covers user | system | agent | tool | wait | error (+ the
- * stand-alone StepDivider, exported for completeness).
+ * EventRow only covers user | system | agent | tool | wait | error | activity
+ * (+ the stand-alone StepDivider, exported for completeness).
  *
  * Styling lives in the co-located thread.css (ported verbatim from the
  * prototype's self-injected CSS), imported once by index.ts. Mode

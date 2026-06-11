@@ -70,7 +70,10 @@ export function matchesSearch(
         (ev.rateLimitType ?? "").toLowerCase().includes(needle)
       );
     case "thinking_heartbeat":
-      return String(ev.estimatedTokens).includes(needle);
+      return (
+        String(ev.estimatedTokens).includes(needle) ||
+        ev.estimatedTokens.toLocaleString().toLowerCase().includes(needle)
+      );
     default:
       return false;
   }

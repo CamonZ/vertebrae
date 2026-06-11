@@ -322,7 +322,7 @@ function activityMessage(
   switch (ev.kind) {
     case "thinking_heartbeat":
       return {
-        evt: nextEvt("thinking-heartbeat"),
+        evt: `thinking-heartbeat-${ev.sessionId}`,
         type: "activity",
         variant: "heartbeat",
         at: clock(ev.timestamp),
