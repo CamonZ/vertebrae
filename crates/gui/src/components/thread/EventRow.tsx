@@ -25,6 +25,7 @@ import {
 } from "../shared/MarkdownContent";
 
 import type {
+  ActivityMessage,
   AgentMessage,
   ErrorMessage,
   Message,
@@ -328,6 +329,7 @@ export function EventRow(props: EventRowProps): ReactNode {
   if (type === "wait") return <WaitRow {...props} />;
   if (type === "error") return <ErrorRow {...props} />;
   if (type === "result") return <ResultRow {...props} />;
+  if (type === "activity") return <ActivityRow {...props} />;
 
   // user / system / agent / tool
   const sel = props.selected ? " sel" : "";
@@ -382,6 +384,33 @@ export function EventRow(props: EventRowProps): ReactNode {
 }
 
 // ── EXCEPTION rows ──
+
+function ActivityRow(
+  props: ActivityMessage & {
+    selected?: boolean;
+    onClick?: () => void;
+  }
+): ReactNode {
+  const sel = props.selected ? " sel" : "";
+  const clickable = props.onClick ? { "data-clickable": "" } : {};
+  const tone = props.tone === "warn" ? " warn" : "";
+  return (
+    <div
+      className={"evrow evrow--activity" + tone + sel}
+      onClick={props.onClick}
+      {...clickable}
+    >
+      <EventWhen at={props.at} rel={props.rel} id={props.id} />
+      <div className="evbody">
+        <div className={`evactivity ${props.variant}`}>
+          <span className="evactivity-dot" />
+          <span className="evactivity-label">{props.label}</span>
+          <span className="evactivity-text">{props.text}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function WaitRow(
   props: WaitMessage & {

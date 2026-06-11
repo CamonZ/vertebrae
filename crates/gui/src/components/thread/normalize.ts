@@ -40,7 +40,12 @@
  * ──────────────────────────────────────────────────────────────────────────
  */
 
-import type { SessionLog, StepExecution, StepType, TaskRun } from "../../bindings";
+import type {
+  SessionLog,
+  StepExecution,
+  StepType,
+  TaskRun,
+} from "../../bindings";
 import {
   parseSessionLogs,
   type ConversationEvent,
@@ -50,6 +55,7 @@ import {
   type TodoListEvent,
 } from "../../types/conversation";
 import type {
+  ActivityMessage,
   AgentMessage,
   ErrorMessage,
   Message,
@@ -270,7 +276,10 @@ function fileEditMessage(
  * render it via a ToolMessage with a checklist body — the smallest change that
  * keeps the union closed. The body is a "[x]/[ ]" rendering of the items.
  */
-function todoMessage(ev: TodoListEvent, runStartMs: number | null): ToolMessage {
+function todoMessage(
+  ev: TodoListEvent,
+  runStartMs: number | null
+): ToolMessage {
   const atMs = ms(ev.timestamp);
   const done = ev.items.filter((i) => i.completed).length;
   const body = ev.items
@@ -290,6 +299,87 @@ function todoMessage(ev: TodoListEvent, runStartMs: number | null): ToolMessage 
   };
 }
 
+function formatRateLimitText(ev: ConversationEvent): string {
+  if (ev.kind !== "rate_limit") return "";
+  const type = ev.rateLimitType?.replace(/_/g, " ");
+  const status = ev.status ?? "rate limit";
+  const reset =
+    ev.resetsAt === undefined
+      ? null
+      : new Date(ev.resetsAt * 1000).toLocaleTimeString([], {
+          hour: "numeric",
+          minute: "2-digit",
+        });
+  return [type, status, reset ? `resets ${reset}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function activityMessage(
+  ev: ConversationEvent,
+  runStartMs: number | null
+): ActivityMessage | null {
+  switch (ev.kind) {
+    case "thinking_heartbeat":
+      return {
+        evt: nextEvt("thinking-heartbeat"),
+        type: "activity",
+        variant: "heartbeat",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: "Thinking",
+        text: `${ev.estimatedTokens.toLocaleString()} tokens`,
+      };
+    case "task_progress":
+      return {
+        evt: `task-progress-${ev.toolUseId}`,
+        type: "activity",
+        variant: "progress",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: ev.subagentType ?? "subagent",
+        text: ev.description,
+      };
+    case "task_started":
+      return {
+        evt: ev.toolUseId
+          ? `task-started-${ev.toolUseId}`
+          : nextEvt("task-started"),
+        type: "activity",
+        variant: "progress",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: ev.subagentType ?? "subagent",
+        text: ev.description,
+      };
+    case "task_notification":
+      return {
+        evt: nextEvt("task-notification"),
+        type: "activity",
+        variant: "notification",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: "Task",
+        text: ev.message,
+      };
+    case "rate_limit":
+      return {
+        evt: ev.sessionId
+          ? `rate-limit-${ev.sessionId}`
+          : nextEvt("rate-limit"),
+        type: "activity",
+        variant: "banner",
+        tone: "warn",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: "Rate limit",
+        text: formatRateLimitText(ev),
+      };
+    default:
+      return null;
+  }
+}
+
 /** Build an AgentMessage prose row from assistant_message / thinking text. */
 function agentMessage(
   text: string,
@@ -305,7 +395,11 @@ function agentMessage(
     type: "agent",
     at: clock(timestamp),
     rel: rel(runStartMs, atMs),
-    speaker: reasoning ? (speaker ? `${speaker} · reasoning` : "reasoning") : speaker,
+    speaker: reasoning
+      ? speaker
+        ? `${speaker} · reasoning`
+        : "reasoning"
+      : speaker,
     model,
     prose: text,
   };
@@ -361,7 +455,9 @@ export function runToThreads(input: RunInput): Thread[] {
     return ta - tb;
   });
 
-  return ordered.map((exec) => stepExecutionToThread(exec, logsByExecutionId, runStartMs));
+  return ordered.map((exec) =>
+    stepExecutionToThread(exec, logsByExecutionId, runStartMs)
+  );
 }
 
 /** One StepExecution → one root Thread (its step head + turns). */
@@ -508,7 +604,10 @@ function appendStepResult(
 }
 
 /** Roll-up status for a step's summary mark. */
-function statusFor(exec: StepExecution, turns: Turn[]): ThreadSummary["status"] {
+function statusFor(
+  exec: StepExecution,
+  turns: Turn[]
+): ThreadSummary["status"] {
   if (exec.status === "in_progress") return "running";
   if (exec.status === "failed") return "err";
   const hasErr = turns.some((t) =>
@@ -579,7 +678,9 @@ function eventsToTurns(
         .map((l) => l.trim())
         .find((l) => l.length > 0) ?? fullPrompt;
     const summary =
-      firstLine.length > 140 ? firstLine.slice(0, 139).trimEnd() + "…" : firstLine;
+      firstLine.length > 140
+        ? firstLine.slice(0, 139).trimEnd() + "…"
+        : firstLine;
     const sys: Message = {
       evt: `${exec.id ?? "exec"}-prompt`,
       type: "system",
@@ -628,7 +729,14 @@ function eventsToMessages(
           out.push(errorMessage(ev.text, ev.timestamp, runStartMs));
         } else {
           out.push(
-            agentMessage(ev.text, ev.timestamp, runStartMs, speaker, model, true)
+            agentMessage(
+              ev.text,
+              ev.timestamp,
+              runStartMs,
+              speaker,
+              model,
+              true
+            )
           );
         }
         break;
@@ -650,6 +758,15 @@ function eventsToMessages(
       case "todo_list":
         out.push(todoMessage(ev, runStartMs));
         break;
+      case "thinking_heartbeat":
+      case "task_progress":
+      case "task_started":
+      case "task_notification":
+      case "rate_limit": {
+        const msg = activityMessage(ev, runStartMs);
+        if (msg) out.push(msg);
+        break;
+      }
     }
   }
   return out;
@@ -713,9 +830,7 @@ function groupBySpawn(
       spawned.add(ev.toolId);
       continue;
     }
-    out.push(
-      ...eventsToMessages([ev], resultById, speaker, model, runStartMs)
-    );
+    out.push(...eventsToMessages([ev], resultById, speaker, model, runStartMs));
   }
 
   // Defensive: if a child group references a parent tool_call that never
