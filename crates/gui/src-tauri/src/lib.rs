@@ -247,7 +247,7 @@ pub fn run() {
             // Start WebSocket connection to Sacrum for real-time updates
             let socket = if let Some(config) = sacrum_config {
                 log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
-                let socket = websocket_client::SacrumSocket::new(
+                let mut socket = websocket_client::SacrumSocket::new(
                     config.base_url,
                     config.api_token,
                     config.project_id,

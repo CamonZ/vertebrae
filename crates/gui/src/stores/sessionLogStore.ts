@@ -28,12 +28,19 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
     })),
 
   appendLog: (executionId, log) =>
-    set((state) => ({
-      logsByExecutionId: {
-        ...state.logsByExecutionId,
-        [executionId]: [...(state.logsByExecutionId[executionId] ?? []), log],
-      },
-    })),
+    set((state) => {
+      const existingLogs = state.logsByExecutionId[executionId] ?? [];
+      if (log.id && existingLogs.some((existingLog) => existingLog.id === log.id)) {
+        return state;
+      }
+
+      return {
+        logsByExecutionId: {
+          ...state.logsByExecutionId,
+          [executionId]: [...existingLogs, log],
+        },
+      };
+    }),
 
   upsertLog: (executionId, log) =>
     set((state) => {
