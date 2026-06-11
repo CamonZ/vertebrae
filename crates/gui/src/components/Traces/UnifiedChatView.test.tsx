@@ -20,7 +20,13 @@ function run(): Thread[] {
               speaker: "Agent",
               prose: "Decomposing the work.",
             },
-            { evt: "t1", type: "tool", at: "01:14:01", cmd: "rg", kind: "shell" },
+            {
+              evt: "t1",
+              type: "tool",
+              at: "01:14:01",
+              cmd: "rg",
+              kind: "shell",
+            },
           ],
         },
       ],
@@ -94,6 +100,22 @@ describe("UnifiedChatView (single-run threads)", () => {
     expect(screen.getByText("Decomposing the work.")).toBeInTheDocument();
   });
 
+  it("renders live activity rows from the shared thread primitive", () => {
+    const threads = run();
+    threads[0].turns[0].messages.push({
+      evt: "act-1",
+      type: "activity",
+      variant: "heartbeat",
+      label: "Thinking",
+      text: "2,333 tokens",
+    });
+
+    render(<UnifiedChatView threads={threads} />);
+
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByText("2,333 tokens")).toBeInTheDocument();
+  });
+
   it("tags root thread rows with data-thread-id for scroll targeting", () => {
     const { container } = render(<UnifiedChatView threads={run()} />);
     expect(container.querySelector('[data-thread-id="th-1"]')).not.toBeNull();
@@ -102,7 +124,9 @@ describe("UnifiedChatView (single-run threads)", () => {
   it("renders only the focused subthread when focused is set", () => {
     const subThread = runWithSub()[0].turns[0].messages[0];
     if (subThread.type !== "spawn") throw new Error("expected spawn");
-    render(<UnifiedChatView threads={runWithSub()} focused={subThread.thread} />);
+    render(
+      <UnifiedChatView threads={runWithSub()} focused={subThread.thread} />
+    );
     expect(screen.getByText("done")).toBeInTheDocument();
     expect(screen.queryByText("verify_changes")).toBeNull();
   });

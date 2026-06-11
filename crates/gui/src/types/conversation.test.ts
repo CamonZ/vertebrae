@@ -33,10 +33,10 @@ describe("parseClaudeMessage", () => {
       });
     });
 
-    it("ignores system messages without init subtype", () => {
+    it("ignores unknown system subtypes", () => {
       const raw: ClaudeRawMessage = {
         type: "system",
-        subtype: "task_notification",
+        subtype: "hook_started",
       };
 
       const events = parseClaudeMessage(raw, timestamp);
@@ -258,6 +258,165 @@ describe("parseClaudeMessage", () => {
     });
   });
 
+  describe("Claude Code 2.1 live stream events", () => {
+    it("parses thinking_tokens into a heartbeat event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "system",
+        subtype: "thinking_tokens",
+        session_id: "sess-1",
+        estimated_tokens: 2333,
+        estimated_tokens_delta: 23,
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "thinking_heartbeat",
+          timestamp,
+          sessionId: "sess-1",
+          estimatedTokens: 2333,
+          estimatedTokensDelta: 23,
+        },
+      ]);
+    });
+
+    it("parses task_progress into a subagent activity event keyed by tool_use_id", () => {
+      const raw: ClaudeRawMessage = {
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-a",
+        tool_use_id: "toolu_spawn",
+        description: "Reading crates/gui/src/types/conversation.ts",
+        subagent_type: "general-purpose",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "task_progress",
+          timestamp,
+          toolUseId: "toolu_spawn",
+          taskId: "task-a",
+          description: "Reading crates/gui/src/types/conversation.ts",
+          subagentType: "general-purpose",
+          parentToolUseId: "toolu_spawn",
+        },
+      ]);
+    });
+
+    it("skips malformed task_progress without tool_use_id", () => {
+      const raw: ClaudeRawMessage = {
+        type: "system",
+        subtype: "task_progress",
+        description: "Reading a file",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
+    });
+
+    it("parses task_started into a subagent start event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "system",
+        subtype: "task_started",
+        task_id: "task-a",
+        tool_use_id: "toolu_spawn",
+        description: "Reviewing GUI stream parsing",
+        subagent_type: "general-purpose",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "task_started",
+          timestamp,
+          toolUseId: "toolu_spawn",
+          taskId: "task-a",
+          description: "Reviewing GUI stream parsing",
+          subagentType: "general-purpose",
+          parentToolUseId: "toolu_spawn",
+        },
+      ]);
+    });
+
+    it("parses system task_notification into a notification event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "system",
+        subtype: "task_notification",
+        message: "Subagent completed review",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "task_notification",
+          timestamp,
+          message: "Subagent completed review",
+        },
+      ]);
+    });
+
+    it("parses top-level task_notification into a notification event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "task_notification",
+        message: "Subagent completed review",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "task_notification",
+          timestamp,
+          message: "Subagent completed review",
+        },
+      ]);
+    });
+
+    it("parses rate_limit_event into a banner event", () => {
+      const raw: ClaudeRawMessage = {
+        type: "rate_limit_event",
+        session_id: "sess-1",
+        rate_limit_info: {
+          status: "allowed",
+          resetsAt: 1781128800,
+          rateLimitType: "five_hour",
+          overageStatus: "rejected",
+          overageDisabledReason: "org_level_disabled",
+          isUsingOverage: false,
+        },
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "rate_limit",
+          timestamp,
+          sessionId: "sess-1",
+          status: "allowed",
+          resetsAt: 1781128800,
+          rateLimitType: "five_hour",
+          overageStatus: "rejected",
+          overageDisabledReason: "org_level_disabled",
+          isUsingOverage: false,
+        },
+      ]);
+    });
+
+    it("parses malformed rate_limit_event without throwing", () => {
+      const raw: ClaudeRawMessage = {
+        type: "rate_limit_event",
+        session_id: "sess-1",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([
+        {
+          kind: "rate_limit",
+          timestamp,
+          sessionId: "sess-1",
+          status: undefined,
+          rateLimitType: undefined,
+          resetsAt: undefined,
+          overageStatus: undefined,
+          overageDisabledReason: undefined,
+          isUsingOverage: undefined,
+        },
+      ]);
+    });
+  });
+
   describe("result messages", () => {
     it("parses success result into session end event", () => {
       const raw: ClaudeRawMessage = {
@@ -349,6 +508,62 @@ describe("parseSessionLogs", () => {
     const events = parseSessionLogs([]);
     expect(events).toHaveLength(0);
   });
+
+  it("collapses repeated Claude live snapshots by logical identity", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "system",
+          subtype: "thinking_tokens",
+          session_id: "sess-1",
+          estimated_tokens: 10,
+          estimated_tokens_delta: 10,
+        }),
+        "2024-01-01T10:00:00Z"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "system",
+          subtype: "thinking_tokens",
+          session_id: "sess-1",
+          estimated_tokens: 42,
+          estimated_tokens_delta: 5,
+        }),
+        "2024-01-01T10:00:01Z"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "system",
+          subtype: "task_progress",
+          tool_use_id: "toolu_spawn",
+          description: "Reading a.ts",
+        }),
+        "2024-01-01T10:00:02Z"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "system",
+          subtype: "task_progress",
+          tool_use_id: "toolu_spawn",
+          description: "Reading b.ts",
+        }),
+        "2024-01-01T10:00:03Z"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs);
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      kind: "thinking_heartbeat",
+      estimatedTokens: 42,
+    });
+    expect(events[1]).toMatchObject({
+      kind: "task_progress",
+      toolUseId: "toolu_spawn",
+      description: "Reading b.ts",
+    });
+  });
 });
 
 describe("getToolIcon", () => {
@@ -423,8 +638,12 @@ describe("parseCodexMessage", () => {
 
   it("turn.started increments the turn count without emitting events", () => {
     const state = newState();
-    expect(parseCodexMessage({ type: "turn.started" }, timestamp, state)).toEqual([]);
-    expect(parseCodexMessage({ type: "turn.started" }, timestamp, state)).toEqual([]);
+    expect(
+      parseCodexMessage({ type: "turn.started" }, timestamp, state)
+    ).toEqual([]);
+    expect(
+      parseCodexMessage({ type: "turn.started" }, timestamp, state)
+    ).toEqual([]);
     expect(state.turnCount).toBe(2);
   });
 
@@ -433,7 +652,11 @@ describe("parseCodexMessage", () => {
     const events = parseCodexMessage(
       {
         type: "turn.completed",
-        usage: { input_tokens: 100, cached_input_tokens: 20, output_tokens: 50 },
+        usage: {
+          input_tokens: 100,
+          cached_input_tokens: 20,
+          output_tokens: 50,
+        },
       },
       timestamp,
       state
@@ -590,7 +813,11 @@ describe("parseCodexMessage", () => {
           type: "file_change",
           status: "completed",
           changes: [
-            { path: "src/foo.rs", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+            {
+              path: "src/foo.rs",
+              kind: "update",
+              diff: "@@ -1 +1 @@\n-old\n+new",
+            },
             { path: "src/bar.rs", kind: "add", diff: "+++ b/src/bar.rs" },
           ],
         },
@@ -605,7 +832,11 @@ describe("parseCodexMessage", () => {
         toolId: "fc1",
         status: "completed",
         changes: [
-          { path: "src/foo.rs", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+          {
+            path: "src/foo.rs",
+            kind: "update",
+            diff: "@@ -1 +1 @@\n-old\n+new",
+          },
           { path: "src/bar.rs", kind: "add", diff: "+++ b/src/bar.rs" },
         ],
       },
@@ -617,7 +848,12 @@ describe("parseCodexMessage", () => {
       parseCodexMessage(
         {
           type: "item.completed",
-          item: { id: "fc-empty", type: "file_change", status: "completed", changes: [] },
+          item: {
+            id: "fc-empty",
+            type: "file_change",
+            status: "completed",
+            changes: [],
+          },
         },
         timestamp,
         newState()
@@ -853,11 +1089,7 @@ describe("parseCodexMessage", () => {
   });
 
   it("top-level `error` without a message uses a sane fallback", () => {
-    const events = parseCodexMessage(
-      { type: "error" },
-      timestamp,
-      newState()
-    );
+    const events = parseCodexMessage({ type: "error" }, timestamp, newState());
     expect(events[0]).toMatchObject({
       kind: "thinking",
       text: "[error] codex error",
@@ -939,7 +1171,10 @@ describe("parseSessionLogs provider dispatch", () => {
       model: "codex",
     });
     expect(events[1]).toMatchObject({ kind: "assistant_message", text: "ok" });
-    expect(events[2]).toMatchObject({ kind: "assistant_message", text: "Hello" });
+    expect(events[2]).toMatchObject({
+      kind: "assistant_message",
+      text: "Hello",
+    });
   });
 
   it("isolates Codex turn-count state per step_execution_id so concurrent executions don't bleed into each other", () => {
