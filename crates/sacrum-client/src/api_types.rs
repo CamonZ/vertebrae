@@ -407,6 +407,8 @@ pub struct SessionLogResponse {
     #[serde(default)]
     pub format: Option<String>,
     #[serde(default)]
+    pub logical_key: Option<String>,
+    #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,

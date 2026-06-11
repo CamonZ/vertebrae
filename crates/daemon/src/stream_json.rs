@@ -95,6 +95,31 @@ struct InitLine {
     tools: serde_json::Value,
 }
 
+/// Parsed stream-json fields needed to decide whether a raw log line is
+/// durable history or an ephemeral status snapshot.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct StreamLogLine {
+    #[serde(rename = "type")]
+    pub msg_type: String,
+    #[serde(default)]
+    pub subtype: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub tool_use_id: Option<String>,
+}
+
+/// How a stream-json line should be persisted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StreamLogPersistence {
+    Durable,
+    Ephemeral { logical_key: String },
+}
+
+fn non_empty(value: &Option<String>) -> Option<&str> {
+    value.as_deref().filter(|s| !s.is_empty())
+}
+
 /// Attempt to parse a single stream-json line as a `system`/`init` message.
 ///
 /// Returns `Some(StreamInitLine)` only for `{"type":"system","subtype":"init",...}`.
@@ -115,6 +140,50 @@ pub fn parse_stream_json_init_line(line: &str) -> Option<StreamInitLine> {
         session_id: parsed.session_id,
         tools: parsed.tools,
     })
+}
+
+/// Parse the subset of a stream-json line needed for session log persistence.
+///
+/// Returns `None` for malformed JSON. Callers should treat that as durable
+/// append so unexpected provider output is retained.
+pub fn parse_stream_log_line(line: &str) -> Option<StreamLogLine> {
+    serde_json::from_str(line).ok()
+}
+
+/// Classify a parsed Claude stream-json line for session log persistence.
+///
+/// Unknown current or future types deliberately remain durable append-only.
+pub fn classify_stream_log_line(line: &StreamLogLine) -> StreamLogPersistence {
+    match (line.msg_type.as_str(), line.subtype.as_deref()) {
+        ("system", Some("thinking_tokens")) => {
+            if let Some(session_id) = non_empty(&line.session_id) {
+                StreamLogPersistence::Ephemeral {
+                    logical_key: format!("thinking:{session_id}"),
+                }
+            } else {
+                StreamLogPersistence::Durable
+            }
+        }
+        ("system", Some("task_progress")) => {
+            if let Some(tool_use_id) = non_empty(&line.tool_use_id) {
+                StreamLogPersistence::Ephemeral {
+                    logical_key: format!("task_progress:{tool_use_id}"),
+                }
+            } else {
+                StreamLogPersistence::Durable
+            }
+        }
+        ("rate_limit_event", _) => {
+            if let Some(session_id) = non_empty(&line.session_id) {
+                StreamLogPersistence::Ephemeral {
+                    logical_key: format!("rate_limit:{session_id}"),
+                }
+            } else {
+                StreamLogPersistence::Durable
+            }
+        }
+        _ => StreamLogPersistence::Durable,
+    }
 }
 
 /// Attempt to parse a single stream-json line as a result message.
@@ -381,5 +450,113 @@ mod tests {
         assert!(parse_stream_json_init_line("not json").is_none());
         assert!(parse_stream_json_init_line(r#"{"type":"system",broken"#).is_none());
         assert!(parse_stream_json_init_line("").is_none());
+    }
+
+    // ===== stream-json session log persistence classification tests =====
+
+    #[test]
+    fn classify_thinking_tokens_as_ephemeral_by_session() {
+        let parsed = parse_stream_log_line(
+            r#"{"type":"system","subtype":"thinking_tokens","session_id":"sess-1"}"#,
+        )
+        .expect("line should parse");
+
+        assert_eq!(
+            classify_stream_log_line(&parsed),
+            StreamLogPersistence::Ephemeral {
+                logical_key: "thinking:sess-1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn repeated_thinking_token_snapshots_share_one_logical_key() {
+        let logical_keys: std::collections::HashSet<_> = (0..50)
+            .map(|tokens| {
+                let raw = format!(
+                    r#"{{"type":"system","subtype":"thinking_tokens","session_id":"sess-1","tokens":{tokens}}}"#
+                );
+                let parsed = parse_stream_log_line(&raw).expect("line should parse");
+                match classify_stream_log_line(&parsed) {
+                    StreamLogPersistence::Ephemeral { logical_key } => logical_key,
+                    StreamLogPersistence::Durable => panic!("thinking_tokens should be ephemeral"),
+                }
+            })
+            .collect();
+
+        assert_eq!(logical_keys.len(), 1);
+        assert!(logical_keys.contains("thinking:sess-1"));
+    }
+
+    #[test]
+    fn classify_task_progress_as_ephemeral_by_tool_use() {
+        let parsed = parse_stream_log_line(
+            r#"{"type":"system","subtype":"task_progress","tool_use_id":"toolu-1"}"#,
+        )
+        .expect("line should parse");
+
+        assert_eq!(
+            classify_stream_log_line(&parsed),
+            StreamLogPersistence::Ephemeral {
+                logical_key: "task_progress:toolu-1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_rate_limit_event_as_ephemeral_by_session() {
+        let parsed = parse_stream_log_line(
+            r#"{"type":"rate_limit_event","session_id":"sess-2","limit":"tokens"}"#,
+        )
+        .expect("line should parse");
+
+        assert_eq!(
+            classify_stream_log_line(&parsed),
+            StreamLogPersistence::Ephemeral {
+                logical_key: "rate_limit:sess-2".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn classify_unknown_types_and_subtypes_as_durable() {
+        for raw in [
+            r#"{"type":"assistant","session_id":"sess-1"}"#,
+            r#"{"type":"user","session_id":"sess-1"}"#,
+            r#"{"type":"result","session_id":"sess-1"}"#,
+            r#"{"type":"system","subtype":"init","session_id":"sess-1"}"#,
+            r#"{"type":"system","subtype":"future_snapshot","session_id":"sess-1"}"#,
+            r#"{"type":"future_event","session_id":"sess-1"}"#,
+        ] {
+            let parsed = parse_stream_log_line(raw).expect("line should parse");
+            assert_eq!(
+                classify_stream_log_line(&parsed),
+                StreamLogPersistence::Durable
+            );
+        }
+    }
+
+    #[test]
+    fn classify_missing_key_fields_as_durable() {
+        for raw in [
+            r#"{"type":"system","subtype":"thinking_tokens"}"#,
+            r#"{"type":"system","subtype":"thinking_tokens","session_id":""}"#,
+            r#"{"type":"system","subtype":"task_progress"}"#,
+            r#"{"type":"system","subtype":"task_progress","tool_use_id":""}"#,
+            r#"{"type":"rate_limit_event"}"#,
+            r#"{"type":"rate_limit_event","session_id":""}"#,
+        ] {
+            let parsed = parse_stream_log_line(raw).expect("line should parse");
+            assert_eq!(
+                classify_stream_log_line(&parsed),
+                StreamLogPersistence::Durable
+            );
+        }
+    }
+
+    #[test]
+    fn parse_stream_log_line_returns_none_for_malformed_json() {
+        assert!(parse_stream_log_line("not json").is_none());
+        assert!(parse_stream_log_line(r#"{"type":"system",broken"#).is_none());
     }
 }

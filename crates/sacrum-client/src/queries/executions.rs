@@ -62,6 +62,7 @@ pub const SESSION_LOG_FIELDS: &str = r#"
         step_execution_id
         content
         format
+        logical_key
         inserted_at
         updated_at
     }
@@ -228,6 +229,8 @@ pub const LIST_LOGS: &str = r#"
             id
             step_execution_id
             content
+            format
+            logical_key
             inserted_at
             updated_at
         }
@@ -235,11 +238,17 @@ pub const LIST_LOGS: &str = r#"
 "#;
 
 pub const CREATE_LOG: &str = r#"
-    mutation CreateLog($step_execution_id: Uuid4!, $content: String!, $format: String) {
+    mutation CreateLog(
+        $step_execution_id: Uuid4!,
+        $content: String!,
+        $format: String,
+        $logicalKey: String
+    ) {
         create_session_log(
             step_execution_id: $step_execution_id,
             content: $content
             format: $format
+            logicalKey: $logicalKey
         ) {
             id
         }
