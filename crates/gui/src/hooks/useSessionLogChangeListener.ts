@@ -17,9 +17,10 @@ interface UseSessionLogChangeListenerOptions {
 }
 
 /**
- * Hook that listens to SessionLogCreatedEvent from Tauri and appends incoming
- * session logs directly to the sessionLogStore. Consumers read logs from the
- * store rather than via callbacks.
+ * Hook that listens to session log Tauri events and writes incoming logs
+ * directly to the sessionLogStore. Created events append new rows; updated
+ * events upsert rows by id or logical_key. Consumers read logs from the store
+ * rather than via callbacks.
  *
  * @param options - Configuration options for the listener
  */
