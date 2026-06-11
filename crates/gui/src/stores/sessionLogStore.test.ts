@@ -103,6 +103,21 @@ describe("sessionLogStore", () => {
       expect(state.logsByExecutionId["exec-new"][0].content).toBe("brand new");
     });
 
+    it("does not append a log whose id is already in the execution bucket", () => {
+      useSessionLogStore
+        .getState()
+        .setLogs("exec-1", [createMockSessionLog({ id: "log-1", content: "first copy" })]);
+
+      useSessionLogStore
+        .getState()
+        .appendLog("exec-1", createMockSessionLog({ id: "log-1", content: "replayed copy" }));
+
+      const logs = useSessionLogStore.getState().logsByExecutionId["exec-1"];
+      expect(logs).toHaveLength(1);
+      expect(logs[0].id).toBe("log-1");
+      expect(logs[0].content).toBe("first copy");
+    });
+
     it("does not affect other execution IDs", () => {
       useSessionLogStore
         .getState()
