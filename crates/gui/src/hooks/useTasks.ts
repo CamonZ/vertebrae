@@ -4,6 +4,12 @@ import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
 import { mergeTask, taskMatchesFilter } from "../stores/taskStore";
 
+// Stable fallback for renders where the query has no data yet (loading or
+// error). A fresh `[]` per render changes identity every time and re-fires
+// any effect/memo that depends on `tasks`, which can loop render → effect →
+// state update → render.
+const NO_TASKS: Task[] = [];
+
 function updatedAtMs(task: Task): number | null {
   if (!task.updated_at) return null;
   const ms = Date.parse(task.updated_at);
@@ -99,7 +105,7 @@ export function useTasks(filter?: TaskFilterOptions) {
   });
 
   return {
-    tasks: query.data ?? [],
+    tasks: query.data ?? NO_TASKS,
     isLoading: query.isLoading,
     error: query.error ? errorMessage(query.error) : null,
     refetch: () => {
