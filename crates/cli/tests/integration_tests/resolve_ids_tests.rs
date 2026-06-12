@@ -1,13 +1,10 @@
 //! Integration tests for `Command::resolve_ids` short-ID resolution.
 //!
-//! Verifies that List, Execution::Create/List, and Workflow::Unassign commands
-//! correctly resolve 8-character hex prefixes to full UUIDs before execution.
+//! Verifies that List and Workflow::Unassign commands correctly resolve
+//! 8-character hex prefixes to full UUIDs before execution.
 
 use super::mock::{mock_services, mock_services_with_seeder};
 use vertebrae_cli::commands::Command;
-use vertebrae_cli::commands::execution::{
-    ExecutionCommand, ExecutionCreateCommand, ExecutionListCommand,
-};
 use vertebrae_cli::commands::list::ListCommand;
 use vertebrae_cli::commands::workflow::{WorkflowCommand, WorkflowUnassignCommand};
 use vertebrae_core::{CreateTaskOptions, Step};
@@ -140,48 +137,6 @@ async fn test_resolve_ids_list_unknown_short_id_returns_error() {
         msg.contains("ffffffff") || msg.contains("not found"),
         "error should reference the prefix or 'not found', got: {msg}"
     );
-}
-
-#[tokio::test]
-async fn test_resolve_ids_execution_create_resolves_task_short_id() {
-    let services = mock_services();
-    seed_task(&services, TASK_FULL, "task").await;
-
-    let mut command = Command::Execution(ExecutionCommand::Create(ExecutionCreateCommand {
-        task_id: TASK_PREFIX.to_string(),
-        context: None,
-        prompt: None,
-    }));
-
-    command.resolve_ids(&services).await.unwrap();
-
-    match command {
-        Command::Execution(ExecutionCommand::Create(c)) => {
-            assert_eq!(c.task_id, TASK_FULL);
-        }
-        _ => panic!("expected Execution::Create"),
-    }
-}
-
-#[tokio::test]
-async fn test_resolve_ids_execution_list_preserves_task_target_for_command_execution() {
-    let services = mock_services();
-    seed_task(&services, TASK_FULL, "task").await;
-
-    let mut command = Command::Execution(ExecutionCommand::List(ExecutionListCommand {
-        task_id: Some(TASK_PREFIX.to_string()),
-        task_run_id: None,
-    }));
-
-    command.resolve_ids(&services).await.unwrap();
-
-    match command {
-        Command::Execution(ExecutionCommand::List(c)) => {
-            assert_eq!(c.task_id.as_deref(), Some(TASK_PREFIX));
-            assert!(c.task_run_id.is_none());
-        }
-        _ => panic!("expected Execution::List"),
-    }
 }
 
 #[tokio::test]

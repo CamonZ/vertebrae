@@ -11,7 +11,6 @@ pub mod check_item;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
-pub mod execution;
 pub mod init;
 pub mod list;
 pub mod manifest;
@@ -41,7 +40,6 @@ pub use check_item::CheckItemCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
-pub use execution::ExecutionCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
 pub use manifest::ManifestCommand;
@@ -139,9 +137,6 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
-    /// Execution history commands
-    #[command(subcommand)]
-    Execution(ExecutionCommand),
     /// Initialize vertebrae in the current project
     Init(InitCommand),
     /// List tasks with optional filters
@@ -471,15 +466,6 @@ impl Command {
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
             Command::Init(_) | Command::Manifest(_) | Command::Ready(_) => {}
-            Command::Execution(cmd) => match cmd {
-                execution::ExecutionCommand::Create(c) => {
-                    c.task_id = resolve_id(&c.task_id, services).await?;
-                }
-                execution::ExecutionCommand::List(_) => {}
-                execution::ExecutionCommand::Show(_)
-                | execution::ExecutionCommand::Update(_)
-                | execution::ExecutionCommand::Log(_) => {}
-            },
             Command::List(cmd) => {
                 resolve_optional_id(&mut cmd.parent, services).await?;
                 resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
@@ -617,10 +603,6 @@ impl Command {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Execution(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(result))
             }
             Command::Init(cmd) => {
                 // Init doesn't use the database - it registers with Sacrum API
@@ -799,38 +781,6 @@ impl Command {
                 )
             }
             Command::Depend(cmd) => json_value(cmd.execute(services).await?)?,
-            Command::Execution(cmd) => match cmd {
-                execution::ExecutionCommand::Create(cmd) => {
-                    let execution_id = cmd.execute(services).await?;
-                    operation_result(
-                        "execution create",
-                        "created",
-                        json!({ "execution_id": execution_id, "task_id": cmd.task_id.to_lowercase() }),
-                    )
-                }
-                execution::ExecutionCommand::List(cmd) => {
-                    json_value(cmd.execute_result(services).await?)?
-                }
-                execution::ExecutionCommand::Show(cmd) => {
-                    json_value(cmd.execute_result(services).await?)?
-                }
-                execution::ExecutionCommand::Update(cmd) => {
-                    cmd.execute(services).await?;
-                    operation_result(
-                        "execution update",
-                        "updated",
-                        json!({ "execution_id": cmd.execution_id.to_lowercase() }),
-                    )
-                }
-                execution::ExecutionCommand::Log(cmd) => {
-                    let log_id = cmd.execute_result(services).await?;
-                    operation_result(
-                        "execution log",
-                        "created",
-                        json!({ "execution_id": cmd.execution_id.to_lowercase(), "log_id": log_id }),
-                    )
-                }
-            },
             Command::Init(cmd) => {
                 let result = cmd
                     .execute()
@@ -1016,44 +966,11 @@ mod tests {
     }
 
     #[test]
-    fn test_command_execution_list_parses_task_target() {
+    fn test_command_execution_family_is_not_available() {
         let cli = TestCli::try_parse_from(["test", "execution", "list", "a1b2c3d4"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Execution(execution::ExecutionCommand::List(cmd)) => {
-                assert_eq!(cmd.task_id.as_deref(), Some("a1b2c3d4"));
-                assert!(cmd.task_run_id.is_none());
-            }
-            _ => panic!("Expected Execution::List command"),
-        }
-    }
-
-    #[test]
-    fn test_command_execution_list_parses_task_run_mode() {
-        let task_run_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-        let cli = TestCli::try_parse_from(["test", "execution", "list", "--task-run", task_run_id]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Execution(execution::ExecutionCommand::List(cmd)) => {
-                assert!(cmd.task_id.is_none());
-                assert_eq!(cmd.task_run_id.as_deref(), Some(task_run_id));
-            }
-            _ => panic!("Expected Execution::List command"),
-        }
-    }
-
-    #[test]
-    fn test_command_execution_list_rejects_task_run_short_id() {
-        let cli = TestCli::try_parse_from(["test", "execution", "list", "--task-run", "bbbbbbbb"]);
-        assert!(cli.is_err());
-        let error = match cli {
-            Ok(_) => unreachable!("short TaskRun ID should be rejected"),
-            Err(err) => err.to_string(),
-        };
         assert!(
-            error.contains("TaskRun short IDs are not supported"),
-            "expected TaskRun short ID error, got: {}",
-            error
+            cli.is_err(),
+            "execution command family should be hidden from the CLI"
         );
     }
 

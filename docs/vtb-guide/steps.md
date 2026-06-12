@@ -396,7 +396,7 @@ vtb workflow add "Smoke-Claude" --step Hello:sonnet
 vtb add "Smoke: Claude default" -d "say hi"
 vtb workflow assign <task-id> <smoke-claude-wf-id>
 vtb run <task-id>
-vtb execution list <task-id>          # confirm a run was recorded
+# Confirm the run in the GUI or by watching daemon logs.
 
 # 2. OpenAI / Codex provider selection.
 #    Separate workflow whose single step targets Codex/gpt-5.5.
@@ -409,15 +409,15 @@ vtb step add "Hello" -w <smoke-codex-wf-id> \
 vtb add "Smoke: Codex" -d "say hi"
 vtb workflow assign <task-id-2> <smoke-codex-wf-id>
 vtb run <task-id-2>
-vtb execution list <task-id-2>        # confirm a run was recorded
+# Confirm the run in the GUI or by watching daemon logs.
 ```
 
 Each smoke task uses a single-step workflow so the run is unambiguous about
 which provider the daemon resolved. The resolved provider and model are
 persisted on the `StepExecution` record (and reported back to the backend); the
-`vtb execution show` text output does not yet print those fields, so confirm
-the harness was actually used by tailing the daemon logs or by inspecting the
-spawned process while the run is in flight.
+CLI does not expose StepExecution detail output, so confirm the harness was
+actually used by tailing the daemon logs or by inspecting the spawned process
+while the run is in flight.
 
 #### Out of scope for the MVP
 

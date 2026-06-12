@@ -427,29 +427,6 @@ Feature: Short ID resolution across all commands
     Then the command should succeed
 
   # ============================================================
-  # execution create / list (regression sites)
-  # ============================================================
-
-  Scenario: execution create resolves task short ID (regression)
-    Given a workflow "exc-wf" with steps "alpha, beta"
-    And I create a task with:
-      | title | Exec target |
-    And I assign the workflow to the task
-    And I store the task short ID as "s"
-    When I run vtb "execution create <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-    And the error should not contain "task ID"
-
-  Scenario: execution list resolves task short ID (regression)
-    Given a workflow "exl-wf" with steps "alpha, beta"
-    And I create a task with:
-      | title | Exec list target |
-    And I assign the workflow to the task
-    And I store the task short ID as "s"
-    When I run vtb "execution list <s>"
-    Then the command should succeed
-
-  # ============================================================
   # Negative scenarios — unknown 8-char prefix
   # ============================================================
 
