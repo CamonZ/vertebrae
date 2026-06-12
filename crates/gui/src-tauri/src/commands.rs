@@ -311,12 +311,13 @@ pub async fn set_current_project(
             );
 
             if socket.has_backend(&config.base_url, &config.api_token) && socket.is_running() {
-                socket
-                    .switch_project(Some(config.project_id.clone()))
-                    .await
-                    .map_err(|e| CommandError {
-                        message: format!("Failed to switch websocket project: {}", e),
-                    })?;
+                if let Err(e) = socket.switch_project(Some(config.project_id.clone())).await {
+                    log::warn!(
+                        "[WebSocket] Failed to switch realtime channel to project '{}': {}",
+                        config.project_id,
+                        e
+                    );
+                }
             } else {
                 socket.shutdown().await;
                 *socket = crate::websocket_client::SacrumSocket::new(
@@ -333,8 +334,8 @@ pub async fn set_current_project(
         }
     }
 
-    // Update REST services after the realtime channel switch has completed, so
-    // stale old-project broadcasts cannot race the service swap.
+    // Update REST services after requesting the realtime channel switch. The
+    // websocket actor keeps retrying in the background if the live join fails.
     {
         let mut service_lock = state.services.write().await;
         let mut client_lock = state.sacrum_client.write().await;
