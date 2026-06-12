@@ -92,7 +92,7 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const JOIN_REPLY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum time to wait for graceful actor shutdown before aborting
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Maximum reconnection delay (30 seconds)
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
@@ -171,8 +171,16 @@ impl ActiveConnection {
             loop {
                 match self.read.next().await {
                     Some(Ok(Message::Text(text))) => {
-                        if let Some(result) = Self::join_reply_result(&text, join_ref)? {
-                            return result;
+                        match Self::join_reply_result(&text, join_ref) {
+                            Ok(Some(result)) => return result,
+                            Ok(None) => {}
+                            Err(e) => {
+                                log::warn!(
+                                    "[WebSocket] Ignoring malformed message before join: {}",
+                                    e
+                                );
+                                continue;
+                            }
                         }
 
                         if let Err(e) = SacrumSocket::handle_phoenix_message_for_topic(
@@ -340,6 +348,7 @@ impl SacrumSocket {
     /// and automatic reconnection with exponential backoff.
     pub fn connect<R: Runtime>(&mut self, app_handle: &tauri::AppHandle<R>) {
         if self.command_tx.is_some() {
+            log::debug!("[WebSocket] Actor already running, ignoring connect request");
             return;
         }
 
@@ -397,11 +406,6 @@ impl SacrumSocket {
             .map_err(|_| "WebSocket actor stopped before switching project".to_string())?
     }
 
-    /// Stop the WebSocket connection and wait for the actor to exit.
-    pub async fn disconnect(&mut self) {
-        self.shutdown().await;
-    }
-
     /// Stop the actor and wait for the connection sink to close.
     pub async fn shutdown(&mut self) {
         if let Some(command_tx) = self.command_tx.take() {
@@ -443,7 +447,6 @@ impl SacrumSocket {
         mut commands: mpsc::UnboundedReceiver<SocketCommand>,
     ) {
         let mut desired_project = initial_project;
-        let mut pending_switch_reply: Option<oneshot::Sender<Result<(), String>>> = None;
         let mut reconnect_delay = Duration::from_millis(100);
         let mut has_connected = false;
 
@@ -463,11 +466,7 @@ impl SacrumSocket {
                         reply,
                     }) => {
                         desired_project = project_slug;
-                        if desired_project.is_some() {
-                            Self::replace_pending_reply(&mut pending_switch_reply, reply);
-                        } else {
-                            let _ = reply.send(Ok(()));
-                        }
+                        let _ = reply.send(Ok(()));
                         continue;
                     }
                     Some(SocketCommand::Shutdown) | None => break,
@@ -492,11 +491,7 @@ impl SacrumSocket {
                     match command {
                         Some(SocketCommand::SwitchProject { project_slug, reply }) => {
                             desired_project = project_slug;
-                            if desired_project.is_some() {
-                                Self::replace_pending_reply(&mut pending_switch_reply, reply);
-                            } else {
-                                let _ = reply.send(Ok(()));
-                            }
+                            let _ = reply.send(Ok(()));
                             continue;
                         }
                         Some(SocketCommand::Shutdown) | None => break,
@@ -519,10 +514,10 @@ impl SacrumSocket {
                     };
 
                     if let Err(e) = initial_join {
-                        if let Some(reply) = pending_switch_reply.take() {
-                            let _ = reply.send(Err(e.clone()));
-                        }
-                        log::warn!("[WebSocket] Initial join failed: {}", e);
+                        log::warn!(
+                            "[WebSocket] Initial join failed; will retry desired project: {}",
+                            e
+                        );
                         connection.close().await;
                         Self::set_state(
                             &state,
@@ -532,9 +527,6 @@ impl SacrumSocket {
                         )
                         .await;
                     } else {
-                        if let Some(reply) = pending_switch_reply.take() {
-                            let _ = reply.send(Ok(()));
-                        }
                         match Self::connection_loop(
                             connection,
                             &api_token,
@@ -584,11 +576,7 @@ impl SacrumSocket {
                     match command {
                         Some(SocketCommand::SwitchProject { project_slug, reply }) => {
                             desired_project = project_slug;
-                            if desired_project.is_some() {
-                                Self::replace_pending_reply(&mut pending_switch_reply, reply);
-                            } else {
-                                let _ = reply.send(Ok(()));
-                            }
+                            let _ = reply.send(Ok(()));
                         }
                         Some(SocketCommand::Shutdown) | None => break,
                     }
@@ -603,21 +591,7 @@ impl SacrumSocket {
             Some(&app_handle),
         )
         .await;
-        if let Some(reply) = pending_switch_reply.take() {
-            let _ = reply.send(Err(
-                "WebSocket actor stopped before switching project".to_string()
-            ));
-        }
         log::info!("[WebSocket] Actor stopped");
-    }
-
-    fn replace_pending_reply(
-        pending: &mut Option<oneshot::Sender<Result<(), String>>>,
-        reply: oneshot::Sender<Result<(), String>>,
-    ) {
-        if let Some(previous) = pending.replace(reply) {
-            let _ = previous.send(Err("WebSocket project switch superseded".to_string()));
-        }
     }
 
     async fn set_state<R: Runtime>(
@@ -709,6 +683,10 @@ impl SacrumSocket {
                                 Some(project_slug) => {
                                     let next_topic = ActiveConnection::project_topic(&project_slug);
                                     if connection.joined_topic.as_deref() == Some(next_topic.as_str()) {
+                                        log::debug!(
+                                            "[WebSocket] Already joined to '{}', switch is a no-op",
+                                            next_topic
+                                        );
                                         let _ = reply.send(Ok(()));
                                         continue;
                                     }
@@ -725,7 +703,7 @@ impl SacrumSocket {
                             };
 
                             if let Err(e) = switch_result {
-                                let _ = reply.send(Err(e.clone()));
+                                let _ = reply.send(Ok(()));
                                 connection.close().await;
                                 return ConnectionOutcome::Lost(e);
                             }
@@ -1942,6 +1920,14 @@ mod tests {
         socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
         join_msg: &serde_json::Value,
     ) {
+        send_join_reply_with_status(socket, join_msg, "ok").await;
+    }
+
+    async fn send_join_reply_with_status(
+        socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+        join_msg: &serde_json::Value,
+        status: &str,
+    ) {
         let Some(arr) = join_msg.as_array() else {
             return;
         };
@@ -1952,7 +1938,7 @@ mod tests {
             arr.get(2).cloned().unwrap_or(serde_json::Value::Null),
             "phx_reply",
             {
-                "status": "ok",
+                "status": status,
                 "response": {}
             }
         ]);
@@ -2406,6 +2392,108 @@ mod tests {
                 .is_err(),
             "project switch should not create another websocket connection"
         );
+
+        socket.shutdown().await;
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn socket_switch_join_rejection_is_best_effort_and_retries_desired_project() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind join rejection test server");
+        let addr = listener.local_addr().expect("read join rejection addr");
+        let (events_tx, mut events) = tokio_mpsc::unbounded_channel();
+
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept first websocket");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("accept first websocket handshake");
+            events_tx
+                .send(TestServerEvent::Connected(1))
+                .expect("record first connection");
+
+            if let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value = serde_json::from_str::<serde_json::Value>(&text)
+                    .expect("initial join should be JSON");
+                send_join_reply(&mut socket, &value).await;
+                events_tx
+                    .send(TestServerEvent::Text(1, value))
+                    .expect("record initial join");
+            }
+
+            if let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value =
+                    serde_json::from_str::<serde_json::Value>(&text).expect("leave should be JSON");
+                events_tx
+                    .send(TestServerEvent::Text(1, value))
+                    .expect("record leave");
+            }
+
+            if let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value = serde_json::from_str::<serde_json::Value>(&text)
+                    .expect("rejected join should be JSON");
+                send_join_reply_with_status(&mut socket, &value, "error").await;
+                events_tx
+                    .send(TestServerEvent::Text(1, value))
+                    .expect("record rejected join");
+            }
+
+            let (stream, _) = listener.accept().await.expect("accept retry websocket");
+            let mut socket = tokio_tungstenite::accept_async(stream)
+                .await
+                .expect("accept retry websocket handshake");
+            events_tx
+                .send(TestServerEvent::Connected(2))
+                .expect("record retry connection");
+
+            if let Some(Ok(Message::Text(text))) = socket.next().await {
+                let value = serde_json::from_str::<serde_json::Value>(&text)
+                    .expect("retry join should be JSON");
+                send_join_reply(&mut socket, &value).await;
+                events_tx
+                    .send(TestServerEvent::Text(2, value))
+                    .expect("record retry join");
+            }
+        });
+
+        let app = build_test_app();
+        let mut socket = SacrumSocket::new(
+            format!("http://{}", addr),
+            "sac_test".to_string(),
+            "project-a".to_string(),
+        );
+        socket.connect(app.handle());
+
+        match next_server_event(&mut events).await {
+            TestServerEvent::Connected(1) => {}
+            other => panic!("expected initial websocket connection, got {other:?}"),
+        }
+        let (connection_id, join_a) = next_text_event(&mut events).await;
+        assert_eq!(connection_id, 1);
+        assert_channel_message(&join_a, "project:project-a", "phx_join");
+
+        socket
+            .switch_project(Some("project-b".to_string()))
+            .await
+            .expect("rejected live join should still accept the desired project");
+
+        let (connection_id, leave_a) = next_text_event(&mut events).await;
+        assert_eq!(connection_id, 1);
+        assert_channel_message(&leave_a, "project:project-a", "phx_leave");
+
+        let (connection_id, rejected_join_b) = next_text_event(&mut events).await;
+        assert_eq!(connection_id, 1);
+        assert_channel_message(&rejected_join_b, "project:project-b", "phx_join");
+
+        match next_server_event(&mut events).await {
+            TestServerEvent::Connected(2) => {}
+            other => panic!("expected retry websocket connection, got {other:?}"),
+        }
+        let (connection_id, retry_join_b) = next_text_event(&mut events).await;
+        assert_eq!(connection_id, 2);
+        assert_channel_message(&retry_join_b, "project:project-b", "phx_join");
 
         socket.shutdown().await;
         server.abort();
