@@ -364,9 +364,8 @@ vtb transition-to <task> <step>  # Jump to specific step
 ### Execution
 ```bash
 vtb run <task>                   # Execute current step via daemon
-vtb execution list <task>        # List compact TaskRun-backed executions for a task
-vtb execution list --task-run <run> # List compact executions for one full TaskRun UUID
-vtb execution show <execution>   # Show execution details and session logs
+vtb start-taskrun <task>         # Start a durable workflow TaskRun
+vtb stop-taskrun <task>          # Stop the active TaskRun for a task
 ```
 
 ### Content

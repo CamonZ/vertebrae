@@ -16,7 +16,7 @@ Key entrypoints:
 - [Project Overview](docs/project-overview.md) - workspace structure, crates, dependencies, and build commands
 - [Architecture](docs/architecture.md) - crate map, service traits, Sacrum GraphQL client, GUI, and daemon
 - [System Overview](docs/system-overview.md) - full Vertebrae + Sacrum domain and execution model
-- [vtb Guide](docs/vtb-guide.md) - CLI usage for tasks, dependencies, sections, workflows, steps, and execution
+- [vtb Guide](docs/vtb-guide.md) - CLI usage for tasks, dependencies, sections, workflows, steps, and runs
 - [GUI Development](docs/gui-development.md) - Tauri + React development workflow
 - [Testing](docs/testing.md) - local test, lint, coverage, and acceptance-test guidance
 - [Sacrum Config](docs/SACRUM_CONFIG.md) - global config file and environment overrides

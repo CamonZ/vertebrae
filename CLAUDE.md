@@ -176,7 +176,6 @@ See `skills/` for detailed command guides:
 - `/gui-dev` - Orchestrate GUI development with Hammerspoon visual feedback
 
 **Advanced:**
-- `/execution` - Workflow execution history
 - `/gate` - Validation gates
 - `/init` - Initialize project
 - `/run` - Execute workflow via daemon

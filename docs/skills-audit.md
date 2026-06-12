@@ -62,7 +62,7 @@ Sacrum skill files that are intentionally **not** copied into Vertebrae:
 | `complete-step` | Fold into workflow transition guidance | Current step movement is documented through `transition-to`, workflow assignment, and TaskRun execution; there is no local `complete-step` command. |
 | `reject-step` | Fold into transition/workflow guidance | Rejection is modeled as workflow movement or review policy, not a standalone CLI command in the manifest. |
 | `review` | Not installed as a command skill | Human review is represented by workflow/step configuration and task movement; the local manifest has no `review` command. |
-| `status` | Not installed as a command skill | Current status inspection is covered by `show`, `list`, `ready`, and `execution`; there is no top-level `status` command. |
+| `status` | Not installed as a command skill | Current status inspection is covered by `show`, `list`, and `ready`; there is no top-level `status` command. |
 | `implement` | Not installed as a command skill | Implementation workflow is project guidance, not a local CLI command. |
 
 Vertebrae-only or renamed skills:
@@ -100,7 +100,7 @@ the local manifest exposes the command.
 | `skills/criterion-ref/SKILL.md` | `vtb criterion-ref` | Command reference | CLI manifest `criterion-ref`; `docs/vtb-guide/references.md` | keep-generated | Manifest hook exists; source `--desc` alias from manifest. |
 | `skills/delete/SKILL.md` | `vtb delete` | Command reference | CLI manifest `delete`; `docs/vtb-guide/tasks.md` | keep-generated | Manifest hook exists; destructive warning may remain curated. |
 | `skills/depend/SKILL.md` | `vtb depend` | Command reference | CLI manifest `depend`; `docs/vtb-guide/dependencies.md` | keep-generated | Manifest hook exists; dependency semantics may stay as short curated context. |
-| `skills/execution/SKILL.md` | `vtb execution ...` | Command family reference | CLI manifest `execution` and subcommands; `docs/vtb-guide/execution.md` | keep-generated | Manifest hook exists on the parent command. Regenerate subcommand syntax from manifest. |
+| `skills/execution/SKILL.md` | Removed from embedded skills | Command family reference | Removed CLI command family; `docs/vtb-guide/execution.md` now covers `run` and TaskRuns only | delete | Execution logs are intentionally invisible to the CLI/agent surface for now. |
 | `skills/gui-dev/SKILL.md` | GUI visual-feedback workflow | Curated workflow guidance | `hammerspoon/`; `docs/gui-development.md`; local GUI workflow | keep-curated | Not a CLI command. Keep hand-authored and validate embedded setup commands manually. |
 | `skills/init/SKILL.md` | `vtb init` | Command reference | CLI manifest `init`; `docs/vtb-guide/project-setup.md` | keep-generated | Manifest hook exists. Keep embedded-skills behavior aligned with docs. |
 | `skills/list/SKILL.md` | `vtb list` | Command reference | CLI manifest `list`; `docs/vtb-guide/tasks.md` | keep-generated | Manifest hook exists. |
