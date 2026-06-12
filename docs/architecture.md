@@ -172,7 +172,7 @@ DaemonSupervisor
 - Reports completion/failure with token counts, cost, and the actual
   provider/model used
 - Handles step types: `execute` (run prompt), `evaluate` (assess output for routing), `route` (branch logic)
-- Runs as macOS launchd service (managed via `vtb daemon install/uninstall/status`)
+- Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow
 
 ## GUI (`crates/gui`)
 

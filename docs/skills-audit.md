@@ -62,7 +62,7 @@ Sacrum skill files that are intentionally **not** copied into Vertebrae:
 | `complete-step` | Fold into workflow transition guidance | Current step movement is documented through `transition-to`, workflow assignment, and TaskRun execution; there is no local `complete-step` command. |
 | `reject-step` | Fold into transition/workflow guidance | Rejection is modeled as workflow movement or review policy, not a standalone CLI command in the manifest. |
 | `review` | Not installed as a command skill | Human review is represented by workflow/step configuration and task movement; the local manifest has no `review` command. |
-| `status` | Not installed as a command skill | Current status inspection is covered by `show`, `list`, `ready`, `execution`, and `daemon status`; there is no top-level `status` command. |
+| `status` | Not installed as a command skill | Current status inspection is covered by `show`, `list`, `ready`, and `execution`; there is no top-level `status` command. |
 | `implement` | Not installed as a command skill | Implementation workflow is project guidance, not a local CLI command. |
 
 Vertebrae-only or renamed skills:
@@ -125,7 +125,7 @@ the local manifest exposes the command.
 ## Manifest coverage notes
 
 The current manifest has examples hooks for every `keep-generated` command skill.
-It also includes commands with no standalone skill or examples hook: `daemon`,
+It also includes commands with no standalone skill or examples hook:
 `manifest`, `unarchive`, and nested command-family subcommands. Those can
 remain documented inside guide pages or parent command-family skills unless
 product onboarding needs a dedicated installed skill for them.
