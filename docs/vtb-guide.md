@@ -19,7 +19,6 @@ This entrypoint is intentionally short. The maintained command guide is split by
 | [Workflows](vtb-guide/workflows.md) | workflow CRUD, assignment, transitions, and task movement rules |
 | [Steps](vtb-guide/steps.md) | step CRUD, step types, output schemas, agents, skills, and provider selection |
 | [Execution Tracking and Runs](vtb-guide/execution.md) | `run`, `start-taskrun`, `stop-taskrun`, run-workflow aliases, execution records, logs |
-| [Daemon Management](vtb-guide/daemon.md) | daemon install, uninstall, and status commands |
 
 ## Installed Guide Assets
 
@@ -37,4 +36,3 @@ The detailed command reference now lives with each topic page:
 - [Workflow commands](vtb-guide/workflows.md)
 - [Step commands](vtb-guide/steps.md)
 - [Execution commands](vtb-guide/execution.md)
-- [Daemon commands](vtb-guide/daemon.md)

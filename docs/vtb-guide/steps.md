@@ -379,8 +379,9 @@ vtb step update <step-id> \
 
 #### Local smoke test
 
-The end-to-end smoke path exercises both providers. It assumes the daemon is
-installed (`vtb daemon install`) and the relevant harness CLI is logged in.
+The end-to-end smoke path exercises both providers. It assumes the daemon was
+installed through the GUI onboarding flow and the relevant harness CLI is
+logged in.
 
 ```bash
 # 0. Confirm the harnesses Vertebrae will spawn are reachable.

@@ -74,8 +74,8 @@ On first launch the GUI offers to install Vertebrae's command-line tools so
 users can drive workflows from the terminal and run them in the background.
 The flow is driven by Tauri commands in `src-tauri/src/install.rs`, which are
 thin adapters over the shared [`vertebrae-installer`](../crates/installer)
-crate. The CLI's `vtb daemon install/uninstall/status` are wrappers over the
-same crate, so GUI- and CLI-driven installs land in identical locations.
+crate. The GUI is the supported owner of daemon installation, so all installer
+UI and lifecycle changes should be made through this flow.
 
 ### Welcome / consent screen
 
@@ -180,14 +180,16 @@ project). The project registry itself lives in the shared
 
 There is no GUI uninstall flow. Undo an install from the terminal:
 
-1. **Remove the daemon service:**
+1. **Remove the daemon service manually:**
 
    ```bash
-   vtb daemon uninstall
+   launchctl bootout gui/$UID ~/Library/LaunchAgents/com.vertebrae.daemon.plist
+   rm -f ~/Library/LaunchAgents/com.vertebrae.daemon.plist
    ```
 
-   This unloads the service and removes the plist / systemd unit. It does
-   **not** remove the staged binaries or the `~/.local/bin` symlinks.
+   On Linux, use `systemctl --user disable --now vertebrae-daemon` and remove
+   `~/.config/systemd/user/vertebrae-daemon.service`. This does **not** remove
+   the staged binaries or the `~/.local/bin` symlinks.
 
 2. **Remove the symlinks and staged binaries manually:**
 
