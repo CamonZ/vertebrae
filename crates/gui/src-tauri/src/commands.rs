@@ -310,15 +310,20 @@ pub async fn set_current_project(
                 config.project_id
             );
 
+            let mut should_rebuild_socket = true;
             if socket.has_backend(&config.base_url, &config.api_token) && socket.is_running() {
                 if let Err(e) = socket.switch_project(Some(config.project_id.clone())).await {
                     log::warn!(
-                        "[WebSocket] Failed to switch realtime channel to project '{}': {}",
+                        "[WebSocket] Rebuilding realtime socket after failed switch to project '{}': {}",
                         config.project_id,
                         e
                     );
+                } else {
+                    should_rebuild_socket = false;
                 }
-            } else {
+            }
+
+            if should_rebuild_socket {
                 socket.shutdown().await;
                 *socket = crate::websocket_client::SacrumSocket::new(
                     config.base_url.clone(),
