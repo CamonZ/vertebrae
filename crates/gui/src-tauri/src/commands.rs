@@ -227,7 +227,7 @@ pub async fn remove_project(
         *chat_lock = None;
 
         let mut socket = socket_state.lock().await;
-        socket.disconnect();
+        socket.shutdown().await;
         *socket = crate::websocket_client::SacrumSocket::disconnected();
     }
 
@@ -299,7 +299,48 @@ pub async fn set_current_project(
         None
     };
 
-    // Update REST services
+    // Switch the Phoenix project channel over the existing socket when the
+    // Sacrum backend credentials are unchanged. Recreate only for backend
+    // changes or when no actor is running.
+    {
+        let mut socket = socket_state.lock().await;
+        if let Some(config) = sacrum_config.as_ref() {
+            log::info!(
+                "[WebSocket] Switching realtime channel to project '{}'",
+                config.project_id
+            );
+
+            let mut should_rebuild_socket = true;
+            if socket.has_backend(&config.base_url, &config.api_token) && socket.is_running() {
+                if let Err(e) = socket.switch_project(Some(config.project_id.clone())).await {
+                    log::warn!(
+                        "[WebSocket] Rebuilding realtime socket after failed switch to project '{}': {}",
+                        config.project_id,
+                        e
+                    );
+                } else {
+                    should_rebuild_socket = false;
+                }
+            }
+
+            if should_rebuild_socket {
+                socket.shutdown().await;
+                *socket = crate::websocket_client::SacrumSocket::new(
+                    config.base_url.clone(),
+                    config.api_token.clone(),
+                    config.project_id.clone(),
+                );
+                socket.connect(&app_handle);
+            }
+        } else {
+            log::info!("[WebSocket] No project selected, shutting down realtime socket");
+            socket.shutdown().await;
+            *socket = crate::websocket_client::SacrumSocket::disconnected();
+        }
+    }
+
+    // Update REST services after requesting the realtime channel switch. The
+    // websocket actor keeps retrying in the background if the live join fails.
     {
         let mut service_lock = state.services.write().await;
         let mut client_lock = state.sacrum_client.write().await;
@@ -320,28 +361,6 @@ pub async fn set_current_project(
                 *client_lock = None;
                 *chat_lock = None;
             }
-        }
-    }
-
-    // Restart WebSocket with new project credentials.
-    // Stop the old connection first so we don't leave a dangling background task.
-    {
-        let mut socket = socket_state.lock().await;
-        socket.disconnect();
-        if let Some(config) = sacrum_config {
-            log::info!(
-                "[WebSocket] Restarting connection for project '{}'",
-                config.project_id
-            );
-            *socket = crate::websocket_client::SacrumSocket::new(
-                config.base_url,
-                config.api_token,
-                config.project_id,
-            );
-            socket.connect(&app_handle);
-        } else {
-            log::info!("[WebSocket] No project selected, socket stays disconnected");
-            *socket = crate::websocket_client::SacrumSocket::disconnected();
         }
     }
 
