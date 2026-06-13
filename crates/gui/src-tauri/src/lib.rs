@@ -30,10 +30,10 @@ use claude_session::{
 use commands::AppState;
 use events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
-    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
-    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
-    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
-    WorkflowTransitionChangedEvent,
+    PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
+    SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -150,6 +150,7 @@ fn create_builder() -> Builder {
             install::install_components,
         ])
         .events(collect_events![
+            ProjectInitProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,

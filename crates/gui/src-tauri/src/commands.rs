@@ -146,6 +146,7 @@ pub async fn save_sacrum_settings(
 #[tauri::command]
 #[specta::specta]
 pub async fn initialize_project(
+    app_handle: tauri::AppHandle,
     path: String,
     name: Option<String>,
 ) -> Result<InitializeProjectResult, CommandError> {
@@ -196,15 +197,38 @@ pub async fn initialize_project(
     )?;
 
     let skills_target = project_root.join(".claude").join("skills");
+    let mut progress_files_copied = 0_u32;
+    let progress_slug = project_slug.clone();
     let skills_copied =
-        vertebrae_skills_assets::install_embedded_skills(&skills_target).map_err(|e| {
-            CommandError {
-                message: format!("Failed to install embedded skills: {}", e),
-            }
+        vertebrae_skills_assets::install_embedded_skills_with_progress(&skills_target, |file| {
+            progress_files_copied = progress_files_copied.saturating_add(1);
+            let _ = app_handle.emit(
+                "project-init-progress-event",
+                crate::events::ProjectInitProgressEvent {
+                    project_slug: progress_slug.clone(),
+                    kind: crate::events::ProjectInitProgressKind::SkillFileInstalled,
+                    files_copied: progress_files_copied,
+                    relative_path: Some(file.relative_path.to_string_lossy().to_string()),
+                    target_path: Some(file.target_path.to_string_lossy().to_string()),
+                },
+            );
+        })
+        .map_err(|e| CommandError {
+            message: format!("Failed to install embedded skills: {}", e),
         })?;
     let skills_copied = u32::try_from(skills_copied).map_err(|_| CommandError {
         message: "Installed skill file count exceeded supported range".to_string(),
     })?;
+    let _ = app_handle.emit(
+        "project-init-progress-event",
+        crate::events::ProjectInitProgressEvent {
+            project_slug: project_slug.clone(),
+            kind: crate::events::ProjectInitProgressKind::Completed,
+            files_copied: skills_copied,
+            relative_path: None,
+            target_path: None,
+        },
+    );
 
     Ok(InitializeProjectResult {
         slug: project_slug,
