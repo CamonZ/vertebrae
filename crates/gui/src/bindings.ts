@@ -48,6 +48,17 @@ async saveSacrumSettings(url: string | null, token: string) : Promise<Result<Sac
 }
 },
 /**
+ * Initialize a local project from the GUI without shelling out to `vtb init`.
+ */
+async initializeProject(path: string, name: string | null) : Promise<Result<InitializeProjectResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("initialize_project", { path, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Add a project to the saved list
  * 
  * Takes a directory path, derives a slug from the folder name,
@@ -1159,6 +1170,38 @@ export type DeleteChatSessionResult = { deleted_session_id: string; success: boo
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * Result returned after GUI-native project initialization.
+ */
+export type InitializeProjectResult = { 
+/**
+ * Project slug registered in config.toml.
+ */
+slug: string; 
+/**
+ * Sacrum project ID.
+ */
+project_id: string; 
+/**
+ * Display name used for the Sacrum project.
+ */
+project_name: string; 
+/**
+ * Canonical local project path.
+ */
+path: string; 
+/**
+ * Whether this call created the project on Sacrum.
+ */
+project_created: boolean; 
+/**
+ * Number of embedded skill files written.
+ */
+skills_copied: number; 
+/**
+ * Target directory where embedded skills were installed.
+ */
+skills_target: string }
 /**
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
