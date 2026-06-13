@@ -5,12 +5,14 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    ChatMessage, ChatSession, DeleteChatSessionResult, PermissionDecisionBehavior,
-    ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog, Step, StepExecution,
-    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    ChatMessage, ChatSession, DeleteChatSessionResult, InitializeProjectResult,
+    PermissionDecisionBehavior, ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog,
+    Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow,
+    WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
@@ -140,6 +142,81 @@ pub async fn save_sacrum_settings(
     sacrum_config_status().await
 }
 
+/// Initialize a local project from the GUI without shelling out to `vtb init`.
+#[tauri::command]
+#[specta::specta]
+pub async fn initialize_project(
+    path: String,
+    name: Option<String>,
+) -> Result<InitializeProjectResult, CommandError> {
+    log::info!("initialize_project called with path: {}", path);
+
+    let project_root = canonical_project_root(&path)?;
+    let folder_name = project_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| CommandError {
+            message: "Failed to extract folder name from path".to_string(),
+        })?;
+    let project_name = name
+        .as_deref()
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .unwrap_or(folder_name)
+        .to_string();
+    let project_slug = derive_project_slug(&project_name)?;
+
+    let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
+        message: format!("Failed to load config file: {}", e),
+    })?;
+    let api_token = config_file
+        .sacrum
+        .token
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .ok_or_else(|| CommandError {
+            message: "No API token found. Save Sacrum settings before initializing a project."
+                .to_string(),
+        })?
+        .to_string();
+    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
+    let base_url = effective_sacrum_url(&config_file.sacrum.url, &default_url);
+    let temp_config =
+        vertebrae_sacrum_client::SacrumConfig::new(base_url, api_token, "temp".to_string());
+    let client = vertebrae_sacrum_client::GraphqlClient::new(temp_config);
+
+    let (project, project_created) =
+        get_or_create_project(&client, &project_name, &project_slug).await?;
+    let project_path = project_root.to_string_lossy().to_string();
+    vertebrae_sacrum_client::register_project(&project_slug, &project.id, &project_path).map_err(
+        |e| CommandError {
+            message: format!("Failed to save config file: {}", e),
+        },
+    )?;
+
+    let skills_target = project_root.join(".claude").join("skills");
+    let skills_copied =
+        vertebrae_skills_assets::install_embedded_skills(&skills_target).map_err(|e| {
+            CommandError {
+                message: format!("Failed to install embedded skills: {}", e),
+            }
+        })?;
+    let skills_copied = u32::try_from(skills_copied).map_err(|_| CommandError {
+        message: "Installed skill file count exceeded supported range".to_string(),
+    })?;
+
+    Ok(InitializeProjectResult {
+        slug: project_slug,
+        project_id: project.id,
+        project_name: project.name,
+        path: project_path,
+        project_created,
+        skills_copied,
+        skills_target: skills_target.to_string_lossy().to_string(),
+    })
+}
+
 /// Add a project to the saved list
 ///
 /// Takes a directory path, derives a slug from the folder name,
@@ -153,7 +230,7 @@ pub async fn add_project(
     log::info!("add_project called with path: {}", path);
 
     // Extract folder name from path
-    let folder_name = std::path::Path::new(&path)
+    let folder_name = Path::new(&path)
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| CommandError {
@@ -162,12 +239,7 @@ pub async fn add_project(
         .to_string();
 
     // Derive slug from folder name
-    let project_slug = slug::slugify(&folder_name);
-    if project_slug.is_empty() {
-        return Err(CommandError {
-            message: format!("Could not create valid slug from: {}", folder_name),
-        });
-    }
+    let project_slug = derive_project_slug(&folder_name)?;
 
     // Load config file and check for duplicate slug
     let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
@@ -202,40 +274,7 @@ pub async fn add_project(
     let client = vertebrae_sacrum_client::GraphqlClient::new(temp_config);
 
     // Try to find existing project by slug, or create a new one
-    let project = match client
-        .execute::<Vec<vertebrae_sacrum_client::ProjectResponse>>(
-            vertebrae_sacrum_client::queries::projects::LIST_PROJECTS,
-            serde_json::json!({}),
-            "projects",
-        )
-        .await
-    {
-        Ok(projects) => {
-            if let Some(existing) = projects.iter().find(|p| p.slug == project_slug) {
-                existing.clone()
-            } else {
-                // Create new project
-                client
-                    .execute::<vertebrae_sacrum_client::ProjectResponse>(
-                        vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
-                        serde_json::json!({
-                            "name": folder_name.clone(),
-                            "slug": project_slug.clone(),
-                        }),
-                        "create_project",
-                    )
-                    .await
-                    .map_err(|e| CommandError {
-                        message: format!("Failed to create project in Sacrum: {}", e),
-                    })?
-            }
-        }
-        Err(e) => {
-            return Err(CommandError {
-                message: format!("Failed to list projects from Sacrum: {}", e),
-            });
-        }
-    };
+    let (project, _) = get_or_create_project(&client, &folder_name, &project_slug).await?;
 
     // Register project in global config
     vertebrae_sacrum_client::register_project(&project_slug, &project.id, &path).map_err(|e| {
@@ -258,6 +297,63 @@ fn effective_sacrum_url(config_url: &str, default_url: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn canonical_project_root(path: &str) -> Result<PathBuf, CommandError> {
+    let project_root = PathBuf::from(path);
+    if !project_root.is_dir() {
+        return Err(CommandError {
+            message: format!("Project path is not a directory: {}", path),
+        });
+    }
+    Ok(project_root.canonicalize().unwrap_or(project_root))
+}
+
+fn derive_project_slug(name: &str) -> Result<String, CommandError> {
+    let project_slug = slug::slugify(name);
+    if project_slug.is_empty() {
+        return Err(CommandError {
+            message: format!("Could not create valid slug from: {}", name),
+        });
+    }
+    Ok(project_slug)
+}
+
+async fn get_or_create_project(
+    client: &vertebrae_sacrum_client::GraphqlClient,
+    name: &str,
+    slug: &str,
+) -> Result<(vertebrae_sacrum_client::ProjectResponse, bool), CommandError> {
+    let projects = client
+        .execute::<Vec<vertebrae_sacrum_client::ProjectResponse>>(
+            vertebrae_sacrum_client::queries::projects::LIST_PROJECTS,
+            json!({}),
+            "projects",
+        )
+        .await
+        .map_err(|e| CommandError {
+            message: format!("Failed to list projects from Sacrum: {}", e),
+        })?;
+
+    if let Some(project) = projects.iter().find(|p| p.slug == slug) {
+        return Ok((project.clone(), false));
+    }
+
+    let project = client
+        .execute::<vertebrae_sacrum_client::ProjectResponse>(
+            vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
+            json!({
+                "name": name,
+                "slug": slug,
+            }),
+            "create_project",
+        )
+        .await
+        .map_err(|e| CommandError {
+            message: format!("Failed to create project in Sacrum: {}", e),
+        })?;
+
+    Ok((project, true))
 }
 
 /// Remove a project from the saved list
@@ -2499,6 +2595,24 @@ mod tests {
             effective_sacrum_url(" https://sacrum.example.test ", "http://localhost:4000"),
             "https://sacrum.example.test"
         );
+    }
+
+    #[test]
+    fn derive_project_slug_rejects_empty_slugs() {
+        assert_eq!(derive_project_slug("My Project").unwrap(), "my-project");
+        let err = derive_project_slug("!!!").unwrap_err();
+        assert!(err.message.contains("Could not create valid slug"));
+    }
+
+    #[test]
+    fn canonical_project_root_requires_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = canonical_project_root(&dir.path().to_string_lossy()).unwrap();
+        assert!(root.is_dir());
+
+        let missing = dir.path().join("missing");
+        let err = canonical_project_root(&missing.to_string_lossy()).unwrap_err();
+        assert!(err.message.contains("Project path is not a directory"));
     }
 
     // ========================================================================

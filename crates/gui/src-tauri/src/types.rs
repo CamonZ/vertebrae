@@ -18,6 +18,25 @@ pub struct SacrumConfigStatus {
     pub has_token: bool,
 }
 
+/// Result returned after GUI-native project initialization.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct InitializeProjectResult {
+    /// Project slug registered in config.toml.
+    pub slug: String,
+    /// Sacrum project ID.
+    pub project_id: String,
+    /// Display name used for the Sacrum project.
+    pub project_name: String,
+    /// Canonical local project path.
+    pub path: String,
+    /// Whether this call created the project on Sacrum.
+    pub project_created: bool,
+    /// Number of embedded skill files written.
+    pub skills_copied: u32,
+    /// Target directory where embedded skills were installed.
+    pub skills_target: String,
+}
+
 /// Task hierarchy level - mirrors db::Level
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
