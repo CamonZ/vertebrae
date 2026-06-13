@@ -278,7 +278,7 @@ fn section_response_to_section(r: &SectionResponse) -> ServiceResult<Section> {
     Ok(Section {
         section_type,
         content: r.content.clone(),
-        order: Some(r.section_order as u32),
+        order: r.section_order.map(|order| order as u32),
         done: r.done,
         done_at,
         refs,
@@ -660,18 +660,28 @@ impl TaskService for SacrumTaskService {
         Ok(response.dependents.iter().map(|d| d.id.clone()).collect())
     }
 
-    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
-        let variables = json!({
-            "task_id": id,
-            "section_type": section.section_type.as_str(),
-            "content": section.content,
-            "section_order": section.order.unwrap_or(0),
-            "done": section.done,
-        });
-        self.client
-            .execute_void(tasks::CREATE_SECTION, variables)
+    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<Section> {
+        let mut variables = serde_json::Map::new();
+        variables.insert("task_id".to_string(), json!(id));
+        variables.insert(
+            "section_type".to_string(),
+            json!(section.section_type.as_str()),
+        );
+        variables.insert("content".to_string(), json!(section.content));
+        variables.insert("done".to_string(), json!(section.done));
+        if let Some(order) = section.order {
+            variables.insert("section_order".to_string(), json!(order));
+        }
+
+        let created: SectionResponse = self
+            .client
+            .execute(
+                tasks::CREATE_SECTION,
+                Value::Object(variables),
+                "create_section",
+            )
             .await?;
-        Ok(())
+        section_response_to_section(&created)
     }
 
     async fn remove_sections(
@@ -723,7 +733,9 @@ impl TaskService for SacrumTaskService {
         let section = response
             .sections
             .iter()
-            .find(|s| s.section_type == section_type.as_str() && s.section_order == ordinal as i32)
+            .find(|s| {
+                s.section_type == section_type.as_str() && s.section_order == Some(ordinal as i32)
+            })
             .ok_or_else(|| {
                 ServiceError::validation_failed(format!(
                     "Section {} with order {} not found",
@@ -753,7 +765,9 @@ impl TaskService for SacrumTaskService {
         let section = response
             .sections
             .iter()
-            .find(|s| s.section_type == section_type.as_str() && s.section_order == ordinal as i32)
+            .find(|s| {
+                s.section_type == section_type.as_str() && s.section_order == Some(ordinal as i32)
+            })
             .ok_or_else(|| {
                 ServiceError::validation_failed(format!(
                     "Section {} with order {} not found",
@@ -777,7 +791,7 @@ impl TaskService for SacrumTaskService {
             .iter()
             .find(|s| {
                 s.section_type == SectionType::ChecklistItem.as_str()
-                    && s.section_order == section_order as i32
+                    && s.section_order == Some(section_order as i32)
             })
             .ok_or_else(|| {
                 ServiceError::validation_failed(format!(
@@ -806,7 +820,7 @@ impl TaskService for SacrumTaskService {
             .iter()
             .find(|s| {
                 s.section_type == SectionType::ChecklistItem.as_str()
-                    && s.section_order == section_order as i32
+                    && s.section_order == Some(section_order as i32)
             })
             .ok_or_else(|| {
                 ServiceError::validation_failed(format!(
@@ -1020,7 +1034,7 @@ mod tests {
             id: "sec-1".to_string(),
             section_type: "checklist_item".to_string(),
             content: "Do this".to_string(),
-            section_order: 1,
+            section_order: Some(1),
             done: Some(true),
             done_at: None,
             inserted_at: None,
@@ -1109,7 +1123,7 @@ mod tests {
                 id: "s-1".to_string(),
                 section_type: type_str.to_string(),
                 content: "content".to_string(),
-                section_order: 0,
+                section_order: Some(0),
                 done: None,
                 done_at: None,
                 inserted_at: None,
@@ -1119,6 +1133,14 @@ mod tests {
             let section = section_response_to_section(&response).unwrap();
             assert_eq!(section.section_type, expected_type);
         }
+    }
+
+    #[test]
+    fn test_create_section_query_requests_returned_order_fields() {
+        assert!(tasks::CREATE_SECTION.contains("create_section("));
+        assert!(tasks::CREATE_SECTION.contains(
+            "id\n            section_type\n            content\n            section_order"
+        ));
     }
 
     #[test]
@@ -1223,6 +1245,24 @@ mod tests {
             "test-project".to_string(),
         ));
         SacrumTaskService::new(client)
+    }
+
+    async fn captured_variables(server: &MockServer) -> serde_json::Value {
+        let received = server
+            .received_requests()
+            .await
+            .expect("received_requests must be enabled");
+        assert_eq!(
+            received.len(),
+            1,
+            "expected exactly one GraphQL request, got {}",
+            received.len()
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&received[0].body).expect("body must be valid JSON");
+        body.get("variables")
+            .cloned()
+            .expect("graphql request must include `variables`")
     }
 
     fn gql_task_data(id: &str, title: &str) -> serde_json::Value {
@@ -1604,7 +1644,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("CreateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "create_section": { "id": "sec-new" } }
+                "data": {
+                    "create_section": {
+                        "id": "sec-new",
+                        "section_type": "checklist_item",
+                        "content": "Do this first",
+                        "section_order": 1
+                    }
+                }
             })))
             .mount(&server)
             .await;
@@ -1620,7 +1667,56 @@ mod tests {
         };
         let result = service.add_section("task-1", section).await;
 
-        assert!(result.is_ok());
+        let created = result.unwrap();
+        assert_eq!(created.section_type, SectionType::ChecklistItem);
+        assert_eq!(created.content, "Do this first");
+        assert_eq!(created.order, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_add_section_omits_section_order_when_order_is_none() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_section": {
+                        "id": "sec-new",
+                        "section_type": "checklist_item",
+                        "content": "Do this next",
+                        "section_order": 7
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let section = Section {
+            section_type: SectionType::ChecklistItem,
+            content: "Do this next".to_string(),
+            order: None,
+            done: None,
+            done_at: None,
+            refs: vec![],
+        };
+        let created = service.add_section("task-1", section).await.unwrap();
+
+        assert_eq!(created.order, Some(7));
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["section_type"], "checklist_item");
+        assert_eq!(variables["content"], "Do this next");
+        assert!(
+            !variables
+                .as_object()
+                .expect("variables must be an object")
+                .contains_key("section_order"),
+            "section_order should be omitted when Section.order is None"
+        );
     }
 
     #[tokio::test]
