@@ -17,3 +17,5 @@ export { ChatWindow, ChatWindowManager } from "./ChatWindow";
 export { GlobalListeners } from "./GlobalListeners";
 export { StyleguideShortcut } from "./StyleguideShortcut";
 export { WindowLayout } from "./WindowLayout";
+export { FirstRunShell } from "./FirstRunShell";
+export type { FirstRunPhase } from "./FirstRunShell";
