@@ -1984,6 +1984,7 @@ dependencies = [
  "vertebrae-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
+ "vertebrae-skills-assets",
 ]
 
 [[package]]

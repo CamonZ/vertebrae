@@ -26,6 +26,39 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 }
 },
 /**
+ * Read the shared Sacrum settings state without exposing the API token.
+ */
+async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sacrum_config_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist Sacrum settings to the shared config.toml.
+ */
+async saveSacrumSettings(url: string | null, token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { url, token }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Initialize a local project from the GUI without shelling out to `vtb init`.
+ */
+async initializeProject(path: string, name: string | null) : Promise<Result<InitializeProjectResult, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("initialize_project", { path, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Add a project to the saved list
  * 
  * Takes a directory path, derives a slug from the folder name,
@@ -253,7 +286,7 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
  * 
  * Creates a new section with the given type and content.
  * For step and testing_criterion types, content can be optional.
- * The order is automatically assigned based on existing sections of the same type.
+ * The order is assigned by Sacrum.
  */
 async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<null, CommandError>> {
     try {
@@ -895,6 +928,7 @@ liveChatEventCreatedEvent: LiveChatEventCreatedEvent,
 liveChatMessageCreatedEvent: LiveChatMessageCreatedEvent,
 liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
+projectInitProgressEvent: ProjectInitProgressEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 sessionLogUpdatedEvent: SessionLogUpdatedEvent,
@@ -920,6 +954,7 @@ liveChatEventCreatedEvent: "live-chat-event-created-event",
 liveChatMessageCreatedEvent: "live-chat-message-created-event",
 liveChatSessionChangedEvent: "live-chat-session-changed-event",
 permissionRequestEvent: "permission-request-event",
+projectInitProgressEvent: "project-init-progress-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 sessionLogUpdatedEvent: "session-log-updated-event",
@@ -1138,6 +1173,38 @@ export type DeleteChatSessionResult = { deleted_session_id: string; success: boo
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 /**
+ * Result returned after GUI-native project initialization.
+ */
+export type InitializeProjectResult = { 
+/**
+ * Project slug registered in config.toml.
+ */
+slug: string; 
+/**
+ * Sacrum project ID.
+ */
+project_id: string; 
+/**
+ * Display name used for the Sacrum project.
+ */
+project_name: string; 
+/**
+ * Canonical local project path.
+ */
+path: string; 
+/**
+ * Whether this call created the project on Sacrum.
+ */
+project_created: boolean; 
+/**
+ * Number of embedded skill files written.
+ */
+skills_copied: number; 
+/**
+ * Target directory where embedded skills were installed.
+ */
+skills_target: string }
+/**
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
  */
@@ -1213,7 +1280,32 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+/**
+ * Progress emitted while the GUI initializes a local project.
+ */
+export type ProjectInitProgressEvent = { project_slug: string; kind: ProjectInitProgressKind; files_copied: number; relative_path: string | null; target_path: string | null }
+export type ProjectInitProgressKind = "SkillFileInstalled" | "Completed"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
+/**
+ * Current Sacrum settings state for GUI onboarding.
+ */
+export type SacrumConfigStatus = { 
+/**
+ * Shared config.toml path, when the platform exposes a config directory.
+ */
+config_path: string | null; 
+/**
+ * Whether config.toml exists on disk.
+ */
+config_exists: boolean; 
+/**
+ * Effective Sacrum URL. Defaults to the standard local Sacrum URL.
+ */
+url: string; 
+/**
+ * Whether a non-empty API token is configured.
+ */
+has_token: boolean }
 /**
  * A saved project in the project list
  */
@@ -1301,7 +1393,7 @@ id: string | null;
 /**
  * Stable key for ephemeral logs that replace earlier snapshots
  */
-logical_key?: string | null;
+logical_key?: string | null; 
 /**
  * Step execution ID this log belongs to
  */

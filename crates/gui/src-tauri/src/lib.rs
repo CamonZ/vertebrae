@@ -30,10 +30,10 @@ use claude_session::{
 use commands::AppState;
 use events::{
     LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
-    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
-    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
-    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
-    WorkflowTransitionChangedEvent,
+    PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
+    SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -64,6 +64,9 @@ fn create_builder() -> Builder {
             greet,
             // Project management commands
             commands::get_projects,
+            commands::sacrum_config_status,
+            commands::save_sacrum_settings,
+            commands::initialize_project,
             commands::add_project,
             commands::remove_project,
             commands::get_current_project,
@@ -147,6 +150,7 @@ fn create_builder() -> Builder {
             install::install_components,
         ])
         .events(collect_events![
+            ProjectInitProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,
