@@ -26,6 +26,28 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 }
 },
 /**
+ * Read the shared Sacrum settings state without exposing the API token.
+ */
+async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sacrum_config_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist Sacrum settings to the shared config.toml.
+ */
+async saveSacrumSettings(url: string | null, token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { url, token }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Add a project to the saved list
  * 
  * Takes a directory path, derives a slug from the folder name,
@@ -253,7 +275,7 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
  * 
  * Creates a new section with the given type and content.
  * For step and testing_criterion types, content can be optional.
- * The order is automatically assigned based on existing sections of the same type.
+ * The order is assigned by Sacrum.
  */
 async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<null, CommandError>> {
     try {
@@ -1215,6 +1237,26 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
+ * Current Sacrum settings state for GUI onboarding.
+ */
+export type SacrumConfigStatus = { 
+/**
+ * Shared config.toml path, when the platform exposes a config directory.
+ */
+config_path: string | null; 
+/**
+ * Whether config.toml exists on disk.
+ */
+config_exists: boolean; 
+/**
+ * Effective Sacrum URL. Defaults to the standard local Sacrum URL.
+ */
+url: string; 
+/**
+ * Whether a non-empty API token is configured.
+ */
+has_token: boolean }
+/**
  * A saved project in the project list
  */
 export type SavedProject = { 
@@ -1301,7 +1343,7 @@ id: string | null;
 /**
  * Stable key for ephemeral logs that replace earlier snapshots
  */
-logical_key?: string | null;
+logical_key?: string | null; 
 /**
  * Step execution ID this log belongs to
  */
