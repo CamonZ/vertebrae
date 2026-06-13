@@ -6397,7 +6397,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vertebrae-core",
- "vertebrae-installer",
  "vertebrae-sacrum-client",
 ]
 
