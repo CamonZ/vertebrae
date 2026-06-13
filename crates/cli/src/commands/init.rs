@@ -104,8 +104,6 @@ pub enum InitError {
         target: PathBuf,
         reason: String,
     },
-    /// Failed to read directory
-    ReadDir { path: PathBuf, reason: String },
     /// Failed to write config file
     WriteConfig { path: PathBuf, reason: String },
     /// Config error
@@ -143,14 +141,6 @@ impl std::fmt::Display for InitError {
                     "Failed to copy '{}' to '{}': {}",
                     source.display(),
                     target.display(),
-                    reason
-                )
-            }
-            InitError::ReadDir { path, reason } => {
-                write!(
-                    f,
-                    "Failed to read directory '{}': {}",
-                    path.display(),
                     reason
                 )
             }
@@ -355,10 +345,13 @@ mod tests {
     use super::*;
     use std::env;
     use std::fs;
+    use std::io::ErrorKind;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::Path;
+    use std::sync::mpsc;
     use std::thread;
+    use std::time::Duration;
     use vertebrae_skills_assets::{install_embedded_skills, list_embedded_skills};
 
     const CURATED_SKILL_COUNT: usize = 26;
@@ -409,7 +402,7 @@ mod tests {
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            env::set_current_dir(&self.previous_cwd).expect("restore current dir");
+            let _ = env::set_current_dir(&self.previous_cwd);
             match &self.previous_home {
                 Some(home) => unsafe { env::set_var("HOME", home) },
                 None => unsafe { env::remove_var("HOME") },
@@ -421,15 +414,54 @@ mod tests {
         }
     }
 
-    fn start_mock_sacrum_server() -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-        let url = format!("http://{}", listener.local_addr().expect("local addr"));
+    struct MockSacrumServer {
+        url: String,
+        shutdown_tx: mpsc::Sender<()>,
+        handle: thread::JoinHandle<()>,
+    }
 
-        thread::spawn(move || {
-            for (index, stream) in listener.incoming().take(2).enumerate() {
-                let mut stream = stream.expect("accept mock request");
+    impl MockSacrumServer {
+        fn stop(&self) {
+            let _ = self.shutdown_tx.send(());
+        }
+
+        fn join(self) {
+            self.handle
+                .join()
+                .expect("mock Sacrum server thread panicked");
+        }
+    }
+
+    fn start_mock_sacrum_server() -> MockSacrumServer {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure mock server listener");
+        let url = format!("http://{}", listener.local_addr().expect("local addr"));
+        let (shutdown_tx, shutdown_rx) = mpsc::channel();
+
+        let handle = thread::spawn(move || {
+            let mut handled_requests = 0;
+
+            while handled_requests < 2 {
+                if shutdown_rx.try_recv().is_ok() {
+                    break;
+                }
+
+                let (mut stream, _) = match listener.accept() {
+                    Ok(accepted) => accepted,
+                    Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("accept mock request: {error}"),
+                };
+                stream
+                    .set_nonblocking(false)
+                    .expect("configure mock request stream");
+
                 let request = read_http_request(&mut stream);
-                let body = if index == 0 {
+                let body = if handled_requests == 0 {
                     assert!(
                         request.contains("ListProjects"),
                         "first init request should list projects, got {request}"
@@ -443,6 +475,7 @@ mod tests {
                     r#"{"data":{"create_project":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#
                         .to_string()
                 };
+                handled_requests += 1;
 
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -455,7 +488,11 @@ mod tests {
             }
         });
 
-        url
+        MockSacrumServer {
+            url,
+            shutdown_tx,
+            handle,
+        }
     }
 
     fn read_http_request(stream: &mut std::net::TcpStream) -> String {
@@ -562,14 +599,19 @@ mod tests {
         {
             let _env = EnvGuard::new(&home_dir, &project_dir);
             let current_project_dir = env::current_dir().expect("current project dir");
-            let server_url = start_mock_sacrum_server();
+            let server = start_mock_sacrum_server();
             let cmd = InitCommand {
-                url: Some(server_url),
+                url: Some(server.url.clone()),
                 token: Some("test-token".to_string()),
                 skills_target: PathBuf::from(".claude/skills"),
             };
 
-            let result = cmd.execute().await.expect("init succeeds");
+            let init_result = cmd.execute().await;
+            if init_result.is_err() {
+                server.stop();
+            }
+            server.join();
+            let result = init_result.expect("init succeeds");
 
             assert_eq!(result.skills_copied, CURATED_SKILL_COUNT);
             assert_eq!(
