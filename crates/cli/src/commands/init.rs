@@ -10,16 +10,12 @@
 //! 7. Write embedded skills to the configured target directory
 
 use clap::Args;
-use include_dir::{Dir, include_dir};
 use serde::Serialize;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use vertebrae_sacrum_client::{
     GraphqlClient, SacrumConfig, config_path, load_config_file, register_project, save_config_file,
 };
-
-/// Embedded skills directory at compile time
-const SKILLS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../skills");
+use vertebrae_skills_assets::{SkillsAssetError, install_embedded_skills};
 
 /// Initialize vertebrae in the current project
 #[derive(Debug, Args)]
@@ -175,6 +171,23 @@ impl std::fmt::Display for InitError {
 
 impl std::error::Error for InitError {}
 
+impl From<SkillsAssetError> for InitError {
+    fn from(error: SkillsAssetError) -> Self {
+        match error {
+            SkillsAssetError::CreateDir { path, reason } => InitError::CreateDir { path, reason },
+            SkillsAssetError::WriteFile {
+                relative_path,
+                target,
+                reason,
+            } => InitError::CopyFile {
+                source: relative_path,
+                target,
+                reason,
+            },
+        }
+    }
+}
+
 impl InitCommand {
     /// Execute the init command.
     ///
@@ -262,8 +275,7 @@ impl InitCommand {
 
         // Copy skills
         let skills_target = current_dir.join(&self.skills_target);
-        self.create_dir_if_not_exists(&skills_target)?;
-        let skills_copied = self.copy_skills(&SKILLS_DIR, &skills_target)?;
+        let skills_copied = install_embedded_skills(&skills_target).map_err(InitError::from)?;
 
         Ok(InitResult {
             config_path: config_path().unwrap_or_default(),
@@ -336,75 +348,20 @@ impl InitCommand {
             }),
         }
     }
-
-    /// Create a directory if it doesn't exist.
-    ///
-    /// Returns true if the directory was created, false if it already existed.
-    fn create_dir_if_not_exists(&self, path: &Path) -> Result<bool, InitError> {
-        if path.exists() {
-            return Ok(false);
-        }
-
-        fs::create_dir_all(path).map_err(|e| InitError::CreateDir {
-            path: path.to_path_buf(),
-            reason: e.to_string(),
-        })?;
-
-        Ok(true)
-    }
-
-    /// Copy skill files from source to target directory.
-    ///
-    /// Recursively copies the embedded directory structure (e.g., skills/add/SKILL.md).
-    /// Returns the number of files copied.
-    fn copy_skills(&self, skills_source: &Dir, skills_target: &Path) -> Result<usize, InitError> {
-        let mut copied = 0;
-
-        // Copy files at this level
-        for file in skills_source.files() {
-            let target_path = skills_target.join(file.path());
-
-            if let Some(parent) = target_path.parent() {
-                self.create_dir_if_not_exists(parent)?;
-            }
-
-            let content = file.contents();
-            fs::write(&target_path, content).map_err(|e| InitError::CopyFile {
-                source: file.path().to_path_buf(),
-                target: target_path.clone(),
-                reason: e.to_string(),
-            })?;
-
-            copied += 1;
-        }
-
-        // Recurse into subdirectories
-        for dir in skills_source.dirs() {
-            let dir_target = skills_target.join(dir.path());
-            self.create_dir_if_not_exists(&dir_target)?;
-
-            for file in dir.files() {
-                let target_path = skills_target.join(file.path());
-
-                let content = file.contents();
-                fs::write(&target_path, content).map_err(|e| InitError::CopyFile {
-                    source: file.path().to_path_buf(),
-                    target: target_path.clone(),
-                    reason: e.to_string(),
-                })?;
-
-                copied += 1;
-            }
-        }
-
-        Ok(copied)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
+    use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::path::Path;
+    use std::thread;
+    use vertebrae_skills_assets::{install_embedded_skills, list_embedded_skills};
+
+    const CURATED_SKILL_COUNT: usize = 26;
 
     /// Helper to create a temporary test directory
     fn create_temp_dir(prefix: &str) -> PathBuf {
@@ -423,6 +380,120 @@ mod tests {
     /// Clean up test directory
     fn cleanup(path: &Path) {
         let _ = fs::remove_dir_all(path);
+    }
+
+    struct EnvGuard {
+        previous_home: Option<std::ffi::OsString>,
+        previous_xdg_config_home: Option<std::ffi::OsString>,
+        previous_cwd: PathBuf,
+    }
+
+    impl EnvGuard {
+        fn new(home: &Path, cwd: &Path) -> Self {
+            let previous_home = env::var_os("HOME");
+            let previous_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+            let previous_cwd = env::current_dir().expect("current dir");
+            // SAFETY: this guard is only used in serial tests because process
+            // environment and current directory are global mutable state.
+            unsafe { env::set_var("HOME", home) };
+            unsafe { env::set_var("XDG_CONFIG_HOME", home.join(".config")) };
+            env::set_current_dir(cwd).expect("set current dir");
+
+            Self {
+                previous_home,
+                previous_xdg_config_home,
+                previous_cwd,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            env::set_current_dir(&self.previous_cwd).expect("restore current dir");
+            match &self.previous_home {
+                Some(home) => unsafe { env::set_var("HOME", home) },
+                None => unsafe { env::remove_var("HOME") },
+            }
+            match &self.previous_xdg_config_home {
+                Some(config_home) => unsafe { env::set_var("XDG_CONFIG_HOME", config_home) },
+                None => unsafe { env::remove_var("XDG_CONFIG_HOME") },
+            }
+        }
+    }
+
+    fn start_mock_sacrum_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let url = format!("http://{}", listener.local_addr().expect("local addr"));
+
+        thread::spawn(move || {
+            for (index, stream) in listener.incoming().take(2).enumerate() {
+                let mut stream = stream.expect("accept mock request");
+                let request = read_http_request(&mut stream);
+                let body = if index == 0 {
+                    assert!(
+                        request.contains("ListProjects"),
+                        "first init request should list projects, got {request}"
+                    );
+                    r#"{"data":{"projects":[]}}"#.to_string()
+                } else {
+                    assert!(
+                        request.contains("CreateProject"),
+                        "second init request should create project, got {request}"
+                    );
+                    r#"{"data":{"create_project":{"id":"proj-123","name":"Temp Project","slug":"temp-project","description":null}}}"#
+                        .to_string()
+                };
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write mock response");
+            }
+        });
+
+        url
+    }
+
+    fn read_http_request(stream: &mut std::net::TcpStream) -> String {
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+
+        loop {
+            let bytes_read = stream.read(&mut buffer).expect("read mock request");
+            if bytes_read == 0 {
+                break;
+            }
+
+            request.extend_from_slice(&buffer[..bytes_read]);
+
+            if let Some(header_end) = find_header_end(&request) {
+                let content_length = content_length(&request[..header_end]).unwrap_or(0);
+                let body_start = header_end + 4;
+                if request.len() >= body_start + content_length {
+                    break;
+                }
+            }
+        }
+
+        String::from_utf8(request).expect("mock request is utf8")
+    }
+
+    fn find_header_end(request: &[u8]) -> Option<usize> {
+        request.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn content_length(headers: &[u8]) -> Option<usize> {
+        let headers = String::from_utf8_lossy(headers);
+        headers.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse().ok())
+                .flatten()
+        })
     }
 
     fn default_cmd() -> InitCommand {
@@ -463,67 +534,74 @@ mod tests {
     }
 
     #[test]
-    fn test_init_copies_skills() {
+    fn test_vtb_init_skill_install_step_installs_curated_skills() {
         let temp_dir = create_temp_dir("copy");
         fs::create_dir_all(&temp_dir).unwrap();
 
         let skills_target = temp_dir.join(".claude/skills");
-        fs::create_dir_all(&skills_target).unwrap();
 
-        let cmd = default_cmd();
+        let count = install_embedded_skills(&skills_target).unwrap();
 
-        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
-        assert!(result.is_ok());
-        // Should copy all the embedded skill files
-        let count = result.unwrap();
-        assert!(count > 0, "Should have copied at least one skill file");
-
-        // Verify at least one known skill folder/file exists
+        assert_eq!(count, CURATED_SKILL_COUNT);
+        assert_eq!(list_embedded_skills().len(), CURATED_SKILL_COUNT);
         assert!(skills_target.join("add/SKILL.md").exists());
+        assert!(!skills_target.join("gui-dev").exists());
+        assert!(!skills_target.join("execution").exists());
 
         cleanup(&temp_dir);
     }
 
-    #[test]
-    fn test_init_embedded_skills_exist() {
-        // Verify that SKILLS_DIR contains subdirectories with SKILL.md files
-        let dir_count = SKILLS_DIR.dirs().count();
-        assert!(
-            dir_count > 0,
-            "SKILLS_DIR should contain embedded skill directories"
-        );
-    }
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_vtb_init_in_temp_dir_installs_exact_curated_skills() {
+        let home_dir = create_temp_dir("home");
+        let project_dir = create_temp_dir("Temp Project");
+        fs::create_dir_all(&home_dir).unwrap();
+        fs::create_dir_all(&project_dir).unwrap();
 
-    #[test]
-    fn test_init_does_not_embed_repo_internal_gui_dev_skill() {
-        assert!(
-            SKILLS_DIR.get_dir("gui-dev").is_none(),
-            "repo-internal gui-dev skill should not be copied by vtb init"
-        );
-        assert!(
-            SKILLS_DIR.get_file("gui-dev/SKILL.md").is_none(),
-            "repo-internal gui-dev skill file should not be embedded"
-        );
-    }
+        {
+            let _env = EnvGuard::new(&home_dir, &project_dir);
+            let current_project_dir = env::current_dir().expect("current project dir");
+            let server_url = start_mock_sacrum_server();
+            let cmd = InitCommand {
+                url: Some(server_url),
+                token: Some("test-token".to_string()),
+                skills_target: PathBuf::from(".claude/skills"),
+            };
 
-    #[test]
-    fn test_init_skips_nonexistent_source() {
-        // This test is no longer applicable since skills are embedded
-        // and always available. We just verify the embedded skills work.
-        let temp_dir = create_temp_dir("nosource");
-        fs::create_dir_all(&temp_dir).unwrap();
+            let result = cmd.execute().await.expect("init succeeds");
 
-        let skills_target = temp_dir.join(".claude/skills");
-        fs::create_dir_all(&skills_target).unwrap();
+            assert_eq!(result.skills_copied, CURATED_SKILL_COUNT);
+            assert_eq!(
+                result.skills_target,
+                current_project_dir.join(".claude/skills")
+            );
+            assert!(result.project_created);
 
-        let cmd = default_cmd();
+            let target = current_project_dir.join(".claude/skills");
+            let mut installed = fs::read_dir(&target)
+                .expect("read installed skills")
+                .map(|entry| {
+                    entry
+                        .expect("read entry")
+                        .file_name()
+                        .into_string()
+                        .expect("skill name utf8")
+                })
+                .collect::<Vec<_>>();
+            installed.sort_unstable();
 
-        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
-        assert!(result.is_ok());
-        // Embedded skills are always available
-        assert!(result.unwrap() > 0);
+            let expected = list_embedded_skills()
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            assert_eq!(installed, expected);
+            assert!(!target.join("gui-dev").exists());
+            assert!(!target.join("execution").exists());
+        }
 
-        cleanup(&temp_dir);
+        cleanup(&home_dir);
+        cleanup(&project_dir);
     }
 
     #[test]
@@ -532,11 +610,8 @@ mod tests {
         fs::create_dir_all(&temp_dir).unwrap();
 
         let skills_target = temp_dir.join(".claude/skills");
-        fs::create_dir_all(&skills_target).unwrap();
 
-        let cmd = default_cmd();
-
-        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
+        let result = install_embedded_skills(&skills_target);
         assert!(result.is_ok());
 
         // Verify that written files have content
@@ -544,36 +619,6 @@ mod tests {
             let content = fs::read_to_string(skills_target.join("add/SKILL.md")).unwrap();
             assert!(!content.is_empty(), "Skill file should have content");
         }
-
-        cleanup(&temp_dir);
-    }
-
-    #[test]
-    fn test_init_create_dir_if_not_exists() {
-        let temp_dir = create_temp_dir("createdir");
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let new_dir = temp_dir.join("new-dir");
-        let cmd = default_cmd();
-
-        let result = cmd.create_dir_if_not_exists(&new_dir);
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-        assert!(new_dir.exists());
-
-        cleanup(&temp_dir);
-    }
-
-    #[test]
-    fn test_init_existing_dir_not_created() {
-        let temp_dir = create_temp_dir("existing");
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        let cmd = default_cmd();
-
-        let result = cmd.create_dir_if_not_exists(&temp_dir);
-        assert!(result.is_ok());
-        assert!(!result.unwrap()); // Was not newly created
 
         cleanup(&temp_dir);
     }
