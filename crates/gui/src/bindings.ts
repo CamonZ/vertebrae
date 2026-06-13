@@ -928,6 +928,7 @@ liveChatEventCreatedEvent: LiveChatEventCreatedEvent,
 liveChatMessageCreatedEvent: LiveChatMessageCreatedEvent,
 liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
+projectInitProgressEvent: ProjectInitProgressEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 sessionLogUpdatedEvent: SessionLogUpdatedEvent,
@@ -953,6 +954,7 @@ liveChatEventCreatedEvent: "live-chat-event-created-event",
 liveChatMessageCreatedEvent: "live-chat-message-created-event",
 liveChatSessionChangedEvent: "live-chat-session-changed-event",
 permissionRequestEvent: "permission-request-event",
+projectInitProgressEvent: "project-init-progress-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 sessionLogUpdatedEvent: "session-log-updated-event",
@@ -1278,6 +1280,11 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+/**
+ * Progress emitted while the GUI initializes a local project.
+ */
+export type ProjectInitProgressEvent = { project_slug: string; kind: ProjectInitProgressKind; files_copied: number; relative_path: string | null; target_path: string | null }
+export type ProjectInitProgressKind = "SkillFileInstalled" | "Completed"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
  * Current Sacrum settings state for GUI onboarding.
