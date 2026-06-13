@@ -1385,29 +1385,6 @@ impl MockSeeder {
             },
         );
     }
-
-    /// Insert a TaskRun into the mock execution state.
-    pub fn insert_task_run(&self, run: TaskRun) {
-        let mut s = self.state.lock().unwrap();
-        s.task_runs.insert(run.id.clone(), run);
-    }
-
-    /// Insert a StepExecution into the mock execution state.
-    pub fn insert_execution(&self, execution: StepExecution) {
-        let id = execution
-            .id
-            .clone()
-            .expect("seeded execution must have an ID");
-        let mut s = self.state.lock().unwrap();
-        s.executions.insert(id, execution);
-    }
-
-    /// Insert a SessionLog into the mock execution state.
-    pub fn insert_log(&self, log: SessionLog) {
-        let id = log.id.clone().expect("seeded session log must have an ID");
-        let mut s = self.state.lock().unwrap();
-        s.logs.insert(id, log);
-    }
 }
 
 /// Create a `VertebraeServices` instance backed by in-memory mocks, plus a seeder

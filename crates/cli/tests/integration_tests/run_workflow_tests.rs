@@ -1,6 +1,6 @@
-//! Integration tests for the `run-workflow` CLI command.
+//! Integration tests for the `start-taskrun` CLI command.
 //!
-//! The `run-workflow` command starts a durable TaskRun for a task workflow.
+//! The `start-taskrun` command starts a durable TaskRun for a task workflow.
 
 use super::mock::mock_services;
 use vertebrae_cli::commands::*;
@@ -28,7 +28,7 @@ async fn create_task_with_workflow(
 
     let wf_options = vertebrae_core::CreateWorkflowOptions {
         name: "Orchestration Workflow".to_string(),
-        description: Some("Workflow for testing run-workflow command".to_string()),
+        description: Some("Workflow for testing start-taskrun command".to_string()),
         steps: vec![],
         order: 0,
         is_default: false,
@@ -272,12 +272,12 @@ mod run_workflow_command_tests {
 
         assert!(
             result1.is_ok(),
-            "First task run-workflow failed: {:?}",
+            "First task start-taskrun failed: {:?}",
             result1
         );
         assert!(
             result2.is_ok(),
-            "Second task run-workflow failed: {:?}",
+            "Second task start-taskrun failed: {:?}",
             result2
         );
     }

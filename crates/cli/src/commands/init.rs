@@ -495,6 +495,18 @@ mod tests {
     }
 
     #[test]
+    fn test_init_does_not_embed_repo_internal_gui_dev_skill() {
+        assert!(
+            SKILLS_DIR.get_dir("gui-dev").is_none(),
+            "repo-internal gui-dev skill should not be copied by vtb init"
+        );
+        assert!(
+            SKILLS_DIR.get_file("gui-dev/SKILL.md").is_none(),
+            "repo-internal gui-dev skill file should not be embedded"
+        );
+    }
+
+    #[test]
     fn test_init_skips_nonexistent_source() {
         // This test is no longer applicable since skills are embedded
         // and always available. We just verify the embedded skills work.

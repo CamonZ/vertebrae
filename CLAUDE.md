@@ -133,14 +133,16 @@ vtb workflow assign <task> <workflow>
 
 # Execution via daemon
 vtb run <task>
-vtb run-workflow <task>
+vtb start-taskrun <task>
 ```
 
 > See [vtb Guide](docs/vtb-guide.md) for the full CLI reference.
 
 ### Skills
 
-See `skills/` for detailed command guides:
+See `skills/` for detailed shipped command guides. Repo-internal workflow
+helpers that should not be installed into consumer projects live under
+`.claude/skills/`.
 
 **Workflow helpers:**
 - `/ready` - Show items ready for work or triage
@@ -174,9 +176,9 @@ See `skills/` for detailed command guides:
 
 **GUI development:**
 - `/gui-dev` - Orchestrate GUI development with Hammerspoon visual feedback
+  (repo-internal: `.claude/skills/gui-dev`)
 
 **Advanced:**
-- `/execution` - Workflow execution history
 - `/gate` - Validation gates
 - `/init` - Initialize project
 - `/run` - Execute workflow via daemon

@@ -10,7 +10,7 @@ This entrypoint is intentionally short. The maintained command guide is split by
 
 | Page | Use it for |
 |------|------------|
-| [Project Setup and Validation](vtb-guide/project-setup.md) | `vtb init`, project configuration, manifest generation, docs validation |
+| [Project Setup](vtb-guide/project-setup.md) | `vtb init`, project configuration, and live CLI help validation |
 | [Core Concepts and Workflow](vtb-guide/overview.md) | task hierarchy, workflow position, short IDs, JSON output, end-to-end usage |
 | [Tasks](vtb-guide/tasks.md) | create, triage, list, show, update, delete, archive, and checklist commands |
 | [Sections](vtb-guide/sections.md) | task documentation sections, section types, checklist criteria, edit/remove behavior |
@@ -18,12 +18,11 @@ This entrypoint is intentionally short. The maintained command guide is split by
 | [Code References](vtb-guide/references.md) | `ref`, `refs`, `unref`, and `criterion-ref` |
 | [Workflows](vtb-guide/workflows.md) | workflow CRUD, assignment, transitions, and task movement rules |
 | [Steps](vtb-guide/steps.md) | step CRUD, step types, output schemas, agents, skills, and provider selection |
-| [Execution Tracking and Runs](vtb-guide/execution.md) | `run`, `start-taskrun`, `stop-taskrun`, run-workflow aliases, execution records, logs |
-| [Daemon Management](vtb-guide/daemon.md) | daemon install, uninstall, and status commands |
+| [Runs and TaskRuns](vtb-guide/execution.md) | `run`, `start-taskrun`, and `stop-taskrun` |
 
 ## Installed Guide Assets
 
-Downstream projects should install this entrypoint plus every page under `docs/vtb-guide/`. The entrypoint keeps navigation stable, while the split pages carry the detailed command examples that are checked by `vtb manifest validate-docs --repo-root .`.
+Downstream projects should install this entrypoint plus every page under `docs/vtb-guide/`. The entrypoint keeps navigation stable, while the split pages carry the detailed command examples that should be checked against live `vtb --help` and `vtb <command> --help` output.
 
 ## Command Reference
 
@@ -36,5 +35,4 @@ The detailed command reference now lives with each topic page:
 - [Code reference commands](vtb-guide/references.md)
 - [Workflow commands](vtb-guide/workflows.md)
 - [Step commands](vtb-guide/steps.md)
-- [Execution commands](vtb-guide/execution.md)
-- [Daemon commands](vtb-guide/daemon.md)
+- [Run commands](vtb-guide/execution.md)

@@ -77,25 +77,11 @@ Feature: Short ID resolution across all commands
     When I run vtb "run <s>"
     Then the error should not contain "is not a valid UUID or short ID"
 
-  Scenario: run-workflow resolves task short ID
-    Given I create a task with:
-      | title | Run-workflow target |
-    And I store the task short ID as "s"
-    When I run vtb "run-workflow <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-
   Scenario: start-taskrun resolves task short ID
     Given I create a task with:
       | title | Start TaskRun target |
     And I store the task short ID as "s"
     When I run vtb "start-taskrun <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-
-  Scenario: stop resolves task short ID
-    Given I create a task with:
-      | title | Stop target |
-    And I store the task short ID as "s"
-    When I run vtb "stop <s>"
     Then the error should not contain "is not a valid UUID or short ID"
 
   Scenario: stop-taskrun resolves task short ID
@@ -424,29 +410,6 @@ Feature: Short ID resolution across all commands
     Given a workflow "sd-wf" with steps "alpha, beta, gamma"
     And I store the short ID of step "beta" as "s"
     When I run vtb "step delete <s>"
-    Then the command should succeed
-
-  # ============================================================
-  # execution create / list (regression sites)
-  # ============================================================
-
-  Scenario: execution create resolves task short ID (regression)
-    Given a workflow "exc-wf" with steps "alpha, beta"
-    And I create a task with:
-      | title | Exec target |
-    And I assign the workflow to the task
-    And I store the task short ID as "s"
-    When I run vtb "execution create <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-    And the error should not contain "task ID"
-
-  Scenario: execution list resolves task short ID (regression)
-    Given a workflow "exl-wf" with steps "alpha, beta"
-    And I create a task with:
-      | title | Exec list target |
-    And I assign the workflow to the task
-    And I store the task short ID as "s"
-    When I run vtb "execution list <s>"
     Then the command should succeed
 
   # ============================================================
