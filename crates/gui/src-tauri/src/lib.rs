@@ -65,6 +65,7 @@ fn create_builder() -> Builder {
             // Project management commands
             commands::get_projects,
             commands::list_embedded_skills,
+            commands::preview_project_slug,
             commands::sacrum_config_status,
             commands::save_sacrum_settings,
             commands::initialize_project,

@@ -89,6 +89,13 @@ pub async fn list_embedded_skills() -> Result<Vec<String>, CommandError> {
         .collect())
 }
 
+/// Preview the backend-derived slug for a project name.
+#[tauri::command]
+#[specta::specta]
+pub async fn preview_project_slug(name: String) -> Result<String, CommandError> {
+    derive_project_slug(&name)
+}
+
 /// Read the shared Sacrum settings state without exposing the API token.
 #[tauri::command]
 #[specta::specta]
@@ -2654,6 +2661,16 @@ mod tests {
         assert!(!skills.is_empty());
         assert_eq!(skills, expected);
         assert!(skills.contains(&"add".to_string()));
+    }
+
+    #[tokio::test]
+    async fn preview_project_slug_uses_backend_slugifier() {
+        assert_eq!(
+            preview_project_slug("Ørsted Project".to_string())
+                .await
+                .unwrap(),
+            "orsted-project"
+        );
     }
 
     struct EnvGuard {

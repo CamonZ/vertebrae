@@ -1310,8 +1310,8 @@ html.window-transparent #root {
 }
 
 .fr-tr .fstate.done {
-  border-color: color-mix(in oklch, #5fbf8f 45%, transparent);
-  color: #5fbf8f;
+  border-color: color-mix(in oklch, var(--ok) 45%, transparent);
+  color: var(--ok);
 }
 
 .fr-summary {
