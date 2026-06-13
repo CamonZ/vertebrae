@@ -79,6 +79,16 @@ pub async fn get_projects(state: State<'_, AppState>) -> Result<Vec<SavedProject
     Ok(state.project_config.get_projects())
 }
 
+/// List all embedded skills available for GUI project initialization.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_embedded_skills() -> Result<Vec<String>, CommandError> {
+    Ok(vertebrae_skills_assets::list_embedded_skills()
+        .into_iter()
+        .map(str::to_string)
+        .collect())
+}
+
 /// Read the shared Sacrum settings state without exposing the API token.
 #[tauri::command]
 #[specta::specta]
@@ -2631,6 +2641,19 @@ mod tests {
             ))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_embedded_skills_returns_sorted_manifest() {
+        let skills = list_embedded_skills().await.unwrap();
+        let expected = vertebrae_skills_assets::list_embedded_skills()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+
+        assert!(!skills.is_empty());
+        assert_eq!(skills, expected);
+        assert!(skills.contains(&"add".to_string()));
     }
 
     struct EnvGuard {

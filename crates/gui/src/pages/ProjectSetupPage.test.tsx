@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
+  act,
   render,
   screen,
   waitFor,
@@ -15,15 +16,26 @@ const {
   mockSetCurrentProject,
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
+  mockListEmbeddedSkills,
+  mockInitializeProject,
+  mockProjectInitListen,
   mockNavigate,
   mockOpen,
+  projectInitProgress,
 } = vi.hoisted(() => ({
   mockGetProjects: vi.fn(),
   mockSetCurrentProject: vi.fn(),
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
+  mockListEmbeddedSkills: vi.fn(),
+  mockInitializeProject: vi.fn(),
+  mockProjectInitListen: vi.fn(),
   mockNavigate: vi.fn(),
   mockOpen: vi.fn(),
+  projectInitProgress: {
+    handler: null as null | ((event: { payload: unknown }) => void),
+    unlisten: vi.fn(),
+  },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -44,8 +56,15 @@ vi.mock("../bindings", () => ({
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
+    listEmbeddedSkills: (...args: unknown[]) => mockListEmbeddedSkills(...args),
+    initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
     addProject: vi.fn(),
     removeProject: vi.fn(),
+  },
+  events: {
+    projectInitProgressEvent: {
+      listen: (...args: unknown[]) => mockProjectInitListen(...args),
+    },
   },
 }));
 
@@ -55,6 +74,7 @@ describe("ProjectSetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProjectScopedStores();
+    projectInitProgress.handler = null;
 
     mockGetProjects.mockResolvedValue({
       status: "ok",
@@ -84,6 +104,26 @@ describe("ProjectSetupPage", () => {
         url: "http://localhost:4000",
         has_token: true,
       },
+    });
+    mockListEmbeddedSkills.mockResolvedValue({
+      status: "ok",
+      data: ["add", "ready"],
+    });
+    mockInitializeProject.mockResolvedValue({
+      status: "ok",
+      data: {
+        slug: "new-project",
+        project_id: "project-new",
+        project_name: "new-project",
+        path: "/tmp/new-project",
+        project_created: true,
+        skills_copied: 2,
+        skills_target: "/tmp/new-project/.claude/skills",
+      },
+    });
+    mockProjectInitListen.mockImplementation(async (handler) => {
+      projectInitProgress.handler = handler;
+      return projectInitProgress.unlisten;
     });
     mockOpen.mockResolvedValue("/tmp/new-project");
   });
@@ -186,8 +226,101 @@ describe("ProjectSetupPage", () => {
         "sac_test"
       );
     });
-    expect(await screen.findByTestId("project-phase-ready")).toHaveTextContent(
-      "new-project"
+    expect(await screen.findByTestId("skills-phase")).toHaveTextContent("add");
+    expect(screen.getByTestId("skills-phase")).toHaveTextContent("ready");
+  });
+
+  it("streams skill progress, selects the initialized project, and enters the app", async () => {
+    mockGetProjects.mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+
+    let resolveInitialize:
+      | ((value: Awaited<ReturnType<typeof mockInitializeProject>>) => void)
+      | null = null;
+    mockInitializeProject.mockReturnValue(
+      new Promise((resolve) => {
+        resolveInitialize = resolve;
+      })
     );
+
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("skills-install"));
+
+    await waitFor(() => {
+      expect(mockInitializeProject).toHaveBeenCalledWith(
+        "/tmp/new-project",
+        "new-project"
+      );
+      expect(projectInitProgress.handler).not.toBeNull();
+    });
+
+    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+      "queued"
+    );
+
+    act(() => {
+      projectInitProgress.handler?.({
+        payload: {
+          project_slug: "other-project",
+          kind: "SkillFileInstalled",
+          files_copied: 1,
+          relative_path: "add/SKILL.md",
+          target_path: "/tmp/other/.claude/skills/add/SKILL.md",
+        },
+      });
+    });
+    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+      "queued"
+    );
+
+    act(() => {
+      projectInitProgress.handler?.({
+        payload: {
+          project_slug: "new-project",
+          kind: "SkillFileInstalled",
+          files_copied: 1,
+          relative_path: "add/SKILL.md",
+          target_path: "/tmp/new-project/.claude/skills/add/SKILL.md",
+        },
+      });
+    });
+    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+      "writing"
+    );
+
+    act(() => {
+      resolveInitialize?.({
+        status: "ok",
+        data: {
+          slug: "new-project",
+          project_id: "project-new",
+          project_name: "new-project",
+          path: "/tmp/new-project",
+          project_created: true,
+          skills_copied: 2,
+          skills_target: "/tmp/new-project/.claude/skills",
+        },
+      });
+    });
+
+    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
+      "2"
+    );
+    expect(screen.getByTestId("ignition-screen")).toHaveTextContent(
+      "/tmp/new-project/.claude/skills"
+    );
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
+    expect(projectInitProgress.unlisten).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("ignition-enter"));
+    expect(mockNavigate).toHaveBeenCalledWith("/");
   });
 });
