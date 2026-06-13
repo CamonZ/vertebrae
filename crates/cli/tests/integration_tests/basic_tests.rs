@@ -872,6 +872,46 @@ mod section_tests {
     }
 
     #[tokio::test]
+    async fn test_add_section_after_delete_reports_server_assigned_ordinal() {
+        let services = mock_services();
+        let id = create_task(&services, "Task with replaced step").await;
+
+        let first = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::ChecklistItem,
+            content: "First step".to_string(),
+        };
+        let first_result = first.execute(&services).await.unwrap();
+        assert_eq!(first_result.ordinal, Some(0));
+
+        let remove = UnsectionCommand {
+            id: id.clone(),
+            section_type: SectionType::ChecklistItem,
+            index: Some(0),
+        };
+        let remove_result = remove.execute(&services).await.unwrap();
+        assert_eq!(remove_result.removed_count, 1);
+
+        let second = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::ChecklistItem,
+            content: "Second step".to_string(),
+        };
+        let second_result = second.execute(&services).await.unwrap();
+
+        assert_eq!(second_result.ordinal, Some(1));
+        assert_eq!(
+            second_result.to_string(),
+            format!("Added checklist_item section (ordinal 1) to task: {}", id)
+        );
+
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.sections.len(), 1);
+        assert_eq!(task.sections[0].content, "Second step");
+        assert_eq!(task.sections[0].order, Some(1));
+    }
+
+    #[tokio::test]
     async fn test_add_single_instance_section_replaces() {
         let services = mock_services();
         let id = create_task(&services, "Task with goal").await;
@@ -884,6 +924,7 @@ mod section_tests {
         };
         let result = cmd.execute(&services).await.unwrap();
         assert!(!result.replaced);
+        assert_eq!(result.ordinal, None);
 
         // Add goal again - should replace
         let cmd2 = SectionCommand {
@@ -893,6 +934,7 @@ mod section_tests {
         };
         let result2 = cmd2.execute(&services).await.unwrap();
         assert!(result2.replaced);
+        assert_eq!(result2.ordinal, None);
 
         // Verify only one goal section
         let task = services.tasks().get_task(&id).await.unwrap();

@@ -94,7 +94,7 @@ pub struct SectionResponse {
     pub section_type: String,
     pub content: String,
     #[serde(default)]
-    pub section_order: i32,
+    pub section_order: Option<i32>,
     #[serde(default)]
     pub done: Option<bool>,
     #[serde(default)]
@@ -976,7 +976,7 @@ mod tests {
         assert_eq!(section.id, "sec-1");
         assert_eq!(section.section_type, "checklist_item");
         assert_eq!(section.content, "Do this first");
-        assert_eq!(section.section_order, 1);
+        assert_eq!(section.section_order, Some(1));
         assert_eq!(section.done, Some(true));
     }
 

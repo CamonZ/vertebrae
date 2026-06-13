@@ -27,6 +27,13 @@ Feature: Sections and checklist items
     Then the output should contain "Added checklist_item section (ordinal 2) to task: <TASK_ID>"
     And the task should have 3 checklist_item sections
 
+  Scenario: Re-add multi-instance section after delete gets a fresh server ordinal
+    When I add a "checklist_item" section with content "First"
+    And I remove the "checklist_item" section at index 0
+    And I add a "checklist_item" section with content "Second"
+    Then the output should contain "Added checklist_item section (ordinal 0) to task: <TASK_ID>"
+    And the task should have 1 checklist_item sections
+
   Scenario Outline: Add each section type
     When I add a "<type>" section with content "Test content"
     Then the task should have a <type> section

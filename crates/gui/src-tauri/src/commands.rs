@@ -1927,7 +1927,7 @@ pub async fn delete_task(
 ///
 /// Creates a new section with the given type and content.
 /// For step and testing_criterion types, content can be optional.
-/// The order is automatically assigned based on existing sections of the same type.
+/// The order is assigned by Sacrum.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_section(
@@ -1952,23 +1952,13 @@ pub async fn add_section(
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
 
-    // Get current task to calculate the order
-    let task = service.tasks().get_task(&task_id).await?;
-
-    // Count existing sections of the same type to determine the order
-    let order = task
-        .sections
-        .iter()
-        .filter(|s| s.section_type == parsed_type)
-        .count() as u32;
-
     // Use provided content or empty string
     let section_content = content.unwrap_or_default();
 
     let section = vertebrae_core::Section {
         section_type: parsed_type,
         content: section_content,
-        order: Some(order),
+        order: None,
         done: None,
         done_at: None,
         refs: Vec::new(),
