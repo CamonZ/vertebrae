@@ -1,9 +1,9 @@
 # Skills Audit
 
-This audit records the retained skill set and generation policy for the
-checked-in `skills/*/SKILL.md` files. It is intentionally separate from command
-validation work: command syntax comes from live CLI help, while durable workflow
-guidance stays curated.
+This audit records the retained embedded skill set, repo-internal skills, and
+generation policy for checked-in skill files. It is intentionally separate from
+command validation work: command syntax comes from live CLI help, while durable
+workflow guidance stays curated.
 
 ## Sources of truth
 
@@ -14,7 +14,7 @@ guidance stays curated.
   maintained guide page for the command family.
 - Human workflow guidance: project docs, especially `AGENTS.md`,
   `docs/vtb-guide/overview.md`, and repo-specific GUI development notes.
-- GUI visual-feedback procedure: `skills/gui-dev/SKILL.md` and the
+- GUI visual-feedback procedure: `.claude/skills/gui-dev/SKILL.md` and the
   Hammerspoon helpers under `hammerspoon/`.
 
 ## Generation policy
@@ -33,19 +33,22 @@ keep the practice text curated and regenerate only the command-reference
 portions.
 
 The next regeneration step should treat the table below as exhaustive. Every
-existing `skills/*/SKILL.md` file has a disposition and source of truth.
+embedded `skills/*/SKILL.md` file and repo-internal `.claude/skills/*/SKILL.md`
+file has a disposition and source of truth.
 
-Before regenerating, compare the checked-in skills and command-help coverage
-against this audit:
+Before regenerating, compare the checked-in embedded skills, repo-internal
+skills, and command-help coverage against this audit:
 
 ```bash
 find skills -mindepth 2 -maxdepth 2 -name SKILL.md | sort
+find .claude/skills -mindepth 2 -maxdepth 2 -name SKILL.md | sort
 cargo run --quiet -p vertebrae-cli -- --help
 ```
 
-The first command should match the inventory's `Skill file` column. The second
-should expose each retained command topic, including aliases documented by
-shared command skills such as `start-taskrun` and `stop-taskrun`.
+The first command should match the embedded `skills/*` rows in the inventory.
+The second command should match repo-internal `.claude/skills/*` rows. The
+third should expose each retained command topic, including aliases documented
+by shared command skills such as `start-taskrun` and `stop-taskrun`.
 
 ## Sacrum guide parity findings
 
@@ -72,7 +75,7 @@ Vertebrae-only or renamed skills:
 | Vertebrae skill | Source of truth | Notes |
 |---|---|---|
 | `run-workflow` | Live help for `start-taskrun` and `stop-taskrun` | File name remains for compatibility with installed skill naming, but examples prefer `start-taskrun` and `stop-taskrun`; `run-workflow`, `stop`, and `stop-workflow` are documented as aliases. |
-| `gui-dev` | `hammerspoon/` helpers and GUI docs | Curated workflow guidance with no Sacrum counterpart. |
+| `gui-dev` | `.claude/skills/gui-dev/SKILL.md`; `hammerspoon/` helpers and GUI docs | Curated repo-internal workflow guidance with no Sacrum counterpart. |
 
 The parity target is structural: keep the split guide pages and installed skill
 shape that worked in Sacrum, but reject stale Sacrum command semantics unless
@@ -84,6 +87,8 @@ the local CLI exposes the command.
   help and validate examples against the relevant guide page.
 - `keep-curated`: keep the skill as hand-authored workflow guidance; validate
   any embedded commands against live help.
+- `keep-internal`: keep the skill as repo-internal `.claude/skills/` guidance
+  and exclude it from the embedded skills copied by `vtb init`.
 - `rewrite`: keep the topic, but rewrite because the current file is not
   aligned with the current live CLI or product shape.
 - `remove`: remove the skill from the embedded set, or fold its useful content
@@ -103,7 +108,7 @@ the local CLI exposes the command.
 | `skills/delete/SKILL.md` | `vtb delete` | Command reference | Live `vtb delete --help`; `docs/vtb-guide/tasks.md` | keep-generated | Destructive warning may remain curated. |
 | `skills/depend/SKILL.md` | `vtb depend` | Command reference | Live `vtb depend --help`; `docs/vtb-guide/dependencies.md` | keep-generated | Dependency semantics may stay as short curated context. |
 | `skills/execution/SKILL.md` | Removed from embedded skills | Command family reference | Removed CLI command family; `docs/vtb-guide/execution.md` now covers `run` and TaskRuns only | delete | Execution logs are intentionally invisible to the CLI/agent surface for now. |
-| `skills/gui-dev/SKILL.md` | GUI visual-feedback workflow | Curated workflow guidance | `hammerspoon/`; `docs/gui-development.md`; local GUI workflow | keep-curated | Not a CLI command. Keep hand-authored and validate embedded setup commands manually. |
+| `.claude/skills/gui-dev/SKILL.md` | GUI visual-feedback workflow | Repo-internal workflow guidance | `hammerspoon/`; `docs/gui-development.md`; local GUI workflow | keep-internal | Not a CLI command. Keep hand-authored, tracked for this repo, and excluded from embedded consumer installs. |
 | `skills/init/SKILL.md` | `vtb init` | Command reference | Live `vtb init --help`; `docs/vtb-guide/project-setup.md` | keep-generated | Keep embedded-skills behavior aligned with docs. |
 | `skills/list/SKILL.md` | `vtb list` | Command reference | Live `vtb list --help`; `docs/vtb-guide/tasks.md` | keep-generated | Verify examples against live help. |
 | `skills/path/SKILL.md` | `vtb path` | Command reference | Live `vtb path --help`; `docs/vtb-guide/dependencies.md` | keep-generated | Verify examples against live help. |
