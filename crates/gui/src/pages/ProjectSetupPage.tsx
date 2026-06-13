@@ -37,14 +37,6 @@ function projectNameFromPath(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-function projectSlugFromName(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
 export function ProjectSetupPage() {
   const navigate = useNavigate();
   const writeTimers = useRef<number[]>([]);
@@ -62,6 +54,7 @@ export function ProjectSetupPage() {
   const [sacrumUrl, setSacrumUrl] = useState("");
   const [sacrumToken, setSacrumToken] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
   const [projectDraft, setProjectDraft] = useState<ProjectDraft | null>(null);
   const [embeddedSkills, setEmbeddedSkills] = useState<string[]>([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(true);
@@ -162,7 +155,7 @@ export function ProjectSetupPage() {
     return () => {
       cancelled = true;
     };
-  }, [sacrumStatus, setupView]);
+  }, [sacrumStatus, sacrumStatusRetryKey, setupView]);
 
   // Handle selecting a project
   const handleSelectProject = async (project: SavedProject) => {
@@ -288,16 +281,23 @@ export function ProjectSetupPage() {
   const handleInitializeProject = async () => {
     if (!projectDraft || isInitializing) return;
 
-    const expectedSlug = projectSlugFromName(projectDraft.name);
-    setIsInitializing(true);
     setFormError(null);
-    setInitializeResult(null);
-    setFileStates(
-      Object.fromEntries(skillFilePaths.map((path) => [path, "queued"]))
-    );
+    setIsInitializing(true);
 
     let unlisten: (() => void) | null = null;
     try {
+      const slugResult = await commands.previewProjectSlug(projectDraft.name);
+      if (slugResult.status === "error") {
+        setFormError(slugResult.error.message);
+        return;
+      }
+
+      const expectedSlug = slugResult.data;
+      setInitializeResult(null);
+      setFileStates(
+        Object.fromEntries(skillFilePaths.map((path) => [path, "queued"]))
+      );
+
       unlisten = await events.projectInitProgressEvent.listen((event) => {
         const payload = event.payload as ProjectInitProgressEvent;
         if (payload.project_slug !== expectedSlug) return;
@@ -336,6 +336,11 @@ export function ProjectSetupPage() {
       unlisten?.();
       setIsInitializing(false);
     }
+  };
+
+  const handleRetrySacrumStatus = () => {
+    setFormError(null);
+    setSacrumStatusRetryKey((current) => current + 1);
   };
 
   const enterInitializedProject = () => {
@@ -495,10 +500,20 @@ export function ProjectSetupPage() {
 
       {formError && (
         <div
-          className="mb-4 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-center text-red-400"
+          className="mb-4 flex flex-wrap items-center justify-center gap-3 rounded-lg border border-red-500/50 bg-red-500/10 p-3 text-center text-red-400"
           data-testid="project-phase-error"
         >
-          {formError}
+          <span>{formError}</span>
+          {setupView === "project" && !sacrumStatus && (
+            <button
+              onClick={handleRetrySacrumStatus}
+              className={secondaryButtonClass}
+              disabled={isLoadingSacrumStatus}
+              data-testid="sacrum-status-retry"
+            >
+              Retry
+            </button>
+          )}
         </div>
       )}
 

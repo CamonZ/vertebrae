@@ -37,6 +37,17 @@ async listEmbeddedSkills() : Promise<Result<string[], CommandError>> {
 }
 },
 /**
+ * Preview the backend-derived slug for a project name.
+ */
+async previewProjectSlug(name: string) : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_project_slug", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read the shared Sacrum settings state without exposing the API token.
  */
 async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {

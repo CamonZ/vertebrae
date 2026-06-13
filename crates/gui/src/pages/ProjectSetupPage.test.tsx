@@ -17,6 +17,7 @@ const {
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
   mockListEmbeddedSkills,
+  mockPreviewProjectSlug,
   mockInitializeProject,
   mockProjectInitListen,
   mockAddProject,
@@ -30,6 +31,7 @@ const {
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
   mockListEmbeddedSkills: vi.fn(),
+  mockPreviewProjectSlug: vi.fn(),
   mockInitializeProject: vi.fn(),
   mockProjectInitListen: vi.fn(),
   mockAddProject: vi.fn(),
@@ -61,6 +63,7 @@ vi.mock("../bindings", () => ({
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
     listEmbeddedSkills: (...args: unknown[]) => mockListEmbeddedSkills(...args),
+    previewProjectSlug: (...args: unknown[]) => mockPreviewProjectSlug(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
     addProject: (...args: unknown[]) => mockAddProject(...args),
     removeProject: (...args: unknown[]) => mockRemoveProject(...args),
@@ -112,6 +115,10 @@ describe("ProjectSetupPage", () => {
     mockListEmbeddedSkills.mockResolvedValue({
       status: "ok",
       data: ["add", "ready"],
+    });
+    mockPreviewProjectSlug.mockResolvedValue({
+      status: "ok",
+      data: "new-project",
     });
     mockInitializeProject.mockResolvedValue({
       status: "ok",
@@ -255,6 +262,11 @@ describe("ProjectSetupPage", () => {
     render(<ProjectSetupPage />);
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    expect(screen.getByTestId("first-run-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Project");
+    expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
+      "Step 1 of 3"
+    );
     await userEvent.click(screen.getByTestId("project-folder-choose"));
 
     expect(
@@ -283,10 +295,50 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByTestId("skills-phase")).toHaveTextContent("ready");
   });
 
+  it("retries Sacrum status loading after a transient failure", async () => {
+    mockGetProjects.mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    mockSacrumConfigStatus
+      .mockResolvedValueOnce({
+        status: "error",
+        error: { message: "Sacrum config unavailable" },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          config_path: "/tmp/config.toml",
+          config_exists: true,
+          url: "http://localhost:4000",
+          has_token: true,
+        },
+      });
+
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Sacrum config unavailable"
+    );
+
+    await userEvent.click(screen.getByTestId("sacrum-status-retry"));
+
+    await waitFor(() => {
+      expect(mockSacrumConfigStatus).toHaveBeenCalledTimes(2);
+    });
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+  });
+
   it("streams skill progress, selects the initialized project, and enters the app", async () => {
     mockGetProjects.mockResolvedValue({
       status: "ok",
       data: [],
+    });
+    mockPreviewProjectSlug.mockResolvedValue({
+      status: "ok",
+      data: "orsted",
     });
 
     let resolveInitialize:
@@ -302,6 +354,8 @@ describe("ProjectSetupPage", () => {
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.clear(screen.getByLabelText("Project name"));
+    await userEvent.type(screen.getByLabelText("Project name"), "Ørsted");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
@@ -310,8 +364,9 @@ describe("ProjectSetupPage", () => {
     await waitFor(() => {
       expect(mockInitializeProject).toHaveBeenCalledWith(
         "/tmp/new-project",
-        "new-project"
+        "Ørsted"
       );
+      expect(mockPreviewProjectSlug).toHaveBeenCalledWith("Ørsted");
       expect(projectInitProgress.handler).not.toBeNull();
     });
 
@@ -322,7 +377,7 @@ describe("ProjectSetupPage", () => {
     act(() => {
       projectInitProgress.handler?.({
         payload: {
-          project_slug: "other-project",
+          project_slug: "rsted",
           kind: "SkillFileInstalled",
           files_copied: 1,
           relative_path: "add/SKILL.md",
@@ -337,7 +392,7 @@ describe("ProjectSetupPage", () => {
     act(() => {
       projectInitProgress.handler?.({
         payload: {
-          project_slug: "new-project",
+          project_slug: "orsted",
           kind: "SkillFileInstalled",
           files_copied: 1,
           relative_path: "add/SKILL.md",
@@ -350,12 +405,27 @@ describe("ProjectSetupPage", () => {
     );
 
     act(() => {
+      projectInitProgress.handler?.({
+        payload: {
+          project_slug: "orsted",
+          kind: "Completed",
+          files_copied: 2,
+          relative_path: null,
+          target_path: null,
+        },
+      });
+    });
+    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+      "written"
+    );
+
+    act(() => {
       resolveInitialize?.({
         status: "ok",
         data: {
-          slug: "new-project",
+          slug: "orsted",
           project_id: "project-new",
-          project_name: "new-project",
+          project_name: "Ørsted",
           path: "/tmp/new-project",
           project_created: true,
           skills_copied: 2,
@@ -370,7 +440,7 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByTestId("ignition-screen")).toHaveTextContent(
       "/tmp/new-project/.claude/skills"
     );
-    expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("orsted");
     expect(projectInitProgress.unlisten).toHaveBeenCalled();
 
     await userEvent.click(screen.getByTestId("ignition-enter"));
