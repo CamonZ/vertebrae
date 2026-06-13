@@ -77,25 +77,11 @@ Feature: Short ID resolution across all commands
     When I run vtb "run <s>"
     Then the error should not contain "is not a valid UUID or short ID"
 
-  Scenario: run-workflow resolves task short ID
-    Given I create a task with:
-      | title | Run-workflow target |
-    And I store the task short ID as "s"
-    When I run vtb "run-workflow <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-
   Scenario: start-taskrun resolves task short ID
     Given I create a task with:
       | title | Start TaskRun target |
     And I store the task short ID as "s"
     When I run vtb "start-taskrun <s>"
-    Then the error should not contain "is not a valid UUID or short ID"
-
-  Scenario: stop resolves task short ID
-    Given I create a task with:
-      | title | Stop target |
-    And I store the task short ID as "s"
-    When I run vtb "stop <s>"
     Then the error should not contain "is not a valid UUID or short ID"
 
   Scenario: stop-taskrun resolves task short ID

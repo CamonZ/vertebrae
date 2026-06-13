@@ -254,10 +254,10 @@ async fn delete_task_via_cli(world: &mut GuiWorld) {
 #[when("I start the task workflow via the CLI")]
 async fn start_task_workflow_via_cli(world: &mut GuiWorld) {
     let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
-    world.run_vtb(&["run-workflow", &task_id]).await;
+    world.run_vtb(&["start-taskrun", &task_id]).await;
     assert_eq!(
         world.last_exit_code, 0,
-        "vtb run-workflow failed: {}{}",
+        "vtb start-taskrun failed: {}{}",
         world.last_stdout, world.last_stderr
     );
 }
