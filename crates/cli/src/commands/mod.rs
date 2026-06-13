@@ -13,7 +13,6 @@ pub mod delete;
 pub mod depend;
 pub mod init;
 pub mod list;
-pub mod manifest;
 pub mod path;
 pub mod ready;
 pub mod r#ref;
@@ -42,7 +41,6 @@ pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
-pub use manifest::ManifestCommand;
 pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
@@ -141,9 +139,6 @@ pub enum Command {
     Init(InitCommand),
     /// List tasks with optional filters
     List(ListCommand),
-    /// Source-of-truth CLI command manifest and docs validation
-    #[command(subcommand)]
-    Manifest(ManifestCommand),
     /// Find the dependency path between two tasks
     Path(PathCommand),
     /// Show highest-level actionable items (entry points for work/triage)
@@ -465,7 +460,7 @@ impl Command {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
-            Command::Init(_) | Command::Manifest(_) | Command::Ready(_) => {}
+            Command::Init(_) | Command::Ready(_) => {}
             Command::List(cmd) => {
                 resolve_optional_id(&mut cmd.parent, services).await?;
                 resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
@@ -628,12 +623,6 @@ impl Command {
                 };
                 Ok(CommandResult::Table(output))
             }
-            Command::Manifest(cmd) => {
-                let result = cmd
-                    .execute()
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                Ok(CommandResult::Message(result))
-            }
             Command::Path(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
@@ -787,14 +776,6 @@ impl Command {
                     .await
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 json_value(result)?
-            }
-            Command::Manifest(cmd) => {
-                let result = cmd
-                    .execute()
-                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-                serde_json::from_str(&result).unwrap_or_else(|_| {
-                    operation_result("manifest", "ok", json!({ "message": result }))
-                })
             }
             Command::Path(cmd) => json_value(cmd.execute(services).await?)?,
             Command::Ready(cmd) => json_value(cmd.execute(services).await?)?,
@@ -971,6 +952,15 @@ mod tests {
         assert!(
             cli.is_err(),
             "execution command family should be hidden from the CLI"
+        );
+    }
+
+    #[test]
+    fn test_command_manifest_family_is_not_available() {
+        let cli = TestCli::try_parse_from(["test", "manifest", "print"]);
+        assert!(
+            cli.is_err(),
+            "manifest command family should be hidden from the CLI"
         );
     }
 
