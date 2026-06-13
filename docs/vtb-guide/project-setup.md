@@ -1,4 +1,4 @@
-# Project Setup and Validation
+# Project Setup
 
 ## Configuration
 
@@ -56,20 +56,14 @@ directory used for the copy.
 
 ---
 
-## CLI Manifest and Docs Validation
+## CLI Help Validation
 
-The shipped `vtb` binary can emit a machine-readable command manifest derived
-from its clap definitions:
-
-```bash
-vtb manifest print
-```
-
-Validate command examples, aliases, and supported section types in this guide
-and the command skills:
+Use live help from the shipped `vtb` binary as the command syntax source of
+truth when updating guide pages or installed command skills:
 
 ```bash
-vtb manifest validate-docs --repo-root .
+vtb --help
+vtb <command> --help
 ```
 
 ---

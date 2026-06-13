@@ -10,7 +10,7 @@ This entrypoint is intentionally short. The maintained command guide is split by
 
 | Page | Use it for |
 |------|------------|
-| [Project Setup and Validation](vtb-guide/project-setup.md) | `vtb init`, project configuration, manifest generation, docs validation |
+| [Project Setup](vtb-guide/project-setup.md) | `vtb init`, project configuration, and live CLI help validation |
 | [Core Concepts and Workflow](vtb-guide/overview.md) | task hierarchy, workflow position, short IDs, JSON output, end-to-end usage |
 | [Tasks](vtb-guide/tasks.md) | create, triage, list, show, update, delete, archive, and checklist commands |
 | [Sections](vtb-guide/sections.md) | task documentation sections, section types, checklist criteria, edit/remove behavior |
@@ -22,7 +22,7 @@ This entrypoint is intentionally short. The maintained command guide is split by
 
 ## Installed Guide Assets
 
-Downstream projects should install this entrypoint plus every page under `docs/vtb-guide/`. The entrypoint keeps navigation stable, while the split pages carry the detailed command examples that are checked by `vtb manifest validate-docs --repo-root .`.
+Downstream projects should install this entrypoint plus every page under `docs/vtb-guide/`. The entrypoint keeps navigation stable, while the split pages carry the detailed command examples that should be checked against live `vtb --help` and `vtb <command> --help` output.
 
 ## Command Reference
 

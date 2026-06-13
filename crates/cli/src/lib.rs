@@ -6,7 +6,6 @@
 pub mod cli_args;
 pub mod commands;
 pub mod error;
-pub mod manifest;
 pub mod output;
 
 pub use cli_args::CliArgs;

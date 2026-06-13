@@ -1,6 +1,5 @@
 use clap::Parser;
 use serde::Serialize;
-use serde_json::json;
 use std::process;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -56,21 +55,6 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
             .map_err(|e| ServiceError::config_error(e.to_string()))?;
         if args.json {
             print_json(&result)?;
-        } else {
-            println!("{}", result);
-        }
-        return Ok(());
-    }
-
-    if let Some(Command::Manifest(ref cmd)) = args.command {
-        let result = cmd
-            .execute()
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
-        if args.json {
-            let value = serde_json::from_str(&result).unwrap_or_else(
-                |_| json!({ "command": "manifest", "status": "ok", "message": result }),
-            );
-            println!("{}", CommandResult::Json(value));
         } else {
             println!("{}", result);
         }
