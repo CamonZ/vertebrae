@@ -355,7 +355,7 @@ mod tests {
         assert_eq!(result.filter_type, Some(SectionType::Goal));
         assert_eq!(result.sections[0].section_type, SectionType::Goal);
         assert_eq!(result.sections[0].content, "Achieve world peace");
-        assert_eq!(result.sections[0].order, None);
+        assert_eq!(result.sections[0].order, Some(0));
     }
 
     #[tokio::test]

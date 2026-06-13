@@ -407,8 +407,8 @@ pub trait TaskService: Send + Sync {
     // Sections and Code References
     // =========================================================================
 
-    /// Add a section to a task
-    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()>;
+    /// Add a section to a task and return the created section.
+    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<Section>;
 
     /// Remove sections from a task by type
     async fn remove_sections(

@@ -74,7 +74,7 @@ impl SectionCommand {
     /// For single-instance types (goal, context, current_behavior, desired_behavior),
     /// replaces any existing section of that type.
     /// For multi-instance types (checklist_item, testing_criterion, anti_pattern,
-    /// failure_test, constraint), appends with auto-incrementing ordinal.
+    /// failure_test, constraint), appends with a server-assigned ordinal.
     ///
     /// # Arguments
     ///
@@ -100,12 +100,11 @@ impl SectionCommand {
             ));
         }
 
-        // Fetch the task first to count existing sections of this type
-        let task = services.tasks().get_task(&id).await?;
+        let is_single_instance = self.section_type.is_single_instance();
 
-        // Handle single-instance vs multi-instance section types
-        let (ordinal, replaced) = if self.section_type.is_single_instance() {
-            // For single-instance types, check if one already exists
+        // Handle single-instance replacement before creating the new section.
+        let replaced = if is_single_instance {
+            let task = services.tasks().get_task(&id).await?;
             let existing = task
                 .sections
                 .iter()
@@ -117,29 +116,27 @@ impl SectionCommand {
                     .remove_sections(&id, self.section_type.clone(), None)
                     .await?;
             }
-            (None, existing)
+            existing
         } else {
-            // For multi-instance types, calculate the next ordinal
-            let count = task
-                .sections
-                .iter()
-                .filter(|s| s.section_type == self.section_type)
-                .count();
-            (Some(count as u32), false)
+            false
         };
 
-        // Create the section with the calculated order
+        // Create the section without a client-assigned order; Sacrum assigns it.
         let section = Section {
             section_type: self.section_type.clone(),
             content: self.content.clone(),
-            order: ordinal,
+            order: None,
             done: None,
             done_at: None,
             refs: Vec::new(),
         };
 
-        // Add the section using service layer (which fires MutationCallback)
-        services.tasks().add_section(&id, section).await?;
+        let created = services.tasks().add_section(&id, section).await?;
+        let ordinal = if is_single_instance {
+            None
+        } else {
+            created.order
+        };
 
         Ok(SectionResult {
             id,
