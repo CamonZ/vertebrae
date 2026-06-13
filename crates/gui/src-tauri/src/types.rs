@@ -5,6 +5,38 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Current Sacrum settings state for GUI onboarding.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SacrumConfigStatus {
+    /// Shared config.toml path, when the platform exposes a config directory.
+    pub config_path: Option<String>,
+    /// Whether config.toml exists on disk.
+    pub config_exists: bool,
+    /// Effective Sacrum URL. Defaults to the standard local Sacrum URL.
+    pub url: String,
+    /// Whether a non-empty API token is configured.
+    pub has_token: bool,
+}
+
+/// Result returned after GUI-native project initialization.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct InitializeProjectResult {
+    /// Project slug registered in config.toml.
+    pub slug: String,
+    /// Sacrum project ID.
+    pub project_id: String,
+    /// Display name used for the Sacrum project.
+    pub project_name: String,
+    /// Canonical local project path.
+    pub path: String,
+    /// Whether this call created the project on Sacrum.
+    pub project_created: bool,
+    /// Number of embedded skill files written.
+    pub skills_copied: u32,
+    /// Target directory where embedded skills were installed.
+    pub skills_target: String,
+}
+
 /// Task hierarchy level - mirrors db::Level
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
