@@ -19,6 +19,8 @@ const {
   mockListEmbeddedSkills,
   mockInitializeProject,
   mockProjectInitListen,
+  mockAddProject,
+  mockRemoveProject,
   mockNavigate,
   mockOpen,
   projectInitProgress,
@@ -30,6 +32,8 @@ const {
   mockListEmbeddedSkills: vi.fn(),
   mockInitializeProject: vi.fn(),
   mockProjectInitListen: vi.fn(),
+  mockAddProject: vi.fn(),
+  mockRemoveProject: vi.fn(),
   mockNavigate: vi.fn(),
   mockOpen: vi.fn(),
   projectInitProgress: {
@@ -58,8 +62,8 @@ vi.mock("../bindings", () => ({
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
     listEmbeddedSkills: (...args: unknown[]) => mockListEmbeddedSkills(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
-    addProject: vi.fn(),
-    removeProject: vi.fn(),
+    addProject: (...args: unknown[]) => mockAddProject(...args),
+    removeProject: (...args: unknown[]) => mockRemoveProject(...args),
   },
   events: {
     projectInitProgressEvent: {
@@ -125,6 +129,8 @@ describe("ProjectSetupPage", () => {
       projectInitProgress.handler = handler;
       return projectInitProgress.unlisten;
     });
+    mockAddProject.mockResolvedValue({ status: "ok", data: null });
+    mockRemoveProject.mockResolvedValue({ status: "ok", data: null });
     mockOpen.mockResolvedValue("/tmp/new-project");
   });
 
@@ -162,6 +168,53 @@ describe("ProjectSetupPage", () => {
     });
     expect(taskIdsWhenNavigating).toEqual([]);
     expect(workflowIdsWhenNavigating).toEqual([]);
+  });
+
+  it("keeps returning users on the saved-project list and opens the wizard from Add Project", async () => {
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("setup-project-list")).toHaveTextContent(
+      "new-project"
+    );
+
+    await userEvent.click(screen.getByTestId("setup-add-project"));
+
+    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    expect(mockAddProject).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(await screen.findByTestId("setup-project-list")).toHaveTextContent(
+      "new-project"
+    );
+  });
+
+  it("removes saved projects without selecting the project row", async () => {
+    mockGetProjects
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: [
+          {
+            slug: "new-project",
+            project_id: "project-new",
+            path: "/tmp/new-project",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: [],
+      });
+
+    render(<ProjectSetupPage />);
+
+    await userEvent.click(await screen.findByTitle("Remove from list"));
+
+    await waitFor(() => {
+      expect(mockRemoveProject).toHaveBeenCalledWith("new-project");
+    });
+    expect(mockSetCurrentProject).not.toHaveBeenCalled();
+    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
   });
 
   it("collects folder and project name without showing Sacrum fields when config is complete", async () => {
