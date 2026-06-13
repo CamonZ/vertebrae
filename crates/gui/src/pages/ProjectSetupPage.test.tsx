@@ -79,6 +79,12 @@ describe("ProjectSetupPage", () => {
 
     render(<ProjectSetupPage />);
 
+    expect(await screen.findByTestId("first-run-shell")).toBeInTheDocument();
+    expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Project");
+    expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
+      "Step 1 of 3"
+    );
+
     await userEvent.click(await screen.findByText("new-project"));
 
     await waitFor(() => {
