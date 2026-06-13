@@ -301,6 +301,11 @@ pub const CREATE_SECTION: &str = r#"
             done: $done
         ) {
             id
+            section_type
+            content
+            section_order
+            done
+            done_at
         }
     }
 "#;

@@ -35,6 +35,8 @@ struct MockState {
     logs: HashMap<String, SessionLog>,
     /// steps stored by id
     steps: HashMap<String, Step>,
+    /// next server-assigned section order by task and section type
+    next_section_orders: HashMap<(String, SectionType), u32>,
     next_id: u64,
 }
 
@@ -439,14 +441,34 @@ impl TaskService for MockTaskService {
             .collect())
     }
 
-    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
+    async fn add_section(&self, id: &str, mut section: Section) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
+        if !s.tasks.contains_key(id) {
+            return Err(ServiceError::task_not_found(id));
+        }
+
+        let key = (id.to_string(), section.section_type.clone());
+        let assigned_order = match section.order {
+            Some(order) => {
+                let next_order = s.next_section_orders.entry(key).or_insert(0);
+                *next_order = (*next_order).max(order + 1);
+                Some(order)
+            }
+            None => {
+                let next_order = s.next_section_orders.entry(key).or_insert(0);
+                let order = *next_order;
+                *next_order += 1;
+                Some(order)
+            }
+        };
+        section.order = assigned_order;
+
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
-        task.sections.push(section);
-        Ok(())
+        task.sections.push(section.clone());
+        Ok(section)
     }
 
     async fn remove_sections(
