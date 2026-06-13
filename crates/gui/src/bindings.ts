@@ -26,6 +26,17 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 }
 },
 /**
+ * List all embedded skills available for GUI project initialization.
+ */
+async listEmbeddedSkills() : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_embedded_skills") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read the shared Sacrum settings state without exposing the API token.
  */
 async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
