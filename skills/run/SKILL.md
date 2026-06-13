@@ -29,9 +29,8 @@ vtb --json run <task-id>
 | `--json` | Global flag; output the `StepExecution` object as machine-readable JSON |
 | `-h`, `--help` | Print command help |
 
-`vtb run` has no command alias. Use `vtb start-taskrun <task-id>` (also
-available as `vtb run-workflow <task-id>`) when you want a durable multi-step
-TaskRun instead of one current-step execution.
+`vtb run` has no command alias. Use `vtb start-taskrun <task-id>` when you want
+a durable multi-step TaskRun instead of one current-step execution.
 
 ## Requirements
 

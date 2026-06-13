@@ -18,7 +18,7 @@ This entrypoint is intentionally short. The maintained command guide is split by
 | [Code References](vtb-guide/references.md) | `ref`, `refs`, `unref`, and `criterion-ref` |
 | [Workflows](vtb-guide/workflows.md) | workflow CRUD, assignment, transitions, and task movement rules |
 | [Steps](vtb-guide/steps.md) | step CRUD, step types, output schemas, agents, skills, and provider selection |
-| [Runs and TaskRuns](vtb-guide/execution.md) | `run`, `start-taskrun`, `stop-taskrun`, and run-workflow aliases |
+| [Runs and TaskRuns](vtb-guide/execution.md) | `run`, `start-taskrun`, and `stop-taskrun` |
 
 ## Installed Guide Assets
 

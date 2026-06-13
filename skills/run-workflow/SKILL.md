@@ -1,50 +1,44 @@
 ---
 name: run-workflow
-description: Start or stop durable TaskRuns for a task via the daemon-backed workflow runner
+description: Start or stop durable TaskRuns with the primary start-taskrun and stop-taskrun commands
 ---
 
-# /run-workflow
+# start-taskrun / stop-taskrun
 
-Start a durable TaskRun for a task's assigned workflow. `vtb run-workflow` is a
-compatibility alias for `vtb start-taskrun`; prefer `start-taskrun` in new
-examples. Use `vtb stop-taskrun` to stop the task's active TaskRun.
+Use `vtb start-taskrun` to start a durable TaskRun for a task's assigned
+workflow. Use `vtb stop-taskrun` to stop the task's active TaskRun.
+
+The installed skill file is still named `run-workflow` for compatibility with
+existing skill references, but the CLI command aliases have been removed.
 
 ## Usage
 
 ```bash
-vtb start-taskrun <task-id>
-vtb run-workflow <task-id>
-vtb stop-taskrun <task-id>
-vtb stop <task-id>
-vtb stop-workflow <task-id>
-vtb --json stop-taskrun <task-id>
+vtb start-taskrun [OPTIONS] <TASK_ID>
+vtb stop-taskrun [OPTIONS] <TASK_ID>
+
+# Machine-readable output
+vtb --json start-taskrun <TASK_ID>
+vtb --json stop-taskrun <TASK_ID>
 ```
 
 ## Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `task-id` | Task ID with an assigned workflow for start, or the task whose active TaskRun should stop |
+| `<TASK_ID>` | Task ID to start a TaskRun for, or the task whose active TaskRun should be stopped |
 
 ## Options
 
 | Option | Description |
 |--------|-------------|
-| `--json` | Global flag; for `stop-taskrun`, output the stopped `TaskRun` object or `null` when none is active |
+| `--json` | Global flag; output machine-readable JSON instead of human-readable text |
 | `-h`, `--help` | Print command help |
-
-## Aliases
-
-| Command | Alias of |
-|---------|----------|
-| `vtb run-workflow <task-id>` | `vtb start-taskrun <task-id>` |
-| `vtb stop <task-id>` | `vtb stop-taskrun <task-id>` |
-| `vtb stop-workflow <task-id>` | `vtb stop-taskrun <task-id>` |
 
 ## Requirements
 
 1. Starting requires a task with a workflow assigned
-2. Task must not already have an active TaskRun when starting
+2. The task must not already have an active TaskRun when starting
 3. A connected daemon must be available for workflow execution
 4. Stopping requires the task ID whose active TaskRun should be stopped
 
@@ -81,22 +75,22 @@ Task abc123 has no assigned workflow
 
 ## How It Works
 
-1. Validates task exists and has a workflow assigned
-2. Calls the execution service to start or stop a TaskRun
-3. The backend records TaskRun state and broadcasts work to connected daemons
-4. The daemon executes workflow steps and reports progress back to Sacrum
+1. `start-taskrun` validates that the task exists and has an assigned workflow
+2. The backend creates a durable TaskRun and broadcasts work to connected daemons
+3. The daemon executes workflow steps and reports progress back to Sacrum
+4. `stop-taskrun` asks the backend to stop the active TaskRun for the task
 
 ## Difference from `/run`
 
 - `/run` executes only the current step and requires a connected daemon
-- `/run-workflow` / `start-taskrun` creates a durable multi-step TaskRun
-- `stop-taskrun` stops the active TaskRun for a task and returns the stopped run, `No active run for task <task-id>`, or `null` with `--json`
+- `start-taskrun` creates a durable multi-step TaskRun for the task's assigned workflow
+- `stop-taskrun` stops the active TaskRun for a task and returns the stopped run, `No active run for task <TASK_ID>`, or `null` with `--json`
 
 ## When to Use
 
 - Driving a task through its assigned workflow automatically
 - Running multi-step orchestrated processes
-- Stopping a task's active TaskRun with `stop-taskrun`, `stop`, or `stop-workflow`
+- Stopping a task's active TaskRun with `stop-taskrun`
 
 ## See Also
 

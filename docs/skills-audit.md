@@ -47,8 +47,7 @@ cargo run --quiet -p vertebrae-cli -- --help
 
 The first command should match the embedded `skills/*` rows in the inventory.
 The second command should match repo-internal `.claude/skills/*` rows. The
-third should expose each retained command topic, including aliases documented
-by shared command skills such as `start-taskrun` and `stop-taskrun`.
+third should expose each retained command topic.
 
 ## Sacrum guide parity findings
 
@@ -74,7 +73,7 @@ Vertebrae-only or renamed skills:
 
 | Vertebrae skill | Source of truth | Notes |
 |---|---|---|
-| `run-workflow` | Live help for `start-taskrun` and `stop-taskrun` | File name remains for compatibility with installed skill naming, but examples prefer `start-taskrun` and `stop-taskrun`; `run-workflow`, `stop`, and `stop-workflow` are documented as aliases. |
+| `run-workflow` | Live help for `start-taskrun` and `stop-taskrun` | File name remains for compatibility with installed skill naming, but the CLI exposes only `start-taskrun` and `stop-taskrun`. |
 | `gui-dev` | `.claude/skills/gui-dev/SKILL.md`; `hammerspoon/` helpers and GUI docs | Curated repo-internal workflow guidance with no Sacrum counterpart. |
 
 The parity target is structural: keep the split guide pages and installed skill
@@ -115,7 +114,7 @@ the local CLI exposes the command.
 | `skills/ready/SKILL.md` | `vtb ready` | Command reference | Live `vtb ready --help`; `docs/vtb-guide/tasks.md` | keep-generated | Verify examples against live help. |
 | `skills/ref/SKILL.md` | `vtb ref` | Command reference | Live `vtb ref --help`; `docs/vtb-guide/references.md` | keep-generated | File-spec rules should match shared parser behavior. |
 | `skills/refs/SKILL.md` | `vtb refs` | Command reference | Live `vtb refs --help`; `docs/vtb-guide/references.md` | keep-generated | Verify examples against live help. |
-| `skills/run-workflow/SKILL.md` | `vtb start-taskrun`; `vtb stop-taskrun`; compatibility aliases | Command reference | Live `vtb start-taskrun --help` and `vtb stop-taskrun --help`; `docs/vtb-guide/execution.md` | rewrite | Rewrite around the primary command names and treat `run-workflow`, `stop`, and `stop-workflow` as compatibility syntax. |
+| `skills/run-workflow/SKILL.md` | `vtb start-taskrun`; `vtb stop-taskrun` | Command reference | Live `vtb start-taskrun --help` and `vtb stop-taskrun --help`; `docs/vtb-guide/execution.md` | keep-generated | File name remains for compatibility, but title and examples use the primary command names only. |
 | `skills/run/SKILL.md` | `vtb run` | Command reference | Live `vtb run --help`; `docs/vtb-guide/execution.md` | keep-generated | Distinguish one-step execution from TaskRun. |
 | `skills/section/SKILL.md` | `vtb section` | Command reference | Live `vtb section --help`; `docs/vtb-guide/sections.md` | keep-generated | Section type list must be generated from live help and section docs. |
 | `skills/sections/SKILL.md` | `vtb sections` | Command reference | Live `vtb sections --help`; `docs/vtb-guide/sections.md` | keep-generated | Verify examples against live help. |
@@ -139,6 +138,5 @@ installed skill for them.
 
 `start-taskrun` and `stop-taskrun` are the only retained command topics whose
 primary command names differ from the skill file name. The
-`skills/run-workflow/SKILL.md` title and examples should prefer the primary
-names while treating `run-workflow`, `stop`, and `stop-workflow` as
-compatibility syntax because live help exposes them as visible aliases.
+`skills/run-workflow/SKILL.md` title and examples should use those primary names
+only; `run-workflow`, `stop`, and `stop-workflow` are no longer CLI aliases.

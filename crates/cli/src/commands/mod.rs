@@ -150,7 +150,7 @@ pub enum Command {
     /// Run the current step for a task
     Run(RunCommand),
     /// Start a TaskRun for a task's assigned workflow
-    #[command(name = "start-taskrun", visible_alias = "run-workflow")]
+    #[command(name = "start-taskrun")]
     RunWorkflow(RunWorkflowCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
@@ -159,7 +159,7 @@ pub enum Command {
     /// Show full details of a task
     Show(ShowCommand),
     /// Stop the active TaskRun for a task
-    #[command(name = "stop-taskrun", visible_aliases = ["stop", "stop-workflow"])]
+    #[command(name = "stop-taskrun")]
     Stop(StopCommand),
     /// Mark a checklist item as done within a task
     #[command(name = "check-item")]
@@ -977,15 +977,12 @@ mod tests {
     }
 
     #[test]
-    fn test_command_run_workflow_alias_parses_as_run_workflow() {
+    fn test_command_run_workflow_alias_is_not_available() {
         let cli = TestCli::try_parse_from(["test", "run-workflow", "a1b2c3d4"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::RunWorkflow(cmd) => {
-                assert_eq!(cmd.task_id, "a1b2c3d4");
-            }
-            _ => panic!("Expected RunWorkflow command"),
-        }
+        assert!(
+            cli.is_err(),
+            "run-workflow alias should not be part of the CLI surface"
+        );
     }
 
     #[test]
@@ -1001,27 +998,21 @@ mod tests {
     }
 
     #[test]
-    fn test_command_stop_alias_parses_as_stop() {
+    fn test_command_stop_alias_is_not_available() {
         let cli = TestCli::try_parse_from(["test", "stop", "a1b2c3d4"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Stop(cmd) => {
-                assert_eq!(cmd.task_id, "a1b2c3d4");
-            }
-            _ => panic!("Expected Stop command"),
-        }
+        assert!(
+            cli.is_err(),
+            "stop alias should not be part of the CLI surface"
+        );
     }
 
     #[test]
-    fn test_command_stop_workflow_alias_parses_as_stop() {
+    fn test_command_stop_workflow_alias_is_not_available() {
         let cli = TestCli::try_parse_from(["test", "stop-workflow", "a1b2c3d4"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Stop(cmd) => {
-                assert_eq!(cmd.task_id, "a1b2c3d4");
-            }
-            _ => panic!("Expected Stop command"),
-        }
+        assert!(
+            cli.is_err(),
+            "stop-workflow alias should not be part of the CLI surface"
+        );
     }
 
     #[test]

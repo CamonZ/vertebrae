@@ -133,7 +133,7 @@ vtb workflow assign <task> <workflow>
 
 # Execution via daemon
 vtb run <task>
-vtb run-workflow <task>
+vtb start-taskrun <task>
 ```
 
 > See [vtb Guide](docs/vtb-guide.md) for the full CLI reference.

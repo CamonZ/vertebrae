@@ -14,20 +14,11 @@ vtb --json run <task-id>
 # Start a TaskRun for a task's assigned workflow (automatic multi-step)
 vtb start-taskrun <task-id>
 
-# Compatibility alias
-vtb run-workflow <task-id>
-
 # Stop the active TaskRun for a task
 vtb stop-taskrun <task-id>
 
 # Emit the stopped TaskRun (or null when none is active) as JSON
 vtb --json stop-taskrun <task-id>
-
-# Compatibility alias
-vtb stop <task-id>
-
-# Compatibility alias
-vtb stop-workflow <task-id>
 ```
 
 `vtb run` executes exactly the task's current workflow step and returns a
@@ -41,9 +32,7 @@ ID passed as its only positional argument. It accepts the global `--json` flag:
 JSON output is the stopped `TaskRun` object, or `null` when the task has no
 active TaskRun. Human-readable output reports either `Stopped run: <status>
 taskRun=<task-run-id> latestStep=<step-execution-id|none>` or `No active run for
-task <task-id>`. `vtb run-workflow`, `vtb stop`, and
-`vtb stop-workflow` remain compatibility aliases for `start-taskrun` and
-`stop-taskrun`.
+task <task-id>`. TaskRun commands have no command aliases.
 
 The CLI does not expose manual execution-history commands. StepExecution and
 TaskRun records are created by `run` and `start-taskrun`; detailed execution
