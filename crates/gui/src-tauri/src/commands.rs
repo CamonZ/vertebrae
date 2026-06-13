@@ -6,8 +6,8 @@
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     ChatMessage, ChatSession, DeleteChatSessionResult, PermissionDecisionBehavior,
-    ResolvePermissionRequestInput, SessionLog, Step, StepExecution, StopRunRequest, Task,
-    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog, Step, StepExecution,
+    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -75,6 +75,69 @@ impl CommandError {
 pub async fn get_projects(state: State<'_, AppState>) -> Result<Vec<SavedProject>, CommandError> {
     log::info!("get_projects called");
     Ok(state.project_config.get_projects())
+}
+
+/// Read the shared Sacrum settings state without exposing the API token.
+#[tauri::command]
+#[specta::specta]
+pub async fn sacrum_config_status() -> Result<SacrumConfigStatus, CommandError> {
+    log::info!("sacrum_config_status called");
+
+    let config_path = vertebrae_sacrum_client::config_path();
+    let config_exists = config_path.as_ref().is_some_and(|path| path.exists());
+    let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
+        message: format!("Failed to load config file: {}", e),
+    })?;
+    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
+    let url = effective_sacrum_url(&config_file.sacrum.url, &default_url);
+    let has_token = config_file
+        .sacrum
+        .token
+        .as_deref()
+        .is_some_and(|token| !token.trim().is_empty());
+
+    Ok(SacrumConfigStatus {
+        config_path: config_path.map(|path| path.to_string_lossy().to_string()),
+        config_exists,
+        url,
+        has_token,
+    })
+}
+
+/// Persist Sacrum settings to the shared config.toml.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_sacrum_settings(
+    url: Option<String>,
+    token: String,
+) -> Result<SacrumConfigStatus, CommandError> {
+    log::info!("save_sacrum_settings called");
+
+    let trimmed_token = token.trim();
+    if trimmed_token.is_empty() {
+        return Err(CommandError {
+            message: "Sacrum API token is required".to_string(),
+        });
+    }
+
+    let mut config_file =
+        vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
+            message: format!("Failed to load config file: {}", e),
+        })?;
+    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
+    config_file.sacrum.url = url
+        .as_deref()
+        .map(str::trim)
+        .filter(|candidate| !candidate.is_empty())
+        .unwrap_or(&default_url)
+        .to_string();
+    config_file.sacrum.token = Some(trimmed_token.to_string());
+
+    vertebrae_sacrum_client::save_config_file(&config_file).map_err(|e| CommandError {
+        message: format!("Failed to save config file: {}", e),
+    })?;
+
+    sacrum_config_status().await
 }
 
 /// Add a project to the saved list
@@ -186,6 +249,15 @@ pub async fn add_project(
         project_id: project.id,
         path,
     })
+}
+
+fn effective_sacrum_url(config_url: &str, default_url: &str) -> String {
+    let trimmed = config_url.trim();
+    if trimmed.is_empty() {
+        default_url.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Remove a project from the saved list
@@ -2411,6 +2483,22 @@ mod tests {
             .expect("assign workflow");
 
         task_id
+    }
+
+    #[test]
+    fn effective_sacrum_url_defaults_for_empty_values() {
+        assert_eq!(
+            effective_sacrum_url("", "http://localhost:4000"),
+            "http://localhost:4000"
+        );
+        assert_eq!(
+            effective_sacrum_url("  ", "http://localhost:4000"),
+            "http://localhost:4000"
+        );
+        assert_eq!(
+            effective_sacrum_url(" https://sacrum.example.test ", "http://localhost:4000"),
+            "https://sacrum.example.test"
+        );
     }
 
     // ========================================================================

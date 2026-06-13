@@ -64,6 +64,8 @@ fn create_builder() -> Builder {
             greet,
             // Project management commands
             commands::get_projects,
+            commands::sacrum_config_status,
+            commands::save_sacrum_settings,
             commands::add_project,
             commands::remove_project,
             commands::get_current_project,
