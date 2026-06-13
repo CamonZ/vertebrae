@@ -1,0 +1,18 @@
+[package]
+name = "vertebrae-skills-assets"
+version = "0.1.0"
+edition = "2024"
+description = "Embedded Vertebrae skills assets and install helpers"
+license = "MIT"
+publish = false
+
+[lib]
+name = "vertebrae_skills_assets"
+path = "src/lib.rs"
+
+[dependencies]
+include_dir = "0.7"
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
