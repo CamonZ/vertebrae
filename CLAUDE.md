@@ -140,7 +140,9 @@ vtb run-workflow <task>
 
 ### Skills
 
-See `skills/` for detailed command guides:
+See `skills/` for detailed shipped command guides. Repo-internal workflow
+helpers that should not be installed into consumer projects live under
+`.claude/skills/`.
 
 **Workflow helpers:**
 - `/ready` - Show items ready for work or triage
@@ -174,6 +176,7 @@ See `skills/` for detailed command guides:
 
 **GUI development:**
 - `/gui-dev` - Orchestrate GUI development with Hammerspoon visual feedback
+  (repo-internal: `.claude/skills/gui-dev`)
 
 **Advanced:**
 - `/gate` - Validation gates
