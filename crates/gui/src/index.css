@@ -1079,6 +1079,90 @@ html.window-transparent #root {
   scrollbar-color: var(--bg-4) transparent;
 }
 
+.fr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1h);
+}
+
+.fr-field > label {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+
+.fr-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2h);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--bg-1) 55%, transparent);
+}
+
+.fr-folder .fic {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--fg-faint);
+}
+
+.fr-folder .fpath {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: var(--text-12);
+  color: var(--fg-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fr-folder .fpath.ph {
+  color: var(--fg-faint);
+}
+
+.fr-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--s-2h);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  outline: none;
+  background: color-mix(in oklch, var(--bg-1) 55%, transparent);
+  font-family: var(--sans);
+  font-size: var(--text-14);
+  color: var(--fg);
+  transition:
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.fr-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.fr-input::placeholder {
+  color: var(--fg-faint);
+}
+
+.fr-callout {
+  display: flex;
+  gap: var(--s-2h);
+  padding: var(--s-2h) var(--s-3);
+  border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--accent-wash);
+  font-family: var(--serif);
+  font-size: var(--text-13);
+  line-height: 1.5;
+  color: var(--fg-soft);
+}
+
 .fr-foot {
   display: flex;
   align-items: center;
