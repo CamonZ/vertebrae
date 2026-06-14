@@ -4,7 +4,7 @@
 //!
 //! Configuration resolution:
 //! - `[sacrum].token` in config file for API token
-//! - `[sacrum].url` in config file for base URL (default: http://localhost:4000)
+//! - `[sacrum].url` in config file for base URL (default: https://vertebrae.dev)
 //! - `[projects.<name>]` entries matched by CWD longest-prefix (CLI) or by name (GUI)
 
 use crate::error::{SacrumClientError, SacrumClientResult};
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 /// Configuration for Sacrum client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SacrumConfig {
-    /// Base URL for Sacrum API (e.g., http://localhost:4000)
+    /// Base URL for Sacrum API (e.g., https://vertebrae.dev)
     pub base_url: String,
     /// API authentication token
     pub api_token: String,
@@ -66,7 +66,7 @@ pub struct ProjectSection {
 }
 
 fn default_url() -> String {
-    "http://localhost:4000".to_string()
+    "https://vertebrae.dev".to_string()
 }
 
 impl SacrumConfig {
@@ -548,8 +548,24 @@ mod tests {
     #[test]
     fn test_global_sacrum_section_default() {
         let section = GlobalSacrumSection::default();
-        assert_eq!(section.url, "http://localhost:4000");
+        assert_eq!(section.url, "https://vertebrae.dev");
         assert!(section.token.is_none());
+    }
+
+    #[test]
+    fn test_config_file_deserialize_without_url_uses_production_default() {
+        let toml_str = r#"
+[sacrum]
+token = "sac_mytoken"
+
+[projects.vertebrae]
+id = "bb747fd8"
+path = "/Users/test/vertebrae"
+"#;
+
+        let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.sacrum.url, "https://vertebrae.dev");
+        assert_eq!(config.sacrum.token.as_deref(), Some("sac_mytoken"));
     }
 
     #[test]
