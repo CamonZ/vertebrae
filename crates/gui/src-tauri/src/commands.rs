@@ -104,8 +104,7 @@ pub async fn sacrum_config_status() -> Result<SacrumConfigStatus, CommandError> 
     let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
         message: format!("Failed to load config file: {}", e),
     })?;
-    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
-    let url = effective_sacrum_url(&config_file.sacrum.url, &default_url);
+    let url = configured_sacrum_url(&config_file);
     let has_token = config_file
         .sacrum
         .token
@@ -123,10 +122,7 @@ pub async fn sacrum_config_status() -> Result<SacrumConfigStatus, CommandError> 
 /// Persist Sacrum settings to the shared config.toml.
 #[tauri::command]
 #[specta::specta]
-pub async fn save_sacrum_settings(
-    url: Option<String>,
-    token: String,
-) -> Result<SacrumConfigStatus, CommandError> {
+pub async fn save_sacrum_settings(token: String) -> Result<SacrumConfigStatus, CommandError> {
     log::info!("save_sacrum_settings called");
 
     let trimmed_token = token.trim();
@@ -141,13 +137,7 @@ pub async fn save_sacrum_settings(
         vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
             message: format!("Failed to load config file: {}", e),
         })?;
-    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
-    config_file.sacrum.url = url
-        .as_deref()
-        .map(str::trim)
-        .filter(|candidate| !candidate.is_empty())
-        .unwrap_or(&default_url)
-        .to_string();
+    config_file.sacrum.url = configured_sacrum_url(&config_file);
     config_file.sacrum.token = Some(trimmed_token.to_string());
 
     vertebrae_sacrum_client::save_config_file(&config_file).map_err(|e| CommandError {
@@ -206,8 +196,7 @@ async fn initialize_project_inner<R: tauri::Runtime>(
         })?
         .to_string();
     validate_sacrum_token(&api_token)?;
-    let default_url = vertebrae_sacrum_client::GlobalSacrumSection::default().url;
-    let base_url = effective_sacrum_url(&config_file.sacrum.url, &default_url);
+    let base_url = configured_sacrum_url(&config_file);
     let temp_config =
         vertebrae_sacrum_client::SacrumConfig::new(base_url, api_token, "temp".to_string());
     let client = vertebrae_sacrum_client::GraphqlClient::new(temp_config);
@@ -221,11 +210,17 @@ async fn initialize_project_inner<R: tauri::Runtime>(
         },
     )?;
 
-    let skills_target = project_root.join(".claude").join("skills");
+    let app_skills_dir = vertebrae_installer::data_dir()
+        .map_err(|e| CommandError {
+            message: format!("Failed to resolve application data directory: {}", e),
+        })?
+        .join("skills");
     let mut progress_files_copied = 0_u32;
     let progress_slug = project_slug.clone();
-    let skills_copied =
-        vertebrae_skills_assets::install_embedded_skills_with_progress(&skills_target, |file| {
+    let skill_install = vertebrae_skills_assets::link_embedded_skills_for_project_with_progress(
+        &app_skills_dir,
+        &project_root,
+        |file| {
             progress_files_copied = progress_files_copied.saturating_add(1);
             let _ = app_handle.emit(
                 "project-init-progress-event",
@@ -237,13 +232,15 @@ async fn initialize_project_inner<R: tauri::Runtime>(
                     target_path: Some(file.target_path.to_string_lossy().to_string()),
                 },
             );
-        })
-        .map_err(|e| CommandError {
-            message: format!("Failed to install embedded skills: {}", e),
-        })?;
-    let skills_copied = u32::try_from(skills_copied).map_err(|_| CommandError {
+        },
+    )
+    .map_err(|e| CommandError {
+        message: format!("Failed to install embedded skills: {}", e),
+    })?;
+    let skills_copied = u32::try_from(skill_install.files_linked).map_err(|_| CommandError {
         message: "Installed skill file count exceeded supported range".to_string(),
     })?;
+    let skills_target = format_skill_targets(&skill_install);
     let _ = app_handle.emit(
         "project-init-progress-event",
         crate::events::ProjectInitProgressEvent {
@@ -262,7 +259,7 @@ async fn initialize_project_inner<R: tauri::Runtime>(
         path: project_path,
         project_created,
         skills_copied,
-        skills_target: skills_target.to_string_lossy().to_string(),
+        skills_target,
     })
 }
 
@@ -316,7 +313,7 @@ pub async fn add_project(
 
     // Create temporary Sacrum client to get-or-create the project
     let temp_config = vertebrae_sacrum_client::SacrumConfig::new(
-        config_file.sacrum.url.clone(),
+        configured_sacrum_url(&config_file),
         api_token,
         "temp".to_string(),
     );
@@ -339,12 +336,12 @@ pub async fn add_project(
     })
 }
 
-fn effective_sacrum_url(config_url: &str, default_url: &str) -> String {
-    let trimmed = config_url.trim();
-    if trimmed.is_empty() {
-        default_url.to_string()
+fn configured_sacrum_url(config_file: &vertebrae_sacrum_client::VertebraeConfigFile) -> String {
+    let trimmed_url = config_file.sacrum.url.trim();
+    if trimmed_url.is_empty() {
+        vertebrae_sacrum_client::GlobalSacrumSection::default().url
     } else {
-        trimmed.to_string()
+        trimmed_url.to_string()
     }
 }
 
@@ -408,6 +405,22 @@ fn paths_refer_to_same_directory(configured_path: &str, project_root: &Path) -> 
         .unwrap_or_else(|_| project_root.to_path_buf());
 
     configured == project_root
+}
+
+fn format_skill_targets(install: &vertebrae_skills_assets::LinkedSkillInstall) -> String {
+    if install.target_roots.is_empty() {
+        return format!(
+            "Staged in {}; no existing .claude/skills or .agents/skills directory found",
+            install.app_skills_dir.to_string_lossy()
+        );
+    }
+
+    install
+        .target_roots
+        .iter()
+        .map(|target| target.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn get_or_create_project(
@@ -2855,22 +2868,6 @@ mod tests {
     }
 
     #[test]
-    fn effective_sacrum_url_defaults_for_empty_values() {
-        assert_eq!(
-            effective_sacrum_url("", "http://localhost:4000"),
-            "http://localhost:4000"
-        );
-        assert_eq!(
-            effective_sacrum_url("  ", "http://localhost:4000"),
-            "http://localhost:4000"
-        );
-        assert_eq!(
-            effective_sacrum_url(" https://sacrum.example.test ", "http://localhost:4000"),
-            "https://sacrum.example.test"
-        );
-    }
-
-    #[test]
     fn derive_project_slug_rejects_empty_slugs() {
         assert_eq!(derive_project_slug("My Project").unwrap(), "my-project");
         let err = derive_project_slug("!!!").unwrap_err();
@@ -2931,14 +2928,12 @@ mod tests {
         let initial = sacrum_config_status().await.unwrap();
         assert!(!initial.config_exists);
         assert!(!initial.has_token);
-        assert_eq!(initial.url, "http://localhost:4000");
+        assert_eq!(initial.url, "https://vertebrae.dev");
 
-        let empty = save_sacrum_settings(None, "  ".to_string())
-            .await
-            .unwrap_err();
+        let empty = save_sacrum_settings("  ".to_string()).await.unwrap_err();
         assert!(empty.message.contains("required"));
 
-        let invalid = save_sacrum_settings(None, "bad\ntoken".to_string())
+        let invalid = save_sacrum_settings("bad\ntoken".to_string())
             .await
             .unwrap_err();
         assert!(invalid.message.contains("Authorization header"));
@@ -2949,21 +2944,30 @@ mod tests {
             "invalid tokens should not be persisted"
         );
 
-        let status = save_sacrum_settings(
-            Some(" https://sacrum.example.test ".to_string()),
-            " sac_valid-token ".to_string(),
-        )
-        .await
+        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
+            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
+                url: "https://custom.example.test".to_string(),
+                token: None,
+            },
+            projects: BTreeMap::new(),
+        })
         .unwrap();
+        let custom_status = sacrum_config_status().await.unwrap();
+        assert_eq!(custom_status.url, "https://custom.example.test");
+
+        let status = save_sacrum_settings(" sac_valid-token ".to_string())
+            .await
+            .unwrap();
         assert!(status.config_exists);
         assert!(status.has_token);
-        assert_eq!(status.url, "https://sacrum.example.test");
+        assert_eq!(status.url, "https://custom.example.test");
 
         let status_json = serde_json::to_value(&status).unwrap();
         assert!(status_json.get("token").is_none());
 
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_valid-token"));
+        assert_eq!(config.sacrum.url, "https://custom.example.test");
     }
 
     #[tokio::test]
@@ -3006,12 +3010,16 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn initialize_project_registers_skills_and_emits_progress() {
+    async fn initialize_project_registers_skill_links_and_emits_progress() {
         let temp_home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::new(temp_home.path());
         let project_parent = tempfile::tempdir().unwrap();
         let project_path = project_parent.path().join("Temp Project");
         fs::create_dir_all(&project_path).unwrap();
+        let claude_skills = project_path.join(".claude/skills");
+        let agents_skills = project_path.join(".agents/skills");
+        fs::create_dir_all(&claude_skills).unwrap();
+        fs::create_dir_all(&agents_skills).unwrap();
         let server = start_mock_sacrum_server();
 
         vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
@@ -3045,9 +3053,21 @@ mod tests {
         assert_eq!(result.project_name, "Temp Project");
         assert!(result.project_created);
         assert!(result.skills_copied > 0);
-        assert!(project_path
-            .join(".claude/skills/vtb-add/SKILL.md")
-            .exists());
+        assert!(result.skills_target.contains(".claude/skills"));
+        assert!(result.skills_target.contains(".agents/skills"));
+
+        let staged_skill = vertebrae_installer::data_dir()
+            .unwrap()
+            .join("skills/vtb-add/SKILL.md");
+        assert!(staged_skill.exists());
+        for link in [
+            project_path.join(".claude/skills/vtb-add/SKILL.md"),
+            project_path.join(".agents/skills/vtb-add/SKILL.md"),
+        ] {
+            let metadata = fs::symlink_metadata(&link).unwrap();
+            assert!(metadata.file_type().is_symlink());
+            assert_eq!(fs::read_link(&link).unwrap(), staged_skill);
+        }
 
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         let registered = config.projects.get("temp-project").unwrap();
@@ -3075,6 +3095,46 @@ mod tests {
             events.last().map(|event| &event.kind),
             Some(crate::events::ProjectInitProgressKind::Completed)
         ));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn initialize_project_stages_skills_without_creating_missing_skill_roots() {
+        let temp_home = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::new(temp_home.path());
+        let project_parent = tempfile::tempdir().unwrap();
+        let project_path = project_parent.path().join("Temp Project");
+        fs::create_dir_all(&project_path).unwrap();
+        let server = start_mock_sacrum_server();
+
+        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
+            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
+                url: server.url.clone(),
+                token: Some("sac_valid-token".to_string()),
+            },
+            projects: BTreeMap::new(),
+        })
+        .unwrap();
+
+        let app = build_app_without_services();
+        let result = initialize_project_inner(
+            app.handle(),
+            project_path.to_string_lossy().to_string(),
+            None,
+        )
+        .await
+        .unwrap();
+        server.stop();
+        server.join();
+
+        assert_eq!(result.skills_copied, 0);
+        assert!(result.skills_target.contains("no existing .claude/skills"));
+        assert!(vertebrae_installer::data_dir()
+            .unwrap()
+            .join("skills/vtb-add/SKILL.md")
+            .exists());
+        assert!(!project_path.join(".claude").exists());
+        assert!(!project_path.join(".agents").exists());
     }
 
     // ========================================================================

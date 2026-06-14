@@ -18,7 +18,7 @@
 //! ```toml
 //! [sacrum]
 //! token = "sac_your_token_here"
-//! url = "http://localhost:4000"
+//! url = "https://vertebrae.dev"
 //!
 //! [projects.my-project]
 //! id = "uuid-here"

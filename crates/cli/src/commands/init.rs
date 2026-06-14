@@ -3,7 +3,7 @@
 //! Implements the `vtb init` command to:
 //! 1. Read or bootstrap global config at ~/.config/vertebrae/config.toml
 //! 2. Accept --token flag for first-time setup (sets [sacrum].token)
-//! 3. Accept --url flag for Sacrum API endpoint (default from config or localhost:4000)
+//! 3. Accept --url flag for Sacrum API endpoint (default from config or https://vertebrae.dev)
 //! 4. Derive project slug from current directory name
 //! 5. Check if project exists in Sacrum API, create if needed
 //! 6. Register the project in global config
@@ -169,6 +169,21 @@ impl From<SkillsAssetError> for InitError {
                 relative_path,
                 target,
                 reason,
+            } => InitError::CopyFile {
+                source: relative_path,
+                target,
+                reason,
+            },
+            SkillsAssetError::ReplaceExisting { target, reason } => InitError::CopyFile {
+                source: PathBuf::from("embedded skill symlink"),
+                target,
+                reason,
+            },
+            SkillsAssetError::SymlinkFile {
+                relative_path,
+                target,
+                reason,
+                ..
             } => InitError::CopyFile {
                 source: relative_path,
                 target,
