@@ -10,7 +10,7 @@ The Sacrum client reads configuration from `~/.config/vertebrae/config.toml`.
 
 ```toml
 [sacrum]
-url = "http://localhost:4000"
+url = "https://vertebrae.dev"
 token = "your-token"
 
 [projects.vertebrae]
@@ -23,8 +23,8 @@ path = "/Users/example/Code/vertebrae"
 `[sacrum]`
 
 - **url** (optional): The base URL for the Sacrum API server
-  - Default: `http://localhost:4000`
-  - Example: `http://api.example.com`
+  - Default: `https://vertebrae.dev`
+  - Example: `http://localhost:4000`
 
 - **token** (required unless using `VTB_TOKEN`): Bearer token for GraphQL requests and Phoenix channel authentication
 
@@ -58,7 +58,7 @@ path = "/Users/example/Code/vertebrae"
 ```toml
 # Production configuration
 [sacrum]
-url = "https://api.sacrum.example.com"
+url = "https://vertebrae.dev"
 token = "prod-token"
 
 [projects.vertebrae]
@@ -70,7 +70,7 @@ path = "/srv/vertebrae"
 
 The CLI resolves configuration in this order:
 
-1. **Base URL**: `VTB_URL`, then `[sacrum].url`, then `http://localhost:4000`
+1. **Base URL**: `VTB_URL`, then `[sacrum].url`, then `https://vertebrae.dev`
 2. **API token**: `VTB_TOKEN`, then `[sacrum].token`
 3. **Project ID**: `VTB_PROJECT_ID`, otherwise the project whose configured `path` is the longest prefix of the current git root
 

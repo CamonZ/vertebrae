@@ -14,7 +14,6 @@ interface FirstRunShellProps {
   children: ReactNode;
   footerLeft?: ReactNode;
   footerRight?: ReactNode;
-  lit?: boolean;
 }
 
 function classNames(...values: Array<string | false | null | undefined>) {
@@ -30,14 +29,13 @@ export function FirstRunShell({
   children,
   footerLeft,
   footerRight,
-  lit = false,
 }: FirstRunShellProps) {
   const total = Math.max(phases.length, 1);
   const progress = `${(Math.min(activeIndex + 1, total) / total) * 100}%`;
 
   return (
     <main
-      className={classNames("fr-stage", lit && "lit")}
+      className="fr-stage"
       data-testid="first-run-shell"
     >
       <section className="fr-card" aria-label="Project setup wizard">
@@ -82,12 +80,6 @@ export function FirstRunShell({
                 </div>
               );
             })}
-            <div className="fr-spine-foot">
-              <span className={classNames("conn", lit && "live")}>
-                <span aria-hidden className="pulse" />
-                Local runtime
-              </span>
-            </div>
           </aside>
 
           <div className="fr-content">

@@ -163,6 +163,13 @@ describe("ProjectSetupPage", () => {
 
     expect(await screen.findByTestId("first-run-shell")).toBeInTheDocument();
     expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Project");
+    expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Ready");
+    expect(screen.getByTestId("first-run-spine")).not.toHaveTextContent(
+      "Ignition"
+    );
+    expect(screen.getByTestId("first-run-spine")).not.toHaveTextContent(
+      "Local runtime"
+    );
     expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
       "Step 1 of 3"
     );
@@ -272,9 +279,10 @@ describe("ProjectSetupPage", () => {
     expect(
       await screen.findByLabelText("Sacrum API token")
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Sacrum URL")).toHaveValue(
-      "http://localhost:4000"
-    );
+    expect(screen.queryByLabelText("Sacrum URL")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Sacrum settings are missing or incomplete/)
+    ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
@@ -286,10 +294,7 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     await waitFor(() => {
-      expect(mockSaveSacrumSettings).toHaveBeenCalledWith(
-        "http://localhost:4000",
-        "sac_test"
-      );
+      expect(mockSaveSacrumSettings).toHaveBeenCalledWith("sac_test");
     });
     expect(await screen.findByTestId("skills-phase")).toHaveTextContent(
       "vtb-add"
@@ -331,6 +336,77 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+  });
+
+  it("returns to token entry when Sacrum rejects the saved API token", async () => {
+    mockGetProjects.mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    mockSacrumConfigStatus.mockResolvedValue({
+      status: "ok",
+      data: {
+        config_path: null,
+        config_exists: false,
+        url: "http://localhost:4000",
+        has_token: false,
+      },
+    });
+    mockSaveSacrumSettings
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          config_path: "/tmp/config.toml",
+          config_exists: true,
+          url: "http://localhost:4000",
+          has_token: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          config_path: "/tmp/config.toml",
+          config_exists: true,
+          url: "http://localhost:4000",
+          has_token: true,
+        },
+      });
+    mockInitializeProject.mockResolvedValueOnce({
+      status: "error",
+      error: { message: "Unauthorized" },
+    });
+
+    render(<ProjectSetupPage />);
+
+    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.type(screen.getByLabelText("Sacrum API token"), "bad-token");
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("skills-install"));
+
+    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Sacrum rejected the API token"
+    );
+    expect(screen.getByLabelText("Sacrum API token")).toHaveValue("");
+
+    await userEvent.type(
+      screen.getByLabelText("Sacrum API token"),
+      "sac_valid-token"
+    );
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    await waitFor(() => {
+      expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith(
+        "sac_valid-token"
+      );
+    });
+    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("file-state-vtb-add/SKILL.md")
+    ).not.toBeInTheDocument();
   });
 
   it("streams skill progress, selects the initialized project, and enters the app", async () => {
@@ -403,7 +479,7 @@ describe("ProjectSetupPage", () => {
       });
     });
     expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "writing"
+      "linking"
     );
 
     act(() => {
@@ -418,7 +494,7 @@ describe("ProjectSetupPage", () => {
       });
     });
     expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "written"
+      "linked"
     );
 
     act(() => {

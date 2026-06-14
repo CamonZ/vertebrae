@@ -15,11 +15,11 @@ import { FirstRunShell, type FirstRunPhase } from "../components";
 const SETUP_PHASES: FirstRunPhase[] = [
   { kind: "Phase 01", name: "Project" },
   { kind: "Phase 02", name: "Skills & Docs" },
-  { kind: "Phase 03", name: "Ignition" },
+  { kind: "Phase 03", name: "Ready" },
 ];
 
 type SetupView = "saved" | "project" | "skills" | "ignition";
-type FileState = "idle" | "queued" | "writing" | "written";
+type FileState = "idle" | "queued" | "linking" | "linked";
 
 interface ProjectDraft {
   path: string;
@@ -37,6 +37,10 @@ function projectNameFromPath(path: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
+function isLikelyTokenError(message: string): boolean {
+  return /\b(token|auth|unauthori[sz]ed|forbidden|401|403)\b/i.test(message);
+}
+
 export function ProjectSetupPage() {
   const navigate = useNavigate();
   const writeTimers = useRef<number[]>([]);
@@ -51,7 +55,6 @@ export function ProjectSetupPage() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [projectName, setProjectName] = useState("");
-  const [sacrumUrl, setSacrumUrl] = useState("");
   const [sacrumToken, setSacrumToken] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
@@ -136,7 +139,6 @@ export function ProjectSetupPage() {
         if (cancelled) return;
         if (result.status === "ok") {
           setSacrumStatus(result.data);
-          setSacrumUrl(result.data.url);
         } else {
           setFormError(result.error.message);
         }
@@ -210,29 +212,28 @@ export function ProjectSetupPage() {
     [embeddedSkills]
   );
 
-  const markFileWriting = useCallback((relativePath: string) => {
+  const markFileLinking = useCallback((relativePath: string) => {
     setFileStates((current) => ({
       ...current,
-      [relativePath]: "writing",
+      [relativePath]: "linking",
     }));
     const timer = window.setTimeout(() => {
       setFileStates((current) => ({
         ...current,
-        [relativePath]: "written",
+        [relativePath]: "linked",
       }));
     }, 250);
     writeTimers.current.push(timer);
   }, []);
 
-  const markAllFilesWritten = useCallback(() => {
+  const markAllFilesLinked = useCallback(() => {
     setFileStates(
-      Object.fromEntries(skillFilePaths.map((path) => [path, "written"]))
+      Object.fromEntries(skillFilePaths.map((path) => [path, "linked"]))
     );
   }, [skillFilePaths]);
 
   const handleProjectContinue = async () => {
     const trimmedName = projectName.trim();
-    const trimmedUrl = sacrumUrl.trim();
     const trimmedToken = sacrumToken.trim();
 
     if (!selectedPath) {
@@ -256,13 +257,10 @@ export function ProjectSetupPage() {
     setFormError(null);
     try {
       if (needsSacrumSettings) {
-        const result = await commands.saveSacrumSettings(
-          trimmedUrl || null,
-          trimmedToken
-        );
+        const result = await commands.saveSacrumSettings(trimmedToken);
         if (result.status === "ok") {
           setSacrumStatus(result.data);
-          setSacrumUrl(result.data.url);
+          setSacrumToken("");
         } else {
           setFormError(result.error.message);
           return;
@@ -270,6 +268,7 @@ export function ProjectSetupPage() {
       }
 
       setProjectDraft({ path: selectedPath, name: trimmedName });
+      setFileStates({});
       setSetupView("skills");
     } catch (e) {
       setFormError(`Failed to save project settings: ${e}`);
@@ -305,10 +304,10 @@ export function ProjectSetupPage() {
           payload.kind === "SkillFileInstalled" &&
           payload.relative_path
         ) {
-          markFileWriting(payload.relative_path);
+          markFileLinking(payload.relative_path);
         }
-        if (payload.kind === "Completed") {
-          markAllFilesWritten();
+        if (payload.kind === "Completed" && payload.files_copied > 0) {
+          markAllFilesLinked();
         }
       });
 
@@ -317,12 +316,31 @@ export function ProjectSetupPage() {
         projectDraft.name
       );
       if (result.status === "error") {
-        setFormError(result.error.message);
+        if (isLikelyTokenError(result.error.message)) {
+          setSacrumStatus((current) =>
+            current
+              ? {
+                  ...current,
+                  has_token: false,
+                }
+              : current
+          );
+          setSacrumToken("");
+          setFileStates({});
+          setSetupView("project");
+          setFormError(
+            "Sacrum rejected the API token. Enter a valid token and try again."
+          );
+        } else {
+          setFormError(result.error.message);
+        }
         return;
       }
 
       setInitializeResult(result.data);
-      markAllFilesWritten();
+      if (result.data.skills_copied > 0) {
+        markAllFilesLinked();
+      }
       const selectResult = await commands.setCurrentProject(result.data.slug);
       if (selectResult.status === "error") {
         setFormError(selectResult.error.message);
@@ -373,8 +391,8 @@ export function ProjectSetupPage() {
   const activeIndex =
     setupView === "ignition" ? 2 : setupView === "skills" ? 1 : 0;
   const isProjectForm = setupView === "project";
-  const writtenFileCount = skillFilePaths.filter(
-    (path) => fileStates[path] === "written"
+  const linkedFileCount = skillFilePaths.filter(
+    (path) => fileStates[path] === "linked"
   ).length;
   const title =
     setupView === "ignition"
@@ -388,19 +406,19 @@ export function ProjectSetupPage() {
           : "Choose a project";
   const lede =
     setupView === "ignition"
-      ? "Project setup is complete. Vertebrae selected the project and installed the local skill files."
+      ? "Project setup is complete. Vertebrae selected the project and linked the local skill files."
       : setupView === "skills"
-        ? "All embedded skills will be installed into this project as a read-only starter kit."
+        ? "Embedded skills are staged in the Vertebrae app directory and linked into existing project skill directories."
         : isProjectForm
           ? "Point Vertebrae at a folder and confirm the name it should use."
           : "Select a saved project or add a new one to prepare its local agent kit.";
   const footerLeft =
     setupView === "ignition" && initializeResult
-      ? `${initializeResult.skills_copied} skill files written`
+      ? `${initializeResult.skills_copied} skill links created`
       : setupView === "skills"
         ? isInitializing
-          ? `${writtenFileCount} / ${skillFilePaths.length} skill files written`
-          : `Adds ${skillFilePaths.length} skill files`
+          ? `${linkedFileCount} / ${skillFilePaths.length} skill files linked`
+          : `Links ${skillFilePaths.length} skill files`
         : isLoading
           ? "Loading projects..."
           : projectCountLabel;
@@ -440,7 +458,7 @@ export function ProjectSetupPage() {
         data-testid="skills-install"
         disabled={isLoadingSkills || isInitializing || !projectDraft}
       >
-        {isInitializing ? "Writing..." : "Install skills"}
+        {isInitializing ? "Linking..." : "Install skills"}
       </button>
     </>
   ) : setupView === "ignition" ? (
@@ -620,33 +638,19 @@ export function ProjectSetupPage() {
           )}
 
           {needsSacrumSettings && (
-            <>
-              <div className="fr-callout">
-                <span>
-                  Sacrum settings are missing or incomplete. Save them here
-                  before initializing this project.
-                </span>
-              </div>
-              <div className="fr-field">
-                <label htmlFor="sacrum-url">Sacrum URL</label>
-                <input
-                  id="sacrum-url"
-                  className="fr-input"
-                  value={sacrumUrl}
-                  onChange={(e) => setSacrumUrl(e.target.value)}
-                />
-              </div>
-              <div className="fr-field">
-                <label htmlFor="sacrum-token">Sacrum API token</label>
-                <input
-                  id="sacrum-token"
-                  className="fr-input"
-                  type="password"
-                  value={sacrumToken}
-                  onChange={(e) => setSacrumToken(e.target.value)}
-                />
-              </div>
-            </>
+            <div className="fr-field">
+              <label htmlFor="sacrum-token">Sacrum API token</label>
+              <input
+                id="sacrum-token"
+                className="fr-input"
+                type="password"
+                value={sacrumToken}
+                onChange={(e) => {
+                  setSacrumToken(e.target.value);
+                  setFormError(null);
+                }}
+              />
+            </div>
           )}
         </div>
       )}
@@ -685,13 +689,13 @@ export function ProjectSetupPage() {
               </div>
 
               <div className="fr-sec-lbl">
-                <span className="t">Files it writes</span>
+                <span className="t">Files it links</span>
                 <span className="n">{skillFilePaths.length} files</span>
               </div>
               <div className="fr-tree" data-testid="skills-file-tree">
                 <div className="fr-tr">
-                  <span className="nm dir">.claude/skills/</span>
-                  <span className="ds">embedded agent skills</span>
+                  <span className="nm dir">.claude/skills/ or .agents/skills/</span>
+                  <span className="ds">existing project skill roots</span>
                 </div>
                 {skillFilePaths.map((path) => {
                   const state =
@@ -706,9 +710,9 @@ export function ProjectSetupPage() {
                       {state !== "idle" && (
                         <span
                           className={`fstate ${
-                            state === "written"
+                            state === "linked"
                               ? "done"
-                              : state === "writing"
+                              : state === "linking"
                                 ? "work"
                                 : "queued"
                           }`}
@@ -721,12 +725,6 @@ export function ProjectSetupPage() {
                   );
                 })}
               </div>
-              <div className="fr-callout">
-                <span>
-                  All embedded skills are installed together; this flow does not
-                  support deselecting individual skills.
-                </span>
-              </div>
             </>
           )}
         </div>
@@ -738,7 +736,7 @@ export function ProjectSetupPage() {
           <div className="fr-summary">
             <div className="fr-sum">
               <div className="v">{initializeResult.skills_copied}</div>
-              <div className="l">skill files</div>
+              <div className="l">skill links</div>
             </div>
             <div className="fr-sum">
               <div className="v">{initializeResult.project_name}</div>
@@ -752,7 +750,7 @@ export function ProjectSetupPage() {
             </div>
           </div>
           <div className="fr-callout">
-            <span>Installed into {initializeResult.skills_target}</span>
+            <span>Linked into {initializeResult.skills_target}</span>
           </div>
         </div>
       )}
