@@ -3,7 +3,7 @@
 //! Implements the `vtb init` command to:
 //! 1. Read or bootstrap global config at ~/.config/vertebrae/config.toml
 //! 2. Accept --token flag for first-time setup (sets [sacrum].token)
-//! 3. Accept --url flag for Sacrum API endpoint (default from config or localhost:4000)
+//! 3. Accept --url flag for Sacrum API endpoint (default from config or https://vertebrae.dev)
 //! 4. Derive project slug from current directory name
 //! 5. Check if project exists in Sacrum API, create if needed
 //! 6. Register the project in global config
@@ -169,6 +169,21 @@ impl From<SkillsAssetError> for InitError {
                 relative_path,
                 target,
                 reason,
+            } => InitError::CopyFile {
+                source: relative_path,
+                target,
+                reason,
+            },
+            SkillsAssetError::ReplaceExisting { target, reason } => InitError::CopyFile {
+                source: PathBuf::from("embedded skill symlink"),
+                target,
+                reason,
+            },
+            SkillsAssetError::SymlinkFile {
+                relative_path,
+                target,
+                reason,
+                ..
             } => InitError::CopyFile {
                 source: relative_path,
                 target,
@@ -581,9 +596,9 @@ mod tests {
 
         assert_eq!(count, CURATED_SKILL_COUNT);
         assert_eq!(list_embedded_skills().len(), CURATED_SKILL_COUNT);
-        assert!(skills_target.join("add/SKILL.md").exists());
-        assert!(!skills_target.join("gui-dev").exists());
-        assert!(!skills_target.join("execution").exists());
+        assert!(skills_target.join("vtb-add/SKILL.md").exists());
+        assert!(!skills_target.join("vtb-gui-dev").exists());
+        assert!(!skills_target.join("vtb-execution").exists());
 
         cleanup(&temp_dir);
     }
@@ -633,13 +648,10 @@ mod tests {
                 .collect::<Vec<_>>();
             installed.sort_unstable();
 
-            let expected = list_embedded_skills()
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>();
+            let expected = list_embedded_skills();
             assert_eq!(installed, expected);
-            assert!(!target.join("gui-dev").exists());
-            assert!(!target.join("execution").exists());
+            assert!(!target.join("vtb-gui-dev").exists());
+            assert!(!target.join("vtb-execution").exists());
         }
 
         cleanup(&home_dir);

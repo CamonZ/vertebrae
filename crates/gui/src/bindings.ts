@@ -26,6 +26,28 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 }
 },
 /**
+ * List all embedded skills available for GUI project initialization.
+ */
+async listEmbeddedSkills() : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_embedded_skills") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Preview the backend-derived slug for a project name.
+ */
+async previewProjectSlug(name: string) : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_project_slug", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read the shared Sacrum settings state without exposing the API token.
  */
 async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
@@ -39,9 +61,9 @@ async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
 /**
  * Persist Sacrum settings to the shared config.toml.
  */
-async saveSacrumSettings(url: string | null, token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
+async saveSacrumSettings(token: string) : Promise<Result<SacrumConfigStatus, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { url, token }) };
+    return { status: "ok", data: await TAURI_INVOKE("save_sacrum_settings", { token }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1197,11 +1219,12 @@ path: string;
  */
 project_created: boolean; 
 /**
- * Number of embedded skill files written.
+ * Number of embedded skill files linked into project skill roots.
  */
 skills_copied: number; 
 /**
- * Target directory where embedded skills were installed.
+ * Project skill roots where embedded skills were linked, or staging info
+ * when no supported project skill root exists.
  */
 skills_target: string }
 /**
@@ -1299,7 +1322,7 @@ config_path: string | null;
  */
 config_exists: boolean; 
 /**
- * Effective Sacrum URL. Defaults to the standard local Sacrum URL.
+ * Sacrum URL used by GUI onboarding.
  */
 url: string; 
 /**

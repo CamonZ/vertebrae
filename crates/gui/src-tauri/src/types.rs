@@ -12,7 +12,7 @@ pub struct SacrumConfigStatus {
     pub config_path: Option<String>,
     /// Whether config.toml exists on disk.
     pub config_exists: bool,
-    /// Effective Sacrum URL. Defaults to the standard local Sacrum URL.
+    /// Sacrum URL used by GUI onboarding.
     pub url: String,
     /// Whether a non-empty API token is configured.
     pub has_token: bool,
@@ -31,9 +31,10 @@ pub struct InitializeProjectResult {
     pub path: String,
     /// Whether this call created the project on Sacrum.
     pub project_created: bool,
-    /// Number of embedded skill files written.
+    /// Number of embedded skill files linked into project skill roots.
     pub skills_copied: u32,
-    /// Target directory where embedded skills were installed.
+    /// Project skill roots where embedded skills were linked, or staging info
+    /// when no supported project skill root exists.
     pub skills_target: String,
 }
 
