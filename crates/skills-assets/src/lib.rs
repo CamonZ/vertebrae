@@ -40,11 +40,12 @@ pub enum SkillsAssetError {
 
 /// Return the names of all embedded top-level skills, sorted for stable UI and
 /// test output.
-pub fn list_embedded_skills() -> Vec<&'static str> {
+pub fn list_embedded_skills() -> Vec<String> {
     let mut skills = SKILLS_DIR
         .dirs()
         .filter_map(|dir| dir.path().file_name())
         .filter_map(|name| name.to_str())
+        .map(installed_skill_name)
         .collect::<Vec<_>>();
     skills.sort_unstable();
     skills
@@ -87,12 +88,12 @@ where
     F: FnMut(&InstalledSkillFile),
 {
     for dir in source_dir.dirs() {
-        create_dir_all(&target_root.join(dir.path()))?;
+        create_dir_all(&target_root.join(installed_relative_path(dir.path())))?;
         install_dir(dir, target_root, on_file_installed, copied)?;
     }
 
     for file in source_dir.files() {
-        let relative_path = file.path().to_path_buf();
+        let relative_path = installed_relative_path(file.path());
         let target_path = target_root.join(&relative_path);
 
         if let Some(parent) = target_path.parent() {
@@ -115,6 +116,28 @@ where
     Ok(())
 }
 
+fn installed_relative_path(source_path: &Path) -> PathBuf {
+    let mut components = source_path.components();
+    let Some(first) = components.next() else {
+        return PathBuf::new();
+    };
+
+    let mut installed = PathBuf::new();
+    installed.push(installed_skill_name(&first.as_os_str().to_string_lossy()));
+    for component in components {
+        installed.push(component.as_os_str());
+    }
+    installed
+}
+
+fn installed_skill_name(source_name: &str) -> String {
+    if source_name.starts_with("vtb-") {
+        source_name.to_string()
+    } else {
+        format!("vtb-{source_name}")
+    }
+}
+
 fn create_dir_all(path: &Path) -> Result<(), SkillsAssetError> {
     fs::create_dir_all(path).map_err(|e| SkillsAssetError::CreateDir {
         path: path.to_path_buf(),
@@ -127,37 +150,44 @@ mod tests {
     use super::*;
 
     const CURATED_SKILLS: [&str; 26] = [
-        "add",
-        "archive",
-        "blockers",
-        "check-item",
-        "criterion-ref",
-        "delete",
-        "depend",
-        "init",
-        "list",
-        "path",
-        "ready",
-        "ref",
-        "refs",
-        "run",
-        "run-workflow",
-        "section",
-        "sections",
-        "step",
-        "transition-to",
-        "uncheck-item",
-        "undepend",
-        "unref",
-        "unsection",
-        "update",
+        "vtb-add",
+        "vtb-archive",
+        "vtb-blockers",
+        "vtb-check-item",
+        "vtb-criterion-ref",
+        "vtb-delete",
+        "vtb-depend",
+        "vtb-init",
+        "vtb-list",
+        "vtb-path",
+        "vtb-ready",
+        "vtb-ref",
+        "vtb-refs",
+        "vtb-run",
+        "vtb-run-workflow",
+        "vtb-section",
+        "vtb-sections",
         "vtb-show",
-        "workflow",
+        "vtb-step",
+        "vtb-transition-to",
+        "vtb-uncheck-item",
+        "vtb-undepend",
+        "vtb-unref",
+        "vtb-unsection",
+        "vtb-update",
+        "vtb-workflow",
     ];
+
+    fn curated_skills() -> Vec<String> {
+        CURATED_SKILLS
+            .iter()
+            .map(|skill| skill.to_string())
+            .collect()
+    }
 
     #[test]
     fn lists_exact_curated_skill_set() {
-        assert_eq!(list_embedded_skills(), CURATED_SKILLS);
+        assert_eq!(list_embedded_skills(), curated_skills());
     }
 
     #[test]
@@ -165,18 +195,18 @@ mod tests {
         let skills = list_embedded_skills();
 
         for excluded in [
-            "gui-dev",
-            "execution",
-            "status",
-            "start-step",
-            "complete-step",
-            "reject-step",
-            "step-done",
-            "review",
-            "implement",
+            "vtb-gui-dev",
+            "vtb-execution",
+            "vtb-status",
+            "vtb-start-step",
+            "vtb-complete-step",
+            "vtb-reject-step",
+            "vtb-step-done",
+            "vtb-review",
+            "vtb-implement",
         ] {
             assert!(
-                !skills.contains(&excluded),
+                !skills.contains(&excluded.to_string()),
                 "{excluded} should not be embedded for vtb init"
             );
         }
@@ -212,7 +242,7 @@ mod tests {
             .collect::<Vec<_>>();
         installed.sort_unstable();
 
-        assert_eq!(installed, CURATED_SKILLS);
+        assert_eq!(installed, curated_skills());
 
         for skill in CURATED_SKILLS {
             let skill_file = target.join(skill).join("SKILL.md");

@@ -260,7 +260,7 @@ function Ignition({ project, skillCount }) {
     <div className="fr-ignite">
       <div className="fr-flame" />
       <div className="key">Initialized</div>
-      <h1>The hearth is lit</h1>
+      <h1>Project ready</h1>
       <p className="sub">Vertebrae is installed and <em style={{ color: 'var(--fg-soft)' }}>{project.name}</em> is connected. Runs you start here will plan, execute, and report against this repo.</p>
       <div className="fr-summary">
         <div className="fr-sum"><div className="v">4</div><div className="l">binaries</div></div>

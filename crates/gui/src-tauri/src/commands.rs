@@ -83,10 +83,7 @@ pub async fn get_projects(state: State<'_, AppState>) -> Result<Vec<SavedProject
 #[tauri::command]
 #[specta::specta]
 pub async fn list_embedded_skills() -> Result<Vec<String>, CommandError> {
-    Ok(vertebrae_skills_assets::list_embedded_skills()
-        .into_iter()
-        .map(str::to_string)
-        .collect())
+    Ok(vertebrae_skills_assets::list_embedded_skills())
 }
 
 /// Preview the backend-derived slug for a project name.
@@ -2653,14 +2650,11 @@ mod tests {
     #[tokio::test]
     async fn list_embedded_skills_returns_sorted_manifest() {
         let skills = list_embedded_skills().await.unwrap();
-        let expected = vertebrae_skills_assets::list_embedded_skills()
-            .into_iter()
-            .map(str::to_string)
-            .collect::<Vec<_>>();
+        let expected = vertebrae_skills_assets::list_embedded_skills();
 
         assert!(!skills.is_empty());
         assert_eq!(skills, expected);
-        assert!(skills.contains(&"add".to_string()));
+        assert!(skills.contains(&"vtb-add".to_string()));
     }
 
     #[tokio::test]
@@ -3051,7 +3045,9 @@ mod tests {
         assert_eq!(result.project_name, "Temp Project");
         assert!(result.project_created);
         assert!(result.skills_copied > 0);
-        assert!(project_path.join(".claude/skills/add/SKILL.md").exists());
+        assert!(project_path
+            .join(".claude/skills/vtb-add/SKILL.md")
+            .exists());
 
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         let registered = config.projects.get("temp-project").unwrap();
