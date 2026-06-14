@@ -581,9 +581,9 @@ mod tests {
 
         assert_eq!(count, CURATED_SKILL_COUNT);
         assert_eq!(list_embedded_skills().len(), CURATED_SKILL_COUNT);
-        assert!(skills_target.join("add/SKILL.md").exists());
-        assert!(!skills_target.join("gui-dev").exists());
-        assert!(!skills_target.join("execution").exists());
+        assert!(skills_target.join("vtb-add/SKILL.md").exists());
+        assert!(!skills_target.join("vtb-gui-dev").exists());
+        assert!(!skills_target.join("vtb-execution").exists());
 
         cleanup(&temp_dir);
     }
@@ -633,13 +633,10 @@ mod tests {
                 .collect::<Vec<_>>();
             installed.sort_unstable();
 
-            let expected = list_embedded_skills()
-                .into_iter()
-                .map(str::to_string)
-                .collect::<Vec<_>>();
+            let expected = list_embedded_skills();
             assert_eq!(installed, expected);
-            assert!(!target.join("gui-dev").exists());
-            assert!(!target.join("execution").exists());
+            assert!(!target.join("vtb-gui-dev").exists());
+            assert!(!target.join("vtb-execution").exists());
         }
 
         cleanup(&home_dir);

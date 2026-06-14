@@ -114,7 +114,7 @@ describe("ProjectSetupPage", () => {
     });
     mockListEmbeddedSkills.mockResolvedValue({
       status: "ok",
-      data: ["add", "ready"],
+      data: ["vtb-add", "vtb-ready"],
     });
     mockPreviewProjectSlug.mockResolvedValue({
       status: "ok",
@@ -291,8 +291,10 @@ describe("ProjectSetupPage", () => {
         "sac_test"
       );
     });
-    expect(await screen.findByTestId("skills-phase")).toHaveTextContent("add");
-    expect(screen.getByTestId("skills-phase")).toHaveTextContent("ready");
+    expect(await screen.findByTestId("skills-phase")).toHaveTextContent(
+      "vtb-add"
+    );
+    expect(screen.getByTestId("skills-phase")).toHaveTextContent("vtb-ready");
   });
 
   it("retries Sacrum status loading after a transient failure", async () => {
@@ -370,7 +372,7 @@ describe("ProjectSetupPage", () => {
       expect(projectInitProgress.handler).not.toBeNull();
     });
 
-    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
       "queued"
     );
 
@@ -380,12 +382,12 @@ describe("ProjectSetupPage", () => {
           project_slug: "rsted",
           kind: "SkillFileInstalled",
           files_copied: 1,
-          relative_path: "add/SKILL.md",
-          target_path: "/tmp/other/.claude/skills/add/SKILL.md",
+          relative_path: "vtb-add/SKILL.md",
+          target_path: "/tmp/other/.claude/skills/vtb-add/SKILL.md",
         },
       });
     });
-    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
       "queued"
     );
 
@@ -395,12 +397,12 @@ describe("ProjectSetupPage", () => {
           project_slug: "orsted",
           kind: "SkillFileInstalled",
           files_copied: 1,
-          relative_path: "add/SKILL.md",
-          target_path: "/tmp/new-project/.claude/skills/add/SKILL.md",
+          relative_path: "vtb-add/SKILL.md",
+          target_path: "/tmp/new-project/.claude/skills/vtb-add/SKILL.md",
         },
       });
     });
-    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
       "writing"
     );
 
@@ -415,7 +417,7 @@ describe("ProjectSetupPage", () => {
         },
       });
     });
-    expect(screen.getByTestId("file-state-add/SKILL.md")).toHaveTextContent(
+    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
       "written"
     );
 

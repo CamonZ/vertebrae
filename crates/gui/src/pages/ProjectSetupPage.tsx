@@ -378,7 +378,7 @@ export function ProjectSetupPage() {
   ).length;
   const title =
     setupView === "ignition"
-      ? "The hearth is lit"
+      ? "Project ready"
       : setupView === "skills"
         ? `Equip ${projectDraft?.name ?? "the project"}`
         : isProjectForm
@@ -388,7 +388,7 @@ export function ProjectSetupPage() {
           : "Choose a project";
   const lede =
     setupView === "ignition"
-      ? "Vertebrae is connected, the local skills are installed, and this project is ready to work."
+      ? "Project setup is complete. Vertebrae selected the project and installed the local skill files."
       : setupView === "skills"
         ? "All embedded skills will be installed into this project as a read-only starter kit."
         : isProjectForm
