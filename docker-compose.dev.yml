@@ -1,14 +1,19 @@
-# Local DEV backend (sacrum) reachable from the host on http://localhost:4000.
+# Local DEV backend (sacrum) reachable from the host on http://localhost:4400.
+#
+# The host port is 4400 (not 4000) to avoid colliding with apps you're actively
+# developing, which commonly grab 4000. Override with SACRUM_HOST_PORT. The
+# container still listens on 4000 internally; only the host mapping changes.
 #
 # This is a standalone stack (own project name + own volume), so it never
 # collides with the acceptance stack in docker-compose.yml.
 #
-# Most people should use the wrapper, which also seeds + writes app config:
-#   scripts/dev-backend.sh up
+# Most people should use the wrapper:
+#   scripts/dev-backend.sh up         # start backend only
+#   scripts/dev-backend.sh provision  # create dev user/token + write app config
 #
 # Raw compose usage:
-#   # Start postgres + sacrum + seed a dev user/token (override creds via env):
-#   docker compose -f docker-compose.dev.yml up -d
+#   # Start postgres + sacrum only (no seeding):
+#   docker compose -f docker-compose.dev.yml up -d postgres sacrum
 #
 #   # Use your own credentials/token:
 #   SEED_EMAIL=me@local.test SEED_PASSWORD=hunter2 SEED_TOKEN=sac_my-dev-token \
@@ -19,9 +24,12 @@
 #
 #   # Tail logs / check health:
 #   docker compose -f docker-compose.dev.yml ps
-#   curl -f http://localhost:4000/healthz
+#   curl -f http://localhost:4400/healthz
 #
-#   # Tear down (drops the DB volume):
+#   # Stop containers but KEEP the data:
+#   docker compose -f docker-compose.dev.yml down
+#
+#   # Tear down AND drop the DB volume (deletes all data):
 #   docker compose -f docker-compose.dev.yml down -v
 
 name: vertebrae-dev
@@ -29,6 +37,18 @@ name: vertebrae-dev
 services:
   postgres:
     image: postgres:17-alpine
+    # Sacrum's CDC (WalEx) uses logical replication, which needs wal_level=logical.
+    # The postgres default is "replica", so set it explicitly or the sacrum boot
+    # fails with: logical decoding requires "wal_level" >= "logical".
+    # Matches the acceptance stack in docker-compose.yml.
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_replication_slots=10"
+      - "-c"
+      - "max_wal_senders=10"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -54,8 +74,10 @@ services:
       PHX_SERVER: "true"
       PORT: "4000"
     # Publish to the host so your local vtb / GUI / daemon can reach it.
+    # Host port defaults to 4400 (override with SACRUM_HOST_PORT) to avoid the
+    # common port-4000 collision; the container keeps listening on 4000.
     ports:
-      - "4000:4000"
+      - "${SACRUM_HOST_PORT:-4400}:4000"
     entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/migrate && exec /app/bin/server"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/healthz"]
