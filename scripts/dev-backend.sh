@@ -1,0 +1,188 @@
+#!/bin/bash
+# Run a local Sacrum backend in Docker and (separately) point the Vertebrae app at it.
+#
+# `up` ONLY starts the database + backend — it never touches your credentials or
+# config.toml. Provisioning the dev user/token and writing the app config is a
+# separate, explicit step (`provision`) so repeated `up`s have no side effects.
+#
+# Usage:
+#   scripts/dev-backend.sh up         # start backend only (postgres + sacrum)
+#   scripts/dev-backend.sh provision  # create dev user/token AND write app config.toml
+#   scripts/dev-backend.sh seed       # create the user/token only
+#   scripts/dev-backend.sh config     # write app config.toml only
+#   scripts/dev-backend.sh status     # show stack state + health
+#   scripts/dev-backend.sh restore    # restore the backed-up prod config.toml
+#   scripts/dev-backend.sh down       # stop & remove containers (KEEPS the DB volume)
+#   scripts/dev-backend.sh destroy    # stop & remove containers AND drop the DB volume
+#
+# Typical flow:
+#   scripts/dev-backend.sh up
+#   scripts/dev-backend.sh provision
+#
+# Credentials/token are overridable via env (defaults shown):
+#   SEED_EMAIL=dev@local.test
+#   SEED_USERNAME=dev
+#   SEED_PASSWORD=dev_password_123
+#   SEED_TOKEN=sac_dev-local-token        # keep the sac_ prefix
+#
+# Example with custom creds:
+#   SEED_PASSWORD=hunter2 SEED_TOKEN=sac_my-token scripts/dev-backend.sh provision
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE_FILE="$REPO_ROOT/docker-compose.dev.yml"
+
+# Host port defaults to 4400 (not 4000) to dodge the common dev-app collision.
+# Override SACRUM_HOST_PORT (consumed by docker-compose.dev.yml) or SACRUM_URL.
+export SACRUM_HOST_PORT="${SACRUM_HOST_PORT:-4400}"
+SACRUM_URL="${SACRUM_URL:-http://localhost:$SACRUM_HOST_PORT}"
+export SEED_EMAIL="${SEED_EMAIL:-dev@local.test}"
+export SEED_USERNAME="${SEED_USERNAME:-dev}"
+export SEED_PASSWORD="${SEED_PASSWORD:-dev_password_123}"
+export SEED_TOKEN="${SEED_TOKEN:-sac_dev-local-token}"
+
+compose() { docker compose -f "$COMPOSE_FILE" "$@"; }
+
+# Resolve the app config dir the same way Rust's dirs::config_dir() does.
+config_dir() {
+  case "$(uname -s)" in
+    Darwin) printf '%s' "$HOME/Library/Application Support/vertebrae" ;;
+    *)      printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/vertebrae" ;;
+  esac
+}
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found on PATH" >&2; exit 1; }
+}
+
+wait_for_health() {
+  echo "==> Waiting for sacrum at $SACRUM_URL/healthz ..."
+  for _ in $(seq 1 60); do
+    if curl -fs "$SACRUM_URL/healthz" >/dev/null 2>&1; then
+      echo "    sacrum is healthy"
+      return 0
+    fi
+    sleep 2
+  done
+  echo "    ERROR: sacrum did not become healthy in time. Recent logs:" >&2
+  compose logs --tail 40 sacrum >&2 || true
+  return 1
+}
+
+do_seed() {
+  echo "==> Seeding user + token (email=$SEED_EMAIL token=$SEED_TOKEN) ..."
+  compose run --rm seeder
+}
+
+write_config() {
+  local dir cfg
+  dir="$(config_dir)"
+  cfg="$dir/config.toml"
+  mkdir -p "$dir"
+
+  if [ -f "$cfg" ]; then
+    if [ ! -f "$cfg.bak" ]; then
+      cp -p "$cfg" "$cfg.bak"
+      echo "==> Backed up existing config -> $cfg.bak"
+    else
+      echo "==> Existing backup preserved (not overwriting $cfg.bak)"
+    fi
+  fi
+
+  cat > "$cfg" <<EOF
+[sacrum]
+url = "$SACRUM_URL"
+token = "$SEED_TOKEN"
+EOF
+  echo "==> Wrote dev config -> $cfg"
+  echo "    Projects are created from the app (GUI first-run wizard / vtb init)."
+}
+
+restore_config() {
+  local cfg; cfg="$(config_dir)/config.toml"
+  if [ -f "$cfg.bak" ]; then
+    mv -f "$cfg.bak" "$cfg"
+    echo "==> Restored config from backup -> $cfg"
+  else
+    echo "No backup found at $cfg.bak — nothing to restore." >&2
+    return 1
+  fi
+}
+
+ensure_reachable() {
+  if ! curl -fs "$SACRUM_URL/healthz" >/dev/null 2>&1; then
+    echo "ERROR: backend not reachable at $SACRUM_URL" >&2
+    echo "       Start it first: scripts/dev-backend.sh up" >&2
+    exit 1
+  fi
+}
+
+cmd_up() {
+  require_docker
+  echo "==> Starting dev backend (postgres + sacrum) ..."
+  compose up -d postgres sacrum
+  wait_for_health
+  cat <<EOF
+
+Backend is up at $SACRUM_URL — no credentials or config were written.
+Next:
+  scripts/dev-backend.sh provision   # create the dev user/token and write app config.toml
+EOF
+}
+
+cmd_provision() {
+  require_docker
+  ensure_reachable
+  do_seed
+  write_config
+  cat <<EOF
+
+Provisioned.
+  user:  $SEED_EMAIL  (password: $SEED_PASSWORD)
+  token: $SEED_TOKEN
+  app config now points at $SACRUM_URL
+
+  - Launch the GUI (cd crates/gui && npm run tauri:dev) and create your project
+    via the first-run wizard, or run 'vtb init' inside a repo.
+  - Restore your previous config later: scripts/dev-backend.sh restore
+EOF
+}
+
+cmd_status() {
+  require_docker
+  compose ps
+  echo "--- health ---"
+  if curl -fs "$SACRUM_URL/healthz" >/dev/null 2>&1; then
+    echo "sacrum: healthy ($SACRUM_URL)"
+  else
+    echo "sacrum: not reachable at $SACRUM_URL"
+  fi
+}
+
+cmd_down() {
+  require_docker
+  echo "==> Stopping dev backend (DB volume preserved) ..."
+  compose down
+  echo "    Data is kept. Bring it back with: scripts/dev-backend.sh up"
+  echo "    To wipe the database for good: scripts/dev-backend.sh destroy"
+}
+
+cmd_destroy() {
+  require_docker
+  echo "==> Destroying dev backend AND its database volume (irreversible) ..."
+  compose down -v
+  echo "    DB volume removed — all stored data is gone."
+}
+
+case "${1:-up}" in
+  up)        cmd_up ;;
+  provision) cmd_provision ;;
+  seed)      require_docker; ensure_reachable; do_seed ;;
+  config)    write_config ;;
+  restore)   restore_config ;;
+  status)    cmd_status ;;
+  down)      cmd_down ;;
+  destroy)   cmd_destroy ;;
+  *) echo "Usage: $0 {up|provision|seed|config|status|restore|down|destroy}" >&2; exit 2 ;;
+esac
