@@ -17,9 +17,13 @@
     "test:mutate": "stryker run",
     "generate:types": "cd src-tauri && cargo run --bin generate-types",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:prepare-sidecars": "node scripts/prepare-sidecars.mjs"
+    "tauri:dev": "VERTEBRAE_BUNDLE_SIDECARS=1 tauri dev",
+    "tauri:build": "VERTEBRAE_BUNDLE_SIDECARS=1 tauri build",
+    "tauri:prepare-sidecars": "node scripts/prepare-sidecars.mjs",
+    "package": "../../scripts/build-package.sh",
+    "package:debug": "../../scripts/build-package.sh --debug",
+    "package:release": "../../scripts/build-package.sh --release",
+    "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",

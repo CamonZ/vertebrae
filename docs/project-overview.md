@@ -38,15 +38,39 @@ vertebrae/
 ## Build Commands
 
 ```bash
-# Build the project (quiet mode reduces output)
+# Build the default Rust workspace members (excludes the GUI and acceptance crates)
 cargo build --quiet
 
-# Build in release mode
+# Build the default Rust workspace members in release mode
 cargo build --release --quiet
 
-# Run the CLI tool
-vtb <args>
+# Build/package everything in dependency order:
+# vtb, vtb-daemon, vtb-gate, staged Tauri sidecars, then the GUI bundle
+scripts/build-package.sh --release
+
+# Build/package debug artifacts instead
+scripts/build-package.sh --debug
+
+# Run the CLI from the build output
+target/debug/vtb <args>
 ```
+
+The root `Cargo.toml` uses `default-members` so bare `cargo build` does not
+compile the Tauri GUI crate. This keeps a clean checkout buildable without
+pre-staged sidecars. Commands that explicitly use `--workspace` still compile
+the GUI crate, but the GUI build script disables Tauri `externalBin` copying for
+non-bundling Cargo builds so Rust tests and linting do not depend on
+`crates/gui/src-tauri/binaries/`.
+
+Use `scripts/build-package.sh` when you need a runnable desktop bundle. It
+delegates sidecar build and staging to
+`crates/gui/scripts/prepare-sidecars.mjs`, which is the single source of truth
+for target-triple detection and `src-tauri/binaries/<bin>-<triple>` staging.
+Set `SIDECAR_PROFILE=debug` or pass `--debug` to build debug sidecars and a
+debug GUI bundle; release is the default. On macOS the wrapper defaults to
+`--bundles app` to produce a repeatable runnable `.app` bundle without requiring
+DMG packaging; set `TAURI_BUNDLES` or pass `--bundles` to request other Tauri
+bundle formats.
 
 ## Dependencies
 

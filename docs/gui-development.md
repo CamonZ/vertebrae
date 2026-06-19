@@ -24,6 +24,8 @@ npm run tauri:dev        # Start Tauri + Vite with hot reload
 # Building
 npm run build            # Build frontend (TypeScript + Vite)
 npm run tauri:build      # Build production Tauri app
+npm run package          # Build sidecars, stage them, then build the GUI bundle
+npm run package:debug    # Same flow with debug sidecars and a debug GUI bundle
 
 # Testing
 npm run test             # Run tests once
@@ -110,10 +112,29 @@ definition and loads it so it starts at login. See
 
 ### Sidecar bundling
 
-`vtb`, `vtb-daemon`, and `vtb-gate` ship inside the GUI bundle as Tauri `externalBin`
-sidecars (declared in `src-tauri/tauri.conf.json`). They are produced and
-staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
-`beforeBuildCommand`:
+`vtb`, `vtb-daemon`, and `vtb-gate` ship inside the GUI bundle as Tauri
+`externalBin` sidecars (declared in `src-tauri/tauri.conf.json`). The supported
+packaging entry point is the root wrapper:
+
+```bash
+scripts/build-package.sh --release
+scripts/build-package.sh --debug
+```
+
+From `crates/gui`, the equivalent npm affordances are:
+
+```bash
+npm run package
+npm run package:debug
+```
+
+The wrapper builds and stages the sidecars first, then invokes the Tauri bundle
+build. On macOS it defaults to `--bundles app` so the repeatable path produces a
+runnable `.app` without requiring DMG tooling; set `TAURI_BUNDLES` or pass
+`--bundles` to request another Tauri bundle format. Sidecar staging itself is
+centralized in `scripts/prepare-sidecars.mjs`,
+which remains wired into Tauri's `beforeDevCommand` and `beforeBuildCommand` so
+direct `npm run tauri:dev` and `npm run tauri:build` commands continue to work:
 
 ```json
 "beforeBuildCommand": "npm run tauri:prepare-sidecars && npm run build"
@@ -125,20 +146,33 @@ staged at build time by `scripts/prepare-sidecars.mjs`, wired in via the
    parsing `rustc -vV`). Supported triples: `aarch64-apple-darwin`,
    `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`,
    `x86_64-unknown-linux-gnu`.
-2. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon -p vtb-gate`.
-3. Copies the release binaries to
+2. Removes staged sidecars for the other supported target triples so stale
+   non-host binaries cannot be bundled accidentally.
+3. Runs `cargo build --release -p vertebrae-cli -p vertebrae-daemon -p vtb-gate`
+   by default, or a debug build when `SIDECAR_PROFILE=debug`, `--debug`, or
+   `--profile debug` is used.
+4. Copies the profile's binaries to
    `src-tauri/binaries/<bin>-<target-triple>` — the naming Tauri's
    `externalBin` expects.
 
-It is idempotent: if the staged copies already exist and are at least as new
-as the source binaries in `target/release/`, the rebuild and copy are skipped,
-keeping `tauri:dev` fast.
+It is idempotent per profile: if the staged profile marker matches the
+requested profile and the staged copies are at least as new as the source
+binaries in `target/<profile>/`, the rebuild and copy are skipped. Switching
+between debug and release forces a restage so bundles do not accidentally reuse
+sidecars from the other profile.
 
 At bundle time `tauri-build` copies each staged sidecar next to the GUI
 executable, stripping the `-<triple>` suffix. At runtime
 `install_components` resolves them relative to the GUI executable using the
 target triple baked in at build time, then hands them to
 `vertebrae_installer::install_binary`.
+
+Bare Rust builds and tests are intentionally separate from GUI bundling.
+`cargo build` uses the workspace's default members, which exclude the Tauri GUI
+crate. `cargo test --workspace --exclude acceptance --exclude gui-acceptance
+--exclude daemon-acceptance` still compiles the GUI crate, but `build.rs`
+removes `externalBin` from Tauri's build configuration unless
+`VERTEBRAE_BUNDLE_SIDECARS=1` is set by the npm/Tauri packaging scripts.
 
 ### When the welcome screen is shown
 
