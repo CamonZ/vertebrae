@@ -29,6 +29,11 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -36,13 +41,10 @@ jobs:
       # Tauri's build script fails if those files are missing for the host triple.
       # Stage them before any cargo command that compiles the gui crate (clippy).
       - name: Stage Tauri sidecars
-        run: |
-          cargo build -p vertebrae-cli -p vertebrae-daemon -p vtb-gate
-          triple="$(rustc -vV | sed -n 's/^host: //p')"
-          mkdir -p crates/gui/src-tauri/binaries
-          cp "target/debug/vtb" "crates/gui/src-tauri/binaries/vtb-${triple}"
-          cp "target/debug/vtb-daemon" "crates/gui/src-tauri/binaries/vtb-daemon-${triple}"
-          cp "target/debug/vtb-gate" "crates/gui/src-tauri/binaries/vtb-gate-${triple}"
+        run: cd crates/gui && SIDECAR_PROFILE=debug npm run tauri:prepare-sidecars
+
+      - name: Test Tauri sidecar staging
+        run: cd crates/gui && npm run test:sidecars
 
       - name: Run clippy
         run: cargo clippy --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings

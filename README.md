@@ -27,16 +27,34 @@ Key entrypoints:
 # Build the workspace
 cargo build --quiet
 
+# Build the CLI, daemon, gate, and GUI bundle in dependency order
+scripts/build-package.sh --release
+
+# Build Linux GUI packages by requesting the bundle format you need
+scripts/build-package.sh --release --bundles appimage
+scripts/build-package.sh --release --bundles deb
+scripts/build-package.sh --release --bundles rpm
+
 # Run local Rust tests, excluding Docker-backed acceptance crates
 cargo test --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance
 
 # Run the CLI
-vtb --help
+target/debug/vtb --help
 
 # Start GUI development
 cd crates/gui
 npm install
 npm run tauri:dev
+```
+
+`scripts/build-package.sh` stages the sidecars (`vtb`, `vtb-daemon`, and
+`vtb-gate`) before invoking Tauri. On macOS it defaults to a `.app` bundle; pass
+`--bundles dmg` when you specifically need Tauri's DMG output. On Linux, install
+the Tauri system dependencies first, then choose `appimage`, `deb`, or `rpm`.
+For Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
 ## Local Backend (Docker)
