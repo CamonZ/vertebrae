@@ -9,14 +9,24 @@
 // stage debug binaries instead — used by the GUI acceptance Docker build,
 // which compiles everything in debug for speed.
 //
-// Idempotency: if the staged copies exist and are at least as new as the
-// source binaries in `target/<profile>/`, the script skips the rebuild and
-// the copy. That keeps `tauri:dev` fast for engineers who run it manually.
+// Idempotency: if the staged profile marker matches and the staged copies are
+// at least as new as the source binaries in `target/<profile>/`, the script
+// skips the rebuild and copy. That keeps `tauri:dev` fast for engineers who
+// run it manually while still forcing a restage when switching debug/release.
 
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SUPPORTED_TARGETS = new Set([
   "aarch64-apple-darwin",
@@ -31,14 +41,41 @@ const BINARIES = [
   { cargoPkg: "vtb-gate", binName: "vtb-gate" },
 ];
 
-const PROFILE = process.env.SIDECAR_PROFILE === "debug" ? "debug" : "release";
-
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const guiDir = resolve(scriptDir, "..");
 const tauriDir = join(guiDir, "src-tauri");
 const workspaceRoot = resolve(guiDir, "..", "..");
 const stagingDir = join(tauriDir, "binaries");
-const profileDir = join(workspaceRoot, "target", PROFILE);
+
+function profileFromArgs(argv = process.argv.slice(2), env = process.env) {
+  let profile = env.SIDECAR_PROFILE || "release";
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--debug") {
+      profile = "debug";
+    } else if (arg === "--release") {
+      profile = "release";
+    } else if (arg === "--profile") {
+      const value = argv[index + 1];
+      if (!value) {
+        throw new Error("--profile requires `debug` or `release`");
+      }
+      profile = value;
+      index += 1;
+    } else if (arg.startsWith("--profile=")) {
+      profile = arg.slice("--profile=".length);
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+
+  if (profile !== "debug" && profile !== "release") {
+    throw new Error(`unsupported sidecar profile: ${profile}`);
+  }
+
+  return profile;
+}
 
 function detectTargetTriple() {
   // Tauri sets this env var when invoking beforeBuildCommand for the
@@ -49,6 +86,9 @@ function detectTargetTriple() {
   }
 
   const result = spawnSync("rustc", ["-vV"], { encoding: "utf8" });
+  if (result.error) {
+    throw new Error(`failed to run rustc -vV: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     throw new Error(
       `rustc -vV failed (status ${result.status}): ${result.stderr}`,
@@ -65,18 +105,34 @@ function exeSuffix(target) {
   return target.includes("windows") ? ".exe" : "";
 }
 
-function sourcePath(binName, suffix) {
-  return join(profileDir, `${binName}${suffix}`);
+function sourcePath(profile, binName, suffix, root = workspaceRoot) {
+  return join(root, "target", profile, `${binName}${suffix}`);
 }
 
-function stagedPath(binName, target, suffix) {
-  return join(stagingDir, `${binName}-${target}${suffix}`);
+function stagedPath(binName, target, suffix, dir = stagingDir) {
+  return join(dir, `${binName}-${target}${suffix}`);
 }
 
-function needsRebuild(target, suffix) {
+function profileMarkerPath(target, dir = stagingDir) {
+  return join(dir, `.sidecar-profile-${target}`);
+}
+
+function stagedProfileMatches(profile, target, dir = stagingDir) {
+  const marker = profileMarkerPath(target, dir);
+  return existsSync(marker) && readFileSync(marker, "utf8").trim() === profile;
+}
+
+function needsRebuild(profile, target, suffix, dirs = {}) {
+  const sourceRoot = dirs.workspaceRoot ?? workspaceRoot;
+  const stagedDir = dirs.stagingDir ?? stagingDir;
+
+  if (!stagedProfileMatches(profile, target, stagedDir)) {
+    return true;
+  }
+
   for (const { binName } of BINARIES) {
-    const src = sourcePath(binName, suffix);
-    const dst = stagedPath(binName, target, suffix);
+    const src = sourcePath(profile, binName, suffix, sourceRoot);
+    const dst = stagedPath(binName, target, suffix, stagedDir);
     if (!existsSync(dst)) {
       return true;
     }
@@ -99,7 +155,37 @@ function stagedBinariesPresent(target, suffix) {
   );
 }
 
-function runCargoBuild() {
+function staleSidecarPaths(target, dir = stagingDir) {
+  if (!existsSync(dir)) {
+    return [];
+  }
+
+  const staleNames = new Set();
+  for (const supportedTarget of SUPPORTED_TARGETS) {
+    if (supportedTarget === target) {
+      continue;
+    }
+
+    const suffix = exeSuffix(supportedTarget);
+    staleNames.add(`.sidecar-profile-${supportedTarget}`);
+    for (const { binName } of BINARIES) {
+      staleNames.add(`${binName}-${supportedTarget}${suffix}`);
+    }
+  }
+
+  return readdirSync(dir)
+    .filter((name) => staleNames.has(name))
+    .map((name) => join(dir, name));
+}
+
+function cleanStaleSidecars(target, dir = stagingDir) {
+  for (const path of staleSidecarPaths(target, dir)) {
+    rmSync(path, { force: true });
+    console.log(`[prepare-sidecars] removed stale sidecar ${path}`);
+  }
+}
+
+function runCargoBuild(profile) {
   const args = [
     "build",
     "-p",
@@ -109,7 +195,7 @@ function runCargoBuild() {
     "-p",
     "vtb-gate",
   ];
-  if (PROFILE === "release") {
+  if (profile === "release") {
     args.splice(1, 0, "--release");
   }
   console.log(`[prepare-sidecars] cargo ${args.join(" ")}`);
@@ -117,15 +203,18 @@ function runCargoBuild() {
     cwd: workspaceRoot,
     stdio: "inherit",
   });
+  if (result.error) {
+    throw new Error(`failed to run cargo build: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     throw new Error(`cargo build failed with status ${result.status}`);
   }
 }
 
-function stageBinaries(target, suffix) {
+function stageBinaries(profile, target, suffix) {
   mkdirSync(stagingDir, { recursive: true });
   for (const { binName } of BINARIES) {
-    const src = sourcePath(binName, suffix);
+    const src = sourcePath(profile, binName, suffix);
     const dst = stagedPath(binName, target, suffix);
     if (!existsSync(src)) {
       throw new Error(
@@ -136,9 +225,11 @@ function stageBinaries(target, suffix) {
     copyFileSync(src, dst);
     console.log(`[prepare-sidecars] staged ${src} -> ${dst}`);
   }
+  writeFileSync(profileMarkerPath(target), `${profile}\n`);
 }
 
 function main() {
+  const profile = profileFromArgs();
   const target = detectTargetTriple();
   if (!SUPPORTED_TARGETS.has(target)) {
     console.error(
@@ -151,22 +242,38 @@ function main() {
   }
 
   const suffix = exeSuffix(target);
+  cleanStaleSidecars(target);
 
-  if (stagedBinariesPresent(target, suffix) && !needsRebuild(target, suffix)) {
+  if (
+    stagedBinariesPresent(target, suffix) &&
+    !needsRebuild(profile, target, suffix)
+  ) {
     console.log(
-      `[prepare-sidecars] sidecars for ${target} are up to date; skipping rebuild`,
+      `[prepare-sidecars] ${profile} sidecars for ${target} are up to date; skipping rebuild`,
     );
     return;
   }
 
-  runCargoBuild();
-  stageBinaries(target, suffix);
-  console.log(`[prepare-sidecars] done for ${target}`);
+  runCargoBuild(profile);
+  stageBinaries(profile, target, suffix);
+  console.log(`[prepare-sidecars] done for ${target} (${profile})`);
 }
 
-try {
-  main();
-} catch (err) {
-  console.error(`[prepare-sidecars] ${err.message}`);
-  process.exit(1);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    main();
+  } catch (err) {
+    console.error(`[prepare-sidecars] ${err.message}`);
+    process.exit(1);
+  }
 }
+
+export {
+  cleanStaleSidecars,
+  needsRebuild,
+  profileFromArgs,
+  profileMarkerPath,
+  stagedProfileMatches,
+  stagedPath,
+  staleSidecarPaths,
+};
