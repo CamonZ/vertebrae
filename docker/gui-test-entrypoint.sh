@@ -52,17 +52,16 @@ for i in $(seq 1 30); do
 done
 cd /app
 
-# Stage the vtb/vtb-daemon sidecars before building the GUI: Tauri's build
+# Stage the vtb/vtb-daemon/vtb-gate sidecars before building the GUI: Tauri's build
 # script validates that every `externalBin` declared in tauri.conf.json exists
-# for the active target triple, so they must be present first. This builds the
-# two binaries (debug) and copies them to src-tauri/binaries/<bin>-<triple>.
-echo "==> Staging vtb/vtb-daemon sidecars (debug)..."
+# for the active target triple, so they must be present first.
+echo "==> Staging vtb/vtb-daemon/vtb-gate sidecars (debug)..."
 SIDECAR_PROFILE=debug node /app/crates/gui/scripts/prepare-sidecars.mjs
 
-# Build the Tauri app and mock-claude (debug mode for speed). vtb/vtb-daemon
+# Build the Tauri app and mock-claude (debug mode for speed). The sidecars
 # were already built by the sidecar staging step above.
 echo "==> Building Tauri app, mock-claude binaries..."
-cargo build --bin gui --quiet
+VERTEBRAE_BUNDLE_SIDECARS=1 cargo build -p gui --bin gui --quiet
 cargo build -p daemon-acceptance --bin mock-claude --quiet
 
 # Install mock-claude where the daemon expects it.
