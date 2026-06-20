@@ -11,6 +11,7 @@ import {
   utilizationLevel,
 } from "../../utils/modelContextWindow";
 import { Thread } from "../thread";
+import type { ThreadModel } from "../thread";
 import { ChatInput } from "../ChatInput";
 import { chatMessagesToThread } from "./chatMessagesToThread";
 
@@ -42,8 +43,8 @@ function ThinkingIndicator() {
 // so the chat renders through the SAME recursive <Thread> primitive as Traces.
 //
 // `permission_request` is the one event the adapter SKIPS: it is interactive,
-// not a Message kind, so ChatWindow renders the PermissionRequestTurn nodes as
-// siblings of <Thread> below.
+// not a Message kind, so ChatWindow interleaves PermissionRequestTurn nodes
+// between Thread chunks at their original message positions.
 
 function PermissionRequestTurn({
   message,
@@ -62,12 +63,19 @@ function PermissionRequestTurn({
     setError(null);
 
     let parsedInput: JsonValue | null = null;
-    if (behavior === "allow" && updatedInput.trim()) {
+    if (behavior === "allow") {
       try {
-        parsedInput = JSON.parse(updatedInput) as JsonValue;
+        parsedInput = updatedInput.trim()
+          ? (JSON.parse(updatedInput) as JsonValue)
+          : {};
       } catch (err) {
         setStatus("error");
         setError(err instanceof Error ? err.message : "Invalid JSON");
+        return;
+      }
+      if (!isJsonRecord(parsedInput)) {
+        setStatus("error");
+        setError("Updated input must be a JSON object");
         return;
       }
     }
@@ -133,6 +141,51 @@ function PermissionRequestTurn({
       </div>
     </div>
   );
+}
+
+function isJsonRecord(value: JsonValue | null): value is Record<string, JsonValue> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type ChatRenderItem =
+  | { kind: "thread"; key: string; thread: ThreadModel }
+  | {
+      kind: "permission";
+      key: string;
+      message: Extract<ChatMessage, { kind: "permission_request" }>;
+    };
+
+function buildChatRenderItems(messages: readonly ChatMessage[]): ChatRenderItem[] {
+  const items: ChatRenderItem[] = [];
+  let segment: ChatMessage[] = [];
+  let segmentSeq = 0;
+
+  const flushSegment = () => {
+    if (segment.length === 0) return;
+    items.push({
+      kind: "thread",
+      key: `thread-${segmentSeq++}`,
+      thread: chatMessagesToThread(segment, {}),
+    });
+    segment = [];
+  };
+
+  messages.forEach((message, index) => {
+    if (message.kind === "permission_request") {
+      flushSegment();
+      items.push({
+        kind: "permission",
+        key: message.requestId ?? `permission-${index}`,
+        message,
+      });
+      return;
+    }
+
+    segment.push(message);
+  });
+
+  flushSegment();
+  return items;
 }
 
 /** Scope chip + human description for the "scoped to …" header line. The chip
@@ -226,22 +279,11 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
     messages.length > 0 &&
     messages[messages.length - 1].kind === "user";
 
-  // Normalize-on-render: derive the canonical Thread from the live store
-  // messages. The permission_request events are SKIPPED here and rendered as
-  // interactive siblings of <Thread> below.
-  const thread = useMemo(
-    () => chatMessagesToThread(messages ?? [], { isWaiting }),
-    [messages, isWaiting]
-  );
-
-  // The interactive permission requests are pulled out of the message stream
-  // and rendered as siblings of <Thread> (they are not Message kinds).
-  const permissionRequests = useMemo(
-    () =>
-      (messages ?? []).filter(
-        (m): m is Extract<ChatMessage, { kind: "permission_request" }> =>
-          m.kind === "permission_request"
-      ),
+  // Normalize-on-render: derive canonical Thread chunks from the live store
+  // messages, interleaving interactive permission cards at their original
+  // message positions so the chat stays chronological.
+  const renderItems = useMemo(
+    () => buildChatRenderItems(messages ?? []),
     [messages]
   );
 
@@ -425,20 +467,21 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
         )}
 
         <div className="flex flex-col gap-3">
-          <Thread
-            thread={thread}
-            depth={0}
-            mode="bare"
-            reveal="shallow"
-            showHead={false}
-            interactive
-          />
-          {permissionRequests.map((m, i) => (
-            <PermissionRequestTurn
-              key={m.requestId ?? `perm-${i}`}
-              message={m}
-            />
-          ))}
+          {renderItems.map((item) =>
+            item.kind === "thread" ? (
+              <Thread
+                key={item.key}
+                thread={item.thread}
+                depth={0}
+                mode="bare"
+                reveal="shallow"
+                showHead={false}
+                interactive
+              />
+            ) : (
+              <PermissionRequestTurn key={item.key} message={item.message} />
+            )
+          )}
           {isWaiting && <ThinkingIndicator />}
           <div ref={messagesEndRef} />
         </div>

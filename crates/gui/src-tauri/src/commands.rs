@@ -3,6 +3,7 @@
 //! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
+use crate::claude_session::{ClaudeSessionManager, LocalPermissionDecision};
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     ChatMessage, ChatSession, DeleteChatSessionResult, InitializeProjectResult,
@@ -1679,59 +1680,49 @@ pub async fn close_claude_session(
     claude_manager.close_session(&session_id).await
 }
 
-const RESOLVE_PERMISSION_REQUEST: &str = r#"
-    mutation ResolvePermissionRequest(
-        $project_id: Uuid4!,
-        $request_id: String!,
-        $behavior: String!,
-        $message: String,
-        $updated_input: Json
-    ) {
-        resolve_permission_request(
-            project_id: $project_id,
-            request_id: $request_id,
-            behavior: $behavior,
-            message: $message,
-            updated_input: $updated_input
-        )
-    }
-"#;
-
 /// Resolve a Claude permission request shown in the GUI.
 #[tauri::command]
 #[specta::specta]
 pub async fn resolve_permission_request(
-    state: State<'_, AppState>,
+    claude_manager: State<'_, ClaudeSessionManager>,
     input: ResolvePermissionRequestInput,
 ) -> Result<serde_json::Value, CommandError> {
-    let client_guard = state.sacrum_client.read().await;
-    let client = client_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let behavior = match input.behavior {
-        PermissionDecisionBehavior::Allow => "allow",
-        PermissionDecisionBehavior::Deny => "deny",
+    let (behavior, message, updated_input) = match input.behavior {
+        PermissionDecisionBehavior::Allow => {
+            let updated_input = match input.updated_input {
+                Some(value @ serde_json::Value::Object(_)) => Some(value),
+                Some(_) => {
+                    return Err(CommandError {
+                        message:
+                            "Allowed permission requests require updated_input to be a JSON object."
+                                .to_string(),
+                    });
+                }
+                None => Some(json!({})),
+            };
+            ("allow", None, updated_input)
+        }
+        PermissionDecisionBehavior::Deny => (
+            "deny",
+            Some(
+                input
+                    .message
+                    .unwrap_or_else(|| "Denied from Vertebrae GUI".to_string()),
+            ),
+            None,
+        ),
     };
 
-    let response: serde_json::Value = client
-        .execute(
-            RESOLVE_PERMISSION_REQUEST,
-            json!({
-                "project_id": client.project_id(),
-                "request_id": input.request_id,
-                "behavior": behavior,
-                "message": input.message,
-                "updated_input": input.updated_input,
-            }),
-            "resolve_permission_request",
+    claude_manager
+        .resolve_permission_request(
+            &input.request_id,
+            LocalPermissionDecision {
+                behavior: behavior.to_string(),
+                message,
+                updated_input,
+            },
         )
-        .await
-        .map_err(|err| CommandError {
-            message: err.to_string(),
-        })?;
-
-    Ok(response)
+        .map_err(|err| CommandError { message: err })
 }
 
 // ============================================================================
