@@ -19,6 +19,9 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use crate::events::PermissionRequestEvent;
 use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 
+#[cfg(unix)]
+const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
+
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 ///
 /// macOS GUI applications inherit a minimal PATH (typically just `/usr/bin:/bin:/usr/sbin:/sbin`)
@@ -739,10 +742,19 @@ impl ClaudeSessionManager {
         app_handle: tauri::AppHandle,
         pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     ) -> Result<PermissionSocketGuard, String> {
+        use std::os::unix::ffi::OsStrExt;
         use std::os::unix::fs::PermissionsExt;
         use std::os::unix::net::UnixListener;
 
         let path = Self::permission_socket_path(session_id);
+        let path_len = path.as_os_str().as_bytes().len();
+        if path_len >= MAX_UNIX_SOCKET_PATH_BYTES {
+            return Err(format!(
+                "permission socket path is {path_len} bytes; must be shorter than {MAX_UNIX_SOCKET_PATH_BYTES}: {:?}",
+                path
+            ));
+        }
+
         if let Err(err) = std::fs::remove_file(&path) {
             if err.kind() != std::io::ErrorKind::NotFound {
                 return Err(format!("failed to remove stale permission socket: {err}"));
@@ -792,17 +804,25 @@ impl ClaudeSessionManager {
 
     #[cfg(unix)]
     fn permission_socket_path(session_id: &str) -> std::path::PathBuf {
-        let safe_session_id: String = session_id
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        std::env::temp_dir().join(format!("vtb-gate-{safe_session_id}.sock"))
+        use std::os::unix::ffi::OsStrExt;
+
+        let filename = format!("vtbg-{}.sock", Self::short_socket_id(session_id));
+        let temp_path = std::env::temp_dir().join(&filename);
+        if temp_path.as_os_str().as_bytes().len() < MAX_UNIX_SOCKET_PATH_BYTES {
+            return temp_path;
+        }
+
+        std::path::PathBuf::from("/tmp").join(filename)
+    }
+
+    #[cfg(unix)]
+    fn short_socket_id(session_id: &str) -> String {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for byte in session_id.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        format!("{hash:016x}")
     }
 
     #[cfg(unix)]
@@ -1542,6 +1562,27 @@ mod tests {
         );
 
         assert!(result.unwrap_err().contains("Permission request not found"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_permission_socket_path_stays_under_unix_limit_for_long_session_ids() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let session_id =
+            "scoped-chat-1781971607649-bijgbrn-1781971734050-extra-long-session-suffix";
+        let path = ClaudeSessionManager::permission_socket_path(session_id);
+        let path_len = path.as_os_str().as_bytes().len();
+
+        assert!(
+            path_len < MAX_UNIX_SOCKET_PATH_BYTES,
+            "socket path should fit Unix sockaddr limits: {:?} ({path_len} bytes)",
+            path
+        );
+        assert!(
+            !path.to_string_lossy().contains(session_id),
+            "socket path should not embed the raw session id"
+        );
     }
 
     // ========================================================================
