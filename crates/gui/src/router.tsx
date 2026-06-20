@@ -23,7 +23,7 @@ import {
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
-import { needsInstallWelcome } from "./utils/installation";
+import { hasAllRequiredBinaries } from "./utils/installation";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -119,7 +119,7 @@ function InstallationGuard({ children }: { children: React.ReactNode }) {
       try {
         const result = await commands.installationStatus();
         if (result.status === "ok") {
-          if (needsInstallWelcome(result.data)) {
+          if (!hasAllRequiredBinaries(result.data)) {
             setNeedsWelcome(true);
             navigate("/welcome", { replace: true });
           }

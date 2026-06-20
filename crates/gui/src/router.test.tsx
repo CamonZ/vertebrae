@@ -67,7 +67,7 @@ import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
-import { needsInstallWelcome } from "./utils/installation";
+import { hasAllRequiredBinaries } from "./utils/installation";
 
 /**
  * Helper to create a test router with the new route structure
@@ -672,51 +672,51 @@ describe("Router Acceptance Tests", () => {
     });
   });
 
-  describe("InstallationGuard install predicate", () => {
+  describe("InstallationGuard required binary predicate", () => {
     type Comp = { installed_at_symlink: boolean; on_path: boolean };
     const comp = (installed: boolean, onPath: boolean): Comp => ({
       installed_at_symlink: installed,
       on_path: onPath,
     });
 
-    it("returns true when nothing is installed or on-path", () => {
+    it("returns false when nothing is installed or on-path", () => {
       expect(
-        needsInstallWelcome({
+        hasAllRequiredBinaries({
           cli: comp(false, false),
           daemon: comp(false, false),
           gate: comp(false, false),
         })
-      ).toBe(true);
+      ).toBe(false);
     });
 
-    it("returns true when only vtb-gate is missing", () => {
+    it("returns false when only vtb-gate is missing", () => {
       expect(
-        needsInstallWelcome({
+        hasAllRequiredBinaries({
           cli: comp(true, true),
           daemon: comp(true, true),
           gate: comp(false, false),
         })
-      ).toBe(true);
+      ).toBe(false);
     });
 
-    it("returns false when each component is installed or on PATH", () => {
+    it("returns true when each component is installed or on PATH", () => {
       expect(
-        needsInstallWelcome({
+        hasAllRequiredBinaries({
           cli: comp(false, true),
           daemon: comp(true, false),
           gate: comp(false, true),
         })
-      ).toBe(false);
+      ).toBe(true);
     });
 
-    it("returns false when all components are symlinked", () => {
+    it("returns true when all components are symlinked", () => {
       expect(
-        needsInstallWelcome({
+        hasAllRequiredBinaries({
           cli: comp(true, false),
           daemon: comp(true, false),
           gate: comp(true, false),
         })
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 });
