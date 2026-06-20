@@ -79,6 +79,8 @@ export interface ChatSession {
   claudeConversationId: string | null;
   /** Injected context summary (read-only snapshot) */
   contextSummary: string | null;
+  /** Project root captured when the local chat session was opened. */
+  projectPath?: string | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
   model?: string;
   /** Latest per-turn context utilization for the badge */
@@ -101,7 +103,8 @@ interface ChatStoreActions {
   openSession: (
     scope: ChatScope,
     entityId: string | null,
-    label: string
+    label: string,
+    projectPath?: string | null
   ) => string;
   /** Close a chat session */
   closeSession: (sessionId: string) => void;
@@ -186,7 +189,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   ...initialState,
 
   // Actions
-  openSession: (scope, entityId, label) => {
+  openSession: (scope, entityId, label, projectPath) => {
     // Check if a session already exists for this scope+entity
     const existing = get().findSession(scope, entityId);
     if (existing) {
@@ -205,6 +208,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       claudeSessionId: null,
       claudeConversationId: null,
       contextSummary: null,
+      projectPath,
     };
 
     set((state) => ({

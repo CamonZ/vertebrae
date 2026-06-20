@@ -192,10 +192,12 @@ export async function doStartSession(
     });
   }
 
-  let workingDir: string | null = null;
-  const pathResult = await commands.getCurrentProjectPath();
-  if (pathResult.status === "ok" && pathResult.data) {
-    workingDir = pathResult.data;
+  let workingDir: string | null = session.projectPath ?? null;
+  if (workingDir === null && session.projectPath === undefined) {
+    const pathResult = await commands.getCurrentProjectPath();
+    if (pathResult.status === "ok" && pathResult.data) {
+      workingDir = pathResult.data;
+    }
   }
 
   const resumeId = session.claudeConversationId;
@@ -505,8 +507,17 @@ export function useOpenChat() {
   const openSession = useChatStore((s) => s.openSession);
 
   return useCallback(
-    (scope: ChatScope, entityId: string | null, label: string) => {
-      return openSession(scope, entityId, label);
+    async (scope: ChatScope, entityId: string | null, label: string) => {
+      let projectPath: string | null = null;
+      try {
+        const pathResult = await commands.getCurrentProjectPath();
+        if (pathResult.status === "ok" && pathResult.data) {
+          projectPath = pathResult.data;
+        }
+      } catch {
+        // Preserve the existing open behavior when the path lookup fails.
+      }
+      return openSession(scope, entityId, label, projectPath);
     },
     [openSession]
   );
