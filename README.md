@@ -49,8 +49,10 @@ npm run tauri:dev
 
 `scripts/build-package.sh` stages the sidecars (`vtb`, `vtb-daemon`, and
 `vtb-gate`) before invoking Tauri. On macOS it defaults to a `.app` bundle; pass
-`--bundles dmg` when you specifically need Tauri's DMG output. On Linux, install
-the Tauri system dependencies first, then choose `appimage`, `deb`, or `rpm`.
+`--bundles dmg` when you specifically need Tauri's DMG output. If create-dmg's
+Finder layout step fails, the wrapper retries with an unstyled DMG that still
+contains the app and Applications link. On Linux, install the Tauri system
+dependencies first, then choose `appimage`, `deb`, or `rpm`.
 For Debian/Ubuntu:
 
 ```bash
