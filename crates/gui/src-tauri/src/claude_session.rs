@@ -10,12 +10,13 @@ use specta::Type;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::Emitter;
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
+use crate::events::PermissionRequestEvent;
 use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
@@ -144,6 +145,22 @@ pub struct ClaudePermissionRequestEvent {
     pub session_id: String,
     pub tool_name: String,
     pub permission_message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalPermissionDecision {
+    pub behavior: String,
+    pub message: Option<String>,
+    pub updated_input: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PermissionSocketRequest {
+    request_id: String,
+    tool_name: String,
+    tool_use_id: String,
+    #[serde(default)]
+    input: serde_json::Value,
 }
 
 // ============================================================================
@@ -290,15 +307,57 @@ struct SessionHandle {
     command_tx: mpsc::UnboundedSender<SessionCommand>,
 }
 
+struct PendingPermission {
+    session_id: String,
+    response_tx: std::sync::mpsc::Sender<LocalPermissionDecision>,
+}
+
+struct SessionRuntimeState {
+    app_handle: tauri::AppHandle,
+    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+    pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
+}
+
+#[cfg(unix)]
+struct PermissionSocketGuard {
+    path: std::path::PathBuf,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(unix)]
+impl PermissionSocketGuard {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PermissionSocketGuard {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Err(err) = std::fs::remove_file(&self.path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to remove vtb-gate permission socket {:?}: {}",
+                    self.path,
+                    err
+                );
+            }
+        }
+    }
+}
+
 /// Manages active Claude CLI sessions
 pub struct ClaudeSessionManager {
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+    pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
 }
 
 impl ClaudeSessionManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            pending_permissions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -330,7 +389,11 @@ impl ClaudeSessionManager {
         }
 
         // Spawn the session thread
-        let sessions = self.sessions.clone();
+        let runtime_state = SessionRuntimeState {
+            app_handle,
+            sessions: self.sessions.clone(),
+            pending_permissions: self.pending_permissions.clone(),
+        };
         let session_id_clone = session_id.clone();
         thread::spawn(move || {
             Self::run_session(
@@ -339,8 +402,7 @@ impl ClaudeSessionManager {
                 initial_prompt,
                 resume_session_id,
                 command_rx,
-                app_handle,
-                sessions,
+                runtime_state,
             );
         });
 
@@ -355,9 +417,14 @@ impl ClaudeSessionManager {
         initial_prompt: Option<String>,
         resume_session_id: Option<String>,
         mut command_rx: mpsc::UnboundedReceiver<SessionCommand>,
-        app_handle: tauri::AppHandle,
-        sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+        runtime_state: SessionRuntimeState,
     ) {
+        let SessionRuntimeState {
+            app_handle,
+            sessions,
+            pending_permissions,
+        } = runtime_state;
+
         // Find the Claude Code CLI binary using unified discovery logic
         let claude_binary = match find_claude_binary() {
             Ok(path) => path.to_string_lossy().to_string(),
@@ -452,6 +519,33 @@ impl ClaudeSessionManager {
         );
         cmd.env("PATH", &augmented_path);
         cmd.env("VTB_CLAUDE_SESSION_ID", &session_id);
+        #[cfg(unix)]
+        let _permission_socket_guard = match Self::start_permission_socket(
+            &session_id,
+            app_handle.clone(),
+            pending_permissions.clone(),
+        ) {
+            Ok(socket) => {
+                log::info!(
+                    "Created vtb-gate permission socket for session {} at {:?}",
+                    session_id,
+                    socket.path()
+                );
+                cmd.env("VTB_GATE_SOCKET", socket.path());
+                socket
+            }
+            Err(e) => {
+                log::error!("Failed to create vtb-gate permission socket: {}", e);
+                let _ = ClaudeSessionErrorEvent {
+                    session_id: session_id.clone(),
+                    error: e,
+                }
+                .emit(&app_handle);
+                return;
+            }
+        };
+        #[cfg(not(unix))]
+        log::warn!("VTB_GATE_SOCKET permission transport is unavailable on this platform");
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -621,6 +715,7 @@ impl ClaudeSessionManager {
         // Kill the child process
         let _ = child.kill();
         let _ = child.wait();
+        Self::fail_pending_permissions_for_session(&pending_permissions, &session_id);
 
         // Clean up session
         let session_id_for_cleanup = session_id.clone();
@@ -636,6 +731,265 @@ impl ClaudeSessionManager {
         });
 
         log::info!("Claude session {} ended", session_id);
+    }
+
+    #[cfg(unix)]
+    fn start_permission_socket(
+        session_id: &str,
+        app_handle: tauri::AppHandle,
+        pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
+    ) -> Result<PermissionSocketGuard, String> {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixListener;
+
+        let path = Self::permission_socket_path(session_id);
+        if let Err(err) = std::fs::remove_file(&path) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                return Err(format!("failed to remove stale permission socket: {err}"));
+            }
+        }
+
+        let listener = UnixListener::bind(&path)
+            .map_err(|err| format!("failed to bind permission socket {:?}: {err}", path))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("failed to set permission socket mode: {err}"))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|err| format!("failed to set permission socket nonblocking: {err}"))?;
+
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_for_thread = stop.clone();
+        let session_id_for_listener = session_id.to_string();
+        thread::spawn(move || {
+            while !stop_for_thread.load(std::sync::atomic::Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _addr)) => {
+                        let app_handle = app_handle.clone();
+                        let pending_permissions = pending_permissions.clone();
+                        let session_id = session_id_for_listener.clone();
+                        thread::spawn(move || {
+                            Self::handle_permission_socket_connection(
+                                stream,
+                                session_id,
+                                app_handle,
+                                pending_permissions,
+                            );
+                        });
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(std::time::Duration::from_millis(25));
+                    }
+                    Err(err) => {
+                        log::error!("vtb-gate permission socket accept failed: {}", err);
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(PermissionSocketGuard { path, stop })
+    }
+
+    #[cfg(unix)]
+    fn permission_socket_path(session_id: &str) -> std::path::PathBuf {
+        let safe_session_id: String = session_id
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        std::env::temp_dir().join(format!("vtb-gate-{safe_session_id}.sock"))
+    }
+
+    #[cfg(unix)]
+    fn handle_permission_socket_connection(
+        mut stream: std::os::unix::net::UnixStream,
+        session_id: String,
+        app_handle: tauri::AppHandle,
+        pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
+    ) {
+        let reader_stream = match stream.try_clone() {
+            Ok(stream) => stream,
+            Err(err) => {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    format!("failed to clone permission socket stream: {err}"),
+                );
+                return;
+            }
+        };
+        let mut reader = std::io::BufReader::new(reader_stream);
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    "permission socket closed before a request was sent".to_string(),
+                );
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    format!("failed to read permission socket request: {err}"),
+                );
+                return;
+            }
+        }
+
+        let request: PermissionSocketRequest = match serde_json::from_str(line.trim_end()) {
+            Ok(request) => request,
+            Err(err) => {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    format!("invalid permission socket request: {err}"),
+                );
+                return;
+            }
+        };
+
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
+        {
+            let mut pending = match pending_permissions.lock() {
+                Ok(pending) => pending,
+                Err(_) => {
+                    let _ = Self::write_permission_socket_error(
+                        &mut stream,
+                        "permission responder lock is poisoned".to_string(),
+                    );
+                    return;
+                }
+            };
+            if pending.contains_key(&request.request_id) {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    format!("duplicate permission request id: {}", request.request_id),
+                );
+                return;
+            }
+            pending.insert(
+                request.request_id.clone(),
+                PendingPermission {
+                    session_id: session_id.clone(),
+                    response_tx,
+                },
+            );
+        }
+
+        let event = PermissionRequestEvent {
+            request_id: request.request_id.clone(),
+            session_id: Some(session_id),
+            tool_name: request.tool_name.clone(),
+            tool_use_id: request.tool_use_id,
+            input: request.input,
+            message: Some(format!("{} needs approval", request.tool_name)),
+        };
+
+        if let Err(err) = app_handle.emit("permission-request-event", &event) {
+            if let Ok(mut pending) = pending_permissions.lock() {
+                pending.remove(&request.request_id);
+            }
+            let _ = Self::write_permission_socket_error(
+                &mut stream,
+                format!("failed to emit permission request event: {err}"),
+            );
+            return;
+        }
+
+        match response_rx.recv() {
+            Ok(decision) => match serde_json::to_string(&decision) {
+                Ok(line) => {
+                    let _ = stream.write_all(line.as_bytes());
+                    let _ = stream.write_all(b"\n");
+                    let _ = stream.flush();
+                }
+                Err(err) => {
+                    let _ = Self::write_permission_socket_error(
+                        &mut stream,
+                        format!("failed to serialize permission decision: {err}"),
+                    );
+                }
+            },
+            Err(_) => {
+                let _ = Self::write_permission_socket_error(
+                    &mut stream,
+                    "permission request was cancelled".to_string(),
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn write_permission_socket_error(
+        stream: &mut std::os::unix::net::UnixStream,
+        message: String,
+    ) -> std::io::Result<()> {
+        let line = serde_json::to_string(&LocalPermissionDecision {
+            behavior: "deny".to_string(),
+            message: Some(message),
+            updated_input: None,
+        })
+        .map_err(std::io::Error::other)?;
+        stream.write_all(line.as_bytes())?;
+        stream.write_all(b"\n")?;
+        stream.flush()
+    }
+
+    pub fn resolve_permission_request(
+        &self,
+        request_id: &str,
+        decision: LocalPermissionDecision,
+    ) -> Result<serde_json::Value, String> {
+        let pending = {
+            let mut pending = self
+                .pending_permissions
+                .lock()
+                .map_err(|_| "permission responder lock is poisoned".to_string())?;
+            pending.remove(request_id)
+        }
+        .ok_or_else(|| format!("Permission request not found or already resolved: {request_id}"))?;
+
+        pending
+            .response_tx
+            .send(decision.clone())
+            .map_err(|_| "Permission request connection is no longer available".to_string())?;
+        serde_json::to_value(decision).map_err(|err| err.to_string())
+    }
+
+    fn fail_pending_permissions_for_session(
+        pending_permissions: &Arc<Mutex<HashMap<String, PendingPermission>>>,
+        session_id: &str,
+    ) {
+        let pending_for_session = {
+            let mut pending = match pending_permissions.lock() {
+                Ok(pending) => pending,
+                Err(_) => return,
+            };
+            let request_ids: Vec<String> = pending
+                .iter()
+                .filter(|(_request_id, pending)| pending.session_id == session_id)
+                .map(|(request_id, _pending)| request_id.clone())
+                .collect();
+            request_ids
+                .into_iter()
+                .filter_map(|request_id| pending.remove(&request_id))
+                .collect::<Vec<_>>()
+        };
+
+        for pending in pending_for_session {
+            let _ = pending.response_tx.send(LocalPermissionDecision {
+                behavior: "deny".to_string(),
+                message: Some(
+                    "Claude session ended before the permission request was resolved".to_string(),
+                ),
+                updated_input: None,
+            });
+        }
     }
 
     /// Process JSONL lines from the Claude CLI stdout.
@@ -1139,6 +1493,55 @@ mod tests {
         }
         let result = manager.close_session("test-session").await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_permission_request_sends_local_decision() {
+        let manager = ClaudeSessionManager::new();
+        let (response_tx, response_rx) = std::sync::mpsc::channel();
+        manager.pending_permissions.lock().unwrap().insert(
+            "req-1".to_string(),
+            PendingPermission {
+                session_id: "session-1".to_string(),
+                response_tx,
+            },
+        );
+
+        let result = manager
+            .resolve_permission_request(
+                "req-1",
+                LocalPermissionDecision {
+                    behavior: "allow".to_string(),
+                    message: None,
+                    updated_input: Some(serde_json::json!({ "command": "ls" })),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(result["behavior"], "allow");
+        assert!(manager.pending_permissions.lock().unwrap().is_empty());
+
+        let decision = response_rx.recv().unwrap();
+        assert_eq!(decision.behavior, "allow");
+        assert_eq!(
+            decision.updated_input,
+            Some(serde_json::json!({ "command": "ls" }))
+        );
+    }
+
+    #[test]
+    fn test_resolve_permission_request_requires_local_pending_request() {
+        let manager = ClaudeSessionManager::new();
+        let result = manager.resolve_permission_request(
+            "missing",
+            LocalPermissionDecision {
+                behavior: "deny".to_string(),
+                message: Some("Denied".to_string()),
+                updated_input: None,
+            },
+        );
+
+        assert!(result.unwrap_err().contains("Permission request not found"));
     }
 
     // ========================================================================
