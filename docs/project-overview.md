@@ -70,7 +70,8 @@ Set `SIDECAR_PROFILE=debug` or pass `--debug` to build debug sidecars and a
 debug GUI bundle; release is the default. On macOS the wrapper defaults to
 `--bundles app` to produce a repeatable runnable `.app` bundle without requiring
 DMG packaging; set `TAURI_BUNDLES` or pass `--bundles` to request other Tauri
-bundle formats.
+bundle formats. DMG builds use Tauri's normal create-dmg flow first, then retry
+without Finder window customization if that AppleScript step fails.
 
 ## Dependencies
 

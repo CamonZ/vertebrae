@@ -64,6 +64,105 @@ if [ "$PROFILE" != "debug" ] && [ "$PROFILE" != "release" ]; then
   exit 2
 fi
 
+bundle_list_includes() {
+  local wanted="$1"
+  local bundle
+
+  for bundle in ${BUNDLES//,/ }; do
+    if [ "$bundle" = "$wanted" ] || [ "$bundle" = "all" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+latest_rw_dmg_name() {
+  local macos_dir="$1"
+  local dmg_dir="$2"
+  local image
+  local latest=""
+
+  for image in "$macos_dir"/rw.*.dmg "$dmg_dir"/rw.*.dmg; do
+    [ -e "$image" ] || continue
+    if [ -z "$latest" ] || [ "$image" -nt "$latest" ]; then
+      latest="$image"
+    fi
+  done
+
+  if [ -z "$latest" ]; then
+    return 1
+  fi
+
+  local name
+  name="$(basename "$latest")"
+  name="${name#rw.}"
+  printf '%s\n' "${name#*.}"
+}
+
+remove_dmg_artifacts() {
+  local macos_dir="$1"
+  local dmg_dir="$2"
+  local dmg_name="$3"
+  local image
+
+  rm -f "$macos_dir/$dmg_name" "$dmg_dir/$dmg_name"
+  for image in "$macos_dir"/rw.*."$dmg_name" "$dmg_dir"/rw.*."$dmg_name"; do
+    [ -e "$image" ] && rm -f "$image"
+  done
+}
+
+retry_dmg_without_finder() {
+  if [ "$(uname -s)" != "Darwin" ] || ! bundle_list_includes dmg; then
+    return 1
+  fi
+
+  local bundle_root="$REPO_ROOT/target/$PROFILE/bundle"
+  local macos_dir="$bundle_root/macos"
+  local dmg_dir="$bundle_root/dmg"
+  local dmg_script="$dmg_dir/bundle_dmg.sh"
+
+  if [ ! -x "$dmg_script" ] || [ ! -d "$macos_dir" ]; then
+    return 1
+  fi
+
+  local app_path
+  app_path="$(find "$macos_dir" -maxdepth 1 -type d -name "*.app" -print -quit)"
+  if [ -z "$app_path" ]; then
+    return 1
+  fi
+
+  local app_name
+  local product_name
+  local dmg_name
+  app_name="$(basename "$app_path")"
+  product_name="${app_name%.app}"
+  if ! dmg_name="$(latest_rw_dmg_name "$macos_dir" "$dmg_dir")"; then
+    return 1
+  fi
+
+  echo "==> Tauri DMG bundling failed; retrying without Finder window customization..."
+  echo "    This skips create-dmg's AppleScript layout step, but keeps the app and Applications link."
+
+  remove_dmg_artifacts "$macos_dir" "$dmg_dir" "$dmg_name"
+
+  local dmg_args=(
+    --skip-jenkins
+    --volname "$product_name"
+    --app-drop-link 480 170
+  )
+  if [ -f "$dmg_dir/icon.icns" ]; then
+    dmg_args+=(--volicon "../dmg/icon.icns")
+  fi
+  dmg_args+=("$dmg_name" "$app_name")
+
+  (cd "$macos_dir" && "$dmg_script" "${dmg_args[@]}")
+
+  mkdir -p "$dmg_dir"
+  mv -f "$macos_dir/$dmg_name" "$dmg_dir/$dmg_name"
+  echo "==> DMG fallback complete: target/$PROFILE/bundle/dmg/$dmg_name"
+}
+
 export SIDECAR_PROFILE="$PROFILE"
 export VERTEBRAE_BUNDLE_SIDECARS=1
 
@@ -78,7 +177,15 @@ fi
 if [ -n "$BUNDLES" ]; then
   TAURI_BUILD_ARGS+=(--bundles "$BUNDLES")
 fi
+set +e
 (cd "$REPO_ROOT/crates/gui" && npm run tauri:build -- "${TAURI_BUILD_ARGS[@]}")
+TAURI_BUILD_STATUS=$?
+set -e
+if [ "$TAURI_BUILD_STATUS" -ne 0 ]; then
+  if ! retry_dmg_without_finder; then
+    exit "$TAURI_BUILD_STATUS"
+  fi
+fi
 
 if [ "$RUN_AFTER_BUILD" -eq 1 ]; then
   case "$(uname -s)" in

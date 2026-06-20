@@ -47,6 +47,11 @@ function makeStatus(overrides?: Partial<InstallationStatus>): InstallationStatus
       symlink_path: "/home/user/.local/bin/vtb-daemon",
       on_path: false,
     },
+    gate: {
+      installed_at_symlink: false,
+      symlink_path: "/home/user/.local/bin/vtb-gate",
+      on_path: false,
+    },
     service: { kind: "not_loaded" },
     ...overrides,
   };
@@ -84,9 +89,12 @@ describe("WelcomeInstallPage", () => {
     expect(screen.getByTestId("welcome-daemon")).toHaveTextContent(
       "/home/user/.local/bin/vtb-daemon"
     );
+    expect(screen.getByTestId("welcome-gate")).toHaveTextContent(
+      "/home/user/.local/bin/vtb-gate"
+    );
   });
 
-  it("defaults both checkboxes ON when nothing is installed", async () => {
+  it("defaults all checkboxes ON when nothing is installed", async () => {
     render(<WelcomeInstallPage />);
 
     await waitFor(() => {
@@ -94,6 +102,7 @@ describe("WelcomeInstallPage", () => {
     });
     expect(screen.getByTestId("welcome-cli-checkbox")).toBeChecked();
     expect(screen.getByTestId("welcome-daemon-checkbox")).toBeChecked();
+    expect(screen.getByTestId("welcome-gate-checkbox")).toBeChecked();
   });
 
   it("pre-checks OFF and disables a component already installed at the symlink", async () => {
@@ -119,8 +128,9 @@ describe("WelcomeInstallPage", () => {
     expect(
       screen.getByTestId("welcome-cli-already-installed")
     ).toHaveTextContent("already installed");
-    // Daemon, untouched, stays checked.
+    // Other components, untouched, stay checked.
     expect(screen.getByTestId("welcome-daemon-checkbox")).toBeChecked();
+    expect(screen.getByTestId("welcome-gate-checkbox")).toBeChecked();
   });
 
   it("calls installComponents with the selected checkbox state and proceeds to /setup", async () => {
@@ -135,7 +145,7 @@ describe("WelcomeInstallPage", () => {
     await user.click(screen.getByTestId("welcome-install"));
 
     await waitFor(() => {
-      expect(mockInstallComponents).toHaveBeenCalledWith(true, false);
+      expect(mockInstallComponents).toHaveBeenCalledWith(true, false, true);
     });
     expect(screen.getByTestId("welcome-success")).toBeInTheDocument();
 

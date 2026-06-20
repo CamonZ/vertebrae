@@ -23,6 +23,7 @@ import {
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
+import { hasAllRequiredBinaries } from "./utils/installation";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -88,11 +89,10 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
 /**
  * Guard component that decides whether the first-run welcome/consent screen
  * should be shown. On mount it queries `installationStatus()` and redirects
- * to `/welcome` only when ALL of these hold:
+ * to `/welcome` when any required component is missing:
  *
- *   - neither component is installed at the symlink path we manage, AND
- *   - neither component is resolvable on `$PATH` (so users who already have
- *     `vtb`/`vtb-daemon` from e.g. `cargo install` are never blocked).
+ *   - the component is not installed at the symlink path we manage, AND
+ *   - it is not resolvable on `$PATH`.
  *
  * Otherwise it renders its children. It sits ABOVE `ProjectGuard` in the tree
  * so the welcome screen comes before `/setup`.
@@ -119,13 +119,7 @@ function InstallationGuard({ children }: { children: React.ReactNode }) {
       try {
         const result = await commands.installationStatus();
         if (result.status === "ok") {
-          const s = result.data;
-          const firstRun =
-            !s.cli.installed_at_symlink &&
-            !s.daemon.installed_at_symlink &&
-            !s.cli.on_path &&
-            !s.daemon.on_path;
-          if (firstRun) {
+          if (!hasAllRequiredBinaries(result.data)) {
             setNeedsWelcome(true);
             navigate("/welcome", { replace: true });
           }

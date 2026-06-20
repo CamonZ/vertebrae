@@ -8,8 +8,8 @@ const SUCCESS_REDIRECT_DELAY_MS = 1500;
 
 /**
  * First-run welcome screen. Asks the user for permission to install the
- * bundled `vtb` (CLI) and `vtb-daemon` (background workflow runner)
- * sidecars into `~/.local/bin`.
+ * bundled `vtb` (CLI), `vtb-daemon` (background workflow runner), and
+ * `vtb-gate` (Claude permission bridge) sidecars into `~/.local/bin`.
  *
  * This page is intentionally rendered OUTSIDE both `InstallationGuard` and
  * `ProjectGuard` — `InstallationGuard` would otherwise create a redirect
@@ -21,6 +21,7 @@ export function WelcomeInstallPage() {
   const [status, setStatus] = useState<InstallationStatus | null>(null);
   const [installCli, setInstallCli] = useState(true);
   const [installDaemon, setInstallDaemon] = useState(true);
+  const [installGate, setInstallGate] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Compute "where do we go after the user decides?" — if they already
@@ -53,6 +54,7 @@ export function WelcomeInstallPage() {
           // our symlink path — the user shouldn't have to re-pick it.
           setInstallCli(!result.data.cli.installed_at_symlink);
           setInstallDaemon(!result.data.daemon.installed_at_symlink);
+          setInstallGate(!result.data.gate.installed_at_symlink);
           setPhase("ready");
         } else {
           setError(result.error.message);
@@ -76,7 +78,8 @@ export function WelcomeInstallPage() {
     try {
       const result = await commands.installComponents(
         installCli,
-        installDaemon
+        installDaemon,
+        installGate
       );
       if (result.status === "ok") {
         setStatus(result.data);
@@ -107,11 +110,12 @@ export function WelcomeInstallPage() {
 
   const isBusy = phase === "installing" || phase === "loading";
   const installButtonDisabled =
-    isBusy || (!installCli && !installDaemon);
+    isBusy || (!installCli && !installDaemon && !installGate);
   const nothingToInstall =
     status !== null &&
     status.cli.installed_at_symlink &&
-    status.daemon.installed_at_symlink;
+    status.daemon.installed_at_symlink &&
+    status.gate.installed_at_symlink;
 
   return (
     <div
@@ -133,8 +137,9 @@ export function WelcomeInstallPage() {
             Vertebrae needs to install its command-line tools — the{" "}
             <span className="font-mono not-italic">vtb</span> CLI and the{" "}
             <span className="font-mono not-italic">vtb-daemon</span> background
-            runner — on your system before you can continue. Review what will be
-            installed below and choose Install to proceed.
+            runner, plus the <span className="font-mono not-italic">vtb-gate</span>{" "}
+            permission bridge — on your system before you can continue. Review
+            what will be installed below and choose Install to proceed.
           </p>
         </div>
 
@@ -170,6 +175,17 @@ export function WelcomeInstallPage() {
               checked={installDaemon}
               disabled={isBusy}
               onChange={setInstallDaemon}
+            />
+            <ComponentRow
+              testId="welcome-gate"
+              label="vtb-gate"
+              description="The local MCP permission bridge used by Claude chat."
+              targetPath={status.gate.symlink_path}
+              alreadyInstalled={status.gate.installed_at_symlink}
+              onPath={status.gate.on_path}
+              checked={installGate}
+              disabled={isBusy}
+              onChange={setInstallGate}
             />
           </div>
         )}

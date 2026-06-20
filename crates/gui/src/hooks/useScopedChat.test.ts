@@ -501,6 +501,29 @@ describe("doStartSession", () => {
     );
   });
 
+  it("uses the project path captured on the chat session", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({ projectPath: "/captured/project" }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+      expect.stringMatching(/^scoped-/),
+      "/captured/project",
+      null,
+      null
+    );
+  });
+
   it("adds user message when provided", async () => {
     const deps = {
       setClaudeSessionId: vi.fn(),

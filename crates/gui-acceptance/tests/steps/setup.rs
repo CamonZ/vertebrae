@@ -10,10 +10,14 @@ use crate::GuiWorld;
 fn installed_marker_paths() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").expect("HOME must be set");
     let bin = PathBuf::from(home).join(".local").join("bin");
-    vec![bin.join("vtb"), bin.join("vtb-daemon")]
+    vec![
+        bin.join("vtb"),
+        bin.join("vtb-daemon"),
+        bin.join("vtb-gate"),
+    ]
 }
 
-/// Seed dummy `vtb`/`vtb-daemon` files at the managed symlink path so the
+/// Seed dummy installer-managed files at the managed symlink path so the
 /// `InstallationGuard` sees the components as installed and renders guarded
 /// routes instead of redirecting to `/welcome`. Every non-`@first_run`
 /// scenario relies on this — without it the clean container (vtb not
