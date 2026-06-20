@@ -30,8 +30,8 @@ async fn gui_on_welcome_screen(world: &mut GuiWorld) {
 }
 
 /// Uncheck a checkbox identified by its `data-testid`. Used to deselect the
-/// daemon so `install_components(install_cli=true, install_daemon=false)` runs
-/// — the path that skips OS service registration (no systemd in the container).
+/// daemon so the installer runs the path that skips OS service registration
+/// (no systemd in the container) while still staging the local chat tools.
 #[when(expr = "I uncheck the install component {string}")]
 async fn uncheck_install_component(world: &mut GuiWorld, test_id: String) {
     let wd = world
@@ -151,8 +151,7 @@ async fn installed_binary_should_exist(world: &mut GuiWorld, name: String) {
 }
 
 /// Assert the installer did NOT create `$HOME/.local/bin/<name>`. Used to prove
-/// that unchecking the daemon left it uninstalled (and thus skipped the
-/// service-registration path that systemd would require).
+/// that unchecking a component left it uninstalled.
 #[then(expr = "the installed CLI binary {string} should not exist on the filesystem")]
 async fn installed_binary_should_not_exist(_world: &mut GuiWorld, name: String) {
     let path = cli_symlink_path(&name);

@@ -162,6 +162,11 @@ describe("Router Acceptance Tests", () => {
             symlink_path: "/home/user/.local/bin/vtb-daemon",
             on_path: true,
           },
+          gate: {
+            installed_at_symlink: true,
+            symlink_path: "/home/user/.local/bin/vtb-gate",
+            on_path: true,
+          },
           service: { kind: "not_loaded" },
         },
       }
@@ -670,12 +675,14 @@ describe("Router Acceptance Tests", () => {
     // Mirror of the production guard's redirect predicate so we can assert the
     // exact boolean condition that gates the /welcome screen.
     type Comp = { installed_at_symlink: boolean; on_path: boolean };
-    function isFirstRun(s: { cli: Comp; daemon: Comp }): boolean {
+    function isFirstRun(s: { cli: Comp; daemon: Comp; gate: Comp }): boolean {
       return (
         !s.cli.installed_at_symlink &&
         !s.daemon.installed_at_symlink &&
+        !s.gate.installed_at_symlink &&
         !s.cli.on_path &&
-        !s.daemon.on_path
+        !s.daemon.on_path &&
+        !s.gate.on_path
       );
     }
 
@@ -689,6 +696,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(false, false),
+          gate: comp(false, false),
         })
       ).toBe(true);
     });
@@ -698,6 +706,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, true),
           daemon: comp(false, false),
+          gate: comp(false, false),
         })
       ).toBe(false);
     });
@@ -707,6 +716,7 @@ describe("Router Acceptance Tests", () => {
         isFirstRun({
           cli: comp(false, false),
           daemon: comp(true, false),
+          gate: comp(false, false),
         })
       ).toBe(false);
     });

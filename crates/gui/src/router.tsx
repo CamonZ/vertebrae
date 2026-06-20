@@ -90,9 +90,10 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
  * should be shown. On mount it queries `installationStatus()` and redirects
  * to `/welcome` only when ALL of these hold:
  *
- *   - neither component is installed at the symlink path we manage, AND
- *   - neither component is resolvable on `$PATH` (so users who already have
- *     `vtb`/`vtb-daemon` from e.g. `cargo install` are never blocked).
+ *   - none of the required components is installed at the symlink path we
+ *     manage, AND
+ *   - none of them is resolvable on `$PATH` (so users who already have the
+ *     tools from e.g. `cargo install` are never blocked).
  *
  * Otherwise it renders its children. It sits ABOVE `ProjectGuard` in the tree
  * so the welcome screen comes before `/setup`.
@@ -123,8 +124,10 @@ function InstallationGuard({ children }: { children: React.ReactNode }) {
           const firstRun =
             !s.cli.installed_at_symlink &&
             !s.daemon.installed_at_symlink &&
+            !s.gate.installed_at_symlink &&
             !s.cli.on_path &&
-            !s.daemon.on_path;
+            !s.daemon.on_path &&
+            !s.gate.on_path;
           if (firstRun) {
             setNeedsWelcome(true);
             navigate("/welcome", { replace: true });
