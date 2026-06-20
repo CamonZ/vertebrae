@@ -86,14 +86,16 @@ It:
 
 - Calls `installation_status` to pre-check the boxes and show each
   component's symlink target path.
-- Offers two components — **vtb CLI** and **vtb-daemon** (background workflow
-  runner) — each as an opt-out checkbox. A component already installed at our
-  symlink path is shown as "already installed" and its checkbox is disabled;
-  a component found elsewhere on `$PATH` is tagged "found on PATH".
-- **Install** calls `install_components(install_cli, install_daemon)`, which
-  stages the chosen sidecars and (if the daemon was selected) registers the
-  daemon service. The user then proceeds to `/setup` (or `/` if a project was
-  already selected).
+- Offers three components — **vtb CLI**, **vtb-daemon** (background workflow
+  runner), and **vtb-gate** (Claude permission bridge) — each as an opt-out
+  checkbox. A component already installed at our symlink path is shown as
+  "already installed" and its checkbox is disabled; a component found elsewhere
+  on `$PATH` is tagged "found on PATH".
+- **Install** calls
+  `install_components(install_cli, install_daemon, install_gate)`, which stages
+  the chosen sidecars and (if the daemon was selected) registers the daemon
+  service. The user then proceeds to `/setup` (or `/` if a project was already
+  selected).
 - **Cancel** calls `quit_application`, which exits the app. Installation is
   required to continue — there is no "skip and install later".
 
@@ -229,7 +231,7 @@ There is no GUI uninstall flow. Undo an install from the terminal:
 
    ```bash
    # symlinks
-   rm -f ~/.local/bin/vtb ~/.local/bin/vtb-daemon
+   rm -f ~/.local/bin/vtb ~/.local/bin/vtb-daemon ~/.local/bin/vtb-gate
 
    # staged binaries (macOS)
    rm -rf "~/Library/Application Support/Vertebrae/bin"
@@ -238,8 +240,8 @@ There is no GUI uninstall flow. Undo an install from the terminal:
    ```
 
    Removing the binaries and symlinks is enough to re-trigger the welcome
-   screen on next launch, provided neither `vtb` nor `vtb-daemon` is otherwise
-   resolvable on `$PATH`.
+   screen on next launch, provided none of `vtb`, `vtb-daemon`, or `vtb-gate`
+   is otherwise resolvable on `$PATH`.
 
 ## Real-Time Sync
 

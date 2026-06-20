@@ -1,5 +1,5 @@
 //! Shared installer logic for staging Vertebrae binaries (`vtb`, `vtb-daemon`,
-//! the GUI shell) into a per-OS data directory, exposing them under
+//! `vtb-gate`, the GUI shell) into a per-OS data directory, exposing them under
 //! `~/.local/bin`, and registering the daemon with the OS service manager
 //! (launchd on macOS, systemd `--user` on Linux).
 //!

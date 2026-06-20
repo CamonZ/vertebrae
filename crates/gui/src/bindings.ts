@@ -924,9 +924,9 @@ async installationStatus() : Promise<Result<InstallationStatus, CommandError>> {
  * Returns the post-install [`InstallationStatus`] so the caller can refresh
  * its UI without a follow-up `installation_status()` round-trip.
  */
-async installComponents(installCli: boolean, installDaemon: boolean) : Promise<Result<InstallationStatus, CommandError>> {
+async installComponents(installCli: boolean, installDaemon: boolean, installGate: boolean) : Promise<Result<InstallationStatus, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("install_components", { installCli, installDaemon }) };
+    return { status: "ok", data: await TAURI_INVOKE("install_components", { installCli, installDaemon, installGate }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1161,7 +1161,7 @@ description: string | null }
  */
 export type CommandError = { message: string }
 /**
- * State of a single component (one of `vtb`, `vtb-daemon`) on this machine.
+ * State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
  * 
  * The welcome screen renders different copy depending on whether the user
  * already has the binary available from a previous `cargo install` or
@@ -1231,7 +1231,7 @@ skills_target: string }
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
  */
-export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; service: ServiceState }
+export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Generic chat event for types not covered by the typed channel events
