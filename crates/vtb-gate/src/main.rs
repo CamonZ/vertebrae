@@ -1,27 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
-use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 const TOOL_NAME: &str = "permission_prompt";
-
-const AWAIT_PERMISSION_DECISION: &str = r#"
-    mutation AwaitPermissionDecision(
-        $project_id: Uuid4!,
-        $session_id: String!,
-        $tool_name: String!,
-        $tool_use_id: String!,
-        $input: Json!
-    ) {
-        await_permission_decision(
-            project_id: $project_id,
-            session_id: $session_id,
-            tool_name: $tool_name,
-            tool_use_id: $tool_use_id,
-            input: $input
-        )
-    }
-"#;
 
 #[derive(Debug, Deserialize)]
 struct JsonRpcRequest {
@@ -43,6 +24,14 @@ struct PermissionArguments {
     tool_name: Option<String>,
     tool_use_id: Option<String>,
     #[serde(default)]
+    input: Value,
+}
+
+#[derive(Debug, Serialize)]
+struct PermissionSocketRequest {
+    request_id: String,
+    tool_name: String,
+    tool_use_id: String,
     input: Value,
 }
 
@@ -148,25 +137,78 @@ async fn await_permission_decision(
     tool_use_id: &str,
     input: Value,
 ) -> Result<Value, String> {
-    let config = SacrumConfig::load().map_err(|e| e.to_string())?;
-    let project_id = config.project_id.clone();
-    let client = GraphqlClient::new(config);
-    let variables = json!({
-        "project_id": project_id,
-        "session_id": session_id,
-        "tool_name": tool_name,
-        "tool_use_id": tool_use_id,
-        "input": input,
-    });
+    let socket_path = std::env::var("VTB_GATE_SOCKET").map_err(|_| {
+        "VTB_GATE_SOCKET is not set; permission prompts require the local GUI socket".to_string()
+    })?;
 
-    client
-        .execute(
-            AWAIT_PERMISSION_DECISION,
-            variables,
-            "await_permission_decision",
-        )
+    ask_over_socket(&socket_path, session_id, tool_name, tool_use_id, input).await
+}
+
+#[cfg(unix)]
+async fn ask_over_socket(
+    socket_path: &str,
+    session_id: &str,
+    tool_name: &str,
+    tool_use_id: &str,
+    input: Value,
+) -> Result<Value, String> {
+    let request_id = request_id_for(session_id, tool_use_id);
+    let request = PermissionSocketRequest {
+        request_id,
+        tool_name: tool_name.to_string(),
+        tool_use_id: tool_use_id.to_string(),
+        input,
+    };
+    let mut stream = tokio::net::UnixStream::connect(socket_path)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| format!("failed to connect to VTB_GATE_SOCKET {socket_path}: {e}"))?;
+
+    let line = serde_json::to_string(&request).map_err(|e| e.to_string())?;
+    stream
+        .write_all(line.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    stream.write_all(b"\n").await.map_err(|e| e.to_string())?;
+    stream.flush().await.map_err(|e| e.to_string())?;
+
+    let mut response_line = String::new();
+    let mut reader = BufReader::new(stream);
+    let bytes = reader
+        .read_line(&mut response_line)
+        .await
+        .map_err(|e| e.to_string())?;
+    if bytes == 0 {
+        return Err("permission socket closed before returning a decision".to_string());
+    }
+
+    let response: Value =
+        serde_json::from_str(response_line.trim_end()).map_err(|e| e.to_string())?;
+    match response.get("behavior").and_then(Value::as_str) {
+        Some("allow" | "deny") => Ok(response),
+        Some(other) => Err(format!(
+            "permission socket returned invalid behavior: {other}"
+        )),
+        None => Err("permission socket response missing behavior".to_string()),
+    }
+}
+
+#[cfg(not(unix))]
+async fn ask_over_socket(
+    _socket_path: &str,
+    _session_id: &str,
+    _tool_name: &str,
+    _tool_use_id: &str,
+    _input: Value,
+) -> Result<Value, String> {
+    Err("VTB_GATE_SOCKET permission transport requires a Unix platform".to_string())
+}
+
+fn request_id_for(session_id: &str, tool_use_id: &str) -> String {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{session_id}:{tool_use_id}:{suffix}")
 }
 
 fn error_obj(code: i64, message: String) -> Value {
@@ -188,4 +230,65 @@ async fn write_response<W: AsyncWriteExt + Unpin>(
         .map_err(|e| e.to_string())?;
     writer.write_all(b"\n").await.map_err(|e| e.to_string())?;
     writer.flush().await.map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn ask_over_socket_sends_request_and_returns_decision() {
+        use std::io::{BufRead as _, Write as _};
+        use std::os::unix::net::UnixListener;
+
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vtb-gate-test-{}-{suffix}.sock",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+
+        let server = std::thread::spawn(move || {
+            let (mut stream, _addr) = listener.accept().unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let request: Value = serde_json::from_str(line.trim_end()).unwrap();
+
+            assert_eq!(request["tool_name"], "Bash");
+            assert_eq!(request["tool_use_id"], "tool-1");
+            assert_eq!(request["input"], json!({ "command": "ls" }));
+            assert!(request["request_id"]
+                .as_str()
+                .unwrap()
+                .contains("session-1"));
+
+            stream
+                .write_all(br#"{"behavior":"allow","updatedInput":{"command":"ls -la"}}"#)
+                .unwrap();
+            stream.write_all(b"\n").unwrap();
+            stream.flush().unwrap();
+        });
+
+        let decision = ask_over_socket(
+            path.to_str().unwrap(),
+            "session-1",
+            "Bash",
+            "tool-1",
+            json!({ "command": "ls" }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(decision["behavior"], "allow");
+        assert_eq!(decision["updatedInput"], json!({ "command": "ls -la" }));
+        server.join().unwrap();
+        let _ = std::fs::remove_file(path);
+    }
 }

@@ -6508,7 +6508,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "vertebrae-sacrum-client",
 ]
 
 [[package]]
