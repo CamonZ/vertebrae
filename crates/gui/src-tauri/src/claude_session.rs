@@ -22,13 +22,15 @@ use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 ///
 /// macOS GUI applications inherit a minimal PATH (typically just `/usr/bin:/bin:/usr/sbin:/sbin`)
 /// because they don't source shell profiles. This function prepends `~/.cargo/bin`,
-/// `/opt/homebrew/bin`, and `/usr/local/bin` so that tools installed via cargo, Homebrew, or
-/// manually into `/usr/local/bin` are discoverable by subprocesses.
+/// `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin` so that tools installed via cargo,
+/// the Vertebrae installer, Homebrew, or manually into `/usr/local/bin` are discoverable by
+/// subprocesses.
 fn build_augmented_path() -> String {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(home) = dirs::home_dir() {
         parts.push(home.join(".cargo/bin").to_string_lossy().into_owned());
+        parts.push(home.join(".local/bin").to_string_lossy().into_owned());
     }
 
     parts.push("/opt/homebrew/bin".to_string());
@@ -1914,6 +1916,21 @@ mod tests {
     }
 
     #[test]
+    fn test_build_augmented_path_contains_local_bin() {
+        let path = build_augmented_path();
+        let home = dirs::home_dir().expect("test requires HOME to be set");
+        let local_bin = home.join(".local").join("bin");
+        let local_bin_str = local_bin.to_string_lossy();
+
+        assert!(
+            path.contains(&*local_bin_str),
+            "PATH should contain {}, got: {}",
+            local_bin_str,
+            path
+        );
+    }
+
+    #[test]
     fn test_build_augmented_path_contains_homebrew_bin() {
         let path = build_augmented_path();
         assert!(
@@ -1979,10 +1996,10 @@ mod tests {
     fn test_build_augmented_path_is_colon_separated() {
         let path = build_augmented_path();
         let segments: Vec<&str> = path.split(':').collect();
-        // At minimum: ~/.cargo/bin, /opt/homebrew/bin, /usr/local/bin
+        // At minimum: ~/.cargo/bin, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin
         assert!(
-            segments.len() >= 3,
-            "PATH should have at least 3 segments, got {}: {}",
+            segments.len() >= 4,
+            "PATH should have at least 4 segments, got {}: {}",
             segments.len(),
             path
         );
