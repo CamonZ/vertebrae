@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
@@ -910,6 +910,40 @@ describe("ChatWindow", () => {
       })
     );
     expect(await screen.findByText("Resolved")).toBeInTheDocument();
+  });
+
+  it("rejects non-object updated input before approving a permission request", async () => {
+    const user = userEvent.setup();
+    const { commands } = await import("../../bindings");
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "permission_request",
+          requestId: "req-1",
+          toolName: "Bash",
+          message: "Allow running ls?",
+          input: '{"command":"ls"}',
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const input = screen.getByDisplayValue('{"command":"ls"}');
+    fireEvent.change(input, { target: { value: "[1,2,3]" } });
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(
+      await screen.findByText("Updated input must be a JSON object")
+    ).toBeInTheDocument();
+    expect(commands.resolvePermissionRequest).not.toHaveBeenCalled();
   });
 
   it("renders permission requests in chronological message order", () => {
