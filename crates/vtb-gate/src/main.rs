@@ -270,9 +270,7 @@ mod tests {
                 .contains("session-1"));
 
             stream
-                .write_all(
-                    br#"{"behavior":"allow","message":null,"updated_input":{"command":"ls -la"}}"#,
-                )
+                .write_all(br#"{"behavior":"allow","updatedInput":{"command":"ls -la"}}"#)
                 .unwrap();
             stream.write_all(b"\n").unwrap();
             stream.flush().unwrap();
@@ -289,7 +287,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(decision["behavior"], "allow");
-        assert_eq!(decision["updated_input"], json!({ "command": "ls -la" }));
+        assert_eq!(decision["updatedInput"], json!({ "command": "ls -la" }));
         server.join().unwrap();
         let _ = std::fs::remove_file(path);
     }

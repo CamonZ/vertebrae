@@ -21,6 +21,8 @@ use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 
 #[cfg(unix)]
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
+#[cfg(unix)]
+const PERMISSION_SOCKET_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 ///
@@ -327,6 +329,7 @@ struct SessionRuntimeState {
 #[cfg(unix)]
 struct PermissionSocketGuard {
     path: std::path::PathBuf,
+    directory: std::path::PathBuf,
     stop: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -346,6 +349,15 @@ impl Drop for PermissionSocketGuard {
                 log::warn!(
                     "Failed to remove vtb-gate permission socket {:?}: {}",
                     self.path,
+                    err
+                );
+            }
+        }
+        if let Err(err) = std::fs::remove_dir(&self.directory) {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                log::warn!(
+                    "Failed to remove vtb-gate permission socket directory {:?}: {}",
+                    self.directory,
                     err
                 );
             }
@@ -758,6 +770,11 @@ impl ClaudeSessionManager {
             ));
         }
 
+        let directory = path
+            .parent()
+            .ok_or_else(|| format!("permission socket path has no parent: {:?}", path))?
+            .to_path_buf();
+        Self::prepare_permission_socket_directory(&directory)?;
         if let Err(err) = std::fs::remove_file(&path) {
             if err.kind() != std::io::ErrorKind::NotFound {
                 return Err(format!("failed to remove stale permission socket: {err}"));
@@ -794,6 +811,7 @@ impl ClaudeSessionManager {
                     Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(std::time::Duration::from_millis(25));
                     }
+                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
                     Err(err) => {
                         log::error!("vtb-gate permission socket accept failed: {}", err);
                         break;
@@ -802,20 +820,26 @@ impl ClaudeSessionManager {
             }
         });
 
-        Ok(PermissionSocketGuard { path, stop })
+        Ok(PermissionSocketGuard {
+            path,
+            directory,
+            stop,
+        })
     }
 
     #[cfg(unix)]
     fn permission_socket_path(session_id: &str) -> std::path::PathBuf {
         use std::os::unix::ffi::OsStrExt;
 
-        let filename = format!("vtbg-{}.sock", Self::short_socket_id(session_id));
-        let temp_path = std::env::temp_dir().join(&filename);
+        let directory_name = format!("vtbg-{}", Self::short_socket_id(session_id));
+        let temp_path = std::env::temp_dir().join(&directory_name).join("p.sock");
         if temp_path.as_os_str().as_bytes().len() < MAX_UNIX_SOCKET_PATH_BYTES {
             return temp_path;
         }
 
-        std::path::PathBuf::from("/tmp").join(filename)
+        std::path::PathBuf::from("/tmp")
+            .join(directory_name)
+            .join("p.sock")
     }
 
     #[cfg(unix)]
@@ -829,12 +853,78 @@ impl ClaudeSessionManager {
     }
 
     #[cfg(unix)]
+    fn prepare_permission_socket_directory(directory: &std::path::Path) -> Result<(), String> {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+        match std::fs::symlink_metadata(directory) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(format!(
+                        "permission socket directory must not be a symlink: {:?}",
+                        directory
+                    ));
+                }
+                if !metadata.is_dir() {
+                    return Err(format!(
+                        "permission socket directory path is not a directory: {:?}",
+                        directory
+                    ));
+                }
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = std::fs::DirBuilder::new();
+                builder.mode(0o700);
+                if let Err(create_err) = builder.create(directory) {
+                    if create_err.kind() != std::io::ErrorKind::AlreadyExists {
+                        return Err(format!(
+                            "failed to create permission socket directory {:?}: {create_err}",
+                            directory
+                        ));
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(format!(
+                    "failed to inspect permission socket directory {:?}: {err}",
+                    directory
+                ));
+            }
+        }
+
+        let metadata = std::fs::symlink_metadata(directory).map_err(|err| {
+            format!(
+                "failed to inspect permission socket directory {:?}: {err}",
+                directory
+            )
+        })?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(
+                "permission socket directory must be a real directory: {:?}",
+                directory
+            ));
+        }
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).map_err(|err| {
+            format!(
+                "failed to set permission socket directory mode {:?}: {err}",
+                directory
+            )
+        })
+    }
+
+    #[cfg(unix)]
     fn handle_permission_socket_connection(
         mut stream: std::os::unix::net::UnixStream,
         session_id: String,
         app_handle: tauri::AppHandle,
         pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     ) {
+        if let Err(err) = stream.set_read_timeout(Some(PERMISSION_SOCKET_READ_TIMEOUT)) {
+            let _ = Self::write_permission_socket_error(
+                &mut stream,
+                format!("failed to set permission socket read timeout: {err}"),
+            );
+            return;
+        }
         let reader_stream = match stream.try_clone() {
             Ok(stream) => stream,
             Err(err) => {
@@ -1568,6 +1658,65 @@ mod tests {
     }
 
     #[test]
+    fn test_fail_pending_permissions_for_session_sends_denials() {
+        let pending_permissions = Arc::new(Mutex::new(HashMap::new()));
+        let (session_a_tx_1, session_a_rx_1) = std::sync::mpsc::channel();
+        let (session_a_tx_2, session_a_rx_2) = std::sync::mpsc::channel();
+        let (session_b_tx, session_b_rx) = std::sync::mpsc::channel();
+
+        {
+            let mut pending = pending_permissions.lock().unwrap();
+            pending.insert(
+                "req-a-1".to_string(),
+                PendingPermission {
+                    session_id: "session-a".to_string(),
+                    response_tx: session_a_tx_1,
+                },
+            );
+            pending.insert(
+                "req-a-2".to_string(),
+                PendingPermission {
+                    session_id: "session-a".to_string(),
+                    response_tx: session_a_tx_2,
+                },
+            );
+            pending.insert(
+                "req-b".to_string(),
+                PendingPermission {
+                    session_id: "session-b".to_string(),
+                    response_tx: session_b_tx,
+                },
+            );
+        }
+
+        ClaudeSessionManager::fail_pending_permissions_for_session(
+            &pending_permissions,
+            "session-a",
+        );
+
+        for receiver in [session_a_rx_1, session_a_rx_2] {
+            let decision = receiver
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .unwrap();
+            assert_eq!(decision.behavior, "deny");
+            assert_eq!(
+                decision.message.as_deref(),
+                Some("Claude session ended before the permission request was resolved")
+            );
+            assert!(decision.updated_input.is_none());
+        }
+        assert!(matches!(
+            session_b_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ));
+
+        let pending = pending_permissions.lock().unwrap();
+        assert!(!pending.contains_key("req-a-1"));
+        assert!(!pending.contains_key("req-a-2"));
+        assert!(pending.contains_key("req-b"));
+    }
+
+    #[test]
     fn test_local_permission_decision_serializes_for_claude_schema() {
         let allow = serde_json::to_value(LocalPermissionDecision {
             behavior: "allow".to_string(),
@@ -1596,6 +1745,27 @@ mod tests {
                 "message": "Denied from Vertebrae GUI"
             })
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_prepare_permission_socket_directory_sets_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("vtbg-dir-test-{}-{suffix}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+
+        ClaudeSessionManager::prepare_permission_socket_directory(&directory).unwrap();
+
+        let mode = std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+
+        std::fs::remove_dir(&directory).unwrap();
     }
 
     #[cfg(unix)]
