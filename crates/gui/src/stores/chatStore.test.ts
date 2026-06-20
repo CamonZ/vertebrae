@@ -78,6 +78,14 @@ describe("chatStore", () => {
       expect(session.scope).toBe("project");
       expect(session.entityId).toBeNull();
     });
+
+    it("stores the project path captured when the session is opened", () => {
+      const id = useChatStore
+        .getState()
+        .openSession("project", null, "Project Chat", "/repo/root");
+
+      expect(useChatStore.getState().sessions[id].projectPath).toBe("/repo/root");
+    });
   });
 
   describe("closeSession", () => {

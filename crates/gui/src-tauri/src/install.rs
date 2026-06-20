@@ -2,7 +2,7 @@
 //!
 //! These commands are consumed by the React welcome screen to:
 //! 1. Probe the current installation state (`installation_status`).
-//! 2. Stage the bundled `vtb` and `vtb-daemon` sidecars into `~/.local/bin`
+//! 2. Stage the bundled `vtb`, `vtb-daemon`, and `vtb-gate` sidecars into `~/.local/bin`
 //!    and (optionally) register the daemon with the OS service manager
 //!    (`install_components`).
 //!
@@ -41,12 +41,13 @@ const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 /// `tauri.conf.json` (without the target-triple suffix Tauri appends).
 const CLI_BIN: &str = "vtb";
 const DAEMON_BIN: &str = "vtb-daemon";
+const GATE_BIN: &str = "vtb-gate";
 
 // ---------------------------------------------------------------------------
 // Response types — these are auto-exported to TypeScript via tauri-specta.
 // ---------------------------------------------------------------------------
 
-/// State of a single component (one of `vtb`, `vtb-daemon`) on this machine.
+/// State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
 ///
 /// The welcome screen renders different copy depending on whether the user
 /// already has the binary available from a previous `cargo install` or
@@ -96,6 +97,7 @@ impl From<ServiceStatus> for ServiceState {
 pub struct InstallationStatus {
     pub cli: ComponentStatus,
     pub daemon: ComponentStatus,
+    pub gate: ComponentStatus,
     pub service: ServiceState,
 }
 
@@ -134,6 +136,7 @@ pub async fn installation_status() -> Result<InstallationStatus, CommandError> {
 pub async fn install_components(
     install_cli: bool,
     install_daemon: bool,
+    install_gate: bool,
 ) -> Result<InstallationStatus, CommandError> {
     if install_cli {
         let source = resolve_sidecar_path(CLI_BIN)?;
@@ -148,6 +151,11 @@ pub async fn install_components(
         install_service(&staged).map_err(installer_error)?;
     }
 
+    if install_gate {
+        let source = resolve_sidecar_path(GATE_BIN)?;
+        install_binary(GATE_BIN, &source).map_err(installer_error)?;
+    }
+
     compute_status()
 }
 
@@ -158,10 +166,12 @@ pub async fn install_components(
 fn compute_status() -> Result<InstallationStatus, CommandError> {
     let cli = component_status(CLI_BIN)?;
     let daemon = component_status(DAEMON_BIN)?;
+    let gate = component_status(GATE_BIN)?;
     let service = service_status().map_err(installer_error)?.into();
     Ok(InstallationStatus {
         cli,
         daemon,
+        gate,
         service,
     })
 }

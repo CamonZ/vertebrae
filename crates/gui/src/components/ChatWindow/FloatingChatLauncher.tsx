@@ -29,7 +29,7 @@ export function FloatingChatLauncher() {
     if (useChatStore.getState().panelOpen) {
       togglePanel();
     } else {
-      openChat("project", null, "Project Chat");
+      void openChat("project", null, "Project Chat");
     }
   }, [openChat, togglePanel]);
 

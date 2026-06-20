@@ -67,6 +67,7 @@ import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
 import { BoardPage } from "./pages/BoardPage";
 import { TracesPage } from "./pages/TracesPage";
+import { hasAllRequiredBinaries } from "./utils/installation";
 
 /**
  * Helper to create a test router with the new route structure
@@ -160,6 +161,11 @@ describe("Router Acceptance Tests", () => {
           daemon: {
             installed_at_symlink: true,
             symlink_path: "/home/user/.local/bin/vtb-daemon",
+            on_path: true,
+          },
+          gate: {
+            installed_at_symlink: true,
+            symlink_path: "/home/user/.local/bin/vtb-gate",
             on_path: true,
           },
           service: { kind: "not_loaded" },
@@ -666,49 +672,51 @@ describe("Router Acceptance Tests", () => {
     });
   });
 
-  describe("InstallationGuard first-run predicate", () => {
-    // Mirror of the production guard's redirect predicate so we can assert the
-    // exact boolean condition that gates the /welcome screen.
+  describe("InstallationGuard required binary predicate", () => {
     type Comp = { installed_at_symlink: boolean; on_path: boolean };
-    function isFirstRun(s: { cli: Comp; daemon: Comp }): boolean {
-      return (
-        !s.cli.installed_at_symlink &&
-        !s.daemon.installed_at_symlink &&
-        !s.cli.on_path &&
-        !s.daemon.on_path
-      );
-    }
-
     const comp = (installed: boolean, onPath: boolean): Comp => ({
       installed_at_symlink: installed,
       on_path: onPath,
     });
 
-    it("returns true when nothing is installed or on-path", () => {
+    it("returns false when nothing is installed or on-path", () => {
       expect(
-        isFirstRun({
+        hasAllRequiredBinaries({
           cli: comp(false, false),
           daemon: comp(false, false),
+          gate: comp(false, false),
+        })
+      ).toBe(false);
+    });
+
+    it("returns false when only vtb-gate is missing", () => {
+      expect(
+        hasAllRequiredBinaries({
+          cli: comp(true, true),
+          daemon: comp(true, true),
+          gate: comp(false, false),
+        })
+      ).toBe(false);
+    });
+
+    it("returns true when each component is installed or on PATH", () => {
+      expect(
+        hasAllRequiredBinaries({
+          cli: comp(false, true),
+          daemon: comp(true, false),
+          gate: comp(false, true),
         })
       ).toBe(true);
     });
 
-    it("returns false when a component is on PATH even if not symlinked", () => {
+    it("returns true when all components are symlinked", () => {
       expect(
-        isFirstRun({
-          cli: comp(false, true),
-          daemon: comp(false, false),
-        })
-      ).toBe(false);
-    });
-
-    it("returns false when a component is symlinked", () => {
-      expect(
-        isFirstRun({
-          cli: comp(false, false),
+        hasAllRequiredBinaries({
+          cli: comp(true, false),
           daemon: comp(true, false),
+          gate: comp(true, false),
         })
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 });

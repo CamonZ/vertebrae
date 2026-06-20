@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
 import { useChatStore } from "../../stores/chatStore";
@@ -29,9 +29,8 @@ describe("FloatingChatLauncher", () => {
 
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
 
-    const state = useChatStore.getState();
-    expect(state.panelOpen).toBe(true);
-    const session = Object.values(state.sessions).find(
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    const session = Object.values(useChatStore.getState().sessions).find(
       (s) => s.scope === "project"
     );
     expect(session).toBeDefined();
@@ -47,16 +46,17 @@ describe("FloatingChatLauncher", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("double-tapping Alt opens the project chat", () => {
+  it("double-tapping Alt opens the project chat", async () => {
     render(<FloatingChatLauncher />);
 
     fireEvent.keyDown(window, { key: "Alt" });
     fireEvent.keyDown(window, { key: "Alt" });
 
-    const state = useChatStore.getState();
-    expect(state.panelOpen).toBe(true);
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(
-      Object.values(state.sessions).some((s) => s.scope === "project")
+      Object.values(useChatStore.getState().sessions).some(
+        (s) => s.scope === "project"
+      )
     ).toBe(true);
   });
 
