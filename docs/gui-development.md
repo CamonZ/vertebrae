@@ -133,8 +133,10 @@ npm run package:debug
 The wrapper builds and stages the sidecars first, then invokes the Tauri bundle
 build. On macOS it defaults to `--bundles app` so the repeatable path produces a
 runnable `.app` without requiring DMG tooling; set `TAURI_BUNDLES` or pass
-`--bundles` to request another Tauri bundle format. Sidecar staging itself is
-centralized in `scripts/prepare-sidecars.mjs`,
+`--bundles` to request another Tauri bundle format. For `--bundles dmg`, the
+wrapper first uses Tauri's normal DMG path; if create-dmg fails during Finder
+window customization, it retries with Finder customization skipped. Sidecar
+staging itself is centralized in `scripts/prepare-sidecars.mjs`,
 which remains wired into Tauri's `beforeDevCommand` and `beforeBuildCommand` so
 direct `npm run tauri:dev` and `npm run tauri:build` commands continue to work:
 
