@@ -1687,9 +1687,30 @@ pub async fn resolve_permission_request(
     claude_manager: State<'_, ClaudeSessionManager>,
     input: ResolvePermissionRequestInput,
 ) -> Result<serde_json::Value, CommandError> {
-    let behavior = match input.behavior {
-        PermissionDecisionBehavior::Allow => "allow",
-        PermissionDecisionBehavior::Deny => "deny",
+    let (behavior, message, updated_input) = match input.behavior {
+        PermissionDecisionBehavior::Allow => {
+            let updated_input = match input.updated_input {
+                Some(value @ serde_json::Value::Object(_)) => Some(value),
+                Some(_) => {
+                    return Err(CommandError {
+                        message:
+                            "Allowed permission requests require updated_input to be a JSON object."
+                                .to_string(),
+                    });
+                }
+                None => Some(json!({})),
+            };
+            ("allow", None, updated_input)
+        }
+        PermissionDecisionBehavior::Deny => (
+            "deny",
+            Some(
+                input
+                    .message
+                    .unwrap_or_else(|| "Denied from Vertebrae GUI".to_string()),
+            ),
+            None,
+        ),
     };
 
     claude_manager
@@ -1697,8 +1718,8 @@ pub async fn resolve_permission_request(
             &input.request_id,
             LocalPermissionDecision {
                 behavior: behavior.to_string(),
-                message: input.message,
-                updated_input: input.updated_input,
+                message,
+                updated_input,
             },
         )
         .map_err(|err| CommandError { message: err })

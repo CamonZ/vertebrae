@@ -902,9 +902,55 @@ describe("ChatWindow", () => {
     await user.click(screen.getByRole("button", { name: "Approve" }));
 
     expect(commands.resolvePermissionRequest).toHaveBeenCalledWith(
-      expect.objectContaining({ request_id: "req-1", behavior: "allow" })
+      expect.objectContaining({
+        request_id: "req-1",
+        behavior: "allow",
+        message: null,
+        updated_input: { command: "ls" },
+      })
     );
     expect(await screen.findByText("Resolved")).toBeInTheDocument();
+  });
+
+  it("renders permission requests in chronological message order", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "assistant",
+          text: "Before permission",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+        {
+          kind: "permission_request",
+          requestId: "req-1",
+          toolName: "Bash",
+          message: "Allow running ls?",
+          input: '{"command":"ls"}',
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "After permission",
+          timestamp: "2024-01-01T12:00:02Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    const { container } = render(<ChatWindow sessionId="test-session" />);
+    const text = container.textContent ?? "";
+
+    expect(text.indexOf("Before permission")).toBeLessThan(
+      text.indexOf("Allow running ls?")
+    );
+    expect(text.indexOf("Allow running ls?")).toBeLessThan(
+      text.indexOf("After permission")
+    );
   });
 
   // --- G) Context fill bar ---

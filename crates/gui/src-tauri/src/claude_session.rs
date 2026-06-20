@@ -151,9 +151,12 @@ pub struct ClaudePermissionRequestEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalPermissionDecision {
     pub behavior: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_input: Option<serde_json::Value>,
 }
 
@@ -1562,6 +1565,37 @@ mod tests {
         );
 
         assert!(result.unwrap_err().contains("Permission request not found"));
+    }
+
+    #[test]
+    fn test_local_permission_decision_serializes_for_claude_schema() {
+        let allow = serde_json::to_value(LocalPermissionDecision {
+            behavior: "allow".to_string(),
+            message: None,
+            updated_input: Some(serde_json::json!({ "command": "ls" })),
+        })
+        .unwrap();
+        assert_eq!(
+            allow,
+            serde_json::json!({
+                "behavior": "allow",
+                "updatedInput": { "command": "ls" }
+            })
+        );
+
+        let deny = serde_json::to_value(LocalPermissionDecision {
+            behavior: "deny".to_string(),
+            message: Some("Denied from Vertebrae GUI".to_string()),
+            updated_input: None,
+        })
+        .unwrap();
+        assert_eq!(
+            deny,
+            serde_json::json!({
+                "behavior": "deny",
+                "message": "Denied from Vertebrae GUI"
+            })
+        );
     }
 
     #[cfg(unix)]
