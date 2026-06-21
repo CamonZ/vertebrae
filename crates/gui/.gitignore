@@ -24,3 +24,9 @@ Thumbs.db
 # Stryker mutation testing
 reports/
 .stryker-tmp/
+
+# design-sync (claude.ai/design) — staged scripts, build output, and all sync
+# inputs/state (config, previews, conventions, NOTES, caches) kept out of git
+.ds-sync/
+ds-bundle/
+.design-sync/
