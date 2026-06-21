@@ -37,6 +37,34 @@ describe("FloatingChatLauncher", () => {
     expect(session?.label).toBe("Project Chat");
   });
 
+  it("reopens the existing active session instead of creating project chat", async () => {
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task Chat");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "still here",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    expect(useChatStore.getState().panelOpen).toBe(true);
+    expect(useChatStore.getState().activeSessionId).toBe(id);
+    expect(useChatStore.getState().sessions[id].messages).toEqual([
+      {
+        kind: "user",
+        text: "still here",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    expect(Object.values(useChatStore.getState().sessions)).toHaveLength(1);
+  });
+
   it("hides itself once the panel is open (panel owns the anchor)", () => {
     useChatStore.setState({ panelOpen: true });
     render(<FloatingChatLauncher />);

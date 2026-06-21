@@ -4,6 +4,7 @@ import { ChatWindow } from "../components/ChatWindow/ChatWindow";
 import { WindowLayout } from "../components/WindowLayout";
 import { useChatStore } from "../stores/chatStore";
 import { takeStashedChatSession } from "../utils/chatStash";
+import { loadPersistedLocalChatSession } from "../utils/localChatPersistence";
 
 /**
  * Standalone page rendered by the `/chat?sessionId=...` pop-out window.
@@ -12,10 +13,10 @@ import { takeStashedChatSession } from "../utils/chatStash";
  * `useChatStore` starts empty. The parent stashes the focal `ChatSession`
  * in `localStorage` before opening us; we read+delete it synchronously
  * before first paint and seed the store so `ChatWindow` and
- * `useScopedChat` find the session immediately. The existing
- * `claudeSessionId` is preserved so `useScopedChat` does NOT recreate the
- * backend session — Claude streaming events are broadcast to all windows
- * and will resume flowing into this one as soon as the hook mounts.
+ * `useScopedChat` find the session immediately. The one-shot stash preserves
+ * a live `claudeSessionId`; durable fallback hydration keeps the Claude
+ * conversation ID so the backend can resume without trusting a stale process
+ * local session ID.
  */
 export function StandaloneChatWindow() {
   const [params] = useSearchParams();
@@ -24,11 +25,16 @@ export function StandaloneChatWindow() {
   const seededRef = useRef(false);
   if (!seededRef.current && sessionId) {
     seededRef.current = true;
-    const stashed = takeStashedChatSession(sessionId);
-    if (stashed) {
+    const seeded =
+      takeStashedChatSession(sessionId) ??
+      loadPersistedLocalChatSession(sessionId);
+    if (seeded) {
       useChatStore.setState((state) => ({
-        sessions: { ...state.sessions, [stashed.id]: stashed },
-        activeSessionId: stashed.id,
+        sessions: {
+          ...state.sessions,
+          [seeded.id]: { ...seeded, isDetached: false },
+        },
+        activeSessionId: seeded.id,
       }));
     }
   }
