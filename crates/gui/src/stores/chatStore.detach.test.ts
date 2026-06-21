@@ -23,6 +23,11 @@ vi.mock("../utils/popOut", () => ({ popOut: popOutMock }));
 
 import { useChatStore } from "./chatStore";
 import { takeStashedChatSession } from "../utils/chatStash";
+import {
+  isLocalChatSessionCleared,
+  loadPersistedLocalChatSession,
+  markLocalChatSessionCleared,
+} from "../utils/localChatPersistence";
 
 describe("chatStore detach / reattach", () => {
   beforeEach(() => {
@@ -117,6 +122,32 @@ describe("chatStore detach / reattach", () => {
     expect(useChatStore.getState().sessions[id].isDetached).toBe(false);
     expect(useChatStore.getState().activeSessionId).toBe(id);
     expect(useChatStore.getState().panelOpen).toBe(true);
+  });
+
+  it("reattachSession does not resurrect a detached session cleared elsewhere", () => {
+    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "stale parent message",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setClaudeConversationId(id, "conv-stale");
+    useChatStore.setState((s) => ({
+      sessions: {
+        ...s.sessions,
+        [id]: { ...s.sessions[id], isDetached: true },
+      },
+      activeSessionId: id,
+      panelOpen: false,
+    }));
+
+    markLocalChatSessionCleared(id);
+    useChatStore.getState().reattachSession(id);
+
+    expect(useChatStore.getState().sessions[id]).toBeUndefined();
+    expect(useChatStore.getState().activeSessionId).toBeNull();
+    expect(loadPersistedLocalChatSession(id)).toBeNull();
+    expect(isLocalChatSessionCleared(id)).toBe(false);
   });
 
   it("does not register a second close listener when popOut reuses an existing window", async () => {

@@ -21,17 +21,30 @@ const DOUBLE_TAP_MS = 400;
 export function FloatingChatLauncher() {
   const openChat = useOpenChat();
   const togglePanel = useChatStore((s) => s.togglePanel);
+  const setPanelOpen = useChatStore((s) => s.setPanelOpen);
+  const focusSession = useChatStore((s) => s.focusSession);
   const panelOpen = useChatStore((s) => s.panelOpen);
 
   // Open (and ensure a session) when closed; close when already open. Reads
   // panelOpen from the store at call time so it works from the key handler too.
   const toggleChat = useCallback(() => {
-    if (useChatStore.getState().panelOpen) {
+    const state = useChatStore.getState();
+    if (state.panelOpen) {
       togglePanel();
+    } else if (state.activeSessionId && state.sessions[state.activeSessionId]) {
+      setPanelOpen(true);
     } else {
-      void openChat("project", null, "Project Chat");
+      const session = Object.values(state.sessions).find(
+        (s) => s.status === "open"
+      );
+      if (session) {
+        focusSession(session.id);
+        setPanelOpen(true);
+      } else {
+        void openChat("project", null, "Project Chat");
+      }
     }
-  }, [openChat, togglePanel]);
+  }, [focusSession, openChat, setPanelOpen, togglePanel]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the
   // event's monotonic timeStamp to measure the gap between discrete presses.
