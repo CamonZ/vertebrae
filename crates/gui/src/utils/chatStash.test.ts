@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { stashChatSession, takeStashedChatSession } from "./chatStash";
+import {
+  discardStashedChatSession,
+  stashChatSession,
+  takeStashedChatSession,
+} from "./chatStash";
 import type { ChatSession } from "../stores/chatStore";
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
@@ -51,5 +55,11 @@ describe("chatStash", () => {
   it("returns null on malformed JSON", () => {
     localStorage.setItem("chat-stash:bad", "{not-json");
     expect(takeStashedChatSession("bad")).toBeNull();
+  });
+
+  it("can discard a stashed session without reading it", () => {
+    stashChatSession(makeSession());
+    discardStashedChatSession("s-1");
+    expect(takeStashedChatSession("s-1")).toBeNull();
   });
 });

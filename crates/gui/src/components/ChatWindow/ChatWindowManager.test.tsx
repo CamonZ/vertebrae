@@ -3,17 +3,16 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const { popOutMock } = vi.hoisted(() => {
-  const popOutMock =
-    vi.fn<
-      (
-        route: string,
-        label: string,
-        opts?: Record<string, unknown>,
-      ) => Promise<{
-        window: { onCloseRequested: (h: () => void) => Promise<() => void> };
-        reused: boolean;
-      }>
-    >();
+  const popOutMock = vi.fn<
+    (
+      route: string,
+      label: string,
+      opts?: Record<string, unknown>
+    ) => Promise<{
+      window: { onCloseRequested: (h: () => void) => Promise<() => void> };
+      reused: boolean;
+    }>
+  >();
   popOutMock.mockResolvedValue({
     window: { onCloseRequested: async () => () => {} },
     reused: false,
@@ -33,6 +32,10 @@ import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import type { ChatSession } from "../../stores/chatStore";
+import {
+  loadPersistedLocalChatSession,
+  persistLocalChatSession,
+} from "../../utils/localChatPersistence";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -85,6 +88,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 
 describe("ChatWindowManager", () => {
   beforeEach(() => {
+    localStorage.clear();
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -153,7 +157,20 @@ describe("ChatWindowManager", () => {
 
   it("toggles panel when close panel button is clicked", async () => {
     const user = userEvent.setup();
-    const s1 = createSession({ id: "s1", label: "Task A" });
+    const s1 = createSession({
+      id: "s1",
+      label: "Task A",
+      messages: [
+        {
+          kind: "user",
+          text: "persist through close",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+      claudeConversationId: "conv-close",
+      projectPath: "/test/project",
+    });
+    persistLocalChatSession(s1);
 
     useChatStore.setState({
       sessions: { s1 },
@@ -165,6 +182,68 @@ describe("ChatWindowManager", () => {
 
     await user.click(screen.getByTitle("Close chat panel"));
     expect(useChatStore.getState().panelOpen).toBe(false);
+
+    let reopened = "";
+    act(() => {
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      reopened = useChatStore
+        .getState()
+        .openSession("task", "task-1", "Task A", "/test/project");
+    });
+    expect(reopened).toBe("s1");
+    expect(useChatStore.getState().sessions.s1.messages).toEqual([
+      {
+        kind: "user",
+        text: "persist through close",
+        timestamp: "2026-01-01T00:00:00Z",
+      },
+    ]);
+    expect(useChatStore.getState().sessions.s1.claudeConversationId).toBe(
+      "conv-close"
+    );
+  });
+
+  it("trash clears messages and prevents later restored session from reappearing", async () => {
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task A", "/test/project");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "delete this",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setClaudeConversationId(id, "conv-delete");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByTitle("Clear messages"));
+
+    expect(loadPersistedLocalChatSession(id)).toBeNull();
+    expect(useChatStore.getState().sessions[id].messages).toEqual([]);
+
+    let reopened = "";
+    act(() => {
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      reopened = useChatStore
+        .getState()
+        .openSession("task", "task-1", "Task A", "/test/project");
+    });
+
+    expect(reopened).not.toBe(id);
+    expect(screen.queryByText("delete this")).not.toBeInTheDocument();
+    expect(useChatStore.getState().sessions[reopened].messages).toEqual([]);
+    expect(
+      useChatStore.getState().sessions[reopened].claudeConversationId
+    ).toBeNull();
   });
 
   it("closes the panel on Escape when it is the focused glass panel", async () => {
@@ -207,9 +286,7 @@ describe("ChatWindowManager", () => {
 
     // The exit animation finishing on the panel root unmounts it.
     fireEvent.animationEnd(panel);
-    expect(
-      screen.queryByTestId("chat-window-manager")
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chat-window-manager")).not.toBeInTheDocument();
   });
 
   // --- Detach / reattach ---
@@ -225,7 +302,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     expect(
-      screen.queryByTitle("Detach into pop-out window"),
+      screen.queryByTitle("Detach into pop-out window")
     ).not.toBeInTheDocument();
   });
 
@@ -235,7 +312,11 @@ describe("ChatWindowManager", () => {
       label: "Task A",
       isDetached: true,
       messages: [
-        { kind: "user", text: "should-not-render", timestamp: "2025-01-01T00:00:00Z" },
+        {
+          kind: "user",
+          text: "should-not-render",
+          timestamp: "2025-01-01T00:00:00Z",
+        },
       ],
     });
     useChatStore.setState({
@@ -247,8 +328,12 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     expect(screen.queryByText("should-not-render")).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Session detached" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reattach to panel" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: "Session detached" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reattach to panel" })
+    ).toBeInTheDocument();
   });
 
   it("clicking reattach in the placeholder clears isDetached", async () => {

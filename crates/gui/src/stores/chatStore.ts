@@ -1,7 +1,19 @@
 import { create } from "zustand";
 import { popOut } from "../utils/popOut";
-import { stashChatSession } from "../utils/chatStash";
+import {
+  discardStashedChatSession,
+  stashChatSession,
+} from "../utils/chatStash";
 import { scopeLabel } from "../utils/chatContext";
+import {
+  clearLocalChatSessionCleared,
+  findPersistedLocalChatSession,
+  isLocalChatSessionCleared,
+  loadPersistedLocalChatSessions,
+  markLocalChatSessionCleared,
+  persistLocalChatSession,
+  removePersistedLocalChatSession,
+} from "../utils/localChatPersistence";
 
 /**
  * Message types for the Claude chat
@@ -168,10 +180,15 @@ interface ChatStoreActions {
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
-const initialState: ChatStoreState = {
+const emptyState: ChatStoreState = {
   sessions: {},
   activeSessionId: null,
   panelOpen: false,
+};
+
+const initialState: ChatStoreState = {
+  ...emptyState,
+  sessions: loadPersistedLocalChatSessions(),
 };
 
 function generateSessionId(): string {
@@ -185,364 +202,393 @@ export function getParentScope(scope: ChatScope): ChatScope | null {
   return SCOPE_HIERARCHY[scope];
 }
 
-export const useChatStore = create<ChatStore>((set, get) => ({
-  ...initialState,
-
-  // Actions
-  openSession: (scope, entityId, label, projectPath) => {
-    // Check if a session already exists for this scope+entity
-    const existing = get().findSession(scope, entityId);
-    if (existing) {
-      set({ activeSessionId: existing, panelOpen: true });
-      return existing;
+function findMatchingSession(
+  sessions: Record<string, ChatSession>,
+  scope: ChatScope,
+  entityId: string | null,
+  projectPath?: string | null
+): string | null {
+  for (const [id, session] of Object.entries(sessions)) {
+    if (session.status !== "open") continue;
+    if (session.scope !== scope || session.entityId !== entityId) continue;
+    if (
+      projectPath !== undefined &&
+      session.projectPath != null &&
+      session.projectPath !== projectPath
+    ) {
+      continue;
     }
-
-    const id = generateSessionId();
-    const session: ChatSession = {
-      id,
-      scope,
-      entityId,
-      label,
-      messages: [],
-      status: "open",
-      claudeSessionId: null,
-      claudeConversationId: null,
-      contextSummary: null,
-      projectPath,
-    };
-
-    set((state) => ({
-      sessions: { ...state.sessions, [id]: session },
-      activeSessionId: id,
-      panelOpen: true,
-    }));
-
     return id;
-  },
+  }
+  return null;
+}
 
-  closeSession: (sessionId) => {
+export const useChatStore = create<ChatStore>((set, get) => {
+  const updateSession = (
+    sessionId: string,
+    updater: (session: ChatSession) => ChatSession,
+    options: { persist?: boolean } = {}
+  ) => {
+    let updated: ChatSession | null = null;
     set((state) => {
-      const remaining = Object.fromEntries(
-        Object.entries(state.sessions).filter(([id]) => id !== sessionId)
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      const next = updater(session);
+      if (next === session) return state;
+      updated = next;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: next,
+        },
+      };
+    });
+    if (updated && options.persist !== false) {
+      persistLocalChatSession(updated);
+    }
+  };
+
+  return {
+    ...initialState,
+
+    // Actions
+    openSession: (scope, entityId, label, projectPath) => {
+      // Check if a session already exists for this scope+entity
+      const existing = findMatchingSession(
+        get().sessions,
+        scope,
+        entityId,
+        projectPath
       );
-      const sessionIds = Object.keys(remaining);
-      const newActiveId =
-        state.activeSessionId === sessionId
-          ? sessionIds.length > 0
-            ? sessionIds[sessionIds.length - 1]
-            : null
-          : state.activeSessionId;
-
-      return {
-        sessions: remaining,
-        activeSessionId: newActiveId,
-        panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
-      };
-    });
-  },
-
-  focusSession: (sessionId) => {
-    set({ activeSessionId: sessionId });
-  },
-
-  addMessage: (sessionId, message) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: {
-            ...session,
-            messages: [...session.messages, message],
-          },
-        },
-      };
-    });
-  },
-
-  updateLastAssistantMessage: (sessionId, text) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      const messages = [...session.messages];
-      const last = messages[messages.length - 1];
-      if (last?.kind === "assistant" && last.isPartial) {
-        messages[messages.length - 1] = { ...last, text: last.text + text };
-      } else {
-        messages.push({
-          kind: "assistant",
-          text,
-          timestamp: new Date().toISOString(),
-          isPartial: true,
-        });
+      if (existing) {
+        set({ activeSessionId: existing, panelOpen: true });
+        return existing;
       }
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, messages },
-        },
-      };
-    });
-  },
 
-  finalizeLastAssistantMessage: (sessionId, text) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      const messages = [...session.messages];
-      const last = messages[messages.length - 1];
-      if (last?.kind === "assistant" && last.isPartial) {
-        messages[messages.length - 1] = {
-          ...last,
-          text,
-          isPartial: false,
+      const persisted = findPersistedLocalChatSession(
+        scope,
+        entityId,
+        projectPath
+      );
+      if (persisted) {
+        const hydrated: ChatSession = {
+          ...persisted,
+          projectPath: persisted.projectPath ?? projectPath,
+          isDetached: false,
         };
-      } else {
-        messages.push({
-          kind: "assistant",
-          text,
-          timestamp: new Date().toISOString(),
-          isPartial: false,
-        });
+        set((state) => ({
+          sessions: { ...state.sessions, [hydrated.id]: hydrated },
+          activeSessionId: hydrated.id,
+          panelOpen: true,
+        }));
+        return hydrated.id;
       }
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, messages },
-        },
+
+      const id = generateSessionId();
+      const session: ChatSession = {
+        id,
+        scope,
+        entityId,
+        label,
+        messages: [],
+        status: "open",
+        claudeSessionId: null,
+        claudeConversationId: null,
+        contextSummary: null,
+        projectPath,
       };
-    });
-  },
 
-  setClaudeSessionId: (sessionId, claudeSessionId) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, claudeSessionId },
-        },
-      };
-    });
-  },
+      persistLocalChatSession(session);
 
-  setClaudeConversationId: (sessionId, conversationId) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: {
-            ...session,
-            claudeConversationId: conversationId,
-          },
-        },
-      };
-    });
-  },
-
-  setContextSummary: (sessionId, summary) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, contextSummary: summary },
-        },
-      };
-    });
-  },
-
-  setSessionModel: (sessionId, model) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session || session.model === model) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, model },
-        },
-      };
-    });
-  },
-
-  setSessionTokenUsage: (sessionId, usage) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      if (
-        session.tokenUsage?.used === usage.used &&
-        session.tokenUsage?.max === usage.max
-      ) {
-        return state;
-      }
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, tokenUsage: usage },
-        },
-      };
-    });
-  },
-
-  setSessionUsage: (sessionId, model, usage) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      if (
-        session.model === model &&
-        session.tokenUsage?.used === usage.used &&
-        session.tokenUsage?.max === usage.max
-      ) {
-        return state;
-      }
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, model, tokenUsage: usage },
-        },
-      };
-    });
-  },
-
-  markSessionClosed: (sessionId) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, status: "closed" },
-        },
-      };
-    });
-  },
-
-  clearMessages: (sessionId) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, messages: [] },
-        },
-      };
-    });
-  },
-
-  togglePanel: () => {
-    set((state) => ({ panelOpen: !state.panelOpen }));
-  },
-
-  setPanelOpen: (open) => {
-    set({ panelOpen: open });
-  },
-
-  widenScope: (sessionId, newScope, newEntityId, newLabel) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: {
-            ...session,
-            scope: newScope,
-            entityId: newEntityId,
-            label: newLabel,
-          },
-        },
-      };
-    });
-  },
-
-  detachSession: async (sessionId) => {
-    const session = get().sessions[sessionId];
-    if (!session || session.isDetached) return;
-
-    // Stash the full session so the pop-out can seed its empty store
-    // synchronously before first paint. The existing claudeSessionId is
-    // carried across so useScopedChat does not double-create the backend
-    // Claude session.
-    stashChatSession({ ...session, isDetached: true });
-
-    set((state) => {
-      const s = state.sessions[sessionId];
-      if (!s) return state;
-      const remainingIds = Object.keys(state.sessions).filter(
-        (id) => id !== sessionId && !state.sessions[id].isDetached
-      );
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...s, isDetached: true },
-        },
-        activeSessionId:
-          state.activeSessionId === sessionId
-            ? (remainingIds[remainingIds.length - 1] ?? null)
-            : state.activeSessionId,
-      };
-    });
-
-    const title = `${scopeLabel(session.scope)}: ${session.label}`;
-    const { window: webview, reused } = await popOut(
-      `/chat?sessionId=${encodeURIComponent(sessionId)}`,
-      `chat-${sessionId}`,
-      {
-        title,
-        width: 600,
-        height: 800,
-      }
-    );
-
-    // Listen once for the pop-out window's close so we reattach the session
-    // back into the main panel. `reused` means a prior detach already
-    // installed the listener — don't stack another.
-    if (!reused) {
-      try {
-        await webview.onCloseRequested(() => {
-          get().reattachSession(sessionId);
-        });
-      } catch {
-        // Listener registration can fail in tests / non-Tauri contexts;
-        // reattach will simply not fire automatically there.
-      }
-    }
-  },
-
-  reattachSession: (sessionId) => {
-    set((state) => {
-      const session = state.sessions[sessionId];
-      if (!session) return state;
-      return {
-        sessions: {
-          ...state.sessions,
-          [sessionId]: { ...session, isDetached: false },
-        },
-        activeSessionId: sessionId,
+      set((state) => ({
+        sessions: { ...state.sessions, [id]: session },
+        activeSessionId: id,
         panelOpen: true,
-      };
-    });
-  },
+      }));
 
-  findSession: (scope, entityId) => {
-    const { sessions } = get();
-    for (const [id, session] of Object.entries(sessions)) {
-      if (
-        session.scope === scope &&
-        session.entityId === entityId &&
-        session.status === "open"
-      ) {
-        return id;
+      return id;
+    },
+
+    closeSession: (sessionId) => {
+      set((state) => {
+        const remaining = Object.fromEntries(
+          Object.entries(state.sessions).filter(([id]) => id !== sessionId)
+        );
+        const sessionIds = Object.keys(remaining);
+        const newActiveId =
+          state.activeSessionId === sessionId
+            ? sessionIds.length > 0
+              ? sessionIds[sessionIds.length - 1]
+              : null
+            : state.activeSessionId;
+
+        return {
+          sessions: remaining,
+          activeSessionId: newActiveId,
+          panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
+        };
+      });
+    },
+
+    focusSession: (sessionId) => {
+      set({ activeSessionId: sessionId });
+    },
+
+    addMessage: (sessionId, message) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: [...session.messages, message],
+      }));
+    },
+
+    updateLastAssistantMessage: (sessionId, text) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const messages = [...session.messages];
+          const last = messages[messages.length - 1];
+          if (last?.kind === "assistant" && last.isPartial) {
+            messages[messages.length - 1] = { ...last, text: last.text + text };
+          } else {
+            messages.push({
+              kind: "assistant",
+              text,
+              timestamp: new Date().toISOString(),
+              isPartial: true,
+            });
+          }
+          return { ...session, messages };
+        },
+        { persist: false }
+      );
+    },
+
+    finalizeLastAssistantMessage: (sessionId, text) => {
+      updateSession(sessionId, (session) => {
+        const messages = [...session.messages];
+        const last = messages[messages.length - 1];
+        if (last?.kind === "assistant" && last.isPartial) {
+          messages[messages.length - 1] = {
+            ...last,
+            text,
+            isPartial: false,
+          };
+        } else {
+          messages.push({
+            kind: "assistant",
+            text,
+            timestamp: new Date().toISOString(),
+            isPartial: false,
+          });
+        }
+        return { ...session, messages };
+      });
+    },
+
+    setClaudeSessionId: (sessionId, claudeSessionId) => {
+      updateSession(sessionId, (session) => ({ ...session, claudeSessionId }), {
+        persist: false,
+      });
+    },
+
+    setClaudeConversationId: (sessionId, conversationId) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        claudeConversationId: conversationId,
+      }));
+    },
+
+    setContextSummary: (sessionId, summary) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        contextSummary: summary,
+      }));
+    },
+
+    setSessionModel: (sessionId, model) => {
+      updateSession(sessionId, (session) =>
+        session.model === model ? session : { ...session, model }
+      );
+    },
+
+    setSessionTokenUsage: (sessionId, usage) => {
+      updateSession(sessionId, (session) => {
+        if (
+          session.tokenUsage?.used === usage.used &&
+          session.tokenUsage?.max === usage.max
+        ) {
+          return session;
+        }
+        return { ...session, tokenUsage: usage };
+      });
+    },
+
+    setSessionUsage: (sessionId, model, usage) => {
+      updateSession(sessionId, (session) => {
+        if (
+          session.model === model &&
+          session.tokenUsage?.used === usage.used &&
+          session.tokenUsage?.max === usage.max
+        ) {
+          return session;
+        }
+        return { ...session, model, tokenUsage: usage };
+      });
+    },
+
+    markSessionClosed: (sessionId) => {
+      if (!get().sessions[sessionId]) return;
+      removePersistedLocalChatSession(sessionId);
+      updateSession(
+        sessionId,
+        (session) => ({
+          ...session,
+          status: "closed" as const,
+        }),
+        { persist: false }
+      );
+    },
+
+    clearMessages: (sessionId) => {
+      if (!get().sessions[sessionId]) return;
+      removePersistedLocalChatSession(sessionId);
+      markLocalChatSessionCleared(sessionId);
+      discardStashedChatSession(sessionId);
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (!session) return state;
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...session,
+              messages: [],
+              claudeSessionId: null,
+              claudeConversationId: null,
+              contextSummary: null,
+              model: undefined,
+              tokenUsage: undefined,
+              status: "open",
+            },
+          },
+        };
+      });
+    },
+
+    togglePanel: () => {
+      set((state) => ({ panelOpen: !state.panelOpen }));
+    },
+
+    setPanelOpen: (open) => {
+      set({ panelOpen: open });
+    },
+
+    widenScope: (sessionId, newScope, newEntityId, newLabel) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        scope: newScope,
+        entityId: newEntityId,
+        label: newLabel,
+      }));
+    },
+
+    detachSession: async (sessionId) => {
+      const session = get().sessions[sessionId];
+      if (!session || session.isDetached) return;
+
+      // Stash the full session so the pop-out can seed its empty store
+      // synchronously before first paint. The existing claudeSessionId is
+      // carried across so useScopedChat does not double-create the backend
+      // Claude session.
+      stashChatSession({ ...session, isDetached: true });
+
+      const updated = { ...session, isDetached: true };
+      persistLocalChatSession(updated);
+
+      set((state) => {
+        if (!state.sessions[sessionId]) return state;
+        const remainingIds = Object.keys(state.sessions).filter(
+          (id) => id !== sessionId && !state.sessions[id].isDetached
+        );
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: updated,
+          },
+          activeSessionId:
+            state.activeSessionId === sessionId
+              ? (remainingIds[remainingIds.length - 1] ?? null)
+              : state.activeSessionId,
+        };
+      });
+
+      const title = `${scopeLabel(session.scope)}: ${session.label}`;
+      const { window: webview, reused } = await popOut(
+        `/chat?sessionId=${encodeURIComponent(sessionId)}`,
+        `chat-${sessionId}`,
+        {
+          title,
+          width: 600,
+          height: 800,
+        }
+      );
+
+      // Listen once for the pop-out window's close so we reattach the session
+      // back into the main panel. `reused` means a prior detach already
+      // installed the listener — don't stack another.
+      if (!reused) {
+        try {
+          await webview.onCloseRequested(() => {
+            get().reattachSession(sessionId);
+          });
+        } catch {
+          // Listener registration can fail in tests / non-Tauri contexts;
+          // reattach will simply not fire automatically there.
+        }
       }
-    }
-    return null;
-  },
+    },
 
-  reset: () => set(initialState),
-}));
+    reattachSession: (sessionId) => {
+      const wasCleared = isLocalChatSessionCleared(sessionId);
+      let updated: ChatSession | null = null;
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (!session) return state;
+        if (wasCleared) {
+          const remaining = Object.fromEntries(
+            Object.entries(state.sessions).filter(([id]) => id !== sessionId)
+          );
+          const sessionIds = Object.keys(remaining);
+          return {
+            sessions: remaining,
+            activeSessionId:
+              state.activeSessionId === sessionId
+                ? (sessionIds[sessionIds.length - 1] ?? null)
+                : state.activeSessionId,
+            panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
+          };
+        }
+        updated = { ...session, isDetached: false };
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: updated,
+          },
+          activeSessionId: sessionId,
+          panelOpen: true,
+        };
+      });
+      if (wasCleared) {
+        clearLocalChatSessionCleared(sessionId);
+      } else if (updated) {
+        persistLocalChatSession(updated);
+      }
+    },
+
+    findSession: (scope, entityId) => {
+      return findMatchingSession(get().sessions, scope, entityId);
+    },
+
+    reset: () => set(emptyState),
+  };
+});

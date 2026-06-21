@@ -38,3 +38,11 @@ export function takeStashedChatSession(sessionId: string): ChatSession | null {
     return null;
   }
 }
+
+export function discardStashedChatSession(sessionId: string): void {
+  try {
+    localStorage.removeItem(key(sessionId));
+  } catch {
+    // Storage disabled; nothing to discard.
+  }
+}
