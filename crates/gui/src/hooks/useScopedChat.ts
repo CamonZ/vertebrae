@@ -22,7 +22,6 @@ import type {
   ChatMessage,
   LocalChatLifecycle,
 } from "../stores/chatStore";
-import { buildContextSummary, buildInitialPrompt } from "../utils/chatContext";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
@@ -230,7 +229,6 @@ export async function doStartSession(
   deps: {
     setClaudeSessionId: (id: string, backendId: string | null) => void;
     setClaudeSessionIdRef: (backendId: string | null) => void;
-    setContextSummary: (id: string, summary: string) => void;
     addMessage: (id: string, msg: ChatMessage) => void;
     setSessionLifecycle: (
       id: string,
@@ -250,17 +248,7 @@ export async function doStartSession(
   deps.setClaudeSessionIdRef(backendSessionId);
 
   try {
-    let context = session.contextSummary;
-    if (!context) {
-      context = await buildContextSummary(session.scope, session.entityId);
-      if (context) {
-        deps.setContextSummary(sessionId, context);
-      }
-    }
-
-    const initialPrompt = userMessage
-      ? buildInitialPrompt(context, userMessage)
-      : undefined;
+    const initialPrompt = userMessage || undefined;
 
     if (userMessage) {
       deps.addMessage(sessionId, {
@@ -387,7 +375,6 @@ export async function doCloseSession(
  * Wraps the chatStore with Claude CLI session lifecycle:
  * - Creates/resumes Claude CLI sessions
  * - Listens for Claude events and routes them to the correct store session
- * - Handles context injection on session start
  */
 export function useScopedChat(sessionId: string | null) {
   const session = useChatStore((s) =>
@@ -405,7 +392,6 @@ export function useScopedChat(sessionId: string | null) {
   const setClaudeConversationId = useChatStore(
     (s) => s.setClaudeConversationId
   );
-  const setContextSummary = useChatStore((s) => s.setContextSummary);
   const setSessionModel = useChatStore((s) => s.setSessionModel);
   const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
@@ -594,7 +580,7 @@ export function useScopedChat(sessionId: string | null) {
   ]);
 
   /**
-   * Start the Claude CLI session with context injection.
+   * Start the Claude CLI session.
    */
   const startSession = useCallback(
     async (userMessage?: string) => {
@@ -615,7 +601,6 @@ export function useScopedChat(sessionId: string | null) {
           setClaudeSessionIdRef: (id) => {
             claudeSessionIdRef.current = id;
           },
-          setContextSummary,
           addMessage,
           setSessionLifecycle,
         },
@@ -627,7 +612,6 @@ export function useScopedChat(sessionId: string | null) {
       sessionId,
       addMessage,
       setClaudeSessionId,
-      setContextSummary,
       setSessionLifecycle,
     ]
   );

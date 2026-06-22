@@ -113,7 +113,7 @@ describe("LiveChatWindow", () => {
           id: "a-md",
           role: "assistant",
           content: "this is **bold** text",
-          content_format: "plain",
+          content_format: "markdown",
           createdAt: "2026-05-10T12:00:00Z",
           pending: false,
           error: null,

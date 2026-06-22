@@ -243,6 +243,8 @@ export interface AgentMessage extends BaseMessage {
   model?: string;
   /** Rendered prose (markdown string in production, JSX in the prototype). */
   prose?: ReactNode;
+  /** String prose defaults to markdown unless a source explicitly marks it plain. */
+  proseFormat?: "markdown" | "plain";
   /**
    * Tools emitted within this agent turn, rendered above the prose. NOTE:
    * tools may alternatively be standalone ToolMessages in the turn series;

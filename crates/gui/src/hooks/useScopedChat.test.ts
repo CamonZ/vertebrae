@@ -43,13 +43,6 @@ vi.mock("../bindings", () => ({
   events: {},
 }));
 
-vi.mock("../utils/chatContext", () => ({
-  buildContextSummary: vi.fn().mockResolvedValue(null),
-  buildInitialPrompt: vi.fn((ctx: string | null, msg: string) =>
-    ctx ? `${ctx}\n\n---\n\n${msg}` : msg
-  ),
-}));
-
 const mockedCommands = vi.mocked(commands);
 
 const SESSION_ID = "session-1";
@@ -682,8 +675,7 @@ describe("doStartSession", () => {
     expect(deps.addMessage).not.toHaveBeenCalled();
   });
 
-  it("uses existing contextSummary without fetching", async () => {
-    const { buildContextSummary } = await import("../utils/chatContext");
+  it("starts without fetching, storing, or injecting scoped context", async () => {
     const deps = {
       setClaudeSessionId: vi.fn(),
       setClaudeSessionIdRef: vi.fn(),
@@ -699,30 +691,17 @@ describe("doStartSession", () => {
       "Help"
     );
 
-    expect(buildContextSummary).not.toHaveBeenCalled();
+    expect(mockedCommands.getCurrentProject).not.toHaveBeenCalled();
+    expect(mockedCommands.getTask).not.toHaveBeenCalled();
+    expect(mockedCommands.getTaskExecutions).not.toHaveBeenCalled();
+    expect(mockedCommands.getWorkflowWithTasks).not.toHaveBeenCalled();
+    expect(mockedCommands.getStep).not.toHaveBeenCalled();
     expect(deps.setContextSummary).not.toHaveBeenCalled();
-  });
-
-  it("fetches and stores context when contextSummary is null", async () => {
-    const { buildContextSummary } = await import("../utils/chatContext");
-    vi.mocked(buildContextSummary).mockResolvedValueOnce(
-      "[Context: Task]\nTask: Fetched"
-    );
-
-    const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
-      setContextSummary: vi.fn(),
-      addMessage: vi.fn(),
-      setSessionLifecycle: vi.fn(),
-    };
-
-    await doStartSession(makeSession(), SESSION_ID, deps, "Go");
-
-    expect(buildContextSummary).toHaveBeenCalledWith("task", "task-1");
-    expect(deps.setContextSummary).toHaveBeenCalledWith(
-      SESSION_ID,
-      "[Context: Task]\nTask: Fetched"
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+      expect.any(String),
+      "/test/project",
+      "Help",
+      null
     );
   });
 
@@ -777,7 +756,7 @@ describe("doStartSession", () => {
     );
   });
 
-  it("passes initial prompt with context when user message provided", async () => {
+  it("passes the user message as the initial prompt without context", async () => {
     const deps = {
       setClaudeSessionId: vi.fn(),
       setClaudeSessionIdRef: vi.fn(),
@@ -796,7 +775,7 @@ describe("doStartSession", () => {
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
       expect.any(String),
       "/test/project",
-      "[Context]\n\n---\n\nQuestion",
+      "Question",
       null
     );
   });

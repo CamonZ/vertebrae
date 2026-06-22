@@ -22,12 +22,6 @@ const { popOutMock } = vi.hoisted(() => {
 
 vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
 
-// Synchronous project so the header's "scoped to" line renders without an async
-// state update (which would otherwise log act() warnings).
-vi.mock("../../hooks/useCurrentProject", () => ({
-  useCurrentProject: () => ({ name: "test-project", path: "/test/project" }),
-}));
-
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";

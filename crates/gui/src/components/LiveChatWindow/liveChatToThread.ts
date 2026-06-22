@@ -11,6 +11,10 @@
  * reconciled message) maps to AgentMessage.streaming for the blinking cursor /
  * speaker spinner.
  *
+ * Assistant messages render markdown unless the backend explicitly marks the
+ * payload as `content_format: "plain"`, in which case markdown syntax remains
+ * literal.
+ *
  * Turn boundaries mirror {@link msgsToThread}: a NON-assistant (human) message
  * opens a new Turn carrying a UserMessage; an assistant message attaches an
  * AgentMessage to the open turn (opening one if none exists — the leading-
@@ -64,6 +68,7 @@ export function liveChatToThread(messages: LiveChatMessage[]): ThreadModel {
         model: undefined,
         streaming: m.pending,
         prose: m.content,
+        proseFormat: m.content_format === "plain" ? "plain" : "markdown",
       };
       cur.messages.push(am);
     }

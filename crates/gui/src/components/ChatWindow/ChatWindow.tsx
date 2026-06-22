@@ -8,9 +8,8 @@ import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
 } from "../../stores/chatStore";
-import type { ChatScope, ChatMessage } from "../../stores/chatStore";
+import type { ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
-import { useCurrentProject } from "../../hooks/useCurrentProject";
 import {
   formatTokenCount,
   utilizationLevel,
@@ -39,8 +38,7 @@ function ThinkingIndicator() {
 }
 
 function lifecycleLabel(
-  lifecycle: ReturnType<typeof getLocalChatLifecycle>,
-  hasResume: boolean
+  lifecycle: ReturnType<typeof getLocalChatLifecycle>
 ): string {
   switch (lifecycle) {
     case "starting":
@@ -54,11 +52,11 @@ function lifecycleLabel(
     case "closing":
       return "Closing";
     case "closed":
-      return hasResume ? "Ready to resume" : "Closed";
+      return "Closed";
     case "error":
       return "Failed";
     case "idle":
-      return hasResume ? "Resumable" : "Ready";
+      return "Ready";
   }
 }
 
@@ -228,35 +226,6 @@ function buildChatRenderItems(
   return items;
 }
 
-/** Scope chip + human description for the "scoped to …" header line. The chip
- *  echoes the design reference (project name for project scope, else the short
- *  entity id); the description reads like the reference's "whole project". */
-function scopeMeta(
-  scope: ChatScope,
-  entityId: string | null,
-  projectName: string | null
-): { chip: string; description: string } {
-  switch (scope) {
-    case "project":
-      return { chip: projectName ?? "project", description: "whole project" };
-    case "workflow":
-      return {
-        chip: entityId?.slice(0, 8) ?? "workflow",
-        description: "this workflow",
-      };
-    case "task":
-      return {
-        chip: entityId?.slice(0, 8) ?? "task",
-        description: "this task",
-      };
-    case "step":
-      return {
-        chip: entityId?.slice(0, 8) ?? "step",
-        description: "this step",
-      };
-  }
-}
-
 interface ChatWindowProps {
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
@@ -264,7 +233,7 @@ interface ChatWindowProps {
 }
 
 /**
- * ChatWindow renders a single chat session: the header band (title + scope),
+ * ChatWindow renders a single chat session: the header band (title + status),
  * the message thread, and the composer footer with its context-utilization bar.
  */
 export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
@@ -277,7 +246,6 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
 
   const clearMessages = useChatStore((s) => s.clearMessages);
   const widenScope = useChatStore((s) => s.widenScope);
-  const { name: projectName } = useCurrentProject();
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -341,7 +309,7 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             ? "Resume session"
             : "Start session";
   const composerPlaceholder = isBusy
-    ? `${lifecycleLabel(lifecycle, hasResume)}...`
+    ? `${lifecycleLabel(lifecycle)}...`
     : canSendMessage
       ? "Type a message..."
       : hasResume || lifecycle === "closed" || lifecycle === "error"
@@ -383,12 +351,6 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
 
   const canWiden = getParentScope(session.scope) !== null;
 
-  const { chip: scopeChip, description: scopeDescription } = scopeMeta(
-    session.scope,
-    session.entityId,
-    projectName
-  );
-
   // Context utilization for the footer bar + readout. Falls back to an empty
   // bar before the first usage event lands.
   const usage = session.tokenUsage;
@@ -405,7 +367,7 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header — single band: title + status ember, controls, scope line. */}
+      {/* Header — single band: title + status ember and controls. */}
       <div className="hc-head">
         <div className="hc-head-top">
           <span className="hc-title">
@@ -429,29 +391,6 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             )}
           </span>
           <div className="hc-ctrls">
-            {isActive && (
-              <button
-                className="hc-ctrl danger"
-                onClick={() => void closeClaudeSession()}
-                disabled={lifecycle === "closing"}
-                title="End session"
-                aria-label="End session"
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5.636 5.636a9 9 0 1012.728 0M12 3v9"
-                  />
-                </svg>
-              </button>
-            )}
             <button
               className="hc-ctrl"
               onClick={() => void handleClearMessages()}
@@ -495,26 +434,8 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             </button>
           </div>
         </div>
-        <div className="hc-head-meta">
-          <span className="hc-scope">
-            <span className="badge-dot" />
-            scoped to
-          </span>
-          <span className="hc-scope-id">{scopeChip}</span>
-          <span className="hc-sep">·</span>
-          <span className="hc-scope">{scopeDescription}</span>
-          <span className="hc-sep">·</span>
-          <span
-            data-testid="chat-lifecycle-label"
-            className={
-              lifecycle === "error"
-                ? "text-xs text-[var(--color-err)]"
-                : "hc-scope"
-            }
-          >
-            {lifecycleLabel(lifecycle, hasResume)}
-          </span>
-          {canWiden && (
+        {canWiden && (
+          <div className="hc-head-meta">
             <button
               className="hc-widen"
               onClick={handleWiden}
@@ -535,23 +456,9 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
                 />
               </svg>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
-
-      {/* Context summary banner */}
-      {session.contextSummary && (
-        <div className="border-b border-[var(--color-line)] bg-[var(--color-bg-2)]/50 px-3 py-1.5">
-          <details className="text-xs text-[var(--color-fg-mute)]">
-            <summary className="cursor-pointer select-none hover:text-[var(--color-fg-soft)]">
-              Context injected
-            </summary>
-            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-eyebrow">
-              {session.contextSummary}
-            </pre>
-          </details>
-        </div>
-      )}
 
       {lifecycle === "error" && session.lifecycleError && (
         <div
