@@ -11,12 +11,44 @@ import type {
   ClaudeSessionEndEvent,
   ClaudeSessionErrorEvent,
 } from "../bindings";
-import { useChatStore } from "../stores/chatStore";
-import type { ChatScope, ChatSession, ChatMessage } from "../stores/chatStore";
+import {
+  getLocalChatLifecycle,
+  isLocalChatLifecycleBusy,
+  useChatStore,
+} from "../stores/chatStore";
+import type {
+  ChatScope,
+  ChatSession,
+  ChatMessage,
+  LocalChatLifecycle,
+} from "../stores/chatStore";
 import { buildContextSummary, buildInitialPrompt } from "../utils/chatContext";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
+
+function commandErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && error !== null) {
+    if ("message" in error && typeof error.message === "string") {
+      return error.message;
+    }
+    const [key, value] = Object.entries(error)[0] ?? [];
+    if (typeof value === "string") return value;
+    if (key) return key;
+  }
+  return "Claude session failed";
+}
+
+function commandErrorKind(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  return Object.keys(error)[0] ?? null;
+}
+
+function isSessionNotFoundError(error: unknown): boolean {
+  return commandErrorKind(error) === "SessionNotFound";
+}
 
 export function handleInitEvent(
   payload: ClaudeSessionInitEvent,
@@ -48,7 +80,10 @@ export function handleUsageEvent(
   if (payload.session_id !== claudeSessionId) return;
   const max = resolveContextWindow(payload.model, payload.context_window);
   if (max && max > 0) {
-    setSessionUsage(sessionId, payload.model, { used: payload.context_tokens, max });
+    setSessionUsage(sessionId, payload.model, {
+      used: payload.context_tokens,
+      max,
+    });
   }
 }
 
@@ -135,19 +170,51 @@ export function handleEndEvent(
   payload: ClaudeSessionEndEvent,
   claudeSessionId: string | null,
   sessionId: string,
-  markSessionClosed: (sessionId: string) => void
+  setSessionLifecycle: (
+    sessionId: string,
+    lifecycle: LocalChatLifecycle,
+    errorMessage?: string | null
+  ) => void,
+  clearStreamingAssistant: (
+    sessionId: string,
+    commitToMessages?: boolean
+  ) => void,
+  setClaudeSessionId: (sessionId: string, backendId: string | null) => void,
+  setClaudeSessionIdRef: (backendId: string | null) => void
 ) {
   if (payload.session_id !== claudeSessionId) return;
-  markSessionClosed(sessionId);
+  clearStreamingAssistant(sessionId, true);
+  setClaudeSessionId(sessionId, null);
+  setClaudeSessionIdRef(null);
+  if (payload.is_error) {
+    setSessionLifecycle(
+      sessionId,
+      "error",
+      payload.result || "Claude session ended with an error"
+    );
+    return;
+  }
+  setSessionLifecycle(sessionId, "idle");
 }
 
 export function handleErrorEvent(
   payload: ClaudeSessionErrorEvent,
   claudeSessionId: string | null,
   sessionId: string,
-  addMessage: (sessionId: string, msg: ChatMessage) => void
+  addMessage: (sessionId: string, msg: ChatMessage) => void,
+  setSessionLifecycle: (
+    sessionId: string,
+    lifecycle: LocalChatLifecycle,
+    errorMessage?: string | null
+  ) => void,
+  clearStreamingAssistant: (
+    sessionId: string,
+    commitToMessages?: boolean
+  ) => void
 ) {
   if (payload.session_id !== claudeSessionId) return;
+  clearStreamingAssistant(sessionId, true);
+  setSessionLifecycle(sessionId, "error", payload.error);
   addMessage(sessionId, {
     kind: "error",
     message: payload.error,
@@ -161,78 +228,156 @@ export async function doStartSession(
   session: ChatSession,
   sessionId: string,
   deps: {
-    setClaudeSessionId: (id: string, backendId: string) => void;
-    setClaudeSessionIdRef: (backendId: string) => void;
+    setClaudeSessionId: (id: string, backendId: string | null) => void;
+    setClaudeSessionIdRef: (backendId: string | null) => void;
     setContextSummary: (id: string, summary: string) => void;
     addMessage: (id: string, msg: ChatMessage) => void;
+    setSessionLifecycle: (
+      id: string,
+      lifecycle: LocalChatLifecycle,
+      errorMessage?: string | null
+    ) => void;
   },
   userMessage?: string
 ) {
+  deps.setSessionLifecycle(
+    sessionId,
+    session.claudeConversationId ? "resuming" : "starting"
+  );
+
   const backendSessionId = `scoped-${sessionId}-${Date.now()}`;
   deps.setClaudeSessionId(sessionId, backendSessionId);
   deps.setClaudeSessionIdRef(backendSessionId);
 
-  let context = session.contextSummary;
-  if (!context) {
-    context = await buildContextSummary(session.scope, session.entityId);
-    if (context) {
-      deps.setContextSummary(sessionId, context);
+  try {
+    let context = session.contextSummary;
+    if (!context) {
+      context = await buildContextSummary(session.scope, session.entityId);
+      if (context) {
+        deps.setContextSummary(sessionId, context);
+      }
     }
-  }
 
-  const initialPrompt = userMessage
-    ? buildInitialPrompt(context, userMessage)
-    : undefined;
+    const initialPrompt = userMessage
+      ? buildInitialPrompt(context, userMessage)
+      : undefined;
 
-  if (userMessage) {
-    deps.addMessage(sessionId, {
-      kind: "user",
-      text: userMessage,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  let workingDir: string | null = session.projectPath ?? null;
-  if (workingDir === null && session.projectPath === undefined) {
-    const pathResult = await commands.getCurrentProjectPath();
-    if (pathResult.status === "ok" && pathResult.data) {
-      workingDir = pathResult.data;
+    if (userMessage) {
+      deps.addMessage(sessionId, {
+        kind: "user",
+        text: userMessage,
+        timestamp: new Date().toISOString(),
+      });
     }
+
+    let workingDir: string | null = session.projectPath ?? null;
+    if (workingDir === null && session.projectPath === undefined) {
+      const pathResult = await commands.getCurrentProjectPath();
+      if (pathResult.status === "ok" && pathResult.data) {
+        workingDir = pathResult.data;
+      }
+    }
+
+    const resumeId = session.claudeConversationId;
+
+    const result = await commands.createClaudeSession(
+      backendSessionId,
+      workingDir,
+      initialPrompt ?? null,
+      resumeId
+    );
+    if (result.status === "error") {
+      throw new Error(commandErrorMessage(result.error));
+    }
+    deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
+  } catch (error) {
+    deps.setClaudeSessionId(sessionId, null);
+    deps.setClaudeSessionIdRef(null);
+    deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
   }
-
-  const resumeId = session.claudeConversationId;
-
-  await commands.createClaudeSession(
-    backendSessionId,
-    workingDir,
-    initialPrompt ?? null,
-    resumeId
-  );
 }
 
 export async function doSendMessage(
   claudeSessionId: string,
   sessionId: string,
   content: string,
-  addMessage: (id: string, msg: ChatMessage) => void
+  deps: {
+    addMessage: (id: string, msg: ChatMessage) => void;
+    setSessionLifecycle: (
+      id: string,
+      lifecycle: LocalChatLifecycle,
+      errorMessage?: string | null
+    ) => void;
+    setClaudeSessionId?: (id: string, backendId: string | null) => void;
+    setClaudeSessionIdRef?: (backendId: string | null) => void;
+  }
 ) {
-  addMessage(sessionId, {
+  deps.setSessionLifecycle(sessionId, "sending");
+  deps.addMessage(sessionId, {
     kind: "user",
     text: content,
     timestamp: new Date().toISOString(),
   });
 
-  await commands.sendClaudeMessage(claudeSessionId, content);
+  try {
+    const result = await commands.sendClaudeMessage(claudeSessionId, content);
+    if (result.status === "error") {
+      const message = commandErrorMessage(result.error);
+      if (isSessionNotFoundError(result.error)) {
+        deps.setClaudeSessionId?.(sessionId, null);
+        deps.setClaudeSessionIdRef?.(null);
+      }
+      throw new Error(message);
+    }
+    deps.setSessionLifecycle(sessionId, "streaming");
+  } catch (error) {
+    const message = commandErrorMessage(error);
+    deps.setSessionLifecycle(sessionId, "error", message);
+  }
 }
 
 export async function doCloseSession(
   claudeSessionId: string,
   sessionId: string | null,
-  markSessionClosed: (id: string) => void
-) {
-  await commands.closeClaudeSession(claudeSessionId);
+  deps: {
+    markSessionClosed: (id: string) => void;
+    setSessionLifecycle: (
+      id: string,
+      lifecycle: LocalChatLifecycle,
+      errorMessage?: string | null
+    ) => void;
+    setClaudeSessionId: (id: string, backendId: string | null) => void;
+    setClaudeSessionIdRef: (backendId: string | null) => void;
+  }
+): Promise<boolean> {
   if (sessionId) {
-    markSessionClosed(sessionId);
+    deps.setSessionLifecycle(sessionId, "closing");
+  }
+
+  try {
+    const result = await commands.closeClaudeSession(claudeSessionId);
+    if (result.status === "error") {
+      if (isSessionNotFoundError(result.error)) {
+        if (sessionId) {
+          deps.markSessionClosed(sessionId);
+          deps.setClaudeSessionId(sessionId, null);
+        }
+        deps.setClaudeSessionIdRef(null);
+        return true;
+      }
+      throw new Error(commandErrorMessage(result.error));
+    }
+    if (sessionId) {
+      deps.markSessionClosed(sessionId);
+      deps.setClaudeSessionId(sessionId, null);
+    }
+    deps.setClaudeSessionIdRef(null);
+    return true;
+  } catch (error) {
+    if (sessionId) {
+      deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+    }
+    return false;
   }
 }
 
@@ -246,7 +391,7 @@ export async function doCloseSession(
  */
 export function useScopedChat(sessionId: string | null) {
   const session = useChatStore((s) =>
-    sessionId ? s.sessions[sessionId] ?? null : null
+    sessionId ? (s.sessions[sessionId] ?? null) : null
   );
 
   const addMessage = useChatStore((s) => s.addMessage);
@@ -264,6 +409,10 @@ export function useScopedChat(sessionId: string | null) {
   const setSessionModel = useChatStore((s) => s.setSessionModel);
   const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
+  const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
+  const clearStreamingAssistant = useChatStore(
+    (s) => s.clearStreamingAssistant
+  );
 
   // Track the Claude backend session ID for event filtering
   const claudeSessionIdRef = useRef<string | null>(null);
@@ -394,7 +543,12 @@ export function useScopedChat(sessionId: string | null) {
           event.payload,
           claudeSessionIdRef.current,
           sessionId,
-          markSessionClosed
+          setSessionLifecycle,
+          clearStreamingAssistant,
+          setClaudeSessionId,
+          (id) => {
+            claudeSessionIdRef.current = id;
+          }
         );
       });
       if (isCancelled) {
@@ -408,7 +562,9 @@ export function useScopedChat(sessionId: string | null) {
           event.payload,
           claudeSessionIdRef.current,
           sessionId,
-          addMessage
+          addMessage,
+          setSessionLifecycle,
+          clearStreamingAssistant
         );
       });
       if (isCancelled) {
@@ -432,7 +588,9 @@ export function useScopedChat(sessionId: string | null) {
     setClaudeConversationId,
     setSessionModel,
     setSessionUsage,
-    markSessionClosed,
+    setSessionLifecycle,
+    setClaudeSessionId,
+    clearStreamingAssistant,
   ]);
 
   /**
@@ -441,6 +599,13 @@ export function useScopedChat(sessionId: string | null) {
   const startSession = useCallback(
     async (userMessage?: string) => {
       if (!session || !sessionId) return;
+      const lifecycle = getLocalChatLifecycle(session);
+      if (
+        isLocalChatLifecycleBusy(lifecycle) ||
+        (session.claudeSessionId && lifecycle !== "error")
+      ) {
+        return;
+      }
 
       await doStartSession(
         session,
@@ -452,11 +617,19 @@ export function useScopedChat(sessionId: string | null) {
           },
           setContextSummary,
           addMessage,
+          setSessionLifecycle,
         },
         userMessage
       );
     },
-    [session, sessionId, addMessage, setClaudeSessionId, setContextSummary]
+    [
+      session,
+      sessionId,
+      addMessage,
+      setClaudeSessionId,
+      setContextSummary,
+      setSessionLifecycle,
+    ]
   );
 
   /**
@@ -466,30 +639,51 @@ export function useScopedChat(sessionId: string | null) {
     async (content: string) => {
       if (!session?.claudeSessionId || !sessionId) return;
 
-      await doSendMessage(
-        session.claudeSessionId,
-        sessionId,
-        content,
-        addMessage
-      );
+      await doSendMessage(session.claudeSessionId, sessionId, content, {
+        addMessage,
+        setSessionLifecycle,
+        setClaudeSessionId,
+        setClaudeSessionIdRef: (id) => {
+          claudeSessionIdRef.current = id;
+        },
+      });
     },
-    [session?.claudeSessionId, sessionId, addMessage]
+    [
+      session?.claudeSessionId,
+      sessionId,
+      addMessage,
+      setSessionLifecycle,
+      setClaudeSessionId,
+    ]
   );
 
   /**
    * Close the Claude CLI session.
    */
   const closeClaudeSession = useCallback(async () => {
-    if (!session?.claudeSessionId) return;
-    await doCloseSession(
-      session.claudeSessionId,
-      sessionId,
-      markSessionClosed
-    );
-  }, [session?.claudeSessionId, sessionId, markSessionClosed]);
+    if (!session?.claudeSessionId) return true;
+    return doCloseSession(session.claudeSessionId, sessionId, {
+      markSessionClosed,
+      setSessionLifecycle,
+      setClaudeSessionId,
+      setClaudeSessionIdRef: (id) => {
+        claudeSessionIdRef.current = id;
+      },
+    });
+  }, [
+    session?.claudeSessionId,
+    sessionId,
+    markSessionClosed,
+    setSessionLifecycle,
+    setClaudeSessionId,
+  ]);
 
   const isActive =
-    session?.status === "open" && session?.claudeSessionId !== null;
+    session?.status === "open" &&
+    session?.claudeSessionId !== null &&
+    session.lifecycle !== "closing" &&
+    session.lifecycle !== "closed" &&
+    session.lifecycle !== "error";
 
   return {
     session,

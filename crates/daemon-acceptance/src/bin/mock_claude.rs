@@ -12,6 +12,10 @@
 //! `cwd.txt` to that directory on startup so tests can assert on how the daemon
 //! invoked the CLI. The envelope prompt is not required for capture, which lets
 //! scenarios exercise the daemon's empty-prompt fallback.
+//!
+//! When invoked without `-p` and with `--input-format stream-json`, it also
+//! serves the GUI local-chat acceptance path by reading stdin prompts and
+//! emitting Claude `stream-json` stdout events.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
@@ -28,7 +32,7 @@ fn main() -> ExitCode {
     let prompt = extract_prompt(&args);
     // Empty-prompt fallback sends `-p "Execute step"` — not an envelope. Skip
     // streaming and sleeping in that case; capture alone is enough.
-    if let Some(envelope) = parse_envelope(prompt) {
+    if let Some(envelope) = prompt.and_then(parse_envelope) {
         let mock_dir =
             PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
 
@@ -44,6 +48,8 @@ fn main() -> ExitCode {
         }
 
         ExitCode::from(envelope.exit_code as u8)
+    } else if prompt.is_none() && uses_stdin_stream_json(&args) {
+        run_stdin_stream_json()
     } else {
         ExitCode::from(0)
     }
@@ -65,18 +71,18 @@ struct Envelope {
     stderr_file: Option<String>,
 }
 
-fn extract_prompt(args: &[String]) -> &str {
+fn extract_prompt(args: &[String]) -> Option<&str> {
     let mut iter = args.iter();
     iter.next();
     while let Some(arg) = iter.next() {
         if arg == "-p" || arg == "--prompt" {
-            return iter.next().expect("-p requires a value").as_str();
+            return Some(iter.next().expect("-p requires a value").as_str());
         }
         if let Some(rest) = arg.strip_prefix("--prompt=") {
-            return rest;
+            return Some(rest);
         }
     }
-    panic!("no '-p <envelope-json>' argument found in {args:?}");
+    None
 }
 
 /// Returns `None` if the prompt is not a JSON object (e.g. the empty-prompt
@@ -102,6 +108,123 @@ fn parse_envelope(raw: &str) -> Option<Envelope> {
         stdout_file: optional_string(obj, "stdout_file"),
         stderr_file: optional_string(obj, "stderr_file"),
     })
+}
+
+fn uses_stdin_stream_json(args: &[String]) -> bool {
+    has_arg_value(args, "--input-format", "stream-json")
+        && has_arg_value(args, "--output-format", "stream-json")
+}
+
+fn has_arg_value(args: &[String], flag: &str, value: &str) -> bool {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == flag {
+            if iter.next().is_some_and(|next| next == value) {
+                return true;
+            }
+        } else if arg == &format!("{flag}={value}") {
+            return true;
+        }
+    }
+    false
+}
+
+fn run_stdin_stream_json() -> ExitCode {
+    let mut first_message = String::new();
+    match std::io::stdin().lock().read_line(&mut first_message) {
+        Ok(0) => return ExitCode::from(0),
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("mock-claude: failed to read stdin stream-json: {err}");
+            return ExitCode::from(1);
+        }
+    }
+
+    let session_id = session_id_from_input(&first_message)
+        .or_else(|| std::env::var("VTB_CLAUDE_SESSION_ID").ok())
+        .unwrap_or_else(|| "mock-gui-session".to_string());
+    let response = std::env::var("MOCK_STDIN_ASSISTANT_MESSAGE")
+        .unwrap_or_else(|_| "local-chat-acceptance reply".to_string());
+    let (first_delta, second_delta) = response
+        .split_once(' ')
+        .map(|(first, rest)| (format!("{first} "), rest.to_string()))
+        .unwrap_or_else(|| (response.clone(), String::new()));
+
+    write_json_line(serde_json::json!({
+        "type": "system",
+        "subtype": "init",
+        "session_id": "conv-gui-local",
+        "model": "claude-sonnet-4",
+        "tools": []
+    }));
+    write_json_line(serde_json::json!({
+        "type": "content_block_delta",
+        "delta": {
+            "type": "text_delta",
+            "text": first_delta
+        }
+    }));
+    if !second_delta.is_empty() {
+        std::thread::sleep(Duration::from_millis(25));
+        write_json_line(serde_json::json!({
+            "type": "content_block_delta",
+            "delta": {
+                "type": "text_delta",
+                "text": second_delta
+            }
+        }));
+    }
+    write_json_line(serde_json::json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "model": "claude-sonnet-4",
+            "usage": {
+                "input_tokens": 42,
+                "output_tokens": 7
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": response
+                }
+            ]
+        }
+    }));
+    write_json_line(serde_json::json!({
+        "type": "result",
+        "subtype": "success",
+        "session_id": session_id,
+        "duration_ms": 25,
+        "total_cost_usd": 0.0,
+        "is_error": false,
+        "result": "done",
+        "num_turns": 1,
+        "modelUsage": {
+            "claude-sonnet-4": {
+                "inputTokens": 42,
+                "outputTokens": 7,
+                "contextWindow": 200000
+            }
+        }
+    }));
+
+    ExitCode::from(0)
+}
+
+fn session_id_from_input(line: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()?
+        .get("session_id")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+fn write_json_line(value: serde_json::Value) {
+    let mut stdout = std::io::stdout().lock();
+    serde_json::to_writer(&mut stdout, &value).expect("write stream-json event");
+    stdout.write_all(b"\n").expect("write stream-json newline");
+    stdout.flush().expect("flush stream-json event");
 }
 
 fn optional_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {

@@ -29,13 +29,19 @@ export function FloatingChatLauncher() {
   // panelOpen from the store at call time so it works from the key handler too.
   const toggleChat = useCallback(() => {
     const state = useChatStore.getState();
+    const isReusableSession = (
+      session: (typeof state.sessions)[string]
+    ): boolean => session.status === "open" && session.lifecycle !== "closed";
+    const activeSession = state.activeSessionId
+      ? state.sessions[state.activeSessionId]
+      : null;
     if (state.panelOpen) {
       togglePanel();
-    } else if (state.activeSessionId && state.sessions[state.activeSessionId]) {
+    } else if (activeSession && isReusableSession(activeSession)) {
       setPanelOpen(true);
     } else {
       const session = Object.values(state.sessions).find(
-        (s) => s.status === "open"
+        (s) => isReusableSession(s)
       );
       if (session) {
         focusSession(session.id);
@@ -70,6 +76,7 @@ export function FloatingChatLauncher() {
     <button
       type="button"
       className="hc-launch"
+      data-testid="local-chat-launcher"
       onClick={toggleChat}
       title="Open project chat (⌥ ⌥)"
       aria-label="Open project chat"

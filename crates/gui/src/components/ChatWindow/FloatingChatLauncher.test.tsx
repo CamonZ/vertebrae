@@ -65,6 +65,30 @@ describe("FloatingChatLauncher", () => {
     expect(Object.values(useChatStore.getState().sessions)).toHaveLength(1);
   });
 
+  it("does not reopen a locally closed active session", async () => {
+    const user = userEvent.setup();
+    const closedId = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task Chat");
+    useChatStore.getState().markSessionClosed(closedId);
+    useChatStore.setState({
+      activeSessionId: closedId,
+      panelOpen: false,
+    });
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    expect(useChatStore.getState().activeSessionId).not.toBe(closedId);
+    const projectSession = Object.values(useChatStore.getState().sessions).find(
+      (s) => s.scope === "project"
+    );
+    expect(projectSession).toBeDefined();
+    expect(useChatStore.getState().sessions[closedId].lifecycle).toBe("closed");
+  });
+
   it("hides itself once the panel is open (panel owns the anchor)", () => {
     useChatStore.setState({ panelOpen: true });
     render(<FloatingChatLauncher />);

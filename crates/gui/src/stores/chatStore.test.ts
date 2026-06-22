@@ -32,6 +32,8 @@ describe("chatStore", () => {
       expect(session.messages).toEqual([]);
       expect(session.status).toBe("open");
       expect(session.claudeSessionId).toBeNull();
+      expect(session.lifecycle).toBe("idle");
+      expect(session.streamingAssistant).toBeNull();
     });
 
     it("sets the new session as active and opens the panel", () => {
@@ -202,10 +204,11 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[reopened].label).toBe("Repo B");
     });
 
-    it("does not hydrate a closed persisted session for scope reopen", () => {
+    it("hydrates a locally closed session so it can resume", () => {
       const id = useChatStore
         .getState()
         .openSession("task", "task-1", "Task One", "/repo/root");
+      useChatStore.getState().setClaudeConversationId(id, "conv-closed");
       useChatStore.getState().markSessionClosed(id);
       useChatStore.setState({
         sessions: {},
@@ -217,11 +220,13 @@ describe("chatStore", () => {
         .getState()
         .openSession("task", "task-1", "Task One", "/repo/root");
 
-      expect(reopened).not.toBe(id);
+      expect(reopened).toBe(id);
       expect(useChatStore.getState().sessions[reopened]).toMatchObject({
         scope: "task",
         entityId: "task-1",
         status: "open",
+        lifecycle: "closed",
+        claudeConversationId: "conv-closed",
       });
     });
   });
@@ -351,17 +356,16 @@ describe("chatStore", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
     });
 
-    it("creates new partial message when session has no messages", () => {
+    it("stores partial text in the ephemeral streaming overlay", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
 
       useChatStore.getState().updateLastAssistantMessage(id, "Start");
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.messages).toHaveLength(1);
-      expect(session.messages[0]).toMatchObject({
-        kind: "assistant",
+      expect(session.messages).toEqual([]);
+      expect(session.lifecycle).toBe("streaming");
+      expect(session.streamingAssistant).toMatchObject({
         text: "Start",
-        isPartial: true,
       });
     });
 
@@ -372,32 +376,28 @@ describe("chatStore", () => {
 
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
-      expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
+      expect(
+        useChatStore.getState().sessions[id].streamingAssistant?.text
+      ).toBe("partial");
       expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
-    it("appends text to existing partial assistant message", () => {
+    it("does not leak partial overlay text when metadata persists mid-stream", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
 
-      useChatStore.getState().addMessage(id, {
-        kind: "assistant",
-        text: "Hel",
-        timestamp: "2024-01-01T00:00:00Z",
-        isPartial: true,
-      });
-
+      useChatStore.getState().updateLastAssistantMessage(id, "Hel");
       useChatStore.getState().updateLastAssistantMessage(id, "lo");
+      useChatStore
+        .getState()
+        .setSessionUsage(id, "claude-sonnet-4", { used: 10, max: 200000 });
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.messages).toHaveLength(1);
-      expect(session.messages[0]).toMatchObject({
-        kind: "assistant",
-        text: "Hello",
-        isPartial: true,
-      });
+      expect(session.streamingAssistant?.text).toBe("Hello");
+      expect(session.messages).toEqual([]);
+      expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
-    it("creates new partial message when last message is not assistant", () => {
+    it("keeps durable user messages separate from the streaming overlay", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
 
       useChatStore.getState().addMessage(id, {
@@ -409,12 +409,40 @@ describe("chatStore", () => {
       useChatStore.getState().updateLastAssistantMessage(id, "Answer");
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.messages).toHaveLength(2);
-      expect(session.messages[1]).toMatchObject({
-        kind: "assistant",
-        text: "Answer",
-        isPartial: true,
-      });
+      expect(session.messages).toEqual([
+        {
+          kind: "user",
+          text: "Question",
+          timestamp: "2024-01-01T00:00:00Z",
+        },
+      ]);
+      expect(session.streamingAssistant?.text).toBe("Answer");
+    });
+
+    it("can commit an interrupted streaming overlay as one durable assistant message", () => {
+      const id = useChatStore
+        .getState()
+        .openSession("task", "t-1", "T1", "/repo/root");
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Partial answer");
+      useChatStore.getState().clearStreamingAssistant(id, true);
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant).toBeNull();
+      expect(session.messages).toMatchObject([
+        {
+          kind: "assistant",
+          text: "Partial answer",
+          isPartial: false,
+        },
+      ]);
+      expect(loadPersistedLocalChatSession(id)?.messages).toMatchObject([
+        {
+          kind: "assistant",
+          text: "Partial answer",
+          isPartial: false,
+        },
+      ]);
     });
   });
 
@@ -656,27 +684,43 @@ describe("chatStore", () => {
   });
 
   describe("markSessionClosed", () => {
-    it("sets session status to closed", () => {
+    it("sets local lifecycle to closed without deleting the session", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().setClaudeSessionId(id, "backend-1");
 
       useChatStore.getState().markSessionClosed(id);
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.status).toBe("closed");
+      expect(session.status).toBe("open");
+      expect(session.lifecycle).toBe("closed");
+      expect(session.claudeSessionId).toBeNull();
     });
 
-    it("removes durable resume state when a session closes", () => {
+    it("preserves durable resume state when a backend session closes", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "Hello",
         timestamp: "2024-01-01T00:00:00Z",
       });
+      useChatStore.getState().setClaudeConversationId(id, "conv-keep");
       expect(loadPersistedLocalChatSession(id)).not.toBeNull();
 
       useChatStore.getState().markSessionClosed(id);
 
-      expect(loadPersistedLocalChatSession(id)).toBeNull();
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        id,
+        lifecycle: "closed",
+        claudeSessionId: null,
+        claudeConversationId: "conv-keep",
+        messages: [
+          {
+            kind: "user",
+            text: "Hello",
+            timestamp: "2024-01-01T00:00:00Z",
+          },
+        ],
+      });
     });
 
     it("does nothing for non-existent session", () => {
@@ -823,12 +867,12 @@ describe("chatStore", () => {
       expect(found).toBeNull();
     });
 
-    it("does not find closed sessions", () => {
+    it("finds locally closed sessions because they are resumable", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");
       useChatStore.getState().markSessionClosed(id);
 
       const found = useChatStore.getState().findSession("task", "t-1");
-      expect(found).toBeNull();
+      expect(found).toBe(id);
     });
   });
 });

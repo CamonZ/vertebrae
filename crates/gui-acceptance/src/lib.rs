@@ -37,13 +37,32 @@ pub async fn webdriver() -> Arc<Mutex<Client>> {
             let gui_binary = std::env::var("GUI_BINARY").unwrap_or_else(|_| GUI_BINARY.to_string());
 
             let display = std::env::var("DISPLAY").unwrap_or_else(|_| ":99".to_string());
+            let claude_code_path = std::env::var("CLAUDE_CODE_PATH")
+                .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
+            let mock_output_dir =
+                std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string());
+
+            let mut app_env = serde_json::Map::new();
+            app_env.insert("DISPLAY".to_string(), serde_json::Value::String(display));
+            app_env.insert(
+                "CLAUDE_CODE_PATH".to_string(),
+                serde_json::Value::String(claude_code_path),
+            );
+            app_env.insert(
+                "MOCK_OUTPUT_DIR".to_string(),
+                serde_json::Value::String(mock_output_dir),
+            );
+            if let Ok(vtb_gate_path) = std::env::var("VTB_GATE_PATH") {
+                app_env.insert(
+                    "VTB_GATE_PATH".to_string(),
+                    serde_json::Value::String(vtb_gate_path),
+                );
+            }
 
             let capabilities = serde_json::json!({
                 "tauri:options": {
                     "application": gui_binary,
-                    "env": {
-                        "DISPLAY": display
-                    }
+                    "env": app_env
                 }
             });
 

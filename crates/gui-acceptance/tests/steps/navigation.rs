@@ -875,6 +875,7 @@ async fn press_key(world: &mut GuiWorld, key_name: String) {
     let client = wd.lock().await;
 
     let key = match key_name.as_str() {
+        "Enter" => "\u{E007}",
         "slash" => "/",
         "j" => "j",
         "k" => "k",

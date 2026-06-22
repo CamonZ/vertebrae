@@ -59,6 +59,21 @@ export type ChatMessage =
  */
 export type ChatScope = "project" | "workflow" | "task" | "step";
 
+export type LocalChatLifecycle =
+  | "idle"
+  | "starting"
+  | "resuming"
+  | "sending"
+  | "streaming"
+  | "closing"
+  | "closed"
+  | "error";
+
+export interface StreamingAssistantMessage {
+  text: string;
+  timestamp: string;
+}
+
 /**
  * Scope hierarchy for widening. Each scope can widen to the next level up.
  */
@@ -99,6 +114,12 @@ export interface ChatSession {
   tokenUsage?: { used: number; max: number };
   /** Whether this session is detached into a standalone pop-out window */
   isDetached?: boolean;
+  /** Runtime-only local chat lifecycle state */
+  lifecycle?: LocalChatLifecycle;
+  /** Runtime-only error detail for the current lifecycle state */
+  lifecycleError?: string | null;
+  /** Ephemeral assistant text currently streaming; not durable transcript state */
+  streamingAssistant?: StreamingAssistantMessage | null;
 }
 
 interface ChatStoreState {
@@ -128,6 +149,17 @@ interface ChatStoreActions {
   updateLastAssistantMessage: (sessionId: string, text: string) => void;
   /** Finalize the last partial assistant message */
   finalizeLastAssistantMessage: (sessionId: string, text: string) => void;
+  /** Set explicit local lifecycle state */
+  setSessionLifecycle: (
+    sessionId: string,
+    lifecycle: LocalChatLifecycle,
+    errorMessage?: string | null
+  ) => void;
+  /** Clear any ephemeral assistant stream overlay */
+  clearStreamingAssistant: (
+    sessionId: string,
+    commitToMessages?: boolean
+  ) => void;
   /** Set the Claude backend session ID */
   setClaudeSessionId: (
     sessionId: string,
@@ -200,6 +232,26 @@ function generateSessionId(): string {
  */
 export function getParentScope(scope: ChatScope): ChatScope | null {
   return SCOPE_HIERARCHY[scope];
+}
+
+export function getLocalChatLifecycle(
+  session: ChatSession | null | undefined
+): LocalChatLifecycle {
+  if (!session) return "idle";
+  if (session.lifecycle) return session.lifecycle;
+  return "idle";
+}
+
+export function isLocalChatLifecycleBusy(
+  lifecycle: LocalChatLifecycle
+): boolean {
+  return (
+    lifecycle === "starting" ||
+    lifecycle === "resuming" ||
+    lifecycle === "sending" ||
+    lifecycle === "streaming" ||
+    lifecycle === "closing"
+  );
 }
 
 function findMatchingSession(
@@ -275,6 +327,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
           isDetached: false,
+          lifecycle: persisted.lifecycle ?? "idle",
+          lifecycleError: null,
+          streamingAssistant: null,
         };
         set((state) => ({
           sessions: { ...state.sessions, [hydrated.id]: hydrated },
@@ -296,6 +351,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         claudeConversationId: null,
         contextSummary: null,
         projectPath,
+        lifecycle: "idle",
+        lifecycleError: null,
+        streamingAssistant: null,
       };
 
       persistLocalChatSession(session);
@@ -345,19 +403,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(
         sessionId,
         (session) => {
-          const messages = [...session.messages];
-          const last = messages[messages.length - 1];
-          if (last?.kind === "assistant" && last.isPartial) {
-            messages[messages.length - 1] = { ...last, text: last.text + text };
-          } else {
-            messages.push({
-              kind: "assistant",
-              text,
-              timestamp: new Date().toISOString(),
-              isPartial: true,
-            });
-          }
-          return { ...session, messages };
+          if (!text) return session;
+          const current = session.streamingAssistant;
+          return {
+            ...session,
+            lifecycle: "streaming",
+            lifecycleError: null,
+            streamingAssistant: {
+              text: `${current?.text ?? ""}${text}`,
+              timestamp: current?.timestamp ?? new Date().toISOString(),
+            },
+          };
         },
         { persist: false }
       );
@@ -381,8 +437,65 @@ export const useChatStore = create<ChatStore>((set, get) => {
             isPartial: false,
           });
         }
-        return { ...session, messages };
+        return {
+          ...session,
+          messages,
+          lifecycle: "idle",
+          lifecycleError: null,
+          streamingAssistant: null,
+        };
       });
+    },
+
+    setSessionLifecycle: (sessionId, lifecycle, errorMessage = null) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const normalizedError =
+            lifecycle === "error"
+              ? (errorMessage ?? "Claude session failed")
+              : null;
+          if (
+            getLocalChatLifecycle(session) === lifecycle &&
+            (session.lifecycleError ?? null) === normalizedError
+          ) {
+            return session;
+          }
+          return {
+            ...session,
+            lifecycle,
+            lifecycleError: normalizedError,
+          };
+        },
+        { persist: false }
+      );
+    },
+
+    clearStreamingAssistant: (sessionId, commitToMessages = false) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const streaming = session.streamingAssistant;
+          if (!streaming) return session;
+          return {
+            ...session,
+            messages:
+              commitToMessages && streaming.text
+                ? [
+                    ...session.messages,
+                    {
+                      kind: "assistant" as const,
+                      text: streaming.text,
+                      timestamp: streaming.timestamp,
+                      isPartial: false,
+                    },
+                  ]
+                : session.messages,
+            streamingAssistant: null,
+          };
+        },
+        { persist: commitToMessages }
+      );
     },
 
     setClaudeSessionId: (sessionId, claudeSessionId) => {
@@ -438,15 +551,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     markSessionClosed: (sessionId) => {
       if (!get().sessions[sessionId]) return;
-      removePersistedLocalChatSession(sessionId);
-      updateSession(
-        sessionId,
-        (session) => ({
-          ...session,
-          status: "closed" as const,
-        }),
-        { persist: false }
-      );
+      updateSession(sessionId, (session) => ({
+        ...session,
+        status: "open" as const,
+        claudeSessionId: null,
+        lifecycle: "closed",
+        lifecycleError: null,
+        streamingAssistant: null,
+      }));
     },
 
     clearMessages: (sessionId) => {
@@ -469,6 +581,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
               model: undefined,
               tokenUsage: undefined,
               status: "open",
+              lifecycle: "idle",
+              lifecycleError: null,
+              streamingAssistant: null,
             },
           },
         };
