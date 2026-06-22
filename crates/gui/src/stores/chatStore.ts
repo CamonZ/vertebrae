@@ -110,7 +110,7 @@ export interface ChatSession {
   projectPath?: string | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
   model?: string;
-  /** Latest per-turn context utilization for the badge */
+  /** Latest per-turn current request input-context utilization for the badge */
   tokenUsage?: { used: number; max: number };
   /** Whether this session is detached into a standalone pop-out window */
   isDetached?: boolean;
@@ -174,7 +174,7 @@ interface ChatStoreActions {
   setContextSummary: (sessionId: string, summary: string) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
-  /** Set the latest per-turn context utilization */
+  /** Set the latest per-turn current request input-context utilization */
   setSessionTokenUsage: (
     sessionId: string,
     usage: { used: number; max: number }

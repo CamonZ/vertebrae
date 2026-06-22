@@ -1229,11 +1229,11 @@ describe("ChatWindow", () => {
 
   // --- G) Context fill bar ---
 
-  it("fills the context bar to the utilization percentage", () => {
+  it("fills the context bar to the input-context utilization percentage", () => {
     const session = createSession({
       claudeSessionId: "claude-abc",
       model: "claude-sonnet-4.5",
-      tokenUsage: { used: 50, max: 100 },
+      tokenUsage: { used: 100_050, max: 200_000 },
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1246,5 +1246,34 @@ describe("ChatWindow", () => {
     const fill = screen.getByTestId("chat-context-fill");
     expect(fill).toHaveStyle({ width: "50%" });
     expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(
+        "100,050 / 200,000 current request input context tokens"
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("clamps the context bar at 100% when input context exceeds the max window", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      model: "claude-sonnet-4.5",
+      tokenUsage: { used: 250_000, max: 200_000 },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const fill = screen.getByTestId("chat-context-fill");
+    expect(fill).toHaveStyle({ width: "100%" });
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(
+        "250,000 / 200,000 current request input context tokens"
+      )
+    ).toBeInTheDocument();
   });
 });

@@ -1072,11 +1072,13 @@ export type ClaudePermissionRequestEvent = { session_id: string; tool_name: stri
  */
 export type ClaudeSessionEndEvent = { session_id: string; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; 
 /**
- * Total tokens used in context (input + cache)
+ * Sum of per-model input contexts from result model usage (input + cache,
+ * excluding output). This is a session summary and may exceed any single
+ * model's context window.
  */
 context_tokens: number; 
 /**
- * Maximum context window size
+ * Maximum reported model context window size
  */
 context_window: number }
 /**
@@ -1096,12 +1098,13 @@ export type ClaudeSessionInitEvent = { session_id: string;
  */
 claude_conversation_id: string | null; model: string; tools: string[] }
 /**
- * Event emitted after each assistant message with the latest context-size figure.
+ * Event emitted after each assistant message with the latest input-context figure.
  * 
- * `context_tokens` is the non-cached input token count for the most recent
- * assistant turn — the source of truth for "how full is the context window".
- * Cache reads, cache creation, and output tokens are cost signals and are
- * intentionally excluded.
+ * `context_tokens` is the total request input for the most recent assistant
+ * turn: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.
+ * This is the source of truth for the chat badge's current request context
+ * occupancy. Output tokens are excluded because they are response tokens, not
+ * request input.
  */
 export type ClaudeSessionUsageEvent = { session_id: string; 
 /**
@@ -1109,7 +1112,7 @@ export type ClaudeSessionUsageEvent = { session_id: string;
  */
 model: string; 
 /**
- * Non-cached input tokens for the latest assistant turn
+ * Current request input-context tokens for the latest assistant turn
  */
 context_tokens: number; 
 /**

@@ -109,13 +109,13 @@ describe("handleInitEvent", () => {
 });
 
 describe("handleUsageEvent", () => {
-  it("computes max from frontend lookup table for opus 4.7 and calls setSessionUsage", () => {
+  it("stores cached-token-inclusive input context and computes max from the frontend lookup table", () => {
     const setUsage = vi.fn();
     handleUsageEvent(
       {
         session_id: CLAUDE_SESSION_ID,
         model: "claude-opus-4-7-20250115",
-        context_tokens: 142_000,
+        context_tokens: 100_050,
         // Backend reports 200k fallback — should be overridden by lookup table.
         context_window: 200_000,
       },
@@ -127,7 +127,7 @@ describe("handleUsageEvent", () => {
       SESSION_ID,
       "claude-opus-4-7-20250115",
       {
-        used: 142_000,
+        used: 100_050,
         max: 1_000_000,
       }
     );
@@ -432,6 +432,55 @@ describe("handleEndEvent", () => {
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
     expect(setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
     expect(setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
+  });
+
+  it("leaves token usage unchanged when session-end summary reports different context tokens", () => {
+    let tokenUsage: { used: number; max: number } | undefined;
+    const setUsage = vi.fn(
+      (
+        _sessionId: string,
+        _model: string,
+        usage: { used: number; max: number }
+      ) => {
+        tokenUsage = usage;
+      }
+    );
+
+    handleUsageEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        model: "claude-sonnet-4.5",
+        context_tokens: 100_050,
+        context_window: 200_000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setUsage
+    );
+
+    const setLifecycle = vi.fn();
+    handleEndEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        duration_ms: 1000,
+        cost_usd: 0.01,
+        num_turns: 5,
+        result: "success",
+        is_error: false,
+        context_tokens: 1,
+        context_window: 1,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setLifecycle,
+      vi.fn(),
+      vi.fn(),
+      vi.fn()
+    );
+
+    expect(setUsage).toHaveBeenCalledOnce();
+    expect(tokenUsage).toEqual({ used: 100_050, max: 200_000 });
     expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
   });
 

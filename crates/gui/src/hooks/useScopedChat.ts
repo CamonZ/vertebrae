@@ -65,7 +65,9 @@ export function handleInitEvent(
   }
 }
 
-// Frontend lookup table wins for per-model maxes; see modelContextWindow.ts.
+// Usage events carry current request input-context tokens (input + cache read
+// + cache creation). Frontend lookup table wins for per-model maxes; see
+// modelContextWindow.ts.
 export function handleUsageEvent(
   payload: ClaudeSessionUsageEvent,
   claudeSessionId: string | null,
@@ -182,6 +184,8 @@ export function handleEndEvent(
   setClaudeSessionIdRef: (backendId: string | null) => void
 ) {
   if (payload.session_id !== claudeSessionId) return;
+  // Session-end modelUsage is a session summary, not the per-turn request
+  // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
   setClaudeSessionId(sessionId, null);
   setClaudeSessionIdRef(null);
