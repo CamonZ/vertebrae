@@ -241,6 +241,10 @@ struct ClaudeMessage {
     model: Option<String>,
     tools: Option<Vec<String>>,
     message: Option<ClaudeMessageContent>,
+    // Present on sub-agent (sidechain) messages spawned by a Task tool call.
+    // Those runs have their own independent context, so their usage must not
+    // drive the main conversation's context-utilization meter.
+    parent_tool_use_id: Option<String>,
     // Result fields
     duration_ms: Option<u32>,
     num_turns: Option<u32>,
@@ -258,45 +262,29 @@ struct ClaudeMessage {
     event: Option<StreamEvent>,
 }
 
-/// Usage statistics per model from the result message
+/// Usage statistics per model from the result message.
+///
+/// Only `contextWindow` is retained: the token counts here are cumulative
+/// session totals (summed across every internal iteration), so they cannot
+/// represent a point-in-time context size. See [`model_usage_context_window`].
 #[derive(Debug, Deserialize)]
 struct ModelUsageStats {
-    #[serde(rename = "inputTokens")]
-    input_tokens: Option<u32>,
-    #[serde(rename = "outputTokens")]
-    output_tokens: Option<u32>,
-    #[serde(rename = "cacheReadInputTokens")]
-    cache_read_input_tokens: Option<u32>,
-    #[serde(rename = "cacheCreationInputTokens")]
-    cache_creation_input_tokens: Option<u32>,
     #[serde(rename = "contextWindow")]
     context_window: Option<u32>,
 }
 
-impl ModelUsageStats {
-    fn input_context_tokens(&self) -> u32 {
-        input_context_tokens(
-            self.input_tokens,
-            self.cache_read_input_tokens,
-            self.cache_creation_input_tokens,
-        )
-    }
-}
-
-fn aggregate_model_usage_context(usage: &HashMap<String, ModelUsageStats>) -> (u32, u32) {
-    // Session-end modelUsage is a whole-session summary. If multiple models
-    // participated, sum their input contexts and pair that with the largest
-    // reported window for deterministic diagnostics.
-    let context_tokens = usage.values().fold(0u32, |total, stats| {
-        total.saturating_add(stats.input_context_tokens())
-    });
-    let context_window = usage
+fn model_usage_context_window(usage: &HashMap<String, ModelUsageStats>) -> u32 {
+    // Session-end `modelUsage` is a CUMULATIVE summary: its cache counters are
+    // summed across every internal iteration (including sub-agents), so they
+    // routinely exceed the context window and cannot represent a point-in-time
+    // context size. The per-turn Usage events (message_start/assistant/
+    // message_delta) are the source of truth for the meter. Here we only
+    // surface the model's context window — the one field that is meaningful.
+    usage
         .values()
         .filter_map(|stats| stats.context_window)
         .max()
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
-
-    (context_tokens, context_window)
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW)
 }
 
 pub fn supported_claude_model_catalog() -> ClaudeModelCatalog {
@@ -407,6 +395,7 @@ struct StreamEvent {
     index: Option<u32>,
     delta: Option<ContentDelta>,
     content_block: Option<ContentBlock>,
+    usage: Option<AssistantUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1323,7 +1312,7 @@ impl ClaudeSessionManager {
                     log::info!(
                         "[Claude JSONL] session={} msg={}",
                         &session_id[..8.min(session_id.len())],
-                        truncate_utf8(&line, 200)
+                        &line
                     );
 
                     if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
@@ -1332,10 +1321,7 @@ impl ClaudeSessionManager {
                             on_events(events);
                         }
                     } else {
-                        log::warn!(
-                            "[Claude JSONL] Failed to parse: {}",
-                            truncate_utf8(&line, 100)
-                        );
+                        log::warn!("[Claude JSONL] Failed to parse: {}", &line);
                     }
                 }
                 Err(e) => {
@@ -1379,6 +1365,10 @@ impl ClaudeSessionManager {
     fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
         let mut events = Vec::new();
 
+        // Sub-agent (sidechain) messages carry their own context lineage; their
+        // usage must not overwrite the main conversation's context meter.
+        let is_sidechain = msg.parent_tool_use_id.is_some();
+
         match msg.msg_type.as_str() {
             "system" if msg.subtype.as_deref() == Some("init") => {
                 events.push(EmittedEvent::Init(ClaudeSessionInitEvent {
@@ -1403,6 +1393,16 @@ impl ClaudeSessionManager {
                                     }));
                                 }
                             }
+                        }
+                    } else if event.event_type == "message_delta" && !is_sidechain {
+                        if let Some(usage) = event.usage {
+                            let context_tokens = usage.input_context_tokens();
+                            events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
+                                session_id: session_id.to_string(),
+                                model: msg.model.clone().unwrap_or_default(),
+                                context_tokens,
+                                context_window: DEFAULT_CONTEXT_WINDOW,
+                            }));
                         }
                     }
                 }
@@ -1433,8 +1433,10 @@ impl ClaudeSessionManager {
             "assistant" => {
                 if let Some(message) = msg.message {
                     // Emit a per-turn usage event so the UI badge updates
-                    // mid-conversation, not only at session_end.
-                    if let Some(usage) = message.usage.as_ref() {
+                    // mid-conversation, not only at session_end. Skip sidechain
+                    // (sub-agent) turns: their context is independent of the
+                    // main conversation and would make the meter lurch.
+                    if let Some(usage) = message.usage.as_ref().filter(|_| !is_sidechain) {
                         let context_tokens = usage.input_context_tokens();
                         events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
                             session_id: session_id.to_string(),
@@ -1498,12 +1500,16 @@ impl ClaudeSessionManager {
                 }
             }
             "result" => {
-                // Extract context usage from modelUsage if available
-                let (context_tokens, context_window) = msg
+                // `modelUsage` is a cumulative session summary, not a
+                // point-in-time context size, so it cannot drive the meter.
+                // The per-turn Usage events own `context_tokens`; here we only
+                // carry the model's context window.
+                let context_window = msg
                     .model_usage
                     .as_ref()
-                    .map(aggregate_model_usage_context)
-                    .unwrap_or((0, DEFAULT_CONTEXT_WINDOW));
+                    .map(model_usage_context_window)
+                    .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+                let context_tokens = 0;
 
                 events.push(EmittedEvent::SessionEnd(ClaudeSessionEndEvent {
                     session_id: session_id.to_string(),
@@ -2516,6 +2522,39 @@ mod tests {
     }
 
     #[test]
+    fn test_build_events_assistant_sidechain_usage_is_skipped() {
+        // Sub-agent (sidechain) messages carry `parent_tool_use_id` and run
+        // with their own context lineage. Their usage must NOT emit a context
+        // event, or the meter lurches to the sub-agent's (often much smaller,
+        // cache-cold) context size mid-turn.
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_015MUSNfZRk8PAxfmiznzBxt",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-haiku-4-5-20251001",
+                    "content": [{"type": "text", "text": "searching"}],
+                    "usage": {
+                        "input_tokens": 3,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 8415,
+                        "output_tokens": 12
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1, "sidechain usage must not be emitted");
+        assert!(
+            matches!(&events[0], EmittedEvent::Text(_)),
+            "expected only the Text event, got {:?}",
+            events[0]
+        );
+    }
+
+    #[test]
     fn test_build_events_assistant_no_usage_no_event() {
         // When `usage` is absent, no Usage event is emitted.
         let msg = parse_msg(
@@ -2564,8 +2603,10 @@ mod tests {
                 assert_eq!(e.cost_usd, 0.05);
                 assert_eq!(e.result, "Task completed");
                 assert!(!e.is_error);
-                // input + cacheRead + cacheCreation; output is response usage.
-                assert_eq!(e.context_tokens, 1300);
+                // modelUsage is a cumulative session summary, not a usable
+                // point-in-time context size, so SessionEnd reports 0 tokens
+                // and only surfaces the model's context window.
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 200_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
@@ -2616,9 +2657,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_events_result_token_arithmetic() {
-        // Verify input/cache components contribute to the context total while
-        // output tokens stay out of request input-context occupancy.
+    fn test_build_events_result_reports_window_not_cumulative_tokens() {
+        // modelUsage token counts are cumulative session totals, not a
+        // point-in-time context size, so SessionEnd never derives
+        // context_tokens from them — it stays 0 and only the window is carried.
         let msg = parse_msg(
             r#"{
                 "type": "result",
@@ -2637,7 +2679,7 @@ mod tests {
         let events = ClaudeSessionManager::build_events("sess-1", msg);
         match &events[0] {
             EmittedEvent::SessionEnd(e) => {
-                assert_eq!(e.context_tokens, 80);
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 100_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
@@ -2645,7 +2687,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_events_result_model_usage_aggregates_models_deterministically() {
+    fn test_build_events_result_picks_largest_context_window_deterministically() {
+        // With multiple models in modelUsage, the largest reported window wins
+        // (deterministic regardless of HashMap order); context_tokens stays 0.
         let msg = parse_msg(
             r#"{
                 "type": "result",
@@ -2671,7 +2715,7 @@ mod tests {
         let events = ClaudeSessionManager::build_events("sess-1", msg);
         match &events[0] {
             EmittedEvent::SessionEnd(e) => {
-                assert_eq!(e.context_tokens, 660);
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 1_000_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
