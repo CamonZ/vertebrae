@@ -139,10 +139,26 @@
 .ev-tools { display: flex; flex-direction: column; gap: var(--s-1h); margin-bottom: var(--s-2); }
 .ev-tools:empty { display: none; }
 .evprose { font-family: var(--sans); font-size: var(--text-13); line-height: var(--leading-relaxed); color: var(--fg-soft); border-left: 2px solid var(--line-strong); padding-left: var(--s-3); }
+.evprose .markdown-content { display: contents; min-width: 0; font: inherit; font-size: inherit; line-height: inherit; color: inherit; }
+.evprose .markdown-content > :first-child { margin-top: 0; }
+.evprose .markdown-content > :last-child { margin-bottom: 0; }
 .evprose p { margin: 0; }
 .evprose p + p { margin-top: var(--s-2); }
+.evprose .markdown-content p { font-size: inherit; line-height: inherit; color: inherit; }
+.evprose .markdown-content > p:last-child { display: inline; }
+.evprose .markdown-content h1,
+.evprose .markdown-content h2,
+.evprose .markdown-content h3,
+.evprose .markdown-content h4 { margin: var(--s-2) 0 var(--s-1); color: var(--fg); font-size: var(--text-14); line-height: var(--leading-normal); font-weight: 600; }
+.evprose .markdown-content ul,
+.evprose .markdown-content ol { margin: var(--s-1) 0 var(--s-2) var(--s-3); padding-left: var(--s-3); font-size: inherit; line-height: inherit; color: inherit; }
+.evprose .markdown-content li { line-height: inherit; }
+.evprose .markdown-content blockquote { margin: var(--s-2) 0; padding-left: var(--s-2); border-left: 2px solid var(--line-strong); color: var(--fg-mute); font-size: inherit; line-height: inherit; }
+.evprose .markdown-content table { font-size: var(--text-12); }
+.evprose .markdown-content .group { margin: var(--s-2) 0; border-radius: var(--r-sm); }
 .evprose strong { color: var(--fg); font-weight: 600; }
 .evprose code { font-family: var(--mono); font-size: var(--text-12); color: var(--accent); background: var(--accent-wash); padding: 1px var(--s-1); border-radius: var(--r-xs); }
+.evprose .markdown-content .group code { color: inherit; background: transparent; padding: 0; border-radius: 0; }
 .ev-cursor { display: inline-block; width: 7px; height: 14px; background: var(--accent); margin-left: 2px; vertical-align: -2px; box-shadow: 0 0 6px var(--accent-glow); animation: ev-blink 1s step-end infinite; }
 @keyframes ev-blink { 50% { opacity: 0; } }
 

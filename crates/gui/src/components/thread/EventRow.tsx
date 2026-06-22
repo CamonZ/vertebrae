@@ -38,45 +38,22 @@ import type {
   WaitMessage,
 } from "./types";
 
-// ===========================================================================
-// Inline markdown — **bold** · `code` · <code>code</code>
-//
-// Mirrors the prototype's renderMd exactly: a compact INLINE renderer for short
-// agent prose, matching the `.evprose` styling. (The block-level
-// MarkdownContent — big headings, code blocks — is intentionally NOT used for
-// inline prose, to preserve 1:1 visual fidelity with the prototype.) Prose that
-// is already a ReactNode is passed through untouched.
-// ===========================================================================
-
-// eslint-disable-next-line react-refresh/only-export-components -- inline-markdown helper is co-located with its only consumers (the EventRow atoms), matching the prototype's renderMd; it is not a React component.
-export function renderEventMd(text: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  let key = 0;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  const re = /\*\*([^*]+)\*\*|`([^`]+)`|<code>([^<]+)<\/code>/g;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1] != null) {
-      out.push(<strong key={"b" + key++}>{m[1]}</strong>);
-    } else {
-      out.push(<code key={"c" + key++}>{m[2] != null ? m[2] : m[3]}</code>);
-    }
-    last = re.lastIndex;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out;
-}
-
 function LogProse({
   prose,
+  proseFormat = "markdown",
   streaming,
 }: {
   prose?: ReactNode;
+  proseFormat?: AgentMessage["proseFormat"];
   streaming?: boolean;
 }): ReactNode {
   if (prose == null && !streaming) return null;
-  const inner = typeof prose === "string" ? renderEventMd(prose) : prose;
+  const inner =
+    typeof prose === "string" && proseFormat !== "plain" ? (
+      <MarkdownContent text={prose} />
+    ) : (
+      prose
+    );
   return (
     <div className="evprose">
       {inner}
@@ -274,12 +251,14 @@ function AgentBody({
   speaker,
   model,
   prose,
+  proseFormat,
   tools = [],
   streaming,
 }: {
   speaker?: string;
   model?: string;
   prose?: ReactNode;
+  proseFormat?: AgentMessage["proseFormat"];
   tools?: ToolMessage[];
   streaming?: boolean;
 }): ReactNode {
@@ -301,7 +280,7 @@ function AgentBody({
           ))}
         </div>
       ) : null}
-      <LogProse prose={prose} streaming={streaming} />
+      <LogProse prose={prose} proseFormat={proseFormat} streaming={streaming} />
     </div>
   );
 }
@@ -359,6 +338,7 @@ export function EventRow(props: EventRowProps): ReactNode {
         speaker={m.speaker}
         model={m.model}
         prose={m.prose}
+        proseFormat={m.proseFormat}
         tools={m.tools}
         streaming={m.streaming}
       />

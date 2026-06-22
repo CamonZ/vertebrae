@@ -8,11 +8,7 @@ export {
 } from "./computeExecutionRollups";
 export type { ExecutionRollups } from "./computeExecutionRollups";
 export { formatCost } from "./formatCost";
-export {
-  buildContextSummary,
-  buildInitialPrompt,
-  scopeLabel,
-} from "./chatContext";
+export { scopeLabel } from "./chatContext";
 export {
   resolveContextWindow,
   formatTokenCount,

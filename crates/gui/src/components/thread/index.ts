@@ -21,7 +21,6 @@ export {
   EventRow,
   ToolRow,
   StepDivider,
-  renderEventMd,
 } from "./EventRow";
 export type {
   EventLogProps,

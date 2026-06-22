@@ -10,9 +10,9 @@ Feature: Local project chat lifecycle
     When I type "hello from acceptance" into the element with test id "local-chat-composer"
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
-    And the GUI element with test id "chat-lifecycle-label" should contain text "Resumable" within 10 seconds
+    And the GUI should not show an element with test id "chat-lifecycle-label" within 5 seconds
     When I click on the element with title "Close chat panel"
     Then the GUI should show an element with test id "local-chat-launcher" within 5 seconds
     When I click on the element with test id "local-chat-launcher"
     Then the GUI should show "local-chat-acceptance reply" within 5 seconds
-    And the GUI element with test id "chat-lifecycle-label" should contain text "Resumable" within 5 seconds
+    And the GUI should not show an element with test id "chat-lifecycle-label" within 5 seconds

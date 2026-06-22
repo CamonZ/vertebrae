@@ -10,12 +10,6 @@ import { commands } from "../../bindings";
 Element.prototype.scrollIntoView = vi.fn();
 const mockedCommands = vi.mocked(commands);
 
-// Synchronous project so the header's "scoped to" line renders without an async
-// state update (which would otherwise log act() warnings).
-vi.mock("../../hooks/useCurrentProject", () => ({
-  useCurrentProject: () => ({ name: "test-project", path: "/test/project" }),
-}));
-
 // Mock the bindings
 vi.mock("../../bindings", () => ({
   commands: {
@@ -83,7 +77,7 @@ describe("ChatWindow", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders the session label as the header title with the scope line", () => {
+  it("renders the session label as the header title without scope copy", () => {
     const session = createSession({ scope: "task", label: "My Task" });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -94,11 +88,11 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByText("My Task")).toBeInTheDocument();
-    expect(screen.getByText("scoped to")).toBeInTheDocument();
-    expect(screen.getByText("this task")).toBeInTheDocument();
+    expect(screen.queryByText("scoped to")).not.toBeInTheDocument();
+    expect(screen.queryByText("this task")).not.toBeInTheDocument();
   });
 
-  it("renders the workflow scope line", () => {
+  it("does not render workflow scope copy", () => {
     const session = createSession({
       scope: "workflow",
       entityId: "wf-1",
@@ -113,7 +107,8 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByText("Deploy Pipeline")).toBeInTheDocument();
-    expect(screen.getByText("this workflow")).toBeInTheDocument();
+    expect(screen.queryByText("this workflow")).not.toBeInTheDocument();
+    expect(screen.queryByText("wf-1")).not.toBeInTheDocument();
   });
 
   it("shows widen button for non-project scopes", () => {
@@ -254,7 +249,7 @@ describe("ChatWindow", () => {
     expect(screen.queryByText('{"file_path": "/test.ts"}')).toBeNull();
   });
 
-  it("shows context summary when present", () => {
+  it("does not render stored context summaries", () => {
     const session = createSession({
       contextSummary: "[Context: Task]\nTask: My Important Task",
     });
@@ -266,24 +261,12 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByText("Context injected")).toBeInTheDocument();
+    expect(screen.queryByText("Context injected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task: My Important Task")).not.toBeInTheDocument();
   });
 
-  it("shows end session button when session has claude backend", () => {
+  it("does not show the standalone end session button", () => {
     const session = createSession({ claudeSessionId: "claude-abc" });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
-
-    render(<ChatWindow sessionId="test-session" />);
-
-    expect(screen.getByTitle("End session")).toBeInTheDocument();
-  });
-
-  it("does not show end session button when not active", () => {
-    const session = createSession({ claudeSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -892,9 +875,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Starting"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Starting...")).toBeDisabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();
   });
@@ -919,9 +900,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Sending"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Sending...")).toBeDisabled();
     expect(screen.getByTitle("Send message")).toBeDisabled();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
@@ -944,9 +923,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Streaming"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Streaming...")).toBeDisabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
   });
@@ -967,9 +944,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Failed"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-lifecycle-error")).toHaveTextContent(
       "Claude failed"
     );
@@ -999,9 +974,7 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Ready to resume"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     const textarea = screen.getByPlaceholderText("Type a message to resume...");
     await user.type(textarea, "Resume");
     expect(screen.getByTitle("Resume session")).not.toBeDisabled();
@@ -1020,9 +993,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
-      "Resuming"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Resuming...")).toBeDisabled();
     expect(screen.getByTitle("Resume session")).toBeDisabled();
   });
