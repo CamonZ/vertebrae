@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { commands } from "../../bindings";
-import type { JsonValue } from "../../bindings";
+import type { ClaudeModelCatalog, JsonValue } from "../../bindings";
 import {
   useChatStore,
   getParentScope,
@@ -14,6 +14,10 @@ import {
   formatTokenCount,
   utilizationLevel,
 } from "../../utils/modelContextWindow";
+import {
+  isLocalChatSessionCleared,
+  loadLastUsedLocalChatModelId,
+} from "../../utils/localChatPersistence";
 import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { ChatInput } from "../ChatInput";
@@ -240,12 +244,63 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [inputValue, setInputValue] = useState("");
+  const [modelCatalog, setModelCatalog] = useState<ClaudeModelCatalog | null>(
+    null
+  );
 
   const { session, isActive, startSession, sendMessage, closeClaudeSession } =
     useScopedChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
   const widenScope = useChatStore((s) => s.widenScope);
+  const setSessionSelectedModel = useChatStore(
+    (s) => s.setSessionSelectedModel
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void commands
+      .getSupportedClaudeModels()
+      .then((catalog) => {
+        if (!cancelled) setModelCatalog(catalog);
+      })
+      .catch(() => {
+        // The chat still works without a picker; backend validation remains.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const supportedModelIds = useMemo(
+    () => new Set(modelCatalog?.models.map((model) => model.id) ?? []),
+    [modelCatalog]
+  );
+  const selectedModelId = session?.selectedModelId;
+  const hasSession = !!session;
+  const hasConversation = !!session?.claudeConversationId;
+  const messageCount = session?.messages.length ?? 0;
+
+  useEffect(() => {
+    if (!hasSession || !modelCatalog) return;
+    if (isLocalChatSessionCleared(sessionId)) return;
+    if (selectedModelId !== undefined) return;
+    if (hasConversation || messageCount > 0) return;
+
+    const lastUsed = loadLastUsedLocalChatModelId();
+    if (lastUsed && supportedModelIds.has(lastUsed)) {
+      setSessionSelectedModel(sessionId, lastUsed);
+    }
+  }, [
+    modelCatalog,
+    hasConversation,
+    hasSession,
+    messageCount,
+    selectedModelId,
+    sessionId,
+    setSessionSelectedModel,
+    supportedModelIds,
+  ]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -291,6 +346,13 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
     // local lifecycle change.
     widenScope(sessionId, parentScope, null, `${scopeLabel(parentScope)} Chat`);
   }, [session, sessionId, widenScope]);
+
+  const handleModelChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      setSessionSelectedModel(sessionId, event.target.value || null);
+    },
+    [sessionId, setSessionSelectedModel]
+  );
 
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
@@ -350,6 +412,8 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
   if (!session) return null;
 
   const canWiden = getParentScope(session.scope) !== null;
+  const selectedModelUnsupported =
+    !!session.selectedModelId && !supportedModelIds.has(session.selectedModelId);
 
   // Current request input-context utilization for the footer bar + readout.
   // Falls back to an empty bar before the first usage event lands.
@@ -458,6 +522,34 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
                 />
               </svg>
             </button>
+          </div>
+        )}
+        {modelCatalog && (
+          <div className="hc-head-meta">
+            <label className="hc-model-picker">
+              <span>Model</span>
+              <select
+                aria-label="Claude model"
+                data-testid="local-chat-model-picker"
+                value={session.selectedModelId ?? ""}
+                onChange={handleModelChange}
+                disabled={isBusy || isActive}
+              >
+                <option value="">
+                  {session.claudeConversationId ? "Original model" : "CLI default"}
+                </option>
+                {selectedModelUnsupported && (
+                  <option value={session.selectedModelId ?? ""}>
+                    Unsupported: {session.selectedModelId}
+                  </option>
+                )}
+                {modelCatalog.models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         )}
       </div>

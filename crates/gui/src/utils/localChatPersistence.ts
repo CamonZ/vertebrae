@@ -6,6 +6,7 @@ import type {
 } from "../stores/chatStore";
 
 const STORAGE_KEY = "local-chat-sessions:v1";
+const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
 const CLEARED_KEY_PREFIX = `${STORAGE_KEY}:cleared:`;
 const VALID_SCOPES = new Set<ChatScope>([
   "project",
@@ -64,6 +65,12 @@ function normalizeSession(value: unknown): ChatSession | null {
         : null,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
+    selectedModelId:
+      typeof candidate.selectedModelId === "string"
+        ? candidate.selectedModelId
+        : candidate.selectedModelId === null
+          ? null
+          : undefined,
     model: typeof candidate.model === "string" ? candidate.model : undefined,
     tokenUsage:
       candidate.tokenUsage &&
@@ -201,6 +208,36 @@ export function clearPersistedLocalChatSessions(): void {
   }
 }
 
+export function loadLastUsedLocalChatModelId(): string | null {
+  if (!canUseStorage()) return null;
+  try {
+    const value = localStorage.getItem(MODEL_STORAGE_KEY);
+    return value && value.trim() ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistLastUsedLocalChatModelId(modelId: string): void {
+  if (!canUseStorage()) return;
+  const trimmed = modelId.trim();
+  if (!trimmed) return;
+  try {
+    localStorage.setItem(MODEL_STORAGE_KEY, trimmed);
+  } catch {
+    // Storage can be disabled or full; the per-session selection still works.
+  }
+}
+
+export function clearLastUsedLocalChatModelId(): void {
+  if (!canUseStorage()) return;
+  try {
+    localStorage.removeItem(MODEL_STORAGE_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 export function markLocalChatSessionCleared(sessionId: string): void {
   removePersistedLocalChatSession(sessionId);
   if (!canUseStorage()) return;
@@ -230,3 +267,4 @@ export function clearLocalChatSessionCleared(sessionId: string): void {
 }
 
 export const LOCAL_CHAT_SESSIONS_STORAGE_KEY = STORAGE_KEY;
+export const LOCAL_CHAT_MODEL_STORAGE_KEY = MODEL_STORAGE_KEY;

@@ -749,13 +749,19 @@ async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
  * If `resume_session_id` is provided, continues an existing conversation.
  * Returns immediately; the session emits events for all output.
  */
-async createClaudeSession(sessionId: string, workingDir: string | null, initialPrompt: string | null, resumeSessionId: string | null) : Promise<Result<null, ClaudeSessionError>> {
+async createClaudeSession(sessionId: string, workingDir: string | null, initialPrompt: string | null, resumeSessionId: string | null, modelId: string | null) : Promise<Result<null, ClaudeSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { sessionId, workingDir, initialPrompt, resumeSessionId }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { sessionId, workingDir, initialPrompt, resumeSessionId, modelId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * List supported Claude Code models for local chat sessions.
+ */
+async getSupportedClaudeModels() : Promise<ClaudeModelCatalog> {
+    return await TAURI_INVOKE("get_supported_claude_models");
 },
 /**
  * Send a message to a Claude session
@@ -943,6 +949,7 @@ claudeSessionEndEvent: ClaudeSessionEndEvent,
 claudeSessionErrorEvent: ClaudeSessionErrorEvent,
 claudeSessionInitEvent: ClaudeSessionInitEvent,
 claudeSessionUsageEvent: ClaudeSessionUsageEvent,
+claudeSessionWarningEvent: ClaudeSessionWarningEvent,
 claudeTextEvent: ClaudeTextEvent,
 claudeToolCallEvent: ClaudeToolCallEvent,
 claudeToolResultEvent: ClaudeToolResultEvent,
@@ -969,6 +976,7 @@ claudeSessionEndEvent: "claude-session-end-event",
 claudeSessionErrorEvent: "claude-session-error-event",
 claudeSessionInitEvent: "claude-session-init-event",
 claudeSessionUsageEvent: "claude-session-usage-event",
+claudeSessionWarningEvent: "claude-session-warning-event",
 claudeTextEvent: "claude-text-event",
 claudeToolCallEvent: "claude-tool-call-event",
 claudeToolResultEvent: "claude-tool-result-event",
@@ -1063,6 +1071,8 @@ plugin_dirs?: string[];
 json_schema: string | null }
 export type ChatMessage = { id: string; project_id: string; chat_session_id: string; role: string; content: string; content_format: string | null; client_message_id: string | null; inserted_at: string | null; updated_at: string | null }
 export type ChatSession = { id: string; project_id: string; status: string; session_kind: string | null; started_at: string | null; ended_at: string | null; stop_requested_at: string | null; inserted_at: string | null; updated_at: string | null }
+export type ClaudeModelCatalog = { defaultModelId: string; models: ClaudeModelOption[] }
+export type ClaudeModelOption = { id: string; label: string }
 /**
  * Event emitted when Claude requests permission
  */
@@ -1119,6 +1129,10 @@ context_tokens: number;
  * Backend-reported context window (fallback when frontend lookup misses)
  */
 context_window: number }
+/**
+ * Event emitted when Claude session startup recovers from a non-fatal issue.
+ */
+export type ClaudeSessionWarningEvent = { session_id: string; warning: string }
 /**
  * Event emitted when Claude produces text output
  */

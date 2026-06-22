@@ -20,7 +20,7 @@
  *                                   → kind:'shell' with the command as `cmd`.
  *   · tool_result                 → MERGED into the matching pending ToolMessage
  *                                   by toolId (status ok/err, body=result).
- *   · error                       → a terminal ErrorMessage{title}.
+ *   · error / warning             → a terminal ErrorMessage{title}.
  *   · permission_request          → SKIPPED here; ChatWindow renders the
  *                                   interactive PermissionRequestTurn as a
  *                                   sibling of <Thread>.
@@ -182,6 +182,19 @@ export function chatMessagesToThread(
         continue;
       }
 
+      case "warning": {
+        activeAgent = null;
+        const turn = openTurn();
+        curTurn = turn;
+        const err: ErrorMessage = {
+          evt: `chat-warning-${errSeq++}`,
+          type: "error",
+          title: m.message,
+        };
+        turn.messages.push(err);
+        continue;
+      }
+
       case "permission_request":
         // Rendered as an interactive sibling of <Thread> by ChatWindow.
         continue;
@@ -197,9 +210,7 @@ function findPendingTool(
   toolId: string
 ): ToolMessage | undefined {
   if (!agent?.tools) return undefined;
-  return agent.tools.find(
-    (t) => t.evt === toolId && t.status === "pending"
-  );
+  return agent.tools.find((t) => t.evt === toolId && t.status === "pending");
 }
 
 /**

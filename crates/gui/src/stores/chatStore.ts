@@ -6,11 +6,13 @@ import {
 } from "../utils/chatStash";
 import { scopeLabel } from "../utils/chatContext";
 import {
+  clearLastUsedLocalChatModelId,
   clearLocalChatSessionCleared,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadPersistedLocalChatSessions,
   markLocalChatSessionCleared,
+  persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   removePersistedLocalChatSession,
 } from "../utils/localChatPersistence";
@@ -44,6 +46,7 @@ export type ChatMessage =
       timestamp: string;
     }
   | { kind: "session_start"; model: string; timestamp: string }
+  | { kind: "warning"; message: string; timestamp: string }
   | {
       kind: "session_end";
       durationMs: number;
@@ -108,6 +111,8 @@ export interface ChatSession {
   contextSummary: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
+  /** User-selected Claude Code model alias for session startup/resume overrides. */
+  selectedModelId?: string | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
   model?: string;
   /** Latest per-turn current request input-context utilization for the badge */
@@ -174,6 +179,8 @@ interface ChatStoreActions {
   setContextSummary: (sessionId: string, summary: string) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
+  /** Set the user-selected Claude Code model for this session */
+  setSessionSelectedModel: (sessionId: string, modelId: string | null) => void;
   /** Set the latest per-turn current request input-context utilization */
   setSessionTokenUsage: (
     sessionId: string,
@@ -524,6 +531,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
+    setSessionSelectedModel: (sessionId, modelId) => {
+      const normalized = modelId?.trim() || null;
+      updateSession(sessionId, (session) =>
+        session.selectedModelId === normalized
+          ? session
+          : { ...session, selectedModelId: normalized }
+      );
+      if (normalized) {
+        persistLastUsedLocalChatModelId(normalized);
+      } else {
+        clearLastUsedLocalChatModelId();
+      }
+    },
+
     setSessionTokenUsage: (sessionId, usage) => {
       updateSession(sessionId, (session) => {
         if (
@@ -578,6 +599,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               claudeSessionId: null,
               claudeConversationId: null,
               contextSummary: null,
+              selectedModelId: session.selectedModelId ?? null,
               model: undefined,
               tokenUsage: undefined,
               status: "open",

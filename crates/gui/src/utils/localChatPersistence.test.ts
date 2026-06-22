@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChatSession } from "../stores/chatStore";
 import {
+  clearLastUsedLocalChatModelId,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
+  loadLastUsedLocalChatModelId,
   loadPersistedLocalChatSession,
   loadPersistedLocalChatSessions,
   markLocalChatSessionCleared,
+  persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   removePersistedLocalChatSession,
 } from "./localChatPersistence";
@@ -24,6 +27,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     claudeConversationId: "conv-1",
     contextSummary: "[Context]",
     projectPath: "/repo",
+    selectedModelId: "opus",
     model: "claude-sonnet-4",
     tokenUsage: { used: 120, max: 200000 },
     isDetached: true,
@@ -50,6 +54,7 @@ describe("localChatPersistence", () => {
       claudeConversationId: "conv-1",
       contextSummary: "[Context]",
       projectPath: "/repo",
+      selectedModelId: "opus",
       model: "claude-sonnet-4",
       tokenUsage: { used: 120, max: 200000 },
       isDetached: false,
@@ -183,5 +188,19 @@ describe("localChatPersistence", () => {
     persistLocalChatSession(makeSession());
 
     expect(isLocalChatSessionCleared("s-1")).toBe(false);
+  });
+
+  it("remembers the last used local chat model id", () => {
+    persistLastUsedLocalChatModelId("haiku");
+
+    expect(loadLastUsedLocalChatModelId()).toBe("haiku");
+  });
+
+  it("clears the last used local chat model id", () => {
+    persistLastUsedLocalChatModelId("haiku");
+
+    clearLastUsedLocalChatModelId();
+
+    expect(loadLastUsedLocalChatModelId()).toBeNull();
   });
 });
