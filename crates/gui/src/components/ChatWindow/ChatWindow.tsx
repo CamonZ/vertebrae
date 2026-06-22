@@ -351,11 +351,13 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
 
   const canWiden = getParentScope(session.scope) !== null;
 
-  // Context utilization for the footer bar + readout. Falls back to an empty
-  // bar before the first usage event lands.
+  // Current request input-context utilization for the footer bar + readout.
+  // Falls back to an empty bar before the first usage event lands.
   const usage = session.tokenUsage;
   const ctxPct =
-    usage && usage.max > 0 ? Math.round((usage.used / usage.max) * 100) : 0;
+    usage && usage.max > 0
+      ? Math.min(100, Math.round((usage.used / usage.max) * 100))
+      : 0;
   const ctxColor =
     usage && usage.max > 0
       ? utilizationLevel(usage.used, usage.max) === "danger"
@@ -549,7 +551,7 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
           <div className="hc-foot-meta">
             <span
               className="ctx-lbl"
-              title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} input tokens`}
+              title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} current request input context tokens`}
             >
               context <b>{ctxPct}%</b>
               {session.model

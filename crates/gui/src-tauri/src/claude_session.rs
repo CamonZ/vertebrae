@@ -23,6 +23,7 @@ use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
 #[cfg(unix)]
 const PERMISSION_SOCKET_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+const DEFAULT_CONTEXT_WINDOW: u32 = 200_000;
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 ///
@@ -105,18 +106,19 @@ pub struct ClaudeToolResultEvent {
     pub is_error: bool,
 }
 
-/// Event emitted after each assistant message with the latest context-size figure.
+/// Event emitted after each assistant message with the latest input-context figure.
 ///
-/// `context_tokens` is the non-cached input token count for the most recent
-/// assistant turn — the source of truth for "how full is the context window".
-/// Cache reads, cache creation, and output tokens are cost signals and are
-/// intentionally excluded.
+/// `context_tokens` is the total request input for the most recent assistant
+/// turn: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.
+/// This is the source of truth for the chat badge's current request context
+/// occupancy. Output tokens are excluded because they are response tokens, not
+/// request input.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ClaudeSessionUsageEvent {
     pub session_id: String,
     /// Model name reported by the assistant message
     pub model: String,
-    /// Non-cached input tokens for the latest assistant turn
+    /// Current request input-context tokens for the latest assistant turn
     pub context_tokens: u32,
     /// Backend-reported context window (fallback when frontend lookup misses)
     pub context_window: u32,
@@ -131,9 +133,11 @@ pub struct ClaudeSessionEndEvent {
     pub num_turns: u32,
     pub result: String,
     pub is_error: bool,
-    /// Total tokens used in context (input + cache)
+    /// Sum of per-model input contexts from result model usage (input + cache,
+    /// excluding output). This is a session summary and may exceed any single
+    /// model's context window.
     pub context_tokens: u32,
-    /// Maximum context window size
+    /// Maximum reported model context window size
     pub context_window: u32,
 }
 
@@ -217,6 +221,32 @@ struct ModelUsageStats {
     context_window: Option<u32>,
 }
 
+impl ModelUsageStats {
+    fn input_context_tokens(&self) -> u32 {
+        input_context_tokens(
+            self.input_tokens,
+            self.cache_read_input_tokens,
+            self.cache_creation_input_tokens,
+        )
+    }
+}
+
+fn aggregate_model_usage_context(usage: &HashMap<String, ModelUsageStats>) -> (u32, u32) {
+    // Session-end modelUsage is a whole-session summary. If multiple models
+    // participated, sum their input contexts and pair that with the largest
+    // reported window for deterministic diagnostics.
+    let context_tokens = usage.values().fold(0u32, |total, stats| {
+        total.saturating_add(stats.input_context_tokens())
+    });
+    let context_window = usage
+        .values()
+        .filter_map(|stats| stats.context_window)
+        .max()
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+
+    (context_tokens, context_window)
+}
+
 /// Nested event structure inside stream_event messages
 #[derive(Debug, Deserialize)]
 struct StreamEvent {
@@ -257,6 +287,27 @@ struct AssistantUsage {
     cache_read_input_tokens: Option<u32>,
     cache_creation_input_tokens: Option<u32>,
     output_tokens: Option<u32>,
+}
+
+impl AssistantUsage {
+    fn input_context_tokens(&self) -> u32 {
+        input_context_tokens(
+            self.input_tokens,
+            self.cache_read_input_tokens,
+            self.cache_creation_input_tokens,
+        )
+    }
+}
+
+fn input_context_tokens(
+    input_tokens: Option<u32>,
+    cache_read_input_tokens: Option<u32>,
+    cache_creation_input_tokens: Option<u32>,
+) -> u32 {
+    input_tokens
+        .unwrap_or(0)
+        .saturating_add(cache_read_input_tokens.unwrap_or(0))
+        .saturating_add(cache_creation_input_tokens.unwrap_or(0))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1231,15 +1282,16 @@ impl ClaudeSessionManager {
                     // Emit a per-turn usage event so the UI badge updates
                     // mid-conversation, not only at session_end.
                     if let Some(usage) = message.usage.as_ref() {
-                        let context_tokens = usage.input_tokens.unwrap_or(0);
+                        let context_tokens = usage.input_context_tokens();
                         events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
                             session_id: session_id.to_string(),
                             model: message.model.clone().unwrap_or_default(),
                             context_tokens,
                             // Backend has no per-turn context_window; fall back to the
-                            // standard 200k. The frontend uses its own model→max
-                            // lookup table as the source of truth for the displayed max.
-                            context_window: 200_000,
+                            // default context window. The frontend uses its own
+                            // model→max lookup table as the source of truth for
+                            // the displayed max.
+                            context_window: DEFAULT_CONTEXT_WINDOW,
                         }));
                     }
                     if let Some(content) = message.content {
@@ -1297,17 +1349,8 @@ impl ClaudeSessionManager {
                 let (context_tokens, context_window) = msg
                     .model_usage
                     .as_ref()
-                    .and_then(|usage| usage.values().next())
-                    .map(|stats| {
-                        let input = stats.input_tokens.unwrap_or(0);
-                        let cache_read = stats.cache_read_input_tokens.unwrap_or(0);
-                        let cache_creation = stats.cache_creation_input_tokens.unwrap_or(0);
-                        let output = stats.output_tokens.unwrap_or(0);
-                        let total = input + cache_read + cache_creation + output;
-                        let window = stats.context_window.unwrap_or(200_000);
-                        (total, window)
-                    })
-                    .unwrap_or((0, 200_000));
+                    .map(aggregate_model_usage_context)
+                    .unwrap_or((0, DEFAULT_CONTEXT_WINDOW));
 
                 events.push(EmittedEvent::SessionEnd(ClaudeSessionEndEvent {
                     session_id: session_id.to_string(),
@@ -2142,8 +2185,8 @@ mod tests {
     #[test]
     fn test_build_events_assistant_emits_usage_event() {
         // Per-turn usage event should fire whenever the assistant message
-        // carries a `usage` block, using `input_tokens` (non-cached) as the
-        // context-size figure.
+        // carries a `usage` block. Cached input tokens still occupy the
+        // request context, so they are included in the context-size figure.
         let msg = parse_msg(
             r#"{
                 "type": "assistant",
@@ -2152,10 +2195,10 @@ mod tests {
                     "model": "claude-opus-4-7-20250115",
                     "content": [{"type": "text", "text": "hi"}],
                     "usage": {
-                        "input_tokens": 12345,
-                        "cache_read_input_tokens": 9999,
-                        "cache_creation_input_tokens": 8888,
-                        "output_tokens": 250
+                        "input_tokens": 50,
+                        "cache_read_input_tokens": 100000,
+                        "cache_creation_input_tokens": 0,
+                        "output_tokens": 25
                     }
                 }
             }"#,
@@ -2167,13 +2210,43 @@ mod tests {
             EmittedEvent::Usage(e) => {
                 assert_eq!(e.session_id, "sess-1");
                 assert_eq!(e.model, "claude-opus-4-7-20250115");
-                // input_tokens only — cache_read/cache_creation/output excluded
-                assert_eq!(e.context_tokens, 12345);
+                assert_eq!(e.context_tokens, 100_050);
                 assert_eq!(e.context_window, 200_000);
             }
             other => panic!("Expected Usage event first, got {:?}", other),
         }
         assert!(matches!(&events[1], EmittedEvent::Text(_)));
+    }
+
+    #[test]
+    fn test_build_events_assistant_usage_includes_cache_creation_tokens() {
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-sonnet-4-6-latest",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_read_input_tokens": 30,
+                        "cache_creation_input_tokens": 40,
+                        "output_tokens": 20
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 2, "expected Usage + Text events");
+        match &events[0] {
+            EmittedEvent::Usage(e) => {
+                assert_eq!(e.model, "claude-sonnet-4-6-latest");
+                assert_eq!(e.context_tokens, 80);
+                assert_eq!(e.context_window, 200_000);
+            }
+            other => panic!("Expected Usage event first, got {:?}", other),
+        }
     }
 
     #[test]
@@ -2225,8 +2298,8 @@ mod tests {
                 assert_eq!(e.cost_usd, 0.05);
                 assert_eq!(e.result, "Task completed");
                 assert!(!e.is_error);
-                // 1000 + 500 + 200 + 100 = 1800
-                assert_eq!(e.context_tokens, 1800);
+                // input + cacheRead + cacheCreation; output is response usage.
+                assert_eq!(e.context_tokens, 1300);
                 assert_eq!(e.context_window, 200_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
@@ -2278,7 +2351,8 @@ mod tests {
 
     #[test]
     fn test_build_events_result_token_arithmetic() {
-        // Verify each component contributes to the total
+        // Verify input/cache components contribute to the context total while
+        // output tokens stay out of request input-context occupancy.
         let msg = parse_msg(
             r#"{
                 "type": "result",
@@ -2297,9 +2371,42 @@ mod tests {
         let events = ClaudeSessionManager::build_events("sess-1", msg);
         match &events[0] {
             EmittedEvent::SessionEnd(e) => {
-                // 10 + 20 + 30 + 40 = 100
-                assert_eq!(e.context_tokens, 100);
+                assert_eq!(e.context_tokens, 80);
                 assert_eq!(e.context_window, 100_000);
+            }
+            other => panic!("Expected SessionEnd event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_result_model_usage_aggregates_models_deterministically() {
+        let msg = parse_msg(
+            r#"{
+                "type": "result",
+                "modelUsage": {
+                    "model-a": {
+                        "inputTokens": 10,
+                        "outputTokens": 999,
+                        "cacheReadInputTokens": 20,
+                        "cacheCreationInputTokens": 30,
+                        "contextWindow": 200000
+                    },
+                    "model-b": {
+                        "inputTokens": 100,
+                        "outputTokens": 999,
+                        "cacheReadInputTokens": 200,
+                        "cacheCreationInputTokens": 300,
+                        "contextWindow": 1000000
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => {
+                assert_eq!(e.context_tokens, 660);
+                assert_eq!(e.context_window, 1_000_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
         }
