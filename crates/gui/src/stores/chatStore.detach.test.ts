@@ -47,7 +47,15 @@ describe("chatStore detach / reattach", () => {
     useChatStore.setState((s) => ({
       sessions: {
         ...s.sessions,
-        [id]: { ...s.sessions[id], claudeSessionId: "claude-xyz" },
+        [id]: {
+          ...s.sessions[id],
+          claudeSessionId: "claude-xyz",
+          lifecycle: "streaming",
+          streamingAssistant: {
+            text: "partial",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        },
       },
     }));
 
@@ -68,6 +76,8 @@ describe("chatStore detach / reattach", () => {
     expect(stashed).not.toBeNull();
     expect(stashed!.claudeSessionId).toBe("claude-xyz");
     expect(stashed!.isDetached).toBe(true);
+    expect(stashed!.streamingAssistant).toMatchObject({ text: "partial" });
+    expect(stashed!.lifecycle).toBe("streaming");
   });
 
   it("detachSession registers onCloseRequested to reattach when the pop-out closes", async () => {

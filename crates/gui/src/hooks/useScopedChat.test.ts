@@ -24,20 +24,21 @@ vi.mock("../bindings", () => ({
     createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    createChatSession: vi.fn(),
+    sendChatMessage: vi.fn(),
+    listChatSessions: vi.fn(),
+    listChatMessages: vi.fn(),
+    setActiveChatSessionId: vi.fn(),
     getCurrentProject: vi.fn().mockResolvedValue({
       status: "ok",
       data: "test-project",
     }),
     getTask: vi.fn().mockResolvedValue({ status: "error", error: "unused" }),
-    getTaskExecutions: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: [] }),
+    getTaskExecutions: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
     getWorkflowWithTasks: vi
       .fn()
       .mockResolvedValue({ status: "error", error: "unused" }),
-    getStep: vi
-      .fn()
-      .mockResolvedValue({ status: "error", error: "unused" }),
+    getStep: vi.fn().mockResolvedValue({ status: "error", error: "unused" }),
   },
   events: {},
 }));
@@ -129,10 +130,14 @@ describe("handleUsageEvent", () => {
       SESSION_ID,
       setUsage
     );
-    expect(setUsage).toHaveBeenCalledWith(SESSION_ID, "claude-opus-4-7-20250115", {
-      used: 142_000,
-      max: 1_000_000,
-    });
+    expect(setUsage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "claude-opus-4-7-20250115",
+      {
+        used: 142_000,
+        max: 1_000_000,
+      }
+    );
   });
 
   it("falls back to backend context_window when model not in lookup table", () => {
@@ -172,46 +177,83 @@ describe("handleUsageEvent", () => {
 });
 
 describe("handleTextEvent", () => {
-  it("calls updateLastAssistantMessage for partial text", () => {
-    const update = vi.fn();
-    const finalize = vi.fn();
+  it("updates partial text immediately when session matches", () => {
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
       { session_id: CLAUDE_SESSION_ID, text: "hello", is_partial: true },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      update,
-      finalize
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage
     );
-    expect(update).toHaveBeenCalledWith(SESSION_ID, "hello");
-    expect(finalize).not.toHaveBeenCalled();
+    expect(updateLastAssistantMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "hello"
+    );
+    expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
   });
 
-  it("calls finalizeLastAssistantMessage for complete text", () => {
-    const update = vi.fn();
-    const finalize = vi.fn();
+  it("updates for every partial delta as it arrives", () => {
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
+    for (const text of ["Hel", "lo", "!"]) {
+      handleTextEvent(
+        { session_id: CLAUDE_SESSION_ID, text, is_partial: true },
+        CLAUDE_SESSION_ID,
+        SESSION_ID,
+        updateLastAssistantMessage,
+        finalizeLastAssistantMessage
+      );
+    }
+
+    expect(updateLastAssistantMessage).toHaveBeenNthCalledWith(
+      1,
+      SESSION_ID,
+      "Hel"
+    );
+    expect(updateLastAssistantMessage).toHaveBeenNthCalledWith(
+      2,
+      SESSION_ID,
+      "lo"
+    );
+    expect(updateLastAssistantMessage).toHaveBeenNthCalledWith(
+      3,
+      SESSION_ID,
+      "!"
+    );
+    expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("finalizes complete text immediately", () => {
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
       { session_id: CLAUDE_SESSION_ID, text: "done", is_partial: false },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      update,
-      finalize
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage
     );
-    expect(finalize).toHaveBeenCalledWith(SESSION_ID, "done");
-    expect(update).not.toHaveBeenCalled();
+    expect(finalizeLastAssistantMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "done"
+    );
+    expect(updateLastAssistantMessage).not.toHaveBeenCalled();
   });
 
   it("does nothing when session ID does not match", () => {
-    const update = vi.fn();
-    const finalize = vi.fn();
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
       { session_id: OTHER_SESSION_ID, text: "hello", is_partial: true },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      update,
-      finalize
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage
     );
-    expect(update).not.toHaveBeenCalled();
-    expect(finalize).not.toHaveBeenCalled();
+    expect(updateLastAssistantMessage).not.toHaveBeenCalled();
+    expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
   });
 });
 
@@ -371,8 +413,11 @@ describe("handlePermissionRequestEvent", () => {
 });
 
 describe("handleEndEvent", () => {
-  it("calls markSessionClosed when session matches", () => {
-    const close = vi.fn();
+  it("clears stream state and returns lifecycle to idle when session matches", () => {
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
+    const setClaudeSessionId = vi.fn();
+    const setClaudeSessionIdRef = vi.fn();
     handleEndEvent(
       {
         session_id: CLAUDE_SESSION_ID,
@@ -386,13 +431,55 @@ describe("handleEndEvent", () => {
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      close
+      setLifecycle,
+      clearStreaming,
+      setClaudeSessionId,
+      setClaudeSessionIdRef
     );
-    expect(close).toHaveBeenCalledWith(SESSION_ID);
+    expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
+    expect(setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
+  });
+
+  it("sets error lifecycle when Claude reports an error result", () => {
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
+    const setClaudeSessionId = vi.fn();
+    const setClaudeSessionIdRef = vi.fn();
+    handleEndEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        duration_ms: 1000,
+        cost_usd: 0.01,
+        num_turns: 5,
+        result: "tool failed",
+        is_error: true,
+        context_tokens: 1000,
+        context_window: 200000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setLifecycle,
+      clearStreaming,
+      setClaudeSessionId,
+      setClaudeSessionIdRef
+    );
+    expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
+    expect(setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(setLifecycle).toHaveBeenCalledWith(
+      SESSION_ID,
+      "error",
+      "tool failed"
+    );
   });
 
   it("does nothing when session does not match", () => {
-    const close = vi.fn();
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
+    const setClaudeSessionId = vi.fn();
+    const setClaudeSessionIdRef = vi.fn();
     handleEndEvent(
       {
         session_id: OTHER_SESSION_ID,
@@ -406,20 +493,36 @@ describe("handleEndEvent", () => {
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      close
+      setLifecycle,
+      clearStreaming,
+      setClaudeSessionId,
+      setClaudeSessionIdRef
     );
-    expect(close).not.toHaveBeenCalled();
+    expect(setLifecycle).not.toHaveBeenCalled();
+    expect(clearStreaming).not.toHaveBeenCalled();
+    expect(setClaudeSessionId).not.toHaveBeenCalled();
+    expect(setClaudeSessionIdRef).not.toHaveBeenCalled();
   });
 });
 
 describe("handleErrorEvent", () => {
   it("adds an error message when session matches", () => {
     const addMsg = vi.fn();
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
     handleErrorEvent(
       { session_id: CLAUDE_SESSION_ID, error: "something broke" },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      addMsg
+      addMsg,
+      setLifecycle,
+      clearStreaming
+    );
+    expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
+    expect(setLifecycle).toHaveBeenCalledWith(
+      SESSION_ID,
+      "error",
+      "something broke"
     );
     expect(addMsg).toHaveBeenCalledWith(
       SESSION_ID,
@@ -432,13 +535,19 @@ describe("handleErrorEvent", () => {
 
   it("does nothing when session does not match", () => {
     const addMsg = vi.fn();
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
     handleErrorEvent(
       { session_id: OTHER_SESSION_ID, error: "x" },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      addMsg
+      addMsg,
+      setLifecycle,
+      clearStreaming
     );
     expect(addMsg).not.toHaveBeenCalled();
+    expect(setLifecycle).not.toHaveBeenCalled();
+    expect(clearStreaming).not.toHaveBeenCalled();
   });
 });
 
@@ -470,6 +579,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps);
@@ -481,6 +591,14 @@ describe("doStartSession", () => {
     expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(
       expect.stringMatching(/^scoped-session-1-\d+$/)
     );
+    expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
+      SESSION_ID,
+      "starting"
+    );
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "idle"
+    );
   });
 
   it("calls createClaudeSession with working directory", async () => {
@@ -489,6 +607,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps);
@@ -507,6 +626,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(
@@ -530,6 +650,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps, "Hello");
@@ -541,6 +662,10 @@ describe("doStartSession", () => {
         text: "Hello",
       })
     );
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "streaming"
+    );
   });
 
   it("does not add user message when not provided", async () => {
@@ -549,6 +674,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps);
@@ -563,6 +689,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(
@@ -587,6 +714,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps, "Go");
@@ -604,6 +732,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(
@@ -618,6 +747,10 @@ describe("doStartSession", () => {
       null,
       "conv-xyz"
     );
+    expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
+      SESSION_ID,
+      "resuming"
+    );
   });
 
   it("passes null workingDir when getCurrentProjectPath fails", async () => {
@@ -631,6 +764,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(makeSession(), SESSION_ID, deps);
@@ -649,6 +783,7 @@ describe("doStartSession", () => {
       setClaudeSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(
@@ -665,6 +800,46 @@ describe("doStartSession", () => {
       null
     );
   });
+
+  it("sets error lifecycle and clears backend id when createClaudeSession fails", async () => {
+    mockedCommands.createClaudeSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SpawnFailed: "claude missing" },
+    } as never);
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(makeSession(), SESSION_ID, deps);
+
+    expect(deps.setClaudeSessionId).toHaveBeenLastCalledWith(SESSION_ID, null);
+    expect(deps.setClaudeSessionIdRef).toHaveBeenLastCalledWith(null);
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "claude missing"
+    );
+  });
+
+  it("does not call Sacrum live chat commands for local session creation", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(makeSession(), SESSION_ID, deps, "Hello");
+
+    expect(mockedCommands.createChatSession).not.toHaveBeenCalled();
+    expect(mockedCommands.sendChatMessage).not.toHaveBeenCalled();
+    expect(mockedCommands.setActiveChatSessionId).not.toHaveBeenCalled();
+  });
 });
 
 describe("doSendMessage", () => {
@@ -673,11 +848,21 @@ describe("doSendMessage", () => {
   });
 
   it("adds user message and calls sendClaudeMessage", async () => {
-    const addMsg = vi.fn();
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
 
-    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hello", addMsg);
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hello", deps);
 
-    expect(addMsg).toHaveBeenCalledWith(
+    expect(deps.setSessionLifecycle).toHaveBeenNthCalledWith(
+      1,
+      SESSION_ID,
+      "sending"
+    );
+    expect(deps.addMessage).toHaveBeenCalledWith(
       SESSION_ID,
       expect.objectContaining({
         kind: "user",
@@ -688,14 +873,101 @@ describe("doSendMessage", () => {
       CLAUDE_SESSION_ID,
       "Hello"
     );
+    expect(deps.setSessionLifecycle).toHaveBeenNthCalledWith(
+      2,
+      SESSION_ID,
+      "streaming"
+    );
   });
 
   it("message includes a timestamp", async () => {
-    const addMsg = vi.fn();
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
 
-    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", addMsg);
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
 
-    expect(addMsg.mock.calls[0][1].timestamp).toBeDefined();
+    expect(deps.addMessage.mock.calls[0][1].timestamp).toBeDefined();
+  });
+
+  it("sets error lifecycle when sendClaudeMessage fails", async () => {
+    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "pipe closed" },
+    } as never);
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
+
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
+
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "pipe closed"
+    );
+  });
+
+  it("clears stale backend id when sendClaudeMessage reports not found", async () => {
+    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+      status: "error",
+      error: { SessionNotFound: "missing" },
+    } as never);
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
+
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
+
+    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "missing"
+    );
+  });
+
+  it("does not clear backend id for non-SessionNotFound errors containing not found", async () => {
+    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "File not found: /project/config.ts" },
+    } as never);
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
+
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
+
+    expect(deps.setClaudeSessionId).not.toHaveBeenCalled();
+    expect(deps.setClaudeSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "File not found: /project/config.ts"
+    );
+  });
+
+  it("does not call Sacrum live chat commands when sending local messages", async () => {
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
+
+    expect(mockedCommands.sendChatMessage).not.toHaveBeenCalled();
+    expect(mockedCommands.createChatSession).not.toHaveBeenCalled();
   });
 });
 
@@ -705,24 +977,92 @@ describe("doCloseSession", () => {
   });
 
   it("calls closeClaudeSession and marks session closed", async () => {
-    const markClosed = vi.fn();
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
 
-    await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, markClosed);
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
 
     expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID
     );
-    expect(markClosed).toHaveBeenCalledWith(SESSION_ID);
+    expect(closed).toBe(true);
+    expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
+      SESSION_ID,
+      "closing"
+    );
+    expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
   });
 
   it("does not call markSessionClosed when sessionId is null", async () => {
-    const markClosed = vi.fn();
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
 
-    await doCloseSession(CLAUDE_SESSION_ID, null, markClosed);
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, null, deps);
 
     expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID
     );
-    expect(markClosed).not.toHaveBeenCalled();
+    expect(closed).toBe(true);
+    expect(deps.markSessionClosed).not.toHaveBeenCalled();
+  });
+
+  it("treats missing backend session as already closed", async () => {
+    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SessionNotFound: "missing" },
+    } as never);
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
+
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
+
+    expect(closed).toBe(true);
+    expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.setSessionLifecycle).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      "error",
+      "missing"
+    );
+  });
+
+  it("sets error lifecycle when closeClaudeSession fails for another reason", async () => {
+    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "pipe closed" },
+    } as never);
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+    };
+
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
+
+    expect(closed).toBe(false);
+    expect(deps.markSessionClosed).not.toHaveBeenCalled();
+    expect(deps.setClaudeSessionId).not.toHaveBeenCalled();
+    expect(deps.setClaudeSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "pipe closed"
+    );
   });
 });

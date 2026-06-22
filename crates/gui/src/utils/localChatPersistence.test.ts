@@ -53,6 +53,9 @@ describe("localChatPersistence", () => {
       model: "claude-sonnet-4",
       tokenUsage: { used: 120, max: 200000 },
       isDetached: false,
+      lifecycle: "idle",
+      lifecycleError: null,
+      streamingAssistant: null,
     });
     expect(loaded?.messages).toEqual([
       { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
@@ -76,6 +79,85 @@ describe("localChatPersistence", () => {
     persistLocalChatSession(makeSession({ status: "closed" }));
 
     expect(findPersistedLocalChatSession("task", "task-1", "/repo")).toBeNull();
+  });
+
+  it("persists closed lifecycle as local resumable metadata", () => {
+    persistLocalChatSession(makeSession({ lifecycle: "closed" }));
+
+    expect(loadPersistedLocalChatSession("s-1")).toMatchObject({
+      status: "open",
+      lifecycle: "closed",
+      claudeConversationId: "conv-1",
+    });
+  });
+
+  it("strips ephemeral stream state and partial assistant messages", () => {
+    persistLocalChatSession(
+      makeSession({
+        messages: [
+          {
+            kind: "user",
+            text: "question",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+          {
+            kind: "assistant",
+            text: "partial",
+            timestamp: "2026-01-01T00:00:01Z",
+            isPartial: true,
+          },
+        ],
+        lifecycle: "streaming",
+        streamingAssistant: {
+          text: "partial overlay",
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("s-1")).toMatchObject({
+      lifecycle: "idle",
+      streamingAssistant: null,
+      messages: [
+        {
+          kind: "user",
+          text: "question",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+  });
+
+  it("strips legacy persisted partial assistant messages during hydration", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify({
+        "s-1": makeSession({
+          messages: [
+            {
+              kind: "assistant",
+              text: "legacy partial",
+              timestamp: "2026-01-01T00:00:00Z",
+              isPartial: true,
+            },
+            {
+              kind: "assistant",
+              text: "complete",
+              timestamp: "2026-01-01T00:00:01Z",
+              isPartial: false,
+            },
+          ],
+        }),
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("s-1")?.messages).toMatchObject([
+      {
+        kind: "assistant",
+        text: "complete",
+        isPartial: false,
+      },
+    ]);
   });
 
   it("excludes closed sessions from startup hydration", () => {

@@ -10,6 +10,7 @@ export interface ChatInputProps {
   placeholder?: string;
   buttonTitle?: string;
   buttonAriaLabel?: string;
+  textareaTestId?: string;
 }
 
 /**
@@ -28,6 +29,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       placeholder,
       buttonTitle = "Send message",
       buttonAriaLabel = "Send message",
+      textareaTestId,
     },
     ref
   ) {
@@ -50,6 +52,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           onKeyDown={handleKeyDown}
           aria-label={ariaLabel}
           placeholder={placeholder}
+          data-testid={textareaTestId}
           disabled={disabled}
           rows={1}
           className="block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"

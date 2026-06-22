@@ -1,4 +1,9 @@
-import type { ChatScope, ChatSession } from "../stores/chatStore";
+import type {
+  ChatMessage,
+  ChatScope,
+  ChatSession,
+  LocalChatLifecycle,
+} from "../stores/chatStore";
 
 const STORAGE_KEY = "local-chat-sessions:v1";
 const CLEARED_KEY_PREFIX = `${STORAGE_KEY}:cleared:`;
@@ -8,6 +13,7 @@ const VALID_SCOPES = new Set<ChatScope>([
   "task",
   "step",
 ]);
+const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
 
 function canUseStorage(): boolean {
   return typeof localStorage !== "undefined";
@@ -29,12 +35,20 @@ function normalizeSession(value: unknown): ChatSession | null {
   if (!Array.isArray(candidate.messages)) return null;
   if (candidate.status !== "open" && candidate.status !== "closed") return null;
 
+  const lifecycle =
+    typeof candidate.lifecycle === "string" &&
+    DURABLE_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle)
+      ? (candidate.lifecycle as LocalChatLifecycle)
+      : candidate.status === "closed"
+        ? "closed"
+        : "idle";
+
   return {
     id: candidate.id,
     scope: candidate.scope as ChatScope,
     entityId: candidate.entityId ?? null,
     label: candidate.label,
-    messages: candidate.messages,
+    messages: durableMessages(candidate.messages),
     status: candidate.status,
     claudeSessionId:
       typeof candidate.claudeSessionId === "string"
@@ -61,15 +75,28 @@ function normalizeSession(value: unknown): ChatSession | null {
           }
         : undefined,
     isDetached: false,
+    lifecycle,
+    lifecycleError: null,
+    streamingAssistant: null,
   };
+}
+
+function durableMessages(messages: ChatMessage[]): ChatMessage[] {
+  return messages.filter(
+    (message) => message.kind !== "assistant" || !message.isPartial
+  );
 }
 
 function serializeSession(session: ChatSession): ChatSession {
   return {
     ...session,
+    messages: durableMessages(session.messages),
     claudeSessionId: null,
     projectPath: session.projectPath ?? null,
     isDetached: false,
+    lifecycle: session.lifecycle === "closed" ? "closed" : "idle",
+    lifecycleError: null,
+    streamingAssistant: null,
   };
 }
 

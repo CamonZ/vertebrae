@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { commands } from "../../bindings";
 import type { JsonValue } from "../../bindings";
-import { useChatStore, getParentScope } from "../../stores/chatStore";
+import {
+  useChatStore,
+  getParentScope,
+  getLocalChatLifecycle,
+  isLocalChatLifecycleBusy,
+} from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
 import { useCurrentProject } from "../../hooks/useCurrentProject";
@@ -33,6 +38,30 @@ function ThinkingIndicator() {
   );
 }
 
+function lifecycleLabel(
+  lifecycle: ReturnType<typeof getLocalChatLifecycle>,
+  hasResume: boolean
+): string {
+  switch (lifecycle) {
+    case "starting":
+      return "Starting";
+    case "resuming":
+      return "Resuming";
+    case "sending":
+      return "Sending";
+    case "streaming":
+      return "Streaming";
+    case "closing":
+      return "Closing";
+    case "closed":
+      return hasResume ? "Ready to resume" : "Closed";
+    case "error":
+      return "Failed";
+    case "idle":
+      return hasResume ? "Resumable" : "Ready";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Turn grouping
 // ---------------------------------------------------------------------------
@@ -52,9 +81,9 @@ function PermissionRequestTurn({
   message: Extract<ChatMessage, { kind: "permission_request" }>;
 }) {
   const [updatedInput, setUpdatedInput] = useState(message.input ?? "");
-  const [status, setStatus] = useState<"pending" | "allowing" | "denying" | "resolved" | "error">(
-    message.requestId ? "pending" : "resolved"
-  );
+  const [status, setStatus] = useState<
+    "pending" | "allowing" | "denying" | "resolved" | "error"
+  >(message.requestId ? "pending" : "resolved");
   const [error, setError] = useState<string | null>(null);
 
   const resolve = async (behavior: "allow" | "deny") => {
@@ -95,7 +124,8 @@ function PermissionRequestTurn({
     }
   };
 
-  const disabled = status === "allowing" || status === "denying" || status === "resolved";
+  const disabled =
+    status === "allowing" || status === "denying" || status === "resolved";
 
   return (
     <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
@@ -104,8 +134,12 @@ function PermissionRequestTurn({
       </p>
       <div className="space-y-3">
         <div>
-          <p className="font-mono text-xs text-[var(--color-fg)]">{message.toolName}</p>
-          <p className="mt-1 text-sm text-[var(--color-fg-soft)]">{message.message}</p>
+          <p className="font-mono text-xs text-[var(--color-fg)]">
+            {message.toolName}
+          </p>
+          <p className="mt-1 text-sm text-[var(--color-fg-soft)]">
+            {message.message}
+          </p>
         </div>
         {message.input && (
           <textarea
@@ -135,7 +169,9 @@ function PermissionRequestTurn({
             {status === "denying" ? "Denying..." : "Deny"}
           </button>
           {status === "resolved" && (
-            <span className="self-center text-xs text-[var(--color-fg-mute)]">Resolved</span>
+            <span className="self-center text-xs text-[var(--color-fg-mute)]">
+              Resolved
+            </span>
           )}
         </div>
       </div>
@@ -143,7 +179,9 @@ function PermissionRequestTurn({
   );
 }
 
-function isJsonRecord(value: JsonValue | null): value is Record<string, JsonValue> {
+function isJsonRecord(
+  value: JsonValue | null
+): value is Record<string, JsonValue> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -155,7 +193,9 @@ type ChatRenderItem =
       message: Extract<ChatMessage, { kind: "permission_request" }>;
     };
 
-function buildChatRenderItems(messages: readonly ChatMessage[]): ChatRenderItem[] {
+function buildChatRenderItems(
+  messages: readonly ChatMessage[]
+): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
   let segment: ChatMessage[] = [];
   let segmentSeq = 0;
@@ -200,11 +240,20 @@ function scopeMeta(
     case "project":
       return { chip: projectName ?? "project", description: "whole project" };
     case "workflow":
-      return { chip: entityId?.slice(0, 8) ?? "workflow", description: "this workflow" };
+      return {
+        chip: entityId?.slice(0, 8) ?? "workflow",
+        description: "this workflow",
+      };
     case "task":
-      return { chip: entityId?.slice(0, 8) ?? "task", description: "this task" };
+      return {
+        chip: entityId?.slice(0, 8) ?? "task",
+        description: "this task",
+      };
     case "step":
-      return { chip: entityId?.slice(0, 8) ?? "step", description: "this step" };
+      return {
+        chip: entityId?.slice(0, 8) ?? "step",
+        description: "this step",
+      };
   }
 }
 
@@ -233,7 +282,7 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [session?.messages]);
+  }, [session?.messages, session?.streamingAssistant]);
 
   // Focus the composer when the window appears (the panel was just opened via
   // the launcher or ⌥⌥, or the active tab switched) and again whenever the
@@ -246,46 +295,89 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
     if (!trimmed || !isActive) return;
-    sendMessage(trimmed);
+    void sendMessage(trimmed);
     setInputValue("");
   }, [inputValue, isActive, sendMessage]);
 
   const handleStartSession = useCallback(() => {
     const initialPrompt = inputValue.trim();
-    startSession(initialPrompt || undefined);
+    void startSession(initialPrompt || undefined);
     setInputValue("");
   }, [inputValue, startSession]);
+
+  const handleClearMessages = useCallback(async () => {
+    if (session?.claudeSessionId) {
+      const closed = await closeClaudeSession();
+      if (!closed) return;
+    }
+    clearMessages(sessionId);
+  }, [clearMessages, closeClaudeSession, session?.claudeSessionId, sessionId]);
 
   const handleWiden = useCallback(() => {
     if (!session) return;
     const parentScope = getParentScope(session.scope);
     if (!parentScope) return;
 
-    // When widening, we lose the specific entity context and go up
-    // For step->task, we'd need the task ID; for simplicity, we set entityId to null
-    // and let the context re-inject at the broader scope level
-    widenScope(
-      sessionId,
-      parentScope,
-      null,
-      `${scopeLabel(parentScope)} Chat`
-    );
+    // Scope widening still lacks the parent entity lookup needed to preserve
+    // real parent IDs; keep the existing null widening behavior out of this
+    // local lifecycle change.
+    widenScope(sessionId, parentScope, null, `${scopeLabel(parentScope)} Chat`);
   }, [session, sessionId, widenScope]);
 
-  const messages = session?.messages;
+  const lifecycle = getLocalChatLifecycle(session);
+  const isBusy = isLocalChatLifecycleBusy(lifecycle);
+  const hasResume = !!session?.claudeConversationId;
+  const canUseComposer = !isBusy;
+  const canSendMessage = isActive && canUseComposer;
+  const shouldStartOrResume = !isActive && canUseComposer;
+  const submitLabel =
+    lifecycle === "starting"
+      ? "Start session"
+      : lifecycle === "resuming"
+        ? "Resume session"
+        : isActive
+          ? "Send message"
+          : hasResume || lifecycle === "closed" || lifecycle === "error"
+            ? "Resume session"
+            : "Start session";
+  const composerPlaceholder = isBusy
+    ? `${lifecycleLabel(lifecycle, hasResume)}...`
+    : canSendMessage
+      ? "Type a message..."
+      : hasResume || lifecycle === "closed" || lifecycle === "error"
+        ? "Type a message to resume..."
+        : "Type a message to start...";
+
+  const sessionMessages = session?.messages;
+  const streamingAssistant = session?.streamingAssistant;
+  const displayMessages = useMemo(() => {
+    if (!sessionMessages) return [];
+    if (!streamingAssistant) return sessionMessages;
+    return [
+      ...sessionMessages,
+      {
+        kind: "assistant" as const,
+        text: streamingAssistant.text,
+        timestamp: streamingAssistant.timestamp,
+        isPartial: true,
+      },
+    ];
+  }, [sessionMessages, streamingAssistant]);
+
+  const messages = displayMessages;
+  const hasStreamingOverlay = !!streamingAssistant;
   const isWaiting =
-    isActive &&
-    !!messages &&
+    (lifecycle === "sending" ||
+      lifecycle === "streaming" ||
+      (isActive && lifecycle !== "error")) &&
+    !hasStreamingOverlay &&
     messages.length > 0 &&
     messages[messages.length - 1].kind === "user";
 
   // Normalize-on-render: derive canonical Thread chunks from the live store
   // messages, interleaving interactive permission cards at their original
   // message positions so the chat stays chronological.
-  const renderItems = useMemo(
-    () => buildChatRenderItems(messages ?? []),
-    [messages]
-  );
+  const renderItems = useMemo(() => buildChatRenderItems(messages), [messages]);
 
   if (!session) return null;
 
@@ -318,9 +410,19 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
         <div className="hc-head-top">
           <span className="hc-title">
             <span className="label">{session.label}</span>
-            {isActive ? (
+            {lifecycle === "error" ? (
+              <span
+                data-testid="chat-error-dot"
+                className="em"
+                style={{
+                  background: "var(--color-err)",
+                  boxShadow:
+                    "0 0 6px color-mix(in oklch, var(--color-err) 60%, transparent)",
+                }}
+              />
+            ) : isActive ? (
               <span data-testid="chat-active-dot" className="em ok" />
-            ) : session.status === "closed" ? (
+            ) : lifecycle === "closed" ? (
               <span data-testid="chat-closed-dot" className="em mute" />
             ) : (
               <span className="em" />
@@ -330,7 +432,8 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             {isActive && (
               <button
                 className="hc-ctrl danger"
-                onClick={closeClaudeSession}
+                onClick={() => void closeClaudeSession()}
+                disabled={lifecycle === "closing"}
                 title="End session"
                 aria-label="End session"
               >
@@ -351,24 +454,25 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             )}
             <button
               className="hc-ctrl"
-              onClick={() => clearMessages(sessionId)}
+              onClick={() => void handleClearMessages()}
+              disabled={lifecycle === "closing"}
               title="Clear messages"
               aria-label="Clear messages"
             >
-            <svg
-              className="h-3.5 w-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-              />
-            </svg>
-          </button>
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                />
+              </svg>
+            </button>
             <button
               className="hc-ctrl"
               onClick={onClosePanel}
@@ -399,6 +503,17 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
           <span className="hc-scope-id">{scopeChip}</span>
           <span className="hc-sep">·</span>
           <span className="hc-scope">{scopeDescription}</span>
+          <span className="hc-sep">·</span>
+          <span
+            data-testid="chat-lifecycle-label"
+            className={
+              lifecycle === "error"
+                ? "text-xs text-[var(--color-err)]"
+                : "hc-scope"
+            }
+          >
+            {lifecycleLabel(lifecycle, hasResume)}
+          </span>
           {canWiden && (
             <button
               className="hc-widen"
@@ -435,6 +550,15 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
               {session.contextSummary}
             </pre>
           </details>
+        </div>
+      )}
+
+      {lifecycle === "error" && session.lifecycleError && (
+        <div
+          data-testid="chat-lifecycle-error"
+          className="border-b border-[var(--color-err)]/30 bg-[var(--color-err)]/10 px-3 py-2 text-xs text-[var(--color-err)]"
+        >
+          {session.lifecycleError}
         </div>
       )}
 
@@ -501,11 +625,17 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             ref={inputRef}
             value={inputValue}
             onChange={setInputValue}
-            onSubmit={isActive ? handleSend : handleStartSession}
-            canSubmit={isActive || inputValue.trim().length > 0}
-            placeholder={isActive ? "Type a message..." : "Type a message to start..."}
-            buttonTitle={isActive ? "Send message" : "Start session"}
-            buttonAriaLabel={isActive ? "Send message" : "Start session"}
+            onSubmit={canSendMessage ? handleSend : handleStartSession}
+            disabled={!canUseComposer}
+            canSubmit={
+              canUseComposer &&
+              inputValue.trim().length > 0 &&
+              (canSendMessage || shouldStartOrResume)
+            }
+            placeholder={composerPlaceholder}
+            buttonTitle={submitLabel}
+            buttonAriaLabel={submitLabel}
+            textareaTestId="local-chat-composer"
           />
         </div>
         {usage && usage.max > 0 && (

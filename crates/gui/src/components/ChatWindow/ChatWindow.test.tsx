@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
+import { commands } from "../../bindings";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
+const mockedCommands = vi.mocked(commands);
 
 // Synchronous project so the header's "scoped to" line renders without an async
 // state update (which would otherwise log act() warnings).
@@ -33,9 +35,7 @@ vi.mock("../../bindings", () => ({
     getCurrentProject: vi
       .fn()
       .mockResolvedValue({ status: "ok", data: "test-project" }),
-    getTaskExecutions: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: [] }),
+    getTaskExecutions: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
   },
   events: {
     claudeSessionInitEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
@@ -251,9 +251,7 @@ describe("ChatWindow", () => {
     // Tool name is the collapsed header label.
     expect(screen.getByText("Read")).toBeInTheDocument();
     // Input is hidden until the block is expanded.
-    expect(
-      screen.queryByText('{"file_path": "/test.ts"}')
-    ).toBeNull();
+    expect(screen.queryByText('{"file_path": "/test.ts"}')).toBeNull();
   });
 
   it("shows context summary when present", () => {
@@ -338,6 +336,78 @@ describe("ChatWindow", () => {
     ).toHaveLength(0);
   });
 
+  it("closes the backend before clearing an active session", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Hello",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTitle("Clear messages"));
+
+    await waitFor(() => {
+      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+        "claude-abc"
+      );
+      expect(
+        useChatStore.getState().sessions["test-session"].messages
+      ).toHaveLength(0);
+    });
+  });
+
+  it("keeps messages when backend close fails during clear", async () => {
+    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "pipe closed" },
+    } as never);
+    const user = userEvent.setup();
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Hello",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTitle("Clear messages"));
+
+    await waitFor(() => {
+      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+        "claude-abc"
+      );
+      const current = useChatStore.getState().sessions["test-session"];
+      expect(current.messages).toHaveLength(1);
+      expect(current.claudeSessionId).toBe("claude-abc");
+      expect(current.lifecycle).toBe("error");
+      expect(current.lifecycleError).toBe("pipe closed");
+    });
+  });
+
   it("shows placeholder text for idle session", () => {
     const session = createSession({ claudeSessionId: null });
     useChatStore.setState({
@@ -384,7 +454,7 @@ describe("ChatWindow", () => {
   });
 
   it("shows closed status indicator for closed sessions", () => {
-    const session = createSession({ status: "closed" });
+    const session = createSession({ lifecycle: "closed" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -501,6 +571,37 @@ describe("ChatWindow", () => {
     expect(document.querySelector(".ev-cursor")).toBeInTheDocument();
   });
 
+  it("renders the ephemeral streaming assistant overlay", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Question",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+      streamingAssistant: {
+        text: "Overlay answer",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByText("Overlay answer")).toBeInTheDocument();
+    expect(document.querySelector(".ev-cursor")).toBeInTheDocument();
+    expect(
+      useChatStore.getState().sessions["test-session"].messages
+    ).toHaveLength(1);
+  });
+
   it("does not show partial cursor for complete assistant messages", () => {
     const session = createSession({
       messages: [
@@ -526,6 +627,29 @@ describe("ChatWindow", () => {
   it("shows thinking indicator when waiting for response", () => {
     const session = createSession({
       claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "user",
+          text: "What is this?",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+  });
+
+  it("keeps showing thinking while streaming before the first text delta", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "streaming",
       messages: [
         {
           kind: "user",
@@ -715,7 +839,7 @@ describe("ChatWindow", () => {
     expect(screen.getByTitle("Start session")).not.toBeDisabled();
   });
 
-  it("enables send button when session is active even with empty input", () => {
+  it("disables send button when session is active with empty input", () => {
     const session = createSession({ claudeSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -725,7 +849,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTitle("Send message")).not.toBeDisabled();
+    expect(screen.getByTitle("Send message")).toBeDisabled();
   });
 
   // --- D) Button title attributes ---
@@ -756,6 +880,151 @@ describe("ChatWindow", () => {
 
     expect(screen.getByTitle("Start session")).toBeInTheDocument();
     expect(screen.queryByTitle("Send message")).not.toBeInTheDocument();
+  });
+
+  it("disables composer while a session is starting", () => {
+    const session = createSession({ lifecycle: "starting" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Starting"
+    );
+    expect(screen.getByPlaceholderText("Starting...")).toBeDisabled();
+    expect(screen.getByTitle("Start session")).toBeDisabled();
+  });
+
+  it("disables composer while sending", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "sending",
+      messages: [
+        {
+          kind: "user",
+          text: "Question",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Sending"
+    );
+    expect(screen.getByPlaceholderText("Sending...")).toBeDisabled();
+    expect(screen.getByTitle("Send message")).toBeDisabled();
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+  });
+
+  it("disables composer while streaming", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      lifecycle: "streaming",
+      streamingAssistant: {
+        text: "Streaming now",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Streaming"
+    );
+    expect(screen.getByPlaceholderText("Streaming...")).toBeDisabled();
+    expect(screen.getByText("Streaming now")).toBeInTheDocument();
+  });
+
+  it("shows an error banner and allows retry text after an error", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      lifecycle: "error",
+      lifecycleError: "Claude failed",
+      claudeSessionId: "stale-claude-id",
+      claudeConversationId: "conv-retry",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Failed"
+    );
+    expect(screen.getByTestId("chat-lifecycle-error")).toHaveTextContent(
+      "Claude failed"
+    );
+    const textarea = screen.getByPlaceholderText("Type a message to resume...");
+    await user.type(textarea, "Retry");
+    expect(screen.getByTitle("Resume session")).not.toBeDisabled();
+    await user.click(screen.getByTitle("Resume session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalled();
+      expect(mockedCommands.sendClaudeMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shows closed resumable state", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      lifecycle: "closed",
+      claudeConversationId: "conv-resume",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Ready to resume"
+    );
+    const textarea = screen.getByPlaceholderText("Type a message to resume...");
+    await user.type(textarea, "Resume");
+    expect(screen.getByTitle("Resume session")).not.toBeDisabled();
+  });
+
+  it("disables composer while a session is resuming", () => {
+    const session = createSession({
+      lifecycle: "resuming",
+      claudeConversationId: "conv-resume",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("chat-lifecycle-label")).toHaveTextContent(
+      "Resuming"
+    );
+    expect(screen.getByPlaceholderText("Resuming...")).toBeDisabled();
+    expect(screen.getByTitle("Resume session")).toBeDisabled();
   });
 
   // --- E) Tool toggling (interactive collapse) ---
@@ -875,9 +1144,9 @@ describe("ChatWindow", () => {
   it("resolves a permission request when Approve is clicked", async () => {
     const user = userEvent.setup();
     const { commands } = await import("../../bindings");
-    (commands.resolvePermissionRequest as ReturnType<typeof vi.fn>).mockResolvedValue(
-      { status: "ok" }
-    );
+    (
+      commands.resolvePermissionRequest as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({ status: "ok" });
     const session = createSession({
       claudeSessionId: "claude-abc",
       messages: [

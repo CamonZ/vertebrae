@@ -6,19 +6,32 @@ function key(sessionId: string): string {
   return `${KEY_PREFIX}${sessionId}`;
 }
 
+// Strip partial assistant messages while preserving lifecycle and stream state for handoff.
+function handoffSession(session: ChatSession): ChatSession {
+  return {
+    ...session,
+    messages: session.messages.filter(
+      (message) => message.kind !== "assistant" || !message.isPartial
+    ),
+  };
+}
+
 /**
  * Stash a chat session in `localStorage` so a freshly-opened pop-out window
  * can seed its empty `useChatStore` synchronously before first paint.
  *
  * Tauri webviews of the same origin share `localStorage`, which makes this
- * a valid hand-off channel. Streaming Claude events are broadcast to all
- * windows, so once the pop-out's `useScopedChat` hook mounts with the
- * existing `claudeSessionId`, real-time updates resume without further
- * plumbing.
+ * a valid hand-off channel. Partial assistant messages are filtered out, while
+ * the live streaming overlay is preserved; Claude events are broadcast to all
+ * windows, so once the pop-out's `useScopedChat` hook mounts with the existing
+ * `claudeSessionId`, real-time updates resume without further plumbing.
  */
 export function stashChatSession(session: ChatSession): void {
   try {
-    localStorage.setItem(key(session.id), JSON.stringify(session));
+    localStorage.setItem(
+      key(session.id),
+      JSON.stringify(handoffSession(session))
+    );
   } catch {
     // Out of quota or storage disabled — pop-out will see an empty session
   }
