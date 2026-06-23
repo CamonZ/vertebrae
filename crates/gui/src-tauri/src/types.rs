@@ -381,20 +381,43 @@ pub struct UpdateTaskOptions {
 #[serde(rename_all = "snake_case")]
 pub enum PermissionMode {
     AcceptEdits,
+    Auto,
     BypassPermissions,
     Default,
-    Delegate,
     DontAsk,
     Plan,
+}
+
+impl PermissionMode {
+    pub fn as_claude_arg(&self) -> &'static str {
+        match self {
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::Auto => "auto",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+            PermissionMode::Default => "default",
+            PermissionMode::DontAsk => "dontAsk",
+            PermissionMode::Plan => "plan",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CreateClaudeSessionInput {
+    pub session_id: String,
+    pub working_dir: Option<String>,
+    pub initial_prompt: Option<String>,
+    pub resume_session_id: Option<String>,
+    pub model_id: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
 }
 
 impl From<vertebrae_core::PermissionMode> for PermissionMode {
     fn from(mode: vertebrae_core::PermissionMode) -> Self {
         match mode {
             vertebrae_core::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
+            vertebrae_core::PermissionMode::Auto => PermissionMode::Auto,
             vertebrae_core::PermissionMode::BypassPermissions => PermissionMode::BypassPermissions,
             vertebrae_core::PermissionMode::Default => PermissionMode::Default,
-            vertebrae_core::PermissionMode::Delegate => PermissionMode::Delegate,
             vertebrae_core::PermissionMode::DontAsk => PermissionMode::DontAsk,
             vertebrae_core::PermissionMode::Plan => PermissionMode::Plan,
         }
@@ -1750,16 +1773,16 @@ mod tests {
     #[test]
     fn permission_mode_from_core_all_variants() {
         assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::Auto),
+            PermissionMode::Auto
+        );
+        assert_eq!(
             PermissionMode::from(vertebrae_core::PermissionMode::BypassPermissions),
             PermissionMode::BypassPermissions
         );
         assert_eq!(
             PermissionMode::from(vertebrae_core::PermissionMode::Default),
             PermissionMode::Default
-        );
-        assert_eq!(
-            PermissionMode::from(vertebrae_core::PermissionMode::Delegate),
-            PermissionMode::Delegate
         );
         assert_eq!(
             PermissionMode::from(vertebrae_core::PermissionMode::DontAsk),

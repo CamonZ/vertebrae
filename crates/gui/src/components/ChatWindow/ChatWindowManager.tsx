@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import { scopeLabel } from "../../utils/chatContext";
@@ -13,6 +13,8 @@ const WIDTH_STORAGE_KEY = "chat-window-manager-width";
 const MIN_PANEL_WIDTH = 320;
 const MAX_PANEL_WIDTH = 760;
 const DEFAULT_PANEL_WIDTH = 384;
+const DEFAULT_PANEL_LEFT_INSET = 60;
+const MAXIMIZED_RIGHT_INSET = 16;
 /** Keyboard resize step (px) for the drag handle. */
 const RESIZE_STEP = 16;
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
@@ -54,24 +56,54 @@ export function ChatWindowManager() {
       ? DEFAULT_PANEL_WIDTH
       : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, stored));
   });
+  const [restoredPanelWidth, setRestoredPanelWidth] = useState(panelWidth);
+  const [isMaximized, setIsMaximized] = useState(false);
+  const [maximizedWidth, setMaximizedWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && !isMaximized) {
       localStorage.setItem(WIDTH_STORAGE_KEY, String(panelWidth));
     }
-  }, [panelWidth]);
+  }, [isMaximized, panelWidth]);
+
+  const computeMaximizedWidth = useCallback(() => {
+    if (typeof window === "undefined") return MAX_PANEL_WIDTH;
+    const leftEdge =
+      panelRef.current?.getBoundingClientRect().left ?? DEFAULT_PANEL_LEFT_INSET;
+    return Math.max(
+      MIN_PANEL_WIDTH,
+      window.innerWidth - leftEdge - MAXIMIZED_RIGHT_INSET
+    );
+  }, []);
+
+  const toggleMaximized = useCallback(() => {
+    setIsMaximized((current) => {
+      if (current) {
+        setPanelWidth(restoredPanelWidth);
+        return false;
+      }
+      setRestoredPanelWidth(panelWidth);
+      setMaximizedWidth(computeMaximizedWidth());
+      return true;
+    });
+  }, [computeMaximizedWidth, panelWidth, restoredPanelWidth]);
+
+  const resizePanel = useCallback((nextWidth: number) => {
+    const width = Math.min(
+      MAX_PANEL_WIDTH,
+      Math.max(MIN_PANEL_WIDTH, nextWidth)
+    );
+    setIsMaximized(false);
+    setRestoredPanelWidth(width);
+    setPanelWidth(width);
+  }, []);
 
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (event: MouseEvent) => {
       const leftEdge = panelRef.current?.getBoundingClientRect().left ?? 0;
-      setPanelWidth(
-        Math.min(
-          MAX_PANEL_WIDTH,
-          Math.max(MIN_PANEL_WIDTH, event.clientX - leftEdge)
-        )
-      );
+      resizePanel(event.clientX - leftEdge);
     };
     const onUp = () => setIsResizing(false);
     document.addEventListener("mousemove", onMove);
@@ -84,7 +116,15 @@ export function ChatWindowManager() {
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
     };
-  }, [isResizing]);
+  }, [isResizing, resizePanel]);
+
+  useEffect(() => {
+    if (!isMaximized) return;
+    const updateMaximizedWidth = () => setMaximizedWidth(computeMaximizedWidth());
+    updateMaximizedWidth();
+    window.addEventListener("resize", updateMaximizedWidth);
+    return () => window.removeEventListener("resize", updateMaximizedWidth);
+  }, [computeMaximizedWidth, isMaximized]);
 
   const sessionList = Object.values(sessions);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
@@ -92,6 +132,7 @@ export function ChatWindowManager() {
   const localSessionSummaries = listLocalSessions(activeProjectPath);
 
   const open = panelOpen && sessionList.length > 0;
+  const renderedPanelWidth = isMaximized ? maximizedWidth : panelWidth;
   const startFreshActiveSession = () => {
     if (!activeSession) return;
     const label = `New ${scopeLabel(activeSession.scope)} Chat`;
@@ -103,6 +144,33 @@ export function ChatWindowManager() {
     );
     setHistoryOpen(false);
   };
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      setDeleteError(null);
+      const target = useChatStore.getState().sessions[sessionId];
+      if (target?.claudeSessionId) {
+        setDeletingSessionId(sessionId);
+        const closed = await doCloseSession(target.claudeSessionId, sessionId, {
+          markSessionClosed,
+          setSessionLifecycle,
+          setClaudeSessionId,
+          setClaudeSessionIdRef: () => {},
+        });
+        setDeletingSessionId(null);
+        if (!closed) {
+          setDeleteError("Could not delete local chat. Try again.");
+          return;
+        }
+      }
+      const wasActive = sessionId === useChatStore.getState().activeSessionId;
+      deleteLocalSession(sessionId);
+      if (wasActive) {
+        setHistoryOpen(false);
+      }
+    },
+    [deleteLocalSession, markSessionClosed, setClaudeSessionId, setSessionLifecycle]
+  );
 
   // Join the shared glass-panel focus model so Escape closes whichever panel is
   // focused. The chat is globally mounted; it's "open" only while showing.
@@ -119,6 +187,17 @@ export function ChatWindowManager() {
     EXIT_MS
   );
 
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.key !== "\\") return;
+      event.preventDefault();
+      toggleMaximized();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, toggleMaximized]);
+
   if (!mounted) {
     return null;
   }
@@ -127,10 +206,12 @@ export function ChatWindowManager() {
     <div
       ref={panelRef}
       className={`hc-panel${closing ? " is-closing" : ""}`}
-      style={{ width: `${panelWidth}px` }}
+      style={{ width: `${renderedPanelWidth}px` }}
       data-testid="chat-window-manager"
       data-focused={isFocused || undefined}
       data-closing={closing || undefined}
+      data-maximized={isMaximized || undefined}
+      data-resizing={isResizing || undefined}
       onAnimationEnd={onAnimationEnd}
       {...focusProps}
     >
@@ -140,7 +221,7 @@ export function ChatWindowManager() {
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize panel"
-        aria-valuenow={panelWidth}
+        aria-valuenow={renderedPanelWidth}
         aria-valuemin={MIN_PANEL_WIDTH}
         aria-valuemax={MAX_PANEL_WIDTH}
         tabIndex={0}
@@ -152,9 +233,9 @@ export function ChatWindowManager() {
         }}
         onKeyDown={(event) => {
           if (event.key === "ArrowRight") {
-            setPanelWidth((w) => Math.min(MAX_PANEL_WIDTH, w + RESIZE_STEP));
+            resizePanel(renderedPanelWidth + RESIZE_STEP);
           } else if (event.key === "ArrowLeft") {
-            setPanelWidth((w) => Math.max(MIN_PANEL_WIDTH, w - RESIZE_STEP));
+            resizePanel(renderedPanelWidth - RESIZE_STEP);
           }
         }}
       />
@@ -168,14 +249,34 @@ export function ChatWindowManager() {
         />
       )}
       {activeSession && !activeSession.isDetached && (
-        <ChatWindow
-          sessionId={activeSession.id}
-          onClosePanel={togglePanel}
-          onToggleHistory={() => setHistoryOpen((value) => !value)}
-          onStartFresh={startFreshActiveSession}
-        />
+        <div className="hc-panel-main">
+          {isMaximized && (
+            <LocalChatMiniPanel
+              activeSessionId={activeSession.id}
+              sessions={localSessionSummaries}
+              onStartFresh={startFreshActiveSession}
+              onSelect={(sessionId) => {
+                setDeleteError(null);
+                selectPersistedSession(sessionId);
+              }}
+              deletingSessionId={deletingSessionId}
+              deleteError={deleteError}
+              onDelete={(sessionId) => void handleDeleteSession(sessionId)}
+            />
+          )}
+          <div className="hc-chat-pane">
+            <ChatWindow
+              sessionId={activeSession.id}
+              onClosePanel={togglePanel}
+              onToggleHistory={
+                isMaximized ? undefined : () => setHistoryOpen((value) => !value)
+              }
+              onStartFresh={startFreshActiveSession}
+            />
+          </div>
+        </div>
       )}
-      {historyOpen && activeSession && (
+      {historyOpen && activeSession && !isMaximized && (
         <LocalChatHistoryDrawer
           activeSessionId={activeSession.id}
           sessions={localSessionSummaries}
@@ -189,38 +290,12 @@ export function ChatWindowManager() {
           }}
           deletingSessionId={deletingSessionId}
           deleteError={deleteError}
-          onDelete={async (sessionId) => {
-            setDeleteError(null);
-            const target = useChatStore.getState().sessions[sessionId];
-            if (target?.claudeSessionId) {
-              setDeletingSessionId(sessionId);
-              const closed = await doCloseSession(
-                target.claudeSessionId,
-                sessionId,
-                {
-                  markSessionClosed,
-                  setSessionLifecycle,
-                  setClaudeSessionId,
-                  setClaudeSessionIdRef: () => {},
-                }
-              );
-              setDeletingSessionId(null);
-              if (!closed) {
-                setDeleteError("Could not delete local chat. Try again.");
-                return;
-              }
-            }
-            const wasActive =
-              sessionId === useChatStore.getState().activeSessionId;
-            deleteLocalSession(sessionId);
-            if (wasActive) {
-              setHistoryOpen(false);
-            }
-          }}
+          onDelete={handleDeleteSession}
         />
       )}
     </div>
   );
+
 }
 
 function formatSessionTime(value: string): string {
@@ -230,6 +305,120 @@ function formatSessionTime(value: string): string {
     month: "short",
     day: "numeric",
   });
+}
+
+function formatSessionModel(session: LocalChatSessionSummary): string {
+  const model = session.model?.trim() || session.selectedModelId?.trim();
+  return model ? model.replace(/^claude-/i, "") : scopeLabel(session.scope);
+}
+
+function LocalChatMiniPanel({
+  activeSessionId,
+  deletingSessionId,
+  deleteError,
+  sessions,
+  onStartFresh,
+  onSelect,
+  onDelete,
+}: {
+  activeSessionId: string;
+  deletingSessionId: string | null;
+  deleteError: string | null;
+  sessions: LocalChatSessionSummary[];
+  onStartFresh: () => void;
+  onSelect: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void | Promise<void>;
+}) {
+  return (
+    <aside
+      data-testid="local-chat-mini-panel"
+      aria-label="Local chat threads"
+      className="hc-mini-history"
+    >
+      <div className="hc-mini-history-head">
+        <span>Chats</span>
+        <button
+          type="button"
+          className="hc-ctrl"
+          onClick={onStartFresh}
+          title="Start fresh local chat"
+          aria-label="Start fresh local chat"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 5v14m7-7H5"
+            />
+          </svg>
+        </button>
+      </div>
+      {deleteError && (
+        <div role="alert" className="hc-mini-history-error">
+          {deleteError}
+        </div>
+      )}
+      {sessions.length === 0 ? (
+        <div className="hc-mini-history-empty">No local chats yet.</div>
+      ) : (
+        <div className="hc-mini-history-list">
+          {sessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            const isDeleting = session.id === deletingSessionId;
+            const modelLabel = formatSessionModel(session);
+            return (
+              <div
+                key={session.id}
+                className="hc-mini-history-row"
+                data-active={isActive || undefined}
+              >
+                <button
+                  type="button"
+                  className="hc-mini-history-open"
+                  onClick={() => onSelect(session.id)}
+                  title={`Open local chat ${session.label}`}
+                  aria-label={`Open local chat ${session.label}`}
+                  aria-current={isActive ? "true" : undefined}
+                >
+                  <span className="label">{session.label}</span>
+                  <span className="preview">{session.preview}</span>
+                  <span className="meta">{modelLabel}</span>
+                </button>
+                <button
+                  type="button"
+                  className="hc-ctrl danger shrink-0"
+                  disabled={isDeleting}
+                  onClick={() => void onDelete(session.id)}
+                  title={`Delete local chat ${session.label}`}
+                  aria-label={`Delete local chat ${session.label}`}
+                >
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </aside>
+  );
 }
 
 function LocalChatHistoryDrawer({

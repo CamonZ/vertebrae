@@ -2412,7 +2412,7 @@ mod provider_tests {
         let initial = r#"{
             "model": "claude-opus-4-5",
             "system_prompt": "Original prompt",
-            "permission_mode": "delegate",
+            "permission_mode": "auto",
             "max_budget_usd": 12.0,
             "allowed_tools": ["bash"]
         }"#;
@@ -2439,7 +2439,7 @@ mod provider_tests {
         assert_eq!(cfg.provider, Some(Provider::Anthropic));
         assert_eq!(cfg.model.as_deref(), Some("claude-opus-4-5"));
         assert_eq!(cfg.system_prompt.as_deref(), Some("Original prompt"));
-        assert_eq!(cfg.permission_mode, Some(PermissionMode::Delegate));
+        assert_eq!(cfg.permission_mode, Some(PermissionMode::Auto));
         assert_eq!(cfg.max_budget_usd, Some(12.0));
         assert_eq!(cfg.allowed_tools, vec!["bash".to_string()]);
     }

@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { commands } from "../../bindings";
-import type { ClaudeModelCatalog, JsonValue } from "../../bindings";
+import type {
+  ClaudeModelCatalog,
+  JsonValue,
+  PermissionMode,
+} from "../../bindings";
 import {
   useChatStore,
   getParentScope,
@@ -22,6 +26,18 @@ import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { ChatInput } from "../ChatInput";
 import { chatMessagesToThread } from "./chatMessagesToThread";
+
+const PERMISSION_MODE_OPTIONS: Array<{
+  value: PermissionMode;
+  label: string;
+}> = [
+  { value: "default", label: "Ask before edits" },
+  { value: "accept_edits", label: "Edit automatically" },
+  { value: "plan", label: "Plan mode" },
+  { value: "auto", label: "Auto mode" },
+  { value: "dont_ask", label: "Don't ask" },
+  { value: "bypass_permissions", label: "Bypass permissions" },
+];
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -293,6 +309,9 @@ export function ChatWindow({
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
+  const setSessionPermissionMode = useChatStore(
+    (s) => s.setSessionPermissionMode
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -390,6 +409,15 @@ export function ChatWindow({
     },
     [sessionId, setSessionSelectedModel]
   );
+  const handlePermissionModeChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      setSessionPermissionMode(
+        sessionId,
+        (event.target.value || "default") as PermissionMode
+      );
+    },
+    [sessionId, setSessionPermissionMode]
+  );
 
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
@@ -450,7 +478,8 @@ export function ChatWindow({
 
   const canWiden = getParentScope(session.scope) !== null;
   const selectedModelUnsupported =
-    !!session.selectedModelId && !supportedModelIds.has(session.selectedModelId);
+    !!session.selectedModelId &&
+    !supportedModelIds.has(session.selectedModelId);
 
   // Current request input-context utilization for the footer bar + readout.
   // Falls back to an empty bar before the first usage event lands.
@@ -605,34 +634,6 @@ export function ChatWindow({
             </button>
           </div>
         )}
-        {modelCatalog && (
-          <div className="hc-head-meta">
-            <label className="hc-model-picker">
-              <span>Model</span>
-              <select
-                aria-label="Claude model"
-                data-testid="local-chat-model-picker"
-                value={session.selectedModelId ?? ""}
-                onChange={handleModelChange}
-                disabled={isBusy || isActive}
-              >
-                <option value="">
-                  {session.claudeConversationId ? "Original model" : "CLI default"}
-                </option>
-                {selectedModelUnsupported && (
-                  <option value={session.selectedModelId ?? ""}>
-                    Unsupported: {session.selectedModelId}
-                  </option>
-                )}
-                {modelCatalog.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
       </div>
 
       {lifecycle === "error" && session.lifecycleError && (
@@ -718,6 +719,54 @@ export function ChatWindow({
             buttonTitle={submitLabel}
             buttonAriaLabel={submitLabel}
             textareaTestId="local-chat-composer"
+            footerLeft={
+              <label className="hc-permission-picker">
+                <span>Permission</span>
+                <select
+                  aria-label="Claude permission mode"
+                  data-testid="local-chat-permission-mode-picker"
+                  value={session.permissionMode ?? "default"}
+                  onChange={handlePermissionModeChange}
+                  disabled={isBusy || isActive}
+                >
+                  {PERMISSION_MODE_OPTIONS.map((mode) => (
+                    <option key={mode.value} value={mode.value}>
+                      {mode.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            }
+            footerRight={
+              modelCatalog ? (
+                <label className="hc-model-picker">
+                  <span>Model</span>
+                  <select
+                    aria-label="Claude model"
+                    data-testid="local-chat-model-picker"
+                    value={session.selectedModelId ?? ""}
+                    onChange={handleModelChange}
+                    disabled={isBusy || isActive}
+                  >
+                    <option value="">
+                      {session.claudeConversationId
+                        ? "Original model"
+                        : "CLI default"}
+                    </option>
+                    {selectedModelUnsupported && (
+                      <option value={session.selectedModelId ?? ""}>
+                        Unsupported: {session.selectedModelId}
+                      </option>
+                    )}
+                    {modelCatalog.models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null
+            }
           />
         </div>
         {usage && usage.max > 0 && (

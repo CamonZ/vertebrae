@@ -156,6 +156,149 @@ describe("ChatWindowManager", () => {
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
+  it("toggles maximized width with Cmd+\\ and restores the prior normal width", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({
+      id: "s1",
+      scope: "project",
+      entityId: null,
+      label: "Project Chat",
+    });
+
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    const panel = screen.getByTestId("chat-window-manager");
+    expect(panel).toHaveStyle({ width: "384px" });
+
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(panel).toHaveAttribute("data-maximized", "true");
+    expect(panel).toHaveStyle({ width: "1184px" });
+    expect(localStorage.getItem("chat-window-manager-width")).toBe("384");
+
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(panel).not.toHaveAttribute("data-maximized");
+    expect(panel).toHaveStyle({ width: "384px" });
+  });
+
+  it("updates maximized width when the viewport resizes", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    const panel = screen.getByTestId("chat-window-manager");
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(panel).toHaveStyle({ width: "1184px" });
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+    });
+    fireEvent.resize(window);
+
+    expect(panel).toHaveStyle({ width: "884px" });
+  });
+
+  it("ignores Cmd+\\ when the chat panel is closed or has no sessions", () => {
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: false,
+    });
+
+    const { rerender } = render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(screen.queryByTestId("chat-window-manager")).toBeNull();
+
+    act(() => {
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: true,
+      });
+    });
+    rerender(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(screen.queryByTestId("chat-window-manager")).toBeNull();
+  });
+
+  it("toggles maximized width with Cmd+\\ while the composer is focused", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({
+      id: "s1",
+      scope: "project",
+      entityId: null,
+      label: "Project Chat",
+    });
+
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    const textarea = screen.getByTestId("local-chat-composer");
+    await user.click(textarea);
+    expect(textarea).toHaveFocus();
+
+    const panel = screen.getByTestId("chat-window-manager");
+    fireEvent.keyDown(textarea, { key: "\\", metaKey: true });
+
+    expect(panel).toHaveAttribute("data-maximized", "true");
+    expect(panel).toHaveStyle({ width: "1184px" });
+  });
+
+  it("manual keyboard resize exits maximized mode and stores the restored width", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    const panel = screen.getByTestId("chat-window-manager");
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(panel).toHaveAttribute("data-maximized", "true");
+
+    fireEvent.keyDown(screen.getByTestId("chat-resize-handle"), {
+      key: "ArrowLeft",
+    });
+
+    expect(panel).not.toHaveAttribute("data-maximized");
+    expect(panel).toHaveStyle({ width: "760px" });
+    expect(localStorage.getItem("chat-window-manager-width")).toBe("760");
+  });
+
   it("shows close panel button", () => {
     const s1 = createSession({ id: "s1", label: "Task A" });
 
@@ -311,6 +454,82 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().activeSessionId).not.toBe(second);
     expect(commands.createClaudeSession).not.toHaveBeenCalled();
     expect(commands.sendClaudeMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a mini thread selector while maximized and keeps the main chat visible", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task One", "/test/project");
+    useChatStore.getState().addMessage(first, {
+      kind: "user",
+      text: "first saved question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const second = useChatStore
+      .getState()
+      .openSession("task", "task-2", "Task Two", "/test/project");
+    useChatStore.getState().addMessage(second, {
+      kind: "assistant",
+      text: "second saved answer",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().focusSession(first);
+
+    render(<ChatWindowManager />);
+
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Toggle chat history")).toBeNull();
+    expect(
+      screen.queryByTestId("local-chat-history-drawer")
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText("first saved question")).toHaveLength(2);
+
+    await user.click(screen.getByLabelText("Open local chat Task Two"));
+
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+    expect(screen.getAllByText("second saved answer")).toHaveLength(2);
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+  });
+
+  it("shows the chat model in the maximized mini thread selector", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task One", "/test/project");
+    useChatStore.getState().setSessionModel(first, "claude-sonnet-4.5");
+    useChatStore.getState().addMessage(first, {
+      kind: "user",
+      text: "first saved question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const second = useChatStore
+      .getState()
+      .openSession("project", null, "Project Chat", "/test/project");
+    useChatStore.getState().addMessage(second, {
+      kind: "user",
+      text: "no model yet",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().focusSession(first);
+
+    render(<ChatWindowManager />);
+
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+
+    expect(miniPanel.getByText("sonnet-4.5")).toBeInTheDocument();
+    expect(miniPanel.getByText("Project")).toBeInTheDocument();
+    expect(miniPanel.queryByText(/Jan/)).not.toBeInTheDocument();
   });
 
   it("closes a live Claude session before deleting it from history", async () => {

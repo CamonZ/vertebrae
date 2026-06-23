@@ -360,9 +360,10 @@ impl std::fmt::Display for TaskRunStatus {
 #[serde(rename_all = "camelCase")]
 pub enum PermissionMode {
     AcceptEdits,
+    #[serde(alias = "delegate")]
+    Auto,
     BypassPermissions,
     Default,
-    Delegate,
     DontAsk,
     Plan,
 }
@@ -371,9 +372,9 @@ impl PermissionMode {
     pub fn as_str(&self) -> &'static str {
         match self {
             PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::Auto => "auto",
             PermissionMode::BypassPermissions => "bypassPermissions",
             PermissionMode::Default => "default",
-            PermissionMode::Delegate => "delegate",
             PermissionMode::DontAsk => "dontAsk",
             PermissionMode::Plan => "plan",
         }
@@ -382,9 +383,9 @@ impl PermissionMode {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "acceptEdits" => Some(PermissionMode::AcceptEdits),
+            "auto" => Some(PermissionMode::Auto),
             "bypassPermissions" => Some(PermissionMode::BypassPermissions),
             "default" => Some(PermissionMode::Default),
-            "delegate" => Some(PermissionMode::Delegate),
             "dontAsk" => Some(PermissionMode::DontAsk),
             "plan" => Some(PermissionMode::Plan),
             _ => None,
@@ -2914,8 +2915,8 @@ mod tests {
             PermissionMode::BypassPermissions.as_str(),
             "bypassPermissions"
         );
+        assert_eq!(PermissionMode::Auto.as_str(), "auto");
         assert_eq!(PermissionMode::Default.as_str(), "default");
-        assert_eq!(PermissionMode::Delegate.as_str(), "delegate");
         assert_eq!(PermissionMode::DontAsk.as_str(), "dontAsk");
         assert_eq!(PermissionMode::Plan.as_str(), "plan");
     }
@@ -2927,8 +2928,8 @@ mod tests {
             PermissionMode::BypassPermissions.to_string(),
             "bypassPermissions"
         );
+        assert_eq!(PermissionMode::Auto.to_string(), "auto");
         assert_eq!(PermissionMode::Default.to_string(), "default");
-        assert_eq!(PermissionMode::Delegate.to_string(), "delegate");
         assert_eq!(PermissionMode::DontAsk.to_string(), "dontAsk");
         assert_eq!(PermissionMode::Plan.to_string(), "plan");
     }
@@ -2943,14 +2944,12 @@ mod tests {
             PermissionMode::parse("bypassPermissions"),
             Some(PermissionMode::BypassPermissions)
         );
+        assert_eq!(PermissionMode::parse("auto"), Some(PermissionMode::Auto));
         assert_eq!(
             PermissionMode::parse("default"),
             Some(PermissionMode::Default)
         );
-        assert_eq!(
-            PermissionMode::parse("delegate"),
-            Some(PermissionMode::Delegate)
-        );
+        assert_eq!(PermissionMode::parse("delegate"), None);
         assert_eq!(
             PermissionMode::parse("dontAsk"),
             Some(PermissionMode::DontAsk)
@@ -2958,6 +2957,18 @@ mod tests {
         assert_eq!(PermissionMode::parse("plan"), Some(PermissionMode::Plan));
         assert_eq!(PermissionMode::parse("invalid"), None);
         assert_eq!(PermissionMode::parse(""), None);
+    }
+
+    #[test]
+    fn permission_mode_deserializes_legacy_delegate_as_auto() {
+        let config: AgentConfig = serde_json::from_value(serde_json::json!({
+            "model": "claude-sonnet-4-5",
+            "permission_mode": "delegate"
+        }))
+        .expect("legacy delegate should not discard the agent config");
+
+        assert_eq!(config.model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(config.permission_mode, Some(PermissionMode::Auto));
     }
 
     // ─── Section Builder Tests ──────────────────────────────────────
@@ -3459,14 +3470,14 @@ mod tests {
         let config2 = AgentConfig::new()
             .with_model("claude-sonnet")
             .with_fallback_model("claude-haiku")
-            .with_permission_mode(PermissionMode::Delegate);
+            .with_permission_mode(PermissionMode::Auto);
 
         let merged = config1.merge(config2);
         assert_eq!(merged.model, Some("claude-sonnet".to_string()));
         assert_eq!(merged.reasoning_effort, None);
         assert_eq!(merged.system_prompt, Some("Original".to_string()));
         assert_eq!(merged.fallback_model, Some("claude-haiku".to_string()));
-        assert_eq!(merged.permission_mode, Some(PermissionMode::Delegate));
+        assert_eq!(merged.permission_mode, Some(PermissionMode::Auto));
     }
 
     #[test]

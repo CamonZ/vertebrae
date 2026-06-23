@@ -4,6 +4,7 @@ import type {
   ChatSession,
   LocalChatLifecycle,
 } from "../stores/chatStore";
+import type { PermissionMode } from "../bindings";
 
 const STORAGE_KEY = "local-chat-sessions:v1";
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
@@ -14,6 +15,14 @@ const VALID_SCOPES = new Set<ChatScope>([
   "task",
   "step",
 ]);
+const VALID_PERMISSION_MODES = new Set<PermissionMode>([
+  "accept_edits",
+  "auto",
+  "bypass_permissions",
+  "default",
+  "dont_ask",
+  "plan",
+]);
 const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
 const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
@@ -23,6 +32,8 @@ export interface LocalChatSessionSummary {
   entityId: string | null;
   label: string;
   preview: string;
+  model?: string;
+  selectedModelId?: string | null;
   createdAt: string;
   updatedAt: string;
   projectPath: string | null;
@@ -96,6 +107,13 @@ function normalizeSession(value: unknown): ChatSession | null {
         : candidate.selectedModelId === null
           ? null
           : undefined,
+    permissionMode:
+      typeof candidate.permissionMode === "string" &&
+      VALID_PERMISSION_MODES.has(candidate.permissionMode as PermissionMode)
+        ? (candidate.permissionMode as PermissionMode)
+        : candidate.permissionMode === null
+          ? null
+          : "default",
     model: typeof candidate.model === "string" ? candidate.model : undefined,
     tokenUsage:
       candidate.tokenUsage &&
@@ -187,6 +205,7 @@ function serializeSession(
     messages,
     claudeSessionId: null,
     projectPath: session.projectPath ?? null,
+    permissionMode: session.permissionMode ?? "default",
     isDetached: false,
     lifecycle: session.lifecycle === "closed" ? "closed" : "idle",
     lifecycleError: null,
@@ -269,6 +288,8 @@ export function listPersistedLocalChatSessions(
       entityId: session.entityId,
       label: session.label,
       preview: session.preview ?? buildPreview(session.messages),
+      model: session.model,
+      selectedModelId: session.selectedModelId,
       createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
       updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
       projectPath: session.projectPath ?? null,

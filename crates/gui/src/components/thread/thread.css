@@ -95,6 +95,15 @@
 }
 .ev-you { font-family: var(--mono); font-size: var(--text-9); letter-spacing: var(--tracking-eyebrow); text-transform: uppercase; color: var(--accent); opacity: 0.85; white-space: nowrap; flex-shrink: 0; }
 .evrow--user .ev-text { font-family: var(--sans); font-size: var(--text-13); line-height: var(--leading-normal); color: var(--fg); white-space: pre-wrap; margin-top: 3px; }
+.evrow--user .ev-text .markdown-content { display: contents; font: inherit; font-size: inherit; line-height: inherit; color: inherit; }
+.evrow--user .ev-text .markdown-content > :first-child { margin-top: 0; }
+.evrow--user .ev-text .markdown-content > :last-child { margin-bottom: 0; }
+.evrow--user .ev-text .markdown-content p { font-size: inherit; line-height: inherit; color: inherit; margin: 0; }
+.evrow--user .ev-text .markdown-content p + p { margin-top: var(--s-2); }
+.evrow--user .ev-text .markdown-content ul,
+.evrow--user .ev-text .markdown-content ol { margin: var(--s-1) 0 var(--s-1) var(--s-3); padding-left: var(--s-3); }
+.evrow--user .ev-text .markdown-content code { font-family: var(--mono); font-size: var(--text-12); border-radius: var(--r-xs); background: color-mix(in oklch, var(--accent) 12%, transparent); padding: 1px var(--s-1); }
+.evrow--user .ev-text .markdown-content pre { margin: var(--s-2) 0; overflow-x: auto; }
 
 /* user · human prompt in BARE mode (chat) → right-aligned bubble.
    System/interpolated rows are excluded — machine input stays left. */

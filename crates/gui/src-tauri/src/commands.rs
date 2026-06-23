@@ -6,10 +6,10 @@
 use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermissionDecision};
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    ChatMessage, ChatSession, DeleteChatSessionResult, InitializeProjectResult,
-    PermissionDecisionBehavior, ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog,
-    Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow,
-    WorkflowWithTasks,
+    ChatMessage, ChatSession, CreateClaudeSessionInput, DeleteChatSessionResult,
+    InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestInput,
+    SacrumConfigStatus, SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions,
+    TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1625,30 +1625,18 @@ pub async fn stop_orchestrator(
 pub async fn create_claude_session(
     claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
     app_handle: tauri::AppHandle,
-    session_id: String,
-    working_dir: Option<String>,
-    initial_prompt: Option<String>,
-    resume_session_id: Option<String>,
-    model_id: Option<String>,
+    input: CreateClaudeSessionInput,
 ) -> Result<(), crate::claude_session::ClaudeSessionError> {
     log::info!(
-        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}, model={:?}",
-        session_id,
-        working_dir,
-        resume_session_id,
-        model_id
+        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}, model={:?}, permission_mode={:?}",
+        input.session_id,
+        input.working_dir,
+        input.resume_session_id,
+        input.model_id,
+        input.permission_mode
     );
 
-    claude_manager
-        .create_session(
-            session_id,
-            working_dir,
-            initial_prompt,
-            resume_session_id,
-            model_id,
-            app_handle,
-        )
-        .await
+    claude_manager.create_session(input, app_handle).await
 }
 
 /// List supported Claude Code models for local chat sessions.

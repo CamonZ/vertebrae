@@ -24,6 +24,16 @@ Feature: Daemon translates step config into Claude CLI invocation
     Then the mock argv contains "--permission-mode" followed by "plan"
     And the mock argv contains "bypassPermissions" exactly 0 times
 
+  Scenario: permission_mode auto is passed through
+    Given a configured daemon test environment
+    And a workflow with one execute step
+    And a task assigned to the workflow
+    And the step is configured with agent_config '{"permission_mode":"auto"}'
+    When the mock is scripted to succeed with full metrics
+    And run_step is invoked
+    And I wait for the execution to reach status "completed"
+    Then the mock argv contains "--permission-mode" followed by "auto"
+
   Scenario: Worktree path is used as the CLI working directory
     Given a configured daemon test environment
     And a workflow with one execute step

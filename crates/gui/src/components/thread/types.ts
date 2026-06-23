@@ -177,6 +177,8 @@ export interface UserMessage extends BaseMessage {
   label?: string;
   /** The visible message text. */
   text?: string;
+  /** Whether string text should be interpreted as markdown. */
+  textFormat?: "plain" | "markdown";
   /**
    * Optional raw/expandable input body (the full interpolated prompt). Shown
    * behind a "show input" toggle.

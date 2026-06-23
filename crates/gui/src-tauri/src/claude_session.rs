@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::events::PermissionRequestEvent;
 use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
+use crate::types::{CreateClaudeSessionInput, PermissionMode};
 
 #[cfg(unix)]
 const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
@@ -368,6 +369,7 @@ fn build_claude_args(
     mcp_config: &str,
     resume_session_id: Option<&str>,
     model_id: Option<&str>,
+    permission_mode: Option<PermissionMode>,
 ) -> Vec<String> {
     let mut args = vec![
         "--output-format".to_string(),
@@ -385,6 +387,11 @@ fn build_claude_args(
     if let Some(model_id) = model_id {
         args.push("--model".to_string());
         args.push(model_id.to_string());
+    }
+
+    if let Some(permission_mode) = permission_mode {
+        args.push("--permission-mode".to_string());
+        args.push(permission_mode.as_claude_arg().to_string());
     }
 
     if let Some(resume_id) = resume_session_id {
@@ -582,13 +589,10 @@ impl ClaudeSessionManager {
     /// If `resume_session_id` is provided, continues an existing Claude conversation
     pub async fn create_session(
         &self,
-        session_id: String,
-        working_dir: Option<String>,
-        initial_prompt: Option<String>,
-        resume_session_id: Option<String>,
-        requested_model_id: Option<String>,
+        input: CreateClaudeSessionInput,
         app_handle: tauri::AppHandle,
     ) -> Result<(), ClaudeSessionError> {
+        let session_id = input.session_id.clone();
         // Check if session already exists
         {
             let sessions = self.sessions.read().await;
@@ -612,17 +616,8 @@ impl ClaudeSessionManager {
             sessions: self.sessions.clone(),
             pending_permissions: self.pending_permissions.clone(),
         };
-        let session_id_clone = session_id.clone();
         thread::spawn(move || {
-            Self::run_session(
-                session_id_clone,
-                working_dir,
-                initial_prompt,
-                resume_session_id,
-                requested_model_id,
-                command_rx,
-                runtime_state,
-            );
+            Self::run_session(input, command_rx, runtime_state);
         });
 
         log::info!("Claude session {} created", session_id);
@@ -631,14 +626,18 @@ impl ClaudeSessionManager {
 
     /// Run the Claude CLI session in a dedicated thread
     fn run_session(
-        session_id: String,
-        working_dir: Option<String>,
-        initial_prompt: Option<String>,
-        resume_session_id: Option<String>,
-        requested_model_id: Option<String>,
+        input: CreateClaudeSessionInput,
         mut command_rx: mpsc::UnboundedReceiver<SessionCommand>,
         runtime_state: SessionRuntimeState,
     ) {
+        let CreateClaudeSessionInput {
+            session_id,
+            working_dir,
+            initial_prompt,
+            resume_session_id,
+            model_id: requested_model_id,
+            permission_mode,
+        } = input;
         let SessionRuntimeState {
             app_handle,
             sessions,
@@ -713,6 +712,7 @@ impl ClaudeSessionManager {
             &mcp_config,
             resume_session_id.as_deref(),
             resolved_model.model_id.as_deref(),
+            permission_mode,
         );
         cmd.args(&args);
 
@@ -1701,7 +1701,7 @@ mod tests {
 
     #[test]
     fn test_build_claude_args_without_model_matches_existing_defaults() {
-        let args = build_claude_args("{\"mcpServers\":{}}", None, None);
+        let args = build_claude_args("{\"mcpServers\":{}}", None, None, None);
 
         assert_eq!(
             args,
@@ -1719,11 +1719,12 @@ mod tests {
             ]
         );
         assert!(!args.iter().any(|arg| arg == "--model"));
+        assert!(!args.iter().any(|arg| arg == "--permission-mode"));
     }
 
     #[test]
     fn test_build_claude_args_includes_selected_model() {
-        let args = build_claude_args("{}", None, Some("opus"));
+        let args = build_claude_args("{}", None, Some("opus"), None);
 
         let model_idx = args
             .iter()
@@ -1733,8 +1734,22 @@ mod tests {
     }
 
     #[test]
+    fn test_build_claude_args_includes_permission_mode() {
+        let args = build_claude_args("{}", None, None, Some(PermissionMode::Auto));
+
+        let permission_idx = args
+            .iter()
+            .position(|arg| arg == "--permission-mode")
+            .expect("--permission-mode should be present");
+        assert_eq!(
+            args.get(permission_idx + 1).map(String::as_str),
+            Some("auto")
+        );
+    }
+
+    #[test]
     fn test_build_claude_args_keeps_resume_and_model_when_override_is_explicit() {
-        let args = build_claude_args("{}", Some("conv-123"), Some("haiku"));
+        let args = build_claude_args("{}", Some("conv-123"), Some("haiku"), None);
 
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"haiku".to_string()));

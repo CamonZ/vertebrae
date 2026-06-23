@@ -18,6 +18,7 @@ import {
   persistLocalChatSession,
 } from "../utils/localChatPersistence";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
+import type { PermissionMode } from "../bindings";
 
 /**
  * Message types for the Claude chat
@@ -123,6 +124,8 @@ export interface ChatSession {
   projectPath?: string | null;
   /** User-selected Claude Code model alias for session startup/resume overrides. */
   selectedModelId?: string | null;
+  /** User-selected Claude Code permission mode for local session startup. */
+  permissionMode?: PermissionMode | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
   model?: string;
   /** Latest per-turn current request input-context utilization for the badge */
@@ -210,6 +213,11 @@ interface ChatStoreActions {
   setSessionModel: (sessionId: string, model: string) => void;
   /** Set the user-selected Claude Code model for this session */
   setSessionSelectedModel: (sessionId: string, modelId: string | null) => void;
+  /** Set the user-selected Claude Code permission mode for this session */
+  setSessionPermissionMode: (
+    sessionId: string,
+    permissionMode: PermissionMode | null
+  ) => void;
   /** Set the latest per-turn current request input-context utilization */
   setSessionTokenUsage: (
     sessionId: string,
@@ -281,6 +289,7 @@ function createLocalSession(
     claudeConversationId: null,
     contextSummary: null,
     projectPath,
+    permissionMode: "default",
     lifecycle: "idle",
     lifecycleError: null,
     streamingAssistant: null,
@@ -672,6 +681,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
       } else {
         clearLastUsedLocalChatModelId();
       }
+    },
+
+    setSessionPermissionMode: (sessionId, permissionMode) => {
+      updateSession(sessionId, (session) =>
+        session.permissionMode === permissionMode
+          ? session
+          : { ...session, permissionMode }
+      );
     },
 
     setSessionTokenUsage: (sessionId, usage) => {

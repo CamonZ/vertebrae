@@ -109,10 +109,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
 
   return (
     <div className={cls}>
-      <div
-        className="evtool-hd"
-        onClick={hasBody ? toggle : undefined}
-      >
+      <div className="evtool-hd" onClick={hasBody ? toggle : undefined}>
         {pending ? (
           <span className="evtool-spin" />
         ) : (
@@ -153,7 +150,8 @@ function EventWhen({
   rel?: string;
   id?: string;
 }): ReactNode {
-  if (at == null && rel == null && id == null) return <div className="evwhen" />;
+  if (at == null && rel == null && id == null)
+    return <div className="evwhen" />;
   return (
     <div className="evwhen">
       {at}
@@ -212,11 +210,13 @@ function UserBody({
   role = "human",
   label,
   text,
+  textFormat = "plain",
   body,
 }: {
   role?: UserRole;
   label?: string;
   text?: string;
+  textFormat?: UserMessage["textFormat"];
   body?: ReactNode;
 }): ReactNode {
   const [open, setOpen] = useState(false);
@@ -224,9 +224,7 @@ function UserBody({
   return (
     <div className="evbody">
       <div className="ev-promptline">
-        <span className="ev-you">
-          {label || (isPrompt ? "Prompt" : "You")}
-        </span>
+        <span className="ev-you">{label || (isPrompt ? "Prompt" : "You")}</span>
         {body ? (
           <button
             className={"ev-expand" + (open ? " open" : "")}
@@ -237,7 +235,11 @@ function UserBody({
           </button>
         ) : null}
       </div>
-      {text ? <div className="ev-text">{text}</div> : null}
+      {text ? (
+        <div className="ev-text">
+          {textFormat === "markdown" ? <MarkdownContent text={text} /> : text}
+        </div>
+      ) : null}
       {body && open ? <div className="ev-prompt-body">{body}</div> : null}
     </div>
   );
@@ -326,11 +328,24 @@ export function EventRow(props: EventRowProps): ReactNode {
   if (type === "system") {
     const m = props as SystemMessage;
     body = (
-      <UserBody role="prompt" label={m.label || "System"} text={m.text} body={m.body} />
+      <UserBody
+        role="prompt"
+        label={m.label || "System"}
+        text={m.text}
+        body={m.body}
+      />
     );
   } else if (type === "user") {
     const m = props as UserMessage;
-    body = <UserBody role={m.role} label={m.label} text={m.text} body={m.body} />;
+    body = (
+      <UserBody
+        role={m.role}
+        label={m.label}
+        text={m.text}
+        textFormat={m.textFormat}
+        body={m.body}
+      />
+    );
   } else if (type === "agent") {
     const m = props as AgentMessage;
     body = (
@@ -507,7 +522,9 @@ export function EventLog({
   children,
 }: EventLogProps): ReactNode {
   return (
-    <div className={"evlog evlog--" + mode + (className ? " " + className : "")}>
+    <div
+      className={"evlog evlog--" + mode + (className ? " " + className : "")}
+    >
       {children}
     </div>
   );

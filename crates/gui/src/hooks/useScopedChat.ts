@@ -289,14 +289,16 @@ export async function doStartSession(
 
     const resumeId = session.claudeConversationId;
     const modelId = resumeId ? null : (session.selectedModelId ?? null);
+    const permissionMode = session.permissionMode ?? "default";
 
-    const result = await commands.createClaudeSession(
-      backendSessionId,
-      workingDir,
-      initialPrompt ?? null,
-      resumeId,
-      modelId
-    );
+    const result = await commands.createClaudeSession({
+      session_id: backendSessionId,
+      working_dir: workingDir,
+      initial_prompt: initialPrompt ?? null,
+      resume_session_id: resumeId,
+      model_id: modelId,
+      permission_mode: permissionMode,
+    });
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));
     }
