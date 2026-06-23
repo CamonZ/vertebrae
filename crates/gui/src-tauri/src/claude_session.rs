@@ -1319,7 +1319,7 @@ impl ClaudeSessionManager {
                     log::info!(
                         "[Claude JSONL] session={} msg={}",
                         &session_id[..8.min(session_id.len())],
-                        &line
+                        line
                     );
 
                     if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
@@ -1328,7 +1328,7 @@ impl ClaudeSessionManager {
                             on_events(events);
                         }
                     } else {
-                        log::warn!("[Claude JSONL] Failed to parse: {}", &line);
+                        log::warn!("[Claude JSONL] Failed to parse: {}", line);
                     }
                 }
                 Err(e) => {
