@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  act,
+  fireEvent,
+  within,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const { popOutMock } = vi.hoisted(() => {
@@ -30,6 +37,7 @@ import {
   loadPersistedLocalChatSession,
   persistLocalChatSession,
 } from "../../utils/localChatPersistence";
+import { commands } from "../../bindings";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -95,6 +103,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.clearAllMocks();
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -250,6 +259,107 @@ describe("ChatWindowManager", () => {
     expect(
       useChatStore.getState().sessions[reopened].claudeConversationId
     ).toBeNull();
+  });
+
+  it("manages persisted local sessions without invoking backend chat persistence", async () => {
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Task One", "/test/project");
+    useChatStore.getState().addMessage(first, {
+      kind: "user",
+      text: "first saved question",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const second = useChatStore
+      .getState()
+      .openSession("task", "task-2", "Task Two", "/test/project");
+    useChatStore.getState().addMessage(second, {
+      kind: "assistant",
+      text: "second saved answer",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().setClaudeConversationId(second, "conv-two");
+    useChatStore.getState().focusSession(first);
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+    expect(drawer.getByText("Task One")).toBeInTheDocument();
+    expect(drawer.getByText("first saved question")).toBeInTheDocument();
+    expect(drawer.getByText("Task Two")).toBeInTheDocument();
+    expect(drawer.getByText("second saved answer")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Open local chat Task Two"));
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+    expect(useChatStore.getState().sessions[second].claudeConversationId).toBe(
+      "conv-two"
+    );
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Delete local chat Task One"));
+    expect(loadPersistedLocalChatSession(first)).toBeNull();
+    expect(loadPersistedLocalChatSession(second)?.id).toBe(second);
+
+    const beforeFresh = Object.keys(useChatStore.getState().sessions);
+    await user.click(
+      screen.getByLabelText("Start fresh local chat from history")
+    );
+    const afterFresh = Object.keys(useChatStore.getState().sessions);
+    expect(afterFresh).toHaveLength(beforeFresh.length + 1);
+    expect(useChatStore.getState().activeSessionId).not.toBe(second);
+    expect(commands.createClaudeSession).not.toHaveBeenCalled();
+    expect(commands.sendClaudeMessage).not.toHaveBeenCalled();
+  });
+
+  it("closes a live Claude session before deleting it from history", async () => {
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Live Task", "/test/project");
+    useChatStore.getState().setClaudeSessionId(id, "live-backend-session");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Delete local chat Live Task"));
+
+    expect(commands.closeClaudeSession).toHaveBeenCalledWith(
+      "live-backend-session"
+    );
+    expect(loadPersistedLocalChatSession(id)).toBeNull();
+    expect(useChatStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("keeps the local session and shows feedback when close fails during history delete", async () => {
+    vi.mocked(commands.closeClaudeSession).mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "pipe closed" },
+    } as never);
+    const user = userEvent.setup();
+    const id = useChatStore
+      .getState()
+      .openSession("task", "task-1", "Live Task", "/test/project");
+    useChatStore.getState().addMessage(id, {
+      kind: "user",
+      text: "keep me",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    useChatStore.getState().setClaudeSessionId(id, "live-backend-session");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Delete local chat Live Task"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Could not delete local chat. Try again."
+      );
+    });
+    expect(loadPersistedLocalChatSession(id)).not.toBeNull();
+    expect(useChatStore.getState().sessions[id]).toBeDefined();
   });
 
   it("closes the panel on Escape when it is the focused glass panel", async () => {
