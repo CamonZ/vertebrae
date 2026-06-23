@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import type { ChatSession as LiveChatSession, SessionLog } from "../bindings";
+import type { SessionLog } from "../bindings";
 import {
   createMockStep,
   createMockStepExecution,
@@ -9,7 +9,6 @@ import {
 } from "../test/test-utils";
 import { useChatStore } from "./chatStore";
 import { useExecutionStore } from "./executionStore";
-import { useLiveChatStore } from "./liveChatStore";
 import { resetProjectScopedStores } from "./projectScopedStores";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
@@ -22,7 +21,7 @@ describe("resetProjectScopedStores", () => {
     resetProjectScopedStores();
   });
 
-  it("clears task, workflow, execution, run, log, and chat state from the previous project", () => {
+  it("clears task, workflow, execution, run, log, and local chat state from the previous project", () => {
     const task = createMockTask({ id: "task-1" });
     const workflowId = "workflow-1";
     const workflow = createMockWorkflow({ id: workflowId });
@@ -39,18 +38,6 @@ describe("resetProjectScopedStores", () => {
       content: "old project log",
       created_at: new Date().toISOString(),
     };
-    const liveSession: LiveChatSession = {
-      id: "live-session-1",
-      project_id: "old-project",
-      status: "active",
-      session_kind: null,
-      started_at: null,
-      ended_at: null,
-      stop_requested_at: null,
-      inserted_at: null,
-      updated_at: null,
-    };
-
     useTaskStore.setState({
       tasks: [task],
       selectedTaskId: task.id,
@@ -95,26 +82,6 @@ describe("resetProjectScopedStores", () => {
       activeSessionId: "chat-1",
       panelOpen: true,
     });
-    useLiveChatStore.setState({
-      currentSession: liveSession,
-      messages: [
-        {
-          id: "message-1",
-          role: "user",
-          content: "hello",
-          content_format: "plain",
-          createdAt: new Date().toISOString(),
-          pending: false,
-          error: null,
-        },
-      ],
-      creatingSession: true,
-      sending: true,
-      panelOpen: true,
-      hydrated: true,
-      lastError: "old error",
-    });
-
     resetProjectScopedStores();
 
     expect(useTaskStore.getState()).toMatchObject({
@@ -146,15 +113,6 @@ describe("resetProjectScopedStores", () => {
       sessions: {},
       activeSessionId: null,
       panelOpen: false,
-    });
-    expect(useLiveChatStore.getState()).toMatchObject({
-      currentSession: null,
-      messages: [],
-      creatingSession: false,
-      sending: false,
-      panelOpen: false,
-      hydrated: false,
-      lastError: null,
     });
   });
 });

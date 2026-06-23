@@ -23,8 +23,6 @@ export type { ToastStore } from "./toastStore";
 export { useDebugStore } from "./debugStore";
 export type { DebugStore } from "./debugStore";
 
-export { useStyleguideStore } from "./styleguideStore";
-
 export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
@@ -35,9 +33,6 @@ export type {
   ChatScope,
   ChatMessage,
 } from "./chatStore";
-
-export { useLiveChatStore } from "./liveChatStore";
-export type { LiveChatStore, LiveChatMessage } from "./liveChatStore";
 
 export { resetProjectScopedStores } from "./projectScopedStores";
 

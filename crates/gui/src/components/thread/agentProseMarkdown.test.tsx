@@ -2,9 +2,7 @@ import { render, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ChatMessage } from "../../stores/chatStore";
-import type { LiveChatMessage } from "../../stores/liveChatStore";
 import { chatMessagesToThread } from "../ChatWindow/chatMessagesToThread";
-import { liveChatToThread } from "../LiveChatWindow/liveChatToThread";
 import { Thread, type ThreadModel } from ".";
 
 const TS = "2026-06-22T12:00:00Z";
@@ -80,79 +78,38 @@ describe("chat agent prose markdown rendering", () => {
     expect(prose.querySelector(".ev-cursor")).toBeInTheDocument();
   });
 
-  it("renders live chat assistant prose as block markdown", () => {
+  it("renders completed local scoped chat assistant prose as block markdown", () => {
     const markdown = [
       "Steps:",
       "",
-      "- First live item",
-      "- Second live item",
+      "- First completed item",
+      "- Second completed item",
       "",
       "```bash",
       "vtb ready",
       "```",
     ].join("\n");
-    const messages: LiveChatMessage[] = [
+    const messages: ChatMessage[] = [
+      { kind: "user", text: "what is ready?", timestamp: TS },
       {
-        id: "u1",
-        role: "user",
-        content: "what is ready?",
-        content_format: "plain",
-        createdAt: TS,
-        pending: false,
-        error: null,
-      },
-      {
-        id: "a1",
-        role: "assistant",
-        content: markdown,
-        content_format: "markdown",
-        createdAt: TS,
-        pending: true,
-        error: null,
+        kind: "assistant",
+        text: markdown,
+        timestamp: TS,
+        isPartial: false,
       },
     ];
 
-    const prose = renderAsChatThread(liveChatToThread(messages));
+    const prose = renderAsChatThread(
+      chatMessagesToThread(messages, { collapsed: new Set<string>() })
+    );
 
     expectBlockMarkdown(
       prose,
-      ["First live item", "Second live item"],
+      ["First completed item", "Second completed item"],
       "bash",
       "vtb ready"
     );
-    expect(prose.querySelector(".ev-cursor")).toBeInTheDocument();
+    expect(prose.querySelector(".ev-cursor")).not.toBeInTheDocument();
   });
 
-  it("renders explicit plain live chat assistant prose without markdown parsing", () => {
-    const plainText = [
-      "Literal syntax:",
-      "",
-      "- not a list item",
-      "*not emphasis*",
-      "",
-      "```ts",
-      "const plain = true;",
-      "```",
-    ].join("\n");
-    const messages: LiveChatMessage[] = [
-      {
-        id: "a-plain",
-        role: "assistant",
-        content: plainText,
-        content_format: "plain",
-        createdAt: TS,
-        pending: false,
-        error: null,
-      },
-    ];
-
-    const prose = renderAsChatThread(liveChatToThread(messages));
-
-    expect(prose.querySelector(".markdown-content")).not.toBeInTheDocument();
-    expect(prose.querySelector("ul")).not.toBeInTheDocument();
-    expect(prose.querySelector("em")).not.toBeInTheDocument();
-    expect(prose).toHaveTextContent("- not a list item");
-    expect(prose).toHaveTextContent("*not emphasis*");
-    expect(prose).toHaveTextContent("```ts");
-  });
 });

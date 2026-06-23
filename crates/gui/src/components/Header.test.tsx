@@ -12,9 +12,6 @@ function setShell(state: Partial<ShellState>) {
   });
 }
 
-vi.mock("./LiveChatWindow", () => ({
-  OpenLiveChatButton: () => <button data-testid="mock-open-live-chat" />,
-}));
 vi.mock("../hooks/useCurrentProject", () => ({
   useCurrentProject: () => ({ name: "sacrum", path: "/code/sacrum" }),
 }));
@@ -66,9 +63,6 @@ describe("Header (Hearth v2 AppTopBar)", () => {
     const action = screen.getByTestId("page-action");
     expect(action.textContent).toBe("3 running");
     expect(activity).toContainElement(action);
-    expect(activity).toContainElement(
-      screen.getByTestId("mock-open-live-chat")
-    );
   });
 
   it("no longer renders the WebSocket connection indicator in the topbar", () => {

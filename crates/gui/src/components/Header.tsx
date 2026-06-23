@@ -1,4 +1,3 @@
-import { OpenLiveChatButton } from "./LiveChatWindow";
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
 
@@ -114,7 +113,6 @@ export function Header() {
         className="titlebar-button ml-auto flex items-center gap-3"
       >
         {headerActions}
-        <OpenLiveChatButton />
       </div>
     </header>
   );
