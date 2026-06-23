@@ -851,6 +851,10 @@ mod tests {
 
     use super::*;
 
+    /// Captured `StepFinished` payloads `(execution_id, task_id, result)` shared
+    /// from a test parent actor back to the assertion site.
+    type CapturedResults = Arc<std::sync::Mutex<Vec<(String, String, StepResult)>>>;
+
     fn test_execution_service() -> Arc<dyn ExecutionService> {
         use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SacrumExecutionService};
 
@@ -1764,7 +1768,7 @@ mod tests {
 
         struct CapturingParent;
 
-        static CANCEL_RESULTS: std::sync::LazyLock<Arc<Mutex<Vec<(String, String, StepResult)>>>> =
+        static CANCEL_RESULTS: std::sync::LazyLock<CapturedResults> =
             std::sync::LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
 
         impl Actor for CapturingParent {
@@ -1849,9 +1853,8 @@ mod tests {
 
         struct CapturingParent;
 
-        static NO_CHILD_RESULTS: std::sync::LazyLock<
-            Arc<Mutex<Vec<(String, String, StepResult)>>>,
-        > = std::sync::LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
+        static NO_CHILD_RESULTS: std::sync::LazyLock<CapturedResults> =
+            std::sync::LazyLock::new(|| Arc::new(Mutex::new(Vec::new())));
 
         impl Actor for CapturingParent {
             type Msg = ProjectMessage;
