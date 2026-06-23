@@ -140,6 +140,10 @@ pub struct ClaudeToolCallEvent {
     pub tool_id: String,
     pub tool_name: String,
     pub input: String, // JSON string
+    /// `tool_use` id of the parent spawn (Task/Agent) tool call when this call
+    /// was made by a sub-agent; `None` for main-thread calls. Drives sub-agent
+    /// nesting in the chat thread.
+    pub parent_tool_use_id: Option<String>,
 }
 
 /// Event emitted when a tool returns a result
@@ -149,6 +153,9 @@ pub struct ClaudeToolResultEvent {
     pub tool_id: String,
     pub result: String,
     pub is_error: bool,
+    /// Parent spawn `tool_use` id when this result belongs to a sub-agent;
+    /// `None` for main-thread results. See [`ClaudeToolCallEvent`].
+    pub parent_tool_use_id: Option<String>,
 }
 
 /// Event emitted after each assistant message with the latest input-context figure.
@@ -1366,8 +1373,10 @@ impl ClaudeSessionManager {
         let mut events = Vec::new();
 
         // Sub-agent (sidechain) messages carry their own context lineage; their
-        // usage must not overwrite the main conversation's context meter.
-        let is_sidechain = msg.parent_tool_use_id.is_some();
+        // usage must not overwrite the main conversation's context meter, and
+        // their tool calls/results nest under the spawning Task tool in the UI.
+        let parent_tool_use_id = msg.parent_tool_use_id.clone();
+        let is_sidechain = parent_tool_use_id.is_some();
 
         match msg.msg_type.as_str() {
             "system" if msg.subtype.as_deref() == Some("init") => {
@@ -1465,6 +1474,7 @@ impl ClaudeSessionManager {
                                         tool_id: id,
                                         tool_name: name,
                                         input: serde_json::to_string(&input).unwrap_or_default(),
+                                        parent_tool_use_id: parent_tool_use_id.clone(),
                                     }));
                                 }
                                 _ => {}
@@ -1493,6 +1503,7 @@ impl ClaudeSessionManager {
                                     tool_id: tool_use_id,
                                     result: result_text,
                                     is_error,
+                                    parent_tool_use_id: parent_tool_use_id.clone(),
                                 }));
                             }
                         }
@@ -1796,6 +1807,7 @@ mod tests {
             tool_id: "toolu_123".to_string(),
             tool_name: "Read".to_string(),
             input: r#"{"file_path":"/test.txt"}"#.to_string(),
+            parent_tool_use_id: None,
         };
         let json = serde_json::to_string(&tool_call_event).expect("Should serialize");
         assert!(json.contains("toolu_123"));
@@ -2552,6 +2564,70 @@ mod tests {
             "expected only the Text event, got {:?}",
             events[0]
         );
+    }
+
+    #[test]
+    fn test_build_events_propagates_parent_tool_use_id() {
+        // A sub-agent tool call carries parent_tool_use_id so the UI can nest it
+        // under the spawning Task tool. Main-thread calls carry None.
+        let sidechain = parse_msg(
+            r#"{
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_AGENT",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_child", "name": "Read", "input": {}}]
+                }
+            }"#,
+        );
+        let events = ClaudeSessionManager::build_events("s", sidechain);
+        match events
+            .iter()
+            .find(|e| matches!(e, EmittedEvent::ToolCall(_)))
+        {
+            Some(EmittedEvent::ToolCall(e)) => {
+                assert_eq!(e.parent_tool_use_id.as_deref(), Some("toolu_AGENT"));
+            }
+            _ => panic!("expected ToolCall event"),
+        }
+
+        let main = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_main", "name": "Read", "input": {}}]
+                }
+            }"#,
+        );
+        match ClaudeSessionManager::build_events("s", main)
+            .into_iter()
+            .find(|e| matches!(e, EmittedEvent::ToolCall(_)))
+        {
+            Some(EmittedEvent::ToolCall(e)) => assert_eq!(e.parent_tool_use_id, None),
+            _ => panic!("expected ToolCall event"),
+        }
+
+        // tool_result on a sidechain user message carries the parent too.
+        let result = parse_msg(
+            r#"{
+                "type": "user",
+                "parent_tool_use_id": "toolu_AGENT",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "toolu_child", "content": "ok", "is_error": false}]
+                }
+            }"#,
+        );
+        match ClaudeSessionManager::build_events("s", result)
+            .into_iter()
+            .find(|e| matches!(e, EmittedEvent::ToolResult(_)))
+        {
+            Some(EmittedEvent::ToolResult(e)) => {
+                assert_eq!(e.parent_tool_use_id.as_deref(), Some("toolu_AGENT"))
+            }
+            _ => panic!("expected ToolResult event"),
+        }
     }
 
     #[test]

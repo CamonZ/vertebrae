@@ -117,6 +117,7 @@ export function handleToolCallEvent(
     toolId: payload.tool_id,
     input: payload.input,
     timestamp: new Date().toISOString(),
+    parentToolUseId: payload.parent_tool_use_id ?? undefined,
   });
 }
 
@@ -133,6 +134,7 @@ export function handleToolResultEvent(
     result: payload.result,
     isError: payload.is_error,
     timestamp: new Date().toISOString(),
+    parentToolUseId: payload.parent_tool_use_id ?? undefined,
   });
 }
 

@@ -1144,11 +1144,22 @@ is_partial: boolean }
 /**
  * Event emitted when Claude calls a tool
  */
-export type ClaudeToolCallEvent = { session_id: string; tool_id: string; tool_name: string; input: string }
+export type ClaudeToolCallEvent = { session_id: string; tool_id: string; tool_name: string; input: string; 
+/**
+ * `tool_use` id of the parent spawn (Task/Agent) tool call when this call
+ * was made by a sub-agent; `None` for main-thread calls. Drives sub-agent
+ * nesting in the chat thread.
+ */
+parent_tool_use_id: string | null }
 /**
  * Event emitted when a tool returns a result
  */
-export type ClaudeToolResultEvent = { session_id: string; tool_id: string; result: string; is_error: boolean }
+export type ClaudeToolResultEvent = { session_id: string; tool_id: string; result: string; is_error: boolean; 
+/**
+ * Parent spawn `tool_use` id when this result belongs to a sub-agent;
+ * `None` for main-thread results. See [`ClaudeToolCallEvent`].
+ */
+parent_tool_use_id: string | null }
 /**
  * Code reference - file location reference
  */

@@ -29,6 +29,12 @@ export type ChatMessage =
       toolId: string;
       input: string;
       timestamp: string;
+      /**
+       * `tool_use` id of the spawning Task/Agent tool call when this call was
+       * made by a sub-agent; absent for main-thread calls. Drives sub-agent
+       * nesting in the rendered thread (see chatMessagesToThread).
+       */
+      parentToolUseId?: string;
     }
   | {
       kind: "tool_result";
@@ -36,6 +42,8 @@ export type ChatMessage =
       result: string;
       isError: boolean;
       timestamp: string;
+      /** Parent spawn `tool_use` id when this result belongs to a sub-agent. */
+      parentToolUseId?: string;
     }
   | {
       kind: "permission_request";

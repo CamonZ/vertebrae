@@ -7,6 +7,8 @@ import type { ChatMessage } from "../../stores/chatStore";
 import type {
   AgentMessage,
   ErrorMessage,
+  Message,
+  SpawnMessage,
   ToolMessage,
   UserMessage,
 } from "../thread/types";
@@ -24,6 +26,13 @@ function build(
     collapsed: opts?.collapsed ?? new Set<string>(),
     onToggleTool: opts?.onToggleTool,
   });
+}
+
+/** First tool row in a turn (tools render as standalone rows in the series). */
+function firstTool(messages: Message[]): ToolMessage {
+  const t = messages.find((m) => m.type === "tool");
+  if (!t) throw new Error("no tool message in turn");
+  return t as ToolMessage;
 }
 
 describe("chatMessagesToThread", () => {
@@ -52,10 +61,10 @@ describe("chatMessagesToThread", () => {
     expect(agent.type).toBe("agent");
     expect(agent.speaker).toBe("Claude");
     expect(agent.prose).toBe("the answer");
-    expect(agent.streaming).toBe(false);
+    expect(agent.streaming ?? false).toBe(false);
   });
 
-  it("merges tool_call + tool_result into ONE ToolMessage with ok status + body", () => {
+  it("merges tool_call + tool_result into ONE standalone ToolMessage with body", () => {
     const thread = build([
       { kind: "assistant", text: "running", timestamp: TS, isPartial: false },
       {
@@ -67,11 +76,9 @@ describe("chatMessagesToThread", () => {
       },
       { kind: "tool_result", toolId: "t1", result: "file body", isError: false, timestamp: TS },
     ]);
-    const agent = thread.turns[0].messages[0] as AgentMessage;
-    expect(agent.tools).toHaveLength(1);
-    const tool = agent.tools![0];
+    const tool = firstTool(thread.turns[0].messages);
     expect(tool.evt).toBe("t1");
-    expect(tool.status).toBe("ok");
+    expect(tool.status).toBe("done");
     expect(tool.error).toBeUndefined();
     expect(tool.body).toBe("file body");
     expect(tool.name).toBe("Read");
@@ -90,14 +97,13 @@ describe("chatMessagesToThread", () => {
       },
       { kind: "tool_result", toolId: "t1", result: "boom", isError: true, timestamp: TS },
     ]);
-    const agent = thread.turns[0].messages[0] as AgentMessage;
-    const tool = agent.tools![0];
+    const tool = firstTool(thread.turns[0].messages);
     expect(tool.status).toBe("err");
     expect(tool.error).toBe(true);
     expect(tool.body).toBe("boom");
   });
 
-  it("opens a headless agent when a tool_call arrives before any assistant", () => {
+  it("renders a tool_call with no preceding assistant as a standalone tool row", () => {
     const thread = build([
       {
         kind: "tool_call",
@@ -108,11 +114,10 @@ describe("chatMessagesToThread", () => {
       },
     ]);
     expect(thread.turns).toHaveLength(1);
-    const agent = thread.turns[0].messages[0] as AgentMessage;
-    expect(agent.type).toBe("agent");
-    expect(agent.speaker).toBe("Claude");
-    expect(agent.tools).toHaveLength(1);
-    expect(agent.tools![0].evt).toBe("t1");
+    const msgs = thread.turns[0].messages;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].type).toBe("tool");
+    expect(msgs[0].evt).toBe("t1");
   });
 
   it("drops session_start and session_end (no rows)", () => {
@@ -143,8 +148,7 @@ describe("chatMessagesToThread", () => {
         timestamp: TS,
       },
     ]);
-    const agent = thread.turns[0].messages[0] as AgentMessage;
-    const tool = agent.tools![0] as ToolMessage;
+    const tool = firstTool(thread.turns[0].messages);
     expect(tool.kind).toBe("shell");
     expect(tool.cmd).toBe("ls -la");
     expect(tool.name).toBeUndefined();
@@ -160,22 +164,25 @@ describe("chatMessagesToThread", () => {
         timestamp: TS,
       },
     ]);
-    const agent = thread.turns[0].messages[0] as AgentMessage;
-    expect((agent.tools![0] as ToolMessage).cmd).toBe("echo hi");
+    expect(firstTool(thread.turns[0].messages).cmd).toBe("echo hi");
   });
 
-  it("sets streaming true for a partial assistant and false when finalized", () => {
+  it("sets streaming true for a partial assistant and falsy when finalized", () => {
     const partial = build([
       { kind: "assistant", text: "typing", timestamp: TS, isPartial: true },
     ]);
-    expect(
-      (partial.turns[0].messages[0] as AgentMessage).streaming
-    ).toBe(true);
+    const a = partial.turns[0].messages.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
+    expect(a.streaming).toBe(true);
 
     const done = build([
       { kind: "assistant", text: "done", timestamp: TS, isPartial: false },
     ]);
-    expect((done.turns[0].messages[0] as AgentMessage).streaming).toBe(false);
+    const b = done.turns[0].messages.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
+    expect(b.streaming ?? false).toBe(false);
   });
 
   it("reflects the collapsed Set on the tool and wires onToggle to the toolId", () => {
@@ -192,7 +199,7 @@ describe("chatMessagesToThread", () => {
       ],
       { collapsed: new Set(["t1"]), onToggleTool }
     );
-    const tool = (thread.turns[0].messages[0] as AgentMessage).tools![0];
+    const tool = firstTool(thread.turns[0].messages);
     expect(tool.collapsed).toBe(true);
     tool.onToggle?.();
     expect(onToggleTool).toHaveBeenCalledWith("t1");
@@ -208,9 +215,119 @@ describe("chatMessagesToThread", () => {
         timestamp: TS,
       },
     ]);
+    expect(firstTool(thread.turns[0].messages).collapsed).toBe(false);
+  });
+
+  it("nests a sub-agent's tool calls under a SpawnMessage child thread", () => {
+    const thread = build([
+      { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "toolu_AGENT",
+        input: '{"description":"Explore","subagent_type":"Explore"}',
+        timestamp: TS,
+      },
+      {
+        kind: "tool_call",
+        toolName: "Read",
+        toolId: "toolu_child",
+        input: "{}",
+        timestamp: TS,
+        parentToolUseId: "toolu_AGENT",
+      },
+      {
+        kind: "tool_result",
+        toolId: "toolu_child",
+        result: "file body",
+        isError: false,
+        timestamp: TS,
+        parentToolUseId: "toolu_AGENT",
+      },
+    ]);
+    const msgs = thread.turns[0].messages;
+
+    // The Agent spawn becomes a SpawnMessage carrying a child thread.
+    const spawn = msgs.find((m) => m.type === "spawn") as SpawnMessage;
+    expect(spawn).toBeDefined();
+    expect(spawn.evt).toBe("toolu_AGENT");
+
+    // The sub-agent's tool nests INSIDE the child thread...
+    const childTools = spawn.thread.turns
+      .flatMap((t) => t.messages)
+      .filter((m) => m.type === "tool") as ToolMessage[];
+    expect(childTools.map((t) => t.evt)).toContain("toolu_child");
+    expect(childTools.find((t) => t.evt === "toolu_child")?.body).toBe(
+      "file body"
+    );
+
+    // ...and does NOT leak into the main turn series.
     expect(
-      (thread.turns[0].messages[0] as AgentMessage).tools![0].collapsed
+      msgs.some((m) => m.type === "tool" && m.evt === "toolu_child")
     ).toBe(false);
+  });
+
+  it("re-injects childrenByParent children in place (not orphaned at the bottom)", () => {
+    // The spawning Agent tool_call stays in the main stream; its sub-agent
+    // children are supplied via childrenByParent (extracted by ChatWindow so a
+    // permission boundary can't split them). The spawn must nest IN PLACE —
+    // labelled by the parent (in-place path), not "subagent" (orphaned path).
+    const children = new Map<string, ChatMessage[]>([
+      [
+        "toolu_AGENT",
+        [
+          {
+            kind: "tool_call",
+            toolName: "Read",
+            toolId: "toolu_child",
+            input: "{}",
+            timestamp: TS,
+            parentToolUseId: "toolu_AGENT",
+          },
+          {
+            kind: "tool_result",
+            toolId: "toolu_child",
+            result: "child body",
+            isError: false,
+            timestamp: TS,
+            parentToolUseId: "toolu_AGENT",
+          },
+        ],
+      ],
+    ]);
+    const thread = chatMessagesToThread(
+      [
+        { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "toolu_AGENT",
+          input: '{"description":"Explore"}',
+          timestamp: TS,
+        },
+        // The final prose arrives AFTER the sub-agent ran; the spawn must still
+        // sort before it (at the Agent tool_call position).
+        { kind: "assistant", text: "done", timestamp: TS, isPartial: false },
+      ],
+      { collapsed: new Set<string>(), childrenByParent: children }
+    );
+    const msgs = thread.turns[0].messages;
+    const spawnIdx = msgs.findIndex((m) => m.type === "spawn");
+    const proseIdx = msgs.findIndex(
+      (m) => m.type === "agent" && (m as AgentMessage).prose === "done"
+    );
+    expect(spawnIdx).toBeGreaterThanOrEqual(0);
+    const spawn = msgs[spawnIdx] as SpawnMessage;
+    // In-place path: keyed by + labelled from the parent, not the fallback.
+    expect(spawn.evt).toBe("toolu_AGENT");
+    expect(spawn.thread.label).toBe("Agent");
+    expect(spawn.thread.label).not.toBe("subagent");
+    // Chronological: spawn sorts BEFORE the trailing prose, not after it.
+    expect(spawnIdx).toBeLessThan(proseIdx);
+    const childTools = spawn.thread.turns
+      .flatMap((t) => t.messages)
+      .filter((m) => m.type === "tool") as ToolMessage[];
+    expect(childTools.map((t) => t.evt)).toContain("toolu_child");
   });
 
   it("maps an error event to a terminal ErrorMessage", () => {

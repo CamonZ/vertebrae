@@ -202,12 +202,31 @@ function buildChatRenderItems(
   let segment: ChatMessage[] = [];
   let segmentSeq = 0;
 
+  // Pull sub-agent (sidechain) tool messages out of the main chronological
+  // stream and key them by their spawning Task tool. Otherwise a permission
+  // segment boundary that falls between a spawn and its children splits the
+  // spawn group, and the children render as orphaned threads dumped at the
+  // bottom. The spawn's parent tool_call stays in the main stream, so the
+  // sub-agent re-nests at its chronological position (see chatMessagesToThread).
+  const childrenByParent = new Map<string, ChatMessage[]>();
+  for (const message of messages) {
+    const parent =
+      (message.kind === "tool_call" || message.kind === "tool_result") &&
+      message.parentToolUseId
+        ? message.parentToolUseId
+        : undefined;
+    if (!parent) continue;
+    const group = childrenByParent.get(parent);
+    if (group) group.push(message);
+    else childrenByParent.set(parent, [message]);
+  }
+
   const flushSegment = () => {
     if (segment.length === 0) return;
     items.push({
       kind: "thread",
       key: `thread-${segmentSeq++}`,
-      thread: chatMessagesToThread(segment, {}),
+      thread: chatMessagesToThread(segment, { childrenByParent }),
     });
     segment = [];
   };
@@ -220,6 +239,15 @@ function buildChatRenderItems(
         key: message.requestId ?? `permission-${index}`,
         message,
       });
+      return;
+    }
+
+    // Sub-agent messages are re-injected via childrenByParent at their parent
+    // spawn's position; keep them out of the main segment stream.
+    if (
+      (message.kind === "tool_call" || message.kind === "tool_result") &&
+      message.parentToolUseId
+    ) {
       return;
     }
 

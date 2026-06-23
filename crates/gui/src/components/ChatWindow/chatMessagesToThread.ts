@@ -1,42 +1,45 @@
 /**
- * chatMessagesToThread — PURE adapter: chatStore `ChatMessage[]` → canonical
+ * chatMessagesToThread — adapter: chatStore `ChatMessage[]` → canonical
  * `Thread` for the unified <Thread> primitive (chat surface).
  *
- * This mirrors the OLD `groupChatMessages` branch-for-branch so the local
- * claude-subprocess chat renders through the SAME recursive Thread primitive as
- * Traces, differing only by capability flags
- * (mode="bare" reveal="shallow" interactive showHead={false}).
+ * Sub-agent scoping (the reason this isn't a flat walk): tool calls/results a
+ * Task/Agent spawns carry `parentToolUseId`. We convert each chat message into
+ * the shared `ConversationEvent` shape and hand each turn to
+ * {@link chatTurnEventsToMessages}, which reuses the SAME `groupBySpawn` the
+ * Traces normalizer uses — so a spawned sub-agent surfaces as a nested
+ * `SpawnMessage` child thread instead of its tool rows leaking into the main
+ * stream. With no sub-agent linkage this degrades to a flat series.
  *
- * Grouping contract (1:1 with the prior machinery):
+ * Grouping contract:
  *   · session_start / session_end → dropped (no row).
  *   · user                        → opens a new Turn with a UserMessage
  *                                   {role:'human', label:'You'}.
- *   · assistant                   → pushes an AgentMessage{speaker:'Claude'}
- *                                   into the open turn (a headless turn opens if
- *                                   none); `isPartial` → `streaming`.
- *   · tool_call                   → a ToolMessage{status:'pending'} pushed into
- *                                   the ACTIVE AgentMessage.tools (a headless
- *                                   agent opens if a tool arrives first). `Bash`
- *                                   → kind:'shell' with the command as `cmd`.
- *   · tool_result                 → MERGED into the matching pending ToolMessage
- *                                   by toolId (status ok/err, body=result).
- *   · error / warning             → a terminal ErrorMessage{title}.
+ *   · assistant / tool_call / tool_result → buffered as ConversationEvents and
+ *                                   grouped (sub-agent nesting) per turn.
+ *   · error / warning             → a terminal ErrorMessage in its own turn.
  *   · permission_request          → SKIPPED here; ChatWindow renders the
  *                                   interactive PermissionRequestTurn as a
  *                                   sibling of <Thread>.
  *
- * Tools are NESTED under the AgentMessage (the chat layout), each wired to a
- * collapse toggle via the `collapsed` Set + `onToggleTool`.
+ * Two chat-specific concerns are restored after grouping (the shared helpers
+ * are trace-shaped): a trailing partial assistant marks its agent row
+ * `streaming`, and agent/error rows get deterministic keys (the grouping
+ * helper keys them off a module counter, which churns across renders).
  *
  * Returns ONE Thread{id:'local-chat-thread'} — rendered depth=0, no head.
  */
 
 import type { ChatMessage } from "../../stores/chatStore";
+import {
+  getToolIcon,
+  type ConversationEvent,
+} from "../../types/conversation";
+import { chatTurnEventsToMessages } from "../thread/normalize";
 import type {
   AgentMessage,
   ErrorMessage,
+  Message,
   Thread,
-  ToolMessage,
   Turn,
   UserMessage,
 } from "../thread/types";
@@ -50,9 +53,16 @@ export interface ChatThreadOptions {
    */
   collapsed?: Set<string>;
   /**
-   * Whether the chat is awaiting a response (last message was the user). Carried
-   * for parity with the caller; not consumed here (the ThinkingIndicator is a
-   * sibling of <Thread>). Present so the option bag matches the call site.
+   * Sub-agent (sidechain) messages keyed by their parent spawn `tool_use` id.
+   * The caller extracts these from the main chronological stream so a permission
+   * segment boundary can't separate a spawn from its children; here they are
+   * re-injected immediately after the matching spawn `tool_call` so the
+   * sub-agent nests in place (not as an orphaned thread dumped at the bottom).
+   */
+  childrenByParent?: Map<string, ChatMessage[]>;
+  /**
+   * Whether the chat is awaiting a response. Carried for parity with the caller;
+   * not consumed here (the ThinkingIndicator is a sibling of <Thread>).
    */
   isWaiting?: boolean;
 }
@@ -64,168 +74,179 @@ export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
-  const { onToggleTool, collapsed } = opts;
+  const { onToggleTool, collapsed, childrenByParent } = opts;
 
   const turns: Turn[] = [];
-  let curTurn: Turn | null = null;
-  let activeAgent: AgentMessage | null = null;
-
-  // Per-call monotonic counters → stable React keys / selection ids.
   let turnSeq = 0;
-  let agentSeq = 0;
-  let errSeq = 0;
 
-  const openTurn = (): Turn => {
-    const t: Turn = { id: `chat-turn-${turnSeq++}`, messages: [] };
-    turns.push(t);
-    return t;
-  };
+  // Current turn accumulator.
+  let userMsg: UserMessage | null = null;
+  let events: ConversationEvent[] = [];
+  let endsWithPartialAssistant = false;
 
-  const openAgent = (): AgentMessage => {
-    if (!curTurn) curTurn = openTurn();
-    const am: AgentMessage = {
-      evt: `chat-agent-${agentSeq++}`,
-      type: "agent",
-      speaker: "Claude",
-      tools: [],
-      prose: "",
-    };
-    curTurn.messages.push(am);
-    activeAgent = am;
-    return am;
+  const flushTurn = () => {
+    if (!userMsg && events.length === 0) return;
+    const turnId = `chat-turn-${turnSeq++}`;
+    const grouped = chatTurnEventsToMessages(events, { collapsed, onToggleTool });
+    stabilizeKeys(grouped, turnId);
+    if (endsWithPartialAssistant) markLastAgentStreaming(grouped);
+    const messagesOut: Message[] = userMsg ? [userMsg, ...grouped] : grouped;
+    turns.push({ id: turnId, messages: messagesOut });
+    userMsg = null;
+    events = [];
+    endsWithPartialAssistant = false;
   };
 
   for (const m of messages) {
     switch (m.kind) {
       case "session_start":
       case "session_end":
+      case "permission_request":
         continue;
 
       case "user": {
-        // A human turn closes any open agent and starts a fresh turn.
-        activeAgent = null;
-        curTurn = openTurn();
-        const um: UserMessage = {
-          evt: `chat-user-${turnSeq}`,
+        flushTurn();
+        userMsg = {
+          evt: `chat-turn-${turnSeq}-user`,
           type: "user",
           role: "human",
           label: "You",
           text: m.text,
         };
-        curTurn.messages.push(um);
         continue;
       }
 
       case "assistant": {
-        if (!curTurn) curTurn = openTurn();
-        const am: AgentMessage = {
-          evt: `chat-agent-${agentSeq++}`,
-          type: "agent",
-          speaker: "Claude",
-          model: undefined,
-          streaming: m.isPartial,
-          prose: m.text,
-          tools: [],
-        };
-        curTurn.messages.push(am);
-        activeAgent = am;
+        events.push({
+          kind: "assistant_message",
+          text: m.text,
+          timestamp: m.timestamp,
+        });
+        endsWithPartialAssistant = m.isPartial === true;
         continue;
       }
 
       case "tool_call": {
-        // A tool may arrive before any assistant prose — open a headless agent
-        // so the tool has a container.
-        const agent = activeAgent ?? openAgent();
-        const isShell = m.toolName === "Bash";
-        const tool: ToolMessage = {
-          evt: m.toolId,
-          type: "tool",
-          status: "pending",
-          // Collapsed by default; self-toggles on click. Honours an external
-          // Set/onToggle if a caller supplies one.
-          collapsed: collapsed ? collapsed.has(m.toolId) : true,
-          onToggle: onToggleTool ? () => onToggleTool(m.toolId) : undefined,
-        };
-        if (isShell) {
-          tool.kind = "shell";
-          tool.cmd = extractShellCommand(m.input);
-        } else {
-          tool.kind = "fn";
-          tool.name = m.toolName;
+        events.push(toToolCallEvent(m));
+        // Re-inject this spawn's sub-agent messages right here so they nest in
+        // place; groupBySpawn pairs them to this tool_call by id.
+        const kids = childrenByParent?.get(m.toolId);
+        if (kids) {
+          for (const k of kids) {
+            const ev = toChildEvent(k);
+            if (ev) events.push(ev);
+          }
         }
-        (agent.tools ??= []).push(tool);
+        endsWithPartialAssistant = false;
         continue;
       }
 
       case "tool_result": {
-        // Merge into the matching PENDING ToolMessage by toolId.
-        const slot = findPendingTool(activeAgent, m.toolId);
-        if (slot) {
-          slot.status = m.isError ? "err" : "ok";
-          slot.error = m.isError || undefined;
-          slot.body = m.result;
-        }
+        events.push(toToolResultEvent(m));
+        endsWithPartialAssistant = false;
         continue;
       }
 
-      case "error": {
-        // Terminal error row — its own headless turn so it stands alone.
-        activeAgent = null;
-        const turn = openTurn();
-        curTurn = turn;
-        const err: ErrorMessage = {
-          evt: `chat-error-${errSeq++}`,
-          type: "error",
-          title: m.message,
-        };
-        turn.messages.push(err);
-        continue;
-      }
-
+      case "error":
       case "warning": {
-        activeAgent = null;
-        const turn = openTurn();
-        curTurn = turn;
+        flushTurn();
+        const turnId = `chat-turn-${turnSeq++}`;
         const err: ErrorMessage = {
-          evt: `chat-warning-${errSeq++}`,
+          evt: `${turnId}-error`,
           type: "error",
           title: m.message,
         };
-        turn.messages.push(err);
+        turns.push({ id: turnId, messages: [err] });
         continue;
       }
-
-      case "permission_request":
-        // Rendered as an interactive sibling of <Thread> by ChatWindow.
-        continue;
     }
   }
+  flushTurn();
 
   return { id: LOCAL_CHAT_THREAD_ID, turns };
 }
 
-/** Find the still-pending ToolMessage with this id in the active agent's tools. */
-function findPendingTool(
-  agent: AgentMessage | null,
-  toolId: string
-): ToolMessage | undefined {
-  if (!agent?.tools) return undefined;
-  return agent.tools.find((t) => t.evt === toolId && t.status === "pending");
+/**
+ * Give agent/error/activity rows deterministic, position-based keys. Tool and
+ * spawn rows already carry stable ids (the `tool_use` id); the grouping helper
+ * keys everything else off a module-global counter that changes every call,
+ * which would churn React keys across renders. Recurses into sub-agent threads.
+ */
+function stabilizeKeys(messages: Message[], prefix: string): void {
+  messages.forEach((m, i) => {
+    if (m.type !== "tool" && m.type !== "spawn") {
+      m.evt = `${prefix}-m${i}`;
+    }
+    if (m.type === "spawn") {
+      m.thread.turns.forEach((t, ti) =>
+        stabilizeKeys(t.messages, `${prefix}-s${i}-${ti}`)
+      );
+    }
+  });
+}
+
+/** Mark the last top-level agent row as streaming (trailing partial assistant). */
+function markLastAgentStreaming(messages: Message[]): void {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === "agent") {
+      (m as AgentMessage).streaming = true;
+      return;
+    }
+  }
+}
+
+/** Convert a `tool_call` chat message to its ConversationEvent shape. */
+function toToolCallEvent(
+  m: Extract<ChatMessage, { kind: "tool_call" }>
+): ConversationEvent {
+  return {
+    kind: "tool_call",
+    toolId: m.toolId,
+    toolName: m.toolName,
+    displayName: m.toolName,
+    icon: getToolIcon(m.toolName),
+    summary: "",
+    input: parseToolInput(m.input),
+    timestamp: m.timestamp,
+    parentToolUseId: m.parentToolUseId,
+  };
+}
+
+/** Convert a `tool_result` chat message to its ConversationEvent shape. */
+function toToolResultEvent(
+  m: Extract<ChatMessage, { kind: "tool_result" }>
+): ConversationEvent {
+  return {
+    kind: "tool_result",
+    toolUseId: m.toolId,
+    isError: m.isError,
+    result: m.result,
+    timestamp: m.timestamp,
+    parentToolUseId: m.parentToolUseId,
+  };
+}
+
+/** Convert a sub-agent child message (tool_call/tool_result) to an event. */
+function toChildEvent(m: ChatMessage): ConversationEvent | null {
+  if (m.kind === "tool_call") return toToolCallEvent(m);
+  if (m.kind === "tool_result") return toToolResultEvent(m);
+  return null;
 }
 
 /**
- * Pull a human-readable shell command out of a tool_call `input` string. The
- * input is a JSON blob like `{"command":"ls -la"}`; fall back to the raw input
- * when it isn't parseable or carries no `command`.
+ * Parse a tool_call `input` JSON string into an object (the ConversationEvent
+ * shape). Falls back to `{ command: <raw> }` for an unparseable string so a
+ * Bash row still renders its command, else an empty object.
  */
-function extractShellCommand(input: string): string {
+function parseToolInput(input: string): Record<string, unknown> {
   try {
-    const parsed = JSON.parse(input) as { command?: unknown };
-    if (typeof parsed.command === "string" && parsed.command.length > 0) {
-      return parsed.command;
+    const parsed = JSON.parse(input) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
   } catch {
-    // Not JSON — fall through to the raw input.
+    // Not JSON — fall through.
   }
-  return input;
+  return input ? { command: input } : {};
 }
