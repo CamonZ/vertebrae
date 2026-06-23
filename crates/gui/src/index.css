@@ -2607,6 +2607,35 @@ html.window-transparent #root {
   background: var(--bg-4);
   color: var(--fg);
 }
+.hc-panel .hc-model-picker {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-1);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-model-picker select {
+  min-width: 78px;
+  max-width: 132px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.hc-panel .hc-model-picker select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.hc-panel .hc-model-picker select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
 
 /* Composer footer: a thin context-utilization bar rides the top edge, the
    existing composer sits below, and a context-% readout caps the foot. */

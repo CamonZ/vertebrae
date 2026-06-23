@@ -24,6 +24,51 @@ const MAX_UNIX_SOCKET_PATH_BYTES: usize = 100;
 #[cfg(unix)]
 const PERMISSION_SOCKET_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const DEFAULT_CONTEXT_WINDOW: u32 = 200_000;
+const DEFAULT_CLAUDE_MODEL_ID: &str = "sonnet";
+const SUPPORTED_CLAUDE_MODELS: &[ClaudeModelDefinition] = &[
+    ClaudeModelDefinition {
+        id: "sonnet",
+        label: "Sonnet",
+    },
+    ClaudeModelDefinition {
+        id: "opus",
+        label: "Opus",
+    },
+    ClaudeModelDefinition {
+        id: "haiku",
+        label: "Haiku",
+    },
+    ClaudeModelDefinition {
+        id: "fable",
+        label: "Fable",
+    },
+];
+
+#[derive(Debug, Clone, Copy)]
+struct ClaudeModelDefinition {
+    id: &'static str,
+    label: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeModelOption {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeModelCatalog {
+    pub default_model_id: String,
+    pub models: Vec<ClaudeModelOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedClaudeModel {
+    model_id: Option<String>,
+    warning: Option<String>,
+}
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
 ///
@@ -95,6 +140,10 @@ pub struct ClaudeToolCallEvent {
     pub tool_id: String,
     pub tool_name: String,
     pub input: String, // JSON string
+    /// `tool_use` id of the parent spawn (Task/Agent) tool call when this call
+    /// was made by a sub-agent; `None` for main-thread calls. Drives sub-agent
+    /// nesting in the chat thread.
+    pub parent_tool_use_id: Option<String>,
 }
 
 /// Event emitted when a tool returns a result
@@ -104,6 +153,9 @@ pub struct ClaudeToolResultEvent {
     pub tool_id: String,
     pub result: String,
     pub is_error: bool,
+    /// Parent spawn `tool_use` id when this result belongs to a sub-agent;
+    /// `None` for main-thread results. See [`ClaudeToolCallEvent`].
+    pub parent_tool_use_id: Option<String>,
 }
 
 /// Event emitted after each assistant message with the latest input-context figure.
@@ -148,6 +200,13 @@ pub struct ClaudeSessionErrorEvent {
     pub error: String,
 }
 
+/// Event emitted when Claude session startup recovers from a non-fatal issue.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ClaudeSessionWarningEvent {
+    pub session_id: String,
+    pub warning: String,
+}
+
 /// Event emitted when Claude requests permission
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ClaudePermissionRequestEvent {
@@ -189,6 +248,10 @@ struct ClaudeMessage {
     model: Option<String>,
     tools: Option<Vec<String>>,
     message: Option<ClaudeMessageContent>,
+    // Present on sub-agent (sidechain) messages spawned by a Task tool call.
+    // Those runs have their own independent context, so their usage must not
+    // drive the main conversation's context-utilization meter.
+    parent_tool_use_id: Option<String>,
     // Result fields
     duration_ms: Option<u32>,
     num_turns: Option<u32>,
@@ -206,45 +269,129 @@ struct ClaudeMessage {
     event: Option<StreamEvent>,
 }
 
-/// Usage statistics per model from the result message
+/// Usage statistics per model from the result message.
+///
+/// Only `contextWindow` is retained: the token counts here are cumulative
+/// session totals (summed across every internal iteration), so they cannot
+/// represent a point-in-time context size. See [`model_usage_context_window`].
 #[derive(Debug, Deserialize)]
 struct ModelUsageStats {
-    #[serde(rename = "inputTokens")]
-    input_tokens: Option<u32>,
-    #[serde(rename = "outputTokens")]
-    output_tokens: Option<u32>,
-    #[serde(rename = "cacheReadInputTokens")]
-    cache_read_input_tokens: Option<u32>,
-    #[serde(rename = "cacheCreationInputTokens")]
-    cache_creation_input_tokens: Option<u32>,
     #[serde(rename = "contextWindow")]
     context_window: Option<u32>,
 }
 
-impl ModelUsageStats {
-    fn input_context_tokens(&self) -> u32 {
-        input_context_tokens(
-            self.input_tokens,
-            self.cache_read_input_tokens,
-            self.cache_creation_input_tokens,
-        )
-    }
-}
-
-fn aggregate_model_usage_context(usage: &HashMap<String, ModelUsageStats>) -> (u32, u32) {
-    // Session-end modelUsage is a whole-session summary. If multiple models
-    // participated, sum their input contexts and pair that with the largest
-    // reported window for deterministic diagnostics.
-    let context_tokens = usage.values().fold(0u32, |total, stats| {
-        total.saturating_add(stats.input_context_tokens())
-    });
-    let context_window = usage
+fn model_usage_context_window(usage: &HashMap<String, ModelUsageStats>) -> u32 {
+    // Session-end `modelUsage` is a CUMULATIVE summary: its cache counters are
+    // summed across every internal iteration (including sub-agents), so they
+    // routinely exceed the context window and cannot represent a point-in-time
+    // context size. The per-turn Usage events (message_start/assistant/
+    // message_delta) are the source of truth for the meter. Here we only
+    // surface the model's context window — the one field that is meaningful.
+    usage
         .values()
         .filter_map(|stats| stats.context_window)
         .max()
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW)
+}
 
-    (context_tokens, context_window)
+pub fn supported_claude_model_catalog() -> ClaudeModelCatalog {
+    ClaudeModelCatalog {
+        default_model_id: DEFAULT_CLAUDE_MODEL_ID.to_string(),
+        models: SUPPORTED_CLAUDE_MODELS
+            .iter()
+            .map(|model| ClaudeModelOption {
+                id: model.id.to_string(),
+                label: model.label.to_string(),
+            })
+            .collect(),
+    }
+}
+
+fn is_supported_claude_model_id(model_id: &str) -> bool {
+    SUPPORTED_CLAUDE_MODELS
+        .iter()
+        .any(|model| model.id == model_id)
+}
+
+fn safe_warning_model_id(model_id: &str) -> String {
+    model_id
+        .chars()
+        .flat_map(|ch| ch.escape_default())
+        .collect()
+}
+
+fn resolve_requested_claude_model(
+    model_id: Option<String>,
+    is_resume: bool,
+) -> ResolvedClaudeModel {
+    let Some(model_id) = model_id else {
+        return ResolvedClaudeModel {
+            model_id: None,
+            warning: None,
+        };
+    };
+    let normalized = model_id.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return ResolvedClaudeModel {
+            model_id: None,
+            warning: None,
+        };
+    }
+    if is_supported_claude_model_id(&normalized) {
+        return ResolvedClaudeModel {
+            model_id: Some(normalized),
+            warning: None,
+        };
+    }
+
+    let safe_model_id = safe_warning_model_id(&normalized);
+    if is_resume {
+        return ResolvedClaudeModel {
+            model_id: None,
+            warning: Some(format!(
+                "Unsupported Claude model '{}'; resuming with the conversation's original model.",
+                safe_model_id
+            )),
+        };
+    }
+
+    ResolvedClaudeModel {
+        model_id: Some(DEFAULT_CLAUDE_MODEL_ID.to_string()),
+        warning: Some(format!(
+            "Unsupported Claude model '{}'; falling back to default model '{}'.",
+            safe_model_id, DEFAULT_CLAUDE_MODEL_ID
+        )),
+    }
+}
+
+fn build_claude_args(
+    mcp_config: &str,
+    resume_session_id: Option<&str>,
+    model_id: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--input-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
+        "--mcp-config".to_string(),
+        mcp_config.to_string(),
+        "--permission-prompt-tool".to_string(),
+        "mcp__vtb-gate__permission_prompt".to_string(),
+    ];
+
+    if let Some(model_id) = model_id {
+        args.push("--model".to_string());
+        args.push(model_id.to_string());
+    }
+
+    if let Some(resume_id) = resume_session_id {
+        args.push(format!("--resume={}", resume_id));
+    }
+
+    args
 }
 
 /// Nested event structure inside stream_event messages
@@ -255,6 +402,7 @@ struct StreamEvent {
     index: Option<u32>,
     delta: Option<ContentDelta>,
     content_block: Option<ContentBlock>,
+    usage: Option<AssistantUsage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -438,6 +586,7 @@ impl ClaudeSessionManager {
         working_dir: Option<String>,
         initial_prompt: Option<String>,
         resume_session_id: Option<String>,
+        requested_model_id: Option<String>,
         app_handle: tauri::AppHandle,
     ) -> Result<(), ClaudeSessionError> {
         // Check if session already exists
@@ -470,6 +619,7 @@ impl ClaudeSessionManager {
                 working_dir,
                 initial_prompt,
                 resume_session_id,
+                requested_model_id,
                 command_rx,
                 runtime_state,
             );
@@ -485,6 +635,7 @@ impl ClaudeSessionManager {
         working_dir: Option<String>,
         initial_prompt: Option<String>,
         resume_session_id: Option<String>,
+        requested_model_id: Option<String>,
         mut command_rx: mpsc::UnboundedReceiver<SessionCommand>,
         runtime_state: SessionRuntimeState,
     ) {
@@ -493,6 +644,16 @@ impl ClaudeSessionManager {
             sessions,
             pending_permissions,
         } = runtime_state;
+        let resolved_model =
+            resolve_requested_claude_model(requested_model_id, resume_session_id.is_some());
+        if let Some(warning) = &resolved_model.warning {
+            log::warn!("{}", warning);
+            let _ = ClaudeSessionWarningEvent {
+                session_id: session_id.clone(),
+                warning: warning.clone(),
+            }
+            .emit(&app_handle);
+        }
 
         // Find the Claude Code CLI binary using unified discovery logic
         let claude_binary = match find_claude_binary() {
@@ -514,10 +675,11 @@ impl ClaudeSessionManager {
         };
 
         log::info!(
-            "Starting Claude session: id={}, working_dir={:?}, resume={:?}, claude_binary={}",
+            "Starting Claude session: id={}, working_dir={:?}, resume={:?}, model={:?}, claude_binary={}",
             session_id,
             working_dir,
             resume_session_id,
+            resolved_model.model_id,
             claude_binary
         );
 
@@ -543,28 +705,15 @@ impl ClaudeSessionManager {
         })
         .to_string();
 
-        // Build args - use --resume if continuing a conversation
-        let mut args = vec![
-            "--output-format",
-            "stream-json",
-            "--input-format",
-            "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-            "--mcp-config",
-            &mcp_config,
-            "--permission-prompt-tool",
-            "mcp__vtb-gate__permission_prompt",
-        ];
-
-        // Store resume_id for arg lifetime
-        let resume_flag;
         if let Some(ref resume_id) = resume_session_id {
             log::info!("Resuming Claude conversation: {}", resume_id);
-            resume_flag = format!("--resume={}", resume_id);
-            args.push(&resume_flag);
         }
 
+        let args = build_claude_args(
+            &mcp_config,
+            resume_session_id.as_deref(),
+            resolved_model.model_id.as_deref(),
+        );
         cmd.args(&args);
 
         // Set working directory if provided and it exists
@@ -1170,7 +1319,7 @@ impl ClaudeSessionManager {
                     log::info!(
                         "[Claude JSONL] session={} msg={}",
                         &session_id[..8.min(session_id.len())],
-                        truncate_utf8(&line, 200)
+                        line
                     );
 
                     if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
@@ -1179,10 +1328,7 @@ impl ClaudeSessionManager {
                             on_events(events);
                         }
                     } else {
-                        log::warn!(
-                            "[Claude JSONL] Failed to parse: {}",
-                            truncate_utf8(&line, 100)
-                        );
+                        log::warn!("[Claude JSONL] Failed to parse: {}", line);
                     }
                 }
                 Err(e) => {
@@ -1226,6 +1372,12 @@ impl ClaudeSessionManager {
     fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
         let mut events = Vec::new();
 
+        // Sub-agent (sidechain) messages carry their own context lineage; their
+        // usage must not overwrite the main conversation's context meter, and
+        // their tool calls/results nest under the spawning Task tool in the UI.
+        let parent_tool_use_id = msg.parent_tool_use_id.clone();
+        let is_sidechain = parent_tool_use_id.is_some();
+
         match msg.msg_type.as_str() {
             "system" if msg.subtype.as_deref() == Some("init") => {
                 events.push(EmittedEvent::Init(ClaudeSessionInitEvent {
@@ -1250,6 +1402,16 @@ impl ClaudeSessionManager {
                                     }));
                                 }
                             }
+                        }
+                    } else if event.event_type == "message_delta" && !is_sidechain {
+                        if let Some(usage) = event.usage {
+                            let context_tokens = usage.input_context_tokens();
+                            events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
+                                session_id: session_id.to_string(),
+                                model: msg.model.clone().unwrap_or_default(),
+                                context_tokens,
+                                context_window: DEFAULT_CONTEXT_WINDOW,
+                            }));
                         }
                     }
                 }
@@ -1280,8 +1442,10 @@ impl ClaudeSessionManager {
             "assistant" => {
                 if let Some(message) = msg.message {
                     // Emit a per-turn usage event so the UI badge updates
-                    // mid-conversation, not only at session_end.
-                    if let Some(usage) = message.usage.as_ref() {
+                    // mid-conversation, not only at session_end. Skip sidechain
+                    // (sub-agent) turns: their context is independent of the
+                    // main conversation and would make the meter lurch.
+                    if let Some(usage) = message.usage.as_ref().filter(|_| !is_sidechain) {
                         let context_tokens = usage.input_context_tokens();
                         events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
                             session_id: session_id.to_string(),
@@ -1310,6 +1474,7 @@ impl ClaudeSessionManager {
                                         tool_id: id,
                                         tool_name: name,
                                         input: serde_json::to_string(&input).unwrap_or_default(),
+                                        parent_tool_use_id: parent_tool_use_id.clone(),
                                     }));
                                 }
                                 _ => {}
@@ -1338,6 +1503,7 @@ impl ClaudeSessionManager {
                                     tool_id: tool_use_id,
                                     result: result_text,
                                     is_error,
+                                    parent_tool_use_id: parent_tool_use_id.clone(),
                                 }));
                             }
                         }
@@ -1345,12 +1511,16 @@ impl ClaudeSessionManager {
                 }
             }
             "result" => {
-                // Extract context usage from modelUsage if available
-                let (context_tokens, context_window) = msg
+                // `modelUsage` is a cumulative session summary, not a
+                // point-in-time context size, so it cannot drive the meter.
+                // The per-turn Usage events own `context_tokens`; here we only
+                // carry the model's context window.
+                let context_window = msg
                     .model_usage
                     .as_ref()
-                    .map(aggregate_model_usage_context)
-                    .unwrap_or((0, DEFAULT_CONTEXT_WINDOW));
+                    .map(model_usage_context_window)
+                    .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+                let context_tokens = 0;
 
                 events.push(EmittedEvent::SessionEnd(ClaudeSessionEndEvent {
                     session_id: session_id.to_string(),
@@ -1458,6 +1628,119 @@ mod tests {
         assert_eq!(manager.sessions.blocking_read().len(), 0);
     }
 
+    #[test]
+    fn test_supported_claude_model_catalog_uses_aliases() {
+        let catalog = supported_claude_model_catalog();
+
+        assert_eq!(catalog.default_model_id, "sonnet");
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["sonnet", "opus", "haiku", "fable"]
+        );
+    }
+
+    #[test]
+    fn test_resolve_requested_claude_model_accepts_supported_ids() {
+        assert_eq!(
+            resolve_requested_claude_model(Some(" Opus ".to_string()), false),
+            ResolvedClaudeModel {
+                model_id: Some("opus".to_string()),
+                warning: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_resolve_requested_claude_model_omits_blank_selection() {
+        assert_eq!(
+            resolve_requested_claude_model(Some("   ".to_string()), false),
+            ResolvedClaudeModel {
+                model_id: None,
+                warning: None,
+            }
+        );
+    }
+
+    #[test]
+    fn test_resolve_requested_claude_model_falls_back_with_warning() {
+        let resolved = resolve_requested_claude_model(Some("claude-unknown".to_string()), false);
+
+        assert_eq!(resolved.model_id.as_deref(), Some("sonnet"));
+        assert!(resolved
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("claude-unknown")));
+    }
+
+    #[test]
+    fn test_resolve_requested_claude_model_escapes_warning_id() {
+        let resolved =
+            resolve_requested_claude_model(Some("Mystery\nINFO fake".to_string()), false);
+
+        assert_eq!(resolved.model_id.as_deref(), Some("sonnet"));
+        assert!(resolved
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("mystery\\ninfo fake")));
+    }
+
+    #[test]
+    fn test_resolve_requested_claude_model_omits_unsupported_model_on_resume() {
+        let resolved = resolve_requested_claude_model(Some("retired".to_string()), true);
+
+        assert_eq!(resolved.model_id, None);
+        assert!(resolved
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("original model")));
+    }
+
+    #[test]
+    fn test_build_claude_args_without_model_matches_existing_defaults() {
+        let args = build_claude_args("{\"mcpServers\":{}}", None, None);
+
+        assert_eq!(
+            args,
+            vec![
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--input-format".to_string(),
+                "stream-json".to_string(),
+                "--verbose".to_string(),
+                "--include-partial-messages".to_string(),
+                "--mcp-config".to_string(),
+                "{\"mcpServers\":{}}".to_string(),
+                "--permission-prompt-tool".to_string(),
+                "mcp__vtb-gate__permission_prompt".to_string(),
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "--model"));
+    }
+
+    #[test]
+    fn test_build_claude_args_includes_selected_model() {
+        let args = build_claude_args("{}", None, Some("opus"));
+
+        let model_idx = args
+            .iter()
+            .position(|arg| arg == "--model")
+            .expect("--model should be present");
+        assert_eq!(args.get(model_idx + 1).map(String::as_str), Some("opus"));
+    }
+
+    #[test]
+    fn test_build_claude_args_keeps_resume_and_model_when_override_is_explicit() {
+        let args = build_claude_args("{}", Some("conv-123"), Some("haiku"));
+
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"haiku".to_string()));
+        assert!(args.contains(&"--resume=conv-123".to_string()));
+    }
+
     #[tokio::test]
     async fn test_has_session_empty() {
         let manager = ClaudeSessionManager::new();
@@ -1524,6 +1807,7 @@ mod tests {
             tool_id: "toolu_123".to_string(),
             tool_name: "Read".to_string(),
             input: r#"{"file_path":"/test.txt"}"#.to_string(),
+            parent_tool_use_id: None,
         };
         let json = serde_json::to_string(&tool_call_event).expect("Should serialize");
         assert!(json.contains("toolu_123"));
@@ -2250,6 +2534,103 @@ mod tests {
     }
 
     #[test]
+    fn test_build_events_assistant_sidechain_usage_is_skipped() {
+        // Sub-agent (sidechain) messages carry `parent_tool_use_id` and run
+        // with their own context lineage. Their usage must NOT emit a context
+        // event, or the meter lurches to the sub-agent's (often much smaller,
+        // cache-cold) context size mid-turn.
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_015MUSNfZRk8PAxfmiznzBxt",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-haiku-4-5-20251001",
+                    "content": [{"type": "text", "text": "searching"}],
+                    "usage": {
+                        "input_tokens": 3,
+                        "cache_read_input_tokens": 0,
+                        "cache_creation_input_tokens": 8415,
+                        "output_tokens": 12
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1, "sidechain usage must not be emitted");
+        assert!(
+            matches!(&events[0], EmittedEvent::Text(_)),
+            "expected only the Text event, got {:?}",
+            events[0]
+        );
+    }
+
+    #[test]
+    fn test_build_events_propagates_parent_tool_use_id() {
+        // A sub-agent tool call carries parent_tool_use_id so the UI can nest it
+        // under the spawning Task tool. Main-thread calls carry None.
+        let sidechain = parse_msg(
+            r#"{
+                "type": "assistant",
+                "parent_tool_use_id": "toolu_AGENT",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_child", "name": "Read", "input": {}}]
+                }
+            }"#,
+        );
+        let events = ClaudeSessionManager::build_events("s", sidechain);
+        match events
+            .iter()
+            .find(|e| matches!(e, EmittedEvent::ToolCall(_)))
+        {
+            Some(EmittedEvent::ToolCall(e)) => {
+                assert_eq!(e.parent_tool_use_id.as_deref(), Some("toolu_AGENT"));
+            }
+            _ => panic!("expected ToolCall event"),
+        }
+
+        let main = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "toolu_main", "name": "Read", "input": {}}]
+                }
+            }"#,
+        );
+        match ClaudeSessionManager::build_events("s", main)
+            .into_iter()
+            .find(|e| matches!(e, EmittedEvent::ToolCall(_)))
+        {
+            Some(EmittedEvent::ToolCall(e)) => assert_eq!(e.parent_tool_use_id, None),
+            _ => panic!("expected ToolCall event"),
+        }
+
+        // tool_result on a sidechain user message carries the parent too.
+        let result = parse_msg(
+            r#"{
+                "type": "user",
+                "parent_tool_use_id": "toolu_AGENT",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "toolu_child", "content": "ok", "is_error": false}]
+                }
+            }"#,
+        );
+        match ClaudeSessionManager::build_events("s", result)
+            .into_iter()
+            .find(|e| matches!(e, EmittedEvent::ToolResult(_)))
+        {
+            Some(EmittedEvent::ToolResult(e)) => {
+                assert_eq!(e.parent_tool_use_id.as_deref(), Some("toolu_AGENT"))
+            }
+            _ => panic!("expected ToolResult event"),
+        }
+    }
+
+    #[test]
     fn test_build_events_assistant_no_usage_no_event() {
         // When `usage` is absent, no Usage event is emitted.
         let msg = parse_msg(
@@ -2298,8 +2679,10 @@ mod tests {
                 assert_eq!(e.cost_usd, 0.05);
                 assert_eq!(e.result, "Task completed");
                 assert!(!e.is_error);
-                // input + cacheRead + cacheCreation; output is response usage.
-                assert_eq!(e.context_tokens, 1300);
+                // modelUsage is a cumulative session summary, not a usable
+                // point-in-time context size, so SessionEnd reports 0 tokens
+                // and only surfaces the model's context window.
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 200_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
@@ -2350,9 +2733,10 @@ mod tests {
     }
 
     #[test]
-    fn test_build_events_result_token_arithmetic() {
-        // Verify input/cache components contribute to the context total while
-        // output tokens stay out of request input-context occupancy.
+    fn test_build_events_result_reports_window_not_cumulative_tokens() {
+        // modelUsage token counts are cumulative session totals, not a
+        // point-in-time context size, so SessionEnd never derives
+        // context_tokens from them — it stays 0 and only the window is carried.
         let msg = parse_msg(
             r#"{
                 "type": "result",
@@ -2371,7 +2755,7 @@ mod tests {
         let events = ClaudeSessionManager::build_events("sess-1", msg);
         match &events[0] {
             EmittedEvent::SessionEnd(e) => {
-                assert_eq!(e.context_tokens, 80);
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 100_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),
@@ -2379,7 +2763,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_events_result_model_usage_aggregates_models_deterministically() {
+    fn test_build_events_result_picks_largest_context_window_deterministically() {
+        // With multiple models in modelUsage, the largest reported window wins
+        // (deterministic regardless of HashMap order); context_tokens stays 0.
         let msg = parse_msg(
             r#"{
                 "type": "result",
@@ -2405,7 +2791,7 @@ mod tests {
         let events = ClaudeSessionManager::build_events("sess-1", msg);
         match &events[0] {
             EmittedEvent::SessionEnd(e) => {
-                assert_eq!(e.context_tokens, 660);
+                assert_eq!(e.context_tokens, 0);
                 assert_eq!(e.context_window, 1_000_000);
             }
             other => panic!("Expected SessionEnd event, got {:?}", other),

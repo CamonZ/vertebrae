@@ -129,6 +129,7 @@ describe("chatStore", () => {
         .setContextSummary(id, "[Context: Task]\nTask One");
       useChatStore.getState().setClaudeSessionId(id, "backend-1");
       useChatStore.getState().setClaudeConversationId(id, "conv-1");
+      useChatStore.getState().setSessionSelectedModel(id, "opus");
       useChatStore
         .getState()
         .setSessionUsage(id, "claude-sonnet-4", { used: 50, max: 200000 });
@@ -152,6 +153,7 @@ describe("chatStore", () => {
         contextSummary: "[Context: Task]\nTask One",
         claudeSessionId: null,
         claudeConversationId: "conv-1",
+        selectedModelId: "opus",
         model: "claude-sonnet-4",
         tokenUsage: { used: 50, max: 200000 },
       });
@@ -162,6 +164,35 @@ describe("chatStore", () => {
           timestamp: "2026-01-01T00:00:00Z",
         },
       ]);
+    });
+
+    it("persists selected model and records it as the last used model", () => {
+      const id = useChatStore
+        .getState()
+        .openSession("task", "task-model", "Task Model");
+
+      useChatStore.getState().setSessionSelectedModel(id, "haiku");
+
+      expect(useChatStore.getState().sessions[id].selectedModelId).toBe(
+        "haiku"
+      );
+      expect(loadPersistedLocalChatSession(id)?.selectedModelId).toBe("haiku");
+      expect(localStorage.getItem("local-chat-model:last-used:v1")).toBe(
+        "haiku"
+      );
+    });
+
+    it("clears the last used model when selection returns to CLI default", () => {
+      const id = useChatStore
+        .getState()
+        .openSession("task", "task-model", "Task Model");
+
+      useChatStore.getState().setSessionSelectedModel(id, "haiku");
+      useChatStore.getState().setSessionSelectedModel(id, null);
+
+      expect(useChatStore.getState().sessions[id].selectedModelId).toBeNull();
+      expect(loadPersistedLocalChatSession(id)?.selectedModelId).toBeNull();
+      expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
     });
 
     it("reuses the matching project path when persisted sessions are already loaded", () => {

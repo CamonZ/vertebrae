@@ -45,6 +45,15 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
+    getSupportedClaudeModels: vi.fn().mockResolvedValue({
+      defaultModelId: "sonnet",
+      models: [
+        { id: "sonnet", label: "Sonnet" },
+        { id: "opus", label: "Opus" },
+        { id: "haiku", label: "Haiku" },
+        { id: "fable", label: "Fable" },
+      ],
+    }),
     createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
@@ -60,6 +69,9 @@ vi.mock("../../bindings", () => ({
     },
     claudeSessionEndEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
     claudeSessionErrorEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    claudeSessionWarningEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },

@@ -3,7 +3,7 @@
 //! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
-use crate::claude_session::{ClaudeSessionManager, LocalPermissionDecision};
+use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermissionDecision};
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     ChatMessage, ChatSession, DeleteChatSessionResult, InitializeProjectResult,
@@ -1629,12 +1629,14 @@ pub async fn create_claude_session(
     working_dir: Option<String>,
     initial_prompt: Option<String>,
     resume_session_id: Option<String>,
+    model_id: Option<String>,
 ) -> Result<(), crate::claude_session::ClaudeSessionError> {
     log::info!(
-        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}",
+        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}, model={:?}",
         session_id,
         working_dir,
-        resume_session_id
+        resume_session_id,
+        model_id
     );
 
     claude_manager
@@ -1643,9 +1645,17 @@ pub async fn create_claude_session(
             working_dir,
             initial_prompt,
             resume_session_id,
+            model_id,
             app_handle,
         )
         .await
+}
+
+/// List supported Claude Code models for local chat sessions.
+#[tauri::command]
+#[specta::specta]
+pub fn get_supported_claude_models() -> ClaudeModelCatalog {
+    crate::claude_session::supported_claude_model_catalog()
 }
 
 /// Send a message to a Claude session

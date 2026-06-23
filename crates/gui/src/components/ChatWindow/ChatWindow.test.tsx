@@ -17,6 +17,15 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
+    getSupportedClaudeModels: vi.fn().mockResolvedValue({
+      defaultModelId: "sonnet",
+      models: [
+        { id: "sonnet", label: "Sonnet" },
+        { id: "opus", label: "Opus" },
+        { id: "haiku", label: "Haiku" },
+        { id: "fable", label: "Fable" },
+      ],
+    }),
     createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
@@ -44,6 +53,9 @@ vi.mock("../../bindings", () => ({
     claudeSessionErrorEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
+    claudeSessionWarningEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
   },
 }));
 
@@ -65,6 +77,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -289,6 +302,145 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTitle("Clear messages")).toBeInTheDocument();
+  });
+
+  it("renders the Claude model picker without forcing a model for a new session", async () => {
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    expect(picker).toHaveValue("");
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBeUndefined();
+  });
+
+  it("persists selected model changes and sends the model when starting", async () => {
+    const user = userEvent.setup();
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-model-picker"),
+      "opus"
+    );
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "/test/project",
+        "Start",
+        null,
+        "opus"
+      );
+    });
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBe("opus");
+  });
+
+  it("can clear a selected model back to CLI default before starting", async () => {
+    const user = userEvent.setup();
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-model-picker"),
+      "opus"
+    );
+    expect(localStorage.getItem("local-chat-model:last-used:v1")).toBe("opus");
+
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-model-picker"),
+      ""
+    );
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+        expect.any(String),
+        "/test/project",
+        "Start",
+        null,
+        null
+      );
+    });
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBeNull();
+    expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+  });
+
+  it("uses the last selected model as the default for a new session", async () => {
+    localStorage.setItem("local-chat-model:last-used:v1", "haiku");
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    await waitFor(() => {
+      expect(picker).toHaveValue("haiku");
+    });
+  });
+
+  it("does not assign a default model to old resumable sessions without a saved choice", async () => {
+    const session = createSession({ claudeConversationId: "conv-existing" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(await screen.findByTestId("local-chat-model-picker")).toHaveValue(
+      ""
+    );
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBeUndefined();
+  });
+
+  it("preserves unsupported saved model ids so backend fallback can warn", async () => {
+    const session = createSession({ selectedModelId: "claude-retired" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await screen.findByTestId("local-chat-model-picker");
+    expect(
+      useChatStore.getState().sessions["test-session"].selectedModelId
+    ).toBe("claude-retired");
   });
 
   it("clears messages when clear button is clicked", async () => {

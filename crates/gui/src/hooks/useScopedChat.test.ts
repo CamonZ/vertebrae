@@ -8,6 +8,7 @@ import {
   handlePermissionRequestEvent,
   handleEndEvent,
   handleErrorEvent,
+  handleWarningEvent,
   doStartSession,
   doSendMessage,
   doCloseSession,
@@ -169,6 +170,42 @@ describe("handleUsageEvent", () => {
   });
 });
 
+describe("handleWarningEvent", () => {
+  it("adds a warning message when session matches", () => {
+    const addMsg = vi.fn();
+    handleWarningEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        warning: "Unsupported model; using sonnet.",
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      addMsg
+    );
+    expect(addMsg).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "warning",
+        message: "Unsupported model; using sonnet.",
+      })
+    );
+  });
+
+  it("ignores warnings for a different session", () => {
+    const addMsg = vi.fn();
+    handleWarningEvent(
+      {
+        session_id: OTHER_SESSION_ID,
+        warning: "Unsupported model; using sonnet.",
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      addMsg
+    );
+    expect(addMsg).not.toHaveBeenCalled();
+  });
+});
+
 describe("handleTextEvent", () => {
   it("updates partial text immediately when session matches", () => {
     const updateLastAssistantMessage = vi.fn();
@@ -259,6 +296,7 @@ describe("handleToolCallEvent", () => {
         tool_id: "t1",
         tool_name: "Read",
         input: '{"path":"file.ts"}',
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -283,6 +321,7 @@ describe("handleToolCallEvent", () => {
         tool_id: "t1",
         tool_name: "Read",
         input: "{}",
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -299,6 +338,7 @@ describe("handleToolCallEvent", () => {
         tool_id: "t1",
         tool_name: "Read",
         input: "{}",
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -317,6 +357,7 @@ describe("handleToolResultEvent", () => {
         tool_id: "t1",
         result: "success",
         is_error: false,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -341,6 +382,7 @@ describe("handleToolResultEvent", () => {
         tool_id: "t1",
         result: "fail",
         is_error: true,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -357,6 +399,7 @@ describe("handleToolResultEvent", () => {
         tool_id: "t1",
         result: "x",
         is_error: false,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -658,6 +701,7 @@ describe("doStartSession", () => {
       expect.stringMatching(/^scoped-/),
       "/test/project",
       null,
+      null,
       null
     );
   });
@@ -682,7 +726,32 @@ describe("doStartSession", () => {
       expect.stringMatching(/^scoped-/),
       "/captured/project",
       null,
+      null,
       null
+    );
+  });
+
+  it("passes the selected model id when the session has one", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({ selectedModelId: "opus" }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+      expect.stringMatching(/^scoped-/),
+      "/test/project",
+      null,
+      null,
+      "opus"
     );
   });
 
@@ -750,6 +819,7 @@ describe("doStartSession", () => {
       expect.any(String),
       "/test/project",
       "Help",
+      null,
       null
     );
   });
@@ -773,11 +843,39 @@ describe("doStartSession", () => {
       expect.any(String),
       "/test/project",
       null,
-      "conv-xyz"
+      "conv-xyz",
+      null
     );
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
       "resuming"
+    );
+  });
+
+  it("does not pass selected model id when resuming a Claude conversation", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        claudeConversationId: "conv-xyz",
+        selectedModelId: "opus",
+      }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
+      expect.any(String),
+      "/test/project",
+      null,
+      "conv-xyz",
+      null
     );
   });
 
@@ -799,6 +897,7 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
       expect.any(String),
+      null,
       null,
       null,
       null
@@ -825,6 +924,7 @@ describe("doStartSession", () => {
       expect.any(String),
       "/test/project",
       "Question",
+      null,
       null
     );
   });

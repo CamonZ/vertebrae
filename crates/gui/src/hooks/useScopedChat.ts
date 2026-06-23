@@ -10,6 +10,7 @@ import type {
   PermissionRequestEvent,
   ClaudeSessionEndEvent,
   ClaudeSessionErrorEvent,
+  ClaudeSessionWarningEvent,
 } from "../bindings";
 import {
   getLocalChatLifecycle,
@@ -116,6 +117,7 @@ export function handleToolCallEvent(
     toolId: payload.tool_id,
     input: payload.input,
     timestamp: new Date().toISOString(),
+    parentToolUseId: payload.parent_tool_use_id ?? undefined,
   });
 }
 
@@ -132,6 +134,7 @@ export function handleToolResultEvent(
     result: payload.result,
     isError: payload.is_error,
     timestamp: new Date().toISOString(),
+    parentToolUseId: payload.parent_tool_use_id ?? undefined,
   });
 }
 
@@ -225,6 +228,20 @@ export function handleErrorEvent(
   });
 }
 
+export function handleWarningEvent(
+  payload: ClaudeSessionWarningEvent,
+  claudeSessionId: string | null,
+  sessionId: string,
+  addMessage: (sessionId: string, msg: ChatMessage) => void
+) {
+  if (payload.session_id !== claudeSessionId) return;
+  addMessage(sessionId, {
+    kind: "warning",
+    message: payload.warning,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 // --- Extracted session lifecycle functions ---
 
 export async function doStartSession(
@@ -271,12 +288,14 @@ export async function doStartSession(
     }
 
     const resumeId = session.claudeConversationId;
+    const modelId = resumeId ? null : (session.selectedModelId ?? null);
 
     const result = await commands.createClaudeSession(
       backendSessionId,
       workingDir,
       initialPrompt ?? null,
-      resumeId
+      resumeId,
+      modelId
     );
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));
@@ -562,6 +581,22 @@ export function useScopedChat(sessionId: string | null) {
         return;
       }
       unlisteners.push(errorUn);
+
+      const warningUn = await events.claudeSessionWarningEvent.listen(
+        (event) => {
+          handleWarningEvent(
+            event.payload,
+            claudeSessionIdRef.current,
+            sessionId,
+            addMessage
+          );
+        }
+      );
+      if (isCancelled) {
+        warningUn();
+        return;
+      }
+      unlisteners.push(warningUn);
     };
 
     setup();
@@ -611,13 +646,7 @@ export function useScopedChat(sessionId: string | null) {
         userMessage
       );
     },
-    [
-      session,
-      sessionId,
-      addMessage,
-      setClaudeSessionId,
-      setSessionLifecycle,
-    ]
+    [session, sessionId, addMessage, setClaudeSessionId, setSessionLifecycle]
   );
 
   /**

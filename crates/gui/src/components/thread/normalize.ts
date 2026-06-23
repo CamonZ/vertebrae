@@ -965,3 +965,56 @@ export function msgsToThread(
 
   return { id: "chat-thread", turns };
 }
+
+// ===========================================================================
+// chatTurnEventsToMessages — the local-chat reuse of groupBySpawn.
+// ===========================================================================
+
+export interface ChatTurnOptions {
+  /** Toggle a tool body's collapsed state (interactive surfaces). */
+  onToggleTool?: (toolId: string) => void;
+  /** Tool ids currently COLLAPSED; when omitted tools start collapsed. */
+  collapsed?: Set<string>;
+}
+
+/**
+ * Build the message series for ONE chat turn's events, reusing {@link
+ * groupBySpawn} so sub-agent tool calls/results (those carrying
+ * `parentToolUseId`) lift into nested `SpawnMessage` child threads — the SAME
+ * nesting Traces gets. With no sub-agent linkage this degrades to a flat
+ * series (agent prose + standalone tool rows), a layout the Thread renderer
+ * supports.
+ *
+ * Tools are wired for the chat's interactive collapse model: each tool body is
+ * collapsed per `collapsed` (default collapsed) and toggles via
+ * `onToggleTool(toolId)`. Wiring recurses into nested sub-agent threads.
+ */
+export function chatTurnEventsToMessages(
+  events: ConversationEvent[],
+  opts: ChatTurnOptions = {}
+): Message[] {
+  const resultById = new Map<string, ToolResultEvent>();
+  for (const ev of events) {
+    if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
+  }
+  const msgs = groupBySpawn(events, resultById, "Claude", undefined, null);
+  wireChatToolCollapse(msgs, opts);
+  return msgs;
+}
+
+/** Recursively apply the chat collapse model to every ToolMessage in a series. */
+function wireChatToolCollapse(msgs: Message[], opts: ChatTurnOptions): void {
+  for (const m of msgs) {
+    if (m.type === "tool") {
+      const id = m.evt;
+      m.collapsed = opts.collapsed ? opts.collapsed.has(id) : true;
+      m.onToggle = opts.onToggleTool
+        ? () => opts.onToggleTool!(id)
+        : m.onToggle;
+    } else if (m.type === "agent" && m.tools) {
+      wireChatToolCollapse(m.tools, opts);
+    } else if (m.type === "spawn") {
+      for (const t of m.thread.turns) wireChatToolCollapse(t.messages, opts);
+    }
+  }
+}

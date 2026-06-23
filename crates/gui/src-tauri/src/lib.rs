@@ -24,8 +24,8 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumChatService, SacrumConfig};
 
 use claude_session::{
     ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
-    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeSessionUsageEvent, ClaudeTextEvent,
-    ClaudeToolCallEvent, ClaudeToolResultEvent,
+    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeSessionUsageEvent,
+    ClaudeSessionWarningEvent, ClaudeTextEvent, ClaudeToolCallEvent, ClaudeToolResultEvent,
 };
 use commands::AppState;
 use events::{
@@ -131,6 +131,7 @@ fn create_builder() -> Builder {
             commands::stop_orchestrator,
             // Claude session commands (JSONL streaming)
             commands::create_claude_session,
+            commands::get_supported_claude_models,
             commands::send_claude_message,
             commands::close_claude_session,
             // Sacrum live chat commands
@@ -178,6 +179,7 @@ fn create_builder() -> Builder {
             ClaudeSessionUsageEvent,
             ClaudeSessionEndEvent,
             ClaudeSessionErrorEvent,
+            ClaudeSessionWarningEvent,
             ClaudePermissionRequestEvent
         ])
 }

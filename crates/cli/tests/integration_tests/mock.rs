@@ -314,10 +314,10 @@ impl TaskService for MockTaskService {
             .or_default()
             .insert(depends_on_id.to_string());
         // Also update the task's dependency_ids field
-        if let Some(task) = s.tasks.get_mut(task_id) {
-            if !task.dependency_ids.contains(&depends_on_id.to_string()) {
-                task.dependency_ids.push(depends_on_id.to_string());
-            }
+        if let Some(task) = s.tasks.get_mut(task_id)
+            && !task.dependency_ids.contains(&depends_on_id.to_string())
+        {
+            task.dependency_ids.push(depends_on_id.to_string());
         }
         Ok(())
     }
