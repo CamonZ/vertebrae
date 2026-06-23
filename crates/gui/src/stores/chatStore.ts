@@ -10,12 +10,14 @@ import {
   clearLocalChatSessionCleared,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
+  listPersistedLocalChatSessions,
   loadPersistedLocalChatSessions,
+  loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
-  removePersistedLocalChatSession,
 } from "../utils/localChatPersistence";
+import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 
 /**
  * Message types for the Claude chat
@@ -133,6 +135,12 @@ export interface ChatSession {
   lifecycleError?: string | null;
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
+  /** Durable local metadata for session-history ordering */
+  createdAt?: string;
+  /** Durable local metadata for session-history ordering */
+  updatedAt?: string;
+  /** Durable local preview for session-history display */
+  preview?: string;
 }
 
 interface ChatStoreState {
@@ -156,6 +164,19 @@ interface ChatStoreActions {
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
   focusSession: (sessionId: string) => void;
+  /** List persisted local chat sessions, newest first */
+  listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
+  /** Hydrate and focus a persisted local chat session */
+  selectPersistedSession: (sessionId: string) => boolean;
+  /** Start a new local chat without reusing an existing scope/entity session */
+  startFreshSession: (
+    scope: ChatScope,
+    entityId: string | null,
+    label: string,
+    projectPath?: string | null
+  ) => string;
+  /** Delete one local persisted session and any in-memory copy */
+  deleteLocalSession: (sessionId: string) => void;
   /** Add a message to a session */
   addMessage: (sessionId: string, message: ChatMessage) => void;
   /** Update the last assistant message (for streaming) */
@@ -242,6 +263,44 @@ function generateSessionId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
+function createLocalSession(
+  scope: ChatScope,
+  entityId: string | null,
+  label: string,
+  projectPath?: string | null
+): ChatSession {
+  const now = new Date().toISOString();
+  return {
+    id: generateSessionId(),
+    scope,
+    entityId,
+    label,
+    messages: [],
+    status: "open",
+    claudeSessionId: null,
+    claudeConversationId: null,
+    contextSummary: null,
+    projectPath,
+    lifecycle: "idle",
+    lifecycleError: null,
+    streamingAssistant: null,
+    createdAt: now,
+    updatedAt: now,
+    preview: "No messages yet",
+  };
+}
+
+function hydrateLocalSession(session: ChatSession): ChatSession {
+  return {
+    ...session,
+    isDetached: false,
+    claudeSessionId: null,
+    lifecycle: session.lifecycle ?? "idle",
+    lifecycleError: null,
+    streamingAssistant: null,
+  };
+}
+
 /**
  * Get the parent scope for widening.
  */
@@ -288,6 +347,20 @@ function findMatchingSession(
     return id;
   }
   return null;
+}
+
+function latestSessionId(sessions: Record<string, ChatSession>): string | null {
+  return (
+    Object.values(sessions)
+      .filter((session) => session.status === "open" && !session.isDetached)
+      .sort((a, b) => {
+        const aTime = Date.parse(a.updatedAt ?? a.createdAt ?? "");
+        const bTime = Date.parse(b.updatedAt ?? b.createdAt ?? "");
+        return (
+          (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
+        );
+      })[0]?.id ?? null
+  );
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
@@ -338,14 +411,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         projectPath
       );
       if (persisted) {
-        const hydrated: ChatSession = {
+        const hydrated: ChatSession = hydrateLocalSession({
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
-          isDetached: false,
-          lifecycle: persisted.lifecycle ?? "idle",
-          lifecycleError: null,
-          streamingAssistant: null,
-        };
+        });
         set((state) => ({
           sessions: { ...state.sessions, [hydrated.id]: hydrated },
           activeSessionId: hydrated.id,
@@ -354,22 +423,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return hydrated.id;
       }
 
-      const id = generateSessionId();
-      const session: ChatSession = {
-        id,
-        scope,
-        entityId,
-        label,
-        messages: [],
-        status: "open",
-        claudeSessionId: null,
-        claudeConversationId: null,
-        contextSummary: null,
-        projectPath,
-        lifecycle: "idle",
-        lifecycleError: null,
-        streamingAssistant: null,
-      };
+      const session = createLocalSession(scope, entityId, label, projectPath);
+      const id = session.id;
 
       persistLocalChatSession(session);
 
@@ -387,13 +442,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const remaining = Object.fromEntries(
           Object.entries(state.sessions).filter(([id]) => id !== sessionId)
         );
-        const sessionIds = Object.keys(remaining);
         const newActiveId =
           state.activeSessionId === sessionId
-            ? sessionIds.length > 0
-              ? sessionIds[sessionIds.length - 1]
-              : null
+            ? latestSessionId(remaining)
             : state.activeSessionId;
+        const sessionIds = Object.keys(remaining);
 
         return {
           sessions: remaining,
@@ -407,10 +460,67 @@ export const useChatStore = create<ChatStore>((set, get) => {
       set({ activeSessionId: sessionId });
     },
 
+    listLocalSessions: (projectPath) => {
+      return listPersistedLocalChatSessions(projectPath);
+    },
+
+    selectPersistedSession: (sessionId) => {
+      const existing = get().sessions[sessionId];
+      if (existing) {
+        set({
+          activeSessionId: sessionId,
+          panelOpen: true,
+        });
+        return true;
+      }
+
+      const persisted = loadPersistedLocalChatSession(sessionId);
+      if (!persisted || persisted.status !== "open") return false;
+      const hydrated = hydrateLocalSession(persisted);
+      set((state) => ({
+        sessions: { ...state.sessions, [hydrated.id]: hydrated },
+        activeSessionId: hydrated.id,
+        panelOpen: true,
+      }));
+      return true;
+    },
+
+    startFreshSession: (scope, entityId, label, projectPath) => {
+      const session = createLocalSession(scope, entityId, label, projectPath);
+      persistLocalChatSession(session);
+      set((state) => ({
+        sessions: { ...state.sessions, [session.id]: session },
+        activeSessionId: session.id,
+        panelOpen: true,
+      }));
+      return session.id;
+    },
+
+    deleteLocalSession: (sessionId) => {
+      markLocalChatSessionCleared(sessionId);
+      discardStashedChatSession(sessionId);
+      set((state) => {
+        if (!state.sessions[sessionId]) return state;
+        const remaining = Object.fromEntries(
+          Object.entries(state.sessions).filter(([id]) => id !== sessionId)
+        );
+        const sessionIds = Object.keys(remaining);
+        return {
+          sessions: remaining,
+          activeSessionId:
+            state.activeSessionId === sessionId
+              ? latestSessionId(remaining)
+              : state.activeSessionId,
+          panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
+        };
+      });
+    },
+
     addMessage: (sessionId, message) => {
       updateSession(sessionId, (session) => ({
         ...session,
         messages: [...session.messages, message],
+        updatedAt: message.timestamp,
       }));
     },
 
@@ -437,6 +547,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     finalizeLastAssistantMessage: (sessionId, text) => {
       updateSession(sessionId, (session) => {
         const messages = [...session.messages];
+        const timestamp = new Date().toISOString();
         const last = messages[messages.length - 1];
         if (last?.kind === "assistant" && last.isPartial) {
           messages[messages.length - 1] = {
@@ -448,13 +559,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
           messages.push({
             kind: "assistant",
             text,
-            timestamp: new Date().toISOString(),
+            timestamp,
             isPartial: false,
           });
         }
         return {
           ...session,
           messages,
+          updatedAt: timestamp,
           lifecycle: "idle",
           lifecycleError: null,
           streamingAssistant: null,
@@ -492,20 +604,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
         (session) => {
           const streaming = session.streamingAssistant;
           if (!streaming) return session;
+          const timestamp =
+            commitToMessages && streaming.text
+              ? new Date().toISOString()
+              : streaming.timestamp;
+          const messages =
+            commitToMessages && streaming.text
+              ? [
+                  ...session.messages,
+                  {
+                    kind: "assistant" as const,
+                    text: streaming.text,
+                    timestamp,
+                    isPartial: false,
+                  },
+                ]
+              : session.messages;
           return {
             ...session,
-            messages:
+            messages,
+            updatedAt:
               commitToMessages && streaming.text
-                ? [
-                    ...session.messages,
-                    {
-                      kind: "assistant" as const,
-                      text: streaming.text,
-                      timestamp: streaming.timestamp,
-                      isPartial: false,
-                    },
-                  ]
-                : session.messages,
+                ? timestamp
+                : session.updatedAt,
             streamingAssistant: null,
           };
         },
@@ -592,9 +713,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     clearMessages: (sessionId) => {
       if (!get().sessions[sessionId]) return;
-      removePersistedLocalChatSession(sessionId);
       markLocalChatSessionCleared(sessionId);
       discardStashedChatSession(sessionId);
+      const timestamp = new Date().toISOString();
       set((state) => {
         const session = state.sessions[sessionId];
         if (!session) return state;
@@ -614,6 +735,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               lifecycle: "idle",
               lifecycleError: null,
               streamingAssistant: null,
+              updatedAt: timestamp,
+              preview: "No messages yet",
             },
           },
         };

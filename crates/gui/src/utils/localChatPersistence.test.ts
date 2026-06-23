@@ -5,6 +5,7 @@ import {
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
+  listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   loadPersistedLocalChatSessions,
   markLocalChatSessionCleared,
@@ -31,6 +32,9 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     model: "claude-sonnet-4",
     tokenUsage: { used: 120, max: 200000 },
     isDetached: true,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    preview: "hello",
     ...overrides,
   };
 }
@@ -202,5 +206,166 @@ describe("localChatPersistence", () => {
     clearLastUsedLocalChatModelId();
 
     expect(loadLastUsedLocalChatModelId()).toBeNull();
+  });
+
+  it("lists session summaries newest first with local metadata", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "older",
+        label: "Older Task",
+        messages: [
+          {
+            kind: "user",
+            text: "old question",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "newer",
+        label: "Newer Task",
+        messages: [
+          {
+            kind: "assistant",
+            text: "new answer",
+            timestamp: "2026-01-02T00:00:00Z",
+          },
+        ],
+        createdAt: "2026-01-01T12:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+        claudeConversationId: "conv-newer",
+      })
+    );
+
+    expect(listPersistedLocalChatSessions("/repo")).toEqual([
+      expect.objectContaining({
+        id: "newer",
+        label: "Newer Task",
+        preview: "new answer",
+        createdAt: "2026-01-01T12:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+        projectPath: "/repo",
+        claudeConversationId: "conv-newer",
+        messageCount: 1,
+      }),
+      expect.objectContaining({
+        id: "older",
+        preview: "old question",
+      }),
+    ]);
+  });
+
+  it("sorts mixed ISO timestamp precision by time rather than text", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "without-millis",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "with-millis",
+        updatedAt: "2026-01-01T00:00:00.999Z",
+      })
+    );
+
+    expect(listPersistedLocalChatSessions().map((s) => s.id)).toEqual([
+      "with-millis",
+      "without-millis",
+    ]);
+  });
+
+  it("uses warning messages as local session preview text", () => {
+    persistLocalChatSession(
+      makeSession({
+        messages: [
+          {
+            kind: "warning",
+            message: "permission needed",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+        preview: undefined,
+      })
+    );
+
+    expect(listPersistedLocalChatSessions()[0]).toMatchObject({
+      preview: "permission needed",
+    });
+  });
+
+  it("scopes listed sessions by project path while keeping legacy unscoped sessions visible", () => {
+    persistLocalChatSession(
+      makeSession({ id: "repo-a", projectPath: "/repo-a" })
+    );
+    persistLocalChatSession(
+      makeSession({ id: "repo-b", projectPath: "/repo-b" })
+    );
+    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+
+    expect(listPersistedLocalChatSessions("/repo-a").map((s) => s.id)).toEqual([
+      "repo-a",
+      "legacy",
+    ]);
+  });
+
+  it("normalizes legacy array storage into session summaries", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify([
+        makeSession({
+          id: "legacy-array",
+          messages: [
+            {
+              kind: "user",
+              text: "legacy text",
+              timestamp: "2026-02-03T04:05:06Z",
+            },
+          ],
+          createdAt: undefined,
+          updatedAt: undefined,
+          preview: undefined,
+        }),
+        { id: "bad", scope: "task", messages: [] },
+      ])
+    );
+
+    expect(listPersistedLocalChatSessions()).toEqual([
+      expect.objectContaining({
+        id: "legacy-array",
+        preview: "legacy text",
+        createdAt: "2026-02-03T04:05:06Z",
+        updatedAt: "2026-02-03T04:05:06Z",
+      }),
+    ]);
+  });
+
+  it("strips stale backend session ids from raw legacy storage", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify({
+        legacy: makeSession({
+          id: "legacy",
+          claudeSessionId: "stale-backend-session",
+          claudeConversationId: "conv-legacy",
+        }),
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("legacy")).toMatchObject({
+      claudeSessionId: null,
+      claudeConversationId: "conv-legacy",
+    });
+  });
+
+  it("treats corrupt storage as an empty local session index", () => {
+    localStorage.setItem("local-chat-sessions:v1", "{not json");
+
+    expect(listPersistedLocalChatSessions()).toEqual([]);
+    expect(loadPersistedLocalChatSessions()).toEqual({});
   });
 });

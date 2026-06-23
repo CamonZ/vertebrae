@@ -262,13 +262,22 @@ interface ChatWindowProps {
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
   onClosePanel?: () => void;
+  /** Opens the local-only persisted session history drawer. */
+  onToggleHistory?: () => void;
+  /** Starts a fresh local chat for the current scope. */
+  onStartFresh?: () => void;
 }
 
 /**
  * ChatWindow renders a single chat session: the header band (title + status),
  * the message thread, and the composer footer with its context-utilization bar.
  */
-export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
+export function ChatWindow({
+  sessionId,
+  onClosePanel,
+  onToggleHistory,
+  onStartFresh,
+}: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [inputValue, setInputValue] = useState("");
@@ -485,6 +494,50 @@ export function ChatWindow({ sessionId, onClosePanel }: ChatWindowProps) {
             )}
           </span>
           <div className="hc-ctrls">
+            {onToggleHistory && (
+              <button
+                className="hc-ctrl"
+                onClick={onToggleHistory}
+                title="Toggle chat history"
+                aria-label="Toggle chat history"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 8v4l3 2m6-2a9 9 0 11-3-6.708M21 3v6h-6"
+                  />
+                </svg>
+              </button>
+            )}
+            {onStartFresh && (
+              <button
+                className="hc-ctrl"
+                onClick={onStartFresh}
+                title="Start fresh local chat"
+                aria-label="Start fresh local chat"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 5v14m7-7H5"
+                  />
+                </svg>
+              </button>
+            )}
             <button
               className="hc-ctrl"
               onClick={() => void handleClearMessages()}

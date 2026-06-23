@@ -15,6 +15,21 @@ const VALID_SCOPES = new Set<ChatScope>([
   "step",
 ]);
 const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
+const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+
+export interface LocalChatSessionSummary {
+  id: string;
+  scope: ChatScope;
+  entityId: string | null;
+  label: string;
+  preview: string;
+  createdAt: string;
+  updatedAt: string;
+  projectPath: string | null;
+  claudeConversationId: string | null;
+  messageCount: number;
+  lifecycle: LocalChatLifecycle;
+}
 
 function canUseStorage(): boolean {
   return typeof localStorage !== "undefined";
@@ -44,17 +59,27 @@ function normalizeSession(value: unknown): ChatSession | null {
         ? "closed"
         : "idle";
 
+  const messages = durableMessages(candidate.messages);
+  const createdAt = normalizeTimestamp(candidate.createdAt, messages, "first");
+  const updatedAt = normalizeTimestamp(
+    candidate.updatedAt,
+    messages,
+    "last",
+    createdAt
+  );
+  const preview =
+    typeof candidate.preview === "string"
+      ? candidate.preview
+      : buildPreview(messages);
+
   return {
     id: candidate.id,
     scope: candidate.scope as ChatScope,
     entityId: candidate.entityId ?? null,
     label: candidate.label,
-    messages: durableMessages(candidate.messages),
+    messages,
     status: candidate.status,
-    claudeSessionId:
-      typeof candidate.claudeSessionId === "string"
-        ? candidate.claudeSessionId
-        : null,
+    claudeSessionId: null,
     claudeConversationId:
       typeof candidate.claudeConversationId === "string"
         ? candidate.claudeConversationId
@@ -85,6 +110,9 @@ function normalizeSession(value: unknown): ChatSession | null {
     lifecycle,
     lifecycleError: null,
     streamingAssistant: null,
+    createdAt,
+    updatedAt,
+    preview,
   };
 }
 
@@ -94,16 +122,78 @@ function durableMessages(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
-function serializeSession(session: ChatSession): ChatSession {
+function messageText(message: ChatMessage): string | null {
+  switch (message.kind) {
+    case "user":
+    case "assistant":
+      return message.text;
+    case "error":
+    case "warning":
+      return message.message;
+    case "tool_call":
+      return `${message.toolName} ${message.input}`;
+    case "tool_result":
+      return message.result;
+    case "permission_request":
+      return message.message;
+    case "session_start":
+      return `Started ${message.model}`;
+    case "session_end":
+      return "Session ended";
+  }
+}
+
+function buildPreview(messages: ChatMessage[]): string {
+  const lastText = [...messages]
+    .reverse()
+    .map(messageText)
+    .find((text) => text && text.trim().length > 0);
+  return (lastText ?? "No messages yet").replace(/\s+/g, " ").trim();
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function normalizeTimestamp(
+  value: unknown,
+  messages: ChatMessage[],
+  position: "first" | "last",
+  fallback = FALLBACK_TIMESTAMP
+): string {
+  if (isIsoTimestamp(value)) return value;
+  const ordered = position === "first" ? messages : [...messages].reverse();
+  const messageTimestamp = ordered.find((message) =>
+    isIsoTimestamp(message.timestamp)
+  )?.timestamp;
+  return messageTimestamp ?? fallback;
+}
+
+function serializeSession(
+  session: ChatSession,
+  previous?: ChatSession | null
+): ChatSession {
+  const messages = durableMessages(session.messages);
+  const createdAt =
+    session.createdAt ??
+    previous?.createdAt ??
+    normalizeTimestamp(undefined, messages, "first", new Date().toISOString());
+  const updatedAt =
+    session.updatedAt ??
+    normalizeTimestamp(undefined, messages, "last", new Date().toISOString());
+
   return {
     ...session,
-    messages: durableMessages(session.messages),
+    messages,
     claudeSessionId: null,
     projectPath: session.projectPath ?? null,
     isDetached: false,
     lifecycle: session.lifecycle === "closed" ? "closed" : "idle",
     lifecycleError: null,
     streamingAssistant: null,
+    createdAt,
+    updatedAt,
+    preview: buildPreview(messages),
   };
 }
 
@@ -164,6 +254,31 @@ export function loadPersistedLocalChatSessions(): Record<string, ChatSession> {
   );
 }
 
+export function listPersistedLocalChatSessions(
+  projectPath?: string | null
+): LocalChatSessionSummary[] {
+  return Object.values(readSessions())
+    .filter(
+      (session) =>
+        session.status === "open" &&
+        projectPathMatches(session.projectPath, projectPath)
+    )
+    .map((session) => ({
+      id: session.id,
+      scope: session.scope,
+      entityId: session.entityId,
+      label: session.label,
+      preview: session.preview ?? buildPreview(session.messages),
+      createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
+      updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
+      projectPath: session.projectPath ?? null,
+      claudeConversationId: session.claudeConversationId,
+      messageCount: session.messages.length,
+      lifecycle: session.lifecycle ?? "idle",
+    }))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
 export function loadPersistedLocalChatSession(
   sessionId: string
 ): ChatSession | null {
@@ -188,7 +303,7 @@ export function findPersistedLocalChatSession(
 
 export function persistLocalChatSession(session: ChatSession): void {
   const sessions = readSessions();
-  sessions[session.id] = serializeSession(session);
+  sessions[session.id] = serializeSession(session, sessions[session.id]);
   writeSessions(sessions);
   clearLocalChatSessionCleared(session.id);
 }
