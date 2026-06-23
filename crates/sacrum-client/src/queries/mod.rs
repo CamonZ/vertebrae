@@ -1,4 +1,3 @@
-pub mod chat;
 pub mod executions;
 pub mod pipeline;
 pub mod projects;

@@ -12,15 +12,13 @@ pub mod websocket_client;
 #[cfg(test)]
 pub mod mock;
 
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
-use vertebrae_core::ChatService;
-use vertebrae_sacrum_client::{GraphqlClient, SacrumChatService, SacrumConfig};
+use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use claude_session::{
     ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
@@ -29,7 +27,6 @@ use claude_session::{
 };
 use commands::AppState;
 use events::{
-    LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
     PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
     SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
     StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
@@ -134,16 +131,7 @@ fn create_builder() -> Builder {
             commands::get_supported_claude_models,
             commands::send_claude_message,
             commands::close_claude_session,
-            // Sacrum live chat commands
-            commands::create_chat_session,
-            commands::send_chat_message,
-            commands::get_chat_session,
-            commands::list_chat_sessions,
-            commands::delete_chat_session,
-            commands::list_chat_messages,
             commands::resolve_permission_request,
-            commands::get_active_chat_session_id,
-            commands::set_active_chat_session_id,
             // WebSocket status command
             commands::get_websocket_status,
             // Application lifecycle
@@ -166,10 +154,6 @@ fn create_builder() -> Builder {
             SessionLogCreatedEvent,
             SessionLogUpdatedEvent,
             SectionChangedEvent,
-            // Sacrum live chat events
-            LiveChatSessionChangedEvent,
-            LiveChatMessageCreatedEvent,
-            LiveChatEventCreatedEvent,
             PermissionRequestEvent,
             // Claude session events
             ClaudeSessionInitEvent,
@@ -228,23 +212,20 @@ pub fn run() {
                 }
             });
 
-            let (service, client_arc, chat_service) = match sacrum_config.as_ref() {
+            let (service, client_arc) = match sacrum_config.as_ref() {
                 Some(config) => {
                     let client = GraphqlClient::new(config.clone());
-                    let client_arc = Arc::new(client);
+                    let client_arc = std::sync::Arc::new(client);
                     let services = vertebrae_sacrum_client::from_sacrum(client_arc.clone());
-                    let chat: Arc<dyn ChatService> =
-                        Arc::new(SacrumChatService::new((*client_arc).clone()));
-                    (Some(services), Some(client_arc), Some(chat))
+                    (Some(services), Some(client_arc))
                 }
-                None => (None, None, None),
+                None => (None, None),
             };
 
             // Manage application state with optional services
             app.manage(AppState {
                 services: RwLock::new(service),
                 sacrum_client: RwLock::new(client_arc),
-                chat_service: RwLock::new(chat_service),
                 project_config,
             });
 
