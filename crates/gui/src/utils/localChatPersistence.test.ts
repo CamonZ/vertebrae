@@ -45,7 +45,7 @@ describe("localChatPersistence", () => {
   });
 
   it("round-trips resumable scoped chat metadata", () => {
-    persistLocalChatSession(makeSession());
+    persistLocalChatSession(makeSession({ permissionMode: "auto" }));
 
     const loaded = loadPersistedLocalChatSession("s-1");
     expect(loaded).toMatchObject({
@@ -59,6 +59,7 @@ describe("localChatPersistence", () => {
       contextSummary: "[Context]",
       projectPath: "/repo",
       selectedModelId: "opus",
+      permissionMode: "auto",
       model: "claude-sonnet-4",
       tokenUsage: { used: 120, max: 200000 },
       isDetached: false,
@@ -69,6 +70,21 @@ describe("localChatPersistence", () => {
     expect(loaded?.messages).toEqual([
       { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
     ]);
+  });
+
+  it("normalizes stale persisted permission modes to default", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify({
+        "s-1": makeSession({
+          permissionMode: "delegate" as ChatSession["permissionMode"],
+        }),
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("s-1")?.permissionMode).toBe(
+      "default"
+    );
   });
 
   it("finds a persisted session by scope, entity, and project path", () => {

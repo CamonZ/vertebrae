@@ -232,6 +232,15 @@ describe("LiveChatWindow", () => {
     expect(sendButton.disabled).toBe(true);
   });
 
+  it("keeps the compact input layout when no footer controls are provided", () => {
+    render(<LiveChatWindow />);
+    const textarea = screen.getByLabelText("Message");
+
+    expect(textarea).toHaveClass("rounded-lg");
+    expect(textarea).not.toHaveClass("rounded-t-lg");
+    expect(textarea.nextElementSibling?.tagName).toBe("BUTTON");
+  });
+
   it("submits via Enter (without shift)", async () => {
     const user = userEvent.setup();
     const session = makeSession();

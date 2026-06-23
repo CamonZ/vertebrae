@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
@@ -275,7 +275,9 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.queryByText("Context injected")).not.toBeInTheDocument();
-    expect(screen.queryByText("Task: My Important Task")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Task: My Important Task")
+    ).not.toBeInTheDocument();
   });
 
   it("does not show the standalone end session button", () => {
@@ -321,6 +323,42 @@ describe("ChatWindow", () => {
     ).toBeUndefined();
   });
 
+  it("renders model and permission controls in the composer footer", async () => {
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const modelPicker = await screen.findByTestId("local-chat-model-picker");
+    const permissionPicker = screen.getByTestId(
+      "local-chat-permission-mode-picker"
+    );
+
+    expect(modelPicker.closest(".hc-foot")).not.toBeNull();
+    expect(permissionPicker.closest(".hc-foot")).not.toBeNull();
+    expect(
+      document.querySelector(".hc-head [data-testid='local-chat-model-picker']")
+    ).toBeNull();
+    expect(permissionPicker).toHaveValue("default");
+    expect(
+      Array.from(
+        (permissionPicker as HTMLSelectElement).options,
+        (option) => [option.textContent, option.value]
+      )
+    ).toEqual([
+      ["Ask before edits", "default"],
+      ["Edit automatically", "accept_edits"],
+      ["Plan mode", "plan"],
+      ["Auto mode", "auto"],
+      ["Don't ask", "dont_ask"],
+      ["Bypass permissions", "bypass_permissions"],
+    ]);
+  });
+
   it("persists selected model changes and sends the model when starting", async () => {
     const user = userEvent.setup();
     const session = createSession();
@@ -340,17 +378,85 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Start session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-        expect.any(String),
-        "/test/project",
-        "Start",
-        null,
-        "opus"
-      );
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+        session_id: expect.any(String),
+        working_dir: "/test/project",
+        initial_prompt: "Start",
+        resume_session_id: null,
+        model_id: "opus",
+        permission_mode: "default",
+      });
     });
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBe("opus");
+  });
+
+  it("sends the selected permission mode when starting", async () => {
+    const user = userEvent.setup();
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.selectOptions(
+      screen.getByTestId("local-chat-permission-mode-picker"),
+      "plan"
+    );
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+        session_id: expect.any(String),
+        working_dir: "/test/project",
+        initial_prompt: "Start",
+        resume_session_id: null,
+        model_id: null,
+        permission_mode: "plan",
+      });
+    });
+    expect(
+      useChatStore.getState().sessions["test-session"].permissionMode
+    ).toBe("plan");
+  });
+
+  it("disables model and permission pickers while active or busy", async () => {
+    const activeSession = createSession({
+      claudeSessionId: "claude-active",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": activeSession },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    const { rerender } = render(<ChatWindow sessionId="test-session" />);
+
+    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(
+      screen.getByTestId("local-chat-permission-mode-picker")
+    ).toBeDisabled();
+
+    act(() => {
+      useChatStore.setState({
+        sessions: {
+          "test-session": createSession({ lifecycle: "sending" }),
+        },
+        activeSessionId: "test-session",
+        panelOpen: true,
+      });
+    });
+    rerender(<ChatWindow sessionId="test-session" />);
+
+    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(
+      screen.getByTestId("local-chat-permission-mode-picker")
+    ).toBeDisabled();
   });
 
   it("can clear a selected model back to CLI default before starting", async () => {
@@ -378,13 +484,14 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Start session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-        expect.any(String),
-        "/test/project",
-        "Start",
-        null,
-        null
-      );
+      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+        session_id: expect.any(String),
+        working_dir: "/test/project",
+        initial_prompt: "Start",
+        resume_session_id: null,
+        model_id: null,
+        permission_mode: "default",
+      });
     });
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
@@ -644,6 +751,49 @@ describe("ChatWindow", () => {
     expect(textarea).toHaveValue("");
   });
 
+  it("keeps newline input on Shift+Enter and grows the composer", async () => {
+    const original = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "scrollHeight"
+    );
+    Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return this.value.includes("\n") ? 88 : 40;
+      },
+    });
+    const user = userEvent.setup();
+    const session = createSession({ claudeSessionId: "claude-abc" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    try {
+      render(<ChatWindow sessionId="test-session" />);
+
+      const textarea = screen.getByTestId("local-chat-composer");
+      await user.type(textarea, "Line one");
+      expect(textarea).toHaveStyle({ height: "40px" });
+
+      await user.keyboard("{Shift>}{Enter}{/Shift}");
+      await user.type(textarea, "Line two");
+
+      expect(textarea).toHaveValue("Line one\nLine two");
+      expect(textarea).toHaveStyle({ height: "88px" });
+      expect(mockedCommands.sendClaudeMessage).not.toHaveBeenCalled();
+    } finally {
+      if (original) {
+        Object.defineProperty(
+          HTMLTextAreaElement.prototype,
+          "scrollHeight",
+          original
+        );
+      }
+    }
+  });
+
   it("does not send whitespace-only messages", async () => {
     const user = userEvent.setup();
     const session = createSession({ claudeSessionId: "claude-abc" });
@@ -704,6 +854,31 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(document.querySelector(".ev-cursor")).toBeInTheDocument();
+  });
+
+  it("renders local user chat messages as markdown", () => {
+    const session = createSession({
+      claudeSessionId: "claude-abc",
+      messages: [
+        {
+          kind: "user",
+          text: "Please read:\n\n- **first**\n- `second`",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    const { container } = render(<ChatWindow sessionId="test-session" />);
+
+    const userRow = container.querySelector(".evrow--user");
+    expect(userRow?.querySelector(".markdown-content")).toBeInTheDocument();
+    expect(userRow?.querySelector("li strong")).toHaveTextContent("first");
+    expect(userRow?.querySelector("li code")).toHaveTextContent("second");
   });
 
   it("renders the ephemeral streaming assistant overlay", () => {
@@ -1027,7 +1202,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Starting...")).toBeDisabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();
   });
@@ -1052,7 +1229,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Sending...")).toBeDisabled();
     expect(screen.getByTitle("Send message")).toBeDisabled();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
@@ -1075,7 +1254,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Streaming...")).toBeDisabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
   });
@@ -1096,7 +1277,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-lifecycle-error")).toHaveTextContent(
       "Claude failed"
     );
@@ -1126,7 +1309,9 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     const textarea = screen.getByPlaceholderText("Type a message to resume...");
     await user.type(textarea, "Resume");
     expect(screen.getByTitle("Resume session")).not.toBeDisabled();
@@ -1145,7 +1330,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-lifecycle-label")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-label")
+    ).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Resuming...")).toBeDisabled();
     expect(screen.getByTitle("Resume session")).toBeDisabled();
   });

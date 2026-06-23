@@ -697,13 +697,14 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.stringMatching(/^scoped-/),
-      "/test/project",
-      null,
-      null,
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.stringMatching(/^scoped-/),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("uses the project path captured on the chat session", async () => {
@@ -722,13 +723,14 @@ describe("doStartSession", () => {
     );
 
     expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.stringMatching(/^scoped-/),
-      "/captured/project",
-      null,
-      null,
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.stringMatching(/^scoped-/),
+      working_dir: "/captured/project",
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("passes the selected model id when the session has one", async () => {
@@ -746,13 +748,39 @@ describe("doStartSession", () => {
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.stringMatching(/^scoped-/),
-      "/test/project",
-      null,
-      null,
-      "opus"
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.stringMatching(/^scoped-/),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: "opus",
+      permission_mode: "default",
+    });
+  });
+
+  it("passes the selected permission mode when starting", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({ permissionMode: "auto" }),
+      SESSION_ID,
+      deps
     );
+
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.stringMatching(/^scoped-/),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "auto",
+    });
   });
 
   it("adds user message when provided", async () => {
@@ -815,13 +843,14 @@ describe("doStartSession", () => {
     expect(mockedCommands.getWorkflowWithTasks).not.toHaveBeenCalled();
     expect(mockedCommands.getStep).not.toHaveBeenCalled();
     expect(deps.setContextSummary).not.toHaveBeenCalled();
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.any(String),
-      "/test/project",
-      "Help",
-      null,
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.any(String),
+      working_dir: "/test/project",
+      initial_prompt: "Help",
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("passes resumeId when session has claudeConversationId", async () => {
@@ -839,13 +868,14 @@ describe("doStartSession", () => {
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.any(String),
-      "/test/project",
-      null,
-      "conv-xyz",
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.any(String),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: "conv-xyz",
+      model_id: null,
+      permission_mode: "default",
+    });
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
       "resuming"
@@ -870,13 +900,14 @@ describe("doStartSession", () => {
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.any(String),
-      "/test/project",
-      null,
-      "conv-xyz",
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.any(String),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: "conv-xyz",
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("passes null workingDir when getCurrentProjectPath fails", async () => {
@@ -895,13 +926,14 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.any(String),
-      null,
-      null,
-      null,
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.any(String),
+      working_dir: null,
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("passes the user message as the initial prompt without context", async () => {
@@ -920,13 +952,14 @@ describe("doStartSession", () => {
       "Question"
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith(
-      expect.any(String),
-      "/test/project",
-      "Question",
-      null,
-      null
-    );
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.any(String),
+      working_dir: "/test/project",
+      initial_prompt: "Question",
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
   });
 
   it("sets error lifecycle and clears backend id when createClaudeSession fails", async () => {

@@ -118,7 +118,11 @@
   --text-4xl: 2.25rem; /* 36px — h2 */
   --text-5xl: 3.5rem; /* 56px — h1 */
   --text-13: 0.8125rem; /* 13px — promoted so Tailwind emits text-13 utility */
-  --text-display: clamp(4.5rem, 11vw, 8.75rem); /* rem so it breathes with root font-size */
+  --text-display: clamp(
+    4.5rem,
+    11vw,
+    8.75rem
+  ); /* rem so it breathes with root font-size */
 
   /* letter-spacing scale — collapses the hardcoded 0.01/0.04/0.08/0.16em variants */
   --tracking-tight: -0.01em;
@@ -331,10 +335,10 @@
    comfortable when scaleFactor < 1.5 (non-Retina) OR innerWidth < 1400.
    Placed after the :root adapter so these overrides win the cascade. ── */
 :root[data-density="comfortable"] {
-  --text-2xs: 0.6875rem;   /* 10→11 */
+  --text-2xs: 0.6875rem; /* 10→11 */
   --text-eyebrow: 0.75rem; /* 11→12 */
-  --text-xs: 0.8125rem;    /* 12→13 */
-  --text-sm: 0.9375rem;    /* 14→15 */
+  --text-xs: 0.8125rem; /* 12→13 */
+  --text-sm: 0.9375rem; /* 14→15 */
 }
 :root[data-density="compact"] {
   --text-2xs: 0.5625rem;
@@ -1933,7 +1937,8 @@ html.window-transparent #root {
   font-size: var(--text-2xs);
   letter-spacing: 0.04em;
   color: var(--fg-mute);
-  transition: color var(--t-fast) var(--ease),
+  transition:
+    color var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease);
 }
 
@@ -2305,22 +2310,30 @@ html.window-transparent #root {
   backdrop-filter: blur(20px) brightness(1.5) saturate(1.5);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-full);
-  box-shadow: var(--shadow-2), 0 0 18px var(--accent-glow),
+  box-shadow:
+    var(--shadow-2),
+    0 0 18px var(--accent-glow),
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   cursor: pointer;
   user-select: none;
-  transition: border-color var(--t-base) var(--ease),
-    box-shadow var(--t-base) var(--ease), transform var(--t-base) var(--ease);
+  transition:
+    border-color var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease),
+    transform var(--t-base) var(--ease);
 }
 .hc-launch:hover {
   border-color: var(--accent);
-  box-shadow: var(--shadow-2), 0 0 28px var(--accent-glow);
+  box-shadow:
+    var(--shadow-2),
+    0 0 28px var(--accent-glow);
   transform: translateY(-1px);
 }
 .hc-launch:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: var(--shadow-2), 0 0 0 3px var(--accent-wash);
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 3px var(--accent-wash);
 }
 .hc-launch .ic {
   display: inline-flex;
@@ -2374,11 +2387,30 @@ html.window-transparent #root {
   backdrop-filter: blur(30px) brightness(1.5) saturate(1.6);
   border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.34),
+  box-shadow:
+    var(--shadow-3),
+    0 0 44px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   /* Drill open: slide in from the left edge toward center (the chat is
      left-anchored). Plays once on mount, i.e. when the panel opens. */
   animation: panel-drill-left var(--t-slow) var(--ease);
+  transition: width var(--t-slow) var(--ease);
+}
+.hc-panel[data-resizing],
+.hc-panel.is-closing {
+  transition: none;
+}
+.hc-panel .hc-panel-main {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+.hc-panel .hc-chat-pane {
+  min-width: 0;
+  flex: 1;
+}
+.hc-panel[data-maximized] .hc-chat-pane {
+  border-left: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2440,6 +2472,7 @@ html.window-transparent #root {
   .detail.detail-float,
   .detail.detail-float.is-closing {
     animation: none;
+    transition: none;
   }
 }
 
@@ -2617,7 +2650,18 @@ html.window-transparent #root {
   font-size: var(--text-10);
   color: var(--fg-mute);
 }
-.hc-panel .hc-model-picker select {
+.hc-panel .hc-permission-picker {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-1);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-model-picker select,
+.hc-panel .hc-permission-picker select {
   min-width: 78px;
   max-width: 132px;
   height: 24px;
@@ -2628,11 +2672,16 @@ html.window-transparent #root {
   font: inherit;
   outline: none;
 }
-.hc-panel .hc-model-picker select:focus-visible {
+.hc-panel .hc-permission-picker select {
+  max-width: 116px;
+}
+.hc-panel .hc-model-picker select:focus-visible,
+.hc-panel .hc-permission-picker select:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
-.hc-panel .hc-model-picker select:disabled {
+.hc-panel .hc-model-picker select:disabled,
+.hc-panel .hc-permission-picker select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -2652,7 +2701,9 @@ html.window-transparent #root {
 }
 .hc-panel .hc-ctx-fill {
   height: 100%;
-  transition: width var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
+  transition:
+    width var(--t-slow) var(--ease),
+    background var(--t-slow) var(--ease);
 }
 .hc-panel .hc-foot-meta {
   display: flex;
@@ -2670,6 +2721,99 @@ html.window-transparent #root {
 .hc-panel .hc-foot-meta .ctx-lbl b {
   color: var(--fg-mute);
   font-weight: 500;
+}
+.hc-panel .hc-mini-history {
+  width: 272px;
+  min-width: 240px;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklch, var(--bg-2) 34%, transparent);
+}
+.hc-panel .hc-mini-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-error {
+  border-bottom: 1px solid color-mix(in oklch, var(--err) 22%, transparent);
+  background: var(--err-wash);
+  padding: var(--s-2);
+  font-size: var(--text-11);
+  color: var(--err);
+}
+.hc-panel .hc-mini-history-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-3);
+  text-align: center;
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-list {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--s-2);
+}
+.hc-panel .hc-mini-history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-1);
+  margin-bottom: var(--s-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: color-mix(in oklch, var(--bg) 44%, transparent);
+  padding: var(--s-1);
+}
+.hc-panel .hc-mini-history-row[data-active] {
+  border-color: color-mix(in oklch, var(--accent) 44%, var(--line));
+  background: var(--accent-wash);
+}
+.hc-panel .hc-mini-history-open {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: var(--s-1);
+  text-align: left;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-open .label,
+.hc-panel .hc-mini-history-open .preview,
+.hc-panel .hc-mini-history-open .meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-mini-history-open .label {
+  font-size: var(--text-12);
+  font-weight: 600;
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-open .preview {
+  margin-top: 2px;
+  font-size: var(--text-11);
+  color: var(--fg-soft);
+}
+.hc-panel .hc-mini-history-open .meta {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: var(--text-9);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-faint);
 }
 
 /* Task rows — ported verbatim from the design reference (docs/design/

@@ -749,9 +749,9 @@ async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
  * If `resume_session_id` is provided, continues an existing conversation.
  * Returns immediately; the session emits events for all output.
  */
-async createClaudeSession(sessionId: string, workingDir: string | null, initialPrompt: string | null, resumeSessionId: string | null, modelId: string | null) : Promise<Result<null, ClaudeSessionError>> {
+async createClaudeSession(input: CreateClaudeSessionInput) : Promise<Result<null, ClaudeSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { sessionId, workingDir, initialPrompt, resumeSessionId, modelId }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { input }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1213,6 +1213,7 @@ symlink_path: string;
  * avoid pestering users who already have `vtb` from `cargo install`.
  */
 on_path: boolean }
+export type CreateClaudeSessionInput = { session_id: string; working_dir: string | null; initial_prompt: string | null; resume_session_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
 /**
  * Options for creating a workflow step.
  */
@@ -1280,7 +1281,7 @@ export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
-export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
+export type PermissionMode = "accept_edits" | "auto" | "bypass_permissions" | "default" | "dont_ask" | "plan"
 export type PermissionRequestEvent = { request_id: string; session_id: string | null; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null }
 /**
  * Workflow step entry in the pipeline summary payload, including the

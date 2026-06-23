@@ -30,10 +30,7 @@
  */
 
 import type { ChatMessage } from "../../stores/chatStore";
-import {
-  getToolIcon,
-  type ConversationEvent,
-} from "../../types/conversation";
+import { getToolIcon, type ConversationEvent } from "../../types/conversation";
 import { chatTurnEventsToMessages } from "../thread/normalize";
 import type {
   AgentMessage,
@@ -87,7 +84,10 @@ export function chatMessagesToThread(
   const flushTurn = () => {
     if (!userMsg && events.length === 0) return;
     const turnId = `chat-turn-${turnSeq++}`;
-    const grouped = chatTurnEventsToMessages(events, { collapsed, onToggleTool });
+    const grouped = chatTurnEventsToMessages(events, {
+      collapsed,
+      onToggleTool,
+    });
     stabilizeKeys(grouped, turnId);
     if (endsWithPartialAssistant) markLastAgentStreaming(grouped);
     const messagesOut: Message[] = userMsg ? [userMsg, ...grouped] : grouped;
@@ -112,6 +112,7 @@ export function chatMessagesToThread(
           role: "human",
           label: "You",
           text: m.text,
+          textFormat: "markdown",
         };
         continue;
       }
