@@ -61,9 +61,9 @@ impl PathCommand {
         let from_id = self.from_id.to_lowercase();
         let to_id = self.to_id.to_lowercase();
 
-        // Validate both tasks exist using the service
-        let from_task = services.tasks().get_task(&from_id).await?;
-        let _to_task = services.tasks().get_task(&to_id).await?;
+        // Validate both tasks exist using title-only reads.
+        let from_title = services.tasks().get_task_title(&from_id).await?;
+        let _to_title = services.tasks().get_task_title(&to_id).await?;
 
         // Handle same task case
         if from_id == to_id {
@@ -72,7 +72,7 @@ impl PathCommand {
                 to_id,
                 path: Some(vec![TaskSummary {
                     id: from_id,
-                    title: from_task.title,
+                    title: from_title,
                 }]),
             });
         }
@@ -83,15 +83,13 @@ impl PathCommand {
         // Convert path IDs to TaskSummary with titles
         let path = match path_ids {
             Some(ids) => {
-                let mut summaries = Vec::new();
-                for id in ids {
-                    let task = services.tasks().get_task(&id).await?;
-                    summaries.push(TaskSummary {
-                        id,
-                        title: task.title,
-                    });
-                }
-                Some(summaries)
+                let titles = services.tasks().get_task_titles(&ids).await?;
+                Some(
+                    titles
+                        .into_iter()
+                        .map(|(id, title)| TaskSummary { id, title })
+                        .collect(),
+                )
             }
             None => None,
         };

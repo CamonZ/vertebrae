@@ -240,6 +240,11 @@ impl TaskService for MockTaskService {
                 if !filter.levels.is_empty() && !filter.levels.contains(&t.level) {
                     return false;
                 }
+                if let Some(workflow_id) = &filter.workflow_id {
+                    if t.workflow_id.as_deref() != Some(workflow_id.as_str()) {
+                        return false;
+                    }
+                }
                 true
             })
             .cloned()
@@ -447,7 +452,7 @@ impl TaskService for MockTaskService {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -456,7 +461,7 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == section_type && sec.order == Some(ordinal) {
                 sec.content = new_content.to_string();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Section not found"))
@@ -467,18 +472,25 @@ impl TaskService for MockTaskService {
         id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
-        task.sections
-            .retain(|s| !(s.section_type == section_type && s.order == Some(ordinal)));
-        Ok(())
+        let index = task
+            .sections
+            .iter()
+            .position(|s| s.section_type == section_type && s.order == Some(ordinal))
+            .ok_or_else(|| ServiceError::validation_failed("Section not found"))?;
+        Ok(task.sections.remove(index))
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -487,13 +499,13 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == SectionType::ChecklistItem && sec.order == Some(section_order) {
                 sec.mark_done();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
-        Ok(())
+        Err(ServiceError::validation_failed("Checklist item not found"))
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -508,7 +520,7 @@ impl TaskService for MockTaskService {
                 } else {
                     sec.mark_done();
                 }
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Checklist item not found"))
@@ -778,6 +790,23 @@ impl WorkflowService for MockWorkflowService {
         _from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
         Ok(vec![])
+    }
+
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(
+        Vec<WorkflowTransition>,
+        std::collections::HashMap<String, String>,
+    )> {
+        let transitions = self.list_workflow_transitions(from_workflow_id).await?;
+        let workflow_names = self
+            .list_workflows()
+            .await?
+            .into_iter()
+            .map(|workflow| (workflow.id, workflow.name))
+            .collect();
+        Ok((transitions, workflow_names))
     }
 
     async fn get_transitions_from_workflow(
@@ -1255,13 +1284,47 @@ impl StepService for MockStepService {
             .cloned()
             .collect())
     }
-    async fn update_step(&self, id: &str, _updates: &StepUpdate) -> ServiceResult<()> {
-        let s = self.state.lock().unwrap();
-        if s.steps.contains_key(id) {
-            Ok(())
-        } else {
-            Err(ServiceError::task_not_found(id))
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
+        let mut s = self.state.lock().unwrap();
+        let step = s
+            .steps
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {}", id)))?;
+        if let Some(name) = &updates.name {
+            step.name = name.clone();
         }
+        if let Some(goal) = &updates.goal {
+            step.goal = Some(goal.clone());
+        }
+        if let Some(prompt) = &updates.prompt {
+            step.prompt = Some(prompt.clone());
+        }
+        if let Some(agents) = &updates.agents {
+            step.agents = agents.clone();
+        }
+        if let Some(skills) = &updates.skills {
+            step.skills = skills.clone();
+        }
+        if let Some(is_final) = updates.is_final {
+            step.is_final = is_final;
+        }
+        if let Some(order) = updates.order {
+            step.order = order;
+        }
+        if let Some(transitions) = &updates.transitions_to {
+            step.transitions_to = transitions.clone();
+        }
+        if let Some(step_type) = &updates.step_type {
+            step.step_type = step_type.clone();
+        }
+        if let Some(schema_update) = &updates.output_schema {
+            step.output_schema = schema_update.clone();
+        }
+        if let Some(agent_config_value) = &updates.agent_config {
+            step.agent_config = serde_json::from_value(agent_config_value.clone())
+                .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        }
+        Ok(step.workflow_id.clone())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();

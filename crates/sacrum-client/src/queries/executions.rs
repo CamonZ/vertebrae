@@ -232,7 +232,6 @@ pub const LIST_LOGS: &str = r#"
             format
             logical_key
             inserted_at
-            updated_at
         }
     }
 "#;

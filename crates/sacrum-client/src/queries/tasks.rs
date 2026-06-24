@@ -64,6 +64,37 @@ pub const TASK_FIELDS: &str = r#"
     }
 "#;
 
+/// Slim fragment for task summaries in list-ready and relationship displays.
+pub const TASK_SUMMARY_FIELDS: &str = r#"
+    fragment TaskSummaryFields on Task {
+        id
+        project_id
+        title
+        level
+        priority
+        tags
+        workflow_id
+        current_step_id
+        archived
+        parent_id
+        run_controls {
+            runnable
+            stoppable
+            disabled_reason_code
+            disabled_reason
+            active_run {
+                id
+                task_id
+                status
+                latest_step_execution_id
+            }
+        }
+    }
+"#;
+
+/// Slim fragment for ready tasks. Keep active run state for RunConsole.
+pub const READY_TASK_FIELDS: &str = TASK_SUMMARY_FIELDS;
+
 /// List tasks with optional filters.
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const LIST_TASKS: &str = r#"
@@ -125,11 +156,57 @@ pub const RESOLVE_SHORT_ID: &str = r#"
 "#;
 
 /// List tasks that are ready (unblocked).
-/// NOTE: Prepend TASK_FIELDS when sending.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS when sending.
 pub const READY_TASKS: &str = r#"
     query ReadyTasks($project_id: Uuid4!) {
         list_ready(project_id: $project_id) {
-            ...TaskFields
+            ...TaskSummaryFields
+        }
+    }
+"#;
+
+/// Get task summary fields by ID.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS when sending.
+pub const GET_TASK_SUMMARY: &str = r#"
+    query GetTaskSummary($id: Uuid4!) {
+        task(id: $id) {
+            ...TaskSummaryFields
+        }
+    }
+"#;
+
+/// Get only a task title by ID.
+pub const GET_TASK_TITLE: &str = r#"
+    query GetTaskTitle($id: Uuid4!) {
+        task(id: $id) {
+            id
+            title
+        }
+    }
+"#;
+
+/// Fetch the optional relationship roots needed by `vtb show`.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS, WORKFLOW_FIELDS, and TASK_RUN_FIELDS.
+pub const SHOW_TASK_RELATED: &str = r#"
+    query ShowTaskRelated(
+        $project_id: Uuid4!,
+        $task_id: Uuid4!,
+        $parent_id: Uuid4!,
+        $include_parent: Boolean!,
+        $workflow_id: Uuid4!,
+        $include_workflow: Boolean!
+    ) {
+        parent: task(id: $parent_id) @include(if: $include_parent) {
+            ...TaskSummaryFields
+        }
+        workflow(id: $workflow_id) @include(if: $include_workflow) {
+            ...WorkflowFields
+        }
+        task_runs(task_id: $task_id) {
+            ...TaskRunFields
+        }
+        workflows(project_id: $project_id) {
+            ...WorkflowFields
         }
     }
 "#;
@@ -152,7 +229,7 @@ pub const CREATE_TASK: &str = r#"
         $tags: [String!],
         $parent_id: Uuid4,
         $workflow_id: Uuid4,
-        $sections: [TaskSectionInput!]
+        $sections: [TaskSectionCreateInput!]
     ) {
         create_task(
             project_id: $project_id,
@@ -226,6 +303,14 @@ pub const DELETE_DEPENDENCY: &str = r#"
     }
 "#;
 
+pub const SYNC_TASK_DEPENDENCIES: &str = r#"
+    mutation SyncTaskDependencies($task_id: Uuid4!, $depends_on_ids: [Uuid4]!) {
+        sync_task_dependencies(task_id: $task_id, depends_on_ids: $depends_on_ids) {
+            id
+        }
+    }
+"#;
+
 // -- Workflow Assignment --
 
 pub const ASSIGN_WORKFLOW: &str = r#"
@@ -283,6 +368,47 @@ pub const CREATE_SECTION: &str = r#"
             section_order
             done
             done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
+        }
+    }
+"#;
+
+pub const UPSERT_SECTION: &str = r#"
+    mutation UpsertSection(
+        $task_id: Uuid4!,
+        $section_type: String!,
+        $content: String!,
+        $section_order: Int,
+        $done: Boolean
+    ) {
+        upsert_section(
+            task_id: $task_id,
+            section_type: $section_type,
+            content: $content,
+            section_order: $section_order,
+            done: $done
+        ) {
+            id
+            section_type
+            content
+            section_order
+            done
+            done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
     }
 "#;
@@ -300,7 +426,20 @@ pub const UPDATE_SECTION: &str = r#"
             done: $done,
             done_at: $done_at
         ) {
-            id done done_at
+            id
+            section_type
+            content
+            section_order
+            done
+            done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
     }
 "#;
@@ -355,6 +494,22 @@ pub const DELETE_TASK_CODE_REFS: &str = r#"
     }
 "#;
 
+pub const SET_CODE_REFS: &str = r#"
+    mutation SetCodeRefs($task_id: Uuid4!, $refs: [CodeRefInput!]!) {
+        set_code_refs(task_id: $task_id, refs: $refs) {
+            id
+            task_id
+            section_id
+            path
+            line_start
+            line_end
+            name
+            description
+            order_index
+        }
+    }
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -375,5 +530,34 @@ mod tests {
         assert!(query.contains("resolveShortId(project_id: $project_id, prefix: $prefix) { id }"));
         assert!(!RESOLVE_SHORT_ID.contains("...TaskFields"));
         assert!(!RESOLVE_SHORT_ID.contains("short_id"));
+    }
+
+    #[test]
+    fn create_task_uses_create_section_input_type() {
+        let query = compact_graphql(CREATE_TASK);
+
+        assert!(query.contains("$sections: [TaskSectionCreateInput!]"));
+    }
+
+    #[test]
+    fn sync_dependencies_matches_backend_list_type() {
+        let query = compact_graphql(SYNC_TASK_DEPENDENCIES);
+
+        assert!(query.contains("$depends_on_ids: [Uuid4]!"));
+    }
+
+    #[test]
+    fn update_task_omits_dead_section_inputs() {
+        assert!(!UPDATE_TASK.contains("$sections"));
+        assert!(!UPDATE_TASK.contains("section_deletions"));
+    }
+
+    #[test]
+    fn section_mutations_return_section_code_refs() {
+        for query in [CREATE_SECTION, UPSERT_SECTION, UPDATE_SECTION] {
+            let query = compact_graphql(query);
+
+            assert!(query.contains("code_refs { id path line_start line_end name description }"));
+        }
     }
 }

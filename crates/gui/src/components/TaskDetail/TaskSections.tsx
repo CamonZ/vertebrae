@@ -6,11 +6,11 @@ import { InlineEditField } from './InlineEditField';
 import { SectionGroup as SharedSectionGroup } from '../molecules/SectionGroup';
 import { Chip } from '../atoms/Chip';
 import { Button } from '../atoms/Button';
+import { updateTaskSectionsInQueryCache } from '../../query';
 
 interface TaskSectionsProps {
   sections: Section[];
   taskId: string;
-  onSectionsChanged?: () => void;
 }
 
 /**
@@ -117,7 +117,6 @@ interface SectionGroupProps {
   taskId: string;
   isAddingNew?: boolean;
   onAddComplete: () => void;
-  onSectionsChanged?: () => void;
 }
 
 /**
@@ -129,8 +128,7 @@ function SectionGroup({
   defaultOpen = false,
   taskId,
   isAddingNew = false,
-  onAddComplete,
-  onSectionsChanged
+  onAddComplete
 }: SectionGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen || isAddingNew);
 
@@ -149,12 +147,12 @@ function SectionGroup({
       if (result.status === 'error') {
         console.error('Failed to toggle done:', result.error.message);
       } else {
-        onSectionsChanged?.();
+        updateTaskSectionsInQueryCache(taskId, result.data, "upsert");
       }
     } catch (err) {
       console.error('Failed to toggle done:', err);
     }
-  }, [taskId, sections, onSectionsChanged]);
+  }, [taskId, sections]);
 
   const handleDeleteSection = useCallback(async (index: number) => {
     const section = sections[index];
@@ -164,21 +162,21 @@ function SectionGroup({
       if (result.status === 'error') {
         console.error('Failed to delete section:', result.error.message);
       } else {
-        onSectionsChanged?.();
+        updateTaskSectionsInQueryCache(taskId, result.data, "remove");
       }
     } catch (err) {
       console.error('Failed to delete section:', err);
     }
-  }, [taskId, type, sections, onSectionsChanged]);
+  }, [taskId, type, sections]);
 
   const handleAddSection = useCallback(async (content: string) => {
     const result = await commands.addSection(taskId, type, content);
     if (result.status === 'error') {
       throw new Error(result.error.message);
     }
+    updateTaskSectionsInQueryCache(taskId, result.data, "upsert");
     onAddComplete();
-    onSectionsChanged?.();
-  }, [taskId, type, onAddComplete, onSectionsChanged]);
+  }, [taskId, type, onAddComplete]);
 
   const handleEditSection = useCallback(async (index: number, content: string) => {
     const section = sections[index];
@@ -192,8 +190,8 @@ function SectionGroup({
     if (result.status === 'error') {
       throw new Error(result.error.message);
     }
-    onSectionsChanged?.();
-  }, [taskId, sections, onSectionsChanged]);
+    updateTaskSectionsInQueryCache(taskId, result.data, "upsert");
+  }, [taskId, sections]);
 
   // Prepare data for EditableList
   const items = sections.map(s => s.content);
@@ -284,7 +282,7 @@ const TYPE_ORDER: SectionType[] = [
  * TaskSections displays task sections grouped by type in collapsible accordions.
  * Uses InlineEditField for consistent inline editing UX.
  */
-export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectionsProps) {
+export function TaskSections({ sections, taskId }: TaskSectionsProps) {
   const [showTypeSelector, setShowTypeSelector] = useState(false);
   const [addingToType, setAddingToType] = useState<SectionType | null>(null);
 
@@ -390,7 +388,6 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
                 taskId={taskId}
                 isAddingNew={addingToType === type}
                 onAddComplete={handleAddComplete}
-                onSectionsChanged={onSectionsChanged}
               />
             ))}
           </div>

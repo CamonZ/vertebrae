@@ -5,25 +5,31 @@
 
 use async_trait::async_trait;
 use serde_json::json;
+use std::collections::HashMap;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
+use vertebrae_core::service::TaskService;
 use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
+    WorkflowTasksBundle,
 };
 
 use crate::api_types::ShortIdResponse;
 use crate::api_types::{
-    PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
+    PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse,
+    WorkflowTasksCompoundResponse, WorkflowTransitionResponse,
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::pipeline::PIPELINE_SUMMARY;
 use crate::queries::steps::{CREATE_STEP, STEP_FIELDS, SYNC_STEP_TRANSITIONS};
-use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
+use crate::queries::tasks::{self, ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
     CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
-    GET_WORKFLOW, LIST_WORKFLOWS, RESOLVE_WORKFLOW_SHORT_ID, UPDATE_WORKFLOW, WORKFLOW_FIELDS,
+    GET_WORKFLOW, GET_WORKFLOW_WITH_TASKS, LIST_WORKFLOWS, RESOLVE_WORKFLOW_SHORT_ID,
+    UPDATE_WORKFLOW, WORKFLOW_FIELDS,
 };
+use crate::task_service::SacrumTaskService;
 
 /// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -256,6 +262,43 @@ impl WorkflowService for SacrumWorkflowService {
         Ok(self.response_to_workflow(&response.workflow))
     }
 
+    async fn get_workflow_with_tasks(
+        &self,
+        _tasks: &dyn TaskService,
+        id: &str,
+    ) -> ServiceResult<WorkflowTasksBundle> {
+        let query = with_fragments(
+            GET_WORKFLOW_WITH_TASKS,
+            &[WORKFLOW_FIELDS, tasks::TASK_FIELDS],
+        );
+        let variables = json!({
+            "project_id": self.client.project_id(),
+            "workflow_id": id,
+        });
+
+        let response: WorkflowTasksCompoundResponse =
+            self.client.execute_compound(&query, variables).await?;
+        let (workflow_names, step_names) =
+            SacrumTaskService::lookups_from_workflows(&response.workflows);
+        let task_service = SacrumTaskService::new(self.client.clone());
+        let tasks = response
+            .tasks
+            .iter()
+            .map(|task| {
+                task_service.response_to_task_with_lookups(
+                    task,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                )
+            })
+            .collect::<ServiceResult<Vec<_>>>()?;
+
+        Ok(WorkflowTasksBundle {
+            workflow: self.response_to_workflow(&response.workflow),
+            tasks,
+        })
+    }
+
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
         let variables = json!({
             "project_id": self.client.project_id(),
@@ -484,13 +527,30 @@ impl WorkflowService for SacrumWorkflowService {
         &self,
         from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
+        let (transitions, _) = self
+            .list_workflow_transitions_with_names(from_workflow_id)
+            .await?;
+        Ok(transitions)
+    }
+
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(Vec<WorkflowTransition>, HashMap<String, String>)> {
         let query = with_fragments(LIST_WORKFLOWS, &[WORKFLOW_FIELDS]);
         let variables = json!({ "project_id": self.client.project_id() });
 
         let workflows: Vec<WorkflowResponse> =
             self.client.execute(&query, variables, "workflows").await?;
 
-        Ok(Self::extract_transitions(&workflows, from_workflow_id))
+        let workflow_names = workflows
+            .iter()
+            .map(|workflow| (workflow.id.clone(), workflow.name.clone()))
+            .collect();
+        Ok((
+            Self::extract_transitions(&workflows, from_workflow_id),
+            workflow_names,
+        ))
     }
 
     async fn get_transitions_from_workflow(
@@ -821,7 +881,7 @@ mod tests {
     // Wiremock integration tests for workflow GraphQL methods
     // =========================================================================
 
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_wiremock_service(server_url: &str) -> SacrumWorkflowService {
@@ -831,6 +891,31 @@ mod tests {
             "test-proj".to_string(),
         ));
         SacrumWorkflowService::new(client)
+    }
+
+    fn create_wiremock_task_service(server_url: &str) -> SacrumTaskService {
+        let client = GraphqlClient::new(SacrumConfig::new(
+            server_url.to_string(),
+            "test-token".to_string(),
+            "test-proj".to_string(),
+        ));
+        SacrumTaskService::new(client)
+    }
+
+    fn gql_task_data(id: &str, title: &str, workflow_id: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "project_id": "test-proj",
+            "title": title,
+            "tags": [],
+            "workflow_id": workflow_id,
+            "dependency_ids": [],
+            "sections": [],
+            "code_refs": [],
+            "blockers": [],
+            "dependents": [],
+            "children": []
+        })
     }
 
     #[tokio::test]
@@ -1015,6 +1100,56 @@ mod tests {
             Some("Development process".to_string())
         );
         assert_eq!(workflow.order, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_with_tasks_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetWorkflowWithTasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Board Workflow",
+                        "workflow_steps": [
+                            { "id": "step-1", "name": "Backlog", "step_order": 0 }
+                        ]
+                    },
+                    "tasks": [
+                        gql_task_data("task-1", "First task", "wf-1"),
+                        gql_task_data("task-2", "Second task", "wf-1")
+                    ],
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "Board Workflow",
+                            "workflow_steps": [
+                                { "id": "step-1", "name": "Backlog", "step_order": 0 }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let task_service = create_wiremock_task_service(&server.uri());
+        let bundle = service
+            .get_workflow_with_tasks(&task_service, "wf-1")
+            .await
+            .unwrap();
+
+        assert_eq!(bundle.workflow.name, "Board Workflow");
+        assert_eq!(bundle.tasks.len(), 2);
+        assert_eq!(bundle.tasks[0].title, "First task");
+        assert_eq!(
+            bundle.tasks[1].workflow_name.as_deref(),
+            Some("Board Workflow")
+        );
     }
 
     #[tokio::test]

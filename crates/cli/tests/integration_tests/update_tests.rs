@@ -441,9 +441,8 @@ async fn test_update_remove_section_invalid_ordinal() {
         remove_section: Some(vec!["checklist_item".to_string(), "999".to_string()]),
     };
 
-    // Mock's remove_section_by_ordinal just retains sections that don't match,
-    // so this won't error even if ordinal doesn't exist
-    cmd.execute(&services).await.unwrap();
+    let result = cmd.execute(&services).await;
+    assert!(result.is_err());
 
     // Verify the step at ordinal 0 still exists (999 never existed)
     let task = services.tasks().get_task(&task_id).await.unwrap();

@@ -229,7 +229,7 @@ impl StepService for SacrumStepService {
         Ok(responses.iter().map(Self::response_to_step).collect())
     }
 
-    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()> {
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
         let query = with_fragments(UPDATE_STEP, &[STEP_FIELDS]);
         let mut variables = json!({ "id": id });
 
@@ -276,7 +276,7 @@ impl StepService for SacrumStepService {
             None => {}
         }
 
-        let _response: WorkflowStepResponse = self
+        let response: WorkflowStepResponse = self
             .client
             .execute(&query, variables, "update_workflow_step")
             .await?;
@@ -298,7 +298,7 @@ impl StepService for SacrumStepService {
                 .await?;
         }
 
-        Ok(())
+        Ok(response.workflow_id)
     }
 
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
@@ -783,7 +783,7 @@ mod tests {
         let updates = StepUpdate::new().with_name("Updated");
         let result = service.update_step("step-1", &updates).await;
 
-        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "wf-1");
     }
 
     #[tokio::test]

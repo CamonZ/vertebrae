@@ -359,6 +359,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_single_instance_section_replaces_existing() {
+        let services = mock_services();
+        let id = create_task(&services, "Task with replaceable goal").await;
+
+        let first = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "Initial goal".to_string(),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        assert!(!first.replaced);
+
+        let second = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "Updated goal".to_string(),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        assert!(second.replaced);
+
+        let result = SectionsCommand {
+            id: id.clone(),
+            section_type: Some(SectionType::Goal),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+
+        assert_eq!(result.sections.len(), 1);
+        assert_eq!(result.sections[0].content, "Updated goal");
+    }
+
+    #[tokio::test]
     async fn test_sections_filter_returns_empty_when_no_match() {
         let services = mock_services();
         let id = create_task(&services, "Task with no testing criteria").await;

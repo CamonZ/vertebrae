@@ -42,7 +42,7 @@ pub trait StepService: Send + Sync {
     async fn list_steps_for_workflow(&self, workflow_id: &str) -> ServiceResult<Vec<Step>>;
 
     /// Update a step
-    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()>;
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String>;
 
     /// Delete a step
     async fn delete_step(&self, id: &str) -> ServiceResult<()>;

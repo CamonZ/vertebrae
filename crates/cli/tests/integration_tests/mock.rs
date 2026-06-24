@@ -492,7 +492,7 @@ impl TaskService for MockTaskService {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -501,7 +501,7 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == section_type && sec.order == Some(ordinal) {
                 sec.content = new_content.to_string();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Section not found"))
@@ -512,18 +512,27 @@ impl TaskService for MockTaskService {
         id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
-        task.sections
-            .retain(|s| !(s.section_type == section_type && s.order == Some(ordinal)));
-        Ok(())
+        let Some(index) = task
+            .sections
+            .iter()
+            .position(|s| s.section_type == section_type && s.order == Some(ordinal))
+        else {
+            return Err(ServiceError::validation_failed("Section not found"));
+        };
+        Ok(task.sections.remove(index))
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -532,13 +541,13 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == SectionType::ChecklistItem && sec.order == Some(section_order) {
                 sec.mark_done();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
-        Ok(())
+        Err(ServiceError::validation_failed("Checklist item not found"))
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -553,7 +562,7 @@ impl TaskService for MockTaskService {
                 } else {
                     sec.mark_done();
                 }
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Checklist item not found"))
@@ -836,6 +845,23 @@ impl WorkflowService for MockWorkflowService {
         _from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
         Ok(vec![])
+    }
+
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(
+        Vec<WorkflowTransition>,
+        std::collections::HashMap<String, String>,
+    )> {
+        let transitions = self.list_workflow_transitions(from_workflow_id).await?;
+        let workflow_names = self
+            .list_workflows()
+            .await?
+            .into_iter()
+            .map(|workflow| (workflow.id, workflow.name))
+            .collect();
+        Ok((transitions, workflow_names))
     }
 
     async fn get_transitions_from_workflow(
@@ -1298,12 +1324,12 @@ impl StepService for MockStepService {
             .cloned()
             .collect())
     }
-    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()> {
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
         let mut s = self.state.lock().unwrap();
         let step = s
             .steps
             .get_mut(id)
-            .ok_or_else(|| ServiceError::task_not_found(id))?;
+            .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {}", id)))?;
         if let Some(name) = &updates.name {
             step.name = name.clone();
         }
@@ -1338,7 +1364,7 @@ impl StepService for MockStepService {
             step.agent_config = serde_json::from_value(agent_config_value.clone())
                 .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
         }
-        Ok(())
+        Ok(step.workflow_id.clone())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();

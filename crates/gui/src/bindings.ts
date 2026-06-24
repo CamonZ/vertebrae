@@ -248,6 +248,19 @@ async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<nul
 }
 },
 /**
+ * Replace the full dependency set for a task
+ * 
+ * Saves picker changes atomically instead of issuing one mutation per add/remove.
+ */
+async syncDependencies(taskId: string, dependsOnIds: string[]) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sync_dependencies", { taskId, dependsOnIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a new task with the given title, optional description, level, and parent task
  * 
  * Returns the ID of the newly created task.
@@ -310,7 +323,7 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
  * For step and testing_criterion types, content can be optional.
  * The order is assigned by Sacrum.
  */
-async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<null, CommandError>> {
+async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<Section, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("add_section", { taskId, sectionType, content }) };
 } catch (e) {
@@ -323,7 +336,7 @@ async addSection(taskId: string, sectionType: string, content: string | null) : 
  * 
  * Updates the content of an existing section identified by its type and ordinal.
  */
-async editSection(taskId: string, sectionType: string, ordinal: number, newContent: string) : Promise<Result<null, CommandError>> {
+async editSection(taskId: string, sectionType: string, ordinal: number, newContent: string) : Promise<Result<Section, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("edit_section", { taskId, sectionType, ordinal, newContent }) };
 } catch (e) {
@@ -337,7 +350,7 @@ async editSection(taskId: string, sectionType: string, ordinal: number, newConte
  * Marks a checklist item as done or not done by toggling its done flag.
  * For checklist item sections only (other types will return an error).
  */
-async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<null, CommandError>> {
+async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<Section, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("toggle_checklist_item_done", { taskId, ordinal }) };
 } catch (e) {
@@ -351,7 +364,7 @@ async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<
  * Deletes a section identified by its type and ordinal.
  * Remaining sections of the same type are renumbered.
  */
-async removeSection(taskId: string, sectionType: string, ordinal: number) : Promise<Result<null, CommandError>> {
+async removeSection(taskId: string, sectionType: string, ordinal: number) : Promise<Result<Section, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("remove_section", { taskId, sectionType, ordinal }) };
 } catch (e) {
@@ -490,7 +503,8 @@ async getPipelineSummary() : Promise<Result<PipelineSummary, CommandError>> {
 /**
  * List all workflow transitions
  * 
- * Returns all defined transitions between workflows, including workflow names.
+ * Returns all defined transitions between workflows, including workflow names
+ * from the same workflow fetch.
  */
 async listWorkflowTransitions() : Promise<Result<WorkflowTransition[], CommandError>> {
     try {

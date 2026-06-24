@@ -7,7 +7,7 @@ use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermi
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     CreateClaudeSessionInput, InitializeProjectResult, PermissionDecisionBehavior,
-    ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog, Step, StepExecution,
+    ResolvePermissionRequestInput, SacrumConfigStatus, Section, SessionLog, Step, StepExecution,
     StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
@@ -758,7 +758,8 @@ pub async fn get_workflow(
 
 /// List all workflow transitions
 ///
-/// Returns all defined transitions between workflows, including workflow names.
+/// Returns all defined transitions between workflows, including workflow names
+/// from the same workflow fetch.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workflow_transitions(
@@ -772,15 +773,10 @@ pub async fn list_workflow_transitions(
 
     let workflow_service = service.workflows();
 
-    // Get all transitions
-    let transitions = workflow_service.list_workflow_transitions(None).await?;
-
-    // Build a cache of workflow names
-    let workflows = workflow_service.list_workflows().await?;
-    let workflow_names: std::collections::HashMap<String, String> = workflows
-        .into_iter()
-        .map(|w| (w.id.clone(), w.name))
-        .collect();
+    // Get all transitions and workflow names from one workflow list response.
+    let (transitions, workflow_names) = workflow_service
+        .list_workflow_transitions_with_names(None)
+        .await?;
 
     // Convert to GUI type with workflow names
     let result: Vec<crate::types::WorkflowTransition> = transitions
@@ -933,26 +929,14 @@ pub async fn get_workflow_with_tasks(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow_service = service.workflows();
-
-    // Get the workflow
-    let workflow = workflow_service.get_workflow(&id).await?;
-
-    // Get tasks associated with this workflow using the service
-    let filter = vertebrae_core::TaskFilter::new();
-    let all_tasks = service.tasks().list_tasks(&filter).await?;
-
-    // Filter tasks that have this workflow_id
-    let workflow_id_str = workflow.id.clone().unwrap_or_default();
-
-    let tasks: Vec<Task> = all_tasks
-        .into_iter()
-        .filter(|t| t.workflow_id.as_deref() == Some(&workflow_id_str))
-        .map(Into::into)
-        .collect();
+    let bundle = service
+        .workflows()
+        .get_workflow_with_tasks(service.tasks(), &id)
+        .await?;
+    let tasks: Vec<Task> = bundle.tasks.into_iter().map(Into::into).collect();
 
     Ok(WorkflowWithTasks {
-        workflow: workflow.into(),
+        workflow: bundle.workflow.into(),
         tasks,
     })
 }
@@ -1386,15 +1370,9 @@ pub(crate) async fn update_step_inner(
     step_id: &str,
     update: vertebrae_core::StepUpdate,
 ) -> Result<String, CommandError> {
-    // Verify step exists and get workflow_id
-    let existing = service.steps().get_step(step_id).await?;
-    let step = existing.ok_or_else(|| CommandError {
-        message: format!("Step not found: {}", step_id),
-    })?;
-
-    service.steps().update_step(step_id, &update).await?;
+    let workflow_id = service.steps().update_step(step_id, &update).await?;
     log::info!("update_step succeeded for step: {}", step_id);
-    Ok(step.workflow_id)
+    Ok(workflow_id)
 }
 
 /// Delete a step
@@ -1824,6 +1802,36 @@ pub async fn remove_dependency(
     Ok(())
 }
 
+/// Replace the full dependency set for a task
+///
+/// Saves picker changes atomically instead of issuing one mutation per add/remove.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_dependencies(
+    state: State<'_, AppState>,
+    task_id: String,
+    depends_on_ids: Vec<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "sync_dependencies called with task_id: {}, {} dependencies",
+        task_id,
+        depends_on_ids.len()
+    );
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .tasks()
+        .sync_dependencies(&task_id, &depends_on_ids)
+        .await?;
+
+    log::info!("Successfully synced dependencies for task {}", task_id);
+    Ok(())
+}
+
 // ============================================================================
 // Task Mutation Commands (Create, Update, Assign Workflow)
 // ============================================================================
@@ -2048,7 +2056,7 @@ pub async fn add_section(
     task_id: String,
     section_type: String,
     content: Option<String>,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "add_section called with task_id: {}, section_type: {}",
         task_id,
@@ -2064,6 +2072,7 @@ pub async fn add_section(
     let parsed_type = section_type
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
+    let is_single_instance = parsed_type.is_single_instance();
 
     // Use provided content or empty string
     let section_content = content.unwrap_or_default();
@@ -2077,10 +2086,14 @@ pub async fn add_section(
         refs: Vec::new(),
     };
 
-    service.tasks().add_section(&task_id, section).await?;
+    let created = if is_single_instance {
+        service.tasks().upsert_section(&task_id, section).await?
+    } else {
+        service.tasks().add_section(&task_id, section).await?
+    };
 
     log::info!("Successfully added section to task: {}", task_id);
-    Ok(())
+    Ok(created.into())
 }
 
 /// Edit a section's content by its ordinal (position)
@@ -2094,7 +2107,7 @@ pub async fn edit_section(
     section_type: String,
     ordinal: u32,
     new_content: String,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "edit_section called with task_id: {}, section_type: {}, ordinal: {}",
         task_id,
@@ -2112,13 +2125,13 @@ pub async fn edit_section(
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
 
-    service
+    let updated = service
         .tasks()
         .edit_section_by_ordinal(&task_id, parsed_type, ordinal, &new_content)
         .await?;
 
     log::info!("Successfully edited section in task: {}", task_id);
-    Ok(())
+    Ok(updated.into())
 }
 
 /// Toggle the completion status of a checklist item
@@ -2131,7 +2144,7 @@ pub async fn toggle_checklist_item_done(
     state: State<'_, AppState>,
     task_id: String,
     ordinal: u32,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "toggle_checklist_item_done called with task_id: {}, ordinal: {}",
         task_id,
@@ -2144,7 +2157,7 @@ pub async fn toggle_checklist_item_done(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Use service method to toggle the checklist item done status
-    service
+    let updated = service
         .tasks()
         .toggle_checklist_item_done(&task_id, ordinal)
         .await?;
@@ -2153,7 +2166,7 @@ pub async fn toggle_checklist_item_done(
         "Successfully toggled checklist item done status for task: {}",
         task_id
     );
-    Ok(())
+    Ok(updated.into())
 }
 
 /// Remove a section from a task by its ordinal (position)
@@ -2167,7 +2180,7 @@ pub async fn remove_section(
     task_id: String,
     section_type: String,
     ordinal: u32,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "remove_section called with task_id: {}, section_type: {}, ordinal: {}",
         task_id,
@@ -2185,13 +2198,13 @@ pub async fn remove_section(
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
 
-    service
+    let removed = service
         .tasks()
         .remove_section_by_ordinal(&task_id, parsed_type, ordinal)
         .await?;
 
     log::info!("Successfully removed section from task: {}", task_id);
-    Ok(())
+    Ok(removed.into())
 }
 
 /// Add a code reference to a testing criterion section
@@ -2325,48 +2338,20 @@ pub async fn remove_code_refs(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task to find the code refs
-    let task = service.tasks().get_task(&task_id).await?;
-
     // Convert u32 indices to usize for internal use
     let indices_usize = indices.map(|v| v.into_iter().map(|i| i as usize).collect::<Vec<usize>>());
 
-    // If indices are specified, remove only those. Otherwise remove all.
-    let to_remove = indices_usize.inspect(|idx_list| {
-        // Build list of code refs to keep (those not in indices)
-        let mut removed_count = 0;
+    let removed_count = indices_usize.as_ref().map_or(0, Vec::len);
+    service
+        .tasks()
+        .remove_code_refs(&task_id, indices_usize)
+        .await?;
 
-        for code_ref in task.code_refs.iter().enumerate() {
-            if idx_list.contains(&code_ref.0) {
-                removed_count += 1;
-            }
-        }
-
-        log::info!(
-            "Removing {} code refs from task: {}",
-            removed_count,
-            task_id
-        );
-    });
-
-    service.tasks().remove_code_refs(&task_id, None).await?;
-
-    for code_ref in task.code_refs.iter().enumerate() {
-        if let Some(ref idx_list) = to_remove {
-            if !idx_list.contains(&code_ref.0) {
-                let db_ref = vertebrae_core::CodeRef {
-                    path: code_ref.1.path.clone(),
-                    line_start: code_ref.1.line_start,
-                    line_end: code_ref.1.line_end,
-                    name: code_ref.1.name.clone(),
-                    description: code_ref.1.description.clone(),
-                };
-                service.tasks().add_code_ref(&task_id, db_ref).await?;
-            }
-        }
-    }
-
-    log::info!("Successfully removed code_refs from task: {}", task_id);
+    log::info!(
+        "Successfully removed {} code_refs from task: {}",
+        removed_count,
+        task_id
+    );
     Ok(())
 }
 
@@ -2391,23 +2376,18 @@ pub async fn replace_code_refs(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task to find existing refs
-    let _task = service.tasks().get_task(&task_id).await?;
-
-    // Clear all existing refs and re-add them
-    // This is a workaround since the service doesn't have a set_code_refs method
-    service.tasks().remove_code_refs(&task_id, None).await?;
-
-    for code_ref in refs {
-        let db_ref = vertebrae_core::CodeRef {
+    let db_refs = refs
+        .into_iter()
+        .map(|code_ref| vertebrae_core::CodeRef {
             path: code_ref.path,
             line_start: code_ref.line_start,
             line_end: code_ref.line_end,
             name: code_ref.name,
             description: code_ref.description,
-        };
-        service.tasks().add_code_ref(&task_id, db_ref).await?;
-    }
+        })
+        .collect::<Vec<_>>();
+
+    service.tasks().set_code_refs(&task_id, &db_refs).await?;
 
     log::info!("Successfully replaced code refs for task: {}", task_id);
     Ok(())
@@ -3386,6 +3366,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sync_dependencies_replaces_dependency_set() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_a = create_task(state.clone(), "A".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let task_b = create_task(state.clone(), "B".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        sync_dependencies(state.clone(), task_a.clone(), vec![task_b.clone()])
+            .await
+            .unwrap();
+        let task = get_task(state.clone(), task_a.clone()).await.unwrap();
+        assert_eq!(task.dependency_ids, vec![task_b.clone()]);
+
+        sync_dependencies(state.clone(), task_a.clone(), vec![])
+            .await
+            .unwrap();
+        let task = get_task(state, task_a).await.unwrap();
+        assert!(task.dependency_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_dependencies_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        let result = sync_dependencies(state, task_id, vec!["nonexistent".to_string()]).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn set_parent_nonexistent_returns_error() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
@@ -3476,10 +3493,11 @@ mod tests {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
 
-        let wf_id = {
+        let (wf_id, other_wf_id) = {
             let guard = state.services.read().await;
             let svc = guard.as_ref().unwrap();
-            svc.workflows()
+            let wf_id = svc
+                .workflows()
                 .create_workflow(vertebrae_core::CreateWorkflowOptions {
                     name: "WF".to_string(),
                     description: None,
@@ -3490,11 +3508,46 @@ mod tests {
                     kanban_column: None,
                 })
                 .await
-                .unwrap()
+                .unwrap();
+            let other_wf_id = svc
+                .workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Other WF".to_string(),
+                    description: None,
+                    steps: vec![],
+                    order: 1,
+                    is_default: false,
+                    is_final: false,
+                    kanban_column: None,
+                })
+                .await
+                .unwrap();
+            (wf_id, other_wf_id)
         };
 
+        let included_task = create_task(state.clone(), "Included".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let excluded_task = create_task(state.clone(), "Excluded".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        assign_workflow(state.clone(), included_task.clone(), wf_id.clone())
+            .await
+            .unwrap();
+        assign_workflow(state.clone(), excluded_task, other_wf_id)
+            .await
+            .unwrap();
+
         let result = get_workflow_with_tasks(state, wf_id).await.unwrap();
-        assert!(result.tasks.is_empty());
+        assert_eq!(
+            result
+                .tasks
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![included_task.as_str()]
+        );
     }
 
     #[tokio::test]
@@ -4299,6 +4352,42 @@ mod tests {
 
         let task = get_task(state, id).await.unwrap();
         assert!(task.code_refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_code_refs_selective_keeps_survivors() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        for path in ["a.rs", "b.rs", "c.rs"] {
+            add_code_ref(
+                state.clone(),
+                id.clone(),
+                path.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        remove_code_refs(state.clone(), id.clone(), Some(vec![1]))
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(
+            task.code_refs
+                .iter()
+                .map(|code_ref| code_ref.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.rs", "c.rs"]
+        );
     }
 
     #[tokio::test]

@@ -43,6 +43,7 @@ vi.mock("../../bindings", () => ({
     removeParent: vi.fn(),
     addDependency: vi.fn(),
     removeDependency: vi.fn(),
+    syncDependencies: vi.fn(),
   },
 }));
 
@@ -77,6 +78,10 @@ describe("TaskRelations", () => {
       data: null,
     });
     vi.mocked(bindingsModule.commands.removeDependency).mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValue({
       status: "ok",
       data: null,
     });
@@ -406,7 +411,7 @@ describe("TaskRelations", () => {
       expect(saveButton).not.toBeDisabled();
     });
 
-    it("calls addDependency for new selections", async () => {
+    it("syncs dependencies for new selections", async () => {
       render(<TaskRelations {...defaultProps} />);
 
       await userEvent.click(screen.getByText("No blockers"));
@@ -423,14 +428,14 @@ describe("TaskRelations", () => {
       await userEvent.click(screen.getByTitle("Save changes"));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.addDependency).toHaveBeenCalledWith(
+        expect(bindingsModule.commands.syncDependencies).toHaveBeenCalledWith(
           "current-task",
-          "task-1"
+          ["task-1"]
         );
       });
     });
 
-    it("calls removeDependency for deselected items", async () => {
+    it("syncs dependencies after deselecting items", async () => {
       render(<TaskRelations {...defaultProps} dependsOnIds={["task-1"]} />);
 
       // Click on the blockers display
@@ -452,9 +457,9 @@ describe("TaskRelations", () => {
       await userEvent.click(screen.getByTitle("Save changes"));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.removeDependency).toHaveBeenCalledWith(
+        expect(bindingsModule.commands.syncDependencies).toHaveBeenCalledWith(
           "current-task",
-          "task-1"
+          []
         );
       });
     });
@@ -660,13 +665,9 @@ describe("TaskRelations", () => {
       await userEvent.click(screen.getByTitle("Save changes"));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.removeDependency).toHaveBeenCalledWith(
+        expect(bindingsModule.commands.syncDependencies).toHaveBeenCalledWith(
           "current-task",
-          "task-1"
-        );
-        expect(bindingsModule.commands.addDependency).toHaveBeenCalledWith(
-          "current-task",
-          "task-2"
+          ["task-2"]
         );
       });
     });
@@ -688,13 +689,9 @@ describe("TaskRelations", () => {
       await userEvent.click(screen.getByTitle("Save changes"));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.addDependency).toHaveBeenCalledWith(
+        expect(bindingsModule.commands.syncDependencies).toHaveBeenCalledWith(
           "current-task",
-          "task-1"
-        );
-        expect(bindingsModule.commands.addDependency).toHaveBeenCalledWith(
-          "current-task",
-          "task-2"
+          ["task-1", "task-2"]
         );
       });
     });
@@ -806,8 +803,8 @@ describe("TaskRelations", () => {
       });
     });
 
-    it("displays error when addDependency fails", async () => {
-      vi.mocked(bindingsModule.commands.addDependency).mockResolvedValueOnce({
+    it("displays error when syncDependencies fails while adding", async () => {
+      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce({
         status: "error",
         error: { message: "Cannot add dependency: would create cycle" },
       });
@@ -854,13 +851,11 @@ describe("TaskRelations", () => {
       });
     });
 
-    it("displays error when removeDependency fails", async () => {
-      vi.mocked(bindingsModule.commands.removeDependency).mockResolvedValueOnce(
-        {
-          status: "error",
-          error: { message: "Failed to remove dependency" },
-        }
-      );
+    it("displays error when syncDependencies fails while removing", async () => {
+      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce({
+        status: "error",
+        error: { message: "Failed to remove dependency" },
+      });
 
       render(<TaskRelations {...defaultProps} dependsOnIds={["task-1"]} />);
 

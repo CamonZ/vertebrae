@@ -11,14 +11,16 @@ use vertebrae_core::models::Task;
 use vertebrae_core::models::{
     BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRunControls,
 };
-use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
+use vertebrae_core::service::{CreateTaskOptions, TaskService, TaskShowBundle, UpdateTaskOptions};
+use vertebrae_core::workflow_service::WorkflowInfo;
 
 use crate::api_types::{
-    CodeRefResponse, SectionResponse, ShortIdResponse, TaskResponse, TaskRunControlsResponse,
-    WorkflowResponse,
+    CodeRefResponse, SectionResponse, ShortIdResponse, ShowTaskRelatedResponse, TaskResponse,
+    TaskRunControlsResponse, TaskTitleResponse, WorkflowResponse,
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::execution_service::SacrumExecutionService;
+use crate::queries::executions::TASK_RUN_FIELDS;
 use crate::queries::tasks;
 use crate::queries::workflows as wf_queries;
 
@@ -43,6 +45,12 @@ impl SacrumTaskService {
         let workflows: Vec<WorkflowResponse> =
             self.client.execute(&query, variables, "workflows").await?;
 
+        Ok(Self::lookups_from_workflows(&workflows))
+    }
+
+    pub(crate) fn lookups_from_workflows(
+        workflows: &[WorkflowResponse],
+    ) -> (HashMap<String, String>, HashMap<String, String>) {
         let mut workflow_names = HashMap::new();
         let mut step_names = HashMap::new();
 
@@ -50,10 +58,43 @@ impl SacrumTaskService {
             for step in &wf.workflow_steps {
                 step_names.insert(step.id.clone(), step.name.clone());
             }
-            workflow_names.insert(wf.id, wf.name);
+            workflow_names.insert(wf.id.clone(), wf.name.clone());
         }
 
-        Ok((workflow_names, step_names))
+        (workflow_names, step_names)
+    }
+
+    fn workflow_info_from_response(
+        workflow: &WorkflowResponse,
+        current_step_id: Option<&str>,
+    ) -> WorkflowInfo {
+        let mut steps = workflow.workflow_steps.clone();
+        steps.sort_by_key(|step| step.step_order);
+        let total_steps = steps.len();
+        let current_step_index = current_step_id
+            .and_then(|id| steps.iter().position(|step| step.id == id))
+            .unwrap_or(0);
+
+        let current_step_name = current_step_id
+            .and_then(|id| steps.iter().find(|step| step.id == id))
+            .map(|step| step.name.clone())
+            .unwrap_or_default();
+
+        WorkflowInfo {
+            id: workflow.id.clone(),
+            name: workflow.name.clone(),
+            current_step_id: current_step_id.map(ToOwned::to_owned),
+            current_step_name,
+            current_step_index,
+            total_steps,
+            prev_step_name: current_step_index
+                .checked_sub(1)
+                .and_then(|index| steps.get(index))
+                .map(|step| step.name.clone()),
+            next_step_name: steps
+                .get(current_step_index + 1)
+                .map(|step| step.name.clone()),
+        }
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
@@ -63,7 +104,7 @@ impl SacrumTaskService {
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model with optional lookups
-    fn response_to_task_with_lookups(
+    pub(crate) fn response_to_task_with_lookups(
         &self,
         response: &TaskResponse,
         workflow_names: Option<&HashMap<String, String>>,
@@ -184,6 +225,13 @@ impl SacrumTaskService {
     /// Fetch a single task by ID (internal helper, returns TaskResponse)
     async fn fetch_task_response(&self, id: &str) -> ServiceResult<TaskResponse> {
         let query = with_fragments(tasks::GET_TASK, &[tasks::TASK_FIELDS]);
+        let variables = json!({ "id": id });
+        let response: TaskResponse = self.client.execute(&query, variables, "task").await?;
+        Ok(response)
+    }
+
+    async fn fetch_task_summary_response(&self, id: &str) -> ServiceResult<TaskResponse> {
+        let query = with_fragments(tasks::GET_TASK_SUMMARY, &[tasks::TASK_SUMMARY_FIELDS]);
         let variables = json!({ "id": id });
         let response: TaskResponse = self.client.execute(&query, variables, "task").await?;
         Ok(response)
@@ -354,14 +402,9 @@ impl TaskService for SacrumTaskService {
 
         let task_id = result.id;
 
-        // If there are dependencies, set them via update
+        // If there are dependencies, set them atomically after creation.
         if !options.depends_on.is_empty() {
-            let update_vars = json!({
-                "id": task_id,
-                "depends_on_ids": options.depends_on,
-            });
-            self.client
-                .execute_void(tasks::UPDATE_TASK, update_vars)
+            self.sync_dependencies(&task_id, &options.depends_on)
                 .await?;
         }
 
@@ -375,6 +418,127 @@ impl TaskService for SacrumTaskService {
         let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
         self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
+    }
+
+    async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {
+        let response = self.fetch_task_summary_response(id).await?;
+
+        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+
+        self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
+    }
+
+    async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
+        let variables = json!({ "id": id });
+        let response: TaskTitleResponse = self
+            .client
+            .execute(tasks::GET_TASK_TITLE, variables, "task")
+            .await?;
+        Ok(response.title)
+    }
+
+    async fn get_task_titles(&self, ids: &[String]) -> ServiceResult<Vec<(String, String)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut variable_defs = Vec::with_capacity(ids.len());
+        let mut roots = Vec::with_capacity(ids.len());
+        let mut variables = serde_json::Map::new();
+
+        for (index, id) in ids.iter().enumerate() {
+            let variable = format!("id{index}");
+            let alias = format!("task{index}");
+            variable_defs.push(format!("${variable}: Uuid4!"));
+            roots.push(format!("{alias}: task(id: ${variable}) {{ id title }}"));
+            variables.insert(variable, json!(id));
+        }
+
+        let query = format!(
+            "query TaskTitles({}) {{ {} }}",
+            variable_defs.join(", "),
+            roots.join(" ")
+        );
+
+        let response: HashMap<String, Option<TaskTitleResponse>> = self
+            .client
+            .execute_compound(&query, Value::Object(variables))
+            .await?;
+
+        ids.iter()
+            .enumerate()
+            .map(|(index, requested_id)| {
+                let alias = format!("task{index}");
+                let title = response
+                    .get(&alias)
+                    .and_then(|task| task.as_ref())
+                    .ok_or_else(|| ServiceError::task_not_found(requested_id))?;
+                Ok((requested_id.clone(), title.title.clone()))
+            })
+            .collect()
+    }
+
+    async fn get_task_show_bundle(&self, id: &str) -> ServiceResult<Option<TaskShowBundle>> {
+        let task_response = self.fetch_task_response(id).await?;
+        let include_parent = task_response.parent_id.is_some();
+        let include_workflow = task_response.workflow_id.is_some();
+        let parent_id = task_response
+            .parent_id
+            .clone()
+            .unwrap_or_else(|| id.to_string());
+        let workflow_id = task_response
+            .workflow_id
+            .clone()
+            .unwrap_or_else(|| id.to_string());
+
+        let query = with_fragments(
+            tasks::SHOW_TASK_RELATED,
+            &[
+                tasks::TASK_SUMMARY_FIELDS,
+                wf_queries::WORKFLOW_FIELDS,
+                TASK_RUN_FIELDS,
+            ],
+        );
+        let variables = json!({
+            "project_id": self.client.project_id,
+            "task_id": id,
+            "parent_id": parent_id,
+            "include_parent": include_parent,
+            "workflow_id": workflow_id,
+            "include_workflow": include_workflow,
+        });
+
+        let related: ShowTaskRelatedResponse =
+            self.client.execute_compound(&query, variables).await?;
+        let (workflow_names, step_names) = Self::lookups_from_workflows(&related.workflows);
+
+        let task = self.response_to_task_with_lookups(
+            &task_response,
+            Some(&workflow_names),
+            Some(&step_names),
+        )?;
+        let parent = related
+            .parent
+            .as_ref()
+            .map(|parent| {
+                self.response_to_task_with_lookups(parent, Some(&workflow_names), Some(&step_names))
+            })
+            .transpose()?;
+        let workflow = related.workflow.as_ref().map(|workflow| {
+            Self::workflow_info_from_response(workflow, task.current_step_id.as_deref())
+        });
+        let run_history = related
+            .task_runs
+            .iter()
+            .map(SacrumExecutionService::response_to_task_run)
+            .collect();
+
+        Ok(Some(TaskShowBundle {
+            task,
+            parent,
+            workflow,
+            run_history,
+        }))
     }
 
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
@@ -530,7 +694,7 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
-        let query = with_fragments(tasks::READY_TASKS, &[tasks::TASK_FIELDS]);
+        let query = with_fragments(tasks::READY_TASKS, &[tasks::READY_TASK_FIELDS]);
         let variables = json!({
             "project_id": self.client.project_id,
         });
@@ -589,6 +753,21 @@ impl TaskService for SacrumTaskService {
         });
         self.client
             .execute_void(tasks::DELETE_DEPENDENCY, variables)
+            .await?;
+        Ok(())
+    }
+
+    async fn sync_dependencies(
+        &self,
+        task_id: &str,
+        depends_on_ids: &[String],
+    ) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+            "depends_on_ids": depends_on_ids,
+        });
+        self.client
+            .execute_void(tasks::SYNC_TASK_DEPENDENCIES, variables)
             .await?;
         Ok(())
     }
@@ -684,6 +863,30 @@ impl TaskService for SacrumTaskService {
         section_response_to_section(&created)
     }
 
+    async fn upsert_section(&self, id: &str, section: Section) -> ServiceResult<Section> {
+        let mut variables = serde_json::Map::new();
+        variables.insert("task_id".to_string(), json!(id));
+        variables.insert(
+            "section_type".to_string(),
+            json!(section.section_type.as_str()),
+        );
+        variables.insert("content".to_string(), json!(section.content));
+        variables.insert("done".to_string(), json!(section.done));
+        if let Some(order) = section.order {
+            variables.insert("section_order".to_string(), json!(order));
+        }
+
+        let updated: SectionResponse = self
+            .client
+            .execute(
+                tasks::UPSERT_SECTION,
+                Value::Object(variables),
+                "upsert_section",
+            )
+            .await?;
+        section_response_to_section(&updated)
+    }
+
     async fn remove_sections(
         &self,
         id: &str,
@@ -727,7 +930,7 @@ impl TaskService for SacrumTaskService {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(task_id).await?;
 
         let section = response
@@ -748,10 +951,11 @@ impl TaskService for SacrumTaskService {
             "id": section.id,
             "content": new_content,
         });
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
     async fn remove_section_by_ordinal(
@@ -759,7 +963,7 @@ impl TaskService for SacrumTaskService {
         task_id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(task_id).await?;
 
         let section = response
@@ -775,15 +979,20 @@ impl TaskService for SacrumTaskService {
                     ordinal
                 ))
             })?;
+        let removed = section_response_to_section(section)?;
 
         let variables = json!({ "id": section.id });
         self.client
             .execute_void(tasks::DELETE_SECTION, variables)
             .await?;
-        Ok(())
+        Ok(removed)
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(id).await?;
 
         let section = response
@@ -806,13 +1015,18 @@ impl TaskService for SacrumTaskService {
             "done": true,
             "done_at": now,
         });
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(id).await?;
 
         let section = response
@@ -844,10 +1058,11 @@ impl TaskService for SacrumTaskService {
             variables["done_at"] = Value::Null;
         }
 
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {
@@ -885,6 +1100,34 @@ impl TaskService for SacrumTaskService {
                     .await?;
             }
         }
+        Ok(())
+    }
+
+    async fn set_code_refs(&self, id: &str, code_refs: &[CodeRef]) -> ServiceResult<()> {
+        let refs: Vec<Value> = code_refs
+            .iter()
+            .enumerate()
+            .map(|(order, code_ref)| {
+                json!({
+                    "path": &code_ref.path,
+                    "line_start": code_ref.line_start,
+                    "line_end": code_ref.line_end,
+                    "name": &code_ref.name,
+                    "description": &code_ref.description,
+                    "order": order,
+                })
+            })
+            .collect();
+
+        let variables = json!({
+            "task_id": id,
+            "refs": refs,
+        });
+
+        let _updated: Vec<CodeRefResponse> = self
+            .client
+            .execute(tasks::SET_CODE_REFS, variables, "set_code_refs")
+            .await?;
         Ok(())
     }
 
@@ -940,7 +1183,7 @@ impl TaskService for SacrumTaskService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::TaskResponse;
+    use crate::api_types::{TaskResponse, WorkflowStepSummary};
 
     fn create_test_client() -> GraphqlClient {
         GraphqlClient::new(crate::config::SacrumConfig::new(
@@ -977,6 +1220,53 @@ mod tests {
             inserted_at: None,
             updated_at: None,
         }
+    }
+
+    fn workflow_response_with_steps(steps: Vec<WorkflowStepSummary>) -> WorkflowResponse {
+        WorkflowResponse {
+            id: "wf-1".to_string(),
+            name: "Workflow".to_string(),
+            description: None,
+            is_default: None,
+            is_final: None,
+            display_order: None,
+            metadata: None,
+            initial_step_id: None,
+            kanban_column: None,
+            project_id: Some("test-project".to_string()),
+            workflow_steps: steps,
+            transitions: None,
+            inserted_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn workflow_info_sorts_steps_before_prev_next() {
+        let workflow = workflow_response_with_steps(vec![
+            WorkflowStepSummary {
+                id: "step-3".to_string(),
+                name: "Done".to_string(),
+                step_order: 2,
+            },
+            WorkflowStepSummary {
+                id: "step-1".to_string(),
+                name: "Backlog".to_string(),
+                step_order: 0,
+            },
+            WorkflowStepSummary {
+                id: "step-2".to_string(),
+                name: "In Progress".to_string(),
+                step_order: 1,
+            },
+        ]);
+
+        let info = SacrumTaskService::workflow_info_from_response(&workflow, Some("step-2"));
+
+        assert_eq!(info.current_step_index, 1);
+        assert_eq!(info.current_step_name, "In Progress");
+        assert_eq!(info.prev_step_name.as_deref(), Some("Backlog"));
+        assert_eq!(info.next_step_name.as_deref(), Some("Done"));
     }
 
     #[test]
@@ -1265,6 +1555,16 @@ mod tests {
             .expect("graphql request must include `variables`")
     }
 
+    async fn captured_graphql_bodies(server: &MockServer) -> Vec<serde_json::Value> {
+        server
+            .received_requests()
+            .await
+            .expect("received_requests must be enabled")
+            .into_iter()
+            .map(|request| serde_json::from_slice(&request.body).expect("body must be valid JSON"))
+            .collect()
+    }
+
     fn gql_task_data(id: &str, title: &str) -> serde_json::Value {
         json!({
             "id": id,
@@ -1343,6 +1643,155 @@ mod tests {
 
         assert_eq!(task.id, "task-1");
         assert_eq!(task.title, "My Task");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_batches_aliases_in_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("query TaskTitles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "task0": { "id": "task-a", "title": "Alpha" },
+                    "task1": { "id": "task-b", "title": "Beta" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let titles = service
+            .get_task_titles(&["task-a".to_string(), "task-b".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            titles,
+            vec![
+                ("task-a".to_string(), "Alpha".to_string()),
+                ("task-b".to_string(), "Beta".to_string())
+            ]
+        );
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let query = bodies[0]["query"].as_str().unwrap();
+        assert!(query.contains("$id0: Uuid4!"));
+        assert!(query.contains("task0: task(id: $id0)"));
+        assert!(query.contains("$id1: Uuid4!"));
+        assert!(query.contains("task1: task(id: $id1)"));
+        assert_eq!(bodies[0]["variables"]["id0"], "task-a");
+        assert_eq!(bodies[0]["variables"]["id1"], "task-b");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_empty_sends_no_request() {
+        let server = MockServer::start().await;
+
+        let service = create_wiremock_service(&server.uri());
+        let titles = service.get_task_titles(&[]).await.unwrap();
+
+        assert!(titles.is_empty());
+        assert!(captured_graphql_bodies(&server).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_missing_alias_returns_not_found() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("query TaskTitles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "task0": { "id": "task-a", "title": "Alpha" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .get_task_titles(&["task-a".to_string(), "task-b".to_string()])
+            .await;
+
+        assert!(matches!(result, Err(ServiceError::TaskNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_get_task_show_bundle_sets_include_flags_and_maps_response() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Child");
+        task_data["parent_id"] = json!("parent-1");
+        task_data["workflow_id"] = json!("wf-1");
+        task_data["current_step_id"] = json!("step-2");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ShowTaskRelated"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "parent": gql_task_data("parent-1", "Parent"),
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Workflow",
+                        "workflow_steps": [
+                            { "id": "step-2", "name": "Current", "step_order": 1 },
+                            { "id": "step-1", "name": "Previous", "step_order": 0 }
+                        ]
+                    },
+                    "task_runs": [],
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "Workflow",
+                            "workflow_steps": [
+                                { "id": "step-1", "name": "Previous", "step_order": 0 },
+                                { "id": "step-2", "name": "Current", "step_order": 1 }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let bundle = service
+            .get_task_show_bundle("task-1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(bundle.task.title, "Child");
+        assert_eq!(
+            bundle.parent.as_ref().map(|task| task.title.as_str()),
+            Some("Parent")
+        );
+        let workflow = bundle.workflow.unwrap();
+        assert_eq!(workflow.current_step_name, "Current");
+        assert_eq!(workflow.prev_step_name.as_deref(), Some("Previous"));
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let related_body = bodies
+            .iter()
+            .find(|body| body["query"].as_str().unwrap().contains("ShowTaskRelated"))
+            .expect("ShowTaskRelated request should be sent");
+        assert_eq!(related_body["variables"]["parent_id"], "parent-1");
+        assert_eq!(related_body["variables"]["workflow_id"], "wf-1");
+        assert_eq!(related_body["variables"]["include_parent"], true);
+        assert_eq!(related_body["variables"]["include_workflow"], true);
     }
 
     #[tokio::test]
@@ -1489,6 +1938,30 @@ mod tests {
         let result = service.remove_dependency("task-1", "task-2").await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_sync_dependencies_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SyncTaskDependencies"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "sync_task_dependencies": { "id": "task-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let deps = vec!["task-2".to_string(), "task-3".to_string()];
+        let result = service.sync_dependencies("task-1", &deps).await;
+
+        assert!(result.is_ok());
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["depends_on_ids"], json!(["task-2", "task-3"]));
     }
 
     #[tokio::test]
@@ -1720,6 +2193,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_upsert_section_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpsertSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "upsert_section": {
+                    "id": "sec-1",
+                    "section_type": "goal",
+                    "content": "Updated goal",
+                    "section_order": null,
+                    "done": null,
+                    "done_at": null
+                } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let section = Section {
+            section_type: SectionType::Goal,
+            content: "Updated goal".to_string(),
+            order: None,
+            done: None,
+            done_at: None,
+            refs: vec![],
+        };
+        let result = service.upsert_section("task-1", section).await.unwrap();
+
+        assert_eq!(result.section_type, SectionType::Goal);
+        assert_eq!(result.content, "Updated goal");
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["section_type"], "goal");
+        assert_eq!(variables["content"], "Updated goal");
+    }
+
+    #[tokio::test]
     async fn test_edit_section_by_ordinal_success() {
         let server = MockServer::start().await;
 
@@ -1743,7 +2256,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": false, "done_at": null } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "updated content",
+                    "section_order": 1,
+                    "done": false,
+                    "done_at": null
+                } }
             })))
             .mount(&server)
             .await;
@@ -1873,6 +2393,71 @@ mod tests {
         let result = service.remove_code_refs("task-1", None).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_code_refs_preserves_input_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SetCodeRefs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "set_code_refs": [
+                    {
+                        "id": "ref-1",
+                        "task_id": "task-1",
+                        "section_id": null,
+                        "path": "src/a.rs",
+                        "line_start": 10,
+                        "line_end": null,
+                        "name": null,
+                        "description": null,
+                        "order_index": 0
+                    },
+                    {
+                        "id": "ref-2",
+                        "task_id": "task-1",
+                        "section_id": null,
+                        "path": "src/b.rs",
+                        "line_start": null,
+                        "line_end": null,
+                        "name": "module",
+                        "description": "second",
+                        "order_index": 1
+                    }
+                ] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let refs = vec![
+            CodeRef {
+                path: "src/a.rs".to_string(),
+                line_start: Some(10),
+                line_end: None,
+                name: None,
+                description: None,
+            },
+            CodeRef {
+                path: "src/b.rs".to_string(),
+                line_start: None,
+                line_end: None,
+                name: Some("module".to_string()),
+                description: Some("second".to_string()),
+            },
+        ];
+        let result = service.set_code_refs("task-1", &refs).await;
+
+        assert!(result.is_ok());
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["refs"][0]["path"], "src/a.rs");
+        assert_eq!(variables["refs"][0]["order"], 0);
+        assert_eq!(variables["refs"][1]["path"], "src/b.rs");
+        assert_eq!(variables["refs"][1]["order"], 1);
     }
 
     #[tokio::test]
@@ -2016,7 +2601,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "First",
+                    "section_order": 0,
+                    "done": true,
+                    "done_at": "2024-01-01T00:00:00Z"
+                } }
             })))
             .mount(&server)
             .await;
@@ -2052,7 +2644,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "First",
+                    "section_order": 0,
+                    "done": true,
+                    "done_at": "2024-01-01T00:00:00Z"
+                } }
             })))
             .mount(&server)
             .await;

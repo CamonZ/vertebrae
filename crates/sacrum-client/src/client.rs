@@ -83,26 +83,17 @@ impl GraphqlClient {
         &self.project_id
     }
 
-    /// Execute a GraphQL query and extract a typed field from the response data
-    ///
-    /// # Arguments
-    /// * `query` - The GraphQL query string
-    /// * `variables` - Query variables as a serde_json::Value
-    /// * `field` - The top-level field name to extract from the `data` object
-    ///
-    /// # Returns
-    /// The deserialized value of `data.{field}`
-    pub async fn execute<T: DeserializeOwned>(
+    async fn send_request<T: DeserializeOwned>(
         &self,
         query: &str,
         variables: Value,
-        field: &str,
-    ) -> SacrumClientResult<T> {
+        context: &str,
+    ) -> SacrumClientResult<GraphqlResponse<T>> {
         let request_body = GraphqlRequest { query, variables };
         let op = extract_operation_name(query);
 
         let start = std::time::Instant::now();
-        log::info!("[GQL] {} (field: {})", op, field);
+        log::info!("[GQL] {} {}", op, context);
 
         let response = self
             .client
@@ -128,7 +119,7 @@ impl GraphqlClient {
         }
 
         let bytes = response.bytes().await?;
-        let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
+        let gql_response: GraphqlResponse<T> = serde_json::from_slice(&bytes)?;
 
         log::info!(
             "[GQL] {} -> {} ({}ms)",
@@ -137,14 +128,35 @@ impl GraphqlClient {
             start.elapsed().as_millis()
         );
 
-        // Check for GraphQL-level errors
-        if let Some(errors) = gql_response.errors
+        if let Some(errors) = gql_response.errors.as_ref()
             && !errors.is_empty()
         {
-            let messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
+            let messages: Vec<String> = errors.iter().map(|e| e.message.clone()).collect();
             let message = messages.join("; ");
             return Err(SacrumClientError::GraphqlError { messages, message });
         }
+
+        Ok(gql_response)
+    }
+
+    /// Execute a GraphQL query and extract a typed field from the response data
+    ///
+    /// # Arguments
+    /// * `query` - The GraphQL query string
+    /// * `variables` - Query variables as a serde_json::Value
+    /// * `field` - The top-level field name to extract from the `data` object
+    ///
+    /// # Returns
+    /// The deserialized value of `data.{field}`
+    pub async fn execute<T: DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: Value,
+        field: &str,
+    ) -> SacrumClientResult<T> {
+        let gql_response: GraphqlResponse<Value> = self
+            .send_request(query, variables, &format!("(field: {field})"))
+            .await?;
 
         // Extract the requested field from data
         let data = gql_response
@@ -169,6 +181,26 @@ impl GraphqlClient {
         Ok(result)
     }
 
+    /// Execute a GraphQL query and deserialize the full response data object.
+    ///
+    /// Use this for compound queries with multiple top-level roots, where no
+    /// single `data.{field}` should be extracted.
+    pub async fn execute_compound<T: DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: Value,
+    ) -> SacrumClientResult<T> {
+        let gql_response: GraphqlResponse<T> =
+            self.send_request(query, variables, "(compound)").await?;
+
+        gql_response
+            .data
+            .ok_or_else(|| SacrumClientError::GraphqlError {
+                messages: vec!["No data in response".to_string()],
+                message: "No data in response".to_string(),
+            })
+    }
+
     /// Execute a GraphQL mutation that doesn't need to return data
     ///
     /// Checks for HTTP errors and GraphQL-level errors but doesn't
@@ -178,54 +210,8 @@ impl GraphqlClient {
     /// * `query` - The GraphQL query/mutation string
     /// * `variables` - Query variables as a serde_json::Value
     pub async fn execute_void(&self, query: &str, variables: Value) -> SacrumClientResult<()> {
-        let request_body = GraphqlRequest { query, variables };
-        let op = extract_operation_name(query);
-
-        let start = std::time::Instant::now();
-        log::info!("[GQL] {} (void)", op);
-
-        let response = self
-            .client
-            .post(&self.endpoint)
-            .json(&request_body)
-            .send()
+        self.send_request::<Value>(query, variables, "(void)")
             .await?;
-        let status = response.status();
-
-        if !status.is_success() {
-            let status_code = status.as_u16();
-            let message = response.text().await.unwrap_or_default();
-            log::info!(
-                "[GQL] {} -> {} ({}ms)",
-                op,
-                status_code,
-                start.elapsed().as_millis()
-            );
-            return Err(SacrumClientError::ApiError {
-                status: status_code,
-                message,
-            });
-        }
-
-        let bytes = response.bytes().await?;
-        let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
-
-        log::info!(
-            "[GQL] {} -> {} ({}ms)",
-            op,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-
-        // Check for GraphQL-level errors
-        if let Some(errors) = gql_response.errors
-            && !errors.is_empty()
-        {
-            let messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
-            let message = messages.join("; ");
-            return Err(SacrumClientError::GraphqlError { messages, message });
-        }
-
         Ok(())
     }
 }

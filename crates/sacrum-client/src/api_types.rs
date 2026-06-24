@@ -87,6 +87,13 @@ pub struct ShortIdResponse {
     pub id: String,
 }
 
+/// Minimal task title response for display-only batch lookups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskTitleResponse {
+    pub id: String,
+    pub title: String,
+}
+
 /// Section response from Sacrum API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SectionResponse {
@@ -149,6 +156,8 @@ pub struct CodeRefResponse {
 pub struct WorkflowStepSummary {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub step_order: i32,
 }
 
 /// Workflow response from Sacrum API (matches WorkflowJSON.data/1)
@@ -396,6 +405,29 @@ pub struct TaskRunTraceResponse {
     pub step_executions: Vec<StepExecutionResponse>,
     #[serde(default)]
     pub session_logs: Vec<SessionLogResponse>,
+}
+
+/// Compound response for `vtb show` related roots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShowTaskRelatedResponse {
+    #[serde(default)]
+    pub parent: Option<TaskResponse>,
+    #[serde(default)]
+    pub workflow: Option<WorkflowResponse>,
+    #[serde(default)]
+    pub task_runs: Vec<TaskRunResponse>,
+    #[serde(default)]
+    pub workflows: Vec<WorkflowResponse>,
+}
+
+/// Compound response for GUI workflow board loading.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowTasksCompoundResponse {
+    pub workflow: WorkflowResponse,
+    #[serde(default)]
+    pub tasks: Vec<TaskResponse>,
+    #[serde(default)]
+    pub workflows: Vec<WorkflowResponse>,
 }
 
 /// Session log response from Sacrum API (matches SessionLogJSON)

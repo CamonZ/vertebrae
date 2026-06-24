@@ -17,6 +17,7 @@ pub const WORKFLOW_FIELDS: &str = r#"
         workflow_steps {
             id
             name
+            step_order
         }
         transitions {
             id
@@ -48,6 +49,22 @@ pub const GET_WORKFLOW: &str = r#"
                 is_final step_order workflow_id
                 transitions { id to_step_id label }
             }
+        }
+    }
+"#;
+
+/// Fetch one workflow plus tasks assigned to it.
+/// NOTE: Prepend WORKFLOW_FIELDS and TASK_FIELDS.
+pub const GET_WORKFLOW_WITH_TASKS: &str = r#"
+    query GetWorkflowWithTasks($project_id: Uuid4!, $workflow_id: Uuid4!) {
+        workflow(id: $workflow_id) {
+            ...WorkflowFields
+        }
+        tasks(project_id: $project_id, workflow_id: $workflow_id) {
+            ...TaskFields
+        }
+        workflows(project_id: $project_id) {
+            ...WorkflowFields
         }
     }
 "#;

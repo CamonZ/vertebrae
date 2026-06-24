@@ -102,21 +102,14 @@ impl SectionCommand {
 
         let is_single_instance = self.section_type.is_single_instance();
 
-        // Handle single-instance replacement before creating the new section.
+        // This is only for the user-facing "Replaced" vs "Added" message.
+        // The write below is still atomic; Sacrum does not currently return
+        // whether the upsert replaced an existing section.
         let replaced = if is_single_instance {
             let task = services.tasks().get_task(&id).await?;
-            let existing = task
-                .sections
+            task.sections
                 .iter()
-                .any(|s| s.section_type == self.section_type);
-            if existing {
-                // Remove existing section first
-                services
-                    .tasks()
-                    .remove_sections(&id, self.section_type.clone(), None)
-                    .await?;
-            }
-            existing
+                .any(|s| s.section_type == self.section_type)
         } else {
             false
         };
@@ -131,7 +124,11 @@ impl SectionCommand {
             refs: Vec::new(),
         };
 
-        let created = services.tasks().add_section(&id, section).await?;
+        let created = if is_single_instance {
+            services.tasks().upsert_section(&id, section).await?
+        } else {
+            services.tasks().add_section(&id, section).await?
+        };
         let ordinal = if is_single_instance {
             None
         } else {

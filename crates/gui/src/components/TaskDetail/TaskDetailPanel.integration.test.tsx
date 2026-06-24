@@ -113,12 +113,46 @@ vi.mock("../../hooks/useTaskExecutions", () => ({
 vi.mock("../../bindings", () => ({
   commands: {
     updateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    addSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    editSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    removeSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    toggleChecklistItemDone: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: null }),
+    addSection: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        type: "checklist_item",
+        content: "New",
+        order: 0,
+        done: false,
+        done_at: null,
+      },
+    }),
+    editSection: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        type: "checklist_item",
+        content: "Updated",
+        order: 0,
+        done: false,
+        done_at: null,
+      },
+    }),
+    removeSection: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        type: "checklist_item",
+        content: "Removed",
+        order: 0,
+        done: false,
+        done_at: null,
+      },
+    }),
+    toggleChecklistItemDone: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        type: "checklist_item",
+        content: "Done",
+        order: 0,
+        done: true,
+        done_at: null,
+      },
+    }),
     deleteTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     runWorkflow: vi.fn(),
     stopRun: vi.fn().mockResolvedValue({ status: "ok", data: null }),
