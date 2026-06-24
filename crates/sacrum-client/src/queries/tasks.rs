@@ -64,6 +64,37 @@ pub const TASK_FIELDS: &str = r#"
     }
 "#;
 
+/// Slim fragment for task summaries in list-ready and relationship displays.
+pub const TASK_SUMMARY_FIELDS: &str = r#"
+    fragment TaskSummaryFields on Task {
+        id
+        project_id
+        title
+        level
+        priority
+        tags
+        workflow_id
+        current_step_id
+        archived
+        parent_id
+        run_controls {
+            runnable
+            stoppable
+            disabled_reason_code
+            disabled_reason
+            active_run {
+                id
+                task_id
+                status
+                latest_step_execution_id
+            }
+        }
+    }
+"#;
+
+/// Slim fragment for ready tasks. Keep active run state for RunConsole.
+pub const READY_TASK_FIELDS: &str = TASK_SUMMARY_FIELDS;
+
 /// List tasks with optional filters.
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const LIST_TASKS: &str = r#"
@@ -129,7 +160,27 @@ pub const RESOLVE_SHORT_ID: &str = r#"
 pub const READY_TASKS: &str = r#"
     query ReadyTasks($project_id: Uuid4!) {
         list_ready(project_id: $project_id) {
-            ...TaskFields
+            ...TaskSummaryFields
+        }
+    }
+"#;
+
+/// Get task summary fields by ID.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS when sending.
+pub const GET_TASK_SUMMARY: &str = r#"
+    query GetTaskSummary($id: Uuid4!) {
+        task(id: $id) {
+            ...TaskSummaryFields
+        }
+    }
+"#;
+
+/// Get only a task title by ID.
+pub const GET_TASK_TITLE: &str = r#"
+    query GetTaskTitle($id: Uuid4!) {
+        task(id: $id) {
+            id
+            title
         }
     }
 "#;

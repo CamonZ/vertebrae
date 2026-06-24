@@ -391,7 +391,7 @@ impl ShowCommand {
             None => return Ok(None),
         };
 
-        let task = services.tasks().get_task(parent_id).await?;
+        let task = services.tasks().get_task_summary(parent_id).await?;
 
         Ok(Some(TaskSummary {
             parent_id: None,

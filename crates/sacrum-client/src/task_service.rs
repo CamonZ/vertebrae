@@ -189,6 +189,13 @@ impl SacrumTaskService {
         Ok(response)
     }
 
+    async fn fetch_task_summary_response(&self, id: &str) -> ServiceResult<TaskResponse> {
+        let query = with_fragments(tasks::GET_TASK_SUMMARY, &[tasks::TASK_SUMMARY_FIELDS]);
+        let variables = json!({ "id": id });
+        let response: TaskResponse = self.client.execute(&query, variables, "task").await?;
+        Ok(response)
+    }
+
     /// Build GraphQL variables from a TaskFilter
     fn filter_to_variables(&self, filter: &TaskFilter) -> Value {
         let mut variables = json!({
@@ -377,6 +384,28 @@ impl TaskService for SacrumTaskService {
         self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
     }
 
+    async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {
+        let response = self.fetch_task_summary_response(id).await?;
+
+        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+
+        self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
+    }
+
+    async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
+        #[derive(serde::Deserialize)]
+        struct TaskTitleResponse {
+            title: String,
+        }
+
+        let variables = json!({ "id": id });
+        let response: TaskTitleResponse = self
+            .client
+            .execute(tasks::GET_TASK_TITLE, variables, "task")
+            .await?;
+        Ok(response.title)
+    }
+
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
         let variables = json!({
             "project_id": self.client.project_id,
@@ -530,7 +559,7 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
-        let query = with_fragments(tasks::READY_TASKS, &[tasks::TASK_FIELDS]);
+        let query = with_fragments(tasks::READY_TASKS, &[tasks::READY_TASK_FIELDS]);
         let variables = json!({
             "project_id": self.client.project_id,
         });

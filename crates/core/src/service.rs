@@ -246,6 +246,16 @@ pub trait TaskService: Send + Sync {
     /// Get a task by ID
     async fn get_task(&self, id: &str) -> ServiceResult<Task>;
 
+    /// Get a task by ID using only fields needed for relationship summaries.
+    async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {
+        self.get_task(id).await
+    }
+
+    /// Get only a task's display title.
+    async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
+        Ok(self.get_task(id).await?.title)
+    }
+
     /// Resolve a short ID prefix (first 8 hex characters of UUID) to the full task ID.
     ///
     /// Returns the full UUID string if exactly one task matches the prefix.

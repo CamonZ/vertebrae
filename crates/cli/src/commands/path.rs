@@ -85,11 +85,8 @@ impl PathCommand {
             Some(ids) => {
                 let mut summaries = Vec::new();
                 for id in ids {
-                    let task = services.tasks().get_task(&id).await?;
-                    summaries.push(TaskSummary {
-                        id,
-                        title: task.title,
-                    });
+                    let title = services.tasks().get_task_title(&id).await?;
+                    summaries.push(TaskSummary { id, title });
                 }
                 Some(summaries)
             }
