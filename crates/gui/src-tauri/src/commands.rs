@@ -1380,15 +1380,9 @@ pub(crate) async fn update_step_inner(
     step_id: &str,
     update: vertebrae_core::StepUpdate,
 ) -> Result<String, CommandError> {
-    // Verify step exists and get workflow_id
-    let existing = service.steps().get_step(step_id).await?;
-    let step = existing.ok_or_else(|| CommandError {
-        message: format!("Step not found: {}", step_id),
-    })?;
-
-    service.steps().update_step(step_id, &update).await?;
+    let workflow_id = service.steps().update_step(step_id, &update).await?;
     log::info!("update_step succeeded for step: {}", step_id);
-    Ok(step.workflow_id)
+    Ok(workflow_id)
 }
 
 /// Delete a step

@@ -1315,12 +1315,12 @@ impl StepService for MockStepService {
             .cloned()
             .collect())
     }
-    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()> {
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<String> {
         let mut s = self.state.lock().unwrap();
         let step = s
             .steps
             .get_mut(id)
-            .ok_or_else(|| ServiceError::task_not_found(id))?;
+            .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {}", id)))?;
         if let Some(name) = &updates.name {
             step.name = name.clone();
         }
@@ -1355,7 +1355,7 @@ impl StepService for MockStepService {
             step.agent_config = serde_json::from_value(agent_config_value.clone())
                 .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
         }
-        Ok(())
+        Ok(step.workflow_id.clone())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();

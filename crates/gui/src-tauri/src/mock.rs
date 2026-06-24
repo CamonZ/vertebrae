@@ -1277,13 +1277,13 @@ impl StepService for MockStepService {
             .cloned()
             .collect())
     }
-    async fn update_step(&self, id: &str, _updates: &StepUpdate) -> ServiceResult<()> {
+    async fn update_step(&self, id: &str, _updates: &StepUpdate) -> ServiceResult<String> {
         let s = self.state.lock().unwrap();
-        if s.steps.contains_key(id) {
-            Ok(())
-        } else {
-            Err(ServiceError::task_not_found(id))
-        }
+        let step = s
+            .steps
+            .get(id)
+            .ok_or_else(|| ServiceError::validation_failed(format!("Step not found: {}", id)))?;
+        Ok(step.workflow_id.clone())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
