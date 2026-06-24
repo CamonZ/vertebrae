@@ -939,15 +939,13 @@ pub async fn get_workflow_with_tasks(
     let workflow = workflow_service.get_workflow(&id).await?;
 
     // Get tasks associated with this workflow using the service
-    let filter = vertebrae_core::TaskFilter::new();
-    let all_tasks = service.tasks().list_tasks(&filter).await?;
-
-    // Filter tasks that have this workflow_id
     let workflow_id_str = workflow.id.clone().unwrap_or_default();
-
-    let tasks: Vec<Task> = all_tasks
+    let filter = vertebrae_core::TaskFilter::new().with_workflow_id(workflow_id_str);
+    let tasks: Vec<Task> = service
+        .tasks()
+        .list_tasks(&filter)
+        .await?
         .into_iter()
-        .filter(|t| t.workflow_id.as_deref() == Some(&workflow_id_str))
         .map(Into::into)
         .collect();
 
@@ -3445,10 +3443,11 @@ mod tests {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
 
-        let wf_id = {
+        let (wf_id, other_wf_id) = {
             let guard = state.services.read().await;
             let svc = guard.as_ref().unwrap();
-            svc.workflows()
+            let wf_id = svc
+                .workflows()
                 .create_workflow(vertebrae_core::CreateWorkflowOptions {
                     name: "WF".to_string(),
                     description: None,
@@ -3459,11 +3458,46 @@ mod tests {
                     kanban_column: None,
                 })
                 .await
-                .unwrap()
+                .unwrap();
+            let other_wf_id = svc
+                .workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Other WF".to_string(),
+                    description: None,
+                    steps: vec![],
+                    order: 1,
+                    is_default: false,
+                    is_final: false,
+                    kanban_column: None,
+                })
+                .await
+                .unwrap();
+            (wf_id, other_wf_id)
         };
 
+        let included_task = create_task(state.clone(), "Included".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let excluded_task = create_task(state.clone(), "Excluded".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        assign_workflow(state.clone(), included_task.clone(), wf_id.clone())
+            .await
+            .unwrap();
+        assign_workflow(state.clone(), excluded_task, other_wf_id)
+            .await
+            .unwrap();
+
         let result = get_workflow_with_tasks(state, wf_id).await.unwrap();
-        assert!(result.tasks.is_empty());
+        assert_eq!(
+            result
+                .tasks
+                .iter()
+                .map(|task| task.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![included_task.as_str()]
+        );
     }
 
     #[tokio::test]

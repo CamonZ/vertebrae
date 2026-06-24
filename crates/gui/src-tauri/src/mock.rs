@@ -240,6 +240,11 @@ impl TaskService for MockTaskService {
                 if !filter.levels.is_empty() && !filter.levels.contains(&t.level) {
                     return false;
                 }
+                if let Some(workflow_id) = &filter.workflow_id {
+                    if t.workflow_id.as_deref() != Some(workflow_id.as_str()) {
+                        return false;
+                    }
+                }
                 true
             })
             .cloned()
