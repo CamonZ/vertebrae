@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Serialize;
-use vertebrae_core::{ServiceError, VertebraeServices};
+use vertebrae_core::{ServiceError, Task, VertebraeServices};
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
@@ -77,7 +77,7 @@ impl BlockersCommand {
         let task = services.tasks().get_task(&id).await?;
 
         // Build the blocker tree
-        let blockers = self.build_blocker_tree(services, &id, 0).await?;
+        let blockers = self.build_blocker_tree(services, &task, 0).await?;
 
         // Count total blockers
         let total_count = count_nodes(&blockers);
@@ -97,7 +97,7 @@ impl BlockersCommand {
     async fn build_blocker_tree(
         &self,
         services: &VertebraeServices,
-        task_id: &str,
+        task: &Task,
         current_depth: usize,
     ) -> Result<Vec<BlockerNode>, ServiceError> {
         // Check depth limit
@@ -107,8 +107,13 @@ impl BlockersCommand {
             return Ok(vec![]);
         }
 
-        // Get direct blockers (tasks that this task depends on)
-        let direct_blockers = self.fetch_direct_blockers(services, task_id).await?;
+        // At the root, reuse the blockers embedded in the task fetched by execute().
+        // Deeper nodes fetch their own task so transitive blockers are materialized.
+        let direct_blockers = if current_depth == 0 {
+            self.visible_blockers(task.blockers.clone())
+        } else {
+            self.fetch_direct_blockers(services, &task.id).await?
+        };
 
         // Build nodes for each direct blocker
         let mut nodes = Vec::new();
@@ -117,13 +122,18 @@ impl BlockersCommand {
 
             // Recursively get children (blockers of this blocker)
             let children =
-                Box::pin(self.build_blocker_tree(services, &blocker_id, current_depth + 1)).await?;
+                Box::pin(self.build_blocker_tree(services, &blocker, current_depth + 1)).await?;
 
             nodes.push(BlockerNode {
                 id: blocker_id,
                 title: blocker.title,
                 level: blocker.level.to_string(),
-                step_name: blocker.step_name.clone(),
+                step_name: Some(
+                    blocker
+                        .step_name
+                        .clone()
+                        .unwrap_or_else(|| "backlog".to_string()),
+                ),
                 children,
             });
         }
@@ -140,47 +150,18 @@ impl BlockersCommand {
         services: &VertebraeServices,
         task_id: &str,
     ) -> Result<Vec<vertebrae_core::Task>, ServiceError> {
-        // Get the task to access its dependency_ids
+        // Get the task to access its embedded blockers.
         let task = services.tasks().get_task(task_id).await?;
-        let blocker_ids = task.dependency_ids;
+        Ok(self.visible_blockers(task.blockers))
+    }
 
-        // Fetch full task details for each blocker
-        let mut result = Vec::new();
-        for blocker_id in blocker_ids {
-            // Get the blocker task
-            if let Ok(mut task) = services.tasks().get_task(&blocker_id).await {
-                // Get step name and workflow name using WorkflowService
-                let (step_name, workflow_name) = if let (Some(step_id), Some(wf_id)) =
-                    (&task.current_step_id, &task.workflow_id)
-                {
-                    // Use WorkflowService.get_workflow_info() instead of direct database calls
-                    let workflow_info = services
-                        .workflows()
-                        .get_workflow_info(wf_id, Some(step_id.as_str()))
-                        .await
-                        .ok();
-                    (
-                        workflow_info
-                            .as_ref()
-                            .map(|info| info.current_step_name.clone())
-                            .unwrap_or_else(|| "backlog".to_string()),
-                        workflow_info.map(|info| info.name),
-                    )
-                } else {
-                    ("backlog".to_string(), None)
-                };
-
-                if !self.all && step_name == "done" {
-                    continue;
-                }
-
-                task.workflow_name = workflow_name;
-                task.step_name = Some(step_name);
-                result.push(task);
-            }
-        }
-
-        Ok(result)
+    fn visible_blockers(&self, blockers: Vec<Task>) -> Vec<Task> {
+        blockers
+            .into_iter()
+            .filter(|blocker| {
+                self.all || blocker.step_name.as_deref().unwrap_or("backlog") != "done"
+            })
+            .collect()
     }
 }
 
