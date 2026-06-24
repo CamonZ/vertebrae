@@ -427,28 +427,11 @@ export function TaskRelations({
     setError(null);
 
     try {
-      // Remove dependencies that are no longer selected
-      for (const depId of dependsOnIds) {
-        if (!newDependencyIds.includes(depId)) {
-          const result = await commands.removeDependency(taskId, depId);
-          if (result.status === 'error') {
-            setError(result.error.message);
-            setIsSaving(false);
-            return;
-          }
-        }
-      }
-
-      // Add new dependencies
-      for (const depId of newDependencyIds) {
-        if (!dependsOnIds.includes(depId)) {
-          const result = await commands.addDependency(taskId, depId);
-          if (result.status === 'error') {
-            setError(result.error.message);
-            setIsSaving(false);
-            return;
-          }
-        }
+      const result = await commands.syncDependencies(taskId, newDependencyIds);
+      if (result.status === 'error') {
+        setError(result.error.message);
+        setIsSaving(false);
+        return;
       }
 
       setIsEditingDeps(false);

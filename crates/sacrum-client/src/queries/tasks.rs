@@ -229,7 +229,7 @@ pub const CREATE_TASK: &str = r#"
         $tags: [String!],
         $parent_id: Uuid4,
         $workflow_id: Uuid4,
-        $sections: [TaskSectionInput!]
+        $sections: [TaskSectionCreateInput!]
     ) {
         create_task(
             project_id: $project_id,
@@ -257,6 +257,8 @@ pub const UPDATE_TASK: &str = r#"
         $tags: [String!],
         $parent_id: Uuid4,
         $depends_on_ids: [Uuid4!],
+        $sections: [TaskSectionInput!],
+        $section_deletions: [Uuid4!],
         $archived: Boolean,
         $worktree: String
     ) {
@@ -269,6 +271,8 @@ pub const UPDATE_TASK: &str = r#"
             tags: $tags,
             parent_id: $parent_id,
             depends_on_ids: $depends_on_ids,
+            sections: $sections,
+            section_deletions: $section_deletions,
             archived: $archived,
             worktree: $worktree
         ) {
@@ -298,6 +302,14 @@ pub const CREATE_DEPENDENCY: &str = r#"
 pub const DELETE_DEPENDENCY: &str = r#"
     mutation DeleteTaskDependency($task_id: Uuid4!, $depends_on_id: Uuid4!) {
         delete_task_dependency(task_id: $task_id, depends_on_id: $depends_on_id) {
+            id
+        }
+    }
+"#;
+
+pub const SYNC_TASK_DEPENDENCIES: &str = r#"
+    mutation SyncTaskDependencies($task_id: Uuid4!, $depends_on_ids: [Uuid4]!) {
+        sync_task_dependencies(task_id: $task_id, depends_on_ids: $depends_on_ids) {
             id
         }
     }
@@ -348,6 +360,31 @@ pub const CREATE_SECTION: &str = r#"
         $done: Boolean
     ) {
         create_section(
+            task_id: $task_id,
+            section_type: $section_type,
+            content: $content,
+            section_order: $section_order,
+            done: $done
+        ) {
+            id
+            section_type
+            content
+            section_order
+            done
+            done_at
+        }
+    }
+"#;
+
+pub const UPSERT_SECTION: &str = r#"
+    mutation UpsertSection(
+        $task_id: Uuid4!,
+        $section_type: String!,
+        $content: String!,
+        $section_order: Int,
+        $done: Boolean
+    ) {
+        upsert_section(
             task_id: $task_id,
             section_type: $section_type,
             content: $content,
@@ -437,6 +474,22 @@ pub const DELETE_TASK_CODE_REFS: &str = r#"
     }
 "#;
 
+pub const SET_CODE_REFS: &str = r#"
+    mutation SetCodeRefs($task_id: Uuid4!, $refs: [CodeRefInput!]!) {
+        set_code_refs(task_id: $task_id, refs: $refs) {
+            id
+            task_id
+            section_id
+            path
+            line_start
+            line_end
+            name
+            description
+            order_index
+        }
+    }
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +510,19 @@ mod tests {
         assert!(query.contains("resolveShortId(project_id: $project_id, prefix: $prefix) { id }"));
         assert!(!RESOLVE_SHORT_ID.contains("...TaskFields"));
         assert!(!RESOLVE_SHORT_ID.contains("short_id"));
+    }
+
+    #[test]
+    fn create_task_uses_create_section_input_type() {
+        let query = compact_graphql(CREATE_TASK);
+
+        assert!(query.contains("$sections: [TaskSectionCreateInput!]"));
+    }
+
+    #[test]
+    fn sync_dependencies_matches_backend_list_type() {
+        let query = compact_graphql(SYNC_TASK_DEPENDENCIES);
+
+        assert!(query.contains("$depends_on_ids: [Uuid4]!"));
     }
 }

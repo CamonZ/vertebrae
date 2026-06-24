@@ -248,6 +248,19 @@ async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<nul
 }
 },
 /**
+ * Replace the full dependency set for a task
+ * 
+ * Saves picker changes atomically instead of issuing one mutation per add/remove.
+ */
+async syncDependencies(taskId: string, dependsOnIds: string[]) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("sync_dependencies", { taskId, dependsOnIds }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a new task with the given title, optional description, level, and parent task
  * 
  * Returns the ID of the newly created task.

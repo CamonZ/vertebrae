@@ -401,14 +401,9 @@ impl TaskService for SacrumTaskService {
 
         let task_id = result.id;
 
-        // If there are dependencies, set them via update
+        // If there are dependencies, set them atomically after creation.
         if !options.depends_on.is_empty() {
-            let update_vars = json!({
-                "id": task_id,
-                "depends_on_ids": options.depends_on,
-            });
-            self.client
-                .execute_void(tasks::UPDATE_TASK, update_vars)
+            self.sync_dependencies(&task_id, &options.depends_on)
                 .await?;
         }
 
@@ -761,6 +756,21 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
+    async fn sync_dependencies(
+        &self,
+        task_id: &str,
+        depends_on_ids: &[String],
+    ) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+            "depends_on_ids": depends_on_ids,
+        });
+        self.client
+            .execute_void(tasks::SYNC_TASK_DEPENDENCIES, variables)
+            .await?;
+        Ok(())
+    }
+
     async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>> {
         // Use GET_TASK which returns nested blockers, then convert to BlockerNode
         let response = self.fetch_task_response(id).await?;
@@ -850,6 +860,30 @@ impl TaskService for SacrumTaskService {
             )
             .await?;
         section_response_to_section(&created)
+    }
+
+    async fn upsert_section(&self, id: &str, section: Section) -> ServiceResult<Section> {
+        let mut variables = serde_json::Map::new();
+        variables.insert("task_id".to_string(), json!(id));
+        variables.insert(
+            "section_type".to_string(),
+            json!(section.section_type.as_str()),
+        );
+        variables.insert("content".to_string(), json!(section.content));
+        variables.insert("done".to_string(), json!(section.done));
+        if let Some(order) = section.order {
+            variables.insert("section_order".to_string(), json!(order));
+        }
+
+        let updated: SectionResponse = self
+            .client
+            .execute(
+                tasks::UPSERT_SECTION,
+                Value::Object(variables),
+                "upsert_section",
+            )
+            .await?;
+        section_response_to_section(&updated)
     }
 
     async fn remove_sections(
@@ -1065,6 +1099,34 @@ impl TaskService for SacrumTaskService {
                     .await?;
             }
         }
+        Ok(())
+    }
+
+    async fn set_code_refs(&self, id: &str, code_refs: &[CodeRef]) -> ServiceResult<()> {
+        let refs: Vec<Value> = code_refs
+            .iter()
+            .enumerate()
+            .map(|(order, code_ref)| {
+                json!({
+                    "path": &code_ref.path,
+                    "line_start": code_ref.line_start,
+                    "line_end": code_ref.line_end,
+                    "name": &code_ref.name,
+                    "description": &code_ref.description,
+                    "order": order,
+                })
+            })
+            .collect();
+
+        let variables = json!({
+            "task_id": id,
+            "refs": refs,
+        });
+
+        let _updated: Vec<CodeRefResponse> = self
+            .client
+            .execute(tasks::SET_CODE_REFS, variables, "set_code_refs")
+            .await?;
         Ok(())
     }
 
@@ -1672,6 +1734,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_sync_dependencies_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SyncTaskDependencies"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "sync_task_dependencies": { "id": "task-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let deps = vec!["task-2".to_string(), "task-3".to_string()];
+        let result = service.sync_dependencies("task-1", &deps).await;
+
+        assert!(result.is_ok());
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["depends_on_ids"], json!(["task-2", "task-3"]));
+    }
+
+    #[tokio::test]
     async fn test_get_blockers_success() {
         let server = MockServer::start().await;
 
@@ -1900,6 +1986,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_upsert_section_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpsertSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "upsert_section": {
+                    "id": "sec-1",
+                    "section_type": "goal",
+                    "content": "Updated goal",
+                    "section_order": null,
+                    "done": null,
+                    "done_at": null
+                } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let section = Section {
+            section_type: SectionType::Goal,
+            content: "Updated goal".to_string(),
+            order: None,
+            done: None,
+            done_at: None,
+            refs: vec![],
+        };
+        let result = service.upsert_section("task-1", section).await.unwrap();
+
+        assert_eq!(result.section_type, SectionType::Goal);
+        assert_eq!(result.content, "Updated goal");
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["section_type"], "goal");
+        assert_eq!(variables["content"], "Updated goal");
+    }
+
+    #[tokio::test]
     async fn test_edit_section_by_ordinal_success() {
         let server = MockServer::start().await;
 
@@ -2060,6 +2186,71 @@ mod tests {
         let result = service.remove_code_refs("task-1", None).await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_code_refs_preserves_input_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("SetCodeRefs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "set_code_refs": [
+                    {
+                        "id": "ref-1",
+                        "task_id": "task-1",
+                        "section_id": null,
+                        "path": "src/a.rs",
+                        "line_start": 10,
+                        "line_end": null,
+                        "name": null,
+                        "description": null,
+                        "order_index": 0
+                    },
+                    {
+                        "id": "ref-2",
+                        "task_id": "task-1",
+                        "section_id": null,
+                        "path": "src/b.rs",
+                        "line_start": null,
+                        "line_end": null,
+                        "name": "module",
+                        "description": "second",
+                        "order_index": 1
+                    }
+                ] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let refs = vec![
+            CodeRef {
+                path: "src/a.rs".to_string(),
+                line_start: Some(10),
+                line_end: None,
+                name: None,
+                description: None,
+            },
+            CodeRef {
+                path: "src/b.rs".to_string(),
+                line_start: None,
+                line_end: None,
+                name: Some("module".to_string()),
+                description: Some("second".to_string()),
+            },
+        ];
+        let result = service.set_code_refs("task-1", &refs).await;
+
+        assert!(result.is_ok());
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["task_id"], "task-1");
+        assert_eq!(variables["refs"][0]["path"], "src/a.rs");
+        assert_eq!(variables["refs"][0]["order"], 0);
+        assert_eq!(variables["refs"][1]["path"], "src/b.rs");
+        assert_eq!(variables["refs"][1]["order"], 1);
     }
 
     #[tokio::test]

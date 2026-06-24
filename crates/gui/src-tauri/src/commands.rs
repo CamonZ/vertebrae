@@ -1802,6 +1802,36 @@ pub async fn remove_dependency(
     Ok(())
 }
 
+/// Replace the full dependency set for a task
+///
+/// Saves picker changes atomically instead of issuing one mutation per add/remove.
+#[tauri::command]
+#[specta::specta]
+pub async fn sync_dependencies(
+    state: State<'_, AppState>,
+    task_id: String,
+    depends_on_ids: Vec<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "sync_dependencies called with task_id: {}, {} dependencies",
+        task_id,
+        depends_on_ids.len()
+    );
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .tasks()
+        .sync_dependencies(&task_id, &depends_on_ids)
+        .await?;
+
+    log::info!("Successfully synced dependencies for task {}", task_id);
+    Ok(())
+}
+
 // ============================================================================
 // Task Mutation Commands (Create, Update, Assign Workflow)
 // ============================================================================
@@ -2341,20 +2371,18 @@ pub async fn replace_code_refs(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Clear all existing refs and re-add them
-    // This is a workaround since the service doesn't have a set_code_refs method
-    service.tasks().remove_code_refs(&task_id, None).await?;
-
-    for code_ref in refs {
-        let db_ref = vertebrae_core::CodeRef {
+    let db_refs = refs
+        .into_iter()
+        .map(|code_ref| vertebrae_core::CodeRef {
             path: code_ref.path,
             line_start: code_ref.line_start,
             line_end: code_ref.line_end,
             name: code_ref.name,
             description: code_ref.description,
-        };
-        service.tasks().add_code_ref(&task_id, db_ref).await?;
-    }
+        })
+        .collect::<Vec<_>>();
+
+    service.tasks().set_code_refs(&task_id, &db_refs).await?;
 
     log::info!("Successfully replaced code refs for task: {}", task_id);
     Ok(())

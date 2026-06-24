@@ -361,6 +361,25 @@ pub trait TaskService: Send + Sync {
     /// Remove a dependency relationship
     async fn remove_dependency(&self, task_id: &str, depends_on_id: &str) -> ServiceResult<()>;
 
+    /// Replace the complete dependency set for a task.
+    async fn sync_dependencies(
+        &self,
+        task_id: &str,
+        depends_on_ids: &[String],
+    ) -> ServiceResult<()> {
+        let current = self.get_dependencies(task_id).await?;
+
+        for existing_id in current.iter().filter(|id| !depends_on_ids.contains(id)) {
+            self.remove_dependency(task_id, existing_id).await?;
+        }
+
+        for desired_id in depends_on_ids.iter().filter(|id| !current.contains(id)) {
+            self.add_dependency(task_id, desired_id).await?;
+        }
+
+        Ok(())
+    }
+
     /// Get the dependency chain (blockers) for a task
     async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>>;
 
@@ -450,6 +469,16 @@ pub trait TaskService: Send + Sync {
     /// Add a section to a task and return the created section.
     async fn add_section(&self, id: &str, section: Section) -> ServiceResult<Section>;
 
+    /// Add or replace a section in one logical operation.
+    async fn upsert_section(&self, id: &str, section: Section) -> ServiceResult<Section> {
+        if section.section_type.is_single_instance() {
+            self.remove_sections(id, section.section_type.clone(), None)
+                .await?;
+        }
+
+        self.add_section(id, section).await
+    }
+
     /// Remove sections from a task by type
     async fn remove_sections(
         &self,
@@ -520,6 +549,15 @@ pub trait TaskService: Send + Sync {
 
     /// Remove code references from a task
     async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()>;
+
+    /// Replace all task-level code references, preserving input order.
+    async fn set_code_refs(&self, id: &str, code_refs: &[CodeRef]) -> ServiceResult<()> {
+        self.remove_code_refs(id, None).await?;
+        for code_ref in code_refs {
+            self.add_code_ref(id, code_ref.clone()).await?;
+        }
+        Ok(())
+    }
 
     /// Atomically append a code reference to a task
     ///
