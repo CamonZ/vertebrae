@@ -728,6 +728,28 @@ describe("doStartSession", () => {
     });
   });
 
+  it("fetches the current project path when the captured project path is null", async () => {
+    const deps = {
+      setClaudeSessionId: vi.fn(),
+      setClaudeSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(makeSession({ projectPath: null }), SESSION_ID, deps);
+
+    expect(mockedCommands.getCurrentProjectPath).toHaveBeenCalled();
+    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
+      session_id: expect.stringMatching(/^scoped-/),
+      working_dir: "/test/project",
+      initial_prompt: null,
+      resume_session_id: null,
+      model_id: null,
+      permission_mode: "default",
+    });
+  });
+
   it("passes the selected model id when the session has one", async () => {
     const deps = {
       setClaudeSessionId: vi.fn(),
@@ -980,7 +1002,6 @@ describe("doStartSession", () => {
       "claude missing"
     );
   });
-
 });
 
 describe("doSendMessage", () => {
@@ -1098,7 +1119,6 @@ describe("doSendMessage", () => {
       "File not found: /project/config.ts"
     );
   });
-
 });
 
 describe("doCloseSession", () => {

@@ -314,7 +314,7 @@ describe("localChatPersistence", () => {
     });
   });
 
-  it("scopes listed sessions by project path while keeping legacy unscoped sessions visible", () => {
+  it("scopes listed sessions by project path without treating legacy unscoped sessions as wildcards", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-a", projectPath: "/repo-a" })
     );
@@ -325,8 +325,21 @@ describe("localChatPersistence", () => {
 
     expect(listPersistedLocalChatSessions("/repo-a").map((s) => s.id)).toEqual([
       "repo-a",
-      "legacy",
     ]);
+  });
+
+  it("does not reuse a legacy persisted session for a requested project path", () => {
+    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+
+    expect(
+      findPersistedLocalChatSession("task", "task-1", "/repo-a")
+    ).toBeNull();
+  });
+
+  it("does not reuse a legacy persisted session when the requested project path is null", () => {
+    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+
+    expect(findPersistedLocalChatSession("task", "task-1", null)).toBeNull();
   });
 
   it("normalizes legacy array storage into session summaries", () => {

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
+import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import { scopeLabel } from "../../utils/chatContext";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
@@ -39,11 +41,16 @@ export function ChatWindowManager() {
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setClaudeSessionId = useChatStore((s) => s.setClaudeSessionId);
+  const projectScopeGeneration = useProjectScopeGeneration();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null
   );
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [currentProjectPathState, setCurrentProjectPathState] = useState<{
+    generation: number;
+    path: string | null;
+  }>({ generation: -1, path: null });
 
   // Horizontal resize. The panel is left-anchored, so a drag on its right edge
   // widens it as the cursor moves right. We measure the panel's fixed left edge
@@ -70,7 +77,8 @@ export function ChatWindowManager() {
   const computeMaximizedWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_PANEL_WIDTH;
     const leftEdge =
-      panelRef.current?.getBoundingClientRect().left ?? DEFAULT_PANEL_LEFT_INSET;
+      panelRef.current?.getBoundingClientRect().left ??
+      DEFAULT_PANEL_LEFT_INSET;
     return Math.max(
       MIN_PANEL_WIDTH,
       window.innerWidth - leftEdge - MAXIMIZED_RIGHT_INSET
@@ -120,27 +128,60 @@ export function ChatWindowManager() {
 
   useEffect(() => {
     if (!isMaximized) return;
-    const updateMaximizedWidth = () => setMaximizedWidth(computeMaximizedWidth());
+    const updateMaximizedWidth = () =>
+      setMaximizedWidth(computeMaximizedWidth());
     updateMaximizedWidth();
     window.addEventListener("resize", updateMaximizedWidth);
     return () => window.removeEventListener("resize", updateMaximizedWidth);
   }, [computeMaximizedWidth, isMaximized]);
 
+  const loadCurrentProjectPath = useCallback(async () => {
+    try {
+      const result = await commands.getCurrentProjectPath();
+      return result.status === "ok" && result.data ? result.data : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadCurrentProjectPath().then((path) => {
+      if (!cancelled) {
+        setCurrentProjectPathState({
+          generation: projectScopeGeneration,
+          path,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadCurrentProjectPath, projectScopeGeneration]);
+
   const sessionList = Object.values(sessions);
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
-  const activeProjectPath = activeSession?.projectPath;
-  const localSessionSummaries = listLocalSessions(activeProjectPath);
+  const currentProjectPath =
+    currentProjectPathState.generation === projectScopeGeneration
+      ? currentProjectPathState.path
+      : null;
+  const localSessionSummaries = listLocalSessions(currentProjectPath);
 
   const open = panelOpen && sessionList.length > 0;
   const renderedPanelWidth = isMaximized ? maximizedWidth : panelWidth;
-  const startFreshActiveSession = () => {
+  const startFreshActiveSession = async () => {
     if (!activeSession) return;
     const label = `New ${scopeLabel(activeSession.scope)} Chat`;
+    const projectPath = await loadCurrentProjectPath();
+    setCurrentProjectPathState({
+      generation: projectScopeGeneration,
+      path: projectPath,
+    });
     startFreshSession(
       activeSession.scope,
       activeSession.entityId,
       label,
-      activeProjectPath
+      projectPath
     );
     setHistoryOpen(false);
   };
@@ -169,7 +210,12 @@ export function ChatWindowManager() {
         setHistoryOpen(false);
       }
     },
-    [deleteLocalSession, markSessionClosed, setClaudeSessionId, setSessionLifecycle]
+    [
+      deleteLocalSession,
+      markSessionClosed,
+      setClaudeSessionId,
+      setSessionLifecycle,
+    ]
   );
 
   // Join the shared glass-panel focus model so Escape closes whichever panel is
@@ -269,7 +315,9 @@ export function ChatWindowManager() {
               sessionId={activeSession.id}
               onClosePanel={togglePanel}
               onToggleHistory={
-                isMaximized ? undefined : () => setHistoryOpen((value) => !value)
+                isMaximized
+                  ? undefined
+                  : () => setHistoryOpen((value) => !value)
               }
               onStartFresh={startFreshActiveSession}
             />
@@ -295,7 +343,6 @@ export function ChatWindowManager() {
       )}
     </div>
   );
-
 }
 
 function formatSessionTime(value: string): string {
@@ -325,7 +372,7 @@ function LocalChatMiniPanel({
   deletingSessionId: string | null;
   deleteError: string | null;
   sessions: LocalChatSessionSummary[];
-  onStartFresh: () => void;
+  onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void;
   onDelete: (sessionId: string) => void | Promise<void>;
 }) {
@@ -340,7 +387,7 @@ function LocalChatMiniPanel({
         <button
           type="button"
           className="hc-ctrl"
-          onClick={onStartFresh}
+          onClick={() => void onStartFresh()}
           title="Start fresh local chat"
           aria-label="Start fresh local chat"
         >
@@ -436,7 +483,7 @@ function LocalChatHistoryDrawer({
   deleteError: string | null;
   sessions: LocalChatSessionSummary[];
   onClose: () => void;
-  onStartFresh: () => void;
+  onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void;
   onDelete: (sessionId: string) => void | Promise<void>;
 }) {
@@ -454,7 +501,7 @@ function LocalChatHistoryDrawer({
           <button
             type="button"
             className="hc-ctrl"
-            onClick={onStartFresh}
+            onClick={() => void onStartFresh()}
             title="Start fresh local chat from history"
             aria-label="Start fresh local chat from history"
           >
