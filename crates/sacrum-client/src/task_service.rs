@@ -68,7 +68,8 @@ impl SacrumTaskService {
         workflow: &WorkflowResponse,
         current_step_id: Option<&str>,
     ) -> WorkflowInfo {
-        let steps = &workflow.workflow_steps;
+        let mut steps = workflow.workflow_steps.clone();
+        steps.sort_by_key(|step| step.step_order);
         let total_steps = steps.len();
         let current_step_index = current_step_id
             .and_then(|id| steps.iter().position(|step| step.id == id))
@@ -1182,7 +1183,7 @@ impl TaskService for SacrumTaskService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::TaskResponse;
+    use crate::api_types::{TaskResponse, WorkflowStepSummary};
 
     fn create_test_client() -> GraphqlClient {
         GraphqlClient::new(crate::config::SacrumConfig::new(
@@ -1219,6 +1220,53 @@ mod tests {
             inserted_at: None,
             updated_at: None,
         }
+    }
+
+    fn workflow_response_with_steps(steps: Vec<WorkflowStepSummary>) -> WorkflowResponse {
+        WorkflowResponse {
+            id: "wf-1".to_string(),
+            name: "Workflow".to_string(),
+            description: None,
+            is_default: None,
+            is_final: None,
+            display_order: None,
+            metadata: None,
+            initial_step_id: None,
+            kanban_column: None,
+            project_id: Some("test-project".to_string()),
+            workflow_steps: steps,
+            transitions: None,
+            inserted_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn workflow_info_sorts_steps_before_prev_next() {
+        let workflow = workflow_response_with_steps(vec![
+            WorkflowStepSummary {
+                id: "step-3".to_string(),
+                name: "Done".to_string(),
+                step_order: 2,
+            },
+            WorkflowStepSummary {
+                id: "step-1".to_string(),
+                name: "Backlog".to_string(),
+                step_order: 0,
+            },
+            WorkflowStepSummary {
+                id: "step-2".to_string(),
+                name: "In Progress".to_string(),
+                step_order: 1,
+            },
+        ]);
+
+        let info = SacrumTaskService::workflow_info_from_response(&workflow, Some("step-2"));
+
+        assert_eq!(info.current_step_index, 1);
+        assert_eq!(info.current_step_name, "In Progress");
+        assert_eq!(info.prev_step_name.as_deref(), Some("Backlog"));
+        assert_eq!(info.next_step_name.as_deref(), Some("Done"));
     }
 
     #[test]
@@ -1507,6 +1555,16 @@ mod tests {
             .expect("graphql request must include `variables`")
     }
 
+    async fn captured_graphql_bodies(server: &MockServer) -> Vec<serde_json::Value> {
+        server
+            .received_requests()
+            .await
+            .expect("received_requests must be enabled")
+            .into_iter()
+            .map(|request| serde_json::from_slice(&request.body).expect("body must be valid JSON"))
+            .collect()
+    }
+
     fn gql_task_data(id: &str, title: &str) -> serde_json::Value {
         json!({
             "id": id,
@@ -1585,6 +1643,155 @@ mod tests {
 
         assert_eq!(task.id, "task-1");
         assert_eq!(task.title, "My Task");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_batches_aliases_in_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("query TaskTitles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "task0": { "id": "task-a", "title": "Alpha" },
+                    "task1": { "id": "task-b", "title": "Beta" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let titles = service
+            .get_task_titles(&["task-a".to_string(), "task-b".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            titles,
+            vec![
+                ("task-a".to_string(), "Alpha".to_string()),
+                ("task-b".to_string(), "Beta".to_string())
+            ]
+        );
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let query = bodies[0]["query"].as_str().unwrap();
+        assert!(query.contains("$id0: Uuid4!"));
+        assert!(query.contains("task0: task(id: $id0)"));
+        assert!(query.contains("$id1: Uuid4!"));
+        assert!(query.contains("task1: task(id: $id1)"));
+        assert_eq!(bodies[0]["variables"]["id0"], "task-a");
+        assert_eq!(bodies[0]["variables"]["id1"], "task-b");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_empty_sends_no_request() {
+        let server = MockServer::start().await;
+
+        let service = create_wiremock_service(&server.uri());
+        let titles = service.get_task_titles(&[]).await.unwrap();
+
+        assert!(titles.is_empty());
+        assert!(captured_graphql_bodies(&server).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_titles_missing_alias_returns_not_found() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("query TaskTitles"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "task0": { "id": "task-a", "title": "Alpha" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .get_task_titles(&["task-a".to_string(), "task-b".to_string()])
+            .await;
+
+        assert!(matches!(result, Err(ServiceError::TaskNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_get_task_show_bundle_sets_include_flags_and_maps_response() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Child");
+        task_data["parent_id"] = json!("parent-1");
+        task_data["workflow_id"] = json!("wf-1");
+        task_data["current_step_id"] = json!("step-2");
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ShowTaskRelated"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "parent": gql_task_data("parent-1", "Parent"),
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Workflow",
+                        "workflow_steps": [
+                            { "id": "step-2", "name": "Current", "step_order": 1 },
+                            { "id": "step-1", "name": "Previous", "step_order": 0 }
+                        ]
+                    },
+                    "task_runs": [],
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "Workflow",
+                            "workflow_steps": [
+                                { "id": "step-1", "name": "Previous", "step_order": 0 },
+                                { "id": "step-2", "name": "Current", "step_order": 1 }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let bundle = service
+            .get_task_show_bundle("task-1")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(bundle.task.title, "Child");
+        assert_eq!(
+            bundle.parent.as_ref().map(|task| task.title.as_str()),
+            Some("Parent")
+        );
+        let workflow = bundle.workflow.unwrap();
+        assert_eq!(workflow.current_step_name, "Current");
+        assert_eq!(workflow.prev_step_name.as_deref(), Some("Previous"));
+
+        let bodies = captured_graphql_bodies(&server).await;
+        let related_body = bodies
+            .iter()
+            .find(|body| body["query"].as_str().unwrap().contains("ShowTaskRelated"))
+            .expect("ShowTaskRelated request should be sent");
+        assert_eq!(related_body["variables"]["parent_id"], "parent-1");
+        assert_eq!(related_body["variables"]["workflow_id"], "wf-1");
+        assert_eq!(related_body["variables"]["include_parent"], true);
+        assert_eq!(related_body["variables"]["include_workflow"], true);
     }
 
     #[tokio::test]

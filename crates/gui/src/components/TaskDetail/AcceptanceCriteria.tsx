@@ -6,7 +6,6 @@ import { updateTaskSectionsInQueryCache } from "../../query";
 interface AcceptanceCriteriaProps {
   criteria: Section[];
   taskId: string;
-  onSectionsChanged?: () => void;
 }
 
 type CriterionStatus = "met" | "not_met" | "pending";

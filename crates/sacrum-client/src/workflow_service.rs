@@ -881,7 +881,7 @@ mod tests {
     // Wiremock integration tests for workflow GraphQL methods
     // =========================================================================
 
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_wiremock_service(server_url: &str) -> SacrumWorkflowService {
@@ -891,6 +891,31 @@ mod tests {
             "test-proj".to_string(),
         ));
         SacrumWorkflowService::new(client)
+    }
+
+    fn create_wiremock_task_service(server_url: &str) -> SacrumTaskService {
+        let client = GraphqlClient::new(SacrumConfig::new(
+            server_url.to_string(),
+            "test-token".to_string(),
+            "test-proj".to_string(),
+        ));
+        SacrumTaskService::new(client)
+    }
+
+    fn gql_task_data(id: &str, title: &str, workflow_id: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "project_id": "test-proj",
+            "title": title,
+            "tags": [],
+            "workflow_id": workflow_id,
+            "dependency_ids": [],
+            "sections": [],
+            "code_refs": [],
+            "blockers": [],
+            "dependents": [],
+            "children": []
+        })
     }
 
     #[tokio::test]
@@ -1075,6 +1100,56 @@ mod tests {
             Some("Development process".to_string())
         );
         assert_eq!(workflow.order, 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_with_tasks_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetWorkflowWithTasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Board Workflow",
+                        "workflow_steps": [
+                            { "id": "step-1", "name": "Backlog", "step_order": 0 }
+                        ]
+                    },
+                    "tasks": [
+                        gql_task_data("task-1", "First task", "wf-1"),
+                        gql_task_data("task-2", "Second task", "wf-1")
+                    ],
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "Board Workflow",
+                            "workflow_steps": [
+                                { "id": "step-1", "name": "Backlog", "step_order": 0 }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let task_service = create_wiremock_task_service(&server.uri());
+        let bundle = service
+            .get_workflow_with_tasks(&task_service, "wf-1")
+            .await
+            .unwrap();
+
+        assert_eq!(bundle.workflow.name, "Board Workflow");
+        assert_eq!(bundle.tasks.len(), 2);
+        assert_eq!(bundle.tasks[0].title, "First task");
+        assert_eq!(
+            bundle.tasks[1].workflow_name.as_deref(),
+            Some("Board Workflow")
+        );
     }
 
     #[tokio::test]

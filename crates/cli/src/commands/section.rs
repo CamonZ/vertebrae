@@ -102,6 +102,9 @@ impl SectionCommand {
 
         let is_single_instance = self.section_type.is_single_instance();
 
+        // This is only for the user-facing "Replaced" vs "Added" message.
+        // The write below is still atomic; Sacrum does not currently return
+        // whether the upsert replaced an existing section.
         let replaced = if is_single_instance {
             let task = services.tasks().get_task(&id).await?;
             task.sections

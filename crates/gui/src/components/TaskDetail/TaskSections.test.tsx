@@ -42,7 +42,6 @@ describe("TaskSections", () => {
   const defaultProps = {
     sections: [] as Section[],
     taskId: "task-123",
-    onSectionsChanged: vi.fn(),
   };
 
   beforeEach(() => {

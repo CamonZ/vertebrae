@@ -266,7 +266,7 @@ pub trait TaskService: Send + Sync {
 
     /// Get only a task's display title.
     async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
-        Ok(self.get_task(id).await?.title)
+        Ok(self.get_task_summary(id).await?.title)
     }
 
     /// Get task display titles in input order.

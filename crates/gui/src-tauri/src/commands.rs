@@ -2072,6 +2072,7 @@ pub async fn add_section(
     let parsed_type = section_type
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
+    let is_single_instance = parsed_type.is_single_instance();
 
     // Use provided content or empty string
     let section_content = content.unwrap_or_default();
@@ -2085,7 +2086,11 @@ pub async fn add_section(
         refs: Vec::new(),
     };
 
-    let created = service.tasks().add_section(&task_id, section).await?;
+    let created = if is_single_instance {
+        service.tasks().upsert_section(&task_id, section).await?
+    } else {
+        service.tasks().add_section(&task_id, section).await?
+    };
 
     log::info!("Successfully added section to task: {}", task_id);
     Ok(created.into())
@@ -3358,6 +3363,43 @@ mod tests {
             .unwrap();
         let task = get_task(state, task_a).await.unwrap();
         assert!(!task.dependency_ids.contains(&task_b));
+    }
+
+    #[tokio::test]
+    async fn sync_dependencies_replaces_dependency_set() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_a = create_task(state.clone(), "A".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let task_b = create_task(state.clone(), "B".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        sync_dependencies(state.clone(), task_a.clone(), vec![task_b.clone()])
+            .await
+            .unwrap();
+        let task = get_task(state.clone(), task_a.clone()).await.unwrap();
+        assert_eq!(task.dependency_ids, vec![task_b.clone()]);
+
+        sync_dependencies(state.clone(), task_a.clone(), vec![])
+            .await
+            .unwrap();
+        let task = get_task(state, task_a).await.unwrap();
+        assert!(task.dependency_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_dependencies_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        let result = sync_dependencies(state, task_id, vec!["nonexistent".to_string()]).await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

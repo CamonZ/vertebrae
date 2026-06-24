@@ -523,14 +523,7 @@ impl TaskService for MockTaskService {
             .iter()
             .position(|s| s.section_type == section_type && s.order == Some(ordinal))
         else {
-            return Ok(Section {
-                section_type,
-                content: String::new(),
-                order: Some(ordinal),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            });
+            return Err(ServiceError::validation_failed("Section not found"));
         };
         Ok(task.sections.remove(index))
     }

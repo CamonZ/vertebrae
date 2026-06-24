@@ -11,7 +11,6 @@ import { updateTaskSectionsInQueryCache } from '../../query';
 interface TaskSectionsProps {
   sections: Section[];
   taskId: string;
-  onSectionsChanged?: () => void;
 }
 
 /**

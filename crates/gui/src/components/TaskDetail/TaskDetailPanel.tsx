@@ -917,7 +917,6 @@ export function TaskDetailPanel({
             <AcceptanceCriteria
               criteria={acceptanceCriteria}
               taskId={taskData.id}
-              onSectionsChanged={refetch}
             />
           </SectionGroup>
 

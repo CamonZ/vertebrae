@@ -47,7 +47,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={[]}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -84,7 +83,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -112,7 +110,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -140,7 +137,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -164,7 +160,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -187,7 +182,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -210,7 +204,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -232,7 +225,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -258,7 +250,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -282,7 +273,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -312,7 +302,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -340,7 +329,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 
@@ -399,7 +387,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={vi.fn()}
         />
       );
 

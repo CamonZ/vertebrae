@@ -17,6 +17,7 @@ pub const WORKFLOW_FIELDS: &str = r#"
         workflow_steps {
             id
             name
+            step_order
         }
         transitions {
             id

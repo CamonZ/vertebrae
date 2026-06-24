@@ -156,6 +156,8 @@ pub struct CodeRefResponse {
 pub struct WorkflowStepSummary {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub step_order: i32,
 }
 
 /// Workflow response from Sacrum API (matches WorkflowJSON.data/1)

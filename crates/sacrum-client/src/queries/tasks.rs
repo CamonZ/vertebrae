@@ -156,7 +156,7 @@ pub const RESOLVE_SHORT_ID: &str = r#"
 "#;
 
 /// List tasks that are ready (unblocked).
-/// NOTE: Prepend TASK_FIELDS when sending.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS when sending.
 pub const READY_TASKS: &str = r#"
     query ReadyTasks($project_id: Uuid4!) {
         list_ready(project_id: $project_id) {
@@ -257,8 +257,6 @@ pub const UPDATE_TASK: &str = r#"
         $tags: [String!],
         $parent_id: Uuid4,
         $depends_on_ids: [Uuid4!],
-        $sections: [TaskSectionInput!],
-        $section_deletions: [Uuid4!],
         $archived: Boolean,
         $worktree: String
     ) {
@@ -271,8 +269,6 @@ pub const UPDATE_TASK: &str = r#"
             tags: $tags,
             parent_id: $parent_id,
             depends_on_ids: $depends_on_ids,
-            sections: $sections,
-            section_deletions: $section_deletions,
             archived: $archived,
             worktree: $worktree
         ) {
@@ -372,6 +368,14 @@ pub const CREATE_SECTION: &str = r#"
             section_order
             done
             done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
     }
 "#;
@@ -397,6 +401,14 @@ pub const UPSERT_SECTION: &str = r#"
             section_order
             done
             done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
     }
 "#;
@@ -420,6 +432,14 @@ pub const UPDATE_SECTION: &str = r#"
             section_order
             done
             done_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
     }
 "#;
@@ -524,5 +544,20 @@ mod tests {
         let query = compact_graphql(SYNC_TASK_DEPENDENCIES);
 
         assert!(query.contains("$depends_on_ids: [Uuid4]!"));
+    }
+
+    #[test]
+    fn update_task_omits_dead_section_inputs() {
+        assert!(!UPDATE_TASK.contains("$sections"));
+        assert!(!UPDATE_TASK.contains("section_deletions"));
+    }
+
+    #[test]
+    fn section_mutations_return_section_code_refs() {
+        for query in [CREATE_SECTION, UPSERT_SECTION, UPDATE_SECTION] {
+            let query = compact_graphql(query);
+
+            assert!(query.contains("code_refs { id path line_start line_end name description }"));
+        }
     }
 }
