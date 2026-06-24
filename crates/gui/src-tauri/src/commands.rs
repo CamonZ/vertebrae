@@ -758,7 +758,8 @@ pub async fn get_workflow(
 
 /// List all workflow transitions
 ///
-/// Returns all defined transitions between workflows, including workflow names.
+/// Returns all defined transitions between workflows, including workflow names
+/// from the same workflow fetch.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workflow_transitions(
@@ -772,15 +773,10 @@ pub async fn list_workflow_transitions(
 
     let workflow_service = service.workflows();
 
-    // Get all transitions
-    let transitions = workflow_service.list_workflow_transitions(None).await?;
-
-    // Build a cache of workflow names
-    let workflows = workflow_service.list_workflows().await?;
-    let workflow_names: std::collections::HashMap<String, String> = workflows
-        .into_iter()
-        .map(|w| (w.id.clone(), w.name))
-        .collect();
+    // Get all transitions and workflow names from one workflow list response.
+    let (transitions, workflow_names) = workflow_service
+        .list_workflow_transitions_with_names(None)
+        .await?;
 
     // Convert to GUI type with workflow names
     let result: Vec<crate::types::WorkflowTransition> = transitions

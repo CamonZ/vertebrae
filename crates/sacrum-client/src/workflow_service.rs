@@ -5,6 +5,7 @@
 
 use async_trait::async_trait;
 use serde_json::json;
+use std::collections::HashMap;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
@@ -484,13 +485,30 @@ impl WorkflowService for SacrumWorkflowService {
         &self,
         from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
+        let (transitions, _) = self
+            .list_workflow_transitions_with_names(from_workflow_id)
+            .await?;
+        Ok(transitions)
+    }
+
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(Vec<WorkflowTransition>, HashMap<String, String>)> {
         let query = with_fragments(LIST_WORKFLOWS, &[WORKFLOW_FIELDS]);
         let variables = json!({ "project_id": self.client.project_id() });
 
         let workflows: Vec<WorkflowResponse> =
             self.client.execute(&query, variables, "workflows").await?;
 
-        Ok(Self::extract_transitions(&workflows, from_workflow_id))
+        let workflow_names = workflows
+            .iter()
+            .map(|workflow| (workflow.id.clone(), workflow.name.clone()))
+            .collect();
+        Ok((
+            Self::extract_transitions(&workflows, from_workflow_id),
+            workflow_names,
+        ))
     }
 
     async fn get_transitions_from_workflow(

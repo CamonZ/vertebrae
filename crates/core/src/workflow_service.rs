@@ -363,6 +363,17 @@ pub trait WorkflowService: Send + Sync {
         from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>>;
 
+    /// List all workflow transitions and workflow names from one workflow fetch.
+    ///
+    /// If `from_workflow_id` is provided, only returns transitions from that workflow.
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(
+        Vec<WorkflowTransition>,
+        std::collections::HashMap<String, String>,
+    )>;
+
     /// Get transitions from a specific workflow
     async fn get_transitions_from_workflow(
         &self,

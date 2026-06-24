@@ -785,6 +785,23 @@ impl WorkflowService for MockWorkflowService {
         Ok(vec![])
     }
 
+    async fn list_workflow_transitions_with_names(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<(
+        Vec<WorkflowTransition>,
+        std::collections::HashMap<String, String>,
+    )> {
+        let transitions = self.list_workflow_transitions(from_workflow_id).await?;
+        let workflow_names = self
+            .list_workflows()
+            .await?
+            .into_iter()
+            .map(|workflow| (workflow.id, workflow.name))
+            .collect();
+        Ok((transitions, workflow_names))
+    }
+
     async fn get_transitions_from_workflow(
         &self,
         _workflow_id: &str,
