@@ -756,7 +756,7 @@ impl TaskService for SacrumTaskService {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(task_id).await?;
 
         let section = response
@@ -777,10 +777,11 @@ impl TaskService for SacrumTaskService {
             "id": section.id,
             "content": new_content,
         });
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
     async fn remove_section_by_ordinal(
@@ -788,7 +789,7 @@ impl TaskService for SacrumTaskService {
         task_id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(task_id).await?;
 
         let section = response
@@ -804,15 +805,20 @@ impl TaskService for SacrumTaskService {
                     ordinal
                 ))
             })?;
+        let removed = section_response_to_section(section)?;
 
         let variables = json!({ "id": section.id });
         self.client
             .execute_void(tasks::DELETE_SECTION, variables)
             .await?;
-        Ok(())
+        Ok(removed)
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(id).await?;
 
         let section = response
@@ -835,13 +841,18 @@ impl TaskService for SacrumTaskService {
             "done": true,
             "done_at": now,
         });
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let response = self.fetch_task_response(id).await?;
 
         let section = response
@@ -873,10 +884,11 @@ impl TaskService for SacrumTaskService {
             variables["done_at"] = Value::Null;
         }
 
-        self.client
-            .execute_void(tasks::UPDATE_SECTION, variables)
+        let updated: SectionResponse = self
+            .client
+            .execute(tasks::UPDATE_SECTION, variables, "update_section")
             .await?;
-        Ok(())
+        section_response_to_section(&updated)
     }
 
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {
@@ -1772,7 +1784,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": false, "done_at": null } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "updated content",
+                    "section_order": 1,
+                    "done": false,
+                    "done_at": null
+                } }
             })))
             .mount(&server)
             .await;
@@ -2045,7 +2064,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "First",
+                    "section_order": 0,
+                    "done": true,
+                    "done_at": "2024-01-01T00:00:00Z"
+                } }
             })))
             .mount(&server)
             .await;
@@ -2081,7 +2107,14 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("UpdateSection"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+                "data": { "update_section": {
+                    "id": "sec-1",
+                    "section_type": "checklist_item",
+                    "content": "First",
+                    "section_order": 0,
+                    "done": true,
+                    "done_at": "2024-01-01T00:00:00Z"
+                } }
             })))
             .mount(&server)
             .await;

@@ -444,7 +444,7 @@ pub trait TaskService: Send + Sync {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()>;
+    ) -> ServiceResult<Section>;
 
     /// Remove a section by its ordinal (order field value)
     ///
@@ -455,7 +455,7 @@ pub trait TaskService: Send + Sync {
         id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()>;
+    ) -> ServiceResult<Section>;
 
     /// Mark a checklist item section as done by section_order
     ///
@@ -465,7 +465,11 @@ pub trait TaskService: Send + Sync {
     ///
     /// * `id` - The task ID
     /// * `section_order` - The section_order value of the checklist item to mark as done
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()>;
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section>;
 
     /// Toggle the done status of a checklist item section by section_order
     ///
@@ -475,7 +479,11 @@ pub trait TaskService: Send + Sync {
     ///
     /// * `id` - The task ID
     /// * `section_order` - The section_order value of the checklist item to toggle
-    async fn toggle_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()>;
+    async fn toggle_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section>;
 
     /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()>;

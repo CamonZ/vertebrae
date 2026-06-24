@@ -7,7 +7,7 @@ use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermi
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     CreateClaudeSessionInput, InitializeProjectResult, PermissionDecisionBehavior,
-    ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog, Step, StepExecution,
+    ResolvePermissionRequestInput, SacrumConfigStatus, Section, SessionLog, Step, StepExecution,
     StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
@@ -2036,7 +2036,7 @@ pub async fn add_section(
     task_id: String,
     section_type: String,
     content: Option<String>,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "add_section called with task_id: {}, section_type: {}",
         task_id,
@@ -2065,10 +2065,10 @@ pub async fn add_section(
         refs: Vec::new(),
     };
 
-    service.tasks().add_section(&task_id, section).await?;
+    let created = service.tasks().add_section(&task_id, section).await?;
 
     log::info!("Successfully added section to task: {}", task_id);
-    Ok(())
+    Ok(created.into())
 }
 
 /// Edit a section's content by its ordinal (position)
@@ -2082,7 +2082,7 @@ pub async fn edit_section(
     section_type: String,
     ordinal: u32,
     new_content: String,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "edit_section called with task_id: {}, section_type: {}, ordinal: {}",
         task_id,
@@ -2100,13 +2100,13 @@ pub async fn edit_section(
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
 
-    service
+    let updated = service
         .tasks()
         .edit_section_by_ordinal(&task_id, parsed_type, ordinal, &new_content)
         .await?;
 
     log::info!("Successfully edited section in task: {}", task_id);
-    Ok(())
+    Ok(updated.into())
 }
 
 /// Toggle the completion status of a checklist item
@@ -2119,7 +2119,7 @@ pub async fn toggle_checklist_item_done(
     state: State<'_, AppState>,
     task_id: String,
     ordinal: u32,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "toggle_checklist_item_done called with task_id: {}, ordinal: {}",
         task_id,
@@ -2132,7 +2132,7 @@ pub async fn toggle_checklist_item_done(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Use service method to toggle the checklist item done status
-    service
+    let updated = service
         .tasks()
         .toggle_checklist_item_done(&task_id, ordinal)
         .await?;
@@ -2141,7 +2141,7 @@ pub async fn toggle_checklist_item_done(
         "Successfully toggled checklist item done status for task: {}",
         task_id
     );
-    Ok(())
+    Ok(updated.into())
 }
 
 /// Remove a section from a task by its ordinal (position)
@@ -2155,7 +2155,7 @@ pub async fn remove_section(
     task_id: String,
     section_type: String,
     ordinal: u32,
-) -> Result<(), CommandError> {
+) -> Result<Section, CommandError> {
     log::info!(
         "remove_section called with task_id: {}, section_type: {}, ordinal: {}",
         task_id,
@@ -2173,13 +2173,13 @@ pub async fn remove_section(
         .parse::<vertebrae_core::SectionType>()
         .map_err(|e| CommandError { message: e })?;
 
-    service
+    let removed = service
         .tasks()
         .remove_section_by_ordinal(&task_id, parsed_type, ordinal)
         .await?;
 
     log::info!("Successfully removed section from task: {}", task_id);
-    Ok(())
+    Ok(removed.into())
 }
 
 /// Add a code reference to a testing criterion section

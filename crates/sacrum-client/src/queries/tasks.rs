@@ -351,7 +351,12 @@ pub const UPDATE_SECTION: &str = r#"
             done: $done,
             done_at: $done_at
         ) {
-            id done done_at
+            id
+            section_type
+            content
+            section_order
+            done
+            done_at
         }
     }
 "#;

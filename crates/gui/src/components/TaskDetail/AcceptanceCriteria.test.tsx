@@ -3,14 +3,30 @@ import { screen, fireEvent, waitFor } from "@testing-library/react";
 import { render } from "../../test/test-utils";
 import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import type { Section } from "../../bindings";
+import * as query from "../../query";
 
 vi.mock("../../bindings", () => ({
   commands: {
-    toggleChecklistItemDone: vi
-      .fn()
-      .mockResolvedValue({ status: "ok", data: null }),
+    toggleChecklistItemDone: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        type: "testing_criterion",
+        content: "Criterion",
+        order: 0,
+        done: true,
+        done_at: null,
+      },
+    }),
   },
 }));
+
+vi.mock("../../query", async () => {
+  const actual = await vi.importActual("../../query");
+  return {
+    ...actual,
+    updateTaskSectionsInQueryCache: vi.fn(),
+  };
+});
 
 function createCriterion(
   overrides: Partial<Section> & { content: string }
@@ -336,7 +352,6 @@ describe("AcceptanceCriteria", () => {
   describe("toggle interaction", () => {
     it("calls toggleChecklistItemDone when criterion is clicked", async () => {
       const { commands } = await import("../../bindings");
-      const onChanged = vi.fn();
 
       const criteria = [
         createCriterion({
@@ -350,7 +365,6 @@ describe("AcceptanceCriteria", () => {
         <AcceptanceCriteria
           criteria={criteria}
           taskId="task-1"
-          onSectionsChanged={onChanged}
         />
       );
 
@@ -365,6 +379,11 @@ describe("AcceptanceCriteria", () => {
           2
         );
       });
+      expect(query.updateTaskSectionsInQueryCache).toHaveBeenCalledWith(
+        "task-1",
+        expect.objectContaining({ done: true }),
+        "upsert"
+      );
     });
   });
 

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import type { Section, CodeRef } from "../../bindings";
 import { commands } from "../../bindings";
+import { updateTaskSectionsInQueryCache } from "../../query";
 
 interface AcceptanceCriteriaProps {
   criteria: Section[];
@@ -169,7 +170,6 @@ function CriterionItem({
 export function AcceptanceCriteria({
   criteria,
   taskId,
-  onSectionsChanged,
 }: AcceptanceCriteriaProps) {
   const sortedCriteria = useMemo(
     () => [...criteria].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
@@ -192,13 +192,13 @@ export function AcceptanceCriteria({
         if (result.status === "error") {
           console.error("Failed to toggle criterion:", result.error.message);
         } else {
-          onSectionsChanged?.();
+          updateTaskSectionsInQueryCache(taskId, result.data, "upsert");
         }
       } catch (err) {
         console.error("Failed to toggle criterion:", err);
       }
     },
-    [taskId, onSectionsChanged]
+    [taskId]
   );
 
   if (totalCount === 0) {

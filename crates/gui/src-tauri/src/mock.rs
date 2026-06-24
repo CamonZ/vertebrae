@@ -452,7 +452,7 @@ impl TaskService for MockTaskService {
         section_type: SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -461,7 +461,7 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == section_type && sec.order == Some(ordinal) {
                 sec.content = new_content.to_string();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Section not found"))
@@ -472,18 +472,25 @@ impl TaskService for MockTaskService {
         id: &str,
         section_type: SectionType,
         ordinal: u32,
-    ) -> ServiceResult<()> {
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
-        task.sections
-            .retain(|s| !(s.section_type == section_type && s.order == Some(ordinal)));
-        Ok(())
+        let index = task
+            .sections
+            .iter()
+            .position(|s| s.section_type == section_type && s.order == Some(ordinal))
+            .ok_or_else(|| ServiceError::validation_failed("Section not found"))?;
+        Ok(task.sections.remove(index))
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(
+        &self,
+        id: &str,
+        section_order: u32,
+    ) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -492,13 +499,13 @@ impl TaskService for MockTaskService {
         for sec in &mut task.sections {
             if sec.section_type == SectionType::ChecklistItem && sec.order == Some(section_order) {
                 sec.mark_done();
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
-        Ok(())
+        Err(ServiceError::validation_failed("Checklist item not found"))
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<Section> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
@@ -513,7 +520,7 @@ impl TaskService for MockTaskService {
                 } else {
                     sec.mark_done();
                 }
-                return Ok(());
+                return Ok(sec.clone());
             }
         }
         Err(ServiceError::validation_failed("Checklist item not found"))

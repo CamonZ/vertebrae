@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { TaskSections } from "./TaskSections";
 import type { Section, SectionType } from "../../bindings";
 import * as bindings from "../../bindings";
+import * as query from "../../query";
 
 // Mock the bindings commands
 vi.mock("../../bindings", async () => {
@@ -16,6 +17,14 @@ vi.mock("../../bindings", async () => {
       removeSection: vi.fn(),
       toggleChecklistItemDone: vi.fn(),
     },
+  };
+});
+
+vi.mock("../../query", async () => {
+  const actual = await vi.importActual("../../query");
+  return {
+    ...actual,
+    updateTaskSectionsInQueryCache: vi.fn(),
   };
 });
 
@@ -176,7 +185,7 @@ describe("TaskSections", () => {
 
       vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
-        data: null,
+        data: { ...sections[0], done: true },
       });
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -226,7 +235,7 @@ describe("TaskSections", () => {
 
       vi.mocked(bindings.commands.editSection).mockResolvedValue({
         status: "ok",
-        data: null,
+        data: { ...sections[0], content: "Updated" },
       });
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -261,7 +270,7 @@ describe("TaskSections", () => {
 
       vi.mocked(bindings.commands.removeSection).mockResolvedValue({
         status: "ok",
-        data: null,
+        data: sections[0],
       });
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -284,7 +293,11 @@ describe("TaskSections", () => {
     it("calls addSection when new section is added", async () => {
       vi.mocked(bindings.commands.addSection).mockResolvedValue({
         status: "ok",
-        data: null,
+        data: createSection({
+          type: "checklist_item",
+          content: "New item",
+          order: 0,
+        }),
       });
 
       render(<TaskSections {...defaultProps} />);
@@ -317,32 +330,30 @@ describe("TaskSections", () => {
   });
 
   describe("callbacks", () => {
-    it("calls onSectionsChanged after successful operations", async () => {
+    it("updates the task sections cache after successful operations", async () => {
       const sections = [
         createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
       ];
 
-      const onSectionsChanged = vi.fn();
+      const updatedSection = { ...sections[0], done: true };
 
       vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
-        data: null,
+        data: updatedSection,
       });
 
-      render(
-        <TaskSections
-          {...defaultProps}
-          sections={sections}
-          onSectionsChanged={onSectionsChanged}
-        />
-      );
+      render(<TaskSections {...defaultProps} sections={sections} />);
 
       // Click on the checkbox button to toggle done
       const checkboxButton = screen.getByTitle("Mark as done");
       await userEvent.click(checkboxButton);
 
       await waitFor(() => {
-        expect(onSectionsChanged).toHaveBeenCalled();
+        expect(query.updateTaskSectionsInQueryCache).toHaveBeenCalledWith(
+          "task-123",
+          updatedSection,
+          "upsert"
+        );
       });
     });
   });
