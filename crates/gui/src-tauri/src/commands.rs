@@ -929,24 +929,14 @@ pub async fn get_workflow_with_tasks(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow_service = service.workflows();
-
-    // Get the workflow
-    let workflow = workflow_service.get_workflow(&id).await?;
-
-    // Get tasks associated with this workflow using the service
-    let workflow_id_str = workflow.id.clone().unwrap_or_default();
-    let filter = vertebrae_core::TaskFilter::new().with_workflow_id(workflow_id_str);
-    let tasks: Vec<Task> = service
-        .tasks()
-        .list_tasks(&filter)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let bundle = service
+        .workflows()
+        .get_workflow_with_tasks(service.tasks(), &id)
+        .await?;
+    let tasks: Vec<Task> = bundle.tasks.into_iter().map(Into::into).collect();
 
     Ok(WorkflowWithTasks {
-        workflow: workflow.into(),
+        workflow: bundle.workflow.into(),
         tasks,
     })
 }

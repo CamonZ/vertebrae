@@ -9,22 +9,27 @@ use std::collections::HashMap;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
+use vertebrae_core::service::TaskService;
 use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
+    WorkflowTasksBundle,
 };
 
 use crate::api_types::ShortIdResponse;
 use crate::api_types::{
-    PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
+    PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse,
+    WorkflowTasksCompoundResponse, WorkflowTransitionResponse,
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::pipeline::PIPELINE_SUMMARY;
 use crate::queries::steps::{CREATE_STEP, STEP_FIELDS, SYNC_STEP_TRANSITIONS};
-use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
+use crate::queries::tasks::{self, ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
     CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
-    GET_WORKFLOW, LIST_WORKFLOWS, RESOLVE_WORKFLOW_SHORT_ID, UPDATE_WORKFLOW, WORKFLOW_FIELDS,
+    GET_WORKFLOW, GET_WORKFLOW_WITH_TASKS, LIST_WORKFLOWS, RESOLVE_WORKFLOW_SHORT_ID,
+    UPDATE_WORKFLOW, WORKFLOW_FIELDS,
 };
+use crate::task_service::SacrumTaskService;
 
 /// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -255,6 +260,43 @@ impl WorkflowService for SacrumWorkflowService {
         let response: WorkflowWithSteps =
             self.client.execute(&query, variables, "workflow").await?;
         Ok(self.response_to_workflow(&response.workflow))
+    }
+
+    async fn get_workflow_with_tasks(
+        &self,
+        _tasks: &dyn TaskService,
+        id: &str,
+    ) -> ServiceResult<WorkflowTasksBundle> {
+        let query = with_fragments(
+            GET_WORKFLOW_WITH_TASKS,
+            &[WORKFLOW_FIELDS, tasks::TASK_FIELDS],
+        );
+        let variables = json!({
+            "project_id": self.client.project_id(),
+            "workflow_id": id,
+        });
+
+        let response: WorkflowTasksCompoundResponse =
+            self.client.execute_compound(&query, variables).await?;
+        let (workflow_names, step_names) =
+            SacrumTaskService::lookups_from_workflows(&response.workflows);
+        let task_service = SacrumTaskService::new(self.client.clone());
+        let tasks = response
+            .tasks
+            .iter()
+            .map(|task| {
+                task_service.response_to_task_with_lookups(
+                    task,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                )
+            })
+            .collect::<ServiceResult<Vec<_>>>()?;
+
+        Ok(WorkflowTasksBundle {
+            workflow: self.response_to_workflow(&response.workflow),
+            tasks,
+        })
     }
 
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {

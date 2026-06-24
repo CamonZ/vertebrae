@@ -185,6 +185,32 @@ pub const GET_TASK_TITLE: &str = r#"
     }
 "#;
 
+/// Fetch the optional relationship roots needed by `vtb show`.
+/// NOTE: Prepend TASK_SUMMARY_FIELDS, WORKFLOW_FIELDS, and TASK_RUN_FIELDS.
+pub const SHOW_TASK_RELATED: &str = r#"
+    query ShowTaskRelated(
+        $project_id: Uuid4!,
+        $task_id: Uuid4!,
+        $parent_id: Uuid4!,
+        $include_parent: Boolean!,
+        $workflow_id: Uuid4!,
+        $include_workflow: Boolean!
+    ) {
+        parent: task(id: $parent_id) @include(if: $include_parent) {
+            ...TaskSummaryFields
+        }
+        workflow(id: $workflow_id) @include(if: $include_workflow) {
+            ...WorkflowFields
+        }
+        task_runs(task_id: $task_id) {
+            ...TaskRunFields
+        }
+        workflows(project_id: $project_id) {
+            ...WorkflowFields
+        }
+    }
+"#;
+
 /// Find dependency path between two tasks.
 /// Returns a flat list of task IDs.
 pub const FIND_PATH: &str = r#"

@@ -5,7 +5,8 @@
 //! task-workflow assignments, and workflow transitions.
 
 use crate::error::ServiceResult;
-use crate::models::{Workflow, WorkflowTransition};
+use crate::models::{Task, TaskFilter, Workflow, WorkflowTransition};
+use crate::service::TaskService;
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -242,6 +243,13 @@ pub struct WorkflowInfo {
     pub next_step_name: Option<String>,
 }
 
+/// Workflow and associated tasks loaded for board-style GUI views.
+#[derive(Debug, Clone)]
+pub struct WorkflowTasksBundle {
+    pub workflow: Workflow,
+    pub tasks: Vec<Task>,
+}
+
 /// Service trait for workflow management operations
 ///
 /// This trait defines the interface for all workflow-related business logic.
@@ -272,6 +280,21 @@ pub trait WorkflowService: Send + Sync {
     ///
     /// ID lookups are case-insensitive.
     async fn get_workflow(&self, id: &str) -> ServiceResult<Workflow>;
+
+    /// Get a workflow plus tasks assigned to it.
+    ///
+    /// Backends may override this to load both roots in one request.
+    async fn get_workflow_with_tasks(
+        &self,
+        tasks: &dyn TaskService,
+        id: &str,
+    ) -> ServiceResult<WorkflowTasksBundle> {
+        let workflow = self.get_workflow(id).await?;
+        let workflow_id = workflow.id.clone().unwrap_or_default();
+        let filter = TaskFilter::new().with_workflow_id(workflow_id);
+        let tasks = tasks.list_tasks(&filter).await?;
+        Ok(WorkflowTasksBundle { workflow, tasks })
+    }
 
     /// Resolve a short ID prefix (first 8 hex characters of UUID) to a full workflow ID.
     ///

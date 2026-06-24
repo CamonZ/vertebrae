@@ -11,14 +11,16 @@ use vertebrae_core::models::Task;
 use vertebrae_core::models::{
     BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRunControls,
 };
-use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
+use vertebrae_core::service::{CreateTaskOptions, TaskService, TaskShowBundle, UpdateTaskOptions};
+use vertebrae_core::workflow_service::WorkflowInfo;
 
 use crate::api_types::{
-    CodeRefResponse, SectionResponse, ShortIdResponse, TaskResponse, TaskRunControlsResponse,
-    WorkflowResponse,
+    CodeRefResponse, SectionResponse, ShortIdResponse, ShowTaskRelatedResponse, TaskResponse,
+    TaskRunControlsResponse, TaskTitleResponse, WorkflowResponse,
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::execution_service::SacrumExecutionService;
+use crate::queries::executions::TASK_RUN_FIELDS;
 use crate::queries::tasks;
 use crate::queries::workflows as wf_queries;
 
@@ -43,6 +45,12 @@ impl SacrumTaskService {
         let workflows: Vec<WorkflowResponse> =
             self.client.execute(&query, variables, "workflows").await?;
 
+        Ok(Self::lookups_from_workflows(&workflows))
+    }
+
+    pub(crate) fn lookups_from_workflows(
+        workflows: &[WorkflowResponse],
+    ) -> (HashMap<String, String>, HashMap<String, String>) {
         let mut workflow_names = HashMap::new();
         let mut step_names = HashMap::new();
 
@@ -50,10 +58,42 @@ impl SacrumTaskService {
             for step in &wf.workflow_steps {
                 step_names.insert(step.id.clone(), step.name.clone());
             }
-            workflow_names.insert(wf.id, wf.name);
+            workflow_names.insert(wf.id.clone(), wf.name.clone());
         }
 
-        Ok((workflow_names, step_names))
+        (workflow_names, step_names)
+    }
+
+    fn workflow_info_from_response(
+        workflow: &WorkflowResponse,
+        current_step_id: Option<&str>,
+    ) -> WorkflowInfo {
+        let steps = &workflow.workflow_steps;
+        let total_steps = steps.len();
+        let current_step_index = current_step_id
+            .and_then(|id| steps.iter().position(|step| step.id == id))
+            .unwrap_or(0);
+
+        let current_step_name = current_step_id
+            .and_then(|id| steps.iter().find(|step| step.id == id))
+            .map(|step| step.name.clone())
+            .unwrap_or_default();
+
+        WorkflowInfo {
+            id: workflow.id.clone(),
+            name: workflow.name.clone(),
+            current_step_id: current_step_id.map(ToOwned::to_owned),
+            current_step_name,
+            current_step_index,
+            total_steps,
+            prev_step_name: current_step_index
+                .checked_sub(1)
+                .and_then(|index| steps.get(index))
+                .map(|step| step.name.clone()),
+            next_step_name: steps
+                .get(current_step_index + 1)
+                .map(|step| step.name.clone()),
+        }
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
@@ -63,7 +103,7 @@ impl SacrumTaskService {
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model with optional lookups
-    fn response_to_task_with_lookups(
+    pub(crate) fn response_to_task_with_lookups(
         &self,
         response: &TaskResponse,
         workflow_names: Option<&HashMap<String, String>>,
@@ -393,17 +433,116 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
-        #[derive(serde::Deserialize)]
-        struct TaskTitleResponse {
-            title: String,
-        }
-
         let variables = json!({ "id": id });
         let response: TaskTitleResponse = self
             .client
             .execute(tasks::GET_TASK_TITLE, variables, "task")
             .await?;
         Ok(response.title)
+    }
+
+    async fn get_task_titles(&self, ids: &[String]) -> ServiceResult<Vec<(String, String)>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut variable_defs = Vec::with_capacity(ids.len());
+        let mut roots = Vec::with_capacity(ids.len());
+        let mut variables = serde_json::Map::new();
+
+        for (index, id) in ids.iter().enumerate() {
+            let variable = format!("id{index}");
+            let alias = format!("task{index}");
+            variable_defs.push(format!("${variable}: Uuid4!"));
+            roots.push(format!("{alias}: task(id: ${variable}) {{ id title }}"));
+            variables.insert(variable, json!(id));
+        }
+
+        let query = format!(
+            "query TaskTitles({}) {{ {} }}",
+            variable_defs.join(", "),
+            roots.join(" ")
+        );
+
+        let response: HashMap<String, Option<TaskTitleResponse>> = self
+            .client
+            .execute_compound(&query, Value::Object(variables))
+            .await?;
+
+        ids.iter()
+            .enumerate()
+            .map(|(index, requested_id)| {
+                let alias = format!("task{index}");
+                let title = response
+                    .get(&alias)
+                    .and_then(|task| task.as_ref())
+                    .ok_or_else(|| ServiceError::task_not_found(requested_id))?;
+                Ok((requested_id.clone(), title.title.clone()))
+            })
+            .collect()
+    }
+
+    async fn get_task_show_bundle(&self, id: &str) -> ServiceResult<Option<TaskShowBundle>> {
+        let task_response = self.fetch_task_response(id).await?;
+        let include_parent = task_response.parent_id.is_some();
+        let include_workflow = task_response.workflow_id.is_some();
+        let parent_id = task_response
+            .parent_id
+            .clone()
+            .unwrap_or_else(|| id.to_string());
+        let workflow_id = task_response
+            .workflow_id
+            .clone()
+            .unwrap_or_else(|| id.to_string());
+
+        let query = with_fragments(
+            tasks::SHOW_TASK_RELATED,
+            &[
+                tasks::TASK_SUMMARY_FIELDS,
+                wf_queries::WORKFLOW_FIELDS,
+                TASK_RUN_FIELDS,
+            ],
+        );
+        let variables = json!({
+            "project_id": self.client.project_id,
+            "task_id": id,
+            "parent_id": parent_id,
+            "include_parent": include_parent,
+            "workflow_id": workflow_id,
+            "include_workflow": include_workflow,
+        });
+
+        let related: ShowTaskRelatedResponse =
+            self.client.execute_compound(&query, variables).await?;
+        let (workflow_names, step_names) = Self::lookups_from_workflows(&related.workflows);
+
+        let task = self.response_to_task_with_lookups(
+            &task_response,
+            Some(&workflow_names),
+            Some(&step_names),
+        )?;
+        let parent = related
+            .parent
+            .as_ref()
+            .map(|parent| {
+                self.response_to_task_with_lookups(parent, Some(&workflow_names), Some(&step_names))
+            })
+            .transpose()?;
+        let workflow = related.workflow.as_ref().map(|workflow| {
+            Self::workflow_info_from_response(workflow, task.current_step_id.as_deref())
+        });
+        let run_history = related
+            .task_runs
+            .iter()
+            .map(SacrumExecutionService::response_to_task_run)
+            .collect();
+
+        Ok(Some(TaskShowBundle {
+            task,
+            parent,
+            workflow,
+            run_history,
+        }))
     }
 
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {

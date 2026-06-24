@@ -169,6 +169,70 @@ impl GraphqlClient {
         Ok(result)
     }
 
+    /// Execute a GraphQL query and deserialize the full response data object.
+    ///
+    /// Use this for compound queries with multiple top-level roots, where no
+    /// single `data.{field}` should be extracted.
+    pub async fn execute_compound<T: DeserializeOwned>(
+        &self,
+        query: &str,
+        variables: Value,
+    ) -> SacrumClientResult<T> {
+        let request_body = GraphqlRequest { query, variables };
+        let op = extract_operation_name(query);
+
+        let start = std::time::Instant::now();
+        log::info!("[GQL] {} (compound)", op);
+
+        let response = self
+            .client
+            .post(&self.endpoint)
+            .json(&request_body)
+            .send()
+            .await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let message = response.text().await.unwrap_or_default();
+            log::info!(
+                "[GQL] {} -> {} ({}ms)",
+                op,
+                status_code,
+                start.elapsed().as_millis()
+            );
+            return Err(SacrumClientError::ApiError {
+                status: status_code,
+                message,
+            });
+        }
+
+        let bytes = response.bytes().await?;
+        let gql_response: GraphqlResponse<T> = serde_json::from_slice(&bytes)?;
+
+        log::info!(
+            "[GQL] {} -> {} ({}ms)",
+            op,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+
+        if let Some(errors) = gql_response.errors
+            && !errors.is_empty()
+        {
+            let messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
+            let message = messages.join("; ");
+            return Err(SacrumClientError::GraphqlError { messages, message });
+        }
+
+        gql_response
+            .data
+            .ok_or_else(|| SacrumClientError::GraphqlError {
+                messages: vec!["No data in response".to_string()],
+                message: "No data in response".to_string(),
+            })
+    }
+
     /// Execute a GraphQL mutation that doesn't need to return data
     ///
     /// Checks for HTTP errors and GraphQL-level errors but doesn't

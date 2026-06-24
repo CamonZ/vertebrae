@@ -6,7 +6,10 @@
 
 use crate::error::ServiceResult;
 use crate::models::Task;
-use crate::models::{BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter};
+use crate::models::{
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRun,
+};
+use crate::workflow_service::WorkflowInfo;
 use async_trait::async_trait;
 
 use std::sync::Arc;
@@ -133,6 +136,16 @@ pub struct UpdateTaskOptions {
     pub worktree: Option<Option<String>>,
 }
 
+/// Optimized payload for `vtb show` implementations that can batch the
+/// task's related reads.
+#[derive(Debug, Clone)]
+pub struct TaskShowBundle {
+    pub task: Task,
+    pub parent: Option<Task>,
+    pub workflow: Option<WorkflowInfo>,
+    pub run_history: Vec<TaskRun>,
+}
+
 impl UpdateTaskOptions {
     /// Create new empty update options
     pub fn new() -> Self {
@@ -254,6 +267,23 @@ pub trait TaskService: Send + Sync {
     /// Get only a task's display title.
     async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
         Ok(self.get_task(id).await?.title)
+    }
+
+    /// Get task display titles in input order.
+    async fn get_task_titles(&self, ids: &[String]) -> ServiceResult<Vec<(String, String)>> {
+        let mut titles = Vec::with_capacity(ids.len());
+        for id in ids {
+            titles.push((id.clone(), self.get_task_title(id).await?));
+        }
+        Ok(titles)
+    }
+
+    /// Optionally return a batched payload for `vtb show`.
+    ///
+    /// The default returns `None`; callers should fall back to their existing
+    /// serial reads.
+    async fn get_task_show_bundle(&self, _id: &str) -> ServiceResult<Option<TaskShowBundle>> {
+        Ok(None)
     }
 
     /// Resolve a short ID prefix (first 8 hex characters of UUID) to the full task ID.

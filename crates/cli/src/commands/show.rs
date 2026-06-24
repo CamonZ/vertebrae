@@ -170,13 +170,47 @@ impl ShowCommand {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Fetch the main task using service layer (includes blockers, dependents, children)
-        let task = self.fetch_task(services, &id).await?;
+        let bundle = services.tasks().get_task_show_bundle(&id).await?;
 
-        // Fetch parent separately (not included in GET_TASK response)
-        let parent = self
-            .fetch_parent(services, task.parent_id.as_deref())
-            .await?;
+        // Fetch the main task using service layer (includes blockers, dependents, children)
+        let (task, parent, workflow, run_history) = if let Some(bundle) = bundle {
+            (
+                task_to_row(bundle.task),
+                bundle.parent.map(|parent| task_to_summary(&parent)),
+                bundle.workflow,
+                bundle
+                    .run_history
+                    .iter()
+                    .map(TaskRunSummary::from)
+                    .collect(),
+            )
+        } else {
+            let task = self.fetch_task(services, &id).await?;
+
+            // Fetch parent separately (not included in GET_TASK response)
+            let parent = self
+                .fetch_parent(services, task.parent_id.as_deref())
+                .await?;
+
+            // Fetch workflow info if task is assigned to a workflow
+            let workflow = self
+                .fetch_workflow_info(
+                    services.workflows(),
+                    task.workflow_id.as_deref(),
+                    task.current_step_id.as_deref(),
+                )
+                .await?;
+
+            let run_history: Vec<TaskRunSummary> = services
+                .executions()
+                .task_runs(&id)
+                .await?
+                .iter()
+                .map(TaskRunSummary::from)
+                .collect();
+
+            (task, parent, workflow, run_history)
+        };
 
         // Convert embedded relationships to TaskSummary
         let children: Vec<TaskSummary> = task.children.iter().map(task_to_summary).collect();
@@ -191,23 +225,7 @@ impl ShowCommand {
 
         let blocks: Vec<TaskSummary> = task.dependents.iter().map(task_to_summary).collect();
 
-        // Fetch workflow info if task is assigned to a workflow
-        let workflow = self
-            .fetch_workflow_info(
-                services.workflows(),
-                task.workflow_id.as_deref(),
-                task.current_step_id.as_deref(),
-            )
-            .await?;
-
         let run_controls = task.run_controls.clone();
-        let run_history: Vec<TaskRunSummary> = services
-            .executions()
-            .task_runs(&id)
-            .await?
-            .iter()
-            .map(TaskRunSummary::from)
-            .collect();
 
         // Convert sections - filter out any without required fields
         let sections: Vec<Section> = task
@@ -322,62 +340,7 @@ impl ShowCommand {
         let task = services.tasks().get_task(id).await?;
 
         // Convert Task to TaskRow for display
-        Ok(TaskRow {
-            id: task.id,
-            title: task.title,
-            description: task.description,
-            level: task.level.as_str().to_string(),
-            workflow_name: task.workflow_name,
-            step_name: task.step_name,
-            priority: task.priority.map(|p| p.as_str().to_string()),
-            tags: task.tags,
-            created_at: task.created_at,
-            updated_at: task.updated_at,
-            completed_at: task.completed_at,
-            archived: task.archived,
-            worktree: task.worktree,
-            rejection_reason: task.rejection_reason,
-            workflow_id: task.workflow_id,
-            current_step_id: task.current_step_id,
-            run_controls: task.run_controls,
-            parent_id: task.parent_id,
-            sections: task
-                .sections
-                .into_iter()
-                .map(|s| SectionRow {
-                    section_type: Some(s.section_type.as_str().to_string()),
-                    content: Some(s.content),
-                    order: s.order,
-                    done: s.done,
-                    done_at: s.done_at,
-                    refs: s
-                        .refs
-                        .into_iter()
-                        .map(|r| CodeRefRow {
-                            path: Some(r.path),
-                            line_start: r.line_start,
-                            line_end: r.line_end,
-                            name: r.name,
-                            description: r.description,
-                        })
-                        .collect(),
-                })
-                .collect(),
-            code_refs: task
-                .code_refs
-                .into_iter()
-                .map(|r| CodeRefRow {
-                    path: Some(r.path),
-                    line_start: r.line_start,
-                    line_end: r.line_end,
-                    name: r.name,
-                    description: r.description,
-                })
-                .collect(),
-            blockers: task.blockers,
-            dependents: task.dependents,
-            children: task.children,
-        })
+        Ok(task_to_row(task))
     }
 
     /// Fetch the parent task (if any) using the service layer.
@@ -422,6 +385,66 @@ impl ShowCommand {
 /// Convert a core Task to a TaskSummary for display in relationships.
 fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
     TaskSummary::from(task)
+}
+
+/// Convert a core Task to the local display row shape.
+fn task_to_row(task: vertebrae_core::Task) -> TaskRow {
+    TaskRow {
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        level: task.level.as_str().to_string(),
+        workflow_name: task.workflow_name,
+        step_name: task.step_name,
+        priority: task.priority.map(|p| p.as_str().to_string()),
+        tags: task.tags,
+        created_at: task.created_at,
+        updated_at: task.updated_at,
+        completed_at: task.completed_at,
+        archived: task.archived,
+        worktree: task.worktree,
+        rejection_reason: task.rejection_reason,
+        workflow_id: task.workflow_id,
+        current_step_id: task.current_step_id,
+        run_controls: task.run_controls,
+        parent_id: task.parent_id,
+        sections: task
+            .sections
+            .into_iter()
+            .map(|s| SectionRow {
+                section_type: Some(s.section_type.as_str().to_string()),
+                content: Some(s.content),
+                order: s.order,
+                done: s.done,
+                done_at: s.done_at,
+                refs: s
+                    .refs
+                    .into_iter()
+                    .map(|r| CodeRefRow {
+                        path: Some(r.path),
+                        line_start: r.line_start,
+                        line_end: r.line_end,
+                        name: r.name,
+                        description: r.description,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        code_refs: task
+            .code_refs
+            .into_iter()
+            .map(|r| CodeRefRow {
+                path: Some(r.path),
+                line_start: r.line_start,
+                line_end: r.line_end,
+                name: r.name,
+                description: r.description,
+            })
+            .collect(),
+        blockers: task.blockers,
+        dependents: task.dependents,
+        children: task.children,
+    }
 }
 
 /// Format a TaskDetail for display
