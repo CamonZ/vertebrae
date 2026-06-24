@@ -2328,51 +2328,17 @@ pub async fn remove_code_refs(
     // Convert u32 indices to usize for internal use
     let indices_usize = indices.map(|v| v.into_iter().map(|i| i as usize).collect::<Vec<usize>>());
 
-    if indices_usize.is_none() {
-        service.tasks().remove_code_refs(&task_id, None).await?;
-        log::info!("Successfully removed code_refs from task: {}", task_id);
-        return Ok(());
-    }
+    let removed_count = indices_usize.as_ref().map_or(0, Vec::len);
+    service
+        .tasks()
+        .remove_code_refs(&task_id, indices_usize)
+        .await?;
 
-    // Get the task to find the code refs for selective removal.
-    let task = service.tasks().get_task(&task_id).await?;
-
-    // If indices are specified, remove only those. Otherwise remove all.
-    let to_remove = indices_usize.inspect(|idx_list| {
-        // Build list of code refs to keep (those not in indices)
-        let mut removed_count = 0;
-
-        for code_ref in task.code_refs.iter().enumerate() {
-            if idx_list.contains(&code_ref.0) {
-                removed_count += 1;
-            }
-        }
-
-        log::info!(
-            "Removing {} code refs from task: {}",
-            removed_count,
-            task_id
-        );
-    });
-
-    service.tasks().remove_code_refs(&task_id, None).await?;
-
-    for code_ref in task.code_refs.iter().enumerate() {
-        if let Some(ref idx_list) = to_remove {
-            if !idx_list.contains(&code_ref.0) {
-                let db_ref = vertebrae_core::CodeRef {
-                    path: code_ref.1.path.clone(),
-                    line_start: code_ref.1.line_start,
-                    line_end: code_ref.1.line_end,
-                    name: code_ref.1.name.clone(),
-                    description: code_ref.1.description.clone(),
-                };
-                service.tasks().add_code_ref(&task_id, db_ref).await?;
-            }
-        }
-    }
-
-    log::info!("Successfully removed code_refs from task: {}", task_id);
+    log::info!(
+        "Successfully removed {} code_refs from task: {}",
+        removed_count,
+        task_id
+    );
     Ok(())
 }
 
@@ -4302,6 +4268,42 @@ mod tests {
 
         let task = get_task(state, id).await.unwrap();
         assert!(task.code_refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_code_refs_selective_keeps_survivors() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        for path in ["a.rs", "b.rs", "c.rs"] {
+            add_code_ref(
+                state.clone(),
+                id.clone(),
+                path.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        }
+
+        remove_code_refs(state.clone(), id.clone(), Some(vec![1]))
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(
+            task.code_refs
+                .iter()
+                .map(|code_ref| code_ref.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.rs", "c.rs"]
+        );
     }
 
     #[tokio::test]
