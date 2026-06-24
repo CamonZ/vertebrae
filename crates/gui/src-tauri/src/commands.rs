@@ -2325,11 +2325,17 @@ pub async fn remove_code_refs(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task to find the code refs
-    let task = service.tasks().get_task(&task_id).await?;
-
     // Convert u32 indices to usize for internal use
     let indices_usize = indices.map(|v| v.into_iter().map(|i| i as usize).collect::<Vec<usize>>());
+
+    if indices_usize.is_none() {
+        service.tasks().remove_code_refs(&task_id, None).await?;
+        log::info!("Successfully removed code_refs from task: {}", task_id);
+        return Ok(());
+    }
+
+    // Get the task to find the code refs for selective removal.
+    let task = service.tasks().get_task(&task_id).await?;
 
     // If indices are specified, remove only those. Otherwise remove all.
     let to_remove = indices_usize.inspect(|idx_list| {
@@ -2390,9 +2396,6 @@ pub async fn replace_code_refs(
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
-
-    // Get the task to find existing refs
-    let _task = service.tasks().get_task(&task_id).await?;
 
     // Clear all existing refs and re-add them
     // This is a workaround since the service doesn't have a set_code_refs method
