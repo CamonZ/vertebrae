@@ -25,11 +25,6 @@ vi.mock("../bindings", () => ({
     createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
     sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    createChatSession: vi.fn(),
-    sendChatMessage: vi.fn(),
-    listChatSessions: vi.fn(),
-    listChatMessages: vi.fn(),
-    setActiveChatSessionId: vi.fn(),
     getCurrentProject: vi.fn().mockResolvedValue({
       status: "ok",
       data: "test-project",
@@ -986,21 +981,6 @@ describe("doStartSession", () => {
     );
   });
 
-  it("does not call Sacrum live chat commands for local session creation", async () => {
-    const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
-      setContextSummary: vi.fn(),
-      addMessage: vi.fn(),
-      setSessionLifecycle: vi.fn(),
-    };
-
-    await doStartSession(makeSession(), SESSION_ID, deps, "Hello");
-
-    expect(mockedCommands.createChatSession).not.toHaveBeenCalled();
-    expect(mockedCommands.sendChatMessage).not.toHaveBeenCalled();
-    expect(mockedCommands.setActiveChatSessionId).not.toHaveBeenCalled();
-  });
 });
 
 describe("doSendMessage", () => {
@@ -1119,17 +1099,6 @@ describe("doSendMessage", () => {
     );
   });
 
-  it("does not call Sacrum live chat commands when sending local messages", async () => {
-    const deps = {
-      addMessage: vi.fn(),
-      setSessionLifecycle: vi.fn(),
-    };
-
-    await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
-
-    expect(mockedCommands.sendChatMessage).not.toHaveBeenCalled();
-    expect(mockedCommands.createChatSession).not.toHaveBeenCalled();
-  });
 });
 
 describe("doCloseSession", () => {

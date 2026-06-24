@@ -9,7 +9,6 @@ const mockUseStepExecutionChangeListener = vi.fn();
 const mockUseSectionChangeListener = vi.fn();
 const mockUseSessionLogChangeListener = vi.fn();
 const mockUseStepTransitionChangeListener = vi.fn();
-const mockUseLiveChatChangeListener = vi.fn();
 
 vi.mock("../hooks", () => ({
   useTaskChangeListener: (...args: unknown[]) =>
@@ -28,8 +27,6 @@ vi.mock("../hooks", () => ({
     mockUseSessionLogChangeListener(...args),
   useStepTransitionChangeListener: (...args: unknown[]) =>
     mockUseStepTransitionChangeListener(...args),
-  useLiveChatChangeListener: (...args: unknown[]) =>
-    mockUseLiveChatChangeListener(...args),
 }));
 
 import { GlobalListeners } from "./GlobalListeners";
@@ -51,7 +48,6 @@ describe("GlobalListeners", () => {
     expect(mockUseSectionChangeListener).toHaveBeenCalled();
     expect(mockUseSessionLogChangeListener).toHaveBeenCalled();
     expect(mockUseStepTransitionChangeListener).toHaveBeenCalled();
-    expect(mockUseLiveChatChangeListener).toHaveBeenCalled();
   });
 
   it("calls each listener hook with no arguments (base store-level subscription)", () => {
@@ -65,6 +61,5 @@ describe("GlobalListeners", () => {
     expect(mockUseSectionChangeListener).toHaveBeenCalledWith();
     expect(mockUseSessionLogChangeListener).toHaveBeenCalledWith();
     expect(mockUseStepTransitionChangeListener).toHaveBeenCalledWith();
-    expect(mockUseLiveChatChangeListener).toHaveBeenCalledWith();
   });
 });

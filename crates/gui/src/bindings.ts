@@ -789,84 +789,12 @@ async closeClaudeSession(sessionId: string) : Promise<Result<null, ClaudeSession
     else return { status: "error", error: e  as any };
 }
 },
-async createChatSession() : Promise<Result<ChatSession, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("create_chat_session") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async sendChatMessage(chatSessionId: string, content: string, contentFormat: string | null, clientMessageId: string | null) : Promise<Result<ChatMessage, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("send_chat_message", { chatSessionId, content, contentFormat, clientMessageId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async getChatSession(chatSessionId: string) : Promise<Result<ChatSession | null, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_chat_session", { chatSessionId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async listChatSessions(limit: number | null) : Promise<Result<ChatSession[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_chat_sessions", { limit }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async deleteChatSession(chatSessionId: string) : Promise<Result<DeleteChatSessionResult, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("delete_chat_session", { chatSessionId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async listChatMessages(chatSessionId: string, limit: number | null, after: string | null) : Promise<Result<ChatMessage[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_chat_messages", { chatSessionId, limit, after }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 /**
  * Resolve a Claude permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("resolve_permission_request", { input }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Read the cached active chat session id for the currently selected project.
- * Returns `None` if no project is selected or no session has been cached.
- */
-async getActiveChatSessionId() : Promise<Result<string | null, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_active_chat_session_id") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Persist (or clear) the active chat session id for the currently selected
- * project so it can be restored on reopen / relaunch.
- */
-async setActiveChatSessionId(chatSessionId: string | null) : Promise<Result<null, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("set_active_chat_session_id", { chatSessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -953,9 +881,6 @@ claudeSessionWarningEvent: ClaudeSessionWarningEvent,
 claudeTextEvent: ClaudeTextEvent,
 claudeToolCallEvent: ClaudeToolCallEvent,
 claudeToolResultEvent: ClaudeToolResultEvent,
-liveChatEventCreatedEvent: LiveChatEventCreatedEvent,
-liveChatMessageCreatedEvent: LiveChatMessageCreatedEvent,
-liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
 projectInitProgressEvent: ProjectInitProgressEvent,
 sectionChangedEvent: SectionChangedEvent,
@@ -980,9 +905,6 @@ claudeSessionWarningEvent: "claude-session-warning-event",
 claudeTextEvent: "claude-text-event",
 claudeToolCallEvent: "claude-tool-call-event",
 claudeToolResultEvent: "claude-tool-result-event",
-liveChatEventCreatedEvent: "live-chat-event-created-event",
-liveChatMessageCreatedEvent: "live-chat-message-created-event",
-liveChatSessionChangedEvent: "live-chat-session-changed-event",
 permissionRequestEvent: "permission-request-event",
 projectInitProgressEvent: "project-init-progress-event",
 sectionChangedEvent: "section-changed-event",
@@ -1069,8 +991,6 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
-export type ChatMessage = { id: string; project_id: string; chat_session_id: string; role: string; content: string; content_format: string | null; client_message_id: string | null; inserted_at: string | null; updated_at: string | null }
-export type ChatSession = { id: string; project_id: string; status: string; session_kind: string | null; started_at: string | null; ended_at: string | null; stop_requested_at: string | null; inserted_at: string | null; updated_at: string | null }
 export type ClaudeModelCatalog = { defaultModelId: string; models: ClaudeModelOption[] }
 export type ClaudeModelOption = { id: string; label: string }
 /**
@@ -1218,7 +1138,6 @@ export type CreateClaudeSessionInput = { session_id: string; working_dir: string
  * Options for creating a workflow step.
  */
 export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; agents: string[]; skills: string[]; order: number; is_final: boolean; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null }
-export type DeleteChatSessionResult = { deleted_session_id: string; success: boolean }
 /**
  * Execution status - mirrors db::ExecutionStatus
  */
@@ -1262,21 +1181,6 @@ skills_target: string }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
-/**
- * Generic chat event for types not covered by the typed channel events
- * (e.g. future tool calls, streaming chunks) — `payload` is kept opaque
- * so new types reach the frontend without a binding rebuild.
- */
-export type LiveChatEventCreatedEvent = { event_id: string | null; chat_session_id: string | null; event_type: string | null; payload: JsonValue }
-export type LiveChatMessageCreatedEvent = { message_id: string; chat_session_id: string; 
-/**
- * Hoisted from `message.client_message_id` so the frontend can dedupe
- * against optimistic local messages even when `message` fails to
- * deserialize.
- */
-client_message_id: string | null; message: ChatMessage | null }
-export type LiveChatSessionChangeType = "Created" | "Updated"
-export type LiveChatSessionChangedEvent = { session_id: string; change_type: LiveChatSessionChangeType; session: ChatSession | null }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

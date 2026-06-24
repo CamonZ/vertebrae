@@ -4,7 +4,6 @@ import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
 import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
-import { LiveChatPanel } from "./LiveChatWindow";
 
 interface AppShellProps {
   children: ReactNode;
@@ -18,7 +17,6 @@ export function AppShell({ children }: AppShellProps) {
         <Sidebar />
         <div className="flex min-w-0 flex-1 overflow-hidden">
           <ContentArea>{children}</ContentArea>
-          <LiveChatPanel />
         </div>
       </div>
       <ChatWindowManager />

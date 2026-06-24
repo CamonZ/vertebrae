@@ -3,7 +3,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { Sidebar } from "./Sidebar";
-import { useStyleguideStore } from "../stores/styleguideStore";
 
 const mockGetCurrentProject = vi.fn();
 const mockGetProjects = vi.fn();
@@ -48,7 +47,6 @@ describe("Sidebar Traces nav", () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockUseWebSocketStatus.mockReturnValue("connected");
-    useStyleguideStore.setState({ isStyleguideNavVisible: false });
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
@@ -119,7 +117,6 @@ describe("Sidebar project switcher", () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockUseWebSocketStatus.mockReturnValue("connected");
-    useStyleguideStore.setState({ isStyleguideNavVisible: false });
     // A project is loaded so the avatar (and switcher) renders.
     mockGetCurrentProject.mockResolvedValue({
       status: "ok",
@@ -260,7 +257,6 @@ describe("Sidebar rail connection readout", () => {
     vi.clearAllMocks();
     window.localStorage.clear();
     mockUseWebSocketStatus.mockReturnValue("connected");
-    useStyleguideStore.setState({ isStyleguideNavVisible: false });
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
   });

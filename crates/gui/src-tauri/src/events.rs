@@ -263,41 +263,6 @@ pub enum SectionChangeType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct LiveChatSessionChangedEvent {
-    pub session_id: String,
-    pub change_type: LiveChatSessionChangeType,
-    pub session: Option<types::ChatSession>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub enum LiveChatSessionChangeType {
-    Created,
-    Updated,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct LiveChatMessageCreatedEvent {
-    pub message_id: String,
-    pub chat_session_id: String,
-    /// Hoisted from `message.client_message_id` so the frontend can dedupe
-    /// against optimistic local messages even when `message` fails to
-    /// deserialize.
-    pub client_message_id: Option<String>,
-    pub message: Option<types::ChatMessage>,
-}
-
-/// Generic chat event for types not covered by the typed channel events
-/// (e.g. future tool calls, streaming chunks) — `payload` is kept opaque
-/// so new types reach the frontend without a binding rebuild.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct LiveChatEventCreatedEvent {
-    pub event_id: Option<String>,
-    pub chat_session_id: Option<String>,
-    pub event_type: Option<String>,
-    pub payload: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct PermissionRequestEvent {
     pub request_id: String,
     pub session_id: Option<String>,

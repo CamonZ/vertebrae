@@ -7,7 +7,6 @@ import {
 } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
-import { StyleguideShortcut } from "./components/StyleguideShortcut";
 import { useTheme, useDensity } from "./hooks";
 import {
   ProjectSetupPage,
@@ -17,7 +16,6 @@ import {
   TracesPage,
   TaskDetailPage,
   StandaloneChatWindow,
-  StandaloneLiveChatWindow,
   StandaloneTracesPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
@@ -33,7 +31,6 @@ function RootLayout() {
 
   return (
     <AppShell>
-      <StyleguideShortcut />
       <Outlet />
     </AppShell>
   );
@@ -175,10 +172,6 @@ const appRoutes: RouteObject[] = [
   {
     path: "/chat",
     element: <StandaloneChatWindow />,
-  },
-  {
-    path: "/live-chat",
-    element: <StandaloneLiveChatWindow />,
   },
   {
     path: "/traces-window/:taskId",

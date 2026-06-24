@@ -46,7 +46,6 @@
 //! ```
 
 pub mod api_types;
-pub mod chat_service;
 pub mod client;
 pub mod config;
 pub mod error;
@@ -57,15 +56,13 @@ pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    ChatMessageResponse, ChatSessionResponse, CodeRefResponse, CreateProjectRequest,
-    DeleteChatSessionResponse, ErrorResponse, PipelineStepResponse, PipelineStepTransitionResponse,
-    PipelineTaskCountsResponse, PipelineWorkflowResponse, PipelineWorkflowTransitionResponse,
-    ProjectListResponse, ProjectResponse, SectionResponse, SessionLogResponse,
-    StepExecutionResponse, StepTransitionResponse, TaskResponse, TaskRunControlsResponse,
-    TaskRunResponse, TaskRunTraceResponse, WorkflowResponse, WorkflowStepResponse,
-    WorkflowTransitionResponse,
+    CodeRefResponse, CreateProjectRequest, ErrorResponse, PipelineStepResponse,
+    PipelineStepTransitionResponse, PipelineTaskCountsResponse, PipelineWorkflowResponse,
+    PipelineWorkflowTransitionResponse, ProjectListResponse, ProjectResponse, SectionResponse,
+    SessionLogResponse, StepExecutionResponse, StepTransitionResponse, TaskResponse,
+    TaskRunControlsResponse, TaskRunResponse, TaskRunTraceResponse, WorkflowResponse,
+    WorkflowStepResponse, WorkflowTransitionResponse,
 };
-pub use chat_service::SacrumChatService;
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
     GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,

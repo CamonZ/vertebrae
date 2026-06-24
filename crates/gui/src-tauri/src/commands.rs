@@ -6,20 +6,16 @@
 use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermissionDecision};
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    ChatMessage, ChatSession, CreateClaudeSessionInput, DeleteChatSessionResult,
-    InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestInput,
-    SacrumConfigStatus, SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions,
-    TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    CreateClaudeSessionInput, InitializeProjectResult, PermissionDecisionBehavior,
+    ResolvePermissionRequestInput, SacrumConfigStatus, SessionLog, Step, StepExecution,
+    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
-use vertebrae_core::{
-    ChatService, ListMessagesOptions, SendMessageOptions, StopRunTarget, VertebraeServices,
-};
+use vertebrae_core::{StopRunTarget, VertebraeServices};
 
 /// Application state holding the services
 pub struct AppState {
@@ -28,8 +24,6 @@ pub struct AppState {
     /// Raw Sacrum GraphQL client used for queries that bypass the service
     /// trait abstractions (e.g. `pipeline_summary`, which is GUI-specific).
     pub sacrum_client: RwLock<Option<std::sync::Arc<vertebrae_sacrum_client::GraphqlClient>>>,
-    /// Sacrum live chat service (None until a project is selected).
-    pub chat_service: RwLock<Option<Arc<dyn ChatService>>>,
     /// Project configuration manager
     pub project_config: ProjectConfig,
 }
@@ -496,8 +490,6 @@ pub async fn remove_project(
         *service_lock = None;
         let mut client_lock = state.sacrum_client.write().await;
         *client_lock = None;
-        let mut chat_lock = state.chat_service.write().await;
-        *chat_lock = None;
 
         let mut socket = socket_state.lock().await;
         socket.shutdown().await;
@@ -617,22 +609,16 @@ pub async fn set_current_project(
     {
         let mut service_lock = state.services.write().await;
         let mut client_lock = state.sacrum_client.write().await;
-        let mut chat_lock = state.chat_service.write().await;
         match sacrum_config.as_ref() {
             Some(config) => {
                 let client = vertebrae_sacrum_client::GraphqlClient::new(config.clone());
                 let client_arc = std::sync::Arc::new(client);
                 *service_lock = Some(vertebrae_sacrum_client::from_sacrum(client_arc.clone()));
-                let chat: Arc<dyn ChatService> = Arc::new(
-                    vertebrae_sacrum_client::SacrumChatService::new((*client_arc).clone()),
-                );
-                *chat_lock = Some(chat);
                 *client_lock = Some(client_arc);
             }
             None => {
                 *service_lock = None;
                 *client_lock = None;
-                *chat_lock = None;
             }
         }
     }
@@ -1724,140 +1710,6 @@ pub async fn resolve_permission_request(
 }
 
 // ============================================================================
-// Sacrum Live Chat Commands
-// ============================================================================
-
-#[tauri::command]
-#[specta::specta]
-pub async fn create_chat_session(state: State<'_, AppState>) -> Result<ChatSession, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let session = chat.create_session().await?;
-    Ok(session.into())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn send_chat_message(
-    state: State<'_, AppState>,
-    chat_session_id: String,
-    content: String,
-    content_format: Option<String>,
-    client_message_id: Option<String>,
-) -> Result<ChatMessage, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let options = SendMessageOptions {
-        content,
-        content_format,
-        client_message_id,
-    };
-    let message = chat.send_message(&chat_session_id, options).await?;
-    Ok(message.into())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn get_chat_session(
-    state: State<'_, AppState>,
-    chat_session_id: String,
-) -> Result<Option<ChatSession>, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let session = chat.get_session(&chat_session_id).await?;
-    Ok(session.map(Into::into))
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_chat_sessions(
-    state: State<'_, AppState>,
-    limit: Option<i32>,
-) -> Result<Vec<ChatSession>, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let sessions = chat.list_sessions(limit).await?;
-    Ok(sessions.into_iter().map(Into::into).collect())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn delete_chat_session(
-    state: State<'_, AppState>,
-    chat_session_id: String,
-) -> Result<DeleteChatSessionResult, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let result = chat.delete_session(&chat_session_id).await?;
-    Ok(result.into())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_chat_messages(
-    state: State<'_, AppState>,
-    chat_session_id: String,
-    limit: Option<i32>,
-    after: Option<String>,
-) -> Result<Vec<ChatMessage>, CommandError> {
-    let chat_guard = state.chat_service.read().await;
-    let chat = chat_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    let options = ListMessagesOptions { limit, after };
-    let messages = chat.list_messages(&chat_session_id, options).await?;
-    Ok(messages.into_iter().map(Into::into).collect())
-}
-
-/// Read the cached active chat session id for the currently selected project.
-/// Returns `None` if no project is selected or no session has been cached.
-#[tauri::command]
-#[specta::specta]
-pub async fn get_active_chat_session_id(
-    state: State<'_, AppState>,
-) -> Result<Option<String>, CommandError> {
-    let slug = match state.project_config.get_current_project() {
-        Some(s) => s,
-        None => return Ok(None),
-    };
-    Ok(state.project_config.get_active_chat_session(&slug))
-}
-
-/// Persist (or clear) the active chat session id for the currently selected
-/// project so it can be restored on reopen / relaunch.
-#[tauri::command]
-#[specta::specta]
-pub async fn set_active_chat_session_id(
-    state: State<'_, AppState>,
-    chat_session_id: Option<String>,
-) -> Result<(), CommandError> {
-    let slug = state
-        .project_config
-        .get_current_project()
-        .ok_or_else(CommandError::no_project_selected)?;
-    state
-        .project_config
-        .set_active_chat_session(&slug, chat_session_id)
-        .map_err(|message| CommandError { message })
-}
-
-// ============================================================================
 // Task Relationship Commands
 // ============================================================================
 
@@ -2620,7 +2472,6 @@ mod tests {
             .manage(AppState {
                 services: RwLock::new(Some(services)),
                 sacrum_client: RwLock::new(None),
-                chat_service: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
@@ -2639,7 +2490,6 @@ mod tests {
             .manage(AppState {
                 services: RwLock::new(None),
                 sacrum_client: RwLock::new(None),
-                chat_service: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
@@ -3161,22 +3011,6 @@ mod tests {
         let state: tauri::State<'_, AppState> = app.state();
         let result = create_task(state, "Test".to_string(), None, None, None).await;
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn list_chat_sessions_no_project_returns_error() {
-        let app = build_app_without_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let result = list_chat_sessions(state, Some(10)).await;
-        assert_no_project_error(result);
-    }
-
-    #[tokio::test]
-    async fn delete_chat_session_no_project_returns_error() {
-        let app = build_app_without_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let result = delete_chat_session(state, "sess-missing".to_string()).await;
-        assert_no_project_error(result);
     }
 
     #[tokio::test]
