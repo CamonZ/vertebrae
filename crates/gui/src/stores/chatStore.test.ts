@@ -240,6 +240,70 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[reopened].label).toBe("Repo B");
     });
 
+    it("does not reuse an in-memory unscoped session for a requested project path", () => {
+      useChatStore.setState({
+        sessions: {
+          legacy: {
+            id: "legacy",
+            scope: "project",
+            entityId: null,
+            label: "Legacy",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-legacy",
+            contextSummary: null,
+            projectPath: null,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      const opened = useChatStore
+        .getState()
+        .openSession("project", null, "Repo A", "/repo-a");
+
+      expect(opened).not.toBe("legacy");
+      expect(useChatStore.getState().sessions[opened]).toMatchObject({
+        label: "Repo A",
+        projectPath: "/repo-a",
+        claudeConversationId: null,
+      });
+    });
+
+    it("does not reuse an in-memory unscoped session when the requested project path is null", () => {
+      useChatStore.setState({
+        sessions: {
+          legacy: {
+            id: "legacy",
+            scope: "project",
+            entityId: null,
+            label: "Legacy",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-legacy",
+            contextSummary: null,
+            projectPath: null,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      const opened = useChatStore
+        .getState()
+        .openSession("project", null, "Project Chat", null);
+
+      expect(opened).not.toBe("legacy");
+      expect(useChatStore.getState().sessions[opened]).toMatchObject({
+        label: "Project Chat",
+        projectPath: null,
+        claudeConversationId: null,
+      });
+    });
+
     it("hydrates a locally closed session so it can resume", () => {
       const id = useChatStore
         .getState()

@@ -254,14 +254,14 @@ function writeSessions(sessions: Record<string, ChatSession>): void {
   }
 }
 
-function projectPathMatches(
+export function projectPathMatches(
   sessionProjectPath: string | null | undefined,
   requestedProjectPath: string | null | undefined
 ): boolean {
   if (requestedProjectPath === undefined) return true;
-  if (sessionProjectPath === undefined || sessionProjectPath === null) {
-    return true;
-  }
+  if (requestedProjectPath === null) return false;
+  if (sessionProjectPath === undefined || sessionProjectPath === null)
+    return false;
   return sessionProjectPath === requestedProjectPath;
 }
 

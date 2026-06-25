@@ -12,10 +12,11 @@ use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
+use crate::commands::AppState;
 use crate::events::PermissionRequestEvent;
 use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 use crate::types::{CreateClaudeSessionInput, PermissionMode};
@@ -401,6 +402,34 @@ fn build_claude_args(
     args
 }
 
+fn current_project_path<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Option<String> {
+    let state = app_handle.try_state::<AppState>()?;
+    let slug = state.project_config.get_current_project()?;
+    match vertebrae_sacrum_client::load_config_file() {
+        Ok(config) => config
+            .projects
+            .get(&slug)
+            .map(|project| project.path.clone()),
+        Err(err) => {
+            log::warn!(
+                "Failed to load config while resolving current project path: {}",
+                err
+            );
+            None
+        }
+    }
+}
+
+fn resolve_working_dir<R: tauri::Runtime>(
+    working_dir: Option<String>,
+    app_handle: &tauri::AppHandle<R>,
+) -> Option<String> {
+    working_dir
+        .filter(|dir| !dir.trim().is_empty())
+        .or_else(|| current_project_path(app_handle))
+        .filter(|dir| !dir.trim().is_empty())
+}
+
 /// Nested event structure inside stream_event messages
 #[derive(Debug, Deserialize)]
 struct StreamEvent {
@@ -643,6 +672,17 @@ impl ClaudeSessionManager {
             sessions,
             pending_permissions,
         } = runtime_state;
+        let Some(working_dir) = resolve_working_dir(working_dir, &app_handle) else {
+            let error = "Cannot start Claude session without a selected project path".to_string();
+            log::error!("{}", error);
+            let _ = ClaudeSessionErrorEvent {
+                session_id: session_id.clone(),
+                error,
+            }
+            .emit(&app_handle);
+            return;
+        };
+
         let resolved_model =
             resolve_requested_claude_model(requested_model_id, resume_session_id.is_some());
         if let Some(warning) = &resolved_model.warning {
@@ -676,7 +716,7 @@ impl ClaudeSessionManager {
         log::info!(
             "Starting Claude session: id={}, working_dir={:?}, resume={:?}, model={:?}, claude_binary={}",
             session_id,
-            working_dir,
+            Some(&working_dir),
             resume_session_id,
             resolved_model.model_id,
             claude_binary
@@ -716,18 +756,22 @@ impl ClaudeSessionManager {
         );
         cmd.args(&args);
 
-        // Set working directory if provided and it exists
-        if let Some(ref dir) = working_dir {
-            let path = std::path::Path::new(dir);
-            if path.exists() && path.is_dir() {
-                log::info!("Setting working directory to: {}", dir);
-                cmd.current_dir(dir);
-            } else {
-                log::warn!(
-                    "Working directory does not exist or is not a directory: {}",
-                    dir
-                );
+        let path = std::path::Path::new(&working_dir);
+        if path.exists() && path.is_dir() {
+            log::info!("Setting working directory to: {}", working_dir);
+            cmd.current_dir(&working_dir);
+        } else {
+            let error = format!(
+                "Working directory does not exist or is not a directory: {}",
+                working_dir
+            );
+            log::error!("{}", error);
+            let _ = ClaudeSessionErrorEvent {
+                session_id: session_id.clone(),
+                error,
             }
+            .emit(&app_handle);
+            return;
         }
 
         let augmented_path = build_augmented_path();
@@ -1754,6 +1798,33 @@ mod tests {
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"haiku".to_string()));
         assert!(args.contains(&"--resume=conv-123".to_string()));
+    }
+
+    #[test]
+    fn test_current_project_path_returns_none_without_managed_state() {
+        let app = tauri::test::mock_app();
+
+        assert_eq!(current_project_path(app.handle()), None);
+    }
+
+    #[test]
+    fn test_resolve_working_dir_uses_explicit_path() {
+        let app = tauri::test::mock_app();
+
+        assert_eq!(
+            resolve_working_dir(Some("/repo/root".to_string()), app.handle()).as_deref(),
+            Some("/repo/root")
+        );
+    }
+
+    #[test]
+    fn test_resolve_working_dir_rejects_blank_path_without_fallback() {
+        let app = tauri::test::mock_app();
+
+        assert_eq!(
+            resolve_working_dir(Some("  ".to_string()), app.handle()),
+            None
+        );
     }
 
     #[tokio::test]

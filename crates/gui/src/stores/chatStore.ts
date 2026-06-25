@@ -16,6 +16,7 @@ import {
   markLocalChatSessionCleared,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
+  projectPathMatches,
 } from "../utils/localChatPersistence";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type { PermissionMode } from "../bindings";
@@ -346,11 +347,7 @@ function findMatchingSession(
   for (const [id, session] of Object.entries(sessions)) {
     if (session.status !== "open") continue;
     if (session.scope !== scope || session.entityId !== entityId) continue;
-    if (
-      projectPath !== undefined &&
-      session.projectPath != null &&
-      session.projectPath !== projectPath
-    ) {
+    if (!projectPathMatches(session.projectPath, projectPath)) {
       continue;
     }
     return id;

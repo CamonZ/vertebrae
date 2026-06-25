@@ -104,6 +104,26 @@ describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
+    vi.mocked(commands.getCurrentProject).mockResolvedValue({
+      status: "ok",
+      data: "/test/project",
+    });
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/test/project",
+    });
+    vi.mocked(commands.createClaudeSession).mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.sendClaudeMessage).mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    vi.mocked(commands.closeClaudeSession).mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -456,6 +476,75 @@ describe("ChatWindowManager", () => {
     expect(commands.sendClaudeMessage).not.toHaveBeenCalled();
   });
 
+  it("starts a fresh chat in the currently selected project instead of the active session's old project", async () => {
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/new/project",
+    });
+    const user = userEvent.setup();
+    const stale = useChatStore
+      .getState()
+      .openSession("project", null, "Stale Project Chat", "/old/project");
+    useChatStore.getState().focusSession(stale);
+
+    render(<ChatWindowManager />);
+    await waitFor(() => {
+      expect(commands.getCurrentProjectPath).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(
+      screen.getByLabelText("Start fresh local chat from history")
+    );
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).not.toBe(stale);
+    });
+    const fresh = useChatStore.getState().activeSessionId;
+    expect(fresh).not.toBeNull();
+    expect(useChatStore.getState().sessions[fresh!]).toMatchObject({
+      label: "New Project Chat",
+      projectPath: "/new/project",
+      claudeConversationId: null,
+    });
+  });
+
+  it("filters local chat history by the currently selected project, not the active session's project", async () => {
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/new/project",
+    });
+    const user = userEvent.setup();
+    const stale = useChatStore
+      .getState()
+      .openSession("project", null, "Old Project Chat", "/old/project");
+    useChatStore.getState().addMessage(stale, {
+      kind: "assistant",
+      text: "old project answer",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const current = useChatStore
+      .getState()
+      .openSession("project", null, "Current Project Chat", "/new/project");
+    useChatStore.getState().addMessage(current, {
+      kind: "assistant",
+      text: "new project answer",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().focusSession(stale);
+
+    render(<ChatWindowManager />);
+    await waitFor(() => {
+      expect(commands.getCurrentProjectPath).toHaveBeenCalled();
+    });
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+    expect(drawer.getByText("Current Project Chat")).toBeInTheDocument();
+    expect(drawer.queryByText("Old Project Chat")).not.toBeInTheDocument();
+    expect(drawer.queryByText("old project answer")).not.toBeInTheDocument();
+  });
+
   it("shows a mini thread selector while maximized and keeps the main chat visible", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -489,7 +578,9 @@ describe("ChatWindowManager", () => {
     expect(
       screen.queryByTestId("local-chat-history-drawer")
     ).not.toBeInTheDocument();
-    expect(screen.getAllByText("first saved question")).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByText("first saved question")).toHaveLength(2);
+    });
 
     await user.click(screen.getByLabelText("Open local chat Task Two"));
 
@@ -498,7 +589,7 @@ describe("ChatWindowManager", () => {
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
   });
 
-  it("shows the chat model in the maximized mini thread selector", () => {
+  it("shows the chat model in the maximized mini thread selector", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 1200,
@@ -527,7 +618,9 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
-    expect(miniPanel.getByText("sonnet-4.5")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(miniPanel.getByText("sonnet-4.5")).toBeInTheDocument();
+    });
     expect(miniPanel.getByText("Project")).toBeInTheDocument();
     expect(miniPanel.queryByText(/Jan/)).not.toBeInTheDocument();
   });
@@ -542,7 +635,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     await user.click(screen.getByLabelText("Toggle chat history"));
-    await user.click(screen.getByLabelText("Delete local chat Live Task"));
+    await user.click(
+      await screen.findByLabelText("Delete local chat Live Task")
+    );
 
     expect(commands.closeClaudeSession).toHaveBeenCalledWith(
       "live-backend-session"
@@ -570,7 +665,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     await user.click(screen.getByLabelText("Toggle chat history"));
-    await user.click(screen.getByLabelText("Delete local chat Live Task"));
+    await user.click(
+      await screen.findByLabelText("Delete local chat Live Task")
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(

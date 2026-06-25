@@ -280,7 +280,7 @@ export async function doStartSession(
     }
 
     let workingDir: string | null = session.projectPath ?? null;
-    if (workingDir === null && session.projectPath === undefined) {
+    if (!workingDir) {
       const pathResult = await commands.getCurrentProjectPath();
       if (pathResult.status === "ok" && pathResult.data) {
         workingDir = pathResult.data;
