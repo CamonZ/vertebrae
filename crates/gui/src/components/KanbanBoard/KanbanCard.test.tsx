@@ -168,6 +168,34 @@ describe("KanbanCard", () => {
       expect(card).toHaveAttribute("data-running", "true");
     });
 
+    it("derives board kind from step_type rather than step or workflow names", () => {
+      const task = createMockTask({
+        title: "Typed step task",
+        step_name: "implement",
+        workflow_name: "Execute workflow",
+        step_type: "evaluate",
+      });
+      render(<KanbanCard task={task} />);
+
+      expect(
+        screen.getByRole("button", { name: /Task: Typed step task/i })
+      ).toHaveAttribute("data-kind", "eval");
+    });
+
+    it("uses the neutral board kind when step_type is missing", () => {
+      const task = createMockTask({
+        title: "Untyped step task",
+        step_name: "execute",
+        workflow_name: "Implementation",
+        step_type: null,
+      });
+      render(<KanbanCard task={task} />);
+
+      expect(
+        screen.getByRole("button", { name: /Task: Untyped step task/i })
+      ).toHaveAttribute("data-kind", "unknown");
+    });
+
     it("marks completed tasks as terminal board cards", () => {
       const task = createMockTask({
         title: "Done task",

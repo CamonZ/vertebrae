@@ -267,13 +267,14 @@ describe("useOperationsData", () => {
     expect(result.current.readyTasks).toHaveLength(0);
   });
 
-  it("excludes tasks whose blockers have not reached a completed run or done step", async () => {
+  it("excludes tasks whose blockers have no completed_at or completed run", async () => {
     const blocker = createMockTask({
       id: "t-blocker",
       title: "Blocker",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-blocker", "executing"),
-      step_name: "in_progress",
+      run_controls: null,
+      step_name: "done",
+      completed_at: null,
     });
     const blocked = createMockTask({
       id: "t-blocked",
@@ -311,6 +312,43 @@ describe("useOperationsData", () => {
       title: "Blocker",
       workflow_id: "wf-1",
       run_controls: withActiveRun("t-blocker", "completed"),
+    });
+    const blocked = createMockTask({
+      id: "t-blocked",
+      title: "Blocked",
+      workflow_id: "wf-1",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+      dependency_ids: ["t-blocker"],
+    });
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [blocker, blocked],
+    });
+
+    const { result } = renderOperationsDataHook();
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.readyTasks.map((t) => t.id)).toContain("t-blocked");
+  });
+
+  it("includes a task whose blocker has completed_at even without a completed run", async () => {
+    const blocker = createMockTask({
+      id: "t-blocker",
+      title: "Blocker",
+      workflow_id: "wf-1",
+      run_controls: null,
+      step_name: "review",
+      completed_at: "2026-01-01T00:00:00Z",
     });
     const blocked = createMockTask({
       id: "t-blocked",

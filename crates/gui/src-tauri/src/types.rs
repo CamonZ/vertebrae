@@ -57,9 +57,6 @@ impl From<vertebrae_core::Level> for TaskLevel {
     }
 }
 
-// Note: Task.status is now a String derived from the workflow step name.
-// The frontend uses strings directly for status values.
-
 /// Task priority - mirrors db::Priority
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -206,6 +203,8 @@ pub struct Task {
     pub workflow_name: Option<String>,
     /// Current step name (if task has a current step in workflow)
     pub step_name: Option<String>,
+    /// Current step type (if task has a current step in workflow)
+    pub step_type: Option<StepType>,
     /// Server-derived TaskRun controls for Run/Stop surfaces
     #[serde(default)]
     pub run_controls: Option<TaskRunControls>,
@@ -251,6 +250,7 @@ impl From<vertebrae_core::Task> for Task {
             current_step_id: task.current_step_id,
             workflow_name: task.workflow_name,
             step_name: task.step_name,
+            step_type: task.step_type.map(Into::into),
             run_controls: task.run_controls.map(Into::into),
             archived: task.archived,
             worktree: task.worktree,

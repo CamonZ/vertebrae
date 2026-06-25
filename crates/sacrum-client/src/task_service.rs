@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::Task;
 use vertebrae_core::models::{
-    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRunControls,
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, StepType, Task, TaskFilter,
+    TaskRunControls,
 };
 use vertebrae_core::service::{CreateTaskOptions, TaskService, TaskShowBundle, UpdateTaskOptions};
 use vertebrae_core::workflow_service::WorkflowInfo;
@@ -36,10 +36,14 @@ impl SacrumTaskService {
     }
 
     /// Fetch all workflows (with embedded steps) in a single query and return
-    /// both workflow_id → workflow_name and step_id → step_name maps.
+    /// workflow_id → workflow_name, step_id → step_name, and step_id → step_type maps.
     async fn fetch_lookups(
         &self,
-    ) -> ServiceResult<(HashMap<String, String>, HashMap<String, String>)> {
+    ) -> ServiceResult<(
+        HashMap<String, String>,
+        HashMap<String, String>,
+        HashMap<String, StepType>,
+    )> {
         let query = with_fragments(wf_queries::LIST_WORKFLOWS, &[wf_queries::WORKFLOW_FIELDS]);
         let variables = json!({ "project_id": self.client.project_id });
         let workflows: Vec<WorkflowResponse> =
@@ -50,18 +54,26 @@ impl SacrumTaskService {
 
     pub(crate) fn lookups_from_workflows(
         workflows: &[WorkflowResponse],
-    ) -> (HashMap<String, String>, HashMap<String, String>) {
+    ) -> (
+        HashMap<String, String>,
+        HashMap<String, String>,
+        HashMap<String, StepType>,
+    ) {
         let mut workflow_names = HashMap::new();
         let mut step_names = HashMap::new();
+        let mut step_types = HashMap::new();
 
         for wf in workflows {
             for step in &wf.workflow_steps {
                 step_names.insert(step.id.clone(), step.name.clone());
+                if let Some(step_type) = step.step_type.as_deref() {
+                    step_types.insert(step.id.clone(), StepType::from_wire_str(step_type));
+                }
             }
             workflow_names.insert(wf.id.clone(), wf.name.clone());
         }
 
-        (workflow_names, step_names)
+        (workflow_names, step_names, step_types)
     }
 
     fn workflow_info_from_response(
@@ -100,7 +112,7 @@ impl SacrumTaskService {
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
     #[cfg(test)]
     fn response_to_task(&self, response: &TaskResponse) -> ServiceResult<Task> {
-        self.response_to_task_with_lookups(response, None, None)
+        self.response_to_task_with_lookups(response, None, None, None)
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model with optional lookups
@@ -109,6 +121,7 @@ impl SacrumTaskService {
         response: &TaskResponse,
         workflow_names: Option<&HashMap<String, String>>,
         step_names: Option<&HashMap<String, String>>,
+        step_types: Option<&HashMap<String, StepType>>,
     ) -> ServiceResult<Task> {
         let level = response
             .level
@@ -166,6 +179,11 @@ impl SacrumTaskService {
             .as_ref()
             .and_then(|step_id| step_names.and_then(|m| m.get(step_id).cloned()));
 
+        let step_type = response
+            .current_step_id
+            .as_ref()
+            .and_then(|step_id| step_types.and_then(|m| m.get(step_id).cloned()));
+
         // Extract dependency_ids from blockers if available, otherwise from dependency_ids field
         let dependency_ids = if !response.blockers.is_empty() {
             response.blockers.iter().map(|b| b.id.clone()).collect()
@@ -177,17 +195,17 @@ impl SacrumTaskService {
         let blockers: Vec<Task> = response
             .blockers
             .iter()
-            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names, step_types))
             .collect::<ServiceResult<Vec<_>>>()?;
         let dependents: Vec<Task> = response
             .dependents
             .iter()
-            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names, step_types))
             .collect::<ServiceResult<Vec<_>>>()?;
         let children: Vec<Task> = response
             .children
             .iter()
-            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names, step_types))
             .collect::<ServiceResult<Vec<_>>>()?;
 
         Ok(Task {
@@ -201,6 +219,7 @@ impl SacrumTaskService {
             current_step_id: response.current_step_id.clone(),
             workflow_name,
             step_name,
+            step_type,
             run_controls: response
                 .run_controls
                 .as_ref()
@@ -415,17 +434,29 @@ impl TaskService for SacrumTaskService {
         let response = self.fetch_task_response(id).await?;
 
         // Fetch lookups to resolve workflow_name and step_name
-        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+        let (workflow_names, step_names, step_types) =
+            self.fetch_lookups().await.unwrap_or_default();
 
-        self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
+        self.response_to_task_with_lookups(
+            &response,
+            Some(&workflow_names),
+            Some(&step_names),
+            Some(&step_types),
+        )
     }
 
     async fn get_task_summary(&self, id: &str) -> ServiceResult<Task> {
         let response = self.fetch_task_summary_response(id).await?;
 
-        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+        let (workflow_names, step_names, step_types) =
+            self.fetch_lookups().await.unwrap_or_default();
 
-        self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
+        self.response_to_task_with_lookups(
+            &response,
+            Some(&workflow_names),
+            Some(&step_names),
+            Some(&step_types),
+        )
     }
 
     async fn get_task_title(&self, id: &str) -> ServiceResult<String> {
@@ -510,18 +541,25 @@ impl TaskService for SacrumTaskService {
 
         let related: ShowTaskRelatedResponse =
             self.client.execute_compound(&query, variables).await?;
-        let (workflow_names, step_names) = Self::lookups_from_workflows(&related.workflows);
+        let (workflow_names, step_names, step_types) =
+            Self::lookups_from_workflows(&related.workflows);
 
         let task = self.response_to_task_with_lookups(
             &task_response,
             Some(&workflow_names),
             Some(&step_names),
+            Some(&step_types),
         )?;
         let parent = related
             .parent
             .as_ref()
             .map(|parent| {
-                self.response_to_task_with_lookups(parent, Some(&workflow_names), Some(&step_names))
+                self.response_to_task_with_lookups(
+                    parent,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                    Some(&step_types),
+                )
             })
             .transpose()?;
         let workflow = related.workflow.as_ref().map(|workflow| {
@@ -666,12 +704,18 @@ impl TaskService for SacrumTaskService {
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         // Fetch lookups once for all tasks
-        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+        let (workflow_names, step_names, step_types) =
+            self.fetch_lookups().await.unwrap_or_default();
 
         responses
             .iter()
             .map(|t| {
-                self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
+                self.response_to_task_with_lookups(
+                    t,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                    Some(&step_types),
+                )
             })
             .collect()
     }
@@ -681,6 +725,7 @@ impl TaskService for SacrumTaskService {
         filter: &TaskFilter,
         workflow_names: Option<&HashMap<String, String>>,
         step_names: Option<&HashMap<String, String>>,
+        step_types: Option<&HashMap<String, StepType>>,
     ) -> ServiceResult<Vec<Task>> {
         let variables = self.filter_to_variables(filter);
 
@@ -689,7 +734,7 @@ impl TaskService for SacrumTaskService {
 
         responses
             .iter()
-            .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names))
+            .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names, step_types))
             .collect()
     }
 
@@ -703,12 +748,18 @@ impl TaskService for SacrumTaskService {
             self.client.execute(&query, variables, "list_ready").await?;
 
         // Fetch lookups once for all tasks
-        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
+        let (workflow_names, step_names, step_types) =
+            self.fetch_lookups().await.unwrap_or_default();
 
         responses
             .iter()
             .map(|t| {
-                self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
+                self.response_to_task_with_lookups(
+                    t,
+                    Some(&workflow_names),
+                    Some(&step_names),
+                    Some(&step_types),
+                )
             })
             .collect()
     }
@@ -791,15 +842,11 @@ impl TaskService for SacrumTaskService {
 
     async fn get_incomplete_blockers_with_details(&self, id: &str) -> ServiceResult<Vec<Task>> {
         let task = self.get_task(id).await?;
-        let mut blockers = Vec::new();
-        for dep_id in task.dependency_ids {
-            if let Ok(blocker) = self.get_task(&dep_id).await
-                && blocker.step_name.as_deref() != Some("done")
-            {
-                blockers.push(blocker);
-            }
-        }
-        Ok(blockers)
+        Ok(task
+            .blockers
+            .into_iter()
+            .filter(|blocker| blocker.completed_at.is_none())
+            .collect())
     }
 
     async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>> {
@@ -1247,16 +1294,19 @@ mod tests {
             WorkflowStepSummary {
                 id: "step-3".to_string(),
                 name: "Done".to_string(),
+                step_type: None,
                 step_order: 2,
             },
             WorkflowStepSummary {
                 id: "step-1".to_string(),
                 name: "Backlog".to_string(),
+                step_type: None,
                 step_order: 0,
             },
             WorkflowStepSummary {
                 id: "step-2".to_string(),
                 name: "In Progress".to_string(),
+                step_type: None,
                 step_order: 1,
             },
         ]);
@@ -1267,6 +1317,36 @@ mod tests {
         assert_eq!(info.current_step_name, "In Progress");
         assert_eq!(info.prev_step_name.as_deref(), Some("Backlog"));
         assert_eq!(info.next_step_name.as_deref(), Some("Done"));
+    }
+
+    #[test]
+    fn response_to_task_resolves_step_type_from_workflow_lookups() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+        let workflow = workflow_response_with_steps(vec![WorkflowStepSummary {
+            id: "step-evaluate".to_string(),
+            name: "Review".to_string(),
+            step_type: Some("evaluate".to_string()),
+            step_order: 0,
+        }]);
+        let (workflow_names, step_names, step_types) =
+            SacrumTaskService::lookups_from_workflows(&[workflow]);
+        let mut response = make_task_response("task-review", "Review task");
+        response.workflow_id = Some("wf-1".to_string());
+        response.current_step_id = Some("step-evaluate".to_string());
+
+        let task = service
+            .response_to_task_with_lookups(
+                &response,
+                Some(&workflow_names),
+                Some(&step_names),
+                Some(&step_types),
+            )
+            .unwrap();
+
+        assert_eq!(task.workflow_name.as_deref(), Some("Workflow"));
+        assert_eq!(task.step_name.as_deref(), Some("Review"));
+        assert_eq!(task.step_type, Some(StepType::Evaluate));
     }
 
     #[test]
@@ -1646,6 +1726,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_incomplete_blockers_uses_embedded_completed_at_without_n_plus_one() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Blocked task");
+        let mut open_done_step = gql_task_data("blocker-open-done", "Open blocker at done step");
+        open_done_step["workflow_id"] = json!("wf-1");
+        open_done_step["current_step_id"] = json!("step-done");
+        let mut completed_review = gql_task_data("blocker-completed-review", "Completed blocker");
+        completed_review["workflow_id"] = json!("wf-1");
+        completed_review["current_step_id"] = json!("step-review");
+        completed_review["completed_at"] = json!("2026-01-01T00:00:00Z");
+        task_data["dependency_ids"] = json!(["blocker-open-done", "blocker-completed-review"]);
+        task_data["blockers"] = json!([open_done_step, completed_review]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+        mount_empty_lookups(&server).await;
+
+        let service = create_wiremock_service(&server.uri());
+        let blockers = service
+            .get_incomplete_blockers_with_details("task-1")
+            .await
+            .unwrap();
+
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].id, "blocker-open-done");
+        assert!(blockers[0].completed_at.is_none());
+
+        let bodies = captured_graphql_bodies(&server).await;
+        assert_eq!(
+            bodies.len(),
+            2,
+            "should fetch target task and workflow lookups only"
+        );
+        assert_eq!(
+            bodies
+                .iter()
+                .filter(|body| body["query"].as_str().unwrap().contains("GetTask"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            bodies
+                .iter()
+                .filter(|body| body["query"].as_str().unwrap().contains("ListWorkflows"))
+                .count(),
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn test_get_task_titles_batches_aliases_in_order() {
         let server = MockServer::start().await;
 
@@ -1882,13 +2019,16 @@ mod tests {
     #[tokio::test]
     async fn test_list_ready_success() {
         let server = MockServer::start().await;
+        let mut ready_task = gql_task_data("task-1", "Ready Task");
+        ready_task["completed_at"] = json!("2026-01-01T00:00:00Z");
 
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("ReadyTasks"))
+            .and(body_string_contains("completed_at"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "list_ready": [gql_task_data("task-1", "Ready Task")]
+                    "list_ready": [ready_task]
                 }
             })))
             .mount(&server)
@@ -1900,6 +2040,7 @@ mod tests {
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Ready Task");
+        assert!(tasks[0].completed_at.is_some());
     }
 
     #[tokio::test]

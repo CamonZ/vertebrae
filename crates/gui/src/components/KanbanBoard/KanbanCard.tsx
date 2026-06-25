@@ -2,8 +2,8 @@ import type { KeyboardEvent } from "react";
 import type { Task } from "../../bindings";
 import { deriveHearthRunChipState } from "../../utils/runState";
 import {
+  hearthStepKind,
   hearthStepStyle,
-  type HearthStepKind,
 } from "../WorkflowPipeline/stepTypeStyling";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
 
@@ -13,29 +13,12 @@ interface KanbanCardProps {
   onClick?: (task: Task) => void;
 }
 
-function inferStepKind(task: Task): HearthStepKind {
-  const value =
-    `${task.step_name ?? ""} ${task.workflow_name ?? ""}`.toLowerCase();
-  if (value.includes("eval") || value.includes("review")) return "eval";
-  if (value.includes("human")) return "human";
-  if (value.includes("wait")) return "wait";
-  if (value.includes("route") || value.includes("triage")) return "route";
-  if (
-    value.includes("implement") ||
-    value.includes("run") ||
-    value.includes("execute")
-  ) {
-    return "execute";
-  }
-  return "unknown";
-}
-
 export function KanbanCard({
   task,
   isSelected = false,
   onClick,
 }: KanbanCardProps) {
-  const stepKind = inferStepKind(task);
+  const stepKind = hearthStepKind(task.step_type);
   const stepStyle = hearthStepStyle(stepKind);
   const runStatus = task.run_controls?.active_run?.status ?? null;
   const runChip = deriveHearthRunChipState(runStatus, {

@@ -857,6 +857,19 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(hero).toHaveTextContent("Running");
       expect(hero).toHaveTextContent("In progress");
     });
+
+    it("derives the Hearth detail hero kind from step_type", () => {
+      renderWithTaskOverrides({
+        step_name: "pending_review",
+        step_type: "human_input",
+      });
+
+      const heroStatus = screen
+        .getByTestId("task-detail-hero")
+        .querySelector(".hero-status");
+      expect(heroStatus).toHaveAttribute("data-step-kind", "human");
+      expect(heroStatus).toHaveTextContent("Pending review");
+    });
   });
 
   describe("Children section", () => {
@@ -1102,6 +1115,35 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ];
       renderWithTaskOverrides({ run_controls: waitingControls() });
       expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
+    });
+
+    it("renders the review banner when a human_input wait is active", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1"),
+      ];
+      renderWithTaskOverrides({
+        step_name: "pending_review",
+        step_type: "human_input",
+        run_controls: waitingControls(),
+      });
+
+      expect(
+        screen.getByRole("region", { name: "Review gate" })
+      ).toBeInTheDocument();
+    });
+
+    it("does not render the review banner solely from a pending_review step label", () => {
+      mockTaskExecutionsOverrides.current = [];
+      renderWithTaskOverrides({
+        step_name: "pending_review",
+        step_type: "execute",
+        run_controls: null,
+      });
+
+      expect(
+        screen.queryByRole("region", { name: "Review gate" })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
     });
 
     it("does not render the gate when there is no active run", () => {

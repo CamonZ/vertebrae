@@ -4,7 +4,7 @@ import { StepBadge } from "./StepBadge";
 
 describe("StepBadge", () => {
   it("formats the step name with capitalization and spacing", () => {
-    render(<StepBadge stepName="in_progress" />);
+    render(<StepBadge stepName="in_progress" stepType="execute" />);
     expect(screen.getByText("In progress")).toBeInTheDocument();
   });
 
@@ -18,10 +18,18 @@ describe("StepBadge", () => {
     expect(screen.getByText("—")).toBeInTheDocument();
   });
 
-  it("uses a square radius and status color for done", () => {
-    render(<StepBadge stepName="done" />);
+  it("uses a square radius and typed step color independent of the display label", () => {
+    render(<StepBadge stepName="done" stepType="evaluate" />);
     const badge = screen.getByText("Done");
     expect(badge.className).toContain("rounded-[var(--radius-sm)]");
-    expect(badge.className).toContain("text-[var(--color-ok)]");
+    expect(badge.getAttribute("style")).toContain("--color-step-eval-fg");
+  });
+
+  it("uses run status color ahead of step type when a run is present", () => {
+    render(
+      <StepBadge stepName="review" stepType="evaluate" runStatus="failed" />
+    );
+    const badge = screen.getByText("Review");
+    expect(badge.getAttribute("style")).toContain("--color-err");
   });
 });

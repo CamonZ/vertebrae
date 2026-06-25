@@ -6,6 +6,7 @@ import {
   deriveRunStateChip,
   getRunChipStyles,
   isActiveRunStatus,
+  isTaskDone,
   taskRunStatusToHearthRunState,
 } from "./runState";
 
@@ -58,6 +59,26 @@ describe("isActiveRunStatus", () => {
     expect(isActiveRunStatus("failed")).toBe(false);
     expect(isActiveRunStatus(null)).toBe(false);
     expect(isActiveRunStatus(undefined)).toBe(false);
+  });
+});
+
+describe("isTaskDone", () => {
+  it("uses completed_at or completed TaskRun status, not step_name labels", () => {
+    expect(
+      isTaskDone({ completed_at: "2026-01-01T00:00:00Z", run_controls: null })
+    ).toBe(true);
+    expect(
+      isTaskDone({
+        completed_at: null,
+        run_controls: makeControls({ active_run: makeRun("completed") }),
+      })
+    ).toBe(true);
+    expect(
+      isTaskDone({
+        completed_at: null,
+        run_controls: makeControls({ active_run: makeRun("executing") }),
+      })
+    ).toBe(false);
   });
 });
 

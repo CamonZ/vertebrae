@@ -197,6 +197,7 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     current_step_id: null,
     workflow_name: null,
     step_name: null,
+    step_type: null,
     run_controls: null,
     archived: false,
     worktree: null,

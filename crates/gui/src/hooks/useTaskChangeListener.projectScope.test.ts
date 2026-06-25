@@ -96,6 +96,7 @@ describe("useTaskChangeListener project scope hygiene", () => {
       workflow_name: "Workflow",
       current_step_id: "step-todo",
       step_name: "todo",
+      step_type: "execute",
     });
     act(() => {
       currentHandler({

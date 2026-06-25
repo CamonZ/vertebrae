@@ -1643,6 +1643,10 @@ workflow_name: string | null;
  */
 step_name: string | null; 
 /**
+ * Current step type (if task has a current step in workflow)
+ */
+step_type: StepType | null;
+/**
  * Server-derived TaskRun controls for Run/Stop surfaces
  */
 run_controls?: TaskRunControls | null; 

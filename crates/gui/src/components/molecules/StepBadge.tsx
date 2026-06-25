@@ -1,77 +1,99 @@
+import type { CSSProperties } from "react";
+import type { StepType, TaskRunStatus } from "../../bindings";
 import { formatStepName } from "../../utils/formatStepName";
+import {
+  hearthStepKind,
+  hearthStepStyle,
+} from "../WorkflowPipeline/stepTypeStyling";
 
 interface StepBadgeProps {
   stepName: string | null;
+  stepType?: StepType | null;
+  runStatus?: TaskRunStatus | null;
   emptyLabel?: string;
   className?: string;
 }
 
-function getStepStyles(stepName: string | null): {
-  bg: string;
-  text: string;
+interface BadgeVisual {
+  style: CSSProperties;
   glow?: string;
-} {
-  if (!stepName) {
-    return {
-      bg: "bg-[var(--color-bg-2)]",
-      text: "text-[var(--color-fg-mute)]",
-    };
-  }
-  switch (stepName.toLowerCase()) {
-    case "todo":
+}
+
+function runStatusVisual(
+  runStatus: TaskRunStatus | null | undefined
+): BadgeVisual | null {
+  switch (runStatus) {
+    case "queued":
+    case "waiting":
       return {
-        bg: "bg-[var(--color-accent-wash)]",
-        text: "text-[var(--color-accent)]",
+        style: {
+          backgroundColor: "var(--color-info-wash)",
+          color: "var(--color-info)",
+        },
       };
-    case "in_progress":
-    case "in progress":
+    case "executing":
       return {
-        bg: "bg-[var(--color-warn-wash)]",
-        text: "text-[var(--color-warn)]",
+        style: {
+          backgroundColor: "var(--color-warn-wash)",
+          color: "var(--color-warn)",
+        },
         glow: "shadow-[0_0_8px_var(--color-accent-glow)]",
       };
-    case "pending_review":
-    case "review":
+    case "stopping":
+    case "stopped":
       return {
-        bg: "bg-[var(--color-info-wash)]",
-        text: "text-[var(--color-info)]",
+        style: {
+          backgroundColor: "var(--color-bg-2)",
+          color: "var(--color-fg-mute)",
+        },
       };
-    case "done":
+    case "completed":
       return {
-        bg: "bg-[var(--color-ok-wash)]",
-        text: "text-[var(--color-ok)]",
+        style: {
+          backgroundColor: "var(--color-ok-wash)",
+          color: "var(--color-ok)",
+        },
       };
-    case "rejected":
+    case "failed":
       return {
-        bg: "bg-[var(--color-err-wash)]",
-        text: "text-[var(--color-err)]",
+        style: {
+          backgroundColor: "var(--color-err-wash)",
+          color: "var(--color-err)",
+        },
       };
-    case "backlog":
     default:
-      return {
-        bg: "bg-[var(--color-bg-2)]",
-        text: "text-[var(--color-fg-mute)]",
-      };
+      return null;
   }
+}
+
+function stepTypeVisual(stepType: StepType | null | undefined): BadgeVisual {
+  const stepStyle = hearthStepStyle(hearthStepKind(stepType));
+  return {
+    style: {
+      backgroundColor: `var(${stepStyle.washVar})`,
+      color: `var(${stepStyle.fgVar})`,
+    },
+  };
 }
 
 export function StepBadge({
   stepName,
+  stepType,
+  runStatus,
   emptyLabel = "No step",
   className,
 }: StepBadgeProps) {
-  const styles = getStepStyles(stepName);
+  const visual = runStatusVisual(runStatus) ?? stepTypeVisual(stepType);
   return (
     <span
       className={[
         "inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-2xs font-medium",
-        styles.bg,
-        styles.text,
-        styles.glow,
+        visual.glow,
         className,
       ]
         .filter(Boolean)
         .join(" ")}
+      style={visual.style}
     >
       {formatStepName(stepName, emptyLabel)}
     </span>

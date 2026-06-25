@@ -504,7 +504,7 @@ export function TaskDetailPanel({
   const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
     isStoppingWorkflow || runControlsState.stopDisabled;
-  const isPendingReview = taskData?.step_name === "pending_review";
+  const isPendingReview = humanInputGate !== null;
 
   const deleteConfirmation =
     taskData && isDeleteDialogOpen ? (
@@ -782,7 +782,7 @@ export function TaskDetailPanel({
                 )
               }
               step={{
-                kind: null,
+                kind: taskData.step_type,
                 label: formatStepName(taskData.step_name, "Unassigned"),
               }}
               finished={

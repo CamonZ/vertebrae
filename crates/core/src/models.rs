@@ -1050,6 +1050,10 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_name: Option<String>,
 
+    /// Current step type (if task has a current step in workflow)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_type: Option<StepType>,
+
     /// Server-derived TaskRun controls for Run/Stop surfaces.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_controls: Option<TaskRunControls>,
@@ -1125,6 +1129,7 @@ impl Task {
             current_step_id: None,
             workflow_name: None,
             step_name: None,
+            step_type: None,
             run_controls: None,
             archived: false,
             worktree: None,

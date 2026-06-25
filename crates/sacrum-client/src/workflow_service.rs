@@ -278,7 +278,7 @@ impl WorkflowService for SacrumWorkflowService {
 
         let response: WorkflowTasksCompoundResponse =
             self.client.execute_compound(&query, variables).await?;
-        let (workflow_names, step_names) =
+        let (workflow_names, step_names, step_types) =
             SacrumTaskService::lookups_from_workflows(&response.workflows);
         let task_service = SacrumTaskService::new(self.client.clone());
         let tasks = response
@@ -289,6 +289,7 @@ impl WorkflowService for SacrumWorkflowService {
                     task,
                     Some(&workflow_names),
                     Some(&step_names),
+                    Some(&step_types),
                 )
             })
             .collect::<ServiceResult<Vec<_>>>()?;

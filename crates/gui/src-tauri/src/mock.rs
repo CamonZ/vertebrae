@@ -86,6 +86,7 @@ impl TaskService for MockTaskService {
             dependency_ids: vec![],
             workflow_name: None,
             step_name: None,
+            step_type: None,
             run_controls: None,
         };
         s.tasks.insert(id.clone(), task);

@@ -94,7 +94,15 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                     </p>
                     <p className="mt-0.5 flex items-center gap-2 text-xs text-[var(--color-fg-mute)]">
                       {task.workflow_name && <span>{task.workflow_name}</span>}
-                      {task.step_name && <StepBadge stepName={task.step_name} />}
+                      {task.step_name && (
+                        <StepBadge
+                          stepName={task.step_name}
+                          stepType={task.step_type}
+                          runStatus={
+                            task.run_controls?.active_run?.status ?? null
+                          }
+                        />
+                      )}
                       {!task.workflow_name && !task.step_name && (
                         <span>No workflow assigned</span>
                       )}

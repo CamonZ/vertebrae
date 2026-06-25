@@ -18,7 +18,7 @@ import {
 
 function makeRun(
   status: TaskRunStatus,
-  overrides: Partial<TaskRun> = {},
+  overrides: Partial<TaskRun> = {}
 ): TaskRun {
   return {
     id: "run-" + status,
@@ -47,6 +47,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     current_step_id: null,
     workflow_name: "Build",
     step_name: null,
+    step_type: null,
     run_controls: null,
     archived: false,
     worktree: null,
@@ -79,7 +80,7 @@ function withRun(task: Task, run: TaskRun | null): Task {
 function makeStep(
   id: string,
   order: number,
-  overrides: Partial<PipelineStep> = {},
+  overrides: Partial<PipelineStep> = {}
 ): PipelineStep {
   return {
     id,
@@ -123,18 +124,12 @@ const SUMMARY: PipelineSummary = {
 describe("splitRunConsole", () => {
   it("buckets active runs into Running and workflow tasks into Ready", () => {
     const idle = withRun(makeTask({ id: "ready-1" }), null);
-    const queued = withRun(
-      makeTask({ id: "ready-2" }),
-      null,
-    );
+    const queued = withRun(makeTask({ id: "ready-2" }), null);
     const running = withRun(
       makeTask({ id: "running-1" }),
-      makeRun("executing"),
+      makeRun("executing")
     );
-    const waiting = withRun(
-      makeTask({ id: "running-2" }),
-      makeRun("waiting"),
-    );
+    const waiting = withRun(makeTask({ id: "running-2" }), makeRun("waiting"));
 
     const { running: run, ready } = splitRunConsole([
       idle,
@@ -160,7 +155,7 @@ describe("splitRunConsole", () => {
   it("surfaces the active run's start time on Running rows", () => {
     const running = withRun(
       makeTask({ id: "running-1" }),
-      makeRun("executing", { started_at: "2024-06-01T12:00:00Z" }),
+      makeRun("executing", { started_at: "2024-06-01T12:00:00Z" })
     );
     const { running: rows } = splitRunConsole([running]);
     expect(rows[0]?.startedAt).toBe("2024-06-01T12:00:00Z");
@@ -169,7 +164,7 @@ describe("splitRunConsole", () => {
   it("treats stopping runs as still active (Running)", () => {
     const stopping = withRun(
       makeTask({ id: "stopping-1" }),
-      makeRun("stopping"),
+      makeRun("stopping")
     );
     const { running, ready } = splitRunConsole([stopping]);
     expect(running.map((r) => r.task.id)).toEqual(["stopping-1"]);
@@ -205,7 +200,9 @@ describe("miniPipeline", () => {
 
   it("returns empty for a task with no workflow or unknown workflow", () => {
     expect(miniPipeline(makeTask({ workflow_id: null }), SUMMARY)).toEqual([]);
-    expect(miniPipeline(makeTask({ workflow_id: "nope" }), SUMMARY)).toEqual([]);
+    expect(miniPipeline(makeTask({ workflow_id: "nope" }), SUMMARY)).toEqual(
+      []
+    );
     expect(miniPipeline(makeTask(), null)).toEqual([]);
   });
 });

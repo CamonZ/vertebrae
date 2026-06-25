@@ -60,6 +60,7 @@ function readyTask(overrides?: Partial<Task>): Task {
     current_step_id: "step-1",
     workflow_name: "Development",
     step_name: "todo",
+    step_type: "execute",
     run_controls: runnableControls(),
     ...overrides,
   });
@@ -129,7 +130,9 @@ describe("ReadySection", () => {
   });
 
   it("disables Start when an active run is already in flight", () => {
-    render(<ReadySection tasks={[readyTask({ run_controls: activeControls() })]} />);
+    render(
+      <ReadySection tasks={[readyTask({ run_controls: activeControls() })]} />
+    );
 
     const start = screen.getByTestId("ready-start-button");
     expect(start).toBeDisabled();

@@ -17,6 +17,7 @@ const createMockTask = (id: string, title: string): Task => ({
   current_step_id: null,
   workflow_name: null,
   step_name: null,
+  step_type: null,
   archived: false,
   worktree: null,
   rejection_reason: null,
@@ -804,10 +805,12 @@ describe("TaskRelations", () => {
     });
 
     it("displays error when syncDependencies fails while adding", async () => {
-      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce({
-        status: "error",
-        error: { message: "Cannot add dependency: would create cycle" },
-      });
+      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce(
+        {
+          status: "error",
+          error: { message: "Cannot add dependency: would create cycle" },
+        }
+      );
 
       render(<TaskRelations {...defaultProps} />);
 
@@ -852,10 +855,12 @@ describe("TaskRelations", () => {
     });
 
     it("displays error when syncDependencies fails while removing", async () => {
-      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce({
-        status: "error",
-        error: { message: "Failed to remove dependency" },
-      });
+      vi.mocked(bindingsModule.commands.syncDependencies).mockResolvedValueOnce(
+        {
+          status: "error",
+          error: { message: "Failed to remove dependency" },
+        }
+      );
 
       render(<TaskRelations {...defaultProps} dependsOnIds={["task-1"]} />);
 

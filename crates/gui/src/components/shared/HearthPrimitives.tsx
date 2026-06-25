@@ -561,6 +561,7 @@ export function HeroStatus({
         `edge-${kind}`,
         className
       )}
+      data-step-kind={kind}
       style={{
         borderLeftColor: `var(${stepStyle.barVar})`,
         ...containerStyle,
