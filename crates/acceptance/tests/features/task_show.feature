@@ -56,6 +56,37 @@ Feature: Show task details
     Then the output should contain "Blocked by:"
     And the output should contain "<blocker_id>"
 
+  Scenario: Show task keeps a blocker visible when a done-named step has no completion timestamp
+    Given a workflow "nonterminal-show-wf" with steps "backlog, done"
+    And I create a task with:
+      | title | Nonterminal done blocker |
+    And I assign the workflow to the task
+    And I store the task ID as "blocker_id"
+    And I create a task with:
+      | title | Blocked by nonterminal done |
+    And I store the task ID as "blocked_id"
+    And I run depend "<blocked_id>" --on the lifecycle task
+    When I transition the lifecycle task through to step "done" with --skip-validation
+    And I show the task "<blocked_id>"
+    Then the output should contain "Blocked by:"
+    And the output should contain "<blocker_id>"
+
+  Scenario: Show task hides a blocker after completed_at is set
+    Given a workflow "terminal-show-wf" with steps "backlog, done"
+    And the workflow is final
+    And I create a task with:
+      | title | Completed blocker |
+    And I assign the workflow to the task
+    And I store the task ID as "blocker_id"
+    And I create a task with:
+      | title | Blocked by completed task |
+    And I store the task ID as "blocked_id"
+    And I run depend "<blocked_id>" --on the lifecycle task
+    When I transition the lifecycle task through to step "done" with --skip-validation
+    And I show the task "<blocked_id>"
+    Then the output should not contain "Blocked by:"
+    And the output should not contain "<blocker_id>"
+
   Scenario: Show task displays sections
     Given I create a task with:
       | title | Section show task |

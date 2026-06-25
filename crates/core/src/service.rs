@@ -5,9 +5,9 @@
 //! to share the same business logic.
 
 use crate::error::ServiceResult;
-use crate::models::Task;
 use crate::models::{
-    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRun,
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, StepType, Task, TaskFilter,
+    TaskRun,
 };
 use crate::workflow_service::WorkflowInfo;
 use async_trait::async_trait;
@@ -332,11 +332,13 @@ pub trait TaskService: Send + Sync {
     /// * `filter` - Task filter criteria
     /// * `workflow_names` - Optional map of workflow_id -> workflow_name
     /// * `step_names` - Optional map of step_id -> step_name
+    /// * `step_types` - Optional map of step_id -> step_type
     async fn list_tasks_with_lookups(
         &self,
         filter: &TaskFilter,
         _workflow_names: Option<&std::collections::HashMap<String, String>>,
         _step_names: Option<&std::collections::HashMap<String, String>>,
+        _step_types: Option<&std::collections::HashMap<String, StepType>>,
     ) -> ServiceResult<Vec<Task>> {
         // Default: ignore the lookups and call list_tasks
         self.list_tasks(filter).await

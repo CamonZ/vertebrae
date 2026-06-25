@@ -215,13 +215,7 @@ impl ShowCommand {
         // Convert embedded relationships to TaskSummary
         let children: Vec<TaskSummary> = task.children.iter().map(task_to_summary).collect();
 
-        // Blockers: filter for incomplete only (step_name != "done")
-        let blocked_by: Vec<TaskSummary> = task
-            .blockers
-            .iter()
-            .filter(|t| t.step_name.as_deref() != Some("done"))
-            .map(task_to_summary)
-            .collect();
+        let blocked_by = incomplete_blocker_summaries(&task.blockers);
 
         let blocks: Vec<TaskSummary> = task.dependents.iter().map(task_to_summary).collect();
 
@@ -385,6 +379,14 @@ impl ShowCommand {
 /// Convert a core Task to a TaskSummary for display in relationships.
 fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
     TaskSummary::from(task)
+}
+
+fn incomplete_blocker_summaries(blockers: &[vertebrae_core::Task]) -> Vec<TaskSummary> {
+    blockers
+        .iter()
+        .filter(|task| task.completed_at.is_none())
+        .map(task_to_summary)
+        .collect()
 }
 
 /// Convert a core Task to the local display row shape.
@@ -784,6 +786,31 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
         }
+    }
+
+    fn blocker(id: &str, step_name: &str, completed: bool) -> vertebrae_core::Task {
+        let mut task =
+            vertebrae_core::Task::new(format!("Blocker {id}"), vertebrae_core::Level::Task);
+        task.id = id.to_string();
+        task.step_name = Some(step_name.to_string());
+        if completed {
+            task.completed_at = Some(chrono::Utc::now());
+        }
+        task
+    }
+
+    #[test]
+    fn incomplete_blocker_summaries_filter_by_completed_at_not_step_name() {
+        let blockers = vec![
+            blocker("completed-review", "review", true),
+            blocker("open-done-step", "done", false),
+            blocker("open-review", "review", false),
+        ];
+
+        let summaries = incomplete_blocker_summaries(&blockers);
+
+        let ids: Vec<_> = summaries.into_iter().map(|summary| summary.id).collect();
+        assert_eq!(ids, vec!["open-done-step", "open-review"]);
     }
 
     #[test]

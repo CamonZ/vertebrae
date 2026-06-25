@@ -58,6 +58,19 @@ function cachedTasksFor(taskId: string, generation: number): Task[] {
   ];
 }
 
+function cachedStepTypeForCurrentStep(
+  taskId: string,
+  currentStepId: string | null | undefined,
+  generation: number
+): Task["step_type"] | null {
+  if (!currentStepId) return null;
+  const match = cachedTasksFor(taskId, generation).find(
+    (cachedTask) =>
+      cachedTask.current_step_id === currentStepId && cachedTask.step_type
+  );
+  return match?.step_type ?? null;
+}
+
 function hasSuspiciousEmptyArrayPayload(task: Task, generation: number) {
   const cachedTasks = cachedTasksFor(task.id, generation);
   return cachedTasks.some(
@@ -120,14 +133,30 @@ export function useTaskChangeListener(
       if (change_type === "Deleted" || archived) {
         removeTaskFromQueryCache(task_id, projectScopeGeneration);
       } else if (task) {
+        const cachedStepType = !task.step_type
+          ? cachedStepTypeForCurrentStep(
+              task_id,
+              task.current_step_id,
+              projectScopeGeneration
+            )
+          : null;
+        const reconciledTask =
+          cachedStepType !== null
+            ? { ...task, step_type: cachedStepType }
+            : task;
+        const needsStepTypeHydration = Boolean(
+          task.current_step_id && !task.step_type && !cachedStepType
+        );
+
         if (
           !task.workflow_name ||
           !task.step_name ||
+          needsStepTypeHydration ||
           hasSuspiciousEmptyArrayPayload(task, projectScopeGeneration)
         ) {
           void fetchAndReconcileTask(task_id);
         } else {
-          upsertTaskInQueryCache(task, projectScopeGeneration);
+          upsertTaskInQueryCache(reconciledTask, projectScopeGeneration);
         }
       } else {
         void fetchAndReconcileTask(task_id);

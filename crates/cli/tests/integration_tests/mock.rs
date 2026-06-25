@@ -91,6 +91,7 @@ impl TaskService for MockTaskService {
             current_step_id: None,
             workflow_name: None,
             step_name: None,
+            step_type: None,
             run_controls: None,
             parent_id: options.parent_id.clone(),
             dependency_ids: options.depends_on.clone(),

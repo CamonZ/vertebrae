@@ -1,4 +1,5 @@
 use cucumber::{given, when};
+use vertebrae_core::workflow_service::{UpdateWorkflowOptions, WorkflowService};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::SmokeWorld;
@@ -130,6 +131,26 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
     );
 
     world.track_workflow(wf_id);
+}
+
+#[given("the workflow is final")]
+async fn given_workflow_is_final(world: &mut SmokeWorld) {
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    let client = world
+        .graphql_client
+        .as_ref()
+        .expect("no configured Sacrum client")
+        .clone();
+    let service = vertebrae_sacrum_client::SacrumWorkflowService::new(client);
+
+    service
+        .update_workflow(&wf_id, UpdateWorkflowOptions::new().with_is_final(true))
+        .await
+        .expect("failed to mark workflow as final");
 }
 
 #[given("I assign the workflow to the task")]

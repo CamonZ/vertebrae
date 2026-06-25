@@ -30,7 +30,10 @@ function makeRun(overrides: Partial<TaskRun> & { id: string }): TaskRun {
 function makeExec(
   overrides: Partial<StepExecution> & { id: string }
 ): StepExecution {
-  const hasStepType = Object.prototype.hasOwnProperty.call(overrides, "step_type");
+  const hasStepType = Object.prototype.hasOwnProperty.call(
+    overrides,
+    "step_type"
+  );
   return {
     id: overrides.id,
     task_id: overrides.task_id ?? "task-1",
@@ -78,7 +81,7 @@ describe("classifyWaitingRun", () => {
     ).toBe("human_input");
   });
 
-  it("uses a narrow wait_children step_name fallback for legacy payloads without step_type", () => {
+  it("treats missing step_type as human_input even when the display label says wait_children", () => {
     expect(
       classifyWaitingRun(
         makeExec({
@@ -87,7 +90,7 @@ describe("classifyWaitingRun", () => {
           step_type: undefined,
         })
       )
-    ).toBe("wait_children");
+    ).toBe("human_input");
   });
 
   it("defaults absent or legacy non-wait_children payloads to human_input", () => {

@@ -143,8 +143,8 @@ impl BlockersCommand {
 
     /// Fetch direct blockers for a task (tasks it depends on).
     ///
-    /// By default, hides blockers whose current workflow step is done.
-    /// When `--all` is set, returns blockers regardless of current step.
+    /// By default, hides blockers that have a completion timestamp.
+    /// When `--all` is set, returns blockers regardless of completion status.
     async fn fetch_direct_blockers(
         &self,
         services: &VertebraeServices,
@@ -158,9 +158,7 @@ impl BlockersCommand {
     fn visible_blockers(&self, blockers: Vec<Task>) -> Vec<Task> {
         blockers
             .into_iter()
-            .filter(|blocker| {
-                self.all || blocker.step_name.as_deref().unwrap_or("backlog") != "done"
-            })
+            .filter(|blocker| self.all || blocker.completed_at.is_none())
             .collect()
     }
 }
@@ -253,6 +251,51 @@ fn print_node(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn blocker(id: &str, step_name: &str, completed: bool) -> Task {
+        let mut task = Task::new(format!("Blocker {id}"), vertebrae_core::Level::Task);
+        task.id = id.to_string();
+        task.step_name = Some(step_name.to_string());
+        if completed {
+            task.completed_at = Some(chrono::Utc::now());
+        }
+        task
+    }
+
+    #[test]
+    fn visible_blockers_filters_by_completed_at_not_step_name() {
+        let command = BlockersCommand {
+            id: "target".to_string(),
+            depth: None,
+            all: false,
+        };
+        let blockers = vec![
+            blocker("completed-review", "review", true),
+            blocker("open-done-step", "done", false),
+            blocker("open-review", "review", false),
+        ];
+
+        let visible = command.visible_blockers(blockers);
+
+        let ids: Vec<_> = visible.into_iter().map(|task| task.id).collect();
+        assert_eq!(ids, vec!["open-done-step", "open-review"]);
+    }
+
+    #[test]
+    fn visible_blockers_all_keeps_completed_blockers_for_display() {
+        let command = BlockersCommand {
+            id: "target".to_string(),
+            depth: None,
+            all: true,
+        };
+        let blockers = vec![blocker("completed-review", "review", true)];
+
+        let visible = command.visible_blockers(blockers);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].id, "completed-review");
+        assert_eq!(visible[0].step_name.as_deref(), Some("review"));
+    }
 
     #[test]
     fn test_blockers_result_serializes_to_json() {

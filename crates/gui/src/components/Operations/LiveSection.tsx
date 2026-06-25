@@ -38,7 +38,9 @@ export function LiveSection({ items }: LiveSectionProps) {
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--color-ok)]" />
         </span>
         <span>Live</span>
-        <span className="ml-auto text-[var(--color-ok)]/70">{items.length}</span>
+        <span className="ml-auto text-[var(--color-ok)]/70">
+          {items.length}
+        </span>
       </h2>
 
       <div className="space-y-1">
@@ -82,7 +84,11 @@ export function LiveSection({ items }: LiveSectionProps) {
                       <span className="font-mono">{statusLabel}</span>
                     )}
                     {item.task.step_name && (
-                      <StepBadge stepName={item.task.step_name} />
+                      <StepBadge
+                        stepName={item.task.step_name}
+                        stepType={item.task.step_type}
+                        runStatus={item.taskRun.status}
+                      />
                     )}
                   </p>
                 </div>

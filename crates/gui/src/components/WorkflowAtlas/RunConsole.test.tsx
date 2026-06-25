@@ -37,9 +37,8 @@ const { runWorkflow, stopRun } = vi.hoisted(() => ({
   stopRun: vi.fn(async () => ({ status: "ok", data: null })),
 }));
 vi.mock("../../bindings", async () => {
-  const actual = await vi.importActual<typeof import("../../bindings")>(
-    "../../bindings",
-  );
+  const actual =
+    await vi.importActual<typeof import("../../bindings")>("../../bindings");
   return {
     ...actual,
     commands: { runWorkflow, stopRun },
@@ -75,6 +74,7 @@ function makeTask(id: string, run: TaskRun | null, title: string): Task {
     current_step_id: "s1",
     workflow_name: "Build",
     step_name: null,
+    step_type: "execute",
     run_controls: {
       runnable: !run,
       stoppable: !!run,
@@ -152,7 +152,9 @@ describe("RunConsole", () => {
     const console_ = screen.getByTestId("run-console");
     // Ready tab is the default — shows the ready task only.
     expect(within(console_).getByText("Ready task")).toBeInTheDocument();
-    expect(within(console_).queryByText("Running task")).not.toBeInTheDocument();
+    expect(
+      within(console_).queryByText("Running task")
+    ).not.toBeInTheDocument();
 
     // Tab counts reflect the split.
     const tabs = within(console_).getAllByRole("tab");
@@ -181,7 +183,9 @@ describe("RunConsole", () => {
     openConsole();
 
     // Jump to the Running tab where the Stop control lives.
-    fireEvent.click(within(screen.getByTestId("run-console")).getAllByRole("tab")[1]);
+    fireEvent.click(
+      within(screen.getByTestId("run-console")).getAllByRole("tab")[1]
+    );
     fireEvent.click(screen.getByRole("button", { name: "Stop run" }));
     expect(stopRun).toHaveBeenCalledExactlyOnceWith({
       task_run_id: null,
@@ -206,7 +210,7 @@ describe("RunConsole", () => {
 
     fireEvent.click(screen.getByText("Ready task"));
     expect(screen.getByTestId("task-detail-panel")).toHaveTextContent(
-      "ready-aaaa",
+      "ready-aaaa"
     );
   });
 

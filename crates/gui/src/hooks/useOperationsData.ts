@@ -157,7 +157,7 @@ export function useOperationsData(): OperationsData {
           if (!dep) return false;
           const depRunStatus = dep.run_controls?.active_run?.status ?? null;
           if (depRunStatus === "completed") return true;
-          return dep.step_name === "done";
+          return Boolean(dep.completed_at);
         });
       }
       return true;

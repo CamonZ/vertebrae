@@ -66,6 +66,7 @@ function createTask(overrides?: Partial<Task>): Task {
     current_step_id: null,
     workflow_name: null,
     step_name: "todo",
+    step_type: null,
     archived: false,
     worktree: null,
     rejection_reason: null,

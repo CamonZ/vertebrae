@@ -77,6 +77,7 @@ pub const TASK_SUMMARY_FIELDS: &str = r#"
         current_step_id
         archived
         parent_id
+        completed_at
         run_controls {
             runnable
             stoppable

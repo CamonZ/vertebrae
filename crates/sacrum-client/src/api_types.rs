@@ -157,6 +157,8 @@ pub struct WorkflowStepSummary {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub step_type: Option<String>,
+    #[serde(default)]
     pub step_order: i32,
 }
 

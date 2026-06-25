@@ -235,6 +235,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_id: "workflow-1",
       current_step_id: "step-todo",
       step_name: "todo",
+      step_type: "execute",
     });
     const filter = taskFilter({
       step_names: ["todo"],
@@ -257,6 +258,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_id: "workflow-1",
       current_step_id: "step-todo",
       step_name: "todo",
+      step_type: "execute",
     });
     emitTaskChanged({
       task_id: "wrong-search",
@@ -274,6 +276,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Implementation",
       current_step_id: "step-done",
       step_name: "done",
+      step_type: "execute" as const,
     };
     emitTaskChanged({
       task_id: "visible",
@@ -334,6 +337,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       workflow_name: "Finished",
       current_step_id: "step-done",
       step_name: "done",
+      step_type: "execute" as const,
     };
     emitTaskChanged({
       task_id: "visible-done",
@@ -392,6 +396,87 @@ describe("useTaskChangeListener realtime list membership", () => {
       id: "needs-hydration",
       workflow_name: "Implementation",
       step_name: "review",
+    });
+  });
+
+  it("hydrates task changed events when payload task data is missing step_type", async () => {
+    const partial = createMockTask({
+      id: "needs-step-type-hydration",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-review",
+      step_name: "review",
+      step_type: null,
+    });
+    const hydrated = {
+      ...partial,
+      step_type: "evaluate" as const,
+    };
+    seedTaskList([]);
+    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "needs-step-type-hydration",
+      change_type: "Updated",
+      task: partial,
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    await waitFor(() => {
+      expect(mockGetTask).toHaveBeenCalledWith("needs-step-type-hydration");
+    });
+    expect(cachedTasks()[0]).toMatchObject({
+      id: "needs-step-type-hydration",
+      step_name: "review",
+      step_type: "evaluate",
+    });
+  });
+
+  it("reuses a cached step_type for the same current step instead of hydrating every event", async () => {
+    const cached = createMockTask({
+      id: "cached-step-type",
+      title: "Cached projection",
+      workflow_id: "workflow-1",
+      workflow_name: "Implementation",
+      current_step_id: "step-review",
+      step_name: "review",
+      step_type: "evaluate",
+    });
+    seedTaskList([cached]);
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: "cached-step-type",
+      change_type: "Updated",
+      task: {
+        ...cached,
+        title: "Updated projection",
+        step_type: null,
+      },
+      current_step_id: "step-review",
+      workflow_id: "workflow-1",
+      level: "ticket",
+      archived: false,
+    });
+
+    expect(mockGetTask).not.toHaveBeenCalled();
+    expect(cachedTasks()[0]).toMatchObject({
+      id: "cached-step-type",
+      title: "Updated projection",
+      current_step_id: "step-review",
+      step_type: "evaluate",
     });
   });
 
