@@ -1,11 +1,25 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
 import { useChatStore } from "../../stores/chatStore";
 
+const mockGetCurrentProjectPath = vi.fn();
+
+vi.mock("../../bindings", () => ({
+  commands: {
+    getCurrentProjectPath: (...args: unknown[]) =>
+      mockGetCurrentProjectPath(...args),
+  },
+}));
+
 describe("FloatingChatLauncher", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetCurrentProjectPath.mockResolvedValue({
+      status: "ok",
+      data: "/test/project",
+    });
     window.localStorage.clear();
     useChatStore.getState().reset();
   });
@@ -23,7 +37,7 @@ describe("FloatingChatLauncher", () => {
     expect(keys[0]).toHaveTextContent("⌥");
   });
 
-  it("opens the project-scoped claude chat when clicked", async () => {
+  it("opens the local project chat when clicked", async () => {
     const user = userEvent.setup();
     render(<FloatingChatLauncher />);
 
@@ -31,17 +45,18 @@ describe("FloatingChatLauncher", () => {
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     const session = Object.values(useChatStore.getState().sessions).find(
-      (s) => s.scope === "project"
+      (s) => s.label === "Project Chat"
     );
     expect(session).toBeDefined();
     expect(session?.label).toBe("Project Chat");
+    expect(session?.projectPath).toBe("/test/project");
   });
 
   it("reopens the existing active session instead of creating project chat", async () => {
     const user = userEvent.setup();
     const id = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task Chat");
+      .openSession("Task Chat", "/test/project");
     useChatStore.getState().addMessage(id, {
       kind: "user",
       text: "still here",
@@ -65,11 +80,76 @@ describe("FloatingChatLauncher", () => {
     expect(Object.values(useChatStore.getState().sessions)).toHaveLength(1);
   });
 
-  it("does not reopen a locally closed active session", async () => {
+  it("does not reopen an active session from another project", async () => {
+    const user = userEvent.setup();
+    const otherProject = useChatStore
+      .getState()
+      .openSession("Other Project Chat", "/other/project");
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    expect(useChatStore.getState().activeSessionId).not.toBe(otherProject);
+    const activeSession =
+      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!];
+    expect(activeSession).toMatchObject({
+      label: "Project Chat",
+      projectPath: "/test/project",
+    });
+  });
+
+  it("does not reopen another project when current project lookup fails", async () => {
+    const user = userEvent.setup();
+    mockGetCurrentProjectPath.mockResolvedValueOnce({
+      status: "error",
+      error: { message: "no project" },
+    });
+    const otherProject = useChatStore
+      .getState()
+      .openSession("Other Project Chat", "/other/project");
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    expect(useChatStore.getState().activeSessionId).not.toBe(otherProject);
+    const activeSession =
+      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!];
+    expect(activeSession).toMatchObject({
+      label: "Project Chat",
+      projectPath: null,
+    });
+  });
+
+  it("reopens a no-project chat when current project lookup fails", async () => {
+    const user = userEvent.setup();
+    mockGetCurrentProjectPath.mockResolvedValueOnce({
+      status: "error",
+      error: { message: "no project" },
+    });
+    const noProject = useChatStore
+      .getState()
+      .openSession("No Project Chat", null);
+    useChatStore.getState().setPanelOpen(false);
+
+    render(<FloatingChatLauncher />);
+
+    await user.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
+    expect(useChatStore.getState().activeSessionId).toBe(noProject);
+  });
+
+  it("opens a same-project locally closed session as resumable", async () => {
     const user = userEvent.setup();
     const closedId = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task Chat");
+      .openSession("Task Chat", "/test/project");
     useChatStore.getState().markSessionClosed(closedId);
     useChatStore.setState({
       activeSessionId: closedId,
@@ -81,11 +161,7 @@ describe("FloatingChatLauncher", () => {
     await user.click(screen.getByRole("button", { name: "Open project chat" }));
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
-    expect(useChatStore.getState().activeSessionId).not.toBe(closedId);
-    const projectSession = Object.values(useChatStore.getState().sessions).find(
-      (s) => s.scope === "project"
-    );
-    expect(projectSession).toBeDefined();
+    expect(useChatStore.getState().activeSessionId).toBe(closedId);
     expect(useChatStore.getState().sessions[closedId].lifecycle).toBe("closed");
   });
 
@@ -107,7 +183,7 @@ describe("FloatingChatLauncher", () => {
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(
       Object.values(useChatStore.getState().sessions).some(
-        (s) => s.scope === "project"
+        (s) => s.label === "Project Chat"
       )
     ).toBe(true);
   });

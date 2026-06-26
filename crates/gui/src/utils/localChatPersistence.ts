@@ -1,6 +1,5 @@
 import type {
   ChatMessage,
-  ChatScope,
   ChatSession,
   LocalChatLifecycle,
 } from "../stores/chatStore";
@@ -9,12 +8,6 @@ import type { PermissionMode } from "../bindings";
 const STORAGE_KEY = "local-chat-sessions:v1";
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
 const CLEARED_KEY_PREFIX = `${STORAGE_KEY}:cleared:`;
-const VALID_SCOPES = new Set<ChatScope>([
-  "project",
-  "workflow",
-  "task",
-  "step",
-]);
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "accept_edits",
   "auto",
@@ -28,8 +21,6 @@ const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
 export interface LocalChatSessionSummary {
   id: string;
-  scope: ChatScope;
-  entityId: string | null;
   label: string;
   preview: string;
   model?: string;
@@ -50,14 +41,6 @@ function normalizeSession(value: unknown): ChatSession | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as Partial<ChatSession>;
   if (typeof candidate.id !== "string") return null;
-  if (!VALID_SCOPES.has(candidate.scope as ChatScope)) return null;
-  if (
-    candidate.entityId !== null &&
-    candidate.entityId !== undefined &&
-    typeof candidate.entityId !== "string"
-  ) {
-    return null;
-  }
   if (typeof candidate.label !== "string") return null;
   if (!Array.isArray(candidate.messages)) return null;
   if (candidate.status !== "open" && candidate.status !== "closed") return null;
@@ -85,8 +68,6 @@ function normalizeSession(value: unknown): ChatSession | null {
 
   return {
     id: candidate.id,
-    scope: candidate.scope as ChatScope,
-    entityId: candidate.entityId ?? null,
     label: candidate.label,
     messages,
     status: candidate.status,
@@ -94,10 +75,6 @@ function normalizeSession(value: unknown): ChatSession | null {
     claudeConversationId:
       typeof candidate.claudeConversationId === "string"
         ? candidate.claudeConversationId
-        : null,
-    contextSummary:
-      typeof candidate.contextSummary === "string"
-        ? candidate.contextSummary
         : null,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
@@ -187,6 +164,26 @@ function normalizeTimestamp(
   return messageTimestamp ?? fallback;
 }
 
+function timestampMillis(value: string | null | undefined): number {
+  const parsed = Date.parse(value ?? "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export function compareLocalChatSessionRecency(
+  a: Pick<ChatSession, "createdAt" | "updatedAt" | "id">,
+  b: Pick<ChatSession, "createdAt" | "updatedAt" | "id">
+): number {
+  const updatedDelta =
+    timestampMillis(b.updatedAt) - timestampMillis(a.updatedAt);
+  if (updatedDelta !== 0) return updatedDelta;
+
+  const createdDelta =
+    timestampMillis(b.createdAt) - timestampMillis(a.createdAt);
+  if (createdDelta !== 0) return createdDelta;
+
+  return b.id.localeCompare(a.id);
+}
+
 function serializeSession(
   session: ChatSession,
   previous?: ChatSession | null
@@ -258,8 +255,13 @@ export function projectPathMatches(
   sessionProjectPath: string | null | undefined,
   requestedProjectPath: string | null | undefined
 ): boolean {
+  // `undefined` means the caller intentionally requested an unfiltered list.
+  // `null` is a real no-project bucket: it may reuse no-project chats, but it
+  // must never match a chat captured under a different project path.
   if (requestedProjectPath === undefined) return true;
-  if (requestedProjectPath === null) return false;
+  if (requestedProjectPath === null) {
+    return sessionProjectPath === undefined || sessionProjectPath === null;
+  }
   if (sessionProjectPath === undefined || sessionProjectPath === null)
     return false;
   return sessionProjectPath === requestedProjectPath;
@@ -284,8 +286,6 @@ export function listPersistedLocalChatSessions(
     )
     .map((session) => ({
       id: session.id,
-      scope: session.scope,
-      entityId: session.entityId,
       label: session.label,
       preview: session.preview ?? buildPreview(session.messages),
       model: session.model,
@@ -297,7 +297,7 @@ export function listPersistedLocalChatSessions(
       messageCount: session.messages.length,
       lifecycle: session.lifecycle ?? "idle",
     }))
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    .sort(compareLocalChatSessionRecency);
 }
 
 export function loadPersistedLocalChatSession(
@@ -307,18 +307,17 @@ export function loadPersistedLocalChatSession(
 }
 
 export function findPersistedLocalChatSession(
-  scope: ChatScope,
-  entityId: string | null,
   projectPath?: string | null
 ): ChatSession | null {
   return (
-    Object.values(readSessions()).find(
-      (session) =>
-        session.status === "open" &&
-        session.scope === scope &&
-        session.entityId === entityId &&
-        projectPathMatches(session.projectPath, projectPath)
-    ) ?? null
+    Object.values(readSessions())
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          !session.isDetached &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0] ?? null
   );
 }
 

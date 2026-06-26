@@ -1,9 +1,23 @@
 import { useCallback, useEffect } from "react";
+import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
-import { useOpenChat } from "../../hooks/useScopedChat";
+import { useOpenChat } from "../../hooks/useLocalChat";
+import {
+  compareLocalChatSessionRecency,
+  projectPathMatches,
+} from "../../utils/localChatPersistence";
 
 /** Max gap (ms) between the two Alt taps that toggle the chat. */
 const DOUBLE_TAP_MS = 400;
+
+async function loadCurrentProjectPath(): Promise<string | null> {
+  try {
+    const result = await commands.getCurrentProjectPath();
+    return result.status === "ok" && result.data ? result.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Floating launcher pill for the project chat, adapted from the design
@@ -27,27 +41,38 @@ export function FloatingChatLauncher() {
 
   // Open (and ensure a session) when closed; close when already open. Reads
   // panelOpen from the store at call time so it works from the key handler too.
-  const toggleChat = useCallback(() => {
+  const toggleChat = useCallback(async () => {
+    if (useChatStore.getState().panelOpen) {
+      togglePanel();
+      return;
+    }
+
+    const projectPath = await loadCurrentProjectPath();
     const state = useChatStore.getState();
+    if (state.panelOpen) return;
+
     const isReusableSession = (
       session: (typeof state.sessions)[string]
-    ): boolean => session.status === "open" && session.lifecycle !== "closed";
+    ): boolean =>
+      session.status === "open" &&
+      session.lifecycle !== "closed" &&
+      !session.isDetached &&
+      projectPathMatches(session.projectPath, projectPath);
     const activeSession = state.activeSessionId
       ? state.sessions[state.activeSessionId]
       : null;
-    if (state.panelOpen) {
-      togglePanel();
-    } else if (activeSession && isReusableSession(activeSession)) {
+
+    if (activeSession && isReusableSession(activeSession)) {
       setPanelOpen(true);
     } else {
-      const session = Object.values(state.sessions).find(
-        (s) => isReusableSession(s)
-      );
+      const session = Object.values(state.sessions)
+        .filter((s) => isReusableSession(s))
+        .sort(compareLocalChatSessionRecency)[0];
       if (session) {
         focusSession(session.id);
         setPanelOpen(true);
       } else {
-        void openChat("project", null, "Project Chat");
+        void openChat("Project Chat", projectPath);
       }
     }
   }, [focusSession, openChat, setPanelOpen, togglePanel]);
@@ -60,7 +85,7 @@ export function FloatingChatLauncher() {
       if (event.key !== "Alt" || event.repeat) return;
       if (lastAlt !== null && event.timeStamp - lastAlt < DOUBLE_TAP_MS) {
         lastAlt = null;
-        toggleChat();
+        void toggleChat();
       } else {
         lastAlt = event.timeStamp;
       }
@@ -77,7 +102,7 @@ export function FloatingChatLauncher() {
       type="button"
       className="hc-launch"
       data-testid="local-chat-launcher"
-      onClick={toggleChat}
+      onClick={() => void toggleChat()}
       title="Open project chat (⌥ ⌥)"
       aria-label="Open project chat"
     >

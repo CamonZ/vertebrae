@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useScopedChat } from "../../hooks/useScopedChat";
+import { useLocalChat } from "../../hooks/useLocalChat";
 import { commands } from "../../bindings";
 import type {
   ClaudeModelCatalog,
@@ -8,12 +8,10 @@ import type {
 } from "../../bindings";
 import {
   useChatStore,
-  getParentScope,
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
 } from "../../stores/chatStore";
 import type { ChatMessage } from "../../stores/chatStore";
-import { scopeLabel } from "../../utils/chatContext";
 import {
   formatTokenCount,
   utilizationLevel,
@@ -280,8 +278,11 @@ interface ChatWindowProps {
   onClosePanel?: () => void;
   /** Opens the local-only persisted session history drawer. */
   onToggleHistory?: () => void;
-  /** Starts a fresh local chat for the current scope. */
+  /** Starts a fresh local chat for the current project. */
   onStartFresh?: () => void;
+  /** Expands/collapses the project chat panel session view. */
+  onToggleWide?: () => void;
+  isWide?: boolean;
 }
 
 /**
@@ -293,6 +294,8 @@ export function ChatWindow({
   onClosePanel,
   onToggleHistory,
   onStartFresh,
+  onToggleWide,
+  isWide = false,
 }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -302,10 +305,9 @@ export function ChatWindow({
   );
 
   const { session, isActive, startSession, sendMessage, closeClaudeSession } =
-    useScopedChat(sessionId);
+    useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
-  const widenScope = useChatStore((s) => s.widenScope);
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
@@ -392,17 +394,6 @@ export function ChatWindow({
     clearMessages(sessionId);
   }, [clearMessages, closeClaudeSession, session?.claudeSessionId, sessionId]);
 
-  const handleWiden = useCallback(() => {
-    if (!session) return;
-    const parentScope = getParentScope(session.scope);
-    if (!parentScope) return;
-
-    // Scope widening still lacks the parent entity lookup needed to preserve
-    // real parent IDs; keep the existing null widening behavior out of this
-    // local lifecycle change.
-    widenScope(sessionId, parentScope, null, `${scopeLabel(parentScope)} Chat`);
-  }, [session, sessionId, widenScope]);
-
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       setSessionSelectedModel(sessionId, event.target.value || null);
@@ -476,7 +467,6 @@ export function ChatWindow({
 
   if (!session) return null;
 
-  const canWiden = getParentScope(session.scope) !== null;
   const selectedModelUnsupported =
     !!session.selectedModelId &&
     !supportedModelIds.has(session.selectedModelId);
@@ -567,6 +557,39 @@ export function ChatWindow({
                 </svg>
               </button>
             )}
+            {onToggleWide && (
+              <button
+                className="hc-ctrl"
+                onClick={onToggleWide}
+                title={isWide ? "Collapse chat panel" : "Widen chat panel"}
+                aria-label={
+                  isWide ? "Collapse chat panel" : "Widen chat panel"
+                }
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  {isWide ? (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 9H4V4m0 5 5-5m6 5h5V4m0 5-5-5M9 15H4v5m0-5 5 5m6-5h5v5m0-5-5 5"
+                    />
+                  ) : (
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
+                    />
+                  )}
+                </svg>
+              </button>
+            )}
             <button
               className="hc-ctrl"
               onClick={() => void handleClearMessages()}
@@ -610,30 +633,6 @@ export function ChatWindow({
             </button>
           </div>
         </div>
-        {canWiden && (
-          <div className="hc-head-meta">
-            <button
-              className="hc-widen"
-              onClick={handleWiden}
-              title={`Widen scope to ${scopeLabel(getParentScope(session.scope)!)}`}
-              aria-label="Widen scope"
-            >
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-                />
-              </svg>
-            </button>
-          </div>
-        )}
       </div>
 
       {lifecycle === "error" && session.lifecycleError && (

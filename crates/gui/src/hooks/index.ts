@@ -37,7 +37,7 @@ export type {
   LayoutResult,
   ElkLayoutOptions,
 } from "./useElkLayout";
-export { useScopedChat, useOpenChat } from "./useScopedChat";
+export { useLocalChat, useOpenChat } from "./useLocalChat";
 export { usePipelineSummary } from "./usePipelineSummary";
 export { useWebSocketStatus } from "./useWebSocketStatus";
 export { useShellHeader } from "./useShellHeader";

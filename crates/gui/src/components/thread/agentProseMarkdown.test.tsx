@@ -44,7 +44,7 @@ function expectBlockMarkdown(
 }
 
 describe("chat agent prose markdown rendering", () => {
-  it("renders local scoped chat assistant prose as block markdown", () => {
+  it("renders local chat assistant prose as block markdown", () => {
     const markdown = [
       "Plan:",
       "",
@@ -78,7 +78,7 @@ describe("chat agent prose markdown rendering", () => {
     expect(prose.querySelector(".ev-cursor")).toBeInTheDocument();
   });
 
-  it("renders completed local scoped chat assistant prose as block markdown", () => {
+  it("renders completed local chat assistant prose as block markdown", () => {
     const markdown = [
       "Steps:",
       "",

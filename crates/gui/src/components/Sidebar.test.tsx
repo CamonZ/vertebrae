@@ -28,7 +28,7 @@ vi.mock("../stores", () => ({
   resetProjectScopedStores: () => mockResetProjectScopedStores(),
 }));
 
-vi.mock("../hooks/useScopedChat", () => ({
+vi.mock("../hooks/useLocalChat", () => ({
   useOpenChat: () => vi.fn(),
 }));
 
@@ -155,7 +155,7 @@ describe("Sidebar project switcher", () => {
 
   it("clicking a non-active project switches the active project and reloads to root", async () => {
     // The switch does a full reload (not a client-side navigate) so every
-    // project-scoped surface re-initializes for the new project — the sidebar
+    // project-local surface re-initializes for the new project — the sidebar
     // avatar polls the current project only once on mount. Stub
     // window.location to capture the reload target.
     const originalLocation = window.location;

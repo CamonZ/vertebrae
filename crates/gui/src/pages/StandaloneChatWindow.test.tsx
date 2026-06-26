@@ -14,7 +14,7 @@ vi.mock("../components/WindowLayout", () => ({
 }));
 
 // Stub ChatWindow so the test stays focused on the page's seeding logic
-// and doesn't pull in useScopedChat's backend bindings.
+// and doesn't pull in useLocalChat's backend bindings.
 vi.mock("../components/ChatWindow/ChatWindow", () => ({
   ChatWindow: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="chat-window">{sessionId}</div>
@@ -44,14 +44,11 @@ describe("StandaloneChatWindow", () => {
   it("seeds the chat store from the localStorage stash before first paint", () => {
     stashChatSession({
       id: "s-99",
-      scope: "task",
-      entityId: "task-1",
       label: "Stashed",
       messages: [],
       status: "open",
       claudeSessionId: "claude-99",
       claudeConversationId: "conv-99",
-      contextSummary: null,
       isDetached: true,
     });
 
@@ -83,8 +80,6 @@ describe("StandaloneChatWindow", () => {
   it("hydrates from durable local chat persistence when no stash exists", () => {
     persistLocalChatSession({
       id: "s-persisted",
-      scope: "task",
-      entityId: "task-1",
       label: "Persisted",
       messages: [
         {
@@ -96,7 +91,6 @@ describe("StandaloneChatWindow", () => {
       status: "open",
       claudeSessionId: "claude-persisted",
       claudeConversationId: "conv-persisted",
-      contextSummary: "[Context]",
       projectPath: "/repo/root",
       isDetached: true,
     });
@@ -108,7 +102,6 @@ describe("StandaloneChatWindow", () => {
       id: "s-persisted",
       claudeSessionId: null,
       claudeConversationId: "conv-persisted",
-      contextSummary: "[Context]",
       projectPath: "/repo/root",
       isDetached: false,
     });

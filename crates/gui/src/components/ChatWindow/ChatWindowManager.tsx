@@ -3,10 +3,9 @@ import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
 import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
-import { scopeLabel } from "../../utils/chatContext";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
-import { doCloseSession } from "../../hooks/useScopedChat";
+import { doCloseSession } from "../../hooks/useLocalChat";
 import { ChatWindow } from "./ChatWindow";
 
 /** Floating chat-panel width: persistence key and clamp bounds (px). Mirrors
@@ -26,7 +25,7 @@ const EXIT_MS = 180;
  * ChatWindowManager manages multiple chat session tabs in a floating-glass side
  * panel anchored bottom-left (design reference `.hc-panel`, opened by the
  * FloatingChatLauncher pill). Renders the active session's ChatWindow, which
- * owns the single header band (title + scope) and the composer.
+ * owns the single header band (title + status) and the composer.
  */
 export function ChatWindowManager() {
   const sessions = useChatStore((s) => s.sessions);
@@ -171,18 +170,12 @@ export function ChatWindowManager() {
   const renderedPanelWidth = isMaximized ? maximizedWidth : panelWidth;
   const startFreshActiveSession = async () => {
     if (!activeSession) return;
-    const label = `New ${scopeLabel(activeSession.scope)} Chat`;
     const projectPath = await loadCurrentProjectPath();
     setCurrentProjectPathState({
       generation: projectScopeGeneration,
       path: projectPath,
     });
-    startFreshSession(
-      activeSession.scope,
-      activeSession.entityId,
-      label,
-      projectPath
-    );
+    startFreshSession("New Chat", projectPath);
     setHistoryOpen(false);
   };
 
@@ -320,6 +313,8 @@ export function ChatWindowManager() {
                   : () => setHistoryOpen((value) => !value)
               }
               onStartFresh={startFreshActiveSession}
+              onToggleWide={toggleMaximized}
+              isWide={isMaximized}
             />
           </div>
         </div>
@@ -356,7 +351,7 @@ function formatSessionTime(value: string): string {
 
 function formatSessionModel(session: LocalChatSessionSummary): string {
   const model = session.model?.trim() || session.selectedModelId?.trim();
-  return model ? model.replace(/^claude-/i, "") : scopeLabel(session.scope);
+  return model ? model.replace(/^claude-/i, "") : "Chat";
 }
 
 function LocalChatMiniPanel({
@@ -593,8 +588,7 @@ function LocalChatHistoryDrawer({
                       {session.preview}
                     </p>
                     <p className="mt-1 text-[10px] uppercase text-[var(--color-fg-mute)]">
-                      {scopeLabel(session.scope)} · {session.messageCount}{" "}
-                      messages
+                      Chat · {session.messageCount} messages
                       {formattedTime ? ` · ${formattedTime}` : ""}
                     </p>
                   </button>

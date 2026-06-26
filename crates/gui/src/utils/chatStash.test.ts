@@ -9,14 +9,11 @@ import type { ChatSession } from "../stores/chatStore";
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "s-1",
-    scope: "task",
-    entityId: "task-1",
     label: "Sample",
     messages: [],
     status: "open",
     claudeSessionId: "claude-abc",
     claudeConversationId: null,
-    contextSummary: null,
     ...overrides,
   };
 }

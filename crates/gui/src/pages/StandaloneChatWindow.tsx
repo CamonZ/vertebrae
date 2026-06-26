@@ -13,7 +13,7 @@ import { loadPersistedLocalChatSession } from "../utils/localChatPersistence";
  * `useChatStore` starts empty. The parent stashes the focal `ChatSession`
  * in `localStorage` before opening us; we read+delete it synchronously
  * before first paint and seed the store so `ChatWindow` and
- * `useScopedChat` find the session immediately. The one-shot stash preserves
+ * `useLocalChat` find the session immediately. The one-shot stash preserves
  * a live `claudeSessionId`; durable fallback hydration keeps the Claude
  * conversation ID so the backend can resume without trusting a stale process
  * local session ID.

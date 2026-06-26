@@ -69,14 +69,11 @@ describe("resetProjectScopedStores", () => {
       sessions: {
         "chat-1": {
           id: "chat-1",
-          scope: "task",
-          entityId: task.id,
           label: "Old task",
           messages: [],
           status: "open",
           claudeSessionId: "claude-1",
           claudeConversationId: null,
-          contextSummary: null,
         },
       },
       activeSessionId: "chat-1",

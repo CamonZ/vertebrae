@@ -62,14 +62,11 @@ vi.mock("../../bindings", () => ({
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "test-session",
-    scope: "task",
-    entityId: "task-1",
     label: "Test Task",
     messages: [],
     status: "open",
     claudeSessionId: null,
     claudeConversationId: null,
-    contextSummary: null,
     ...overrides,
   };
 }
@@ -90,8 +87,8 @@ describe("ChatWindow", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders the session label as the header title without scope copy", () => {
-    const session = createSession({ scope: "task", label: "My Task" });
+  it("renders the session label as the header title without entity copy", () => {
+    const session = createSession({ label: "My Task" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -101,14 +98,12 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByText("My Task")).toBeInTheDocument();
-    expect(screen.queryByText("scoped to")).not.toBeInTheDocument();
+    expect(screen.queryByText("local to")).not.toBeInTheDocument();
     expect(screen.queryByText("this task")).not.toBeInTheDocument();
   });
 
-  it("does not render workflow scope copy", () => {
+  it("does not render old entity copy", () => {
     const session = createSession({
-      scope: "workflow",
-      entityId: "wf-1",
       label: "Deploy Pipeline",
     });
     useChatStore.setState({
@@ -124,23 +119,10 @@ describe("ChatWindow", () => {
     expect(screen.queryByText("wf-1")).not.toBeInTheDocument();
   });
 
-  it("shows widen button for non-project scopes", () => {
-    const session = createSession({ scope: "step", label: "Step 1" });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
-
-    render(<ChatWindow sessionId="test-session" />);
-
-    expect(screen.getByTitle("Widen scope to Task")).toBeInTheDocument();
-  });
-
-  it("does not show widen button for project scope", () => {
+  it("shows a scope-neutral widening control when the panel can expand", async () => {
+    const user = userEvent.setup();
+    const onToggleWide = vi.fn();
     const session = createSession({
-      scope: "project",
-      entityId: null,
       label: "Project Chat",
     });
     useChatStore.setState({
@@ -149,9 +131,40 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
 
-    render(<ChatWindow sessionId="test-session" />);
+    render(
+      <ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />
+    );
 
     expect(screen.queryByTitle(/Widen scope/)).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Widen chat panel" })
+    );
+
+    expect(onToggleWide).toHaveBeenCalledTimes(1);
+  });
+
+  it("labels the widening control as collapse while the panel is wide", () => {
+    const session = createSession({
+      label: "Project Chat",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(
+      <ChatWindow
+        sessionId="test-session"
+        onToggleWide={() => {}}
+        isWide={true}
+      />
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Collapse chat panel" })
+    ).toBeInTheDocument();
   });
 
   it("shows empty state message when no messages", () => {
@@ -264,7 +277,6 @@ describe("ChatWindow", () => {
 
   it("does not render stored context summaries", () => {
     const session = createSession({
-      contextSummary: "[Context: Task]\nTask: My Important Task",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -705,7 +717,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    // The scope header should have a muted dot for closed status
+    // The chat header should have a muted dot for closed status.
     screen.getByText("Test Task");
     // Closed session indicator is a sibling of the header content
     expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();

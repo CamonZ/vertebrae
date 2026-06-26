@@ -18,7 +18,6 @@ import {
   useChatStore,
 } from "../stores/chatStore";
 import type {
-  ChatScope,
   ChatSession,
   ChatMessage,
   LocalChatLifecycle,
@@ -264,7 +263,7 @@ export async function doStartSession(
     session.claudeConversationId ? "resuming" : "starting"
   );
 
-  const backendSessionId = `scoped-${sessionId}-${Date.now()}`;
+  const backendSessionId = `local-${sessionId}-${Date.now()}`;
   deps.setClaudeSessionId(sessionId, backendSessionId);
   deps.setClaudeSessionIdRef(backendSessionId);
 
@@ -395,13 +394,13 @@ export async function doCloseSession(
 }
 
 /**
- * Hook to manage a scoped Claude chat session.
+ * Hook to manage a local Claude chat session.
  *
  * Wraps the chatStore with Claude CLI session lifecycle:
  * - Creates/resumes Claude CLI sessions
  * - Listens for Claude events and routes them to the correct store session
  */
-export function useScopedChat(sessionId: string | null) {
+export function useLocalChat(sessionId: string | null) {
   const session = useChatStore((s) =>
     sessionId ? (s.sessions[sessionId] ?? null) : null
   );
@@ -714,23 +713,25 @@ export function useScopedChat(sessionId: string | null) {
 }
 
 /**
- * Helper hook to open a scoped chat session from any component.
+ * Helper hook to open a local chat session from any component.
  */
 export function useOpenChat() {
   const openSession = useChatStore((s) => s.openSession);
 
   return useCallback(
-    async (scope: ChatScope, entityId: string | null, label: string) => {
-      let projectPath: string | null = null;
-      try {
-        const pathResult = await commands.getCurrentProjectPath();
-        if (pathResult.status === "ok" && pathResult.data) {
-          projectPath = pathResult.data;
+    async (label = "Project Chat", projectPathOverride?: string | null) => {
+      let projectPath: string | null = projectPathOverride ?? null;
+      if (projectPathOverride === undefined) {
+        try {
+          const pathResult = await commands.getCurrentProjectPath();
+          if (pathResult.status === "ok" && pathResult.data) {
+            projectPath = pathResult.data;
+          }
+        } catch {
+          // Null is the no-project bucket; it reuses only null-path sessions.
         }
-      } catch {
-        // Preserve the existing open behavior when the path lookup fails.
       }
-      return openSession(scope, entityId, label, projectPath);
+      return openSession(label, projectPath);
     },
     [openSession]
   );

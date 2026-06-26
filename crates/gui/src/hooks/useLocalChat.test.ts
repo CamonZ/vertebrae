@@ -12,7 +12,7 @@ import {
   doStartSession,
   doSendMessage,
   doCloseSession,
-} from "./useScopedChat";
+} from "./useLocalChat";
 import type { ChatSession } from "../stores/chatStore";
 import { commands } from "../bindings";
 
@@ -636,14 +636,11 @@ describe("handleErrorEvent", () => {
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: SESSION_ID,
-    scope: "task",
-    entityId: "task-1",
     label: "Test Task",
     messages: [],
     status: "open",
     claudeSessionId: null,
     claudeConversationId: null,
-    contextSummary: null,
     ...overrides,
   };
 }
@@ -666,10 +663,10 @@ describe("doStartSession", () => {
 
     expect(deps.setClaudeSessionId).toHaveBeenCalledWith(
       SESSION_ID,
-      expect.stringMatching(/^scoped-session-1-\d+$/)
+      expect.stringMatching(/^local-session-1-\d+$/)
     );
     expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(
-      expect.stringMatching(/^scoped-session-1-\d+$/)
+      expect.stringMatching(/^local-session-1-\d+$/)
     );
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
@@ -693,7 +690,7 @@ describe("doStartSession", () => {
     await doStartSession(makeSession(), SESSION_ID, deps);
 
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^scoped-/),
+      session_id: expect.stringMatching(/^local-/),
       working_dir: "/test/project",
       initial_prompt: null,
       resume_session_id: null,
@@ -719,7 +716,7 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^scoped-/),
+      session_id: expect.stringMatching(/^local-/),
       working_dir: "/captured/project",
       initial_prompt: null,
       resume_session_id: null,
@@ -741,7 +738,7 @@ describe("doStartSession", () => {
 
     expect(mockedCommands.getCurrentProjectPath).toHaveBeenCalled();
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^scoped-/),
+      session_id: expect.stringMatching(/^local-/),
       working_dir: "/test/project",
       initial_prompt: null,
       resume_session_id: null,
@@ -766,7 +763,7 @@ describe("doStartSession", () => {
     );
 
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^scoped-/),
+      session_id: expect.stringMatching(/^local-/),
       working_dir: "/test/project",
       initial_prompt: null,
       resume_session_id: null,
@@ -791,7 +788,7 @@ describe("doStartSession", () => {
     );
 
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^scoped-/),
+      session_id: expect.stringMatching(/^local-/),
       working_dir: "/test/project",
       initial_prompt: null,
       resume_session_id: null,
@@ -838,7 +835,7 @@ describe("doStartSession", () => {
     expect(deps.addMessage).not.toHaveBeenCalled();
   });
 
-  it("starts without fetching, storing, or injecting scoped context", async () => {
+  it("starts without fetching, storing, or injecting local context", async () => {
     const deps = {
       setClaudeSessionId: vi.fn(),
       setClaudeSessionIdRef: vi.fn(),
@@ -847,12 +844,7 @@ describe("doStartSession", () => {
       setSessionLifecycle: vi.fn(),
     };
 
-    await doStartSession(
-      makeSession({ contextSummary: "[Context: Task]\nTask: X" }),
-      SESSION_ID,
-      deps,
-      "Help"
-    );
+    await doStartSession(makeSession(), SESSION_ID, deps, "Help");
 
     expect(mockedCommands.getCurrentProject).not.toHaveBeenCalled();
     expect(mockedCommands.getTask).not.toHaveBeenCalled();
@@ -962,12 +954,7 @@ describe("doStartSession", () => {
       setSessionLifecycle: vi.fn(),
     };
 
-    await doStartSession(
-      makeSession({ contextSummary: "[Context]" }),
-      SESSION_ID,
-      deps,
-      "Question"
-    );
+    await doStartSession(makeSession(), SESSION_ID, deps, "Question");
 
     expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
       session_id: expect.any(String),
