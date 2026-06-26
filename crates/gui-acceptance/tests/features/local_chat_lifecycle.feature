@@ -18,6 +18,7 @@ Feature: Local project chat lifecycle
     And the GUI should not show an element with test id "chat-lifecycle-label" within 5 seconds
     When I click on the element with title "Toggle chat history"
     Then the GUI should show an element with test id "local-chat-history-drawer" within 5 seconds
+    And the local chat history drawer should show the active project within 5 seconds
     And the GUI should show "local-chat-acceptance reply" within 5 seconds
     When I click on the element with title "Start fresh local chat from history"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds

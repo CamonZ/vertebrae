@@ -131,3 +131,46 @@ async fn second_project_is_active_within(world: &mut GuiWorld, timeout: u64) {
         .screenshot(&client, "after-assert-second-project-active")
         .await;
 }
+
+#[then(expr = "the local chat history drawer should show the active project within {int} seconds")]
+async fn local_chat_history_drawer_shows_active_project(world: &mut GuiWorld, timeout: u64) {
+    let slug = active_project_slug(world);
+
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    world
+        .screenshot(&client, "before-assert-local-chat-project-group")
+        .await;
+
+    let locator = Locator::XPath(&format!(
+        "//*[@data-testid='local-chat-history-drawer']//h3[normalize-space(.)='{}']",
+        slug
+    ));
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(locator)
+        .await;
+
+    if element.is_err() {
+        world
+            .screenshot(&client, "fail-local-chat-project-group")
+            .await;
+    }
+
+    assert!(
+        element.is_ok(),
+        "expected local chat history drawer to show active project heading '{}' within {} seconds",
+        slug,
+        timeout
+    );
+
+    world
+        .screenshot(&client, "after-assert-local-chat-project-group")
+        .await;
+}
