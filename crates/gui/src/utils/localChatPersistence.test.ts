@@ -17,8 +17,6 @@ import {
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "s-1",
-    scope: "task",
-    entityId: "task-1",
     label: "Task Chat",
     messages: [
       { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
@@ -26,7 +24,6 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     status: "open",
     claudeSessionId: "backend-1",
     claudeConversationId: "conv-1",
-    contextSummary: "[Context]",
     projectPath: "/repo",
     selectedModelId: "opus",
     model: "claude-sonnet-4",
@@ -44,19 +41,16 @@ describe("localChatPersistence", () => {
     localStorage.clear();
   });
 
-  it("round-trips resumable scoped chat metadata", () => {
+  it("round-trips resumable local chat metadata", () => {
     persistLocalChatSession(makeSession({ permissionMode: "auto" }));
 
     const loaded = loadPersistedLocalChatSession("s-1");
     expect(loaded).toMatchObject({
       id: "s-1",
-      scope: "task",
-      entityId: "task-1",
       label: "Task Chat",
       status: "open",
       claudeSessionId: null,
       claudeConversationId: "conv-1",
-      contextSummary: "[Context]",
       projectPath: "/repo",
       selectedModelId: "opus",
       permissionMode: "auto",
@@ -70,6 +64,30 @@ describe("localChatPersistence", () => {
     expect(loaded?.messages).toEqual([
       { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
     ]);
+  });
+
+  it("loads legacy scoped v1 sessions while stripping scope fields", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify({
+        legacy: {
+          ...makeSession({ id: "legacy" }),
+          scope: "task",
+          entityId: "task-1",
+          contextSummary: "[Context]",
+        },
+      })
+    );
+
+    const loaded = loadPersistedLocalChatSession("legacy");
+    expect(loaded).toMatchObject({
+      id: "legacy",
+      label: "Task Chat",
+      claudeConversationId: "conv-1",
+    });
+    expect(loaded && "scope" in loaded).toBe(false);
+    expect(loaded && "entityId" in loaded).toBe(false);
+    expect(loaded && "contextSummary" in loaded).toBe(false);
   });
 
   it("normalizes stale persisted permission modes to default", () => {
@@ -87,7 +105,7 @@ describe("localChatPersistence", () => {
     );
   });
 
-  it("finds a persisted session by scope, entity, and project path", () => {
+  it("finds a persisted session by project path", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-a", projectPath: "/repo-a" })
     );
@@ -95,15 +113,36 @@ describe("localChatPersistence", () => {
       makeSession({ id: "repo-b", projectPath: "/repo-b" })
     );
 
-    expect(findPersistedLocalChatSession("task", "task-1", "/repo-b")?.id).toBe(
+    expect(findPersistedLocalChatSession("/repo-b")?.id).toBe(
       "repo-b"
     );
   });
 
-  it("does not find closed sessions for scope reopen", () => {
+  it("finds the newest persisted session for a project path", () => {
+    persistLocalChatSession(
+      makeSession({
+        id: "older",
+        projectPath: "/repo",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      })
+    );
+    persistLocalChatSession(
+      makeSession({
+        id: "newer",
+        projectPath: "/repo",
+        createdAt: "2026-01-02T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      })
+    );
+
+    expect(findPersistedLocalChatSession("/repo")?.id).toBe("newer");
+  });
+
+  it("does not find closed sessions for reopen", () => {
     persistLocalChatSession(makeSession({ status: "closed" }));
 
-    expect(findPersistedLocalChatSession("task", "task-1", "/repo")).toBeNull();
+    expect(findPersistedLocalChatSession("/repo")).toBeNull();
   });
 
   it("persists closed lifecycle as local resumable metadata", () => {
@@ -326,20 +365,23 @@ describe("localChatPersistence", () => {
     expect(listPersistedLocalChatSessions("/repo-a").map((s) => s.id)).toEqual([
       "repo-a",
     ]);
+    expect(listPersistedLocalChatSessions(null).map((s) => s.id)).toEqual([
+      "legacy",
+    ]);
   });
 
   it("does not reuse a legacy persisted session for a requested project path", () => {
     persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
 
     expect(
-      findPersistedLocalChatSession("task", "task-1", "/repo-a")
+      findPersistedLocalChatSession("/repo-a")
     ).toBeNull();
   });
 
-  it("does not reuse a legacy persisted session when the requested project path is null", () => {
+  it("reuses a no-project persisted session when the requested project path is null", () => {
     persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
 
-    expect(findPersistedLocalChatSession("task", "task-1", null)).toBeNull();
+    expect(findPersistedLocalChatSession(null)?.id).toBe("legacy");
   });
 
   it("normalizes legacy array storage into session summaries", () => {

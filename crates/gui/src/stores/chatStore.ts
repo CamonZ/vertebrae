@@ -4,14 +4,13 @@ import {
   discardStashedChatSession,
   stashChatSession,
 } from "../utils/chatStash";
-import { scopeLabel } from "../utils/chatContext";
 import {
   clearLastUsedLocalChatModelId,
   clearLocalChatSessionCleared,
+  compareLocalChatSessionRecency,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   listPersistedLocalChatSessions,
-  loadPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
   persistLastUsedLocalChatModelId,
@@ -68,12 +67,6 @@ export type ChatMessage =
     }
   | { kind: "error"; message: string; timestamp: string };
 
-/**
- * Scope levels for chat sessions.
- * Each session is scoped to a particular entity type.
- */
-export type ChatScope = "project" | "workflow" | "task" | "step";
-
 export type LocalChatLifecycle =
   | "idle"
   | "starting"
@@ -89,26 +82,9 @@ export interface StreamingAssistantMessage {
   timestamp: string;
 }
 
-/**
- * Scope hierarchy for widening. Each scope can widen to the next level up.
- */
-const SCOPE_HIERARCHY: Record<ChatScope, ChatScope | null> = {
-  step: "task",
-  task: "workflow",
-  workflow: "project",
-  project: null,
-};
-
-/**
- * A chat session scoped to a particular entity.
- */
 export interface ChatSession {
   /** Unique session identifier */
   id: string;
-  /** The scope level of this chat */
-  scope: ChatScope;
-  /** The entity ID this chat is scoped to (null for project scope) */
-  entityId: string | null;
   /** Human-readable label for the session tab */
   label: string;
   /** Chat messages in this session */
@@ -119,8 +95,6 @@ export interface ChatSession {
   claudeSessionId: string | null;
   /** Claude conversation ID for resume support */
   claudeConversationId: string | null;
-  /** Injected context summary (read-only snapshot) */
-  contextSummary: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected Claude Code model alias for session startup/resume overrides. */
@@ -157,13 +131,8 @@ interface ChatStoreState {
 }
 
 interface ChatStoreActions {
-  /** Open a new chat session for the given scope */
-  openSession: (
-    scope: ChatScope,
-    entityId: string | null,
-    label: string,
-    projectPath?: string | null
-  ) => string;
+  /** Open or reuse a local chat session */
+  openSession: (label: string, projectPath?: string | null) => string;
   /** Close a chat session */
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
@@ -172,13 +141,8 @@ interface ChatStoreActions {
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (sessionId: string) => boolean;
-  /** Start a new local chat without reusing an existing scope/entity session */
-  startFreshSession: (
-    scope: ChatScope,
-    entityId: string | null,
-    label: string,
-    projectPath?: string | null
-  ) => string;
+  /** Start a new local chat without reusing an existing session */
+  startFreshSession: (label: string, projectPath?: string | null) => string;
   /** Delete one local persisted session and any in-memory copy */
   deleteLocalSession: (sessionId: string) => void;
   /** Add a message to a session */
@@ -208,8 +172,6 @@ interface ChatStoreActions {
     sessionId: string,
     conversationId: string | null
   ) => void;
-  /** Set context summary for a session */
-  setContextSummary: (sessionId: string, summary: string) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
   /** Set the user-selected Claude Code model for this session */
@@ -238,20 +200,11 @@ interface ChatStoreActions {
   togglePanel: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
-  /** Widen the scope of a session (step -> task -> workflow -> project) */
-  widenScope: (
-    sessionId: string,
-    newScope: ChatScope,
-    newEntityId: string | null,
-    newLabel: string
-  ) => void;
-  /** Find an existing open session for a scope+entity */
-  findSession: (scope: ChatScope, entityId: string | null) => string | null;
   /** Detach a session into a standalone pop-out window. */
   detachSession: (sessionId: string) => Promise<void>;
   /** Reattach a previously detached session back into the main panel. */
   reattachSession: (sessionId: string) => void;
-  /** Reset project-scoped chat sessions */
+  /** Reset local chat sessions */
   reset: () => void;
 }
 
@@ -265,7 +218,6 @@ const emptyState: ChatStoreState = {
 
 const initialState: ChatStoreState = {
   ...emptyState,
-  sessions: loadPersistedLocalChatSessions(),
 };
 
 function generateSessionId(): string {
@@ -273,22 +225,17 @@ function generateSessionId(): string {
 }
 
 function createLocalSession(
-  scope: ChatScope,
-  entityId: string | null,
   label: string,
   projectPath?: string | null
 ): ChatSession {
   const now = new Date().toISOString();
   return {
     id: generateSessionId(),
-    scope,
-    entityId,
     label,
     messages: [],
     status: "open",
     claudeSessionId: null,
     claudeConversationId: null,
-    contextSummary: null,
     projectPath,
     permissionMode: "default",
     lifecycle: "idle",
@@ -309,13 +256,6 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     lifecycleError: null,
     streamingAssistant: null,
   };
-}
-
-/**
- * Get the parent scope for widening.
- */
-export function getParentScope(scope: ChatScope): ChatScope | null {
-  return SCOPE_HIERARCHY[scope];
 }
 
 export function getLocalChatLifecycle(
@@ -340,32 +280,25 @@ export function isLocalChatLifecycleBusy(
 
 function findMatchingSession(
   sessions: Record<string, ChatSession>,
-  scope: ChatScope,
-  entityId: string | null,
   projectPath?: string | null
 ): string | null {
-  for (const [id, session] of Object.entries(sessions)) {
-    if (session.status !== "open") continue;
-    if (session.scope !== scope || session.entityId !== entityId) continue;
-    if (!projectPathMatches(session.projectPath, projectPath)) {
-      continue;
-    }
-    return id;
-  }
-  return null;
+  return (
+    Object.values(sessions)
+      .filter(
+        (session) =>
+          session.status === "open" &&
+          !session.isDetached &&
+          projectPathMatches(session.projectPath, projectPath)
+      )
+      .sort(compareLocalChatSessionRecency)[0]?.id ?? null
+  );
 }
 
 function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   return (
     Object.values(sessions)
       .filter((session) => session.status === "open" && !session.isDetached)
-      .sort((a, b) => {
-        const aTime = Date.parse(a.updatedAt ?? a.createdAt ?? "");
-        const bTime = Date.parse(b.updatedAt ?? b.createdAt ?? "");
-        return (
-          (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime)
-        );
-      })[0]?.id ?? null
+      .sort(compareLocalChatSessionRecency)[0]?.id ?? null
   );
 }
 
@@ -398,24 +331,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
     ...initialState,
 
     // Actions
-    openSession: (scope, entityId, label, projectPath) => {
-      // Check if a session already exists for this scope+entity
-      const existing = findMatchingSession(
-        get().sessions,
-        scope,
-        entityId,
-        projectPath
-      );
+    openSession: (label, projectPath) => {
+      const existing = findMatchingSession(get().sessions, projectPath);
       if (existing) {
         set({ activeSessionId: existing, panelOpen: true });
         return existing;
       }
 
-      const persisted = findPersistedLocalChatSession(
-        scope,
-        entityId,
-        projectPath
-      );
+      const persisted = findPersistedLocalChatSession(projectPath);
       if (persisted) {
         const hydrated: ChatSession = hydrateLocalSession({
           ...persisted,
@@ -429,7 +352,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return hydrated.id;
       }
 
-      const session = createLocalSession(scope, entityId, label, projectPath);
+      const session = createLocalSession(label, projectPath);
       const id = session.id;
 
       persistLocalChatSession(session);
@@ -491,8 +414,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return true;
     },
 
-    startFreshSession: (scope, entityId, label, projectPath) => {
-      const session = createLocalSession(scope, entityId, label, projectPath);
+    startFreshSession: (label, projectPath) => {
+      const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
       set((state) => ({
         sessions: { ...state.sessions, [session.id]: session },
@@ -653,13 +576,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }));
     },
 
-    setContextSummary: (sessionId, summary) => {
-      updateSession(sessionId, (session) => ({
-        ...session,
-        contextSummary: summary,
-      }));
-    },
-
     setSessionModel: (sessionId, model) => {
       updateSession(sessionId, (session) =>
         session.model === model ? session : { ...session, model }
@@ -741,7 +657,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
               messages: [],
               claudeSessionId: null,
               claudeConversationId: null,
-              contextSummary: null,
               selectedModelId: session.selectedModelId ?? null,
               model: undefined,
               tokenUsage: undefined,
@@ -765,22 +680,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       set({ panelOpen: open });
     },
 
-    widenScope: (sessionId, newScope, newEntityId, newLabel) => {
-      updateSession(sessionId, (session) => ({
-        ...session,
-        scope: newScope,
-        entityId: newEntityId,
-        label: newLabel,
-      }));
-    },
-
     detachSession: async (sessionId) => {
       const session = get().sessions[sessionId];
       if (!session || session.isDetached) return;
 
       // Stash the full session so the pop-out can seed its empty store
       // synchronously before first paint. The existing claudeSessionId is
-      // carried across so useScopedChat does not double-create the backend
+      // carried across so useLocalChat does not double-create the backend
       // Claude session.
       stashChatSession({ ...session, isDetached: true });
 
@@ -804,12 +710,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         };
       });
 
-      const title = `${scopeLabel(session.scope)}: ${session.label}`;
       const { window: webview, reused } = await popOut(
         `/chat?sessionId=${encodeURIComponent(sessionId)}`,
         `chat-${sessionId}`,
         {
-          title,
+          title: session.label,
           width: 600,
           height: 800,
         }
@@ -865,10 +770,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
       } else if (updated) {
         persistLocalChatSession(updated);
       }
-    },
-
-    findSession: (scope, entityId) => {
-      return findMatchingSession(get().sessions, scope, entityId);
     },
 
     reset: () => set(emptyState),

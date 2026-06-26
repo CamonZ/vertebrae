@@ -23,7 +23,7 @@ function handoffSession(session: ChatSession): ChatSession {
  * Tauri webviews of the same origin share `localStorage`, which makes this
  * a valid hand-off channel. Partial assistant messages are filtered out, while
  * the live streaming overlay is preserved; Claude events are broadcast to all
- * windows, so once the pop-out's `useScopedChat` hook mounts with the existing
+ * windows, so once the pop-out's `useLocalChat` hook mounts with the existing
  * `claudeSessionId`, real-time updates resume without further plumbing.
  */
 export function stashChatSession(session: ChatSession): void {

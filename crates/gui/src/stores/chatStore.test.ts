@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { useChatStore, getParentScope } from "./chatStore";
+import { useChatStore } from "./chatStore";
 import {
   isLocalChatSessionCleared,
   loadPersistedLocalChatSession,
@@ -23,17 +23,17 @@ describe("chatStore", () => {
   });
 
   describe("openSession", () => {
-    it("creates a new session with the given scope and entity", () => {
+    it("creates a new neutral local chat session", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-123", "My Task");
+        .openSession("My Task");
 
       expect(id).toBeTruthy();
       const session = useChatStore.getState().sessions[id];
       expect(session).toBeDefined();
-      expect(session.scope).toBe("task");
-      expect(session.entityId).toBe("task-123");
       expect(session.label).toBe("My Task");
+      expect("scope" in session).toBe(false);
+      expect("entityId" in session).toBe(false);
       expect(session.messages).toEqual([]);
       expect(session.status).toBe("open");
       expect(session.claudeSessionId).toBeNull();
@@ -44,94 +44,132 @@ describe("chatStore", () => {
     it("sets the new session as active and opens the panel", () => {
       const id = useChatStore
         .getState()
-        .openSession("workflow", "wf-1", "Workflow 1");
+        .openSession("Workflow 1");
 
       expect(useChatStore.getState().activeSessionId).toBe(id);
       expect(useChatStore.getState().panelOpen).toBe(true);
     });
 
-    it("reuses existing session for same scope+entity", () => {
+    it("reuses an existing session for the same project path", () => {
       const id1 = useChatStore
         .getState()
-        .openSession("task", "task-123", "Task A");
+        .openSession("Task A", "/repo/root");
       const id2 = useChatStore
         .getState()
-        .openSession("task", "task-123", "Task A");
+        .openSession("Replacement Label", "/repo/root");
 
       expect(id1).toBe(id2);
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
 
+    it("reuses the newest open non-detached session for the same project path", () => {
+      useChatStore.setState({
+        sessions: {
+          older: {
+            id: "older",
+            label: "Older",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-older",
+            projectPath: "/repo/root",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+          detached: {
+            id: "detached",
+            label: "Detached",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-detached",
+            projectPath: "/repo/root",
+            isDetached: true,
+            createdAt: "2026-01-03T00:00:00Z",
+            updatedAt: "2026-01-03T00:00:00Z",
+          },
+          newer: {
+            id: "newer",
+            label: "Newer",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-newer",
+            projectPath: "/repo/root",
+            createdAt: "2026-01-02T00:00:00Z",
+            updatedAt: "2026-01-02T00:00:00Z",
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      const reopened = useChatStore
+        .getState()
+        .openSession("Project Chat", "/repo/root");
+
+      expect(reopened).toBe("newer");
+      expect(useChatStore.getState().activeSessionId).toBe("newer");
+    });
+
     it("reusing session sets it as active and opens panel", () => {
-      const id1 = useChatStore.getState().openSession("task", "task-1", "T1");
-      useChatStore.getState().openSession("task", "task-2", "T2");
+      const id1 = useChatStore.getState().openSession("T1");
+      useChatStore.getState().openSession("T2");
 
       // Close panel manually
       useChatStore.getState().setPanelOpen(false);
       expect(useChatStore.getState().panelOpen).toBe(false);
 
       // Reopen same session
-      useChatStore.getState().openSession("task", "task-1", "T1");
+      useChatStore.getState().openSession("T1");
       expect(useChatStore.getState().activeSessionId).toBe(id1);
       expect(useChatStore.getState().panelOpen).toBe(true);
     });
 
-    it("creates separate sessions for different entities", () => {
+    it("creates separate sessions for different project paths", () => {
       const id1 = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task 1");
+        .openSession("Task 1", "/repo-a");
       const id2 = useChatStore
         .getState()
-        .openSession("task", "task-2", "Task 2");
+        .openSession("Task 2", "/repo-b");
 
       expect(id1).not.toBe(id2);
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
     });
 
-    it("creates separate sessions for different scopes on same entity", () => {
-      const id1 = useChatStore
-        .getState()
-        .openSession("task", "entity-1", "Task View");
-      const id2 = useChatStore
-        .getState()
-        .openSession("workflow", "entity-1", "Workflow View");
-
-      expect(id1).not.toBe(id2);
-      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
-    });
-
-    it("supports project scope with null entityId", () => {
+    it("persists sessions without scope or entity fields", () => {
       const id = useChatStore
         .getState()
-        .openSession("project", null, "Project Chat");
+        .openSession("Project Chat");
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.scope).toBe("project");
-      expect(session.entityId).toBeNull();
+      const persisted = loadPersistedLocalChatSession(id);
+      expect("scope" in session).toBe(false);
+      expect("entityId" in session).toBe(false);
+      expect(persisted && "scope" in persisted).toBe(false);
+      expect(persisted && "entityId" in persisted).toBe(false);
     });
 
     it("stores the project path captured when the session is opened", () => {
       const id = useChatStore
         .getState()
-        .openSession("project", null, "Project Chat", "/repo/root");
+        .openSession("Project Chat", "/repo/root");
 
       expect(useChatStore.getState().sessions[id].projectPath).toBe(
         "/repo/root"
       );
     });
 
-    it("hydrates a persisted session for the same scope and entity", () => {
+    it("hydrates a persisted session for the same project path", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task One", "/repo/root");
+        .openSession("Task One", "/repo/root");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "remember this",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      useChatStore
-        .getState()
-        .setContextSummary(id, "[Context: Task]\nTask One");
       useChatStore.getState().setClaudeSessionId(id, "backend-1");
       useChatStore.getState().setClaudeConversationId(id, "conv-1");
       useChatStore.getState().setSessionSelectedModel(id, "opus");
@@ -147,7 +185,7 @@ describe("chatStore", () => {
 
       const reopened = useChatStore
         .getState()
-        .openSession("task", "task-1", "Replacement Label", "/repo/root");
+        .openSession("Replacement Label", "/repo/root");
 
       expect(reopened).toBe(id);
       expect(useChatStore.getState().activeSessionId).toBe(id);
@@ -155,7 +193,6 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id]).toMatchObject({
         label: "Task One",
         projectPath: "/repo/root",
-        contextSummary: "[Context: Task]\nTask One",
         claudeSessionId: null,
         claudeConversationId: "conv-1",
         selectedModelId: "opus",
@@ -174,7 +211,7 @@ describe("chatStore", () => {
     it("persists selected model and records it as the last used model", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-model", "Task Model");
+        .openSession("Task Model");
 
       useChatStore.getState().setSessionSelectedModel(id, "haiku");
 
@@ -190,7 +227,7 @@ describe("chatStore", () => {
     it("clears the last used model when selection returns to CLI default", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-model", "Task Model");
+        .openSession("Task Model");
 
       useChatStore.getState().setSessionSelectedModel(id, "haiku");
       useChatStore.getState().setSessionSelectedModel(id, null);
@@ -205,26 +242,20 @@ describe("chatStore", () => {
         sessions: {
           "repo-a": {
             id: "repo-a",
-            scope: "project",
-            entityId: null,
             label: "Repo A",
             messages: [],
             status: "open",
             claudeSessionId: null,
             claudeConversationId: "conv-a",
-            contextSummary: null,
             projectPath: "/repo-a",
           },
           "repo-b": {
             id: "repo-b",
-            scope: "project",
-            entityId: null,
             label: "Repo B",
             messages: [],
             status: "open",
             claudeSessionId: null,
             claudeConversationId: "conv-b",
-            contextSummary: null,
             projectPath: "/repo-b",
           },
         },
@@ -234,7 +265,7 @@ describe("chatStore", () => {
 
       const reopened = useChatStore
         .getState()
-        .openSession("project", null, "Repo B", "/repo-b");
+        .openSession("Repo B", "/repo-b");
 
       expect(reopened).toBe("repo-b");
       expect(useChatStore.getState().sessions[reopened].label).toBe("Repo B");
@@ -245,14 +276,11 @@ describe("chatStore", () => {
         sessions: {
           legacy: {
             id: "legacy",
-            scope: "project",
-            entityId: null,
             label: "Legacy",
             messages: [],
             status: "open",
             claudeSessionId: null,
             claudeConversationId: "conv-legacy",
-            contextSummary: null,
             projectPath: null,
           },
         },
@@ -262,7 +290,7 @@ describe("chatStore", () => {
 
       const opened = useChatStore
         .getState()
-        .openSession("project", null, "Repo A", "/repo-a");
+        .openSession("Repo A", "/repo-a");
 
       expect(opened).not.toBe("legacy");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
@@ -272,19 +300,16 @@ describe("chatStore", () => {
       });
     });
 
-    it("does not reuse an in-memory unscoped session when the requested project path is null", () => {
+    it("reuses an in-memory no-project session when the requested project path is null", () => {
       useChatStore.setState({
         sessions: {
           legacy: {
             id: "legacy",
-            scope: "project",
-            entityId: null,
             label: "Legacy",
             messages: [],
             status: "open",
             claudeSessionId: null,
             claudeConversationId: "conv-legacy",
-            contextSummary: null,
             projectPath: null,
           },
         },
@@ -294,20 +319,20 @@ describe("chatStore", () => {
 
       const opened = useChatStore
         .getState()
-        .openSession("project", null, "Project Chat", null);
+        .openSession("Project Chat", null);
 
-      expect(opened).not.toBe("legacy");
+      expect(opened).toBe("legacy");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
-        label: "Project Chat",
+        label: "Legacy",
         projectPath: null,
-        claudeConversationId: null,
+        claudeConversationId: "conv-legacy",
       });
     });
 
     it("hydrates a locally closed session so it can resume", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task One", "/repo/root");
+        .openSession("Task One", "/repo/root");
       useChatStore.getState().setClaudeConversationId(id, "conv-closed");
       useChatStore.getState().markSessionClosed(id);
       useChatStore.setState({
@@ -318,12 +343,10 @@ describe("chatStore", () => {
 
       const reopened = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task One", "/repo/root");
+        .openSession("Task One", "/repo/root");
 
       expect(reopened).toBe(id);
       expect(useChatStore.getState().sessions[reopened]).toMatchObject({
-        scope: "task",
-        entityId: "task-1",
         status: "open",
         lifecycle: "closed",
         claudeConversationId: "conv-closed",
@@ -333,7 +356,7 @@ describe("chatStore", () => {
 
   describe("closeSession", () => {
     it("removes the session from the store", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().closeSession(id);
 
       expect(useChatStore.getState().sessions[id]).toBeUndefined();
@@ -342,13 +365,13 @@ describe("chatStore", () => {
     it("keeps durable resume state when closing the in-memory session", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
       useChatStore.getState().setClaudeConversationId(id, "conv-close");
       useChatStore.getState().closeSession(id);
 
       const reopened = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
 
       expect(reopened).toBe(id);
       expect(useChatStore.getState().sessions[id].claudeConversationId).toBe(
@@ -357,8 +380,8 @@ describe("chatStore", () => {
     });
 
     it("selects the last remaining session when active session is closed", () => {
-      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
-      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+      const id1 = useChatStore.getState().openSession("T1");
+      const id2 = useChatStore.getState().startFreshSession("T2");
 
       // id2 is now active
       expect(useChatStore.getState().activeSessionId).toBe(id2);
@@ -368,7 +391,7 @@ describe("chatStore", () => {
     });
 
     it("closes the panel when the last session is closed", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       expect(useChatStore.getState().panelOpen).toBe(true);
 
       useChatStore.getState().closeSession(id);
@@ -377,7 +400,7 @@ describe("chatStore", () => {
     });
 
     it("does nothing for non-existent session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().closeSession("non-existent");
 
       expect(useChatStore.getState().sessions[id]).toBeDefined();
@@ -385,9 +408,9 @@ describe("chatStore", () => {
     });
 
     it("does not change active session if non-active is closed", () => {
-      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
-      useChatStore.getState().openSession("task", "t-2", "T2");
-      const id3 = useChatStore.getState().openSession("task", "t-3", "T3");
+      const id1 = useChatStore.getState().openSession("T1");
+      useChatStore.getState().startFreshSession("T2");
+      const id3 = useChatStore.getState().startFreshSession("T3");
 
       // Make id1 active (not the last in the session list)
       useChatStore.getState().focusSession(id1);
@@ -399,8 +422,8 @@ describe("chatStore", () => {
     });
 
     it("preserves panelOpen when other sessions remain", () => {
-      useChatStore.getState().openSession("task", "t-1", "T1");
-      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+      useChatStore.getState().openSession("T1");
+      const id2 = useChatStore.getState().startFreshSession("T2");
       expect(useChatStore.getState().panelOpen).toBe(true);
 
       useChatStore.getState().closeSession(id2);
@@ -410,8 +433,8 @@ describe("chatStore", () => {
 
   describe("focusSession", () => {
     it("sets the active session", () => {
-      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
-      useChatStore.getState().openSession("task", "t-2", "T2");
+      const id1 = useChatStore.getState().openSession("T1");
+      useChatStore.getState().startFreshSession("T2");
 
       useChatStore.getState().focusSession(id1);
       expect(useChatStore.getState().activeSessionId).toBe(id1);
@@ -419,10 +442,10 @@ describe("chatStore", () => {
   });
 
   describe("local session management", () => {
-    it("lists persisted local sessions scoped to the requested project path", () => {
+    it("lists persisted local sessions for the requested project path", () => {
       const idA = useChatStore
         .getState()
-        .openSession("project", null, "Repo A", "/repo-a");
+        .openSession("Repo A", "/repo-a");
       useChatStore.getState().addMessage(idA, {
         kind: "user",
         text: "from repo a",
@@ -430,7 +453,7 @@ describe("chatStore", () => {
       });
       const idB = useChatStore
         .getState()
-        .openSession("project", null, "Repo B", "/repo-b");
+        .openSession("Repo B", "/repo-b");
       useChatStore.getState().addMessage(idB, {
         kind: "assistant",
         text: "from repo b",
@@ -455,8 +478,6 @@ describe("chatStore", () => {
     it("selects a persisted session into the active store without duplicating it", () => {
       persistLocalChatSession({
         id: "persisted",
-        scope: "task",
-        entityId: "task-1",
         label: "Persisted Task",
         messages: [
           {
@@ -468,7 +489,6 @@ describe("chatStore", () => {
         status: "open",
         claudeSessionId: "stale-backend",
         claudeConversationId: "conv-resume",
-        contextSummary: "[Context]",
         projectPath: "/repo",
       });
 
@@ -497,7 +517,7 @@ describe("chatStore", () => {
     it("focuses an already-loaded session without dropping live runtime state", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "task-1", "Live Task", "/repo");
+        .openSession("Live Task", "/repo");
       useChatStore.getState().setClaudeSessionId(id, "live-backend");
       useChatStore.getState().setSessionLifecycle(id, "streaming");
 
@@ -512,10 +532,10 @@ describe("chatStore", () => {
     it("deletes one local session without removing unrelated persisted sessions", () => {
       const keep = useChatStore
         .getState()
-        .openSession("task", "keep", "Keep", "/repo");
+        .openSession("Keep", "/repo");
       const remove = useChatStore
         .getState()
-        .openSession("task", "remove", "Remove", "/repo");
+        .startFreshSession("Remove", "/repo");
       useChatStore.getState().setClaudeConversationId(remove, "conv-remove");
 
       useChatStore.getState().deleteLocalSession(remove);
@@ -530,7 +550,7 @@ describe("chatStore", () => {
     it("activates the newest remaining local session when deleting the active one", () => {
       const older = useChatStore
         .getState()
-        .openSession("task", "older", "Older", "/repo");
+        .openSession("Older", "/repo");
       useChatStore.getState().addMessage(older, {
         kind: "user",
         text: "old",
@@ -538,7 +558,7 @@ describe("chatStore", () => {
       });
       const newer = useChatStore
         .getState()
-        .openSession("task", "newer", "Newer", "/repo");
+        .startFreshSession("Newer", "/repo");
       useChatStore.getState().addMessage(newer, {
         kind: "user",
         text: "new",
@@ -546,29 +566,27 @@ describe("chatStore", () => {
       });
       const active = useChatStore
         .getState()
-        .openSession("task", "active", "Active", "/repo");
+        .startFreshSession("Active", "/repo");
 
       useChatStore.getState().deleteLocalSession(active);
 
       expect(useChatStore.getState().activeSessionId).toBe(newer);
     });
 
-    it("starts a fresh local chat even when the same scope and entity already exist", () => {
+    it("starts a fresh local chat even when a matching project session already exists", () => {
       const existing = useChatStore
         .getState()
-        .openSession("task", "task-1", "Existing", "/repo");
+        .openSession("Existing", "/repo");
 
       const fresh = useChatStore
         .getState()
-        .startFreshSession("task", "task-1", "Task Chat", "/repo");
+        .startFreshSession("Task Chat", "/repo");
 
       expect(fresh).not.toBe(existing);
       expect(useChatStore.getState().activeSessionId).toBe(fresh);
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
       expect(loadPersistedLocalChatSession(fresh)).toMatchObject({
         id: fresh,
-        scope: "task",
-        entityId: "task-1",
         label: "Task Chat",
         claudeConversationId: null,
       });
@@ -577,7 +595,7 @@ describe("chatStore", () => {
 
   describe("addMessage", () => {
     it("appends a message to the session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
         kind: "user",
@@ -615,7 +633,7 @@ describe("chatStore", () => {
     });
 
     it("stores partial text in the ephemeral streaming overlay", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().updateLastAssistantMessage(id, "Start");
 
@@ -630,7 +648,7 @@ describe("chatStore", () => {
     it("does not persist streaming partial assistant deltas", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
 
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
@@ -641,7 +659,7 @@ describe("chatStore", () => {
     });
 
     it("does not leak partial overlay text when metadata persists mid-stream", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().updateLastAssistantMessage(id, "Hel");
       useChatStore.getState().updateLastAssistantMessage(id, "lo");
@@ -656,7 +674,7 @@ describe("chatStore", () => {
     });
 
     it("keeps durable user messages separate from the streaming overlay", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
         kind: "user",
@@ -682,7 +700,7 @@ describe("chatStore", () => {
       vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
       const id = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
 
       useChatStore.getState().updateLastAssistantMessage(id, "Partial answer");
       useChatStore.setState((state) => ({
@@ -731,7 +749,7 @@ describe("chatStore", () => {
     it("pushes new complete message when last is not partial assistant", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
         kind: "user",
@@ -752,7 +770,7 @@ describe("chatStore", () => {
     });
 
     it("pushes new complete message when session has no messages", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore
         .getState()
@@ -768,7 +786,7 @@ describe("chatStore", () => {
     });
 
     it("marks the partial message as complete", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
         kind: "assistant",
@@ -791,7 +809,7 @@ describe("chatStore", () => {
     it("persists the finalized assistant message", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
       useChatStore.getState().finalizeLastAssistantMessage(id, "complete");
@@ -804,7 +822,7 @@ describe("chatStore", () => {
 
   describe("setClaudeSessionId", () => {
     it("sets the backend session ID", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().setClaudeSessionId(id, "claude-session-abc");
 
@@ -820,7 +838,7 @@ describe("chatStore", () => {
 
   describe("setClaudeConversationId", () => {
     it("sets the conversation ID", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().setClaudeConversationId(id, "conv-abc-123");
 
@@ -834,27 +852,9 @@ describe("chatStore", () => {
     });
   });
 
-  describe("setContextSummary", () => {
-    it("stores the context summary text", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
-
-      useChatStore
-        .getState()
-        .setContextSummary(id, "[Context: Task]\nTask: My Task");
-
-      const session = useChatStore.getState().sessions[id];
-      expect(session.contextSummary).toBe("[Context: Task]\nTask: My Task");
-    });
-
-    it("does nothing for non-existent session", () => {
-      useChatStore.getState().setContextSummary("non-existent", "summary");
-      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
-    });
-  });
-
   describe("setSessionModel", () => {
     it("stores the model name on the session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().setSessionModel(id, "claude-opus-4-7");
       expect(useChatStore.getState().sessions[id].model).toBe(
         "claude-opus-4-7"
@@ -868,7 +868,7 @@ describe("chatStore", () => {
 
     it("does not update or persist when the model is unchanged", () => {
       const setItem = vi.spyOn(Storage.prototype, "setItem");
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().setSessionModel(id, "claude-opus-4-7");
       setItem.mockClear();
 
@@ -882,7 +882,7 @@ describe("chatStore", () => {
 
   describe("setSessionTokenUsage", () => {
     it("stores used + max on the session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore
         .getState()
         .setSessionTokenUsage(id, { used: 142_000, max: 1_000_000 });
@@ -893,7 +893,7 @@ describe("chatStore", () => {
     });
 
     it("overwrites previous usage on later turns", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore
         .getState()
         .setSessionTokenUsage(id, { used: 100, max: 1_000_000 });
@@ -905,7 +905,7 @@ describe("chatStore", () => {
 
     it("does not update or persist when token usage is unchanged", () => {
       const setItem = vi.spyOn(Storage.prototype, "setItem");
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore
         .getState()
         .setSessionTokenUsage(id, { used: 100, max: 1_000_000 });
@@ -923,7 +923,7 @@ describe("chatStore", () => {
 
   describe("setSessionUsage", () => {
     it("sets model and tokenUsage together in one update", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().setSessionUsage(id, "claude-opus-4-7", {
         used: 142_000,
         max: 1_000_000,
@@ -942,7 +942,7 @@ describe("chatStore", () => {
 
     it("does not update or persist when model and usage are unchanged", () => {
       const setItem = vi.spyOn(Storage.prototype, "setItem");
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().setSessionUsage(id, "claude-opus-4-7", {
         used: 142_000,
         max: 1_000_000,
@@ -962,7 +962,7 @@ describe("chatStore", () => {
 
   describe("markSessionClosed", () => {
     it("sets local lifecycle to closed without deleting the session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().setClaudeSessionId(id, "backend-1");
 
       useChatStore.getState().markSessionClosed(id);
@@ -974,7 +974,7 @@ describe("chatStore", () => {
     });
 
     it("preserves durable resume state when a backend session closes", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "Hello",
@@ -1001,7 +1001,7 @@ describe("chatStore", () => {
     });
 
     it("does nothing for non-existent session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().markSessionClosed("non-existent");
 
       expect(useChatStore.getState().sessions[id].status).toBe("open");
@@ -1011,7 +1011,7 @@ describe("chatStore", () => {
 
   describe("clearMessages", () => {
     it("empties the messages array", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
         kind: "user",
@@ -1028,7 +1028,7 @@ describe("chatStore", () => {
     it("deletes durable resume state so cleared chats are not restored", () => {
       const id = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "remove me",
@@ -1047,7 +1047,6 @@ describe("chatStore", () => {
         messages: [],
         claudeSessionId: null,
         claudeConversationId: null,
-        contextSummary: null,
         status: "open",
       });
 
@@ -1058,7 +1057,7 @@ describe("chatStore", () => {
       });
       const reopened = useChatStore
         .getState()
-        .openSession("task", "t-1", "T1", "/repo/root");
+        .openSession("T1", "/repo/root");
 
       expect(reopened).not.toBe(id);
       expect(useChatStore.getState().sessions[reopened].messages).toEqual([]);
@@ -1068,7 +1067,7 @@ describe("chatStore", () => {
     });
 
     it("does nothing for non-existent session", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id = useChatStore.getState().openSession("T1");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "Hello",
@@ -1101,73 +1100,4 @@ describe("chatStore", () => {
     });
   });
 
-  describe("widenScope", () => {
-    it("updates session scope, entityId, and label", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("step", "step-1", "Step 1");
-
-      useChatStore.getState().widenScope(id, "task", "task-1", "Task Chat");
-
-      const session = useChatStore.getState().sessions[id];
-      expect(session.scope).toBe("task");
-      expect(session.entityId).toBe("task-1");
-      expect(session.label).toBe("Task Chat");
-    });
-
-    it("does nothing for non-existent session", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("step", "step-1", "Step 1");
-      useChatStore
-        .getState()
-        .widenScope("non-existent", "task", "task-1", "Task Chat");
-
-      const session = useChatStore.getState().sessions[id];
-      expect(session.scope).toBe("step");
-      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
-    });
-  });
-
-  describe("findSession", () => {
-    it("finds an existing open session by scope and entityId", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
-
-      const found = useChatStore.getState().findSession("task", "t-1");
-      expect(found).toBe(id);
-    });
-
-    it("returns null when no matching session exists", () => {
-      useChatStore.getState().openSession("task", "t-1", "T1");
-
-      const found = useChatStore.getState().findSession("task", "t-999");
-      expect(found).toBeNull();
-    });
-
-    it("finds locally closed sessions because they are resumable", () => {
-      const id = useChatStore.getState().openSession("task", "t-1", "T1");
-      useChatStore.getState().markSessionClosed(id);
-
-      const found = useChatStore.getState().findSession("task", "t-1");
-      expect(found).toBe(id);
-    });
-  });
-});
-
-describe("getParentScope", () => {
-  it("returns task for step", () => {
-    expect(getParentScope("step")).toBe("task");
-  });
-
-  it("returns workflow for task", () => {
-    expect(getParentScope("task")).toBe("workflow");
-  });
-
-  it("returns project for workflow", () => {
-    expect(getParentScope("workflow")).toBe("project");
-  });
-
-  it("returns null for project (top level)", () => {
-    expect(getParentScope("project")).toBeNull();
-  });
 });

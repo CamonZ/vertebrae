@@ -42,7 +42,7 @@ import { commands } from "../../bindings";
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
-// Mock the bindings (needed by useScopedChat + useCurrentProject inside ChatWindow)
+// Mock the bindings (needed by useLocalChat + useCurrentProject inside ChatWindow)
 vi.mock("../../bindings", () => ({
   commands: {
     getCurrentProject: vi.fn().mockResolvedValue({
@@ -88,14 +88,11 @@ vi.mock("../../bindings", () => ({
 function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: `session-${Date.now()}-${Math.random()}`,
-    scope: "task",
-    entityId: "task-1",
     label: "Test Task",
     messages: [],
     status: "open",
     claudeSessionId: null,
     claudeConversationId: null,
-    contextSummary: null,
     ...overrides,
   };
 }
@@ -158,8 +155,6 @@ describe("ChatWindowManager", () => {
   it("renders the active session as a single header band, with no tabs", () => {
     const s1 = createSession({
       id: "s1",
-      scope: "project",
-      entityId: null,
       label: "Project Chat",
     });
 
@@ -183,8 +178,6 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      scope: "project",
-      entityId: null,
       label: "Project Chat",
     });
 
@@ -207,6 +200,38 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
     expect(panel).not.toHaveAttribute("data-maximized");
     expect(panel).toHaveStyle({ width: "384px" });
+  });
+
+  it("toggles the wide project chat view from the header control", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({
+      id: "s1",
+      label: "Project Chat",
+    });
+
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    const panel = screen.getByTestId("chat-window-manager");
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+
+    expect(panel).toHaveAttribute("data-maximized", "true");
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Collapse chat panel" })
+    );
+
+    expect(panel).not.toHaveAttribute("data-maximized");
   });
 
   it("updates maximized width when the viewport resizes", () => {
@@ -268,8 +293,6 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      scope: "project",
-      entityId: null,
       label: "Project Chat",
     });
 
@@ -370,7 +393,7 @@ describe("ChatWindowManager", () => {
       });
       reopened = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task A", "/test/project");
+        .openSession("Task A", "/test/project");
     });
     expect(reopened).toBe("s1");
     expect(useChatStore.getState().sessions.s1.messages).toEqual([
@@ -389,7 +412,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const id = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task A", "/test/project");
+      .openSession("Task A", "/test/project");
     useChatStore.getState().addMessage(id, {
       kind: "user",
       text: "delete this",
@@ -413,7 +436,7 @@ describe("ChatWindowManager", () => {
       });
       reopened = useChatStore
         .getState()
-        .openSession("task", "task-1", "Task A", "/test/project");
+        .openSession("Task A", "/test/project");
     });
 
     expect(reopened).not.toBe(id);
@@ -428,7 +451,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const first = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task One", "/test/project");
+      .openSession("Task One", "/test/project");
     useChatStore.getState().addMessage(first, {
       kind: "user",
       text: "first saved question",
@@ -436,7 +459,7 @@ describe("ChatWindowManager", () => {
     });
     const second = useChatStore
       .getState()
-      .openSession("task", "task-2", "Task Two", "/test/project");
+      .startFreshSession("Task Two", "/test/project");
     useChatStore.getState().addMessage(second, {
       kind: "assistant",
       text: "second saved answer",
@@ -484,7 +507,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const stale = useChatStore
       .getState()
-      .openSession("project", null, "Stale Project Chat", "/old/project");
+      .openSession("Stale Project Chat", "/old/project");
     useChatStore.getState().focusSession(stale);
 
     render(<ChatWindowManager />);
@@ -503,7 +526,7 @@ describe("ChatWindowManager", () => {
     const fresh = useChatStore.getState().activeSessionId;
     expect(fresh).not.toBeNull();
     expect(useChatStore.getState().sessions[fresh!]).toMatchObject({
-      label: "New Project Chat",
+      label: "New Chat",
       projectPath: "/new/project",
       claudeConversationId: null,
     });
@@ -517,7 +540,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const stale = useChatStore
       .getState()
-      .openSession("project", null, "Old Project Chat", "/old/project");
+      .openSession("Old Project Chat", "/old/project");
     useChatStore.getState().addMessage(stale, {
       kind: "assistant",
       text: "old project answer",
@@ -525,7 +548,7 @@ describe("ChatWindowManager", () => {
     });
     const current = useChatStore
       .getState()
-      .openSession("project", null, "Current Project Chat", "/new/project");
+      .openSession("Current Project Chat", "/new/project");
     useChatStore.getState().addMessage(current, {
       kind: "assistant",
       text: "new project answer",
@@ -553,7 +576,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const first = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task One", "/test/project");
+      .openSession("Task One", "/test/project");
     useChatStore.getState().addMessage(first, {
       kind: "user",
       text: "first saved question",
@@ -561,7 +584,7 @@ describe("ChatWindowManager", () => {
     });
     const second = useChatStore
       .getState()
-      .openSession("task", "task-2", "Task Two", "/test/project");
+      .startFreshSession("Task Two", "/test/project");
     useChatStore.getState().addMessage(second, {
       kind: "assistant",
       text: "second saved answer",
@@ -596,7 +619,7 @@ describe("ChatWindowManager", () => {
     });
     const first = useChatStore
       .getState()
-      .openSession("task", "task-1", "Task One", "/test/project");
+      .openSession("Task One", "/test/project");
     useChatStore.getState().setSessionModel(first, "claude-sonnet-4.5");
     useChatStore.getState().addMessage(first, {
       kind: "user",
@@ -605,7 +628,7 @@ describe("ChatWindowManager", () => {
     });
     const second = useChatStore
       .getState()
-      .openSession("project", null, "Project Chat", "/test/project");
+      .startFreshSession("Project Chat", "/test/project");
     useChatStore.getState().addMessage(second, {
       kind: "user",
       text: "no model yet",
@@ -621,7 +644,7 @@ describe("ChatWindowManager", () => {
     await waitFor(() => {
       expect(miniPanel.getByText("sonnet-4.5")).toBeInTheDocument();
     });
-    expect(miniPanel.getByText("Project")).toBeInTheDocument();
+    expect(miniPanel.getByText("Chat")).toBeInTheDocument();
     expect(miniPanel.queryByText(/Jan/)).not.toBeInTheDocument();
   });
 
@@ -629,7 +652,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const id = useChatStore
       .getState()
-      .openSession("task", "task-1", "Live Task", "/test/project");
+      .openSession("Live Task", "/test/project");
     useChatStore.getState().setClaudeSessionId(id, "live-backend-session");
 
     render(<ChatWindowManager />);
@@ -654,7 +677,7 @@ describe("ChatWindowManager", () => {
     const user = userEvent.setup();
     const id = useChatStore
       .getState()
-      .openSession("task", "task-1", "Live Task", "/test/project");
+      .openSession("Live Task", "/test/project");
     useChatStore.getState().addMessage(id, {
       kind: "user",
       text: "keep me",

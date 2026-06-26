@@ -43,7 +43,7 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("detachSession marks the session detached and stashes it for the pop-out", async () => {
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
     useChatStore.setState((s) => ({
       sessions: {
         ...s.sessions,
@@ -68,7 +68,7 @@ describe("chatStore detach / reattach", () => {
     const [route, label, opts] = popOutMock.mock.calls[0];
     expect(label).toBe(`chat-${id}`);
     expect(route).toContain(`sessionId=${encodeURIComponent(id)}`);
-    expect(opts).toMatchObject({ title: "Task: Task A" });
+    expect(opts).toMatchObject({ title: "Task A" });
 
     // Stashed session preserves the existing claudeSessionId so the pop-out
     // does not double-create the backend Claude session.
@@ -81,7 +81,7 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("detachSession registers onCloseRequested to reattach when the pop-out closes", async () => {
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
     await useChatStore.getState().detachSession(id);
 
     expect(onCloseRequestedMock).toHaveBeenCalledTimes(1);
@@ -96,7 +96,7 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("detachSession is a no-op when the session is already detached", async () => {
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
     await useChatStore.getState().detachSession(id);
     popOutMock.mockClear();
     onCloseRequestedMock.mockClear();
@@ -107,8 +107,8 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("detachSession switches activeSessionId to a remaining attached tab", async () => {
-    const id1 = useChatStore.getState().openSession("task", "t-1", "Task A");
-    const id2 = useChatStore.getState().openSession("task", "t-2", "Task B");
+    const id1 = useChatStore.getState().openSession("Task A");
+    const id2 = useChatStore.getState().startFreshSession("Task B");
     useChatStore.setState({ activeSessionId: id2 });
 
     await useChatStore.getState().detachSession(id2);
@@ -117,7 +117,7 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("reattachSession clears isDetached and re-focuses the tab", () => {
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
     useChatStore.setState((s) => ({
       sessions: {
         ...s.sessions,
@@ -135,7 +135,7 @@ describe("chatStore detach / reattach", () => {
   });
 
   it("reattachSession does not resurrect a detached session cleared elsewhere", () => {
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
     useChatStore.getState().addMessage(id, {
       kind: "user",
       text: "stale parent message",
@@ -162,7 +162,7 @@ describe("chatStore detach / reattach", () => {
 
   it("does not register a second close listener when popOut reuses an existing window", async () => {
     popOutMock.mockResolvedValueOnce({ window: mockWebview, reused: true });
-    const id = useChatStore.getState().openSession("task", "t-1", "Task A");
+    const id = useChatStore.getState().openSession("Task A");
 
     await useChatStore.getState().detachSession(id);
 

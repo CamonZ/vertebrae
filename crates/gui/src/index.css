@@ -2507,8 +2507,9 @@ html.window-transparent #root {
 }
 
 /* ── Chat header + footer ───────────────────────────────────────────────────
-   Single header band (title + "scoped to …" meta) and the composer footer with
-   its context-utilization bar. Ported from docs/design/lib/lib-chat.jsx
+   Single header band (title + status indicator + control buttons) and the
+   composer footer with its context-utilization bar. Ported from
+   docs/design/lib/lib-chat.jsx
    (`.hc-head` / `.hc-foot`). The reference's drag/dock affordances are dropped
    (the panel is fixed-anchored, not draggable), so `.hc-head` is not a grab
    handle here. */
@@ -2584,61 +2585,6 @@ html.window-transparent #root {
 .hc-panel .hc-ctrl.danger:hover {
   background: var(--err-wash);
   color: var(--err);
-}
-.hc-panel .hc-head-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--s-1h);
-  margin-top: var(--s-1h);
-  white-space: nowrap;
-  overflow: hidden;
-}
-.hc-panel .hc-scope {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  letter-spacing: 0.04em;
-  color: var(--fg-mute);
-}
-.hc-panel .hc-scope .badge-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--ok);
-  box-shadow: 0 0 5px color-mix(in oklch, var(--ok) 60%, transparent);
-}
-.hc-panel .hc-scope-id {
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  color: var(--fg-faint);
-  padding: 1px var(--s-1h);
-  background: var(--bg);
-  border: 1px solid var(--line);
-  border-radius: var(--r-xs);
-}
-.hc-panel .hc-sep {
-  color: var(--fg-ghost);
-  font-size: var(--text-10);
-}
-/* Widen-scope control, kept for entity-scoped chats (no parent for project). */
-.hc-panel .hc-widen {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-left: var(--s-1);
-  padding: 2px;
-  color: var(--fg-mute);
-  border: none;
-  background: transparent;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  transition: all var(--t-fast) var(--ease);
-}
-.hc-panel .hc-widen:hover {
-  background: var(--bg-4);
-  color: var(--fg);
 }
 .hc-panel .hc-model-picker {
   display: inline-flex;

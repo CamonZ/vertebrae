@@ -26,11 +26,10 @@ export type { DebugStore } from "./debugStore";
 export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
-export { useChatStore, getParentScope } from "./chatStore";
+export { useChatStore } from "./chatStore";
 export type {
   ChatStore,
   ChatSession,
-  ChatScope,
   ChatMessage,
 } from "./chatStore";
 
