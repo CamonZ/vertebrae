@@ -217,6 +217,7 @@ function ProjectPopover({
         const result = await commands.addProject(selected);
         if (result.status === "ok") {
           await loadProjects();
+          resetProjectScopedStores();
         }
       }
     } catch {
@@ -463,7 +464,10 @@ export function Sidebar() {
       </div>
       {/* Thin 20px rule between the project monogram and the nav icons —
           the design rail's `.app-rail hr` (1px, --color-line, 20px wide). */}
-      <div aria-hidden className="my-0.5 h-px w-5 shrink-0 bg-[var(--color-line)]" />
+      <div
+        aria-hidden
+        className="my-0.5 h-px w-5 shrink-0 bg-[var(--color-line)]"
+      />
       <nav aria-label="Main navigation" className="flex-1">
         <ul role="list" className="flex flex-col items-center gap-1">
           {RAIL_NAV_ITEMS.map((item) => (

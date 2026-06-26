@@ -231,6 +231,7 @@ describe("Sidebar project switcher", () => {
     await waitFor(() => {
       expect(mockAddProject).toHaveBeenCalledWith("/Users/dev/code/gamma");
     });
+    expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
   });
 
   it("clicking the avatar while the switcher is open closes it (toggle)", async () => {

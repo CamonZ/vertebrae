@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const { popOutMock } = vi.hoisted(() => {
+const { popOutMock, savedProjects } = vi.hoisted(() => {
   const popOutMock = vi.fn<
     (
       route: string,
@@ -24,7 +24,12 @@ const { popOutMock } = vi.hoisted(() => {
     window: { onCloseRequested: async () => () => {} },
     reused: false,
   });
-  return { popOutMock };
+  const savedProjects = [
+    { slug: "test-project", project_id: "project-test", path: "/test/project" },
+    { slug: "old-project", project_id: "project-old", path: "/old/project" },
+    { slug: "new-project", project_id: "project-new", path: "/new/project" },
+  ];
+  return { popOutMock, savedProjects };
 });
 
 vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
@@ -52,6 +57,10 @@ vi.mock("../../bindings", () => ({
     getCurrentProjectPath: vi.fn().mockResolvedValue({
       status: "ok",
       data: "/test/project",
+    }),
+    getProjects: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: savedProjects,
     }),
     getSupportedClaudeModels: vi.fn().mockResolvedValue({
       defaultModelId: "sonnet",
@@ -108,6 +117,10 @@ describe("ChatWindowManager", () => {
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
       data: "/test/project",
+    });
+    vi.mocked(commands.getProjects).mockResolvedValue({
+      status: "ok",
+      data: savedProjects,
     });
     vi.mocked(commands.createClaudeSession).mockResolvedValue({
       status: "ok",
@@ -391,9 +404,7 @@ describe("ChatWindowManager", () => {
         activeSessionId: null,
         panelOpen: false,
       });
-      reopened = useChatStore
-        .getState()
-        .openSession("Task A", "/test/project");
+      reopened = useChatStore.getState().openSession("Task A", "/test/project");
     });
     expect(reopened).toBe("s1");
     expect(useChatStore.getState().sessions.s1.messages).toEqual([
@@ -410,9 +421,7 @@ describe("ChatWindowManager", () => {
 
   it("trash clears messages and prevents later restored session from reappearing", async () => {
     const user = userEvent.setup();
-    const id = useChatStore
-      .getState()
-      .openSession("Task A", "/test/project");
+    const id = useChatStore.getState().openSession("Task A", "/test/project");
     useChatStore.getState().addMessage(id, {
       kind: "user",
       text: "delete this",
@@ -434,9 +443,7 @@ describe("ChatWindowManager", () => {
         activeSessionId: null,
         panelOpen: false,
       });
-      reopened = useChatStore
-        .getState()
-        .openSession("Task A", "/test/project");
+      reopened = useChatStore.getState().openSession("Task A", "/test/project");
     });
 
     expect(reopened).not.toBe(id);
@@ -532,7 +539,7 @@ describe("ChatWindowManager", () => {
     });
   });
 
-  it("filters local chat history by the currently selected project, not the active session's project", async () => {
+  it("groups local chat history by project with the current project first and fallback last", async () => {
     vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
       status: "ok",
       data: "/new/project",
@@ -554,6 +561,22 @@ describe("ChatWindowManager", () => {
       text: "new project answer",
       timestamp: "2026-01-02T00:00:00Z",
     });
+    const currentOlder = useChatStore
+      .getState()
+      .startFreshSession("Older Current Project Chat", "/new/project");
+    useChatStore.getState().addMessage(currentOlder, {
+      kind: "assistant",
+      text: "older current project answer",
+      timestamp: "2026-01-01T12:00:00Z",
+    });
+    const legacy = useChatStore
+      .getState()
+      .startFreshSession("Legacy Chat", null);
+    useChatStore.getState().addMessage(legacy, {
+      kind: "assistant",
+      text: "legacy answer",
+      timestamp: "2026-01-03T00:00:00Z",
+    });
     useChatStore.getState().focusSession(stale);
 
     render(<ChatWindowManager />);
@@ -563,9 +586,85 @@ describe("ChatWindowManager", () => {
 
     await user.click(screen.getByLabelText("Toggle chat history"));
     const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+    await waitFor(() => {
+      expect(drawer.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+    });
+    expect(
+      drawer
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["new-project", "old-project", "Unknown project"]);
+
+    const currentGroup = within(
+      drawer.getByRole("region", { name: "new-project chats" })
+    );
+    expect(
+      currentGroup
+        .getAllByRole("button", { name: /^Open local chat/ })
+        .map((button) => button.getAttribute("aria-label"))
+    ).toEqual([
+      "Open local chat Current Project Chat",
+      "Open local chat Older Current Project Chat",
+    ]);
+
     expect(drawer.getByText("Current Project Chat")).toBeInTheDocument();
-    expect(drawer.queryByText("Old Project Chat")).not.toBeInTheDocument();
-    expect(drawer.queryByText("old project answer")).not.toBeInTheDocument();
+    expect(drawer.getByText("new project answer")).toBeInTheDocument();
+    expect(drawer.getByText("Old Project Chat")).toBeInTheDocument();
+    expect(drawer.getByText("old project answer")).toBeInTheDocument();
+    expect(drawer.getByText("Legacy Chat")).toBeInTheDocument();
+    expect(drawer.getByText("legacy answer")).toBeInTheDocument();
+  });
+
+  it("keeps project load failures scoped to current-project chats", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/new/project",
+    });
+    vi.mocked(commands.getProjects).mockResolvedValue({
+      status: "error",
+      error: { SendFailed: "project registry unavailable" },
+    } as never);
+    const user = userEvent.setup();
+    const stale = useChatStore
+      .getState()
+      .openSession("Old Project Chat", "/old/project");
+    useChatStore.getState().addMessage(stale, {
+      kind: "assistant",
+      text: "old project answer",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const current = useChatStore
+      .getState()
+      .openSession("Current Project Chat", "/new/project");
+    useChatStore.getState().addMessage(current, {
+      kind: "assistant",
+      text: "new project answer",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    useChatStore.getState().focusSession(stale);
+
+    try {
+      render(<ChatWindowManager />);
+      await waitFor(() => {
+        expect(commands.getProjects).toHaveBeenCalled();
+      });
+
+      await user.click(screen.getByLabelText("Toggle chat history"));
+      const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+
+      expect(
+        await drawer.findByText(
+          "Could not load saved projects. Showing current project chats only."
+        )
+      ).toBeInTheDocument();
+      expect(drawer.getByText("Current Project Chat")).toBeInTheDocument();
+      expect(drawer.getByText("new project answer")).toBeInTheDocument();
+      expect(drawer.queryByText("Old Project Chat")).not.toBeInTheDocument();
+      expect(drawer.queryByText("old project answer")).not.toBeInTheDocument();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("shows a mini thread selector while maximized and keeps the main chat visible", async () => {
@@ -610,6 +709,78 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().activeSessionId).toBe(second);
     expect(screen.getAllByText("second saved answer")).toHaveLength(2);
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+  });
+
+  it("groups the maximized mini thread selector by project", async () => {
+    vi.mocked(commands.getCurrentProjectPath).mockResolvedValue({
+      status: "ok",
+      data: "/new/project",
+    });
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+
+    const oldProject = useChatStore
+      .getState()
+      .openSession("Old Project Chat", "/old/project");
+    useChatStore.getState().addMessage(oldProject, {
+      kind: "assistant",
+      text: "old project answer",
+      timestamp: "2026-01-03T00:00:00Z",
+    });
+    const currentOlder = useChatStore
+      .getState()
+      .openSession("Current Older Chat", "/new/project");
+    useChatStore.getState().addMessage(currentOlder, {
+      kind: "assistant",
+      text: "older current answer",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const currentNewer = useChatStore
+      .getState()
+      .startFreshSession("Current Newer Chat", "/new/project");
+    useChatStore.getState().addMessage(currentNewer, {
+      kind: "assistant",
+      text: "newer current answer",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+    const legacy = useChatStore
+      .getState()
+      .startFreshSession("Legacy Chat", null);
+    useChatStore.getState().addMessage(legacy, {
+      kind: "assistant",
+      text: "legacy answer",
+      timestamp: "2026-01-04T00:00:00Z",
+    });
+    useChatStore.getState().focusSession(oldProject);
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    await waitFor(() => {
+      expect(miniPanel.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+    });
+    expect(
+      miniPanel
+        .getAllByRole("heading", { level: 3 })
+        .map((heading) => heading.textContent)
+    ).toEqual(["new-project", "old-project", "Unknown project"]);
+
+    const currentGroup = within(
+      miniPanel.getByRole("region", { name: "new-project chats" })
+    );
+    expect(
+      currentGroup
+        .getAllByRole("button", { name: /^Open local chat/ })
+        .map((button) => button.getAttribute("aria-label"))
+    ).toEqual([
+      "Open local chat Current Newer Chat",
+      "Open local chat Current Older Chat",
+    ]);
+    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
   });
 
   it("shows the chat model in the maximized mini thread selector", async () => {

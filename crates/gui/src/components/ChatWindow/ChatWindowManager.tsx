@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands } from "../../bindings";
+import type { SavedProject } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
 import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
+import {
+  groupLocalChatSessionsByProject,
+  type LocalChatSessionGroup,
+} from "../../utils/localChatSessionGroups";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
@@ -20,6 +25,11 @@ const MAXIMIZED_RIGHT_INSET = 16;
 const RESIZE_STEP = 16;
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
 const EXIT_MS = 180;
+const PROJECT_LOAD_WARNING =
+  "Could not load saved projects. Showing current project chats only.";
+
+type ProjectLoadStatus = "idle" | "loaded" | "error";
+const EMPTY_SAVED_PROJECTS: SavedProject[] = [];
 
 /**
  * ChatWindowManager manages multiple chat session tabs in a floating-glass side
@@ -46,10 +56,17 @@ export function ChatWindowManager() {
     null
   );
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [currentProjectPathState, setCurrentProjectPathState] = useState<{
+  const [projectGroupingState, setProjectGroupingState] = useState<{
     generation: number;
-    path: string | null;
-  }>({ generation: -1, path: null });
+    currentProjectPath: string | null;
+    projects: SavedProject[];
+    projectsStatus: ProjectLoadStatus;
+  }>({
+    generation: -1,
+    currentProjectPath: null,
+    projects: [],
+    projectsStatus: "idle",
+  });
 
   // Horizontal resize. The panel is left-anchored, so a drag on its right edge
   // widens it as the cursor moves right. We measure the panel's fixed left edge
@@ -143,38 +160,94 @@ export function ChatWindowManager() {
     }
   }, []);
 
+  const loadSavedProjects = useCallback(async () => {
+    try {
+      const result = await commands.getProjects();
+      if (result.status === "ok") {
+        return { projects: result.data, status: "loaded" as const };
+      }
+      console.warn("Failed to load saved projects for chat grouping", result);
+    } catch (error) {
+      console.warn("Failed to load saved projects for chat grouping", error);
+    }
+    return { projects: [], status: "error" as const };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    void loadCurrentProjectPath().then((path) => {
-      if (!cancelled) {
-        setCurrentProjectPathState({
-          generation: projectScopeGeneration,
-          path,
-        });
+    void Promise.all([loadCurrentProjectPath(), loadSavedProjects()]).then(
+      ([currentProjectPath, projectLoad]) => {
+        if (!cancelled) {
+          setProjectGroupingState((state) => ({
+            generation: projectScopeGeneration,
+            currentProjectPath,
+            projects:
+              projectLoad.status === "loaded"
+                ? projectLoad.projects
+                : state.projects,
+            projectsStatus: projectLoad.status,
+          }));
+        }
       }
-    });
+    );
     return () => {
       cancelled = true;
     };
-  }, [loadCurrentProjectPath, projectScopeGeneration]);
+  }, [loadCurrentProjectPath, loadSavedProjects, projectScopeGeneration]);
 
   const sessionList = Object.values(sessions);
+  const sessionChangeToken = sessionList
+    .map(
+      (session) =>
+        `${session.id}:${session.projectPath ?? ""}:${session.updatedAt ?? ""}:${
+          session.messages.length
+        }`
+    )
+    .join("\0");
   const activeSession = activeSessionId ? sessions[activeSessionId] : null;
   const currentProjectPath =
-    currentProjectPathState.generation === projectScopeGeneration
-      ? currentProjectPathState.path
+    projectGroupingState.generation === projectScopeGeneration
+      ? projectGroupingState.currentProjectPath
       : null;
-  const localSessionSummaries = listLocalSessions(currentProjectPath);
+  const projectsLoadFailed =
+    projectGroupingState.generation === projectScopeGeneration &&
+    projectGroupingState.projectsStatus === "error";
+  const savedProjects =
+    projectGroupingState.generation === projectScopeGeneration
+      ? projectGroupingState.projects
+      : EMPTY_SAVED_PROJECTS;
+  const localSessionGroups = useMemo(() => {
+    const summaries = listLocalSessions(
+      projectsLoadFailed ? currentProjectPath : undefined
+    );
+    if (!sessionChangeToken && summaries.length === 0) return [];
+    return groupLocalChatSessionsByProject(
+      summaries,
+      savedProjects,
+      currentProjectPath
+    );
+  }, [
+    currentProjectPath,
+    listLocalSessions,
+    projectsLoadFailed,
+    savedProjects,
+    sessionChangeToken,
+  ]);
+  const projectGroupingWarning = projectsLoadFailed
+    ? PROJECT_LOAD_WARNING
+    : null;
 
   const open = panelOpen && sessionList.length > 0;
   const renderedPanelWidth = isMaximized ? maximizedWidth : panelWidth;
   const startFreshActiveSession = async () => {
     if (!activeSession) return;
     const projectPath = await loadCurrentProjectPath();
-    setCurrentProjectPathState({
+    setProjectGroupingState((state) => ({
       generation: projectScopeGeneration,
-      path: projectPath,
-    });
+      currentProjectPath: projectPath,
+      projects: state.projects,
+      projectsStatus: state.projectsStatus,
+    }));
     startFreshSession("New Chat", projectPath);
     setHistoryOpen(false);
   };
@@ -292,7 +365,8 @@ export function ChatWindowManager() {
           {isMaximized && (
             <LocalChatMiniPanel
               activeSessionId={activeSession.id}
-              sessions={localSessionSummaries}
+              sessionGroups={localSessionGroups}
+              projectWarning={projectGroupingWarning}
               onStartFresh={startFreshActiveSession}
               onSelect={(sessionId) => {
                 setDeleteError(null);
@@ -322,7 +396,8 @@ export function ChatWindowManager() {
       {historyOpen && activeSession && !isMaximized && (
         <LocalChatHistoryDrawer
           activeSessionId={activeSession.id}
-          sessions={localSessionSummaries}
+          sessionGroups={localSessionGroups}
+          projectWarning={projectGroupingWarning}
           onClose={() => setHistoryOpen(false)}
           onStartFresh={startFreshActiveSession}
           onSelect={(sessionId) => {
@@ -358,7 +433,8 @@ function LocalChatMiniPanel({
   activeSessionId,
   deletingSessionId,
   deleteError,
-  sessions,
+  projectWarning,
+  sessionGroups,
   onStartFresh,
   onSelect,
   onDelete,
@@ -366,7 +442,8 @@ function LocalChatMiniPanel({
   activeSessionId: string;
   deletingSessionId: string | null;
   deleteError: string | null;
-  sessions: LocalChatSessionSummary[];
+  projectWarning: string | null;
+  sessionGroups: LocalChatSessionGroup[];
   onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void;
   onDelete: (sessionId: string) => void | Promise<void>;
@@ -406,57 +483,71 @@ function LocalChatMiniPanel({
           {deleteError}
         </div>
       )}
-      {sessions.length === 0 ? (
+      {projectWarning && (
+        <div role="alert" className="hc-mini-history-error">
+          {projectWarning}
+        </div>
+      )}
+      {sessionGroups.length === 0 ? (
         <div className="hc-mini-history-empty">No local chats yet.</div>
       ) : (
         <div className="hc-mini-history-list">
-          {sessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            const isDeleting = session.id === deletingSessionId;
-            const modelLabel = formatSessionModel(session);
-            return (
-              <div
-                key={session.id}
-                className="hc-mini-history-row"
-                data-active={isActive || undefined}
-              >
-                <button
-                  type="button"
-                  className="hc-mini-history-open"
-                  onClick={() => onSelect(session.id)}
-                  title={`Open local chat ${session.label}`}
-                  aria-label={`Open local chat ${session.label}`}
-                  aria-current={isActive ? "true" : undefined}
-                >
-                  <span className="label">{session.label}</span>
-                  <span className="preview">{session.preview}</span>
-                  <span className="meta">{modelLabel}</span>
-                </button>
-                <button
-                  type="button"
-                  className="hc-ctrl danger shrink-0"
-                  disabled={isDeleting}
-                  onClick={() => void onDelete(session.id)}
-                  title={`Delete local chat ${session.label}`}
-                  aria-label={`Delete local chat ${session.label}`}
-                >
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
+          {sessionGroups.map((group) => (
+            <section
+              key={group.id}
+              className="hc-mini-history-group"
+              aria-label={`${group.label} chats`}
+            >
+              <h3 className="hc-mini-history-group-title">{group.label}</h3>
+              {group.sessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                const isDeleting = session.id === deletingSessionId;
+                const modelLabel = formatSessionModel(session);
+                return (
+                  <div
+                    key={session.id}
+                    className="hc-mini-history-row"
+                    data-active={isActive || undefined}
                   >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                    />
-                  </svg>
-                </button>
-              </div>
-            );
-          })}
+                    <button
+                      type="button"
+                      className="hc-mini-history-open"
+                      onClick={() => onSelect(session.id)}
+                      title={`Open local chat ${session.label}`}
+                      aria-label={`Open local chat ${session.label}`}
+                      aria-current={isActive ? "true" : undefined}
+                    >
+                      <span className="label">{session.label}</span>
+                      <span className="preview">{session.preview}</span>
+                      <span className="meta">{modelLabel}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="hc-ctrl danger shrink-0"
+                      disabled={isDeleting}
+                      onClick={() => void onDelete(session.id)}
+                      title={`Delete local chat ${session.label}`}
+                      aria-label={`Delete local chat ${session.label}`}
+                    >
+                      <svg
+                        className="h-3.5 w-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
       )}
     </aside>
@@ -467,7 +558,8 @@ function LocalChatHistoryDrawer({
   activeSessionId,
   deletingSessionId,
   deleteError,
-  sessions,
+  projectWarning,
+  sessionGroups,
   onClose,
   onStartFresh,
   onSelect,
@@ -476,7 +568,8 @@ function LocalChatHistoryDrawer({
   activeSessionId: string;
   deletingSessionId: string | null;
   deleteError: string | null;
-  sessions: LocalChatSessionSummary[];
+  projectWarning: string | null;
+  sessionGroups: LocalChatSessionGroup[];
   onClose: () => void;
   onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void;
@@ -545,79 +638,98 @@ function LocalChatHistoryDrawer({
           {deleteError}
         </div>
       )}
-      {sessions.length === 0 ? (
+      {projectWarning && (
+        <div
+          role="alert"
+          className="border-b border-[var(--color-line)] bg-[var(--warn-wash)] px-3 py-2 text-xs text-[var(--warn)]"
+        >
+          {projectWarning}
+        </div>
+      )}
+      {sessionGroups.length === 0 ? (
         <div className="flex flex-1 items-center justify-center p-4 text-center text-sm text-[var(--color-fg-mute)]">
           No local chats yet.
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-2">
-          {sessions.map((session) => {
-            const isActive = session.id === activeSessionId;
-            const isDeleting = session.id === deletingSessionId;
-            const formattedTime = formatSessionTime(session.updatedAt);
-            return (
-              <div
-                key={session.id}
-                className={`group mb-2 rounded-md border p-2 ${
-                  isActive
-                    ? "border-[var(--accent)] bg-[var(--color-bg-2)]"
-                    : "border-[var(--color-line)] bg-[var(--color-bg-1)]"
-                }`}
-                data-active={isActive || undefined}
-              >
-                <div className="flex items-start gap-2">
-                  <button
-                    type="button"
-                    className="min-w-0 flex-1 text-left"
-                    onClick={() => onSelect(session.id)}
-                    title={`Open local chat ${session.label}`}
-                    aria-label={`Open local chat ${session.label}`}
-                    aria-current={isActive ? "true" : undefined}
+          {sessionGroups.map((group) => (
+            <section
+              key={group.id}
+              className="mb-3 last:mb-0"
+              aria-label={`${group.label} chats`}
+            >
+              <h3 className="px-1 pb-2 text-[10px] font-medium text-[var(--color-fg-mute)] uppercase">
+                {group.label}
+              </h3>
+              {group.sessions.map((session) => {
+                const isActive = session.id === activeSessionId;
+                const isDeleting = session.id === deletingSessionId;
+                const formattedTime = formatSessionTime(session.updatedAt);
+                return (
+                  <div
+                    key={session.id}
+                    className={`group mb-2 rounded-md border p-2 ${
+                      isActive
+                        ? "border-[var(--accent)] bg-[var(--color-bg-2)]"
+                        : "border-[var(--color-line)] bg-[var(--color-bg-1)]"
+                    }`}
+                    data-active={isActive || undefined}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-medium text-[var(--color-fg)]">
-                        {session.label}
-                      </span>
-                      {session.claudeConversationId && (
-                        <span className="shrink-0 rounded border border-[var(--color-line)] px-1.5 py-0.5 text-[10px] uppercase text-[var(--color-fg-mute)]">
-                          resumable
-                        </span>
-                      )}
+                    <div className="flex items-start gap-2">
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => onSelect(session.id)}
+                        title={`Open local chat ${session.label}`}
+                        aria-label={`Open local chat ${session.label}`}
+                        aria-current={isActive ? "true" : undefined}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium text-[var(--color-fg)]">
+                            {session.label}
+                          </span>
+                          {session.claudeConversationId && (
+                            <span className="shrink-0 rounded border border-[var(--color-line)] px-1.5 py-0.5 text-[10px] text-[var(--color-fg-mute)] uppercase">
+                              resumable
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs text-[var(--color-fg-soft)]">
+                          {session.preview}
+                        </p>
+                        <p className="mt-1 text-[10px] text-[var(--color-fg-mute)] uppercase">
+                          Chat · {session.messageCount} messages
+                          {formattedTime ? ` · ${formattedTime}` : ""}
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        className="hc-ctrl danger shrink-0"
+                        disabled={isDeleting}
+                        onClick={() => void onDelete(session.id)}
+                        title={`Delete local chat ${session.label}`}
+                        aria-label={`Delete local chat ${session.label}`}
+                      >
+                        <svg
+                          className="h-3.5 w-3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-[var(--color-fg-soft)]">
-                      {session.preview}
-                    </p>
-                    <p className="mt-1 text-[10px] uppercase text-[var(--color-fg-mute)]">
-                      Chat · {session.messageCount} messages
-                      {formattedTime ? ` · ${formattedTime}` : ""}
-                    </p>
-                  </button>
-                  <button
-                    type="button"
-                    className="hc-ctrl danger shrink-0"
-                    disabled={isDeleting}
-                    onClick={() => void onDelete(session.id)}
-                    title={`Delete local chat ${session.label}`}
-                    aria-label={`Delete local chat ${session.label}`}
-                  >
-                    <svg
-                      className="h-3.5 w-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+                  </div>
+                );
+              })}
+            </section>
+          ))}
         </div>
       )}
     </aside>

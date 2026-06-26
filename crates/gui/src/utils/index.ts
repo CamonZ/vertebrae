@@ -19,6 +19,11 @@ export type { PopOutOptions, PopOutResult } from "./popOut";
 export { stashTask, takeStashedTask } from "./taskStash";
 export type { TaskStashPayload } from "./taskStash";
 export { stashChatSession, takeStashedChatSession } from "./chatStash";
+export {
+  FALLBACK_CHAT_PROJECT_LABEL,
+  groupLocalChatSessionsByProject,
+} from "./localChatSessionGroups";
+export type { LocalChatSessionGroup } from "./localChatSessionGroups";
 export { getPriorityIndicator } from "./taskPriority";
 export type { PriorityIndicator } from "./taskPriority";
 export {
