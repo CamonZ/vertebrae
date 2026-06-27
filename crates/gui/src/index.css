@@ -2405,12 +2405,47 @@ html.window-transparent #root {
   min-height: 0;
   flex: 1;
 }
+.hc-panel .hc-chat-panes {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+}
 .hc-panel .hc-chat-pane {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  position: relative;
+  outline: none;
+}
+.hc-panel .hc-chat-pane > * {
   min-width: 0;
   flex: 1;
 }
-.hc-panel[data-maximized] .hc-chat-pane {
+.hc-panel[data-maximized] .hc-chat-panes {
   border-left: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  overflow-x: auto;
+}
+.hc-panel[data-maximized] .hc-chat-pane {
+  flex-basis: 360px;
+  min-width: 360px;
+}
+.hc-panel[data-maximized] .hc-chat-pane + .hc-chat-pane {
+  border-left: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+}
+.hc-panel[data-maximized] .hc-chat-pane[data-pane-active]::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-glow);
+  z-index: 1;
+}
+.hc-panel[data-maximized] .hc-chat-pane:focus-visible {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklch, var(--accent) 58%, transparent);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2582,6 +2617,14 @@ html.window-transparent #root {
   background: var(--bg-4);
   color: var(--fg);
 }
+.hc-panel .hc-ctrl:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.hc-panel .hc-ctrl:disabled:hover {
+  background: transparent;
+  color: var(--fg-mute);
+}
 .hc-panel .hc-ctrl.danger:hover {
   background: var(--err-wash);
   color: var(--err);
@@ -2741,6 +2784,10 @@ html.window-transparent #root {
   border-color: color-mix(in oklch, var(--accent) 44%, var(--line));
   background: var(--accent-wash);
 }
+.hc-panel .hc-mini-history-row[data-keyboard-active] {
+  outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
+  outline-offset: 1px;
+}
 .hc-panel .hc-mini-history-open {
   min-width: 0;
   flex: 1;
@@ -2775,6 +2822,123 @@ html.window-transparent #root {
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   color: var(--fg-faint);
+}
+
+.hc-panel .hc-shortcuts-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+  background: color-mix(in oklch, var(--bg) 58%, transparent);
+  -webkit-backdrop-filter: blur(16px) brightness(1.18);
+  backdrop-filter: blur(16px) brightness(1.18);
+}
+.hc-panel .hc-shortcuts {
+  width: min(640px, 100%);
+  max-height: min(680px, calc(100% - var(--s-4)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--fg) 14%, transparent);
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--bg-3) 56%, transparent),
+    color-mix(in oklch, var(--bg-2) 52%, transparent)
+  );
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 color-mix(in oklch, var(--fg) 12%, transparent);
+}
+.hc-panel .hc-shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-2);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 9%, transparent);
+}
+.hc-panel .hc-shortcuts-eyebrow {
+  margin: 0 0 3px;
+  font-family: var(--mono);
+  font-size: var(--text-9);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.hc-panel .hc-shortcuts h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: var(--text-xl);
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--fg);
+}
+.hc-panel .hc-shortcuts-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-3);
+}
+.hc-panel .hc-shortcuts-section + .hc-shortcuts-section {
+  margin-top: var(--s-4);
+}
+.hc-panel .hc-shortcuts-section h3 {
+  margin: 0 0 var(--s-2);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.hc-panel .hc-shortcuts-section dl {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--line);
+}
+.hc-panel .hc-shortcuts-section dl > div {
+  display: grid;
+  grid-template-columns: minmax(128px, 0.48fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 38px;
+  padding: var(--s-2) var(--s-2h);
+  background: color-mix(in oklch, var(--bg-1) 72%, transparent);
+}
+.hc-panel .hc-shortcuts dt {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hc-panel .hc-shortcuts dd {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-12);
+  color: var(--fg-soft);
+}
+.hc-panel .hc-shortcuts kbd {
+  min-width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklch, var(--bg) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--fg) 10%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 1.2;
+  color: var(--fg-mute);
 }
 
 /* Task rows — ported verbatim from the design reference (docs/design/

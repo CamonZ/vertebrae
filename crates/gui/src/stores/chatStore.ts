@@ -9,6 +9,7 @@ import {
   clearLocalChatSessionCleared,
   compareLocalChatSessionRecency,
   findPersistedLocalChatSession,
+  isDisposableClosedLocalChatSession,
   isLocalChatSessionCleared,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
@@ -121,11 +122,27 @@ export interface ChatSession {
   preview?: string;
 }
 
+export interface ChatPane {
+  /** Stable pane identifier for maximized split-chat layout */
+  id: string;
+  /** Store session rendered in this pane */
+  sessionId: string;
+}
+
+export interface ChatPaneLayout {
+  /** Visible chat panes in the maximized chat view */
+  panes: ChatPane[];
+  /** Pane receiving sidebar selections and pane-level controls */
+  activePaneId: string | null;
+}
+
 interface ChatStoreState {
   /** All open chat sessions, keyed by session ID */
   sessions: Record<string, ChatSession>;
   /** Currently focused session ID */
   activeSessionId: string | null;
+  /** Pane-to-session bindings for maximized split chat */
+  paneLayout: ChatPaneLayout;
   /** Whether the chat panel is visible */
   panelOpen: boolean;
 }
@@ -137,6 +154,19 @@ interface ChatStoreActions {
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
   focusSession: (sessionId: string) => void;
+  /** Focus a maximized chat pane */
+  focusPane: (paneId: string) => void;
+  /** Bind a pane to a session, focusing an existing pane if already visible */
+  bindPaneToSession: (paneId: string, sessionId: string) => boolean;
+  /** Create a fresh local chat in a new split pane */
+  startFreshSessionInNewPane: (
+    label: string,
+    projectPath?: string | null
+  ) => string;
+  /** Close a split pane without closing its underlying chat session */
+  closePane: (paneId: string) => void;
+  /** Collapse split panes back to a single visible pane */
+  unsplitPanes: (paneId?: string) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate and focus a persisted local chat session */
@@ -210,9 +240,17 @@ interface ChatStoreActions {
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
+export const MAX_CHAT_PANES = 6;
+
+const emptyPaneLayout: ChatPaneLayout = {
+  panes: [],
+  activePaneId: null,
+};
+
 const emptyState: ChatStoreState = {
   sessions: {},
   activeSessionId: null,
+  paneLayout: emptyPaneLayout,
   panelOpen: false,
 };
 
@@ -222,6 +260,10 @@ const initialState: ChatStoreState = {
 
 function generateSessionId(): string {
   return `chat-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+function generatePaneId(): string {
+  return `pane-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
 function createLocalSession(
@@ -302,6 +344,213 @@ function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   );
 }
 
+function activeSessionIdFromPaneLayout(
+  paneLayout: ChatPaneLayout
+): string | null {
+  return (
+    paneLayout.panes.find((pane) => pane.id === paneLayout.activePaneId)
+      ?.sessionId ??
+    paneLayout.panes[0]?.sessionId ??
+    null
+  );
+}
+
+export function normalizePaneLayout(
+  paneLayout: ChatPaneLayout | undefined,
+  sessions: Record<string, ChatSession>
+): ChatPaneLayout {
+  const seenSessionIds = new Set<string>();
+  const panes = (paneLayout?.panes ?? []).filter((pane) => {
+    const session = sessions[pane.sessionId];
+    if (!session || session.status !== "open" || session.isDetached) {
+      return false;
+    }
+    if (seenSessionIds.has(pane.sessionId)) return false;
+    seenSessionIds.add(pane.sessionId);
+    return true;
+  });
+  const activePaneId =
+    paneLayout?.activePaneId &&
+    panes.some((pane) => pane.id === paneLayout.activePaneId)
+      ? paneLayout.activePaneId
+      : (panes[0]?.id ?? null);
+
+  return { panes, activePaneId };
+}
+
+function focusSessionInPaneLayout(
+  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  sessionId: string
+): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
+  const session = state.sessions[sessionId];
+  if (!session || session.status !== "open" || session.isDetached) {
+    return {
+      activeSessionId: state.activeSessionId,
+      paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
+    };
+  }
+
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  const existingPane = paneLayout.panes.find(
+    (pane) => pane.sessionId === sessionId
+  );
+  if (existingPane) {
+    return {
+      activeSessionId: sessionId,
+      paneLayout: {
+        panes: paneLayout.panes,
+        activePaneId: existingPane.id,
+      },
+    };
+  }
+
+  const activePaneId = paneLayout.activePaneId ?? paneLayout.panes[0]?.id;
+  if (activePaneId) {
+    return {
+      activeSessionId: sessionId,
+      paneLayout: {
+        panes: paneLayout.panes.map((pane) =>
+          pane.id === activePaneId ? { ...pane, sessionId } : pane
+        ),
+        activePaneId,
+      },
+    };
+  }
+
+  const pane = { id: generatePaneId(), sessionId };
+  return {
+    activeSessionId: sessionId,
+    paneLayout: {
+      panes: [pane],
+      activePaneId: pane.id,
+    },
+  };
+}
+
+function addSessionPane(
+  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  sessionId: string
+): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
+  const session = state.sessions[sessionId];
+  if (!session || session.status !== "open" || session.isDetached) {
+    return {
+      activeSessionId: state.activeSessionId,
+      paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
+    };
+  }
+
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  const existingPane = paneLayout.panes.find(
+    (pane) => pane.sessionId === sessionId
+  );
+  if (existingPane) {
+    return {
+      activeSessionId: sessionId,
+      paneLayout: {
+        panes: paneLayout.panes,
+        activePaneId: existingPane.id,
+      },
+    };
+  }
+
+  if (paneLayout.panes.length >= MAX_CHAT_PANES) {
+    return focusSessionInPaneLayout(state, sessionId);
+  }
+
+  const pane = { id: generatePaneId(), sessionId };
+  return {
+    activeSessionId: sessionId,
+    paneLayout: {
+      panes: [...paneLayout.panes, pane],
+      activePaneId: pane.id,
+    },
+  };
+}
+
+function removePaneFromLayout(
+  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  paneId: string
+): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  if (paneLayout.panes.length <= 1) {
+    return {
+      activeSessionId: activeSessionIdFromPaneLayout(paneLayout),
+      paneLayout,
+    };
+  }
+
+  const panes = paneLayout.panes.filter((pane) => pane.id !== paneId);
+  if (panes.length === paneLayout.panes.length) {
+    return {
+      activeSessionId: activeSessionIdFromPaneLayout(paneLayout),
+      paneLayout,
+    };
+  }
+
+  const activePaneId =
+    paneLayout.activePaneId === paneId
+      ? (panes[0]?.id ?? null)
+      : paneLayout.activePaneId;
+  const nextLayout = { panes, activePaneId };
+  return {
+    activeSessionId: activeSessionIdFromPaneLayout(nextLayout),
+    paneLayout: nextLayout,
+  };
+}
+
+function removeSessionFromRuntimeState(
+  state: ChatStoreState,
+  sessionId: string
+): Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout" | "panelOpen"> {
+  const remaining = Object.fromEntries(
+    Object.entries(state.sessions).filter(([id]) => id !== sessionId)
+  );
+  const normalizedPaneLayout = normalizePaneLayout(state.paneLayout, remaining);
+  const activePaneSessionId = activeSessionIdFromPaneLayout(
+    normalizedPaneLayout
+  );
+  const activeSessionStillOpen =
+    state.activeSessionId !== null && !!remaining[state.activeSessionId];
+  const sessionIds = Object.keys(remaining);
+
+  return {
+    sessions: remaining,
+    activeSessionId: activeSessionStillOpen
+      ? state.activeSessionId
+      : (activePaneSessionId ?? latestSessionId(remaining)),
+    paneLayout: normalizedPaneLayout,
+    panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
+  };
+}
+
+function collapsePaneLayout(
+  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  paneId?: string
+): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  const keepPane =
+    (paneId && paneLayout.panes.find((pane) => pane.id === paneId)) ||
+    paneLayout.panes.find((pane) => pane.id === paneLayout.activePaneId) ||
+    (state.activeSessionId
+      ? paneLayout.panes.find(
+          (pane) => pane.sessionId === state.activeSessionId
+        )
+      : undefined) ||
+    paneLayout.panes[0];
+
+  if (!keepPane) {
+    return { activeSessionId: null, paneLayout: emptyPaneLayout };
+  }
+
+  return {
+    activeSessionId: keepPane.sessionId,
+    paneLayout: {
+      panes: [keepPane],
+      activePaneId: keepPane.id,
+    },
+  };
+}
+
 export const useChatStore = create<ChatStore>((set, get) => {
   const updateSession = (
     sessionId: string,
@@ -334,7 +583,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     openSession: (label, projectPath) => {
       const existing = findMatchingSession(get().sessions, projectPath);
       if (existing) {
-        set({ activeSessionId: existing, panelOpen: true });
+        set((state) => ({
+          ...focusSessionInPaneLayout(state, existing),
+          panelOpen: true,
+        }));
         return existing;
       }
 
@@ -344,11 +596,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
         });
-        set((state) => ({
-          sessions: { ...state.sessions, [hydrated.id]: hydrated },
-          activeSessionId: hydrated.id,
-          panelOpen: true,
-        }));
+        set((state) => {
+          const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+          return {
+            sessions: nextSessions,
+            ...focusSessionInPaneLayout(
+              {
+                ...state,
+                sessions: nextSessions,
+              },
+              hydrated.id
+            ),
+            panelOpen: true,
+          };
+        });
         return hydrated.id;
       }
 
@@ -357,36 +618,113 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
       persistLocalChatSession(session);
 
-      set((state) => ({
-        sessions: { ...state.sessions, [id]: session },
-        activeSessionId: id,
-        panelOpen: true,
-      }));
+      set((state) => {
+        const nextSessions = { ...state.sessions, [id]: session };
+        return {
+          sessions: nextSessions,
+          ...focusSessionInPaneLayout(
+            { ...state, sessions: nextSessions },
+            id
+          ),
+          panelOpen: true,
+        };
+      });
 
       return id;
     },
 
     closeSession: (sessionId) => {
       set((state) => {
-        const remaining = Object.fromEntries(
-          Object.entries(state.sessions).filter(([id]) => id !== sessionId)
-        );
-        const newActiveId =
-          state.activeSessionId === sessionId
-            ? latestSessionId(remaining)
-            : state.activeSessionId;
-        const sessionIds = Object.keys(remaining);
-
-        return {
-          sessions: remaining,
-          activeSessionId: newActiveId,
-          panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
-        };
+        if (!state.sessions[sessionId]) return state;
+        return removeSessionFromRuntimeState(state, sessionId);
       });
     },
 
     focusSession: (sessionId) => {
-      set({ activeSessionId: sessionId });
+      set((state) => focusSessionInPaneLayout(state, sessionId));
+    },
+
+    focusPane: (paneId) => {
+      set((state) => {
+        const paneLayout = normalizePaneLayout(
+          state.paneLayout,
+          state.sessions
+        );
+        const pane = paneLayout.panes.find((item) => item.id === paneId);
+        if (!pane) return { paneLayout };
+        return {
+          activeSessionId: pane.sessionId,
+          paneLayout: {
+            panes: paneLayout.panes,
+            activePaneId: pane.id,
+          },
+        };
+      });
+    },
+
+    bindPaneToSession: (paneId, sessionId) => {
+      let bound = false;
+      set((state) => {
+        const session = state.sessions[sessionId];
+        if (!session || session.status !== "open" || session.isDetached) {
+          return {
+            paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
+          };
+        }
+        const paneLayout = normalizePaneLayout(
+          state.paneLayout,
+          state.sessions
+        );
+        const existingPane = paneLayout.panes.find(
+          (pane) => pane.sessionId === sessionId
+        );
+        if (existingPane) {
+          bound = true;
+          return {
+            activeSessionId: sessionId,
+            paneLayout: {
+              panes: paneLayout.panes,
+              activePaneId: existingPane.id,
+            },
+          };
+        }
+        if (!paneLayout.panes.some((pane) => pane.id === paneId)) {
+          return { paneLayout };
+        }
+        bound = true;
+        return {
+          activeSessionId: sessionId,
+          paneLayout: {
+            panes: paneLayout.panes.map((pane) =>
+              pane.id === paneId ? { ...pane, sessionId } : pane
+            ),
+            activePaneId: paneId,
+          },
+        };
+      });
+      return bound;
+    },
+
+    startFreshSessionInNewPane: (label, projectPath) => {
+      const session = createLocalSession(label, projectPath);
+      persistLocalChatSession(session);
+      set((state) => {
+        const nextSessions = { ...state.sessions, [session.id]: session };
+        return {
+          sessions: nextSessions,
+          ...addSessionPane({ ...state, sessions: nextSessions }, session.id),
+          panelOpen: true,
+        };
+      });
+      return session.id;
+    },
+
+    closePane: (paneId) => {
+      set((state) => removePaneFromLayout(state, paneId));
+    },
+
+    unsplitPanes: (paneId) => {
+      set((state) => collapsePaneLayout(state, paneId));
     },
 
     listLocalSessions: (projectPath) => {
@@ -396,32 +734,71 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectPersistedSession: (sessionId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
-        set({
-          activeSessionId: sessionId,
-          panelOpen: true,
+        let reattached: ChatSession | null = null;
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (!current) return state;
+          const nextSession = current.isDetached
+            ? { ...current, isDetached: false }
+            : current;
+          const nextSessions = current.isDetached
+            ? { ...state.sessions, [sessionId]: nextSession }
+            : state.sessions;
+          if (current.isDetached) {
+            reattached = nextSession;
+          }
+          return {
+            sessions: nextSessions,
+            ...focusSessionInPaneLayout(
+              { ...state, sessions: nextSessions },
+              sessionId
+            ),
+            panelOpen: true,
+          };
         });
+        if (reattached) {
+          persistLocalChatSession(reattached);
+        }
         return true;
       }
 
       const persisted = loadPersistedLocalChatSession(sessionId);
       if (!persisted || persisted.status !== "open") return false;
       const hydrated = hydrateLocalSession(persisted);
-      set((state) => ({
-        sessions: { ...state.sessions, [hydrated.id]: hydrated },
-        activeSessionId: hydrated.id,
-        panelOpen: true,
-      }));
+      set((state) => {
+        const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+        return {
+          sessions: nextSessions,
+          ...focusSessionInPaneLayout(
+            {
+              ...state,
+              sessions: nextSessions,
+            },
+            hydrated.id
+          ),
+          panelOpen: true,
+        };
+      });
       return true;
     },
 
     startFreshSession: (label, projectPath) => {
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
-      set((state) => ({
-        sessions: { ...state.sessions, [session.id]: session },
-        activeSessionId: session.id,
-        panelOpen: true,
-      }));
+      set((state) => {
+        const nextSessions = { ...state.sessions, [session.id]: session };
+        return {
+          sessions: nextSessions,
+          ...focusSessionInPaneLayout(
+            {
+              ...state,
+              sessions: nextSessions,
+            },
+            session.id
+          ),
+          panelOpen: true,
+        };
+      });
       return session.id;
     },
 
@@ -430,18 +807,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       discardStashedChatSession(sessionId);
       set((state) => {
         if (!state.sessions[sessionId]) return state;
-        const remaining = Object.fromEntries(
-          Object.entries(state.sessions).filter(([id]) => id !== sessionId)
-        );
-        const sessionIds = Object.keys(remaining);
-        return {
-          sessions: remaining,
-          activeSessionId:
-            state.activeSessionId === sessionId
-              ? latestSessionId(remaining)
-              : state.activeSessionId,
-          panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
-        };
+        return removeSessionFromRuntimeState(state, sessionId);
       });
     },
 
@@ -630,15 +996,25 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     markSessionClosed: (sessionId) => {
-      if (!get().sessions[sessionId]) return;
-      updateSession(sessionId, (session) => ({
+      const session = get().sessions[sessionId];
+      if (!session) return;
+      const closedSession = {
         ...session,
         status: "open" as const,
         claudeSessionId: null,
-        lifecycle: "closed",
+        lifecycle: "closed" as const,
         lifecycleError: null,
         streamingAssistant: null,
-      }));
+      };
+      if (isDisposableClosedLocalChatSession(closedSession)) {
+        persistLocalChatSession(closedSession);
+        set((state) => {
+          if (!state.sessions[sessionId]) return state;
+          return removeSessionFromRuntimeState(state, sessionId);
+        });
+        return;
+      }
+      updateSession(sessionId, () => closedSession);
     },
 
     clearMessages: (sessionId) => {
@@ -698,15 +1074,22 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const remainingIds = Object.keys(state.sessions).filter(
           (id) => id !== sessionId && !state.sessions[id].isDetached
         );
+        const nextActiveSessionId =
+          state.activeSessionId === sessionId
+            ? (remainingIds[remainingIds.length - 1] ?? null)
+            : state.activeSessionId;
+        const nextSessions = {
+          ...state.sessions,
+          [sessionId]: updated,
+        };
+        const nextPaneLayout = normalizePaneLayout(
+          state.paneLayout,
+          nextSessions
+        );
         return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: updated,
-          },
-          activeSessionId:
-            state.activeSessionId === sessionId
-              ? (remainingIds[remainingIds.length - 1] ?? null)
-              : state.activeSessionId,
+          sessions: nextSessions,
+          activeSessionId: nextActiveSessionId,
+          paneLayout: nextPaneLayout,
         };
       });
 
@@ -746,22 +1129,36 @@ export const useChatStore = create<ChatStore>((set, get) => {
             Object.entries(state.sessions).filter(([id]) => id !== sessionId)
           );
           const sessionIds = Object.keys(remaining);
+          const normalizedPaneLayout = normalizePaneLayout(
+            state.paneLayout,
+            remaining
+          );
+          const activePaneSessionId =
+            activeSessionIdFromPaneLayout(normalizedPaneLayout);
           return {
             sessions: remaining,
             activeSessionId:
               state.activeSessionId === sessionId
-                ? (sessionIds[sessionIds.length - 1] ?? null)
+                ? (activePaneSessionId ??
+                  sessionIds[sessionIds.length - 1] ??
+                  null)
                 : state.activeSessionId,
+            paneLayout: normalizedPaneLayout,
             panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
           };
         }
         updated = { ...session, isDetached: false };
+        const nextSessions = {
+          ...state.sessions,
+          [sessionId]: updated,
+        };
+        const nextState = {
+          ...state,
+          sessions: nextSessions,
+        };
         return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: updated,
-          },
-          activeSessionId: sessionId,
+          sessions: nextSessions,
+          ...addSessionPane(nextState, sessionId),
           panelOpen: true,
         };
       });

@@ -78,6 +78,7 @@ describe("ChatWindow", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
   });
@@ -117,6 +118,19 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Deploy Pipeline")).toBeInTheDocument();
     expect(screen.queryByText("this workflow")).not.toBeInTheDocument();
     expect(screen.queryByText("wf-1")).not.toBeInTheDocument();
+  });
+
+  it("reserves the context metadata footer before usage lands", () => {
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    const { container } = render(<ChatWindow sessionId="test-session" />);
+
+    expect(container.querySelector(".hc-foot-meta")).toBeInTheDocument();
   });
 
   it("shows a scope-neutral widening control when the panel can expand", async () => {
@@ -620,6 +634,36 @@ describe("ChatWindow", () => {
       expect(
         useChatStore.getState().sessions["test-session"].messages
       ).toHaveLength(0);
+    });
+  });
+
+  it("keeps an empty active chat open after clearing its backend session", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      claudeSessionId: "claude-empty",
+      lifecycle: "idle",
+      messages: [],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTitle("Clear messages"));
+
+    await waitFor(() => {
+      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+        "claude-empty"
+      );
+      expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+        messages: [],
+        claudeSessionId: null,
+        lifecycle: "idle",
+      });
+      expect(useChatStore.getState().panelOpen).toBe(true);
     });
   });
 

@@ -137,6 +137,7 @@ describe("ChatWindowManager", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
     usePanelFocusStore.getState().reset();
@@ -704,11 +705,834 @@ describe("ChatWindowManager", () => {
       expect(screen.getAllByText("first saved question")).toHaveLength(2);
     });
 
-    await user.click(screen.getByLabelText("Open local chat Task Two"));
+    await user.click(
+      screen.getByLabelText("Load local chat Task Two into active pane")
+    );
 
     expect(useChatStore.getState().activeSessionId).toBe(second);
     expect(screen.getAllByText("second saved answer")).toHaveLength(2);
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+  });
+
+  it("splits the maximized chat into two distinct session panes", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    await user.click(screen.getByLabelText("Split chat pane"));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    const state = useChatStore.getState();
+    const paneSessionIds = state.paneLayout.panes.map((pane) => pane.sessionId);
+    expect(paneSessionIds).toHaveLength(2);
+    expect(new Set(paneSessionIds).size).toBe(2);
+    expect(paneSessionIds[0]).toBe(first);
+    expect(state.sessions[paneSessionIds[1]]).toMatchObject({
+      label: "New Chat",
+      projectPath: "/test/project",
+      claudeSessionId: null,
+    });
+  });
+
+  it("splits the maximized chat with Cmd+Option+Backslash", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    useChatStore.getState().openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    fireEvent.keyDown(window, { key: "\\", metaKey: true, altKey: true });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
+    });
+    expect(useChatStore.getState().paneLayout.panes).toHaveLength(2);
+  });
+
+  it("can split the maximized chat into more than two vertical panes", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+    });
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    for (let targetPaneCount = 2; targetPaneCount <= 3; targetPaneCount += 1) {
+      const splitButtons = screen
+        .getAllByLabelText("Split chat pane")
+        .filter((button) => !(button as HTMLButtonElement).disabled);
+      await user.click(splitButtons[splitButtons.length - 1]);
+      await waitFor(() => {
+        expect(screen.getAllByTestId("chat-pane")).toHaveLength(
+          targetPaneCount
+        );
+      });
+    }
+
+    const paneSessionIds = useChatStore
+      .getState()
+      .paneLayout.panes.map((pane) => pane.sessionId);
+    expect(paneSessionIds).toHaveLength(3);
+    expect(new Set(paneSessionIds).size).toBe(3);
+    expect(paneSessionIds[0]).toBe(first);
+  });
+
+  it("disables splitting when the maximized panel is too narrow for two panes", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 900,
+    });
+    const user = userEvent.setup();
+    useChatStore.getState().openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const splitButton = screen.getByLabelText("Split chat pane");
+    expect(splitButton).toBeDisabled();
+    await user.click(splitButton);
+
+    expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
+    expect(useChatStore.getState().paneLayout.panes).toHaveLength(1);
+  });
+
+  it("keeps split pane input and backend sends independent", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const left = createSession({
+      id: "left",
+      label: "Left Chat",
+      claudeSessionId: "backend-left",
+      lifecycle: "idle",
+    });
+    const right = createSession({
+      id: "right",
+      label: "Right Chat",
+      claudeSessionId: "backend-right",
+      lifecycle: "idle",
+    });
+    useChatStore.setState({
+      sessions: { left, right },
+      activeSessionId: "left",
+      paneLayout: {
+        panes: [
+          { id: "pane-left", sessionId: "left" },
+          { id: "pane-right", sessionId: "right" },
+        ],
+        activePaneId: "pane-left",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const panes = screen.getAllByTestId("chat-pane");
+    const leftComposer = within(panes[0]).getByTestId("local-chat-composer");
+    const rightComposer = within(panes[1]).getByTestId("local-chat-composer");
+    await user.type(leftComposer, "left message");
+    await user.type(rightComposer, "right message");
+
+    expect(leftComposer).toHaveValue("left message");
+    expect(rightComposer).toHaveValue("right message");
+
+    await user.click(leftComposer);
+    await user.keyboard("{Enter}");
+    await user.click(rightComposer);
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => {
+      expect(commands.sendClaudeMessage).toHaveBeenCalledWith(
+        "backend-left",
+        "left message"
+      );
+      expect(commands.sendClaudeMessage).toHaveBeenCalledWith(
+        "backend-right",
+        "right message"
+      );
+    });
+    expect(useChatStore.getState().sessions.left.messages).toEqual([
+      expect.objectContaining({ kind: "user", text: "left message" }),
+    ]);
+    expect(useChatStore.getState().sessions.right.messages).toEqual([
+      expect.objectContaining({ kind: "user", text: "right message" }),
+    ]);
+  });
+
+  it("keeps the footer metadata row aligned when one split pane has no usage yet", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const left = createSession({
+      id: "left",
+      label: "Left Chat",
+      claudeSessionId: "backend-left",
+      model: "claude-haiku",
+      tokenUsage: { used: 28_000, max: 200_000 },
+    });
+    const right = createSession({
+      id: "right",
+      label: "Right Chat",
+      claudeSessionId: null,
+    });
+    useChatStore.setState({
+      sessions: { left, right },
+      activeSessionId: "left",
+      paneLayout: {
+        panes: [
+          { id: "pane-left", sessionId: "left" },
+          { id: "pane-right", sessionId: "right" },
+        ],
+        activePaneId: "pane-left",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const panes = screen.getAllByTestId("chat-pane");
+    const footerRows = panes.map((pane) => pane.querySelector(".hc-foot-meta"));
+    expect(footerRows[0]).toHaveTextContent("context 14%");
+    expect(footerRows[1]).toBeInTheDocument();
+    expect(footerRows[1]?.textContent?.trim()).toBe("");
+  });
+
+  it("renders simultaneous streaming content in the correct split panes", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const left = createSession({
+      id: "left",
+      label: "Left Chat",
+      claudeSessionId: "backend-left",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "left prompt",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+      streamingAssistant: {
+        text: "left streaming answer",
+        timestamp: "2026-01-01T00:00:01Z",
+      },
+    });
+    const right = createSession({
+      id: "right",
+      label: "Right Chat",
+      claudeSessionId: "backend-right",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "right prompt",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
+      streamingAssistant: {
+        text: "right streaming answer",
+        timestamp: "2026-01-01T00:00:01Z",
+      },
+    });
+    useChatStore.setState({
+      sessions: { left, right },
+      activeSessionId: "left",
+      paneLayout: {
+        panes: [
+          { id: "pane-left", sessionId: "left" },
+          { id: "pane-right", sessionId: "right" },
+        ],
+        activePaneId: "pane-left",
+      },
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const panes = screen.getAllByTestId("chat-pane");
+    expect(within(panes[0]).getByText("left streaming answer")).toBeVisible();
+    expect(within(panes[1]).getByText("right streaming answer")).toBeVisible();
+    expect(
+      within(panes[0]).queryByText("right streaming answer")
+    ).not.toBeInTheDocument();
+    expect(
+      within(panes[1]).queryByText("left streaming answer")
+    ).not.toBeInTheDocument();
+  });
+
+  it("routes mini selector choices to the selected pane without duplicating visible sessions", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two", "/test/project");
+    const third = "third";
+    persistLocalChatSession(
+      createSession({
+        id: third,
+        label: "Task Three",
+        projectPath: "/test/project",
+        messages: [
+          {
+            kind: "assistant",
+            text: "third saved answer",
+            timestamp: "2026-01-03T00:00:00Z",
+          },
+        ],
+      })
+    );
+    useChatStore
+      .getState()
+      .focusPane(useChatStore.getState().paneLayout.panes[0].id);
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const firstPane = screen.getAllByTestId("chat-pane")[0];
+    await user.click(firstPane);
+    await user.click(
+      await screen.findByLabelText(
+        "Load local chat Task Three into active pane"
+      )
+    );
+
+    let paneSessionIds = useChatStore
+      .getState()
+      .paneLayout.panes.map((pane) => pane.sessionId);
+    expect(paneSessionIds).toEqual([third, second]);
+    expect(useChatStore.getState().activeSessionId).toBe(third);
+
+    await user.click(screen.getAllByTestId("chat-pane")[0]);
+    await user.click(
+      screen.getByLabelText("Load local chat Task Two into active pane")
+    );
+
+    paneSessionIds = useChatStore
+      .getState()
+      .paneLayout.panes.map((pane) => pane.sessionId);
+    expect(paneSessionIds).toEqual([third, second]);
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+    expect(useChatStore.getState().paneLayout.panes[0].sessionId).not.toBe(
+      second
+    );
+    expect(useChatStore.getState().sessions[first]).toBeDefined();
+  });
+
+  it("loads mini selector choices into the pane selected by keyboard shortcut", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two", "/test/project");
+    const third = "third";
+    persistLocalChatSession(
+      createSession({
+        id: third,
+        label: "Task Three",
+        projectPath: "/test/project",
+        messages: [
+          {
+            kind: "assistant",
+            text: "third saved answer",
+            timestamp: "2026-01-03T00:00:00Z",
+          },
+        ],
+      })
+    );
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await screen.findByTestId("local-chat-mini-panel");
+    fireEvent.keyDown(window, { key: "2", metaKey: true, altKey: true });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second);
+    });
+
+    await userEvent
+      .setup()
+      .click(
+        await screen.findByLabelText(
+          "Load local chat Task Three into active pane"
+        )
+      );
+
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([first, third]);
+    expect(useChatStore.getState().activeSessionId).toBe(third);
+    expect(useChatStore.getState().sessions[second]).toBeDefined();
+  });
+
+  it("loads mini selector choices into the active pane with arrow keys and Enter", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two", "/test/project");
+    const third = "third";
+    persistLocalChatSession(
+      createSession({
+        id: third,
+        label: "Task Three",
+        projectPath: "/test/project",
+        messages: [
+          {
+            kind: "assistant",
+            text: "third saved answer",
+            timestamp: "2026-01-03T00:00:00Z",
+          },
+        ],
+      })
+    );
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    const miniPanel = await screen.findByTestId("local-chat-mini-panel");
+    fireEvent.keyDown(window, {
+      key: "™",
+      code: "Digit2",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second);
+    });
+    fireEvent.keyDown(window, {
+      key: "Ó",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(miniPanel).toHaveFocus();
+
+    const historyButtons = screen.getAllByRole("button", {
+      name: /^Load local chat/,
+    });
+    const targetIndex = historyButtons.findIndex(
+      (button) =>
+        button.getAttribute("aria-label") ===
+        "Load local chat Task Three into active pane"
+    );
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+
+    fireEvent.keyDown(miniPanel, { key: "Home" });
+    expect(historyButtons[0]).toHaveFocus();
+    for (let index = 0; index < targetIndex; index += 1) {
+      fireEvent.keyDown(document.activeElement ?? miniPanel, {
+        key: "ArrowDown",
+      });
+    }
+    expect(historyButtons[targetIndex]).toHaveFocus();
+
+    fireEvent.keyDown(historyButtons[targetIndex], { key: "Enter" });
+
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([first, third]);
+    expect(useChatStore.getState().activeSessionId).toBe(third);
+    expect(useChatStore.getState().sessions[second]).toBeDefined();
+  });
+
+  it("removes persisted-only history rows immediately when deleted", async () => {
+    const user = userEvent.setup();
+    useChatStore.getState().openSession("Active Task", "/test/project");
+    persistLocalChatSession(
+      createSession({
+        id: "history-only",
+        label: "History Only",
+        projectPath: "/test/project",
+        messages: [
+          {
+            kind: "user",
+            text: "delete me",
+            timestamp: "2026-01-04T00:00:00Z",
+          },
+        ],
+        createdAt: "2026-01-04T00:00:00Z",
+        updatedAt: "2026-01-04T00:00:00Z",
+      })
+    );
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByLabelText("Toggle chat history"));
+
+    await user.click(
+      await screen.findByLabelText("Delete local chat History Only")
+    );
+
+    await waitFor(() => {
+      expect(loadPersistedLocalChatSession("history-only")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByLabelText(
+          "Load local chat History Only into active pane"
+        )
+      ).not.toBeInTheDocument();
+    });
+    expect(loadPersistedLocalChatSession("history-only")).toBeNull();
+  });
+
+  it("closes one split pane while keeping the other session intact", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const user = userEvent.setup();
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two", "/test/project");
+    useChatStore.getState().addMessage(second, {
+      kind: "assistant",
+      text: "keep this pane session",
+      timestamp: "2026-01-02T00:00:00Z",
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const secondPane = screen.getAllByTestId("chat-pane")[1];
+    await user.click(within(secondPane).getByLabelText("Close this pane"));
+
+    expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
+    expect(useChatStore.getState().sessions[second]).toMatchObject({
+      messages: [
+        expect.objectContaining({
+          kind: "assistant",
+          text: "keep this pane session",
+        }),
+      ],
+    });
+    expect(useChatStore.getState().paneLayout.panes).toEqual([
+      expect.objectContaining({ sessionId: first }),
+    ]);
+  });
+
+  it("uses keyboard shortcuts to focus, close, and merge split panes", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+    });
+    const first = useChatStore.getState().openSession("Task One");
+    const second = useChatStore.getState().startFreshSessionInNewPane("Task Two");
+    const third = useChatStore.getState().startFreshSessionInNewPane("Task Three");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    fireEvent.keyDown(window, {
+      key: "¡",
+      code: "Digit1",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+
+    fireEvent.keyDown(window, {
+      key: "ArrowRight",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+
+    fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+    expect(useChatStore.getState().activeSessionId).toBe(third);
+
+    fireEvent.keyDown(window, { key: "w", metaKey: true, altKey: true });
+    expect(useChatStore.getState().paneLayout.panes).toHaveLength(3);
+
+    fireEvent.keyDown(window, { key: "x", metaKey: true, altKey: true });
+    expect(useChatStore.getState().paneLayout.panes).toHaveLength(3);
+
+    fireEvent.keyDown(window, {
+      key: "|",
+      code: "Backslash",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([first, second]);
+    expect(useChatStore.getState().sessions[third]).toBeDefined();
+
+    fireEvent.keyDown(window, {
+      key: "™",
+      code: "Digit2",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+
+    fireEvent.keyDown(window, {
+      key: "µ",
+      code: "KeyM",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(useChatStore.getState().paneLayout.panes).toEqual([
+      expect.objectContaining({ sessionId: second }),
+    ]);
+  });
+
+  it("does not prevent app shortcuts when chat pane shortcuts cannot run", () => {
+    useChatStore.getState().openSession("Task One");
+
+    render(<ChatWindowManager />);
+
+    const ctrlTab = new KeyboardEvent("keydown", {
+      key: "Tab",
+      ctrlKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(ctrlTab);
+    expect(ctrlTab.defaultPrevented).toBe(false);
+
+    const unshiftedNewChat = new KeyboardEvent("keydown", {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    window.dispatchEvent(unshiftedNewChat);
+    expect(unshiftedNewChat.defaultPrevented).toBe(false);
+  });
+
+  it("keeps the global shortcut listener stable while sessions stream", () => {
+    const addSpy = vi.spyOn(window, "addEventListener");
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const id = useChatStore.getState().openSession("Task One");
+
+    render(<ChatWindowManager />);
+    const keydownAdds = addSpy.mock.calls.filter(
+      ([type]) => type === "keydown"
+    ).length;
+    const keydownRemoves = removeSpy.mock.calls.filter(
+      ([type]) => type === "keydown"
+    ).length;
+
+    act(() => {
+      useChatStore.getState().updateLastAssistantMessage(id, "stream");
+    });
+
+    expect(
+      addSpy.mock.calls.filter(([type]) => type === "keydown")
+    ).toHaveLength(keydownAdds);
+    expect(
+      removeSpy.mock.calls.filter(([type]) => type === "keydown")
+    ).toHaveLength(keydownRemoves);
+
+    addSpy.mockRestore();
+    removeSpy.mockRestore();
+  });
+
+  it("uses keyboard shortcuts to open history and start fresh chats", async () => {
+    const first = useChatStore.getState().openSession("Task One", "/test/project");
+
+    render(<ChatWindowManager />);
+
+    fireEvent.keyDown(window, {
+      key: "˙",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(
+      screen.queryByTestId("local-chat-history-drawer")
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "Ó",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(screen.getByTestId("local-chat-history-drawer")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+
+    fireEvent.keyDown(window, {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).not.toBe(first);
+    });
+    const fresh = useChatStore.getState().activeSessionId;
+    expect(fresh).not.toBeNull();
+    expect(useChatStore.getState().sessions[fresh!]).toMatchObject({
+      label: "New Chat",
+      projectPath: "/test/project",
+    });
+  });
+
+  it("uses shifted session shortcuts against the active split pane", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    await screen.findByTestId("local-chat-mini-panel");
+    fireEvent.keyDown(window, {
+      key: "™",
+      code: "Digit2",
+      metaKey: true,
+      altKey: true,
+    });
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second);
+    });
+
+    fireEvent.keyDown(window, {
+      key: "˙",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(screen.getByTestId("local-chat-mini-panel")).not.toHaveFocus();
+
+    fireEvent.keyDown(window, {
+      key: "Ó",
+      code: "KeyH",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(screen.getByTestId("local-chat-mini-panel")).toHaveFocus();
+
+    fireEvent.keyDown(window, {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+    });
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([first, second]);
+
+    fireEvent.keyDown(window, {
+      key: "Dead",
+      code: "KeyN",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).not.toBe(second);
+    });
+    const fresh = useChatStore.getState().activeSessionId;
+    expect(fresh).not.toBeNull();
+    expect(
+      useChatStore.getState().paneLayout.panes.map((pane) => pane.sessionId)
+    ).toEqual([first, fresh]);
+    expect(useChatStore.getState().sessions[second]).toBeDefined();
+  });
+
+  it("shows chat keyboard shortcut hints with Cmd+Shift+Slash", () => {
+    useChatStore.getState().openSession("Task One");
+
+    render(<ChatWindowManager />);
+
+    fireEvent.keyDown(window, { key: "?", metaKey: true, shiftKey: true });
+    const dialog = screen.getByRole("dialog", {
+      name: "Chat keyboard shortcuts",
+    });
+    expect(within(dialog).getByText("Chat shortcuts")).toBeInTheDocument();
+    expect(within(dialog).getByText("Close active pane")).toBeInTheDocument();
+    expect(within(dialog).queryByText("X")).not.toBeInTheDocument();
+    expect(
+      within(dialog).getByText("History for active pane")
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(
+      screen.queryByRole("dialog", { name: "Chat keyboard shortcuts" })
+    ).not.toBeInTheDocument();
+    expect(useChatStore.getState().panelOpen).toBe(true);
+  });
+
+  it("toggles chat keyboard shortcut hints with Cmd+Shift+Slash", () => {
+    useChatStore.getState().openSession("Task One");
+
+    render(<ChatWindowManager />);
+
+    fireEvent.keyDown(window, { key: "/", metaKey: true, shiftKey: true });
+    expect(
+      screen.getByRole("dialog", { name: "Chat keyboard shortcuts" })
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "/", metaKey: true, shiftKey: true });
+    expect(
+      screen.queryByRole("dialog", { name: "Chat keyboard shortcuts" })
+    ).not.toBeInTheDocument();
   });
 
   it("groups the maximized mini thread selector by project", async () => {
@@ -773,11 +1597,11 @@ describe("ChatWindowManager", () => {
     );
     expect(
       currentGroup
-        .getAllByRole("button", { name: /^Open local chat/ })
+        .getAllByRole("button", { name: /^Load local chat/ })
         .map((button) => button.getAttribute("aria-label"))
     ).toEqual([
-      "Open local chat Current Newer Chat",
-      "Open local chat Current Older Chat",
+      "Load local chat Current Newer Chat into active pane",
+      "Load local chat Current Older Chat into active pane",
     ]);
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
@@ -838,6 +1662,40 @@ describe("ChatWindowManager", () => {
     );
     expect(loadPersistedLocalChatSession(id)).toBeNull();
     expect(useChatStore.getState().sessions[id]).toBeUndefined();
+  });
+
+  it("closes the history drawer after deleting the active live session", async () => {
+    const user = userEvent.setup();
+    const other = useChatStore
+      .getState()
+      .openSession("Other Task", "/test/project");
+    useChatStore.getState().addMessage(other, {
+      kind: "user",
+      text: "keep another session",
+      timestamp: "2026-01-01T00:00:00Z",
+    });
+    const active = useChatStore
+      .getState()
+      .startFreshSession("Live Task", "/test/project");
+    useChatStore.getState().setClaudeSessionId(active, "live-backend-session");
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByLabelText("Toggle chat history"));
+    expect(screen.getByTestId("local-chat-history-drawer")).toBeInTheDocument();
+    await user.click(
+      await screen.findByLabelText("Delete local chat Live Task")
+    );
+
+    await waitFor(() => {
+      expect(commands.closeClaudeSession).toHaveBeenCalledWith(
+        "live-backend-session"
+      );
+      expect(
+        screen.queryByTestId("local-chat-history-drawer")
+      ).not.toBeInTheDocument();
+    });
+    expect(useChatStore.getState().activeSessionId).toBe(other);
   });
 
   it("keeps the local session and shows feedback when close fails during history delete", async () => {

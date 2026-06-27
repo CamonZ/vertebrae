@@ -34,6 +34,7 @@ describe("chatStore detach / reattach", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
     localStorage.clear();
@@ -116,6 +117,23 @@ describe("chatStore detach / reattach", () => {
     expect(useChatStore.getState().activeSessionId).toBe(id1);
   });
 
+  it("detachSession removes the session from split pane layout", async () => {
+    const id1 = useChatStore.getState().openSession("Task A");
+    const id2 = useChatStore.getState().startFreshSessionInNewPane("Task B");
+    const before = useChatStore.getState().paneLayout;
+    expect(before.panes.map((pane) => pane.sessionId)).toEqual([id1, id2]);
+
+    await useChatStore.getState().detachSession(id2);
+
+    const state = useChatStore.getState();
+    expect(state.sessions[id2].isDetached).toBe(true);
+    expect(state.activeSessionId).toBe(id1);
+    expect(state.paneLayout.panes).toEqual([
+      expect.objectContaining({ sessionId: id1 }),
+    ]);
+    expect(state.paneLayout.activePaneId).toBe(state.paneLayout.panes[0].id);
+  });
+
   it("reattachSession clears isDetached and re-focuses the tab", () => {
     const id = useChatStore.getState().openSession("Task A");
     useChatStore.setState((s) => ({
@@ -132,6 +150,39 @@ describe("chatStore detach / reattach", () => {
     expect(useChatStore.getState().sessions[id].isDetached).toBe(false);
     expect(useChatStore.getState().activeSessionId).toBe(id);
     expect(useChatStore.getState().panelOpen).toBe(true);
+  });
+
+  it("reattachSession adds a detached session without evicting visible split panes", () => {
+    const first = useChatStore.getState().openSession("Task A");
+    const second = useChatStore.getState().startFreshSessionInNewPane("Task B");
+    const detached = "detached-task";
+    useChatStore.getState().focusSession(first);
+    useChatStore.setState((s) => ({
+      sessions: {
+        ...s.sessions,
+        [detached]: {
+          id: detached,
+          label: "Task C",
+          messages: [],
+          status: "open",
+          claudeSessionId: null,
+          claudeConversationId: null,
+          isDetached: true,
+        },
+      },
+      activeSessionId: first,
+    }));
+
+    useChatStore.getState().reattachSession(detached);
+
+    const state = useChatStore.getState();
+    expect(state.sessions[detached].isDetached).toBe(false);
+    expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      first,
+      second,
+      detached,
+    ]);
+    expect(state.activeSessionId).toBe(detached);
   });
 
   it("reattachSession does not resurrect a detached session cleared elsewhere", () => {
