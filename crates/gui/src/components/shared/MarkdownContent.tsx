@@ -1,9 +1,12 @@
 import { memo, type ComponentPropsWithoutRef } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { findBalancedJsonEnd } from "../../utils/jsonFragments";
+import { VtbEntityMarkdownLink } from "./VtbEntityLink";
+import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
 interface MarkdownContentProps {
   text: string;
@@ -30,6 +33,10 @@ type CodeProps = ComponentPropsWithoutRef<"code"> & {
   node?: unknown;
 };
 
+type AnchorProps = ComponentPropsWithoutRef<"a"> & {
+  node?: unknown;
+};
+
 const codeBlockStyle: React.CSSProperties = {
   margin: 0,
   padding: "0.75rem",
@@ -45,6 +52,43 @@ const codeTagStyle = {
   className: "font-mono",
 };
 
+function markdownUrlTransform(value: string): string {
+  if (value.toLowerCase().startsWith("vtb://")) return value;
+  return defaultUrlTransform(value);
+}
+
+function MarkdownAnchor({ children, href, node, ...props }: AnchorProps) {
+  void node;
+  const vtbTarget = parseVtbEntityHref(href);
+  if (href?.toLowerCase().startsWith("vtb://")) {
+    if (vtbTarget) {
+      return (
+        <VtbEntityMarkdownLink target={vtbTarget}>
+          {children}
+        </VtbEntityMarkdownLink>
+      );
+    }
+
+    return (
+      <span data-testid="vtb-entity-link-fallback" className="text-fg">
+        {children ?? href}
+      </span>
+    );
+  }
+
+  return (
+    <a
+      className="text-accent underline decoration-accent/30 hover:decoration-accent"
+      target="_blank"
+      rel="noopener noreferrer"
+      href={href}
+      {...props}
+    >
+      {children}
+    </a>
+  );
+}
+
 const components = {
   p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
     <p
@@ -55,10 +99,7 @@ const components = {
     </p>
   ),
   h1: ({ children, ...props }: ComponentPropsWithoutRef<"h1">) => (
-    <h1
-      className="mb-3 mt-4 text-xl font-bold text-fg first:mt-0"
-      {...props}
-    >
+    <h1 className="mb-3 mt-4 text-xl font-bold text-fg first:mt-0" {...props}>
       {children}
     </h1>
   ),
@@ -87,10 +128,7 @@ const components = {
     </h4>
   ),
   ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
-    <ul
-      className="mb-2 ml-4 list-disc space-y-1 text-base text-fg"
-      {...props}
-    >
+    <ul className="mb-2 ml-4 list-disc space-y-1 text-base text-fg" {...props}>
       {children}
     </ul>
   ),
@@ -118,16 +156,7 @@ const components = {
       {children}
     </blockquote>
   ),
-  a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (
-    <a
-      className="text-accent underline decoration-accent/30 hover:decoration-accent"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
+  a: MarkdownAnchor,
   table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
     <div className="mb-2 overflow-x-auto">
       <table className="w-full border-collapse text-sm" {...props}>
@@ -149,10 +178,7 @@ const components = {
     </th>
   ),
   td: ({ children, ...props }: ComponentPropsWithoutRef<"td">) => (
-    <td
-      className="border-t border-border/50 px-3 py-1.5 text-fg"
-      {...props}
-    >
+    <td className="border-t border-border/50 px-3 py-1.5 text-fg" {...props}>
       {children}
     </td>
   ),
@@ -304,47 +330,6 @@ function maybeWrapBareJson(text: string): string {
   }
 }
 
-/**
- * Scan from `start` (a `{` or `[`) to find the matching close, tracking
- * string and escape state so brackets inside strings don't confuse the
- * counter. Returns the index just past the close, or null if the substring
- * isn't well-balanced.
- */
-function findBalancedJsonEnd(text: string, start: number): number | null {
-  const open = text[start];
-  const close = open === "{" ? "}" : open === "[" ? "]" : "";
-  if (!close) return null;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < text.length; i++) {
-    const c = text[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (inString) {
-      if (c === "\\") {
-        escape = true;
-        continue;
-      }
-      if (c === '"') inString = false;
-      continue;
-    }
-    if (c === '"') {
-      inString = true;
-      continue;
-    }
-    if (c === "{" || c === "[") depth++;
-    else if (c === "}" || c === "]") {
-      depth--;
-      if (depth === 0) return c === close ? i + 1 : null;
-      if (depth < 0) return null;
-    }
-  }
-  return null;
-}
-
 function isPrettyPrintable(value: unknown): boolean {
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === "object" && value !== null) {
@@ -429,7 +414,11 @@ export const MarkdownContent = memo(function MarkdownContent({
   const prepared = formatInlineJsonBlocks(maybeWrapBareJson(text));
   return (
     <div className="markdown-content" data-testid="markdown-content">
-      <Markdown remarkPlugins={remarkPlugins} components={components}>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        components={components}
+        urlTransform={markdownUrlTransform}
+      >
         {prepared}
       </Markdown>
     </div>

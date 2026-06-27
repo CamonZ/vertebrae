@@ -80,6 +80,7 @@ import { ProjectSetupPage } from "./ProjectSetupPage";
 describe("ProjectSetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.pushState({}, "", "/setup");
     resetProjectScopedStores();
     projectInitProgress.handler = null;
 
@@ -182,6 +183,17 @@ describe("ProjectSetupPage", () => {
     });
     expect(taskIdsWhenNavigating).toEqual([]);
     expect(workflowIdsWhenNavigating).toEqual([]);
+  });
+
+  it("selects a saved project from the project query parameter", async () => {
+    window.history.pushState({}, "", "/setup?project=new-project");
+
+    render(<ProjectSetupPage />);
+
+    await waitFor(() => {
+      expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 
   it("keeps returning users on the saved-project list and opens the wizard from Add Project", async () => {

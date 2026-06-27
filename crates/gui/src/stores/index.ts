@@ -27,11 +27,10 @@ export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
 export { useChatStore } from "./chatStore";
-export type {
-  ChatStore,
-  ChatSession,
-  ChatMessage,
-} from "./chatStore";
+export type { ChatStore, ChatSession, ChatMessage } from "./chatStore";
+
+export { useEntityPanelStore } from "./entityPanelStore";
+export type { EntityPanelSelection } from "./entityPanelStore";
 
 export { resetProjectScopedStores } from "./projectScopedStores";
 

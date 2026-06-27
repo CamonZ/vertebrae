@@ -8,7 +8,9 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -18,7 +20,7 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::commands::AppState;
 use crate::events::PermissionRequestEvent;
-use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
+use crate::helpers::{find_claude_binary, find_vtb_binary, find_vtb_gate_binary};
 use crate::types::{CreateClaudeSessionInput, PermissionMode};
 
 #[cfg(unix)]
@@ -96,6 +98,94 @@ fn build_augmented_path() -> String {
     }
 
     parts.join(":")
+}
+
+fn prepend_path_dir(dir: &Path, path: &str) -> String {
+    let mut parts = vec![dir.to_path_buf()];
+    parts.extend(std::env::split_paths(path));
+    std::env::join_paths(parts)
+        .unwrap_or_else(|_| {
+            let separator = if cfg!(windows) { ";" } else { ":" };
+            format!("{}{}{}", dir.display(), separator, path).into()
+        })
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(unix)]
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(unix)]
+fn build_vtb_json_wrapper_script(vtb_binary: &Path) -> String {
+    let real_vtb = shell_single_quote(&vtb_binary.to_string_lossy());
+    format!(
+        r#"#!/bin/sh
+real_vtb={real_vtb}
+has_json=0
+wants_help=0
+for arg in "$@"; do
+  if [ "$arg" = "--json" ]; then
+    has_json=1
+  fi
+  if [ "$arg" = "--help" ] || [ "$arg" = "-h" ]; then
+    wants_help=1
+  fi
+done
+
+if [ "$has_json" = "0" ] && [ "$wants_help" = "0" ]; then
+  if [ "$1" = "list" ] || [ "$1" = "show" ]; then
+    sub="$1"
+    shift
+    exec "$real_vtb" "$sub" --json "$@"
+  fi
+
+  if [ "$1" = "workflow" ]; then
+    if [ "$2" = "list" ] || [ "$2" = "show" ]; then
+      group="$1"
+      sub="$2"
+      shift 2
+      exec "$real_vtb" "$group" "$sub" --json "$@"
+    fi
+  fi
+
+  if [ "$1" = "step" ]; then
+    if [ "$2" = "list" ] || [ "$2" = "show" ]; then
+      group="$1"
+      sub="$2"
+      shift 2
+      exec "$real_vtb" "$group" "$sub" --json "$@"
+    fi
+  fi
+fi
+
+exec "$real_vtb" "$@"
+"#
+    )
+}
+
+#[cfg(unix)]
+fn write_vtb_json_wrapper(wrapper_dir: &Path, vtb_binary: &Path) -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let wrapper_path = wrapper_dir.join("vtb");
+    fs::write(&wrapper_path, build_vtb_json_wrapper_script(vtb_binary))
+        .map_err(|err| format!("failed to write vtb JSON wrapper: {err}"))?;
+    fs::set_permissions(&wrapper_path, fs::Permissions::from_mode(0o755))
+        .map_err(|err| format!("failed to mark vtb JSON wrapper executable: {err}"))?;
+    Ok(wrapper_path)
+}
+
+#[cfg(unix)]
+fn create_vtb_json_wrapper_dir() -> Result<tempfile::TempDir, String> {
+    let vtb_binary = find_vtb_binary()?;
+    let dir = tempfile::Builder::new()
+        .prefix("vertebrae-vtb-json-")
+        .tempdir()
+        .map_err(|err| format!("failed to create vtb JSON wrapper temp dir: {err}"))?;
+    write_vtb_json_wrapper(dir.path(), &vtb_binary)?;
+    Ok(dir)
 }
 
 /// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
@@ -774,7 +864,30 @@ impl ClaudeSessionManager {
             return;
         }
 
-        let augmented_path = build_augmented_path();
+        #[cfg(unix)]
+        let vtb_json_wrapper_dir = match create_vtb_json_wrapper_dir() {
+            Ok(dir) => {
+                log::info!(
+                    "Created vtb JSON wrapper for Claude subprocess at {}",
+                    dir.path().display()
+                );
+                Some(dir)
+            }
+            Err(err) => {
+                log::warn!(
+                    "Could not create vtb JSON wrapper for Claude subprocess: {}",
+                    err
+                );
+                None
+            }
+        };
+        #[cfg(not(unix))]
+        let vtb_json_wrapper_dir: Option<tempfile::TempDir> = None;
+
+        let mut augmented_path = build_augmented_path();
+        if let Some(ref wrapper_dir) = vtb_json_wrapper_dir {
+            augmented_path = prepend_path_dir(wrapper_dir.path(), &augmented_path);
+        }
         log::info!(
             "Setting augmented PATH for Claude subprocess: {}",
             augmented_path
@@ -1660,6 +1773,24 @@ pub enum ClaudeSessionError {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn test_vtb_json_wrapper() -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let real_vtb = temp.path().join("real-vtb");
+        fs::write(&real_vtb, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").expect("write fake vtb");
+        fs::set_permissions(&real_vtb, fs::Permissions::from_mode(0o755))
+            .expect("mark fake vtb executable");
+
+        let wrapper_dir = temp.path().join("wrapper");
+        fs::create_dir(&wrapper_dir).expect("create wrapper dir");
+        let wrapper_path =
+            write_vtb_json_wrapper(&wrapper_dir, &real_vtb).expect("write vtb wrapper");
+
+        (temp, wrapper_path)
+    }
+
     #[test]
     fn test_claude_session_manager_new() {
         let manager = ClaudeSessionManager::new();
@@ -1764,6 +1895,84 @@ mod tests {
         );
         assert!(!args.iter().any(|arg| arg == "--model"));
         assert!(!args.iter().any(|arg| arg == "--permission-mode"));
+        assert!(!args.iter().any(|arg| arg == "--system-prompt"));
+    }
+
+    #[test]
+    fn test_build_claude_args_does_not_inject_entity_link_prompt() {
+        let args = build_claude_args("{}", None, None, None);
+
+        assert!(!args.iter().any(|arg| arg == "--append-system-prompt"));
+        assert!(!args.iter().any(|arg| arg == "--system-prompt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_vtb_json_wrapper_forces_json_for_task_list() {
+        let (wrapper_dir, wrapper_path) = test_vtb_json_wrapper();
+
+        let output = Command::new(&wrapper_path)
+            .args(["list", "--level", "task"])
+            .output()
+            .expect("run vtb wrapper");
+
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "list\n--json\n--level\ntask\n"
+        );
+        drop(wrapper_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_vtb_json_wrapper_forces_json_for_workflow_and_step_inspection() {
+        let (wrapper_dir, wrapper_path) = test_vtb_json_wrapper();
+
+        let workflow = Command::new(&wrapper_path)
+            .args(["workflow", "list"])
+            .output()
+            .expect("run workflow list wrapper");
+        let step = Command::new(&wrapper_path)
+            .args(["step", "show", "step-id"])
+            .output()
+            .expect("run step show wrapper");
+
+        assert!(workflow.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&workflow.stdout),
+            "workflow\nlist\n--json\n"
+        );
+        assert!(step.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&step.stdout),
+            "step\nshow\n--json\nstep-id\n"
+        );
+        drop(wrapper_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_vtb_json_wrapper_keeps_non_inspection_and_existing_json_commands_unchanged() {
+        let (wrapper_dir, wrapper_path) = test_vtb_json_wrapper();
+
+        let add = Command::new(&wrapper_path)
+            .args(["add", "Thing"])
+            .output()
+            .expect("run add wrapper");
+        let already_json = Command::new(&wrapper_path)
+            .args(["list", "--json", "--level", "task"])
+            .output()
+            .expect("run list --json wrapper");
+
+        assert!(add.status.success());
+        assert_eq!(String::from_utf8_lossy(&add.stdout), "add\nThing\n");
+        assert!(already_json.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&already_json.stdout),
+            "list\n--json\n--level\ntask\n"
+        );
+        drop(wrapper_dir);
     }
 
     #[test]

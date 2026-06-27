@@ -39,6 +39,7 @@ interface IdChipProps {
   level?: TaskLevel | null;
   className?: string;
   testId?: string;
+  copyable?: boolean;
 }
 
 interface KindChipProps extends HTMLAttributes<HTMLSpanElement> {
@@ -238,6 +239,7 @@ export function IdChip({
   level,
   className,
   testId,
+  copyable = true,
 }: IdChipProps): ReactNode {
   const [copied, setCopied] = useState(false);
 
@@ -251,6 +253,18 @@ export function IdChip({
 
   // Lowercase noun for the copy affordance, e.g. "ticket" / "task run".
   const label = kind === "task" && level ? level : kind;
+
+  if (!copyable) {
+    return (
+      <span
+        data-testid={testId}
+        data-full-id={id}
+        className={classNames("c-id-chip", className)}
+      >
+        <span className="id-text">{formatEntityId(id)}</span>
+      </span>
+    );
+  }
 
   const copy = (
     event: MouseEvent<HTMLSpanElement> | KeyboardEvent<HTMLSpanElement>

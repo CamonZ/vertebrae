@@ -121,6 +121,12 @@ Steps for workflow '<workflow-id>':
 3. approved (id: c9d0e1f2, type: execute, model: default) [FINAL]
 ```
 
+When presenting the data to the user always do so like:
+```
+step_title (step_id)
+```
+
+
 ### Options
 
 | Flag | Short | Description |

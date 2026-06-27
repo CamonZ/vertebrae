@@ -1,11 +1,28 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router-dom";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { MarkdownContent } from "./MarkdownContent";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
+function LocationProbe() {
+  const location = useLocation();
+  return (
+    <span data-testid="location">
+      {location.pathname}
+      {location.search}
+    </span>
+  );
+}
+
 describe("MarkdownContent", () => {
+  beforeEach(() => {
+    useEntityPanelStore.getState().reset();
+  });
+
   describe("plain text rendering", () => {
     it("renders plain text in a paragraph", () => {
       render(<MarkdownContent text="Hello world" />);
@@ -114,6 +131,63 @@ describe("MarkdownContent", () => {
       expect(link).toHaveAttribute("href", "https://example.com");
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("renders vtb ticket links as typed in-app entity links", () => {
+      render(
+        <MemoryRouter>
+          <MarkdownContent text="See [Ticket 03111754](vtb://ticket/03111754-4769-47c1-a64c-078d73554af8)" />
+        </MemoryRouter>
+      );
+
+      const link = screen.getByRole("link", { name: /open ticket/i });
+      expect(link).toHaveAttribute(
+        "href",
+        "/task/03111754-4769-47c1-a64c-078d73554af8"
+      );
+      expect(link).toHaveAttribute("data-vtb-entity-type", "ticket");
+      expect(link).toHaveTextContent("Ticket 03111754");
+      expect(link).toHaveAttribute(
+        "data-vtb-route",
+        "/task/03111754-4769-47c1-a64c-078d73554af8"
+      );
+      expect(screen.getByTestId("vtb-entity-level-mark")).toHaveAttribute(
+        "data-level",
+        "ticket"
+      );
+      expect(link).toHaveAttribute(
+        "data-full-id",
+        "03111754-4769-47c1-a64c-078d73554af8"
+      );
+      expect(screen.queryByTestId("vtb-entity-id-chip")).toBeNull();
+    });
+
+    it("clicking a vtb task link opens the side panel without changing routes", async () => {
+      const user = userEvent.setup();
+
+      render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <MarkdownContent text="Open [the task](vtb://task/task-123)" />
+          <LocationProbe />
+        </MemoryRouter>
+      );
+
+      await user.click(screen.getByRole("link", { name: /open task/i }));
+
+      expect(screen.getByTestId("location")).toHaveTextContent("/chat");
+      expect(useEntityPanelStore.getState().selection).toEqual({
+        type: "task",
+        taskId: "task-123",
+      });
+    });
+
+    it("renders unknown or malformed vtb links as inert fallback text", () => {
+      render(<MarkdownContent text="See [mystery](vtb://unknown/id)" />);
+
+      expect(screen.getByTestId("vtb-entity-link-fallback")).toHaveTextContent(
+        "mystery"
+      );
+      expect(screen.queryByRole("link", { name: /mystery/i })).toBeNull();
     });
   });
 

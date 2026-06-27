@@ -11,6 +11,7 @@ export type EntityIdKind =
   | "task"
   | "step"
   | "workflow"
+  | "project"
   | "step execution"
   | "task run"
   | "chat session";

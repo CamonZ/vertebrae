@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChatWindow } from "../components/ChatWindow/ChatWindow";
+import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
 import { WindowLayout } from "../components/WindowLayout";
 import { useChatStore } from "../stores/chatStore";
 import { takeStashedChatSession } from "../utils/chatStash";
@@ -52,6 +53,7 @@ export function StandaloneChatWindow() {
   return (
     <WindowLayout>
       <ChatWindow sessionId={sessionId} />
+      <GlobalEntityPanelHost />
     </WindowLayout>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   commands,
   events,
@@ -43,7 +43,9 @@ function isLikelyTokenError(message: string): boolean {
 
 export function ProjectSetupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const writeTimers = useRef<number[]>([]);
+  const requestedProjectRef = useRef<string | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +162,7 @@ export function ProjectSetupPage() {
   }, [sacrumStatus, sacrumStatusRetryKey, setupView]);
 
   // Handle selecting a project
-  const handleSelectProject = async (project: SavedProject) => {
+  const handleSelectProject = useCallback(async (project: SavedProject) => {
     setIsLoading(true);
     setError(null);
     try {
@@ -176,7 +178,27 @@ export function ProjectSetupPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [navigate]);
+
+  const requestedProjectSlug = useMemo(() => {
+    return new URLSearchParams(location.search).get("project")?.trim() ?? "";
+  }, [location.search]);
+
+  useEffect(() => {
+    if (isLoading || !requestedProjectSlug) return;
+    if (requestedProjectRef.current === requestedProjectSlug) return;
+    requestedProjectRef.current = requestedProjectSlug;
+
+    const requestedProject = projects.find(
+      (project) => project.slug === requestedProjectSlug
+    );
+    if (!requestedProject) {
+      setError(`Project "${requestedProjectSlug}" is not saved.`);
+      return;
+    }
+
+    void handleSelectProject(requestedProject);
+  }, [handleSelectProject, isLoading, projects, requestedProjectSlug]);
 
   const showProjectForm = () => {
     setError(null);

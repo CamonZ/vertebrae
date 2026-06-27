@@ -13,8 +13,8 @@ Manage workflows that define how tasks progress through steps.
 
 **Start here to understand available workflows:**
 ```bash
-vtb workflow list                    # See all configured workflows
-vtb workflow show <workflow-id>      # See steps within a workflow
+vtb workflow list --json                    # See all configured workflows
+vtb workflow show <workflow-id> --json      # See steps within a workflow
 ```
 
 ## Subcommands
@@ -74,7 +74,6 @@ model. `--json` returns an operation envelope with `command`, `status`, and
 List all defined workflows.
 
 ```bash
-vtb workflow list
 vtb workflow list --json
 ```
 
@@ -92,6 +91,13 @@ a description append ` - <description>`. If no workflows exist, the command
 prints `No workflows found`. With `--json`, the command returns the raw array of
 workflow summaries with `id`, `name`, `description`, `step_count`, and
 `is_default` fields.
+
+When presenting the data to the user always do so like
+
+```
+workflow_title (workflow_id)
+```
+
 
 ---
 
@@ -122,6 +128,18 @@ workflow-detail object with `id`, `name`, `description`, `is_default`,
 
 Malformed IDs are rejected before command execution. A valid full UUID or short
 ID that does not resolve to a workflow returns a validation error.
+
+When presenting the data to the user always do so like
+
+```
+workflow_title (workflow_id)
+```
+
+And if asked to render the steps for one or more workflows do so in the same format, e.g.
+
+```
+step_title (step_id)
+```
 
 ---
 

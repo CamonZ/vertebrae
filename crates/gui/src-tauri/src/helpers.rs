@@ -1,47 +1,80 @@
 use std::path::PathBuf;
 
+fn executable_name(name: &str) -> String {
+    if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    }
+}
+
+fn find_from_env(env_var: &str, label: &str) -> Result<Option<PathBuf>, String> {
+    let Ok(path) = std::env::var(env_var) else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(path);
+    if path.exists() {
+        return Ok(Some(path));
+    }
+
+    Err(format!(
+        "{label} path specified in {env_var} does not exist: {}",
+        path.display()
+    ))
+}
+
+fn find_sibling_binary(name: &str) -> Option<PathBuf> {
+    let current_exe = std::env::current_exe().ok()?;
+    let dir = current_exe.parent()?;
+    let executable = executable_name(name);
+
+    let sibling = dir.join(&executable);
+    if sibling.exists() {
+        return Some(sibling);
+    }
+
+    let release = dir.parent()?.join("release").join(executable);
+    release.exists().then_some(release)
+}
+
+fn find_on_path(name: &str) -> Option<PathBuf> {
+    let output = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    path.exists().then_some(path)
+}
+
+fn first_existing(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths.into_iter().find(|path| path.exists())
+}
+
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {
-    // Check CLAUDE_CODE_PATH environment variable (highest priority)
-    if let Ok(path) = std::env::var("CLAUDE_CODE_PATH") {
-        let path = PathBuf::from(path);
-        // Verify the path exists
-        if path.exists() {
-            return Ok(path);
-        }
-        // If env var is set but path doesn't exist, return early with error
-        return Err(format!(
-            "Claude binary path specified in CLAUDE_CODE_PATH does not exist: {}",
-            path.display()
-        ));
+    if let Some(path) = find_from_env("CLAUDE_CODE_PATH", "Claude binary")? {
+        return Ok(path);
     }
 
-    // Try to find 'claude' in PATH
-    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout);
-            let path = PathBuf::from(path_str.trim());
-            if path.exists() {
-                return Ok(path);
-            }
-        }
+    if let Some(path) = find_on_path("claude") {
+        return Ok(path);
     }
 
-    // Probe well-known installation paths as fallback
     let mut well_known_paths = vec![
         PathBuf::from("/usr/local/bin/claude"),
         PathBuf::from("/opt/homebrew/bin/claude"),
     ];
-
-    // Add ~/.local/bin/claude (expand ~ to home directory)
     if let Some(home_dir) = dirs::home_dir() {
         well_known_paths.insert(0, home_dir.join(".local/bin/claude"));
     }
 
-    for path in well_known_paths {
-        if path.exists() {
-            return Ok(path);
-        }
+    if let Some(path) = first_existing(well_known_paths) {
+        return Ok(path);
     }
 
     Err(
@@ -51,57 +84,55 @@ pub fn find_claude_binary() -> Result<PathBuf, String> {
 }
 
 pub fn find_vtb_gate_binary() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("VTB_GATE_PATH") {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Ok(path);
-        }
-        return Err(format!(
-            "vtb-gate path specified in VTB_GATE_PATH does not exist: {}",
-            path.display()
-        ));
+    if let Some(path) = find_from_env("VTB_GATE_PATH", "vtb-gate")? {
+        return Ok(path);
     }
 
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(dir) = current_exe.parent() {
-            let sibling = dir.join(if cfg!(windows) {
-                "vtb-gate.exe"
-            } else {
-                "vtb-gate"
-            });
-            if sibling.exists() {
-                return Ok(sibling);
-            }
-            if let Some(target_dir) = dir.parent() {
-                let release = target_dir.join("release").join(if cfg!(windows) {
-                    "vtb-gate.exe"
-                } else {
-                    "vtb-gate"
-                });
-                if release.exists() {
-                    return Ok(release);
-                }
-            }
-        }
+    if let Some(path) = find_sibling_binary("vtb-gate") {
+        return Ok(path);
     }
 
-    if let Ok(output) = std::process::Command::new("which").arg("vtb-gate").output() {
-        if output.status.success() {
-            let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-            if path.exists() {
-                return Ok(path);
-            }
-        }
+    if let Some(path) = find_on_path("vtb-gate") {
+        return Ok(path);
     }
 
     if let Some(home_dir) = dirs::home_dir() {
-        let path = home_dir.join(".local/bin/vtb-gate");
-        if path.exists() {
+        if let Some(path) = first_existing([home_dir.join(".local/bin/vtb-gate")]) {
             return Ok(path);
         }
     }
 
     Err("vtb-gate not found. Set VTB_GATE_PATH or ensure vtb-gate is on PATH.".to_string())
+}
+
+pub fn find_vtb_binary() -> Result<PathBuf, String> {
+    if let Some(path) = find_from_env("VTB_PATH", "vtb")? {
+        return Ok(path);
+    }
+
+    if let Some(path) = find_sibling_binary("vtb") {
+        return Ok(path);
+    }
+
+    if let Some(path) = find_on_path("vtb") {
+        return Ok(path);
+    }
+
+    let mut well_known_paths = vec![
+        PathBuf::from("/opt/homebrew/bin/vtb"),
+        PathBuf::from("/usr/local/bin/vtb"),
+    ];
+
+    if let Some(home_dir) = dirs::home_dir() {
+        well_known_paths.insert(0, home_dir.join(".local/bin/vtb"));
+        well_known_paths.insert(0, home_dir.join(".cargo/bin/vtb"));
+    }
+
+    if let Some(path) = first_existing(well_known_paths) {
+        return Ok(path);
+    }
+
+    Err("vtb not found. Set VTB_PATH or ensure vtb is on PATH.".to_string())
 }
 
 #[cfg(test)]

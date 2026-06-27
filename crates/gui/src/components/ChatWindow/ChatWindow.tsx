@@ -11,6 +11,7 @@ import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
 } from "../../stores/chatStore";
+import { useTaskStore } from "../../stores/taskStore";
 import type { ChatMessage } from "../../stores/chatStore";
 import {
   formatTokenCount,
@@ -20,6 +21,12 @@ import {
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
 } from "../../utils/localChatPersistence";
+import {
+  buildVtbEntityIndex,
+  indexedVtbEntityFromTask,
+  linkifyChatMessage,
+  type VtbEntityIndex,
+} from "../../utils/vtbChatEntityLinks";
 import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { ChatInput } from "../ChatInput";
@@ -36,6 +43,18 @@ const PERMISSION_MODE_OPTIONS: Array<{
   { value: "dont_ask", label: "Don't ask" },
   { value: "bypass_permissions", label: "Bypass permissions" },
 ];
+
+interface LinkifiedMessageCache {
+  index: VtbEntityIndex | null;
+  messages: Map<string, { text: string; linked: ChatMessage }>;
+}
+
+function linkifiedMessageCacheKey(
+  message: Extract<ChatMessage, { kind: "assistant" }>,
+  position: number
+): string {
+  return `${message.kind}:${message.timestamp}:${message.isPartial ? "partial" : "final"}:${position}`;
+}
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -322,6 +341,8 @@ export function ChatWindow({
     useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
+  const cachedTasks = useTaskStore((s) => s.tasks);
+  const selectedTask = useTaskStore((s) => s.selectedTask);
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
@@ -463,7 +484,56 @@ export function ChatWindow({
     ];
   }, [sessionMessages, streamingAssistant]);
 
-  const messages = displayMessages;
+  const cachedTaskEntities = useMemo(() => {
+    const byId = new Map(
+      cachedTasks.flatMap((task) => {
+        const entity = indexedVtbEntityFromTask(task);
+        return entity ? [[entity.id, entity] as const] : [];
+      })
+    );
+    if (selectedTask) {
+      const entity = indexedVtbEntityFromTask(selectedTask);
+      if (entity) byId.set(entity.id, entity);
+    }
+    return [...byId.values()];
+  }, [cachedTasks, selectedTask]);
+
+  const vtbEntityIndex = useMemo(
+    () => buildVtbEntityIndex(sessionMessages ?? [], cachedTaskEntities),
+    [cachedTaskEntities, sessionMessages]
+  );
+  const linkifiedMessageCacheRef = useRef<LinkifiedMessageCache>({
+    index: null,
+    messages: new Map(),
+  });
+  const messages = useMemo(() => {
+    const cache = linkifiedMessageCacheRef.current;
+    if (cache.index !== vtbEntityIndex) {
+      cache.index = vtbEntityIndex;
+      cache.messages.clear();
+    }
+
+    const activeKeys = new Set<string>();
+    const linkedMessages = displayMessages.map((message, index) => {
+      if (message.kind !== "assistant") return message;
+
+      const key = linkifiedMessageCacheKey(message, index);
+      activeKeys.add(key);
+
+      const cached = cache.messages.get(key);
+      if (cached?.text === message.text) return cached.linked;
+
+      const linked = linkifyChatMessage(message, vtbEntityIndex);
+      cache.messages.set(key, { text: message.text, linked });
+      return linked;
+    });
+
+    for (const key of cache.messages.keys()) {
+      if (!activeKeys.has(key)) cache.messages.delete(key);
+    }
+
+    return linkedMessages;
+  }, [displayMessages, vtbEntityIndex]);
   const hasStreamingOverlay = !!streamingAssistant;
   const isWaiting =
     (lifecycle === "sending" ||
@@ -607,9 +677,7 @@ export function ChatWindow({
                 onClick={onSplitPane}
                 disabled={!canSplitPane}
                 title={
-                  canSplitPane
-                    ? "Split chat pane"
-                    : "No more chat panes fit"
+                  canSplitPane ? "Split chat pane" : "No more chat panes fit"
                 }
                 aria-label="Split chat pane"
               >

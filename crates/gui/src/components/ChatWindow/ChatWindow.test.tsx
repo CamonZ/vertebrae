@@ -1,10 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
+import { useTaskStore } from "../../stores/taskStore";
 import { commands } from "../../bindings";
+import { createMockTask } from "../../test/test-utils";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -81,6 +89,7 @@ describe("ChatWindow", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
+    useTaskStore.getState().reset();
   });
 
   it("returns null when session does not exist", () => {
@@ -145,15 +154,11 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
 
-    render(
-      <ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />
-    );
+    render(<ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />);
 
     expect(screen.queryByTitle(/Widen scope/)).not.toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Widen chat panel" })
-    );
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
 
     expect(onToggleWide).toHaveBeenCalledTimes(1);
   });
@@ -242,6 +247,96 @@ describe("ChatWindow", () => {
     expect(screen.getByText("I can help with that!")).toBeInTheDocument();
   });
 
+  it("links cached task IDs even without structured tool output", () => {
+    useTaskStore.getState().setTasks([
+      createMockTask({
+        id: "90e157f0-3333-4333-8333-333333333333",
+        title: "Restructure AppShell: topbar over rail",
+        level: "task",
+      }),
+    ]);
+    const session = createSession({
+      messages: [
+        {
+          kind: "assistant",
+          text: "Tasks: 90e157f0 - Restructure AppShell: topbar over rail",
+          timestamp: "2024-01-01T12:00:00Z",
+          isPartial: false,
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const link = screen.getByTestId("vtb-entity-link");
+    expect(link).toHaveTextContent("Restructure AppShell: topbar over rail");
+    expect(link).toHaveAttribute("data-vtb-entity-type", "task");
+    expect(link).toHaveAttribute(
+      "data-vtb-entity-id",
+      "90e157f0-3333-4333-8333-333333333333"
+    );
+    expect(link).toHaveAttribute(
+      "href",
+      "/task/90e157f0-3333-4333-8333-333333333333"
+    );
+  });
+
+  it("links short-id status rows from prior vtb list JSON output", () => {
+    const session = createSession({
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Bash",
+          toolId: "tool-1",
+          input: '{"command":"vtb list --level ticket"}',
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+        {
+          kind: "tool_result",
+          toolId: "tool-1",
+          result: JSON.stringify([
+            {
+              id: "85057de6-ab1d-4c5f-b7a6-c03bc7d2f8e8",
+              level: "ticket",
+              title: "Manual implementation of Hearth v2 GUI",
+            },
+          ]),
+          isError: false,
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: [
+            "In Progress",
+            "85057de6 — Manual implementation of Hearth v2 GUI",
+          ].join("\n"),
+          timestamp: "2024-01-01T12:00:02Z",
+          isPartial: false,
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const link = screen.getByTestId("vtb-entity-link");
+    expect(link).toHaveTextContent("Manual implementation of Hearth v2 GUI");
+    expect(link).toHaveAttribute("data-vtb-entity-type", "ticket");
+    expect(link).toHaveAttribute(
+      "data-vtb-entity-id",
+      "85057de6-ab1d-4c5f-b7a6-c03bc7d2f8e8"
+    );
+  });
+
   it("renders error messages", () => {
     const session = createSession({
       messages: [
@@ -290,8 +385,7 @@ describe("ChatWindow", () => {
   });
 
   it("does not render stored context summaries", () => {
-    const session = createSession({
-    });
+    const session = createSession({});
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -371,10 +465,10 @@ describe("ChatWindow", () => {
     ).toBeNull();
     expect(permissionPicker).toHaveValue("default");
     expect(
-      Array.from(
-        (permissionPicker as HTMLSelectElement).options,
-        (option) => [option.textContent, option.value]
-      )
+      Array.from((permissionPicker as HTMLSelectElement).options, (option) => [
+        option.textContent,
+        option.value,
+      ])
     ).toEqual([
       ["Ask before edits", "default"],
       ["Edit automatically", "accept_edits"],

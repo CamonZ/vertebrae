@@ -11,8 +11,6 @@ state, sections, refs, and relationships.
 ## Usage
 
 ```bash
-vtb show <task-id>
-vtb --json show <task-id>
 vtb show <task-id> --json
 ```
 
@@ -30,3 +28,11 @@ subcommand.
 
 See `docs/vtb-guide.md#viewing-details` for the canonical output shape,
 short-ID behavior, JSON fields, and validation details.
+
+## Rendering
+
+When presenting the data to the user always do so like
+
+```
+<task_title> (<task_id>)
+```

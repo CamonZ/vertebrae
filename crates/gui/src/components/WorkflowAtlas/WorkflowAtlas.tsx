@@ -46,7 +46,10 @@ import { FloatingDetailPanel } from "../panels/FloatingDetailPanel";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { WorkflowInspector } from "./inspector/WorkflowInspector";
 import { StepInspector } from "./inspector/StepInspector";
-import type { AtlasSelection } from "./inspector/selection";
+import {
+  selectionFromSearch,
+  type AtlasSelection,
+} from "./inspector/selection";
 import { ColumnHeader } from "./ColumnHeader";
 import { EdgeLabel } from "./EdgeLabel";
 import { GraphEdge } from "./GraphEdge";
@@ -100,8 +103,16 @@ export function layoutKey(model: AtlasModel): string {
   return `${wfs}#${steps}#${edges}`;
 }
 
+function searchRequestsSelection(search: string): boolean {
+  const params = new URLSearchParams(search);
+  return Boolean(
+    params.get("workflowId")?.trim() || params.get("stepId")?.trim()
+  );
+}
+
 export function WorkflowAtlas() {
   const { summary, isLoading, error, refetch } = usePipelineSummary();
+  const currentSearch = window.location.search;
 
   const [view, setView] = useState<AtlasView>("graph");
   const [query, setQuery] = useState("");
@@ -128,6 +139,23 @@ export function WorkflowAtlas() {
     () => (summary ? buildAtlasModel(summary) : null),
     [summary]
   );
+
+  const appliedSearchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!model) return;
+    const search = currentSearch;
+    if (appliedSearchRef.current === search) return;
+    appliedSearchRef.current = search;
+
+    const requestedSelection = selectionFromSearch(model, search);
+    if (!requestedSelection) {
+      if (searchRequestsSelection(search)) setSel(null);
+      return;
+    }
+
+    setSel(requestedSelection);
+    setView("graph");
+  }, [currentSearch, model]);
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
 

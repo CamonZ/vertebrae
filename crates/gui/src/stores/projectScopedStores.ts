@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useChatStore } from "./chatStore";
+import { useEntityPanelStore } from "./entityPanelStore";
 import { useExecutionStore } from "./executionStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
@@ -45,4 +46,5 @@ export function resetProjectScopedStores() {
   useTaskRunStore.getState().reset();
   useSessionLogStore.getState().reset();
   useChatStore.getState().reset();
+  useEntityPanelStore.getState().reset();
 }

@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
 import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
+import { GlobalEntityPanelHost } from "./GlobalEntityPanelHost";
 
 interface AppShellProps {
   children: ReactNode;
@@ -21,6 +22,7 @@ export function AppShell({ children }: AppShellProps) {
       </div>
       <ChatWindowManager />
       <FloatingChatLauncher />
+      <GlobalEntityPanelHost />
       <ToastContainer />
     </div>
   );
