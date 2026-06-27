@@ -150,6 +150,7 @@ describe("FloatingChatLauncher", () => {
     const closedId = useChatStore
       .getState()
       .openSession("Task Chat", "/test/project");
+    useChatStore.getState().setClaudeConversationId(closedId, "conv-closed");
     useChatStore.getState().markSessionClosed(closedId);
     useChatStore.setState({
       activeSessionId: closedId,

@@ -155,6 +155,43 @@ describe("localChatPersistence", () => {
     });
   });
 
+  it("drops closed empty sessions instead of listing unresumable history", () => {
+    persistLocalChatSession(
+      makeSession({
+        messages: [],
+        claudeConversationId: null,
+        lifecycle: "closed",
+        preview: "No messages yet",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("s-1")).toBeNull();
+    expect(loadPersistedLocalChatSessions()).toEqual({});
+    expect(listPersistedLocalChatSessions()).toEqual([]);
+    expect(findPersistedLocalChatSession("/repo")).toBeNull();
+  });
+
+  it("hides legacy closed empty records already in local storage", () => {
+    localStorage.setItem(
+      "local-chat-sessions:v1",
+      JSON.stringify({
+        ghost: makeSession({
+          id: "ghost",
+          label: "Ghost",
+          messages: [],
+          claudeConversationId: null,
+          lifecycle: "closed",
+          preview: "No messages yet",
+        }),
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("ghost")).toBeNull();
+    expect(loadPersistedLocalChatSessions()).toEqual({});
+    expect(listPersistedLocalChatSessions()).toEqual([]);
+    expect(findPersistedLocalChatSession("/repo")).toBeNull();
+  });
+
   it("strips ephemeral stream state and partial assistant messages", () => {
     persistLocalChatSession(
       makeSession({

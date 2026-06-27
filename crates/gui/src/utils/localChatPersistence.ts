@@ -146,6 +146,27 @@ function buildPreview(messages: ChatMessage[]): string {
   return (lastText ?? "No messages yet").replace(/\s+/g, " ").trim();
 }
 
+export function hasDurableLocalChatContent(
+  session: Pick<ChatSession, "messages" | "claudeConversationId">
+): boolean {
+  return (
+    durableMessages(session.messages).length > 0 ||
+    !!session.claudeConversationId?.trim()
+  );
+}
+
+export function isDisposableClosedLocalChatSession(
+  session: Pick<
+    ChatSession,
+    "messages" | "claudeConversationId" | "lifecycle" | "status"
+  >
+): boolean {
+  return (
+    (session.lifecycle === "closed" || session.status === "closed") &&
+    !hasDurableLocalChatContent(session)
+  );
+}
+
 function isIsoTimestamp(value: unknown): value is string {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
@@ -270,7 +291,9 @@ export function projectPathMatches(
 export function loadPersistedLocalChatSessions(): Record<string, ChatSession> {
   return Object.fromEntries(
     Object.entries(readSessions()).filter(
-      (entry): entry is [string, ChatSession] => entry[1].status === "open"
+      (entry): entry is [string, ChatSession] =>
+        entry[1].status === "open" &&
+        !isDisposableClosedLocalChatSession(entry[1])
     )
   );
 }
@@ -282,6 +305,7 @@ export function listPersistedLocalChatSessions(
     .filter(
       (session) =>
         session.status === "open" &&
+        !isDisposableClosedLocalChatSession(session) &&
         projectPathMatches(session.projectPath, projectPath)
     )
     .map((session) => ({
@@ -303,7 +327,9 @@ export function listPersistedLocalChatSessions(
 export function loadPersistedLocalChatSession(
   sessionId: string
 ): ChatSession | null {
-  return readSessions()[sessionId] ?? null;
+  const session = readSessions()[sessionId] ?? null;
+  if (!session || isDisposableClosedLocalChatSession(session)) return null;
+  return session;
 }
 
 export function findPersistedLocalChatSession(
@@ -315,6 +341,7 @@ export function findPersistedLocalChatSession(
         (session) =>
           session.status === "open" &&
           !session.isDetached &&
+          !isDisposableClosedLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
       .sort(compareLocalChatSessionRecency)[0] ?? null
@@ -323,7 +350,13 @@ export function findPersistedLocalChatSession(
 
 export function persistLocalChatSession(session: ChatSession): void {
   const sessions = readSessions();
-  sessions[session.id] = serializeSession(session, sessions[session.id]);
+  const serialized = serializeSession(session, sessions[session.id]);
+  if (isDisposableClosedLocalChatSession(serialized)) {
+    delete sessions[session.id];
+    writeSessions(sessions);
+    return;
+  }
+  sessions[session.id] = serialized;
   writeSessions(sessions);
   clearLocalChatSessionCleared(session.id);
 }

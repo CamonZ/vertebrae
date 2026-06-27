@@ -678,10 +678,13 @@ export function useLocalChat(sessionId: string | null) {
   /**
    * Close the Claude CLI session.
    */
-  const closeClaudeSession = useCallback(async () => {
+  const closeClaudeSession = useCallback(async (options?: { markClosed?: boolean }) => {
     if (!session?.claudeSessionId) return true;
     return doCloseSession(session.claudeSessionId, sessionId, {
-      markSessionClosed,
+      markSessionClosed:
+        options?.markClosed === false
+          ? (id) => setSessionLifecycle(id, "idle")
+          : markSessionClosed,
       setSessionLifecycle,
       setClaudeSessionId,
       setClaudeSessionIdRef: (id) => {

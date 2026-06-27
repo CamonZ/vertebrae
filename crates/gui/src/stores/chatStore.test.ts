@@ -13,6 +13,7 @@ describe("chatStore", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
   });
@@ -24,9 +25,7 @@ describe("chatStore", () => {
 
   describe("openSession", () => {
     it("creates a new neutral local chat session", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("My Task");
+      const id = useChatStore.getState().openSession("My Task");
 
       expect(id).toBeTruthy();
       const session = useChatStore.getState().sessions[id];
@@ -42,18 +41,14 @@ describe("chatStore", () => {
     });
 
     it("sets the new session as active and opens the panel", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Workflow 1");
+      const id = useChatStore.getState().openSession("Workflow 1");
 
       expect(useChatStore.getState().activeSessionId).toBe(id);
       expect(useChatStore.getState().panelOpen).toBe(true);
     });
 
     it("reuses an existing session for the same project path", () => {
-      const id1 = useChatStore
-        .getState()
-        .openSession("Task A", "/repo/root");
+      const id1 = useChatStore.getState().openSession("Task A", "/repo/root");
       const id2 = useChatStore
         .getState()
         .openSession("Replacement Label", "/repo/root");
@@ -127,21 +122,15 @@ describe("chatStore", () => {
     });
 
     it("creates separate sessions for different project paths", () => {
-      const id1 = useChatStore
-        .getState()
-        .openSession("Task 1", "/repo-a");
-      const id2 = useChatStore
-        .getState()
-        .openSession("Task 2", "/repo-b");
+      const id1 = useChatStore.getState().openSession("Task 1", "/repo-a");
+      const id2 = useChatStore.getState().openSession("Task 2", "/repo-b");
 
       expect(id1).not.toBe(id2);
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
     });
 
     it("persists sessions without scope or entity fields", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Project Chat");
+      const id = useChatStore.getState().openSession("Project Chat");
 
       const session = useChatStore.getState().sessions[id];
       const persisted = loadPersistedLocalChatSession(id);
@@ -162,9 +151,7 @@ describe("chatStore", () => {
     });
 
     it("hydrates a persisted session for the same project path", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Task One", "/repo/root");
+      const id = useChatStore.getState().openSession("Task One", "/repo/root");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "remember this",
@@ -209,9 +196,7 @@ describe("chatStore", () => {
     });
 
     it("persists selected model and records it as the last used model", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Task Model");
+      const id = useChatStore.getState().openSession("Task Model");
 
       useChatStore.getState().setSessionSelectedModel(id, "haiku");
 
@@ -225,9 +210,7 @@ describe("chatStore", () => {
     });
 
     it("clears the last used model when selection returns to CLI default", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Task Model");
+      const id = useChatStore.getState().openSession("Task Model");
 
       useChatStore.getState().setSessionSelectedModel(id, "haiku");
       useChatStore.getState().setSessionSelectedModel(id, null);
@@ -263,9 +246,7 @@ describe("chatStore", () => {
         panelOpen: false,
       });
 
-      const reopened = useChatStore
-        .getState()
-        .openSession("Repo B", "/repo-b");
+      const reopened = useChatStore.getState().openSession("Repo B", "/repo-b");
 
       expect(reopened).toBe("repo-b");
       expect(useChatStore.getState().sessions[reopened].label).toBe("Repo B");
@@ -288,9 +269,7 @@ describe("chatStore", () => {
         panelOpen: false,
       });
 
-      const opened = useChatStore
-        .getState()
-        .openSession("Repo A", "/repo-a");
+      const opened = useChatStore.getState().openSession("Repo A", "/repo-a");
 
       expect(opened).not.toBe("legacy");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
@@ -317,9 +296,7 @@ describe("chatStore", () => {
         panelOpen: false,
       });
 
-      const opened = useChatStore
-        .getState()
-        .openSession("Project Chat", null);
+      const opened = useChatStore.getState().openSession("Project Chat", null);
 
       expect(opened).toBe("legacy");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
@@ -330,9 +307,7 @@ describe("chatStore", () => {
     });
 
     it("hydrates a locally closed session so it can resume", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Task One", "/repo/root");
+      const id = useChatStore.getState().openSession("Task One", "/repo/root");
       useChatStore.getState().setClaudeConversationId(id, "conv-closed");
       useChatStore.getState().markSessionClosed(id);
       useChatStore.setState({
@@ -363,15 +338,11 @@ describe("chatStore", () => {
     });
 
     it("keeps durable resume state when closing the in-memory session", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().setClaudeConversationId(id, "conv-close");
       useChatStore.getState().closeSession(id);
 
-      const reopened = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const reopened = useChatStore.getState().openSession("T1", "/repo/root");
 
       expect(reopened).toBe(id);
       expect(useChatStore.getState().sessions[id].claudeConversationId).toBe(
@@ -441,19 +412,110 @@ describe("chatStore", () => {
     });
   });
 
+  describe("pane layout", () => {
+    it("keeps single-pane behavior as the default", () => {
+      const first = useChatStore.getState().openSession("First");
+      const second = useChatStore.getState().startFreshSession("Second");
+
+      expect(useChatStore.getState().activeSessionId).toBe(second);
+      expect(useChatStore.getState().paneLayout.panes).toMatchObject([
+        { sessionId: second },
+      ]);
+
+      useChatStore.getState().focusSession(first);
+
+      const state = useChatStore.getState();
+      expect(state.activeSessionId).toBe(first);
+      expect(state.paneLayout.panes).toHaveLength(1);
+      expect(state.paneLayout.panes[0].sessionId).toBe(first);
+      expect(state.paneLayout.activePaneId).toBe(state.paneLayout.panes[0].id);
+    });
+
+    it("adds a fresh chat as a distinct split pane", () => {
+      const first = useChatStore.getState().openSession("First");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Second");
+
+      const state = useChatStore.getState();
+      expect(state.activeSessionId).toBe(second);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        first,
+        second,
+      ]);
+      expect(
+        new Set(state.paneLayout.panes.map((pane) => pane.sessionId)).size
+      ).toBe(2);
+    });
+
+    it("supports more than two distinct split panes", () => {
+      const first = useChatStore.getState().openSession("First");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Second");
+      const third = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Third");
+
+      const state = useChatStore.getState();
+      expect(state.activeSessionId).toBe(third);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        first,
+        second,
+        third,
+      ]);
+      expect(
+        new Set(state.paneLayout.panes.map((pane) => pane.sessionId)).size
+      ).toBe(3);
+    });
+
+    it("focuses an existing pane instead of binding one session twice", () => {
+      const first = useChatStore.getState().openSession("First");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Second");
+      const [firstPane, secondPane] = useChatStore.getState().paneLayout.panes;
+
+      expect(
+        useChatStore.getState().bindPaneToSession(firstPane.id, second)
+      ).toBe(true);
+
+      const state = useChatStore.getState();
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        first,
+        second,
+      ]);
+      expect(state.paneLayout.activePaneId).toBe(secondPane.id);
+      expect(state.activeSessionId).toBe(second);
+    });
+
+    it("closes a pane without deleting its session", () => {
+      const first = useChatStore.getState().openSession("First");
+      const second = useChatStore
+        .getState()
+        .startFreshSessionInNewPane("Second");
+      const secondPane = useChatStore.getState().paneLayout.panes[1];
+
+      useChatStore.getState().closePane(secondPane.id);
+
+      const state = useChatStore.getState();
+      expect(state.sessions[second]).toBeDefined();
+      expect(state.paneLayout.panes).toEqual([
+        expect.objectContaining({ sessionId: first }),
+      ]);
+      expect(state.activeSessionId).toBe(first);
+    });
+  });
+
   describe("local session management", () => {
     it("lists persisted local sessions for the requested project path", () => {
-      const idA = useChatStore
-        .getState()
-        .openSession("Repo A", "/repo-a");
+      const idA = useChatStore.getState().openSession("Repo A", "/repo-a");
       useChatStore.getState().addMessage(idA, {
         kind: "user",
         text: "from repo a",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      const idB = useChatStore
-        .getState()
-        .openSession("Repo B", "/repo-b");
+      const idB = useChatStore.getState().openSession("Repo B", "/repo-b");
       useChatStore.getState().addMessage(idB, {
         kind: "assistant",
         text: "from repo b",
@@ -515,9 +577,7 @@ describe("chatStore", () => {
     });
 
     it("focuses an already-loaded session without dropping live runtime state", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Live Task", "/repo");
+      const id = useChatStore.getState().openSession("Live Task", "/repo");
       useChatStore.getState().setClaudeSessionId(id, "live-backend");
       useChatStore.getState().setSessionLifecycle(id, "streaming");
 
@@ -529,10 +589,46 @@ describe("chatStore", () => {
       });
     });
 
-    it("deletes one local session without removing unrelated persisted sessions", () => {
-      const keep = useChatStore
+    it("reattaches an already-loaded detached session when selected from history", () => {
+      const first = useChatStore.getState().openSession("Pane One", "/repo");
+      const second = useChatStore
         .getState()
-        .openSession("Keep", "/repo");
+        .startFreshSessionInNewPane("Pane Two", "/repo");
+      useChatStore.getState().focusSession(first);
+      const firstPaneId = useChatStore.getState().paneLayout.activePaneId;
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          detached: {
+            id: "detached",
+            label: "Detached",
+            messages: [],
+            status: "open",
+            claudeSessionId: null,
+            claudeConversationId: "conv-detached",
+            projectPath: "/repo",
+            isDetached: true,
+          },
+        },
+      }));
+
+      expect(useChatStore.getState().selectPersistedSession("detached")).toBe(
+        true
+      );
+
+      const state = useChatStore.getState();
+      expect(state.sessions.detached.isDetached).toBe(false);
+      expect(state.activeSessionId).toBe("detached");
+      expect(state.paneLayout.activePaneId).toBe(firstPaneId);
+      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+        "detached",
+        second,
+      ]);
+      expect(state.sessions[first]).toBeDefined();
+    });
+
+    it("deletes one local session without removing unrelated persisted sessions", () => {
+      const keep = useChatStore.getState().openSession("Keep", "/repo");
       const remove = useChatStore
         .getState()
         .startFreshSession("Remove", "/repo");
@@ -548,17 +644,13 @@ describe("chatStore", () => {
     });
 
     it("activates the newest remaining local session when deleting the active one", () => {
-      const older = useChatStore
-        .getState()
-        .openSession("Older", "/repo");
+      const older = useChatStore.getState().openSession("Older", "/repo");
       useChatStore.getState().addMessage(older, {
         kind: "user",
         text: "old",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      const newer = useChatStore
-        .getState()
-        .startFreshSession("Newer", "/repo");
+      const newer = useChatStore.getState().startFreshSession("Newer", "/repo");
       useChatStore.getState().addMessage(newer, {
         kind: "user",
         text: "new",
@@ -574,9 +666,7 @@ describe("chatStore", () => {
     });
 
     it("starts a fresh local chat even when a matching project session already exists", () => {
-      const existing = useChatStore
-        .getState()
-        .openSession("Existing", "/repo");
+      const existing = useChatStore.getState().openSession("Existing", "/repo");
 
       const fresh = useChatStore
         .getState()
@@ -646,9 +736,7 @@ describe("chatStore", () => {
     });
 
     it("does not persist streaming partial assistant deltas", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
 
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
@@ -698,9 +786,7 @@ describe("chatStore", () => {
     it("can commit an interrupted streaming overlay as one durable assistant message", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
-      const id = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
 
       useChatStore.getState().updateLastAssistantMessage(id, "Partial answer");
       useChatStore.setState((state) => ({
@@ -807,9 +893,7 @@ describe("chatStore", () => {
     });
 
     it("persists the finalized assistant message", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
       useChatStore.getState().finalizeLastAssistantMessage(id, "complete");
@@ -961,8 +1045,13 @@ describe("chatStore", () => {
   });
 
   describe("markSessionClosed", () => {
-    it("sets local lifecycle to closed without deleting the session", () => {
+    it("sets local lifecycle to closed without deleting a durable session", () => {
       const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
       useChatStore.getState().setClaudeSessionId(id, "backend-1");
 
       useChatStore.getState().markSessionClosed(id);
@@ -971,6 +1060,19 @@ describe("chatStore", () => {
       expect(session.status).toBe("open");
       expect(session.lifecycle).toBe("closed");
       expect(session.claudeSessionId).toBeNull();
+    });
+
+    it("drops empty closed sessions from runtime and local history", () => {
+      const id = useChatStore.getState().openSession("T1", "/repo");
+      useChatStore.getState().setClaudeSessionId(id, "backend-1");
+
+      useChatStore.getState().markSessionClosed(id);
+
+      expect(useChatStore.getState().sessions[id]).toBeUndefined();
+      expect(useChatStore.getState().activeSessionId).toBeNull();
+      expect(useChatStore.getState().panelOpen).toBe(false);
+      expect(loadPersistedLocalChatSession(id)).toBeNull();
+      expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
     });
 
     it("preserves durable resume state when a backend session closes", () => {
@@ -1026,9 +1128,7 @@ describe("chatStore", () => {
     });
 
     it("deletes durable resume state so cleared chats are not restored", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().addMessage(id, {
         kind: "user",
         text: "remove me",
@@ -1055,9 +1155,7 @@ describe("chatStore", () => {
         activeSessionId: null,
         panelOpen: false,
       });
-      const reopened = useChatStore
-        .getState()
-        .openSession("T1", "/repo/root");
+      const reopened = useChatStore.getState().openSession("T1", "/repo/root");
 
       expect(reopened).not.toBe(id);
       expect(useChatStore.getState().sessions[reopened].messages).toEqual([]);
@@ -1099,5 +1197,4 @@ describe("chatStore", () => {
       expect(useChatStore.getState().panelOpen).toBe(false);
     });
   });
-
 });

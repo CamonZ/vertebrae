@@ -283,6 +283,15 @@ interface ChatWindowProps {
   /** Expands/collapses the project chat panel session view. */
   onToggleWide?: () => void;
   isWide?: boolean;
+  /** Adds another visible chat pane in the maximized view. */
+  onSplitPane?: () => void;
+  canSplitPane?: boolean;
+  /** Collapses the maximized view back to this pane only. */
+  onUnsplitPanes?: () => void;
+  /** Closes this pane without closing the underlying chat session. */
+  onClosePane?: () => void;
+  /** Whether this pane should receive composer autofocus. */
+  autoFocusComposer?: boolean;
 }
 
 /**
@@ -296,6 +305,11 @@ export function ChatWindow({
   onStartFresh,
   onToggleWide,
   isWide = false,
+  onSplitPane,
+  canSplitPane = true,
+  onUnsplitPanes,
+  onClosePane,
+  autoFocusComposer = true,
 }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -365,13 +379,12 @@ export function ChatWindow({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [session?.messages, session?.streamingAssistant]);
 
-  // Focus the composer when the window appears (the panel was just opened via
-  // the launcher or ⌥⌥, or the active tab switched) and again whenever the
-  // session becomes active. The composer is always rendered, so this lands even
-  // before a claude session has been started.
+  // Focus the composer when this chat window is the foreground pane. The
+  // composer is always rendered, so this lands before a Claude session starts.
   useEffect(() => {
+    if (!autoFocusComposer) return;
     inputRef.current?.focus();
-  }, [isActive]);
+  }, [autoFocusComposer]);
 
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
@@ -388,7 +401,7 @@ export function ChatWindow({
 
   const handleClearMessages = useCallback(async () => {
     if (session?.claudeSessionId) {
-      const closed = await closeClaudeSession();
+      const closed = await closeClaudeSession({ markClosed: false });
       if (!closed) return;
     }
     clearMessages(sessionId);
@@ -562,9 +575,7 @@ export function ChatWindow({
                 className="hc-ctrl"
                 onClick={onToggleWide}
                 title={isWide ? "Collapse chat panel" : "Widen chat panel"}
-                aria-label={
-                  isWide ? "Collapse chat panel" : "Widen chat panel"
-                }
+                aria-label={isWide ? "Collapse chat panel" : "Widen chat panel"}
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -587,6 +598,77 @@ export function ChatWindow({
                       d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
                     />
                   )}
+                </svg>
+              </button>
+            )}
+            {onSplitPane && (
+              <button
+                className="hc-ctrl"
+                onClick={onSplitPane}
+                disabled={!canSplitPane}
+                title={
+                  canSplitPane
+                    ? "Split chat pane"
+                    : "No more chat panes fit"
+                }
+                aria-label="Split chat pane"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 5h7v14H4zM13 5h7v14h-7z"
+                  />
+                </svg>
+              </button>
+            )}
+            {onUnsplitPanes && (
+              <button
+                className="hc-ctrl"
+                onClick={onUnsplitPanes}
+                title="Keep only this pane"
+                aria-label="Keep only this pane"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M5 5h14v14H5zM9 9l3 3m0 0 3-3m-3 3v6"
+                  />
+                </svg>
+              </button>
+            )}
+            {onClosePane && (
+              <button
+                className="hc-ctrl"
+                onClick={onClosePane}
+                title="Close this pane"
+                aria-label="Close this pane"
+              >
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             )}
@@ -768,8 +850,11 @@ export function ChatWindow({
             }
           />
         </div>
-        {usage && usage.max > 0 && (
-          <div className="hc-foot-meta">
+        <div
+          className="hc-foot-meta"
+          aria-hidden={usage && usage.max > 0 ? undefined : true}
+        >
+          {usage && usage.max > 0 ? (
             <span
               className="ctx-lbl"
               title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} current request input context tokens`}
@@ -779,8 +864,10 @@ export function ChatWindow({
                 ? ` · ${session.model.replace(/^claude-/i, "")} · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.max)}`
                 : ""}
             </span>
-          </div>
-        )}
+          ) : (
+            <span className="ctx-lbl">&nbsp;</span>
+          )}
+        </div>
       </div>
     </div>
   );
