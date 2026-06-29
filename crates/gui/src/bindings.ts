@@ -757,6 +757,45 @@ async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
+ * List supported local chat harnesses for provider-neutral local sessions.
+ */
+async getSupportedLocalChatHarnesses() : Promise<LocalChatHarnessCatalog> {
+    return await TAURI_INVOKE("get_supported_local_chat_harnesses");
+},
+/**
+ * Create a provider-neutral local chat session.
+ */
+async createLocalChatSession(input: CreateLocalChatSessionInput) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_local_chat_session", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Send a message to a provider-neutral local chat session.
+ */
+async sendLocalChatMessage(backendSessionId: string, content: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_local_chat_message", { backendSessionId, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Close a provider-neutral local chat session.
+ */
+async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("close_local_chat_session", { backendSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a new Claude session with JSONL streaming
  * 
  * Spawns the Claude CLI with streaming JSON input/output mode.
@@ -895,6 +934,14 @@ claudeSessionWarningEvent: ClaudeSessionWarningEvent,
 claudeTextEvent: ClaudeTextEvent,
 claudeToolCallEvent: ClaudeToolCallEvent,
 claudeToolResultEvent: ClaudeToolResultEvent,
+localChatSessionEndEvent: LocalChatSessionEndEvent,
+localChatSessionErrorEvent: LocalChatSessionErrorEvent,
+localChatSessionInitEvent: LocalChatSessionInitEvent,
+localChatSessionUsageEvent: LocalChatSessionUsageEvent,
+localChatSessionWarningEvent: LocalChatSessionWarningEvent,
+localChatTextEvent: LocalChatTextEvent,
+localChatToolCallEvent: LocalChatToolCallEvent,
+localChatToolResultEvent: LocalChatToolResultEvent,
 permissionRequestEvent: PermissionRequestEvent,
 projectInitProgressEvent: ProjectInitProgressEvent,
 sectionChangedEvent: SectionChangedEvent,
@@ -919,6 +966,14 @@ claudeSessionWarningEvent: "claude-session-warning-event",
 claudeTextEvent: "claude-text-event",
 claudeToolCallEvent: "claude-tool-call-event",
 claudeToolResultEvent: "claude-tool-result-event",
+localChatSessionEndEvent: "local-chat-session-end-event",
+localChatSessionErrorEvent: "local-chat-session-error-event",
+localChatSessionInitEvent: "local-chat-session-init-event",
+localChatSessionUsageEvent: "local-chat-session-usage-event",
+localChatSessionWarningEvent: "local-chat-session-warning-event",
+localChatTextEvent: "local-chat-text-event",
+localChatToolCallEvent: "local-chat-tool-call-event",
+localChatToolResultEvent: "local-chat-tool-result-event",
 permissionRequestEvent: "permission-request-event",
 projectInitProgressEvent: "project-init-progress-event",
 sectionChangedEvent: "section-changed-event",
@@ -1148,6 +1203,7 @@ symlink_path: string;
  */
 on_path: boolean }
 export type CreateClaudeSessionInput = { session_id: string; working_dir: string | null; initial_prompt: string | null; resume_session_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
+export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
 /**
  * Options for creating a workflow step.
  */
@@ -1195,6 +1251,19 @@ skills_target: string }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
+export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; supports_resume: boolean }
+export type LocalChatHarnessKind = "claude" | "codex"
+export type LocalChatModelOption = { id: string; label: string }
+export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
+export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
+export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; error: string }
+export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[] }
+export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; model: string; context_tokens: number; context_window: number }
+export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; warning: string }
+export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; text: string; is_partial: boolean }
+export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }
+export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

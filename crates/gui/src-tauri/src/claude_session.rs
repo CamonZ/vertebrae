@@ -12,7 +12,7 @@ use std::io::BufRead;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
@@ -30,6 +30,16 @@ use crate::local_chat::harnesses::claude::live_jsonl::{
     ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
 };
 use crate::local_chat::permissions::PermissionBridge;
+use crate::local_chat::{
+    LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind, LocalChatRuntime,
+    LocalChatSessionEndEvent as NeutralSessionEndEvent,
+    LocalChatSessionErrorEvent as NeutralSessionErrorEvent,
+    LocalChatSessionInitEvent as NeutralSessionInitEvent,
+    LocalChatSessionUsageEvent as NeutralSessionUsageEvent,
+    LocalChatSessionWarningEvent as NeutralSessionWarningEvent,
+    LocalChatTextEvent as NeutralTextEvent, LocalChatToolCallEvent as NeutralToolCallEvent,
+    LocalChatToolResultEvent as NeutralToolResultEvent,
+};
 use crate::types::CreateClaudeSessionInput;
 
 pub use crate::local_chat::permissions::LocalPermissionDecision;
@@ -217,9 +227,8 @@ struct SessionHandle {
 }
 
 struct SessionRuntimeState {
-    app_handle: tauri::AppHandle,
+    runtime: LocalChatRuntime,
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-    permission_bridge: PermissionBridge,
 }
 
 struct SessionCleanup {
@@ -254,6 +263,7 @@ impl Drop for SessionCleanup {
 }
 
 /// Manages active Claude CLI sessions
+#[derive(Clone)]
 pub struct ClaudeSessionManager {
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
     permission_bridge: PermissionBridge,
@@ -267,6 +277,10 @@ impl ClaudeSessionManager {
         }
     }
 
+    pub(crate) fn permission_bridge(&self) -> PermissionBridge {
+        self.permission_bridge.clone()
+    }
+
     /// Create a new Claude session with JSONL streaming
     /// If `resume_session_id` is provided, continues an existing Claude conversation
     pub async fn create_session(
@@ -274,7 +288,21 @@ impl ClaudeSessionManager {
         input: CreateClaudeSessionInput,
         app_handle: tauri::AppHandle,
     ) -> Result<(), ClaudeSessionError> {
+        let runtime = LocalChatRuntime::new(app_handle, self.permission_bridge.clone());
+        self.create_session_with_runtime(input, runtime).await
+    }
+
+    pub(crate) async fn create_session_with_runtime(
+        &self,
+        input: CreateClaudeSessionInput,
+        runtime: LocalChatRuntime,
+    ) -> Result<(), ClaudeSessionError> {
         let session_id = input.session_id.clone();
+        if runtime.app_handle().is_none() {
+            return Err(ClaudeSessionError::SpawnFailed(
+                "Tauri app handle is required to start a Claude session".to_string(),
+            ));
+        }
         // Check if session already exists
         {
             let sessions = self.sessions.read().await;
@@ -294,9 +322,8 @@ impl ClaudeSessionManager {
 
         // Spawn the session thread
         let runtime_state = SessionRuntimeState {
-            app_handle,
+            runtime,
             sessions: self.sessions.clone(),
-            permission_bridge: self.permission_bridge.clone(),
         };
         thread::spawn(move || {
             Self::run_session(input, command_rx, runtime_state);
@@ -320,21 +347,19 @@ impl ClaudeSessionManager {
             model_id: requested_model_id,
             permission_mode,
         } = input;
-        let SessionRuntimeState {
-            app_handle,
-            sessions,
-            permission_bridge,
-        } = runtime_state;
+        let SessionRuntimeState { runtime, sessions } = runtime_state;
+        let Some(app_handle) = runtime.app_handle() else {
+            log::error!("Cannot run Claude session without a Tauri app handle");
+            return;
+        };
+        let event_sink = runtime.event_sink();
+        let permission_bridge = runtime.permission_bridge();
         let cleanup_guard =
             SessionCleanup::new(session_id.clone(), sessions, permission_bridge.clone());
         let Some(working_dir) = resolve_working_dir(working_dir, &app_handle) else {
             let error = "Cannot start Claude session without a selected project path".to_string();
             log::error!("{}", error);
-            let _ = ClaudeSessionErrorEvent {
-                session_id: session_id.clone(),
-                error,
-            }
-            .emit(&app_handle);
+            Self::emit_error(&event_sink, &session_id, error);
             return;
         };
 
@@ -342,11 +367,7 @@ impl ClaudeSessionManager {
             resolve_requested_claude_model(requested_model_id, resume_session_id.is_some());
         if let Some(warning) = &resolved_model.warning {
             log::warn!("{}", warning);
-            let _ = ClaudeSessionWarningEvent {
-                session_id: session_id.clone(),
-                warning: warning.clone(),
-            }
-            .emit(&app_handle);
+            Self::emit_warning(&event_sink, &session_id, warning.clone());
         }
 
         // Find the Claude Code CLI binary using unified discovery logic
@@ -355,15 +376,7 @@ impl ClaudeSessionManager {
             Err(e) => {
                 log::error!("Failed to find Claude Code CLI: {}", e);
                 // Notify frontend of initialization failure
-                let _ = app_handle.emit(
-                    "claude-session-init-event",
-                    ClaudeSessionInitEvent {
-                        session_id: session_id.clone(),
-                        claude_conversation_id: None,
-                        model: String::new(),
-                        tools: vec![],
-                    },
-                );
+                Self::emit_init(&event_sink, &session_id, None, String::new(), vec![]);
                 return;
             }
         };
@@ -382,11 +395,7 @@ impl ClaudeSessionManager {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(e) => {
                 log::error!("Failed to find vtb-gate: {}", e);
-                let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id.clone(),
-                    error: e,
-                }
-                .emit(&app_handle);
+                Self::emit_error(&event_sink, &session_id, e);
                 return;
             }
         };
@@ -421,11 +430,7 @@ impl ClaudeSessionManager {
                 working_dir
             );
             log::error!("{}", error);
-            let _ = ClaudeSessionErrorEvent {
-                session_id: session_id.clone(),
-                error,
-            }
-            .emit(&app_handle);
+            Self::emit_error(&event_sink, &session_id, error);
             return;
         }
 
@@ -450,11 +455,7 @@ impl ClaudeSessionManager {
                 }
                 Err(e) => {
                     log::error!("Failed to create vtb-gate permission socket: {}", e);
-                    let _ = ClaudeSessionErrorEvent {
-                        session_id: session_id.clone(),
-                        error: e,
-                    }
-                    .emit(&app_handle);
+                    Self::emit_error(&event_sink, &session_id, e);
                     return;
                 }
             };
@@ -465,21 +466,17 @@ impl ClaudeSessionManager {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let app_handle_for_reader = app_handle.clone();
+        let event_sink_for_reader = event_sink.clone();
         let stdout_processor = Box::new(move |reader, session_id: String| {
             jsonl::process_jsonl_lines(reader, &session_id, |events| {
-                Self::emit_jsonl_events(&app_handle_for_reader, events);
+                Self::emit_jsonl_events(&event_sink_for_reader, events);
             });
         });
 
-        let app_handle_for_stderr = app_handle.clone();
+        let event_sink_for_stderr = event_sink.clone();
         let stderr_processor = Box::new(move |reader, session_id: String| {
             process_claude_stderr_lines(reader, &session_id, |error_msg| {
-                let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id.clone(),
-                    error: error_msg,
-                }
-                .emit(&app_handle_for_stderr);
+                Self::emit_error(&event_sink_for_stderr, &session_id, error_msg);
             });
         });
 
@@ -505,21 +502,13 @@ impl ClaudeSessionManager {
             Err(ClaudeLiveJsonlProcessError::Spawn(err)) => {
                 let error = format!("Failed to spawn claude at {}: {}", claude_binary, err);
                 log::error!("{}", error);
-                let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id.clone(),
-                    error,
-                }
-                .emit(&app_handle);
+                Self::emit_error(&event_sink, &session_id, error);
                 return;
             }
             Err(err) => {
                 let error = err.to_string();
                 log::error!("{}", error);
-                let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id.clone(),
-                    error,
-                }
-                .emit(&app_handle);
+                Self::emit_error(&event_sink, &session_id, error);
                 return;
             }
         }
@@ -528,75 +517,102 @@ impl ClaudeSessionManager {
         log::info!("Claude session {} ended", session_id);
     }
 
-    fn emit_jsonl_events(app_handle: &tauri::AppHandle, events: Vec<EmittedEvent>) {
+    fn emit_jsonl_events(event_sink: &LocalChatEventSink, events: Vec<EmittedEvent>) {
         for event in events {
-            match event {
-                EmittedEvent::Init(e) => {
-                    let event = ClaudeSessionInitEvent {
-                        session_id: e.session_id,
-                        claude_conversation_id: e.claude_conversation_id,
-                        model: e.model,
-                        tools: e.tools,
-                    };
-                    log::info!(
-                        "[Claude Init] conversation_id={:?}, model={}",
-                        event.claude_conversation_id,
-                        event.model
-                    );
-                    let _ = event.emit(app_handle);
-                }
-                EmittedEvent::Text(e) => {
-                    let _ = ClaudeTextEvent {
-                        session_id: e.session_id,
-                        text: e.text,
-                        is_partial: e.is_partial,
-                    }
-                    .emit(app_handle);
-                }
-                EmittedEvent::ToolCall(e) => {
-                    let _ = ClaudeToolCallEvent {
-                        session_id: e.session_id,
-                        tool_id: e.tool_id,
-                        tool_name: e.tool_name,
-                        input: e.input,
-                        parent_tool_use_id: e.parent_tool_use_id,
-                    }
-                    .emit(app_handle);
-                }
-                EmittedEvent::ToolResult(e) => {
-                    let _ = ClaudeToolResultEvent {
-                        session_id: e.session_id,
-                        tool_id: e.tool_id,
-                        result: e.result,
-                        is_error: e.is_error,
-                        parent_tool_use_id: e.parent_tool_use_id,
-                    }
-                    .emit(app_handle);
-                }
-                EmittedEvent::Usage(e) => {
-                    let _ = ClaudeSessionUsageEvent {
-                        session_id: e.session_id,
-                        model: e.model,
-                        context_tokens: e.context_tokens,
-                        context_window: e.context_window,
-                    }
-                    .emit(app_handle);
-                }
-                EmittedEvent::SessionEnd(e) => {
-                    let _ = ClaudeSessionEndEvent {
-                        session_id: e.session_id,
-                        duration_ms: e.duration_ms,
-                        cost_usd: e.cost_usd,
-                        num_turns: e.num_turns,
-                        result: e.result,
-                        is_error: e.is_error,
-                        context_tokens: e.context_tokens,
-                        context_window: e.context_window,
-                    }
-                    .emit(app_handle);
-                }
+            let event = Self::local_chat_event_from_claude_emitted(event);
+            if let LocalChatEvent::Init(e) = &event {
+                log::info!(
+                    "[Claude Init] conversation_id={:?}, model={}",
+                    e.provider_resume_id,
+                    e.model
+                );
             }
+            event_sink.emit(event);
         }
+    }
+
+    fn local_chat_event_from_claude_emitted(event: EmittedEvent) -> LocalChatEvent {
+        match event {
+            EmittedEvent::Init(e) => LocalChatEvent::Init(NeutralSessionInitEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                provider_resume_id: e.claude_conversation_id,
+                model: e.model,
+                tools: e.tools,
+            }),
+            EmittedEvent::Text(e) => LocalChatEvent::Text(NeutralTextEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                text: e.text,
+                is_partial: e.is_partial,
+            }),
+            EmittedEvent::ToolCall(e) => LocalChatEvent::ToolCall(NeutralToolCallEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                tool_id: e.tool_id,
+                tool_name: e.tool_name,
+                input: e.input,
+                parent_tool_use_id: e.parent_tool_use_id,
+            }),
+            EmittedEvent::ToolResult(e) => LocalChatEvent::ToolResult(NeutralToolResultEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                tool_id: e.tool_id,
+                result: e.result,
+                is_error: e.is_error,
+                parent_tool_use_id: e.parent_tool_use_id,
+            }),
+            EmittedEvent::Usage(e) => LocalChatEvent::Usage(NeutralSessionUsageEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                model: e.model,
+                context_tokens: e.context_tokens,
+                context_window: e.context_window,
+            }),
+            EmittedEvent::SessionEnd(e) => LocalChatEvent::End(NeutralSessionEndEvent {
+                backend_session_id: e.session_id,
+                harness: LocalChatHarnessKind::Claude,
+                duration_ms: e.duration_ms,
+                cost_usd: e.cost_usd,
+                num_turns: e.num_turns,
+                result: e.result,
+                is_error: e.is_error,
+                context_tokens: e.context_tokens,
+                context_window: e.context_window,
+            }),
+        }
+    }
+
+    fn emit_init(
+        event_sink: &LocalChatEventSink,
+        session_id: &str,
+        provider_resume_id: Option<String>,
+        model: String,
+        tools: Vec<String>,
+    ) {
+        event_sink.emit(LocalChatEvent::Init(NeutralSessionInitEvent {
+            backend_session_id: session_id.to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            provider_resume_id,
+            model,
+            tools,
+        }));
+    }
+
+    fn emit_error(event_sink: &LocalChatEventSink, session_id: &str, error: String) {
+        event_sink.emit(LocalChatEvent::Error(NeutralSessionErrorEvent {
+            backend_session_id: session_id.to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            error,
+        }));
+    }
+
+    fn emit_warning(event_sink: &LocalChatEventSink, session_id: &str, warning: String) {
+        event_sink.emit(LocalChatEvent::Warning(NeutralSessionWarningEvent {
+            backend_session_id: session_id.to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            warning,
+        }));
     }
 
     pub fn resolve_permission_request(
@@ -690,6 +706,8 @@ pub enum ClaudeSessionError {
 
 #[cfg(test)]
 mod line_processing_tests;
+#[cfg(test)]
+mod local_chat_event_mapping_tests;
 #[cfg(test)]
 mod manager_session_registry_tests;
 #[cfg(test)]
