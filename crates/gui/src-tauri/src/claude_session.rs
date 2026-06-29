@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -25,6 +25,10 @@ pub use crate::local_chat::harnesses::claude::args::{
     supported_claude_model_catalog, ClaudeModelCatalog, ClaudeModelOption,
 };
 use crate::local_chat::harnesses::claude::jsonl::{self, EmittedEvent};
+use crate::local_chat::harnesses::claude::live_jsonl::{
+    encode_claude_user_jsonl_message, process_claude_stderr_lines, ClaudeLiveJsonlCommand,
+    ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
+};
 use crate::local_chat::permissions::PermissionBridge;
 use crate::types::CreateClaudeSessionInput;
 
@@ -207,26 +211,46 @@ fn resolve_working_dir<R: tauri::Runtime>(
 // Session management
 // ============================================================================
 
-/// Commands sent to the Claude session thread
-enum SessionCommand {
-    SendMessage {
-        content: String,
-        response: oneshot::Sender<Result<(), String>>,
-    },
-    Close {
-        response: oneshot::Sender<Result<(), String>>,
-    },
-}
-
 /// Handle to a Claude session
 struct SessionHandle {
-    command_tx: mpsc::UnboundedSender<SessionCommand>,
+    command_tx: mpsc::UnboundedSender<ClaudeLiveJsonlCommand>,
 }
 
 struct SessionRuntimeState {
     app_handle: tauri::AppHandle,
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
     permission_bridge: PermissionBridge,
+}
+
+struct SessionCleanup {
+    session_id: String,
+    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+    permission_bridge: PermissionBridge,
+}
+
+impl SessionCleanup {
+    fn new(
+        session_id: String,
+        sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
+        permission_bridge: PermissionBridge,
+    ) -> Self {
+        Self {
+            session_id,
+            sessions,
+            permission_bridge,
+        }
+    }
+}
+
+impl Drop for SessionCleanup {
+    fn drop(&mut self) {
+        self.permission_bridge.fail_pending_permissions_for_session(
+            &self.session_id,
+            "Claude session ended before the permission request was resolved",
+        );
+        let mut sessions = self.sessions.blocking_write();
+        sessions.remove(&self.session_id);
+    }
 }
 
 /// Manages active Claude CLI sessions
@@ -285,7 +309,7 @@ impl ClaudeSessionManager {
     /// Run the Claude CLI session in a dedicated thread
     fn run_session(
         input: CreateClaudeSessionInput,
-        mut command_rx: mpsc::UnboundedReceiver<SessionCommand>,
+        command_rx: mpsc::UnboundedReceiver<ClaudeLiveJsonlCommand>,
         runtime_state: SessionRuntimeState,
     ) {
         let CreateClaudeSessionInput {
@@ -301,6 +325,8 @@ impl ClaudeSessionManager {
             sessions,
             permission_bridge,
         } = runtime_state;
+        let cleanup_guard =
+            SessionCleanup::new(session_id.clone(), sessions, permission_bridge.clone());
         let Some(working_dir) = resolve_working_dir(working_dir, &app_handle) else {
             let error = "Cannot start Claude session without a selected project path".to_string();
             log::error!("{}", error);
@@ -439,227 +465,138 @@ impl ClaudeSessionManager {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        // Spawn the process
-        let mut child = match cmd.spawn() {
-            Ok(child) => {
-                log::info!("Claude process spawned successfully");
-                child
-            }
-            Err(e) => {
-                log::error!("Failed to spawn claude at {}: {}", claude_binary, e);
-                let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id.clone(),
-                    error: format!("Failed to spawn claude at {}: {}", claude_binary, e),
-                }
-                .emit(&app_handle);
-                return;
-            }
-        };
-
-        let mut stdin = child.stdin.take().unwrap();
-        let stdout = child.stdout.take().unwrap();
-        let stderr = child.stderr.take().unwrap();
-
-        // Send initial prompt if provided
-        if let Some(prompt) = initial_prompt {
-            let input_msg = serde_json::json!({
-                "type": "user",
-                "session_id": &session_id,
-                "parent_tool_use_id": null,
-                "message": {
-                    "role": "user",
-                    "content": prompt
-                }
-            });
-            if let Ok(json) = serde_json::to_string(&input_msg) {
-                let _ = writeln!(stdin, "{}", json);
-                let _ = stdin.flush();
-            }
-        }
-
-        // Spawn stdout reader thread
-        let session_id_for_reader = session_id.clone();
         let app_handle_for_reader = app_handle.clone();
-        let (exit_tx, exit_rx) = std::sync::mpsc::channel();
-
-        thread::spawn(move || {
-            let reader = std::io::BufReader::new(stdout);
-            jsonl::process_jsonl_lines(reader, &session_id_for_reader, |events| {
-                for event in events {
-                    match event {
-                        EmittedEvent::Init(e) => {
-                            let event = ClaudeSessionInitEvent {
-                                session_id: e.session_id,
-                                claude_conversation_id: e.claude_conversation_id,
-                                model: e.model,
-                                tools: e.tools,
-                            };
-                            log::info!(
-                                "[Claude Init] conversation_id={:?}, model={}",
-                                event.claude_conversation_id,
-                                event.model
-                            );
-                            let _ = event.emit(&app_handle_for_reader);
-                        }
-                        EmittedEvent::Text(e) => {
-                            let _ = ClaudeTextEvent {
-                                session_id: e.session_id,
-                                text: e.text,
-                                is_partial: e.is_partial,
-                            }
-                            .emit(&app_handle_for_reader);
-                        }
-                        EmittedEvent::ToolCall(e) => {
-                            let _ = ClaudeToolCallEvent {
-                                session_id: e.session_id,
-                                tool_id: e.tool_id,
-                                tool_name: e.tool_name,
-                                input: e.input,
-                                parent_tool_use_id: e.parent_tool_use_id,
-                            }
-                            .emit(&app_handle_for_reader);
-                        }
-                        EmittedEvent::ToolResult(e) => {
-                            let _ = ClaudeToolResultEvent {
-                                session_id: e.session_id,
-                                tool_id: e.tool_id,
-                                result: e.result,
-                                is_error: e.is_error,
-                                parent_tool_use_id: e.parent_tool_use_id,
-                            }
-                            .emit(&app_handle_for_reader);
-                        }
-                        EmittedEvent::Usage(e) => {
-                            let _ = ClaudeSessionUsageEvent {
-                                session_id: e.session_id,
-                                model: e.model,
-                                context_tokens: e.context_tokens,
-                                context_window: e.context_window,
-                            }
-                            .emit(&app_handle_for_reader);
-                        }
-                        EmittedEvent::SessionEnd(e) => {
-                            let _ = ClaudeSessionEndEvent {
-                                session_id: e.session_id,
-                                duration_ms: e.duration_ms,
-                                cost_usd: e.cost_usd,
-                                num_turns: e.num_turns,
-                                result: e.result,
-                                is_error: e.is_error,
-                                context_tokens: e.context_tokens,
-                                context_window: e.context_window,
-                            }
-                            .emit(&app_handle_for_reader);
-                        }
-                    }
-                }
+        let stdout_processor = Box::new(move |reader, session_id: String| {
+            jsonl::process_jsonl_lines(reader, &session_id, |events| {
+                Self::emit_jsonl_events(&app_handle_for_reader, events);
             });
-            let _ = exit_tx.send(());
         });
 
-        // Spawn stderr reader thread
-        let session_id_for_stderr = session_id.clone();
         let app_handle_for_stderr = app_handle.clone();
-        thread::spawn(move || {
-            let reader = std::io::BufReader::new(stderr);
-            Self::process_stderr_lines(reader, &session_id_for_stderr, |error_msg| {
+        let stderr_processor = Box::new(move |reader, session_id: String| {
+            process_claude_stderr_lines(reader, &session_id, |error_msg| {
                 let _ = ClaudeSessionErrorEvent {
-                    session_id: session_id_for_stderr.clone(),
+                    session_id: session_id.clone(),
                     error: error_msg,
                 }
                 .emit(&app_handle_for_stderr);
             });
         });
 
-        // Forward commands to stdin using sync channel
-        let (sync_tx, sync_rx) = std::sync::mpsc::channel::<SessionCommand>();
-        let session_id_for_forwarder = session_id.clone();
+        let runner = ClaudeLiveJsonlProcessRunner::new(
+            session_id.clone(),
+            cmd,
+            command_rx,
+            Box::new(encode_claude_user_jsonl_message),
+            stdout_processor,
+            stderr_processor,
+        )
+        .with_initial_prompt(initial_prompt);
 
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(async {
-                while let Some(cmd) = command_rx.recv().await {
-                    if sync_tx.send(cmd).is_err() {
-                        break;
-                    }
-                }
-            });
-            log::debug!(
-                "Claude session {} command forwarder exited",
-                session_id_for_forwarder
-            );
-        });
-
-        // Main command processing loop
-        let mut should_exit = false;
-
-        loop {
-            match sync_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                Ok(cmd) => match cmd {
-                    SessionCommand::SendMessage { content, response } => {
-                        let input_msg = serde_json::json!({
-                            "type": "user",
-                            "session_id": &session_id,
-                            "parent_tool_use_id": null,
-                            "message": {
-                                "role": "user",
-                                "content": content
-                            }
-                        });
-                        let result = serde_json::to_string(&input_msg)
-                            .map_err(|e| e.to_string())
-                            .and_then(|json| {
-                                writeln!(stdin, "{}", json).map_err(|e| e.to_string())?;
-                                stdin.flush().map_err(|e| e.to_string())
-                            });
-                        let _ = response.send(result);
-                    }
-                    SessionCommand::Close { response } => {
-                        let _ = response.send(Ok(()));
-                        should_exit = true;
-                    }
-                },
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Check if reader exited
-                    if exit_rx.try_recv().is_ok() {
-                        should_exit = true;
-                    }
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    should_exit = true;
-                }
+        match runner.run() {
+            Ok(result) => {
+                log::debug!(
+                    "Claude session {} live JSONL runner exited via {:?}, status={:?}",
+                    session_id,
+                    result.exit_reason,
+                    result.wait_status
+                );
             }
-
-            if should_exit {
-                break;
+            Err(ClaudeLiveJsonlProcessError::Spawn(err)) => {
+                let error = format!("Failed to spawn claude at {}: {}", claude_binary, err);
+                log::error!("{}", error);
+                let _ = ClaudeSessionErrorEvent {
+                    session_id: session_id.clone(),
+                    error,
+                }
+                .emit(&app_handle);
+                return;
+            }
+            Err(err) => {
+                let error = err.to_string();
+                log::error!("{}", error);
+                let _ = ClaudeSessionErrorEvent {
+                    session_id: session_id.clone(),
+                    error,
+                }
+                .emit(&app_handle);
+                return;
             }
         }
 
-        // Kill the child process
-        let _ = child.kill();
-        let _ = child.wait();
-        permission_bridge.fail_pending_permissions_for_session(
-            &session_id,
-            "Claude session ended before the permission request was resolved",
-        );
-
-        // Clean up session
-        let session_id_for_cleanup = session_id.clone();
-        thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-            rt.block_on(async {
-                let mut sessions = sessions.write().await;
-                sessions.remove(&session_id_for_cleanup);
-            });
-        });
-
+        drop(cleanup_guard);
         log::info!("Claude session {} ended", session_id);
+    }
+
+    fn emit_jsonl_events(app_handle: &tauri::AppHandle, events: Vec<EmittedEvent>) {
+        for event in events {
+            match event {
+                EmittedEvent::Init(e) => {
+                    let event = ClaudeSessionInitEvent {
+                        session_id: e.session_id,
+                        claude_conversation_id: e.claude_conversation_id,
+                        model: e.model,
+                        tools: e.tools,
+                    };
+                    log::info!(
+                        "[Claude Init] conversation_id={:?}, model={}",
+                        event.claude_conversation_id,
+                        event.model
+                    );
+                    let _ = event.emit(app_handle);
+                }
+                EmittedEvent::Text(e) => {
+                    let _ = ClaudeTextEvent {
+                        session_id: e.session_id,
+                        text: e.text,
+                        is_partial: e.is_partial,
+                    }
+                    .emit(app_handle);
+                }
+                EmittedEvent::ToolCall(e) => {
+                    let _ = ClaudeToolCallEvent {
+                        session_id: e.session_id,
+                        tool_id: e.tool_id,
+                        tool_name: e.tool_name,
+                        input: e.input,
+                        parent_tool_use_id: e.parent_tool_use_id,
+                    }
+                    .emit(app_handle);
+                }
+                EmittedEvent::ToolResult(e) => {
+                    let _ = ClaudeToolResultEvent {
+                        session_id: e.session_id,
+                        tool_id: e.tool_id,
+                        result: e.result,
+                        is_error: e.is_error,
+                        parent_tool_use_id: e.parent_tool_use_id,
+                    }
+                    .emit(app_handle);
+                }
+                EmittedEvent::Usage(e) => {
+                    let _ = ClaudeSessionUsageEvent {
+                        session_id: e.session_id,
+                        model: e.model,
+                        context_tokens: e.context_tokens,
+                        context_window: e.context_window,
+                    }
+                    .emit(app_handle);
+                }
+                EmittedEvent::SessionEnd(e) => {
+                    let _ = ClaudeSessionEndEvent {
+                        session_id: e.session_id,
+                        duration_ms: e.duration_ms,
+                        cost_usd: e.cost_usd,
+                        num_turns: e.num_turns,
+                        result: e.result,
+                        is_error: e.is_error,
+                        context_tokens: e.context_tokens,
+                        context_window: e.context_window,
+                    }
+                    .emit(app_handle);
+                }
+            }
+        }
     }
 
     pub fn resolve_permission_request(
@@ -674,28 +611,8 @@ impl ClaudeSessionManager {
     /// Process stderr lines from the Claude CLI.
     /// Passes each non-empty line (prefixed with `[stderr]`) to the callback.
     /// Stops on read error.
-    fn process_stderr_lines(
-        reader: impl BufRead,
-        session_id: &str,
-        mut on_error: impl FnMut(String),
-    ) {
-        for line in reader.lines() {
-            match line {
-                Ok(line) if !line.is_empty() => {
-                    log::warn!(
-                        "[Claude stderr] session={} {}",
-                        &session_id[..8.min(session_id.len())],
-                        &line[..500.min(line.len())]
-                    );
-                    on_error(format!("[stderr] {}", line));
-                }
-                Err(e) => {
-                    log::error!("Error reading stderr: {}", e);
-                    break;
-                }
-                _ => {}
-            }
-        }
+    fn process_stderr_lines(reader: impl BufRead, session_id: &str, on_error: impl FnMut(String)) {
+        process_claude_stderr_lines(reader, session_id, on_error);
     }
 
     /// Send a message to a Claude session
@@ -712,7 +629,7 @@ impl ClaudeSessionManager {
         let (response_tx, response_rx) = oneshot::channel();
         session
             .command_tx
-            .send(SessionCommand::SendMessage {
+            .send(ClaudeLiveJsonlCommand::SendMessage {
                 content: content.to_string(),
                 response: response_tx,
             })
@@ -734,7 +651,7 @@ impl ClaudeSessionManager {
         let (response_tx, response_rx) = oneshot::channel();
         session
             .command_tx
-            .send(SessionCommand::Close {
+            .send(ClaudeLiveJsonlCommand::Close {
                 response: response_tx,
             })
             .map_err(|_| ClaudeSessionError::SessionNotFound(session_id.to_string()))?;

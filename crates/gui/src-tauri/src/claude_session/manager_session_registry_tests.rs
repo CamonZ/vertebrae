@@ -136,3 +136,26 @@ async fn test_close_session_channel_dropped() {
     let result = manager.close_session("test-session").await;
     assert!(result.is_err());
 }
+
+#[test]
+fn test_session_cleanup_removes_registry_handle() {
+    let manager = ClaudeSessionManager::new();
+    let (tx, _rx) = mpsc::unbounded_channel();
+    {
+        let mut sessions = manager.sessions.blocking_write();
+        sessions.insert("test-session".to_string(), SessionHandle { command_tx: tx });
+    }
+
+    {
+        let _cleanup = SessionCleanup::new(
+            "test-session".to_string(),
+            manager.sessions.clone(),
+            manager.permission_bridge.clone(),
+        );
+    }
+
+    assert!(!manager
+        .sessions
+        .blocking_read()
+        .contains_key("test-session"));
+}
