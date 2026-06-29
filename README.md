@@ -117,4 +117,6 @@ See [docs/SACRUM_CONFIG.md](docs/SACRUM_CONFIG.md) for the current format.
 
 ## License
 
-MIT
+Apache-2.0. See [LICENSE](LICENSE) for the Apache License 2.0 text.
+
+Copyright 2026 Rafael Simon Garcia Rodriguez.

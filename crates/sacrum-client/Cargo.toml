@@ -3,7 +3,7 @@ name = "vertebrae-sacrum-client"
 version = "0.1.0"
 edition = "2024"
 description = "HTTP client for Sacrum backend"
-license = "MIT"
+license = "Apache-2.0"
 
 [dependencies]
 reqwest = { version = "0.13", features = ["json", "query"] }

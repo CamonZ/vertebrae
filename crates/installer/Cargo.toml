@@ -3,7 +3,7 @@ name = "vertebrae-installer"
 version = "0.1.0"
 edition = "2024"
 description = "Shared installer logic for staging Vertebrae binaries and registering the daemon service"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 name = "vertebrae_installer"
