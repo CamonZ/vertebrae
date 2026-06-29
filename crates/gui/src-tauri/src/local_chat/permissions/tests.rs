@@ -2,9 +2,9 @@ use super::*;
 
 #[test]
 fn test_resolve_permission_request_sends_local_decision() {
-    let manager = ClaudeSessionManager::new();
+    let bridge = PermissionBridge::new();
     let (response_tx, response_rx) = std::sync::mpsc::channel();
-    manager.pending_permissions.lock().unwrap().insert(
+    bridge.pending_permissions.lock().unwrap().insert(
         "req-1".to_string(),
         PendingPermission {
             session_id: "session-1".to_string(),
@@ -12,7 +12,7 @@ fn test_resolve_permission_request_sends_local_decision() {
         },
     );
 
-    let result = manager
+    let result = bridge
         .resolve_permission_request(
             "req-1",
             LocalPermissionDecision {
@@ -24,7 +24,7 @@ fn test_resolve_permission_request_sends_local_decision() {
         .unwrap();
 
     assert_eq!(result["behavior"], "allow");
-    assert!(manager.pending_permissions.lock().unwrap().is_empty());
+    assert!(bridge.pending_permissions.lock().unwrap().is_empty());
 
     let decision = response_rx.recv().unwrap();
     assert_eq!(decision.behavior, "allow");
@@ -36,8 +36,8 @@ fn test_resolve_permission_request_sends_local_decision() {
 
 #[test]
 fn test_resolve_permission_request_requires_local_pending_request() {
-    let manager = ClaudeSessionManager::new();
-    let result = manager.resolve_permission_request(
+    let bridge = PermissionBridge::new();
+    let result = bridge.resolve_permission_request(
         "missing",
         LocalPermissionDecision {
             behavior: "deny".to_string(),
@@ -51,13 +51,13 @@ fn test_resolve_permission_request_requires_local_pending_request() {
 
 #[test]
 fn test_fail_pending_permissions_for_session_sends_denials() {
-    let pending_permissions = Arc::new(Mutex::new(HashMap::new()));
+    let bridge = PermissionBridge::new();
     let (session_a_tx_1, session_a_rx_1) = std::sync::mpsc::channel();
     let (session_a_tx_2, session_a_rx_2) = std::sync::mpsc::channel();
     let (session_b_tx, session_b_rx) = std::sync::mpsc::channel();
 
     {
-        let mut pending = pending_permissions.lock().unwrap();
+        let mut pending = bridge.pending_permissions.lock().unwrap();
         pending.insert(
             "req-a-1".to_string(),
             PendingPermission {
@@ -81,7 +81,10 @@ fn test_fail_pending_permissions_for_session_sends_denials() {
         );
     }
 
-    ClaudeSessionManager::fail_pending_permissions_for_session(&pending_permissions, "session-a");
+    bridge.fail_pending_permissions_for_session(
+        "session-a",
+        "Claude session ended before the permission request was resolved",
+    );
 
     for receiver in [session_a_rx_1, session_a_rx_2] {
         let decision = receiver
@@ -99,14 +102,14 @@ fn test_fail_pending_permissions_for_session_sends_denials() {
         Err(std::sync::mpsc::TryRecvError::Empty)
     ));
 
-    let pending = pending_permissions.lock().unwrap();
+    let pending = bridge.pending_permissions.lock().unwrap();
     assert!(!pending.contains_key("req-a-1"));
     assert!(!pending.contains_key("req-a-2"));
     assert!(pending.contains_key("req-b"));
 }
 
 #[test]
-fn test_local_permission_decision_serializes_for_claude_schema() {
+fn test_local_permission_decision_serializes_for_provider_schema() {
     let allow = serde_json::to_value(LocalPermissionDecision {
         behavior: "allow".to_string(),
         message: None,
@@ -149,7 +152,7 @@ fn test_prepare_permission_socket_directory_sets_private_mode() {
         std::env::temp_dir().join(format!("vtbg-dir-test-{}-{suffix}", std::process::id()));
     let _ = std::fs::remove_dir_all(&directory);
 
-    ClaudeSessionManager::prepare_permission_socket_directory(&directory).unwrap();
+    PermissionBridge::prepare_permission_socket_directory(&directory).unwrap();
 
     let mode = std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o700);
@@ -163,7 +166,7 @@ fn test_permission_socket_path_stays_under_unix_limit_for_long_session_ids() {
     use std::os::unix::ffi::OsStrExt;
 
     let session_id = "scoped-chat-1781971607649-bijgbrn-1781971734050-extra-long-session-suffix";
-    let path = ClaudeSessionManager::permission_socket_path(session_id);
+    let path = PermissionBridge::permission_socket_path(session_id);
     let path_len = path.as_os_str().as_bytes().len();
 
     assert!(
