@@ -3,7 +3,7 @@ name = "vertebrae-daemon"
 version = "0.1.0"
 edition = "2024"
 description = "Workflow execution daemon for Vertebrae using ractor actor framework"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 name = "vertebrae_daemon"
