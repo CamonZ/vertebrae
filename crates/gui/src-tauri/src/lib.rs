@@ -33,6 +33,11 @@ use events::{
     StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
     TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
+use local_chat::{
+    LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
+    LocalChatSessionManager, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+};
 use project_config::ProjectConfig;
 
 /// Example command that will be exported with type definitions.
@@ -128,6 +133,11 @@ fn create_builder() -> Builder {
             commands::stop_run,
             commands::orchestrate_task,
             commands::stop_orchestrator,
+            // Provider-neutral local chat commands
+            commands::get_supported_local_chat_harnesses,
+            commands::create_local_chat_session,
+            commands::send_local_chat_message,
+            commands::close_local_chat_session,
             // Claude session commands (JSONL streaming)
             commands::create_claude_session,
             commands::get_supported_claude_models,
@@ -157,6 +167,15 @@ fn create_builder() -> Builder {
             SessionLogUpdatedEvent,
             SectionChangedEvent,
             PermissionRequestEvent,
+            // Provider-neutral local chat events
+            LocalChatSessionInitEvent,
+            LocalChatTextEvent,
+            LocalChatToolCallEvent,
+            LocalChatToolResultEvent,
+            LocalChatSessionUsageEvent,
+            LocalChatSessionEndEvent,
+            LocalChatSessionErrorEvent,
+            LocalChatSessionWarningEvent,
             // Claude session events
             ClaudeSessionInitEvent,
             ClaudeTextEvent,
@@ -231,8 +250,12 @@ pub fn run() {
                 project_config,
             });
 
-            // Initialize Claude session manager for JSONL chat
-            app.manage(ClaudeSessionManager::new());
+            // Initialize shared local chat session managers for JSONL chat
+            let claude_manager = ClaudeSessionManager::new();
+            let local_chat_manager =
+                LocalChatSessionManager::with_claude_manager(claude_manager.clone());
+            app.manage(claude_manager);
+            app.manage(local_chat_manager);
             log::info!("[STARTUP] Claude session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
@@ -282,6 +305,13 @@ mod tests {
             "async stopRun(",
             "async orchestrateTask(",
             "async stopOrchestrator(",
+            "async getSupportedLocalChatHarnesses(",
+            "async createLocalChatSession(",
+            "async sendLocalChatMessage(",
+            "async closeLocalChatSession(",
+            "async createClaudeSession(",
+            "async sendClaudeMessage(",
+            "async closeClaudeSession(",
         ] {
             assert!(
                 bindings.contains(command),
@@ -293,5 +323,20 @@ mod tests {
             bindings.contains("taskRunChangedEvent: TaskRunChangedEvent"),
             "generated bindings should include the TaskRun changed event"
         );
+        assert!(
+            bindings.contains("localChatSessionInitEvent: LocalChatSessionInitEvent"),
+            "generated bindings should include the neutral local chat init event"
+        );
+        for ty in [
+            "export type LocalChatHarnessKind",
+            "export type LocalChatHarnessCatalog",
+            "export type CreateLocalChatSessionInput",
+            "export type LocalChatSessionError",
+        ] {
+            assert!(
+                bindings.contains(ty),
+                "generated bindings should include {ty}"
+            );
+        }
     }
 }
