@@ -3,7 +3,8 @@
 //! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
-use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager, LocalPermissionDecision};
+use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager};
+use crate::local_chat::permissions::LocalPermissionDecision;
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
     CreateClaudeSessionInput, InitializeProjectResult, PermissionDecisionBehavior,
