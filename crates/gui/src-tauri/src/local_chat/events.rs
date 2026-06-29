@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
 use tauri_specta::Event;
 
 use crate::local_chat::harness::LocalChatHarnessKind;
@@ -108,21 +110,48 @@ impl LocalChatEvent {
 #[derive(Clone)]
 pub(crate) struct LocalChatEventSink {
     app_handle: Option<tauri::AppHandle>,
+    #[cfg(test)]
+    captured_events: Option<Arc<Mutex<Vec<LocalChatEvent>>>>,
 }
 
 impl LocalChatEventSink {
     pub(crate) fn tauri(app_handle: tauri::AppHandle) -> Self {
         Self {
             app_handle: Some(app_handle),
+            #[cfg(test)]
+            captured_events: None,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn inert_for_tests() -> Self {
-        Self { app_handle: None }
+        Self {
+            app_handle: None,
+            captured_events: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn capturing_for_tests() -> (Self, Arc<Mutex<Vec<LocalChatEvent>>>) {
+        let captured_events = Arc::new(Mutex::new(Vec::new()));
+        (
+            Self {
+                app_handle: None,
+                captured_events: Some(captured_events.clone()),
+            },
+            captured_events,
+        )
     }
 
     pub(crate) fn emit(&self, event: LocalChatEvent) {
+        #[cfg(test)]
+        if let Some(captured_events) = &self.captured_events {
+            captured_events
+                .lock()
+                .expect("local chat event capture lock poisoned")
+                .push(event.clone());
+        }
+
         let Some(app_handle) = &self.app_handle else {
             return;
         };
