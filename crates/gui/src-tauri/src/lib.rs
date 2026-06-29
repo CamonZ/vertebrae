@@ -5,6 +5,7 @@ pub mod commands;
 pub mod events;
 pub mod helpers;
 pub mod install;
+pub(crate) mod local_chat;
 pub mod project_config;
 pub mod types;
 pub mod websocket_client;
