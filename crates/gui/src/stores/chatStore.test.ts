@@ -35,7 +35,7 @@ describe("chatStore", () => {
       expect("entityId" in session).toBe(false);
       expect(session.messages).toEqual([]);
       expect(session.status).toBe("open");
-      expect(session.claudeSessionId).toBeNull();
+      expect(session.backendSessionId).toBeNull();
       expect(session.lifecycle).toBe("idle");
       expect(session.streamingAssistant).toBeNull();
     });
@@ -65,8 +65,9 @@ describe("chatStore", () => {
             label: "Older",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-older",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-older",
             projectPath: "/repo/root",
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
@@ -76,8 +77,9 @@ describe("chatStore", () => {
             label: "Detached",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-detached",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-detached",
             projectPath: "/repo/root",
             isDetached: true,
             createdAt: "2026-01-03T00:00:00Z",
@@ -88,8 +90,9 @@ describe("chatStore", () => {
             label: "Newer",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-newer",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-newer",
             projectPath: "/repo/root",
             createdAt: "2026-01-02T00:00:00Z",
             updatedAt: "2026-01-02T00:00:00Z",
@@ -157,8 +160,8 @@ describe("chatStore", () => {
         text: "remember this",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      useChatStore.getState().setClaudeSessionId(id, "backend-1");
-      useChatStore.getState().setClaudeConversationId(id, "conv-1");
+      useChatStore.getState().setBackendSessionId(id, "backend-1");
+      useChatStore.getState().setProviderResumeId(id, "conv-1");
       useChatStore.getState().setSessionSelectedModel(id, "opus");
       useChatStore
         .getState()
@@ -180,8 +183,8 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id]).toMatchObject({
         label: "Task One",
         projectPath: "/repo/root",
-        claudeSessionId: null,
-        claudeConversationId: "conv-1",
+        backendSessionId: null,
+        providerResumeId: "conv-1",
         selectedModelId: "opus",
         model: "claude-sonnet-4",
         tokenUsage: { used: 50, max: 200000 },
@@ -228,8 +231,9 @@ describe("chatStore", () => {
             label: "Repo A",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-a",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-a",
             projectPath: "/repo-a",
           },
           "repo-b": {
@@ -237,8 +241,9 @@ describe("chatStore", () => {
             label: "Repo B",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-b",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-b",
             projectPath: "/repo-b",
           },
         },
@@ -260,8 +265,9 @@ describe("chatStore", () => {
             label: "Legacy",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-legacy",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-legacy",
             projectPath: null,
           },
         },
@@ -275,7 +281,7 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
         label: "Repo A",
         projectPath: "/repo-a",
-        claudeConversationId: null,
+        providerResumeId: null,
       });
     });
 
@@ -287,8 +293,9 @@ describe("chatStore", () => {
             label: "Legacy",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-legacy",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-legacy",
             projectPath: null,
           },
         },
@@ -302,13 +309,13 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
         label: "Legacy",
         projectPath: null,
-        claudeConversationId: "conv-legacy",
+        providerResumeId: "conv-legacy",
       });
     });
 
     it("hydrates a locally closed session so it can resume", () => {
       const id = useChatStore.getState().openSession("Task One", "/repo/root");
-      useChatStore.getState().setClaudeConversationId(id, "conv-closed");
+      useChatStore.getState().setProviderResumeId(id, "conv-closed");
       useChatStore.getState().markSessionClosed(id);
       useChatStore.setState({
         sessions: {},
@@ -324,7 +331,7 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[reopened]).toMatchObject({
         status: "open",
         lifecycle: "closed",
-        claudeConversationId: "conv-closed",
+        providerResumeId: "conv-closed",
       });
     });
   });
@@ -339,13 +346,13 @@ describe("chatStore", () => {
 
     it("keeps durable resume state when closing the in-memory session", () => {
       const id = useChatStore.getState().openSession("T1", "/repo/root");
-      useChatStore.getState().setClaudeConversationId(id, "conv-close");
+      useChatStore.getState().setProviderResumeId(id, "conv-close");
       useChatStore.getState().closeSession(id);
 
       const reopened = useChatStore.getState().openSession("T1", "/repo/root");
 
       expect(reopened).toBe(id);
-      expect(useChatStore.getState().sessions[id].claudeConversationId).toBe(
+      expect(useChatStore.getState().sessions[id].providerResumeId).toBe(
         "conv-close"
       );
     });
@@ -453,9 +460,7 @@ describe("chatStore", () => {
       const second = useChatStore
         .getState()
         .startFreshSessionInNewPane("Second");
-      const third = useChatStore
-        .getState()
-        .startFreshSessionInNewPane("Third");
+      const third = useChatStore.getState().startFreshSessionInNewPane("Third");
 
       const state = useChatStore.getState();
       expect(state.activeSessionId).toBe(third);
@@ -549,8 +554,9 @@ describe("chatStore", () => {
           },
         ],
         status: "open",
-        claudeSessionId: "stale-backend",
-        claudeConversationId: "conv-resume",
+        harness: "claude",
+        backendSessionId: "stale-backend",
+        providerResumeId: "conv-resume",
         projectPath: "/repo",
       });
 
@@ -562,8 +568,8 @@ describe("chatStore", () => {
         "persisted",
       ]);
       expect(useChatStore.getState().sessions.persisted).toMatchObject({
-        claudeSessionId: null,
-        claudeConversationId: "conv-resume",
+        backendSessionId: null,
+        providerResumeId: "conv-resume",
         lifecycleError: null,
         streamingAssistant: null,
       });
@@ -578,13 +584,13 @@ describe("chatStore", () => {
 
     it("focuses an already-loaded session without dropping live runtime state", () => {
       const id = useChatStore.getState().openSession("Live Task", "/repo");
-      useChatStore.getState().setClaudeSessionId(id, "live-backend");
+      useChatStore.getState().setBackendSessionId(id, "live-backend");
       useChatStore.getState().setSessionLifecycle(id, "streaming");
 
       expect(useChatStore.getState().selectPersistedSession(id)).toBe(true);
 
       expect(useChatStore.getState().sessions[id]).toMatchObject({
-        claudeSessionId: "live-backend",
+        backendSessionId: "live-backend",
         lifecycle: "streaming",
       });
     });
@@ -604,8 +610,9 @@ describe("chatStore", () => {
             label: "Detached",
             messages: [],
             status: "open",
-            claudeSessionId: null,
-            claudeConversationId: "conv-detached",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-detached",
             projectPath: "/repo",
             isDetached: true,
           },
@@ -632,7 +639,7 @@ describe("chatStore", () => {
       const remove = useChatStore
         .getState()
         .startFreshSession("Remove", "/repo");
-      useChatStore.getState().setClaudeConversationId(remove, "conv-remove");
+      useChatStore.getState().setProviderResumeId(remove, "conv-remove");
 
       useChatStore.getState().deleteLocalSession(remove);
 
@@ -678,7 +685,7 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(fresh)).toMatchObject({
         id: fresh,
         label: "Task Chat",
-        claudeConversationId: null,
+        providerResumeId: null,
       });
     });
   });
@@ -904,34 +911,34 @@ describe("chatStore", () => {
     });
   });
 
-  describe("setClaudeSessionId", () => {
+  describe("setBackendSessionId", () => {
     it("sets the backend session ID", () => {
       const id = useChatStore.getState().openSession("T1");
 
-      useChatStore.getState().setClaudeSessionId(id, "claude-session-abc");
+      useChatStore.getState().setBackendSessionId(id, "claude-session-abc");
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.claudeSessionId).toBe("claude-session-abc");
+      expect(session.backendSessionId).toBe("claude-session-abc");
     });
 
     it("does nothing for non-existent session", () => {
-      useChatStore.getState().setClaudeSessionId("non-existent", "abc");
+      useChatStore.getState().setBackendSessionId("non-existent", "abc");
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
     });
   });
 
-  describe("setClaudeConversationId", () => {
+  describe("setProviderResumeId", () => {
     it("sets the conversation ID", () => {
       const id = useChatStore.getState().openSession("T1");
 
-      useChatStore.getState().setClaudeConversationId(id, "conv-abc-123");
+      useChatStore.getState().setProviderResumeId(id, "conv-abc-123");
 
       const session = useChatStore.getState().sessions[id];
-      expect(session.claudeConversationId).toBe("conv-abc-123");
+      expect(session.providerResumeId).toBe("conv-abc-123");
     });
 
     it("does nothing for non-existent session", () => {
-      useChatStore.getState().setClaudeConversationId("non-existent", "conv-1");
+      useChatStore.getState().setProviderResumeId("non-existent", "conv-1");
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
     });
   });
@@ -1052,19 +1059,19 @@ describe("chatStore", () => {
         text: "Hello",
         timestamp: "2024-01-01T00:00:00Z",
       });
-      useChatStore.getState().setClaudeSessionId(id, "backend-1");
+      useChatStore.getState().setBackendSessionId(id, "backend-1");
 
       useChatStore.getState().markSessionClosed(id);
 
       const session = useChatStore.getState().sessions[id];
       expect(session.status).toBe("open");
       expect(session.lifecycle).toBe("closed");
-      expect(session.claudeSessionId).toBeNull();
+      expect(session.backendSessionId).toBeNull();
     });
 
     it("drops empty closed sessions from runtime and local history", () => {
       const id = useChatStore.getState().openSession("T1", "/repo");
-      useChatStore.getState().setClaudeSessionId(id, "backend-1");
+      useChatStore.getState().setBackendSessionId(id, "backend-1");
 
       useChatStore.getState().markSessionClosed(id);
 
@@ -1082,7 +1089,7 @@ describe("chatStore", () => {
         text: "Hello",
         timestamp: "2024-01-01T00:00:00Z",
       });
-      useChatStore.getState().setClaudeConversationId(id, "conv-keep");
+      useChatStore.getState().setProviderResumeId(id, "conv-keep");
       expect(loadPersistedLocalChatSession(id)).not.toBeNull();
 
       useChatStore.getState().markSessionClosed(id);
@@ -1090,8 +1097,8 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)).toMatchObject({
         id,
         lifecycle: "closed",
-        claudeSessionId: null,
-        claudeConversationId: "conv-keep",
+        backendSessionId: null,
+        providerResumeId: "conv-keep",
         messages: [
           {
             kind: "user",
@@ -1134,9 +1141,9 @@ describe("chatStore", () => {
         text: "remove me",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      useChatStore.getState().setClaudeSessionId(id, "backend-clear");
-      useChatStore.getState().setClaudeConversationId(id, "conv-clear");
-      expect(loadPersistedLocalChatSession(id)?.claudeConversationId).toBe(
+      useChatStore.getState().setBackendSessionId(id, "backend-clear");
+      useChatStore.getState().setProviderResumeId(id, "conv-clear");
+      expect(loadPersistedLocalChatSession(id)?.providerResumeId).toBe(
         "conv-clear"
       );
 
@@ -1145,8 +1152,8 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)).toBeNull();
       expect(useChatStore.getState().sessions[id]).toMatchObject({
         messages: [],
-        claudeSessionId: null,
-        claudeConversationId: null,
+        backendSessionId: null,
+        providerResumeId: null,
         status: "open",
       });
 
@@ -1160,7 +1167,7 @@ describe("chatStore", () => {
       expect(reopened).not.toBe(id);
       expect(useChatStore.getState().sessions[reopened].messages).toEqual([]);
       expect(
-        useChatStore.getState().sessions[reopened].claudeConversationId
+        useChatStore.getState().sessions[reopened].providerResumeId
       ).toBeNull();
     });
 

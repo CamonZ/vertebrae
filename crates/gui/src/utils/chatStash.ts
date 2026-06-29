@@ -1,4 +1,5 @@
 import type { ChatSession } from "../stores/chatStore";
+import { normalizeLocalChatSession } from "./localChatPersistence";
 
 const KEY_PREFIX = "chat-stash:";
 
@@ -22,9 +23,10 @@ function handoffSession(session: ChatSession): ChatSession {
  *
  * Tauri webviews of the same origin share `localStorage`, which makes this
  * a valid hand-off channel. Partial assistant messages are filtered out, while
- * the live streaming overlay is preserved; Claude events are broadcast to all
- * windows, so once the pop-out's `useLocalChat` hook mounts with the existing
- * `claudeSessionId`, real-time updates resume without further plumbing.
+ * the live streaming overlay is preserved; local-chat events are broadcast to
+ * all windows, so once the pop-out's `useLocalChat` hook mounts with the
+ * existing `backendSessionId`, real-time updates resume without further
+ * plumbing.
  */
 export function stashChatSession(session: ChatSession): void {
   try {
@@ -46,7 +48,9 @@ export function takeStashedChatSession(sessionId: string): ChatSession | null {
     const raw = localStorage.getItem(key(sessionId));
     if (!raw) return null;
     localStorage.removeItem(key(sessionId));
-    return JSON.parse(raw) as ChatSession;
+    return normalizeLocalChatSession(JSON.parse(raw), {
+      preserveRuntimeBackendSessionId: true,
+    });
   } catch {
     return null;
   }

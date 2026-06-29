@@ -3,7 +3,7 @@
 //! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
-use crate::claude_session::{ClaudeModelCatalog, ClaudeSessionManager};
+use crate::claude_session::ClaudeSessionManager;
 use crate::local_chat::permissions::LocalPermissionDecision;
 use crate::local_chat::{
     CreateLocalChatSessionInput, LocalChatHarnessCatalog, LocalChatSessionError,
@@ -11,9 +11,9 @@ use crate::local_chat::{
 };
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    CreateClaudeSessionInput, InitializeProjectResult, PermissionDecisionBehavior,
-    ResolvePermissionRequestInput, SacrumConfigStatus, Section, SessionLog, Step, StepExecution,
-    StopRunRequest, Task, TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestInput,
+    SacrumConfigStatus, Section, SessionLog, Step, StepExecution, StopRunRequest, Task,
+    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -1645,73 +1645,6 @@ pub async fn close_local_chat_session(
         backend_session_id
     );
     local_chat_manager.close_session(&backend_session_id).await
-}
-
-// ============================================================================
-// Claude Session Commands (JSONL streaming compatibility)
-// ============================================================================
-
-/// Create a new Claude session with JSONL streaming
-///
-/// Spawns the Claude CLI with streaming JSON input/output mode.
-/// If `resume_session_id` is provided, continues an existing conversation.
-/// Returns immediately; the session emits events for all output.
-#[tauri::command]
-#[specta::specta]
-pub async fn create_claude_session(
-    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
-    app_handle: tauri::AppHandle,
-    input: CreateClaudeSessionInput,
-) -> Result<(), crate::claude_session::ClaudeSessionError> {
-    log::info!(
-        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}, model={:?}, permission_mode={:?}",
-        input.session_id,
-        input.working_dir,
-        input.resume_session_id,
-        input.model_id,
-        input.permission_mode
-    );
-
-    claude_manager.create_session(input, app_handle).await
-}
-
-/// List supported Claude Code models for local chat sessions.
-#[tauri::command]
-#[specta::specta]
-pub fn get_supported_claude_models() -> ClaudeModelCatalog {
-    crate::claude_session::supported_claude_model_catalog()
-}
-
-/// Send a message to a Claude session
-///
-/// Sends a user message to an active Claude session via stdin.
-#[tauri::command]
-#[specta::specta]
-pub async fn send_claude_message(
-    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
-    session_id: String,
-    content: String,
-) -> Result<(), crate::claude_session::ClaudeSessionError> {
-    log::info!(
-        "send_claude_message called: session_id={}, content_len={}",
-        session_id,
-        content.len()
-    );
-
-    claude_manager.send_message(&session_id, &content).await
-}
-
-/// Close a Claude session
-///
-/// Terminates the Claude CLI process for the given session.
-#[tauri::command]
-#[specta::specta]
-pub async fn close_claude_session(
-    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
-    session_id: String,
-) -> Result<(), crate::claude_session::ClaudeSessionError> {
-    log::info!("close_claude_session called: session_id={}", session_id);
-    claude_manager.close_session(&session_id).await
 }
 
 /// Resolve a Claude permission request shown in the GUI.

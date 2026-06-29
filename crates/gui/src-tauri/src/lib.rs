@@ -21,11 +21,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
-use claude_session::{
-    ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
-    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeSessionUsageEvent,
-    ClaudeSessionWarningEvent, ClaudeTextEvent, ClaudeToolCallEvent, ClaudeToolResultEvent,
-};
+use claude_session::ClaudeSessionManager;
 use commands::AppState;
 use events::{
     PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
@@ -138,11 +134,6 @@ fn create_builder() -> Builder {
             commands::create_local_chat_session,
             commands::send_local_chat_message,
             commands::close_local_chat_session,
-            // Claude session commands (JSONL streaming)
-            commands::create_claude_session,
-            commands::get_supported_claude_models,
-            commands::send_claude_message,
-            commands::close_claude_session,
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,
@@ -175,17 +166,7 @@ fn create_builder() -> Builder {
             LocalChatSessionUsageEvent,
             LocalChatSessionEndEvent,
             LocalChatSessionErrorEvent,
-            LocalChatSessionWarningEvent,
-            // Claude session events
-            ClaudeSessionInitEvent,
-            ClaudeTextEvent,
-            ClaudeToolCallEvent,
-            ClaudeToolResultEvent,
-            ClaudeSessionUsageEvent,
-            ClaudeSessionEndEvent,
-            ClaudeSessionErrorEvent,
-            ClaudeSessionWarningEvent,
-            ClaudePermissionRequestEvent
+            LocalChatSessionWarningEvent
         ])
 }
 
@@ -309,9 +290,6 @@ mod tests {
             "async createLocalChatSession(",
             "async sendLocalChatMessage(",
             "async closeLocalChatSession(",
-            "async createClaudeSession(",
-            "async sendClaudeMessage(",
-            "async closeClaudeSession(",
         ] {
             assert!(
                 bindings.contains(command),

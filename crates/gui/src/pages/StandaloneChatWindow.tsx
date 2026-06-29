@@ -14,9 +14,9 @@ import { loadPersistedLocalChatSession } from "../utils/localChatPersistence";
  * in `localStorage` before opening us; we read+delete it synchronously
  * before first paint and seed the store so `ChatWindow` and
  * `useLocalChat` find the session immediately. The one-shot stash preserves
- * a live `claudeSessionId`; durable fallback hydration keeps the Claude
- * conversation ID so the backend can resume without trusting a stale process
- * local session ID.
+ * a live `backendSessionId`; durable fallback hydration keeps the provider
+ * resume ID so the backend can resume without trusting a stale process-local
+ * session ID.
  */
 export function StandaloneChatWindow() {
   const [params] = useSearchParams();

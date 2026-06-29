@@ -13,7 +13,6 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
 use tauri::Manager;
-use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::commands::AppState;
@@ -82,111 +81,6 @@ fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
         end -= 1;
     }
     &s[..end]
-}
-
-// ============================================================================
-// Events emitted to the frontend
-// ============================================================================
-
-/// Event emitted when Claude session initializes
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeSessionInitEvent {
-    pub session_id: String,
-    /// Claude's conversation ID - use this with --resume for multi-turn
-    pub claude_conversation_id: Option<String>,
-    pub model: String,
-    pub tools: Vec<String>,
-}
-
-/// Event emitted when Claude produces text output
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeTextEvent {
-    pub session_id: String,
-    pub text: String,
-    /// Whether this is a partial (streaming) message
-    pub is_partial: bool,
-}
-
-/// Event emitted when Claude calls a tool
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeToolCallEvent {
-    pub session_id: String,
-    pub tool_id: String,
-    pub tool_name: String,
-    pub input: String, // JSON string
-    /// `tool_use` id of the parent spawn (Task/Agent) tool call when this call
-    /// was made by a sub-agent; `None` for main-thread calls. Drives sub-agent
-    /// nesting in the chat thread.
-    pub parent_tool_use_id: Option<String>,
-}
-
-/// Event emitted when a tool returns a result
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeToolResultEvent {
-    pub session_id: String,
-    pub tool_id: String,
-    pub result: String,
-    pub is_error: bool,
-    /// Parent spawn `tool_use` id when this result belongs to a sub-agent;
-    /// `None` for main-thread results. See [`ClaudeToolCallEvent`].
-    pub parent_tool_use_id: Option<String>,
-}
-
-/// Event emitted after each assistant message with the latest input-context figure.
-///
-/// `context_tokens` is the total request input for the most recent assistant
-/// turn: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.
-/// This is the source of truth for the chat badge's current request context
-/// occupancy. Output tokens are excluded because they are response tokens, not
-/// request input.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeSessionUsageEvent {
-    pub session_id: String,
-    /// Model name reported by the assistant message
-    pub model: String,
-    /// Current request input-context tokens for the latest assistant turn
-    pub context_tokens: u32,
-    /// Backend-reported context window (fallback when frontend lookup misses)
-    pub context_window: u32,
-}
-
-/// Event emitted when Claude session ends
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeSessionEndEvent {
-    pub session_id: String,
-    pub duration_ms: u32,
-    pub cost_usd: f64,
-    pub num_turns: u32,
-    pub result: String,
-    pub is_error: bool,
-    /// Sum of per-model input contexts from result model usage (input + cache,
-    /// excluding output). This is a session summary and may exceed any single
-    /// model's context window.
-    pub context_tokens: u32,
-    /// Maximum reported model context window size
-    pub context_window: u32,
-}
-
-/// Event emitted when Claude session encounters an error
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeSessionErrorEvent {
-    pub session_id: String,
-    pub error: String,
-}
-
-/// Event emitted when Claude session startup recovers from a non-fatal issue.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudeSessionWarningEvent {
-    pub session_id: String,
-    pub warning: String,
-}
-
-/// Event emitted when Claude requests permission
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ClaudePermissionRequestEvent {
-    pub session_id: String,
-    pub tool_name: String,
-    pub permission_message: String,
 }
 
 fn current_project_path<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Option<String> {

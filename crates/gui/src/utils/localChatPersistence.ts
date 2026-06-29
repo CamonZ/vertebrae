@@ -3,11 +3,16 @@ import type {
   ChatSession,
   LocalChatLifecycle,
 } from "../stores/chatStore";
-import type { PermissionMode } from "../bindings";
+import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
 
 const STORAGE_KEY = "local-chat-sessions:v1";
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
 const CLEARED_KEY_PREFIX = `${STORAGE_KEY}:cleared:`;
+export const DEFAULT_LOCAL_CHAT_HARNESS: LocalChatHarnessKind = "claude";
+const VALID_LOCAL_CHAT_HARNESSES = new Set<LocalChatHarnessKind>([
+  "claude",
+  "codex",
+]);
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "accept_edits",
   "auto",
@@ -16,30 +21,74 @@ const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "dont_ask",
   "plan",
 ]);
+const VALID_LIFECYCLES = new Set<LocalChatLifecycle>([
+  "idle",
+  "starting",
+  "resuming",
+  "sending",
+  "streaming",
+  "closing",
+  "closed",
+  "error",
+]);
 const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
 const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
 export interface LocalChatSessionSummary {
   id: string;
   label: string;
+  harness: LocalChatHarnessKind;
   preview: string;
   model?: string;
   selectedModelId?: string | null;
   createdAt: string;
   updatedAt: string;
   projectPath: string | null;
-  claudeConversationId: string | null;
+  providerResumeId: string | null;
   messageCount: number;
   lifecycle: LocalChatLifecycle;
+}
+
+type LegacyLocalChatSessionRecord = Partial<ChatSession> & {
+  claudeSessionId?: unknown;
+  claudeConversationId?: unknown;
+};
+
+interface NormalizeSessionOptions {
+  preserveRuntimeBackendSessionId?: boolean;
 }
 
 function canUseStorage(): boolean {
   return typeof localStorage !== "undefined";
 }
 
-function normalizeSession(value: unknown): ChatSession | null {
+function normalizeHarness(value: unknown): LocalChatHarnessKind {
+  return typeof value === "string" &&
+    VALID_LOCAL_CHAT_HARNESSES.has(value as LocalChatHarnessKind)
+    ? (value as LocalChatHarnessKind)
+    : DEFAULT_LOCAL_CHAT_HARNESS;
+}
+
+function normalizeRuntimeBackendSessionId(
+  candidate: LegacyLocalChatSessionRecord,
+  options: NormalizeSessionOptions
+): string | null {
+  if (!options.preserveRuntimeBackendSessionId) return null;
+  if (typeof candidate.backendSessionId === "string") {
+    return candidate.backendSessionId;
+  }
+  if (typeof candidate.claudeSessionId === "string") {
+    return candidate.claudeSessionId;
+  }
+  return null;
+}
+
+export function normalizeLocalChatSession(
+  value: unknown,
+  options: NormalizeSessionOptions = {}
+): ChatSession | null {
   if (typeof value !== "object" || value === null) return null;
-  const candidate = value as Partial<ChatSession>;
+  const candidate = value as LegacyLocalChatSessionRecord;
   if (typeof candidate.id !== "string") return null;
   if (typeof candidate.label !== "string") return null;
   if (!Array.isArray(candidate.messages)) return null;
@@ -47,7 +96,9 @@ function normalizeSession(value: unknown): ChatSession | null {
 
   const lifecycle =
     typeof candidate.lifecycle === "string" &&
-    DURABLE_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle)
+    (options.preserveRuntimeBackendSessionId
+      ? VALID_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle)
+      : DURABLE_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle))
       ? (candidate.lifecycle as LocalChatLifecycle)
       : candidate.status === "closed"
         ? "closed"
@@ -65,17 +116,21 @@ function normalizeSession(value: unknown): ChatSession | null {
     typeof candidate.preview === "string"
       ? candidate.preview
       : buildPreview(messages);
+  const providerResumeId =
+    typeof candidate.providerResumeId === "string"
+      ? candidate.providerResumeId
+      : typeof candidate.claudeConversationId === "string"
+        ? candidate.claudeConversationId
+        : null;
 
   return {
     id: candidate.id,
     label: candidate.label,
     messages,
     status: candidate.status,
-    claudeSessionId: null,
-    claudeConversationId:
-      typeof candidate.claudeConversationId === "string"
-        ? candidate.claudeConversationId
-        : null,
+    harness: normalizeHarness(candidate.harness),
+    backendSessionId: normalizeRuntimeBackendSessionId(candidate, options),
+    providerResumeId,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
     selectedModelId:
@@ -101,10 +156,25 @@ function normalizeSession(value: unknown): ChatSession | null {
             max: candidate.tokenUsage.max,
           }
         : undefined,
-    isDetached: false,
+    isDetached: options.preserveRuntimeBackendSessionId
+      ? candidate.isDetached === true
+      : false,
     lifecycle,
-    lifecycleError: null,
-    streamingAssistant: null,
+    lifecycleError: options.preserveRuntimeBackendSessionId
+      ? typeof candidate.lifecycleError === "string"
+        ? candidate.lifecycleError
+        : null
+      : null,
+    streamingAssistant:
+      options.preserveRuntimeBackendSessionId &&
+      candidate.streamingAssistant &&
+      typeof candidate.streamingAssistant.text === "string" &&
+      typeof candidate.streamingAssistant.timestamp === "string"
+        ? {
+            text: candidate.streamingAssistant.text,
+            timestamp: candidate.streamingAssistant.timestamp,
+          }
+        : null,
     createdAt,
     updatedAt,
     preview,
@@ -147,18 +217,18 @@ function buildPreview(messages: ChatMessage[]): string {
 }
 
 export function hasDurableLocalChatContent(
-  session: Pick<ChatSession, "messages" | "claudeConversationId">
+  session: Pick<ChatSession, "messages" | "providerResumeId">
 ): boolean {
   return (
     durableMessages(session.messages).length > 0 ||
-    !!session.claudeConversationId?.trim()
+    !!session.providerResumeId?.trim()
   );
 }
 
 export function isDisposableClosedLocalChatSession(
   session: Pick<
     ChatSession,
-    "messages" | "claudeConversationId" | "lifecycle" | "status"
+    "messages" | "providerResumeId" | "lifecycle" | "status"
   >
 ): boolean {
   return (
@@ -219,11 +289,18 @@ function serializeSession(
     normalizeTimestamp(undefined, messages, "last", new Date().toISOString());
 
   return {
-    ...session,
+    id: session.id,
+    label: session.label,
     messages,
-    claudeSessionId: null,
+    status: session.status,
+    harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    backendSessionId: null,
+    providerResumeId: session.providerResumeId ?? null,
     projectPath: session.projectPath ?? null,
+    selectedModelId: session.selectedModelId,
     permissionMode: session.permissionMode ?? "default",
+    model: session.model,
+    tokenUsage: session.tokenUsage,
     isDetached: false,
     lifecycle: session.lifecycle === "closed" ? "closed" : "idle",
     lifecycleError: null,
@@ -244,12 +321,12 @@ function readSessions(): Record<string, ChatSession> {
 
     const entries = Array.isArray(parsed)
       ? parsed.map((session) => {
-          const normalized = normalizeSession(session);
+          const normalized = normalizeLocalChatSession(session);
           return [normalized?.id, normalized];
         })
       : Object.entries(parsed).map(([id, session]) => [
           id,
-          normalizeSession(session),
+          normalizeLocalChatSession(session),
         ]);
 
     return Object.fromEntries(
@@ -312,12 +389,13 @@ export function listPersistedLocalChatSessions(
       id: session.id,
       label: session.label,
       preview: session.preview ?? buildPreview(session.messages),
+      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       model: session.model,
       selectedModelId: session.selectedModelId,
       createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
       updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
       projectPath: session.projectPath ?? null,
-      claudeConversationId: session.claudeConversationId,
+      providerResumeId: session.providerResumeId,
       messageCount: session.messages.length,
       lifecycle: session.lifecycle ?? "idle",
     }))

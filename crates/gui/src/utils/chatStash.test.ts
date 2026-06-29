@@ -12,9 +12,10 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     label: "Sample",
     messages: [],
     status: "open",
-    claudeSessionId: "claude-abc",
-    claudeConversationId: null,
+    backendSessionId: "claude-abc",
+    providerResumeId: null,
     ...overrides,
+    harness: overrides.harness ?? "claude",
   };
 }
 
@@ -34,7 +35,7 @@ describe("chatStash", () => {
     const taken = takeStashedChatSession(session.id);
     expect(taken).not.toBeNull();
     expect(taken!.id).toBe("s-1");
-    expect(taken!.claudeSessionId).toBe("claude-abc");
+    expect(taken!.backendSessionId).toBe("claude-abc");
     expect(taken!.messages).toHaveLength(1);
     expect(taken!.messages[0]).toMatchObject({ kind: "user", text: "hi" });
   });
@@ -60,7 +61,7 @@ describe("chatStash", () => {
 
     const taken = takeStashedChatSession("s-1");
     expect(taken).not.toBeNull();
-    expect(taken!.claudeSessionId).toBe("claude-abc");
+    expect(taken!.backendSessionId).toBe("claude-abc");
     expect(taken!.lifecycle).toBe("streaming");
     expect(taken!.streamingAssistant).toMatchObject({
       text: "partial overlay",

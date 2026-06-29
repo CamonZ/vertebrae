@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocalChat } from "../../hooks/useLocalChat";
 import { commands } from "../../bindings";
 import type {
-  ClaudeModelCatalog,
   JsonValue,
+  LocalChatHarnessCatalog,
   PermissionMode,
 } from "../../bindings";
 import {
@@ -17,6 +17,7 @@ import {
   utilizationLevel,
 } from "../../utils/modelContextWindow";
 import {
+  DEFAULT_LOCAL_CHAT_HARNESS,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
 } from "../../utils/localChatPersistence";
@@ -314,12 +315,16 @@ export function ChatWindow({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [inputValue, setInputValue] = useState("");
-  const [modelCatalog, setModelCatalog] = useState<ClaudeModelCatalog | null>(
-    null
-  );
+  const [harnessCatalog, setHarnessCatalog] =
+    useState<LocalChatHarnessCatalog | null>(null);
 
-  const { session, isActive, startSession, sendMessage, closeClaudeSession } =
-    useLocalChat(sessionId);
+  const {
+    session,
+    isActive,
+    startSession,
+    sendMessage,
+    closeLocalChatSession,
+  } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setSessionSelectedModel = useChatStore(
@@ -332,9 +337,9 @@ export function ChatWindow({
   useEffect(() => {
     let cancelled = false;
     void commands
-      .getSupportedClaudeModels()
+      .getSupportedLocalChatHarnesses()
       .then((catalog) => {
-        if (!cancelled) setModelCatalog(catalog);
+        if (!cancelled) setHarnessCatalog(catalog);
       })
       .catch(() => {
         // The chat still works without a picker; backend validation remains.
@@ -344,17 +349,29 @@ export function ChatWindow({
     };
   }, []);
 
+  const visibleHarness = useMemo(() => {
+    if (!harnessCatalog) return null;
+    const harness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
+    return (
+      harnessCatalog.harnesses.find((item) => item.harness === harness) ??
+      harnessCatalog.harnesses.find(
+        (item) => item.harness === harnessCatalog.default_harness
+      ) ??
+      null
+    );
+  }, [harnessCatalog, session?.harness]);
+
   const supportedModelIds = useMemo(
-    () => new Set(modelCatalog?.models.map((model) => model.id) ?? []),
-    [modelCatalog]
+    () => new Set(visibleHarness?.models.map((model) => model.id) ?? []),
+    [visibleHarness]
   );
   const selectedModelId = session?.selectedModelId;
   const hasSession = !!session;
-  const hasConversation = !!session?.claudeConversationId;
+  const hasConversation = !!session?.providerResumeId;
   const messageCount = session?.messages.length ?? 0;
 
   useEffect(() => {
-    if (!hasSession || !modelCatalog) return;
+    if (!hasSession || !visibleHarness) return;
     if (isLocalChatSessionCleared(sessionId)) return;
     if (selectedModelId !== undefined) return;
     if (hasConversation || messageCount > 0) return;
@@ -364,7 +381,7 @@ export function ChatWindow({
       setSessionSelectedModel(sessionId, lastUsed);
     }
   }, [
-    modelCatalog,
+    visibleHarness,
     hasConversation,
     hasSession,
     messageCount,
@@ -400,12 +417,17 @@ export function ChatWindow({
   }, [inputValue, startSession]);
 
   const handleClearMessages = useCallback(async () => {
-    if (session?.claudeSessionId) {
-      const closed = await closeClaudeSession({ markClosed: false });
+    if (session?.backendSessionId) {
+      const closed = await closeLocalChatSession({ markClosed: false });
       if (!closed) return;
     }
     clearMessages(sessionId);
-  }, [clearMessages, closeClaudeSession, session?.claudeSessionId, sessionId]);
+  }, [
+    clearMessages,
+    closeLocalChatSession,
+    session?.backendSessionId,
+    sessionId,
+  ]);
 
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -425,7 +447,7 @@ export function ChatWindow({
 
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
-  const hasResume = !!session?.claudeConversationId;
+  const hasResume = !!session?.providerResumeId;
   const canUseComposer = !isBusy;
   const canSendMessage = isActive && canUseComposer;
   const shouldStartOrResume = !isActive && canUseComposer;
@@ -607,9 +629,7 @@ export function ChatWindow({
                 onClick={onSplitPane}
                 disabled={!canSplitPane}
                 title={
-                  canSplitPane
-                    ? "Split chat pane"
-                    : "No more chat panes fit"
+                  canSplitPane ? "Split chat pane" : "No more chat panes fit"
                 }
                 aria-label="Split chat pane"
               >
@@ -819,7 +839,7 @@ export function ChatWindow({
               </label>
             }
             footerRight={
-              modelCatalog ? (
+              visibleHarness ? (
                 <label className="hc-model-picker">
                   <span>Model</span>
                   <select
@@ -830,7 +850,7 @@ export function ChatWindow({
                     disabled={isBusy || isActive}
                   >
                     <option value="">
-                      {session.claudeConversationId
+                      {session.providerResumeId
                         ? "Original model"
                         : "CLI default"}
                     </option>
@@ -839,7 +859,7 @@ export function ChatWindow({
                         Unsupported: {session.selectedModelId}
                       </option>
                     )}
-                    {modelCatalog.models.map((model) => (
+                    {visibleHarness.models.map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.label}
                       </option>

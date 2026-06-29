@@ -8,6 +8,7 @@ import {
   clearLastUsedLocalChatModelId,
   clearLocalChatSessionCleared,
   compareLocalChatSessionRecency,
+  DEFAULT_LOCAL_CHAT_HARNESS,
   findPersistedLocalChatSession,
   isDisposableClosedLocalChatSession,
   isLocalChatSessionCleared,
@@ -19,7 +20,7 @@ import {
   projectPathMatches,
 } from "../utils/localChatPersistence";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
-import type { PermissionMode } from "../bindings";
+import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
 
 /**
  * Message types for the Claude chat
@@ -92,10 +93,12 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Session status */
   status: "open" | "closed";
-  /** The Claude CLI session ID (for the backend) */
-  claudeSessionId: string | null;
-  /** Claude conversation ID for resume support */
-  claudeConversationId: string | null;
+  /** Local chat harness that owns the runtime session. */
+  harness: LocalChatHarnessKind;
+  /** Runtime backend session ID for the active local harness process. */
+  backendSessionId: string | null;
+  /** Provider-specific durable resume ID for this conversation. */
+  providerResumeId: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected Claude Code model alias for session startup/resume overrides. */
@@ -192,15 +195,15 @@ interface ChatStoreActions {
     sessionId: string,
     commitToMessages?: boolean
   ) => void;
-  /** Set the Claude backend session ID */
-  setClaudeSessionId: (
+  /** Set the runtime backend session ID */
+  setBackendSessionId: (
     sessionId: string,
-    claudeSessionId: string | null
+    backendSessionId: string | null
   ) => void;
-  /** Set the Claude conversation ID for resume */
-  setClaudeConversationId: (
+  /** Set the provider-specific durable resume ID */
+  setProviderResumeId: (
     sessionId: string,
-    conversationId: string | null
+    providerResumeId: string | null
   ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
@@ -276,8 +279,9 @@ function createLocalSession(
     label,
     messages: [],
     status: "open",
-    claudeSessionId: null,
-    claudeConversationId: null,
+    harness: DEFAULT_LOCAL_CHAT_HARNESS,
+    backendSessionId: null,
+    providerResumeId: null,
     projectPath,
     permissionMode: "default",
     lifecycle: "idle",
@@ -293,7 +297,8 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
   return {
     ...session,
     isDetached: false,
-    claudeSessionId: null,
+    harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    backendSessionId: null,
     lifecycle: session.lifecycle ?? "idle",
     lifecycleError: null,
     streamingAssistant: null,
@@ -501,14 +506,16 @@ function removePaneFromLayout(
 function removeSessionFromRuntimeState(
   state: ChatStoreState,
   sessionId: string
-): Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout" | "panelOpen"> {
+): Pick<
+  ChatStoreState,
+  "sessions" | "activeSessionId" | "paneLayout" | "panelOpen"
+> {
   const remaining = Object.fromEntries(
     Object.entries(state.sessions).filter(([id]) => id !== sessionId)
   );
   const normalizedPaneLayout = normalizePaneLayout(state.paneLayout, remaining);
-  const activePaneSessionId = activeSessionIdFromPaneLayout(
-    normalizedPaneLayout
-  );
+  const activePaneSessionId =
+    activeSessionIdFromPaneLayout(normalizedPaneLayout);
   const activeSessionStillOpen =
     state.activeSessionId !== null && !!remaining[state.activeSessionId];
   const sessionIds = Object.keys(remaining);
@@ -622,10 +629,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const nextSessions = { ...state.sessions, [id]: session };
         return {
           sessions: nextSessions,
-          ...focusSessionInPaneLayout(
-            { ...state, sessions: nextSessions },
-            id
-          ),
+          ...focusSessionInPaneLayout({ ...state, sessions: nextSessions }, id),
           panelOpen: true,
         };
       });
@@ -929,16 +933,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
-    setClaudeSessionId: (sessionId, claudeSessionId) => {
-      updateSession(sessionId, (session) => ({ ...session, claudeSessionId }), {
-        persist: false,
-      });
+    setBackendSessionId: (sessionId, backendSessionId) => {
+      updateSession(
+        sessionId,
+        (session) => ({ ...session, backendSessionId }),
+        {
+          persist: false,
+        }
+      );
     },
 
-    setClaudeConversationId: (sessionId, conversationId) => {
+    setProviderResumeId: (sessionId, providerResumeId) => {
       updateSession(sessionId, (session) => ({
         ...session,
-        claudeConversationId: conversationId,
+        providerResumeId,
       }));
     },
 
@@ -1001,7 +1009,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const closedSession = {
         ...session,
         status: "open" as const,
-        claudeSessionId: null,
+        backendSessionId: null,
         lifecycle: "closed" as const,
         lifecycleError: null,
         streamingAssistant: null,
@@ -1031,8 +1039,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
             [sessionId]: {
               ...session,
               messages: [],
-              claudeSessionId: null,
-              claudeConversationId: null,
+              backendSessionId: null,
+              providerResumeId: null,
               selectedModelId: session.selectedModelId ?? null,
               model: undefined,
               tokenUsage: undefined,
@@ -1061,9 +1069,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!session || session.isDetached) return;
 
       // Stash the full session so the pop-out can seed its empty store
-      // synchronously before first paint. The existing claudeSessionId is
+      // synchronously before first paint. The existing backendSessionId is
       // carried across so useLocalChat does not double-create the backend
-      // Claude session.
+      // local chat session.
       stashChatSession({ ...session, isDetached: true });
 
       const updated = { ...session, isDetached: true };
