@@ -22,8 +22,8 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
       { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
     ],
     status: "open",
-    claudeSessionId: "backend-1",
-    claudeConversationId: "conv-1",
+    backendSessionId: "backend-1",
+    providerResumeId: "conv-1",
     projectPath: "/repo",
     selectedModelId: "opus",
     model: "claude-sonnet-4",
@@ -33,6 +33,7 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     updatedAt: "2026-01-01T00:00:00Z",
     preview: "hello",
     ...overrides,
+    harness: overrides.harness ?? "claude",
   };
 }
 
@@ -49,8 +50,9 @@ describe("localChatPersistence", () => {
       id: "s-1",
       label: "Task Chat",
       status: "open",
-      claudeSessionId: null,
-      claudeConversationId: "conv-1",
+      harness: "claude",
+      backendSessionId: null,
+      providerResumeId: "conv-1",
       projectPath: "/repo",
       selectedModelId: "opus",
       permissionMode: "auto",
@@ -83,7 +85,7 @@ describe("localChatPersistence", () => {
     expect(loaded).toMatchObject({
       id: "legacy",
       label: "Task Chat",
-      claudeConversationId: "conv-1",
+      providerResumeId: "conv-1",
     });
     expect(loaded && "scope" in loaded).toBe(false);
     expect(loaded && "entityId" in loaded).toBe(false);
@@ -113,9 +115,7 @@ describe("localChatPersistence", () => {
       makeSession({ id: "repo-b", projectPath: "/repo-b" })
     );
 
-    expect(findPersistedLocalChatSession("/repo-b")?.id).toBe(
-      "repo-b"
-    );
+    expect(findPersistedLocalChatSession("/repo-b")?.id).toBe("repo-b");
   });
 
   it("finds the newest persisted session for a project path", () => {
@@ -151,7 +151,7 @@ describe("localChatPersistence", () => {
     expect(loadPersistedLocalChatSession("s-1")).toMatchObject({
       status: "open",
       lifecycle: "closed",
-      claudeConversationId: "conv-1",
+      providerResumeId: "conv-1",
     });
   });
 
@@ -159,7 +159,7 @@ describe("localChatPersistence", () => {
     persistLocalChatSession(
       makeSession({
         messages: [],
-        claudeConversationId: null,
+        providerResumeId: null,
         lifecycle: "closed",
         preview: "No messages yet",
       })
@@ -179,7 +179,7 @@ describe("localChatPersistence", () => {
           id: "ghost",
           label: "Ghost",
           messages: [],
-          claudeConversationId: null,
+          providerResumeId: null,
           lifecycle: "closed",
           preview: "No messages yet",
         }),
@@ -329,7 +329,7 @@ describe("localChatPersistence", () => {
         ],
         createdAt: "2026-01-01T12:00:00Z",
         updatedAt: "2026-01-02T00:00:00Z",
-        claudeConversationId: "conv-newer",
+        providerResumeId: "conv-newer",
       })
     );
 
@@ -341,7 +341,7 @@ describe("localChatPersistence", () => {
         createdAt: "2026-01-01T12:00:00Z",
         updatedAt: "2026-01-02T00:00:00Z",
         projectPath: "/repo",
-        claudeConversationId: "conv-newer",
+        providerResumeId: "conv-newer",
         messageCount: 1,
       }),
       expect.objectContaining({
@@ -410,9 +410,7 @@ describe("localChatPersistence", () => {
   it("does not reuse a legacy persisted session for a requested project path", () => {
     persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
 
-    expect(
-      findPersistedLocalChatSession("/repo-a")
-    ).toBeNull();
+    expect(findPersistedLocalChatSession("/repo-a")).toBeNull();
   });
 
   it("reuses a no-project persisted session when the requested project path is null", () => {
@@ -452,22 +450,37 @@ describe("localChatPersistence", () => {
     ]);
   });
 
-  it("strips stale backend session ids from raw legacy storage", () => {
+  it("hydrates legacy Claude ids into neutral fields", () => {
     localStorage.setItem(
       "local-chat-sessions:v1",
       JSON.stringify({
-        legacy: makeSession({
+        legacy: {
           id: "legacy",
+          label: "Legacy Claude Chat",
+          messages: [
+            {
+              kind: "user",
+              text: "resume me",
+              timestamp: "2026-01-01T00:00:00Z",
+            },
+          ],
+          status: "open",
           claudeSessionId: "stale-backend-session",
           claudeConversationId: "conv-legacy",
-        }),
+          projectPath: "/repo",
+        },
       })
     );
 
-    expect(loadPersistedLocalChatSession("legacy")).toMatchObject({
-      claudeSessionId: null,
-      claudeConversationId: "conv-legacy",
+    const loaded = loadPersistedLocalChatSession("legacy");
+    expect(loaded).toMatchObject({
+      id: "legacy",
+      harness: "claude",
+      backendSessionId: null,
+      providerResumeId: "conv-legacy",
     });
+    expect(loaded && "claudeSessionId" in loaded).toBe(false);
+    expect(loaded && "claudeConversationId" in loaded).toBe(false);
   });
 
   it("treats corrupt storage as an empty local session index", () => {

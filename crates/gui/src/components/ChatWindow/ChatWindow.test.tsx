@@ -1,10 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
+
+const { permissionRequestListeners } = vi.hoisted(() => ({
+  permissionRequestListeners: [] as Array<(event: { payload: unknown }) => void>,
+}));
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -17,18 +27,28 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
-    getSupportedClaudeModels: vi.fn().mockResolvedValue({
-      defaultModelId: "sonnet",
-      models: [
-        { id: "sonnet", label: "Sonnet" },
-        { id: "opus", label: "Opus" },
-        { id: "haiku", label: "Haiku" },
-        { id: "fable", label: "Fable" },
+    getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          supports_resume: true,
+          models: [
+            { id: "sonnet", label: "Sonnet" },
+            { id: "opus", label: "Opus" },
+            { id: "haiku", label: "Haiku" },
+            { id: "fable", label: "Fable" },
+          ],
+        },
       ],
     }),
-    createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
-    closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
+    closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
     getTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     getStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
@@ -41,19 +61,33 @@ vi.mock("../../bindings", () => ({
     getTaskExecutions: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
   },
   events: {
-    claudeSessionInitEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeSessionUsageEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeToolResultEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudePermissionRequestEvent: {
+    localChatSessionInitEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
-    claudeSessionEndEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeSessionErrorEvent: {
+    localChatSessionUsageEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
-    claudeSessionWarningEvent: {
+    localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatToolResultEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    permissionRequestEvent: {
+      listen: vi.fn((listener) => {
+        permissionRequestListeners.push(listener);
+        return Promise.resolve(() => {
+          const index = permissionRequestListeners.indexOf(listener);
+          if (index !== -1) permissionRequestListeners.splice(index, 1);
+        });
+      }),
+    },
+    localChatSessionEndEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    localChatSessionErrorEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    localChatSessionWarningEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },
@@ -65,8 +99,9 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
     label: "Test Task",
     messages: [],
     status: "open",
-    claudeSessionId: null,
-    claudeConversationId: null,
+    harness: "claude",
+    backendSessionId: null,
+    providerResumeId: null,
     ...overrides,
   };
 }
@@ -74,6 +109,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    permissionRequestListeners.length = 0;
     localStorage.clear();
     useChatStore.setState({
       sessions: {},
@@ -145,15 +181,11 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
 
-    render(
-      <ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />
-    );
+    render(<ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />);
 
     expect(screen.queryByTitle(/Widen scope/)).not.toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Widen chat panel" })
-    );
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
 
     expect(onToggleWide).toHaveBeenCalledTimes(1);
   });
@@ -290,8 +322,7 @@ describe("ChatWindow", () => {
   });
 
   it("does not render stored context summaries", () => {
-    const session = createSession({
-    });
+    const session = createSession({});
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -307,7 +338,7 @@ describe("ChatWindow", () => {
   });
 
   it("does not show the standalone end session button", () => {
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -371,10 +402,10 @@ describe("ChatWindow", () => {
     ).toBeNull();
     expect(permissionPicker).toHaveValue("default");
     expect(
-      Array.from(
-        (permissionPicker as HTMLSelectElement).options,
-        (option) => [option.textContent, option.value]
-      )
+      Array.from((permissionPicker as HTMLSelectElement).options, (option) => [
+        option.textContent,
+        option.value,
+      ])
     ).toEqual([
       ["Ask before edits", "default"],
       ["Edit automatically", "accept_edits"],
@@ -404,11 +435,12 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Start session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-        session_id: expect.any(String),
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+        backend_session_id: expect.any(String),
+        harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",
-        resume_session_id: null,
+        provider_resume_id: null,
         model_id: "opus",
         permission_mode: "default",
       });
@@ -437,11 +469,12 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Start session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-        session_id: expect.any(String),
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+        backend_session_id: expect.any(String),
+        harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",
-        resume_session_id: null,
+        provider_resume_id: null,
         model_id: null,
         permission_mode: "plan",
       });
@@ -453,7 +486,7 @@ describe("ChatWindow", () => {
 
   it("disables model and permission pickers while active or busy", async () => {
     const activeSession = createSession({
-      claudeSessionId: "claude-active",
+      backendSessionId: "claude-active",
     });
     useChatStore.setState({
       sessions: { "test-session": activeSession },
@@ -510,11 +543,12 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Start session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-        session_id: expect.any(String),
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+        backend_session_id: expect.any(String),
+        harness: "claude",
         working_dir: "/test/project",
         initial_prompt: "Start",
-        resume_session_id: null,
+        provider_resume_id: null,
         model_id: null,
         permission_mode: "default",
       });
@@ -543,7 +577,7 @@ describe("ChatWindow", () => {
   });
 
   it("does not assign a default model to old resumable sessions without a saved choice", async () => {
-    const session = createSession({ claudeConversationId: "conv-existing" });
+    const session = createSession({ providerResumeId: "conv-existing" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -607,7 +641,7 @@ describe("ChatWindow", () => {
   it("closes the backend before clearing an active session", async () => {
     const user = userEvent.setup();
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "streaming",
       messages: [
         {
@@ -628,7 +662,7 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Clear messages"));
 
     await waitFor(() => {
-      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
         "claude-abc"
       );
       expect(
@@ -640,7 +674,7 @@ describe("ChatWindow", () => {
   it("keeps an empty active chat open after clearing its backend session", async () => {
     const user = userEvent.setup();
     const session = createSession({
-      claudeSessionId: "claude-empty",
+      backendSessionId: "claude-empty",
       lifecycle: "idle",
       messages: [],
     });
@@ -655,12 +689,12 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Clear messages"));
 
     await waitFor(() => {
-      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
         "claude-empty"
       );
       expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
         messages: [],
-        claudeSessionId: null,
+        backendSessionId: null,
         lifecycle: "idle",
       });
       expect(useChatStore.getState().panelOpen).toBe(true);
@@ -668,13 +702,13 @@ describe("ChatWindow", () => {
   });
 
   it("keeps messages when backend close fails during clear", async () => {
-    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "pipe closed" },
     } as never);
     const user = userEvent.setup();
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "streaming",
       messages: [
         {
@@ -695,19 +729,19 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Clear messages"));
 
     await waitFor(() => {
-      expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
         "claude-abc"
       );
       const current = useChatStore.getState().sessions["test-session"];
       expect(current.messages).toHaveLength(1);
-      expect(current.claudeSessionId).toBe("claude-abc");
+      expect(current.backendSessionId).toBe("claude-abc");
       expect(current.lifecycle).toBe("error");
       expect(current.lifecycleError).toBe("pipe closed");
     });
   });
 
   it("shows placeholder text for idle session", () => {
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -722,7 +756,7 @@ describe("ChatWindow", () => {
   });
 
   it("focuses the composer on mount, before any session is started", () => {
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -737,7 +771,7 @@ describe("ChatWindow", () => {
   });
 
   it("shows placeholder text for active session", () => {
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -771,7 +805,7 @@ describe("ChatWindow", () => {
 
   it("sends message when send button is clicked and clears input", async () => {
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -791,7 +825,7 @@ describe("ChatWindow", () => {
 
   it("sends message on Enter key and clears input", async () => {
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -819,7 +853,7 @@ describe("ChatWindow", () => {
       },
     });
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -838,7 +872,7 @@ describe("ChatWindow", () => {
 
       expect(textarea).toHaveValue("Line one\nLine two");
       expect(textarea).toHaveStyle({ height: "88px" });
-      expect(mockedCommands.sendClaudeMessage).not.toHaveBeenCalled();
+      expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
     } finally {
       if (original) {
         Object.defineProperty(
@@ -852,7 +886,7 @@ describe("ChatWindow", () => {
 
   it("does not send whitespace-only messages", async () => {
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -871,7 +905,7 @@ describe("ChatWindow", () => {
 
   it("starts session on Enter when not active and input has text", async () => {
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -914,7 +948,7 @@ describe("ChatWindow", () => {
 
   it("renders local user chat messages as markdown", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "user",
@@ -939,7 +973,7 @@ describe("ChatWindow", () => {
 
   it("renders the ephemeral streaming assistant overlay", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "streaming",
       messages: [
         {
@@ -992,7 +1026,7 @@ describe("ChatWindow", () => {
 
   it("shows thinking indicator when waiting for response", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "user",
@@ -1014,7 +1048,7 @@ describe("ChatWindow", () => {
 
   it("keeps showing thinking while streaming before the first text delta", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "streaming",
       messages: [
         {
@@ -1037,7 +1071,7 @@ describe("ChatWindow", () => {
 
   it("does not show thinking indicator when last message is from assistant", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "user",
@@ -1065,7 +1099,7 @@ describe("ChatWindow", () => {
 
   it("does not show thinking indicator when session is not active", () => {
     const session = createSession({
-      claudeSessionId: null,
+      backendSessionId: null,
       messages: [
         {
           kind: "user",
@@ -1087,7 +1121,7 @@ describe("ChatWindow", () => {
 
   it("shows active green dot when session has claude backend", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       status: "open",
     });
     useChatStore.setState({
@@ -1102,7 +1136,7 @@ describe("ChatWindow", () => {
   });
 
   it("does not show active green dot when session has no claude backend", () => {
-    const session = createSession({ claudeSessionId: null, status: "open" });
+    const session = createSession({ backendSessionId: null, status: "open" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1155,7 +1189,7 @@ describe("ChatWindow", () => {
 
   it("hides empty state when session is active with no messages", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [],
     });
     useChatStore.setState({
@@ -1174,7 +1208,7 @@ describe("ChatWindow", () => {
   // --- C) Send button disabled state ---
 
   it("disables send button when input is empty and session not active", () => {
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1188,7 +1222,7 @@ describe("ChatWindow", () => {
 
   it("enables send button when input has text", async () => {
     const user = userEvent.setup();
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1206,7 +1240,7 @@ describe("ChatWindow", () => {
   });
 
   it("disables send button when session is active with empty input", () => {
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1221,7 +1255,7 @@ describe("ChatWindow", () => {
   // --- D) Button title attributes ---
 
   it("shows 'Send message' title when active, not 'Start session'", () => {
-    const session = createSession({ claudeSessionId: "claude-abc" });
+    const session = createSession({ backendSessionId: "claude-abc" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1235,7 +1269,7 @@ describe("ChatWindow", () => {
   });
 
   it("shows 'Start session' title when not active, not 'Send message'", () => {
-    const session = createSession({ claudeSessionId: null });
+    const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -1267,7 +1301,7 @@ describe("ChatWindow", () => {
 
   it("disables composer while sending", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "sending",
       messages: [
         {
@@ -1295,7 +1329,7 @@ describe("ChatWindow", () => {
 
   it("disables composer while streaming", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       lifecycle: "streaming",
       streamingAssistant: {
         text: "Streaming now",
@@ -1322,8 +1356,8 @@ describe("ChatWindow", () => {
     const session = createSession({
       lifecycle: "error",
       lifecycleError: "Claude failed",
-      claudeSessionId: "stale-claude-id",
-      claudeConversationId: "conv-retry",
+      backendSessionId: "stale-claude-id",
+      providerResumeId: "conv-retry",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1345,8 +1379,8 @@ describe("ChatWindow", () => {
     await user.click(screen.getByTitle("Resume session"));
 
     await waitFor(() => {
-      expect(mockedCommands.createClaudeSession).toHaveBeenCalled();
-      expect(mockedCommands.sendClaudeMessage).not.toHaveBeenCalled();
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalled();
+      expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
     });
   });
 
@@ -1354,7 +1388,7 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     const session = createSession({
       lifecycle: "closed",
-      claudeConversationId: "conv-resume",
+      providerResumeId: "conv-resume",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1376,7 +1410,7 @@ describe("ChatWindow", () => {
   it("disables composer while a session is resuming", () => {
     const session = createSession({
       lifecycle: "resuming",
-      claudeConversationId: "conv-resume",
+      providerResumeId: "conv-resume",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1481,7 +1515,7 @@ describe("ChatWindow", () => {
 
   it("renders a permission request with approve / deny controls", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "permission_request",
@@ -1507,6 +1541,37 @@ describe("ChatWindow", () => {
     expect(screen.getByRole("button", { name: "Deny" })).toBeInTheDocument();
   });
 
+  it("renders permission requests emitted by the neutral permission event", async () => {
+    const session = createSession({ backendSessionId: "claude-abc" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await waitFor(() => expect(permissionRequestListeners).toHaveLength(1));
+    act(() => {
+      permissionRequestListeners[0]({
+        payload: {
+          request_id: "req-event",
+          session_id: "claude-abc",
+          tool_name: "Bash",
+          tool_use_id: "tool-use-1",
+          input: { command: "pwd" },
+          message: "Allow running pwd?",
+        },
+      });
+    });
+
+    expect(screen.getByText("Permission required")).toBeInTheDocument();
+    expect(screen.getByText("Allow running pwd?")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Approve" })
+    ).toBeInTheDocument();
+  });
+
   it("resolves a permission request when Approve is clicked", async () => {
     const user = userEvent.setup();
     const { commands } = await import("../../bindings");
@@ -1514,7 +1579,7 @@ describe("ChatWindow", () => {
       commands.resolvePermissionRequest as ReturnType<typeof vi.fn>
     ).mockResolvedValue({ status: "ok" });
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "permission_request",
@@ -1551,7 +1616,7 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     const { commands } = await import("../../bindings");
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "permission_request",
@@ -1583,7 +1648,7 @@ describe("ChatWindow", () => {
 
   it("renders permission requests in chronological message order", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       messages: [
         {
           kind: "assistant",
@@ -1626,7 +1691,7 @@ describe("ChatWindow", () => {
 
   it("fills the context bar to the input-context utilization percentage", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       model: "claude-sonnet-4.5",
       tokenUsage: { used: 100_050, max: 200_000 },
     });
@@ -1650,7 +1715,7 @@ describe("ChatWindow", () => {
 
   it("clamps the context bar at 100% when input context exceeds the max window", () => {
     const session = createSession({
-      claudeSessionId: "claude-abc",
+      backendSessionId: "claude-abc",
       model: "claude-sonnet-4.5",
       tokenUsage: { used: 250_000, max: 200_000 },
     });

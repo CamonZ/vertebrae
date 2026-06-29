@@ -50,7 +50,7 @@ describe("chatStore detach / reattach", () => {
         ...s.sessions,
         [id]: {
           ...s.sessions[id],
-          claudeSessionId: "claude-xyz",
+          backendSessionId: "claude-xyz",
           lifecycle: "streaming",
           streamingAssistant: {
             text: "partial",
@@ -71,11 +71,11 @@ describe("chatStore detach / reattach", () => {
     expect(route).toContain(`sessionId=${encodeURIComponent(id)}`);
     expect(opts).toMatchObject({ title: "Task A" });
 
-    // Stashed session preserves the existing claudeSessionId so the pop-out
+    // Stashed session preserves the existing backendSessionId so the pop-out
     // does not double-create the backend Claude session.
     const stashed = takeStashedChatSession(id);
     expect(stashed).not.toBeNull();
-    expect(stashed!.claudeSessionId).toBe("claude-xyz");
+    expect(stashed!.backendSessionId).toBe("claude-xyz");
     expect(stashed!.isDetached).toBe(true);
     expect(stashed!.streamingAssistant).toMatchObject({ text: "partial" });
     expect(stashed!.lifecycle).toBe("streaming");
@@ -165,8 +165,9 @@ describe("chatStore detach / reattach", () => {
           label: "Task C",
           messages: [],
           status: "open",
-          claudeSessionId: null,
-          claudeConversationId: null,
+          harness: "claude",
+          backendSessionId: null,
+          providerResumeId: null,
           isDetached: true,
         },
       },
@@ -192,7 +193,7 @@ describe("chatStore detach / reattach", () => {
       text: "stale parent message",
       timestamp: "2026-01-01T00:00:00Z",
     });
-    useChatStore.getState().setClaudeConversationId(id, "conv-stale");
+    useChatStore.getState().setProviderResumeId(id, "conv-stale");
     useChatStore.setState((s) => ({
       sessions: {
         ...s.sessions,

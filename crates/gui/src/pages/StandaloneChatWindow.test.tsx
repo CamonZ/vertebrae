@@ -47,8 +47,9 @@ describe("StandaloneChatWindow", () => {
       label: "Stashed",
       messages: [],
       status: "open",
-      claudeSessionId: "claude-99",
-      claudeConversationId: "conv-99",
+      harness: "claude",
+      backendSessionId: "claude-99",
+      providerResumeId: "conv-99",
       isDetached: true,
     });
 
@@ -57,8 +58,8 @@ describe("StandaloneChatWindow", () => {
     expect(screen.getByTestId("chat-window").textContent).toBe("s-99");
     const seeded = useChatStore.getState().sessions["s-99"];
     expect(seeded).toBeDefined();
-    expect(seeded.claudeSessionId).toBe("claude-99");
-    expect(seeded.claudeConversationId).toBe("conv-99");
+    expect(seeded.backendSessionId).toBe("claude-99");
+    expect(seeded.providerResumeId).toBe("conv-99");
     expect(useChatStore.getState().activeSessionId).toBe("s-99");
     // Stash entry was consumed so a future window doesn't re-seed stale data
     expect(localStorage.getItem("chat-stash:s-99")).toBeNull();
@@ -89,8 +90,9 @@ describe("StandaloneChatWindow", () => {
         },
       ],
       status: "open",
-      claudeSessionId: "claude-persisted",
-      claudeConversationId: "conv-persisted",
+      harness: "claude",
+      backendSessionId: "claude-persisted",
+      providerResumeId: "conv-persisted",
       projectPath: "/repo/root",
       isDetached: true,
     });
@@ -100,8 +102,8 @@ describe("StandaloneChatWindow", () => {
     const seeded = useChatStore.getState().sessions["s-persisted"];
     expect(seeded).toMatchObject({
       id: "s-persisted",
-      claudeSessionId: null,
-      claudeConversationId: "conv-persisted",
+      backendSessionId: null,
+      providerResumeId: "conv-persisted",
       projectPath: "/repo/root",
       isDetached: false,
     });

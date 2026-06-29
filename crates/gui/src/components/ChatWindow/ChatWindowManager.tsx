@@ -89,16 +89,12 @@ function minSplitLayoutWidth(paneCount: number): number {
 
 function isShortcutHintsKey(event: KeyboardEvent): boolean {
   return (
-    event.metaKey &&
-    event.shiftKey &&
-    (event.key === "?" || event.key === "/")
+    event.metaKey && event.shiftKey && (event.key === "?" || event.key === "/")
   );
 }
 
 function isBackslashShortcutKey(event: KeyboardEvent): boolean {
-  return (
-    event.code === "Backslash" || event.key === "\\" || event.key === "|"
-  );
+  return event.code === "Backslash" || event.key === "\\" || event.key === "|";
 }
 
 function isLetterShortcutKey(event: KeyboardEvent, code: string, key: string) {
@@ -137,7 +133,7 @@ export function ChatWindowManager() {
   const unsplitPanes = useChatStore((s) => s.unsplitPanes);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
-  const setClaudeSessionId = useChatStore((s) => s.setClaudeSessionId);
+  const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
   const projectScopeGeneration = useProjectScopeGeneration();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
@@ -417,7 +413,11 @@ export function ChatWindowManager() {
     startFreshSessionInNewPane("New Chat", projectPath);
     setHistoryOpen(false);
     return true;
-  }, [loadCurrentProjectPath, projectScopeGeneration, startFreshSessionInNewPane]);
+  }, [
+    loadCurrentProjectPath,
+    projectScopeGeneration,
+    startFreshSessionInNewPane,
+  ]);
   const focusPaneByIndex = useCallback(
     (index: number) => {
       const pane = visiblePanes[index];
@@ -478,14 +478,18 @@ export function ChatWindowManager() {
       setDeleteError(null);
       const target = useChatStore.getState().sessions[sessionId];
       const wasActive = sessionId === useChatStore.getState().activeSessionId;
-      if (target?.claudeSessionId) {
+      if (target?.backendSessionId) {
         setDeletingSessionId(sessionId);
-        const closed = await doCloseSession(target.claudeSessionId, sessionId, {
-          markSessionClosed,
-          setSessionLifecycle,
-          setClaudeSessionId,
-          setClaudeSessionIdRef: () => {},
-        });
+        const closed = await doCloseSession(
+          target.backendSessionId,
+          sessionId,
+          {
+            markSessionClosed,
+            setSessionLifecycle,
+            setBackendSessionId,
+            setBackendSessionIdRef: () => {},
+          }
+        );
         setDeletingSessionId(null);
         if (!closed) {
           setDeleteError("Could not delete local chat. Try again.");
@@ -501,7 +505,7 @@ export function ChatWindowManager() {
     [
       deleteLocalSession,
       markSessionClosed,
-      setClaudeSessionId,
+      setBackendSessionId,
       setSessionLifecycle,
     ]
   );
@@ -834,22 +838,17 @@ function LocalChatMiniPanel({
     setKeyboardSessionId(activeSession?.id ?? sessionItems[0].id);
   }, [activeSessionId, keyboardSessionId, sessionItems]);
 
-  const focusHistorySession = useCallback(
-    (sessionId: string) => {
-      setKeyboardSessionId(sessionId);
-      sessionButtonRefs.current.get(sessionId)?.focus();
-    },
-    []
-  );
+  const focusHistorySession = useCallback((sessionId: string) => {
+    setKeyboardSessionId(sessionId);
+    sessionButtonRefs.current.get(sessionId)?.focus();
+  }, []);
 
   const handleHistoryKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
       if (sessionItems.length === 0) return;
       const currentIndex = Math.max(
         0,
-        sessionItems.findIndex(
-          (session) => session.id === keyboardSessionId
-        )
+        sessionItems.findIndex((session) => session.id === keyboardSessionId)
       );
       let nextIndex: number | null = null;
 
@@ -1141,7 +1140,7 @@ function LocalChatHistoryDrawer({
                           <span className="truncate text-sm font-medium text-[var(--color-fg)]">
                             {session.label}
                           </span>
-                          {session.claudeConversationId && (
+                          {session.providerResumeId && (
                             <span className="shrink-0 rounded border border-[var(--color-line)] px-1.5 py-0.5 text-[10px] text-[var(--color-fg-mute)] uppercase">
                               resumable
                             </span>

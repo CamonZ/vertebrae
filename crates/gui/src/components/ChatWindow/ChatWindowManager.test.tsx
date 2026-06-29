@@ -62,33 +62,51 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: savedProjects,
     }),
-    getSupportedClaudeModels: vi.fn().mockResolvedValue({
-      defaultModelId: "sonnet",
-      models: [
-        { id: "sonnet", label: "Sonnet" },
-        { id: "opus", label: "Opus" },
-        { id: "haiku", label: "Haiku" },
-        { id: "fable", label: "Fable" },
+    getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          supports_resume: true,
+          models: [
+            { id: "sonnet", label: "Sonnet" },
+            { id: "opus", label: "Opus" },
+            { id: "haiku", label: "Haiku" },
+            { id: "fable", label: "Fable" },
+          ],
+        },
       ],
     }),
-    createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
-    closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
+    closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
   },
   events: {
-    claudeSessionInitEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeSessionUsageEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeToolResultEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudePermissionRequestEvent: {
+    localChatSessionInitEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
-    claudeSessionEndEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
-    claudeSessionErrorEvent: {
+    localChatSessionUsageEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
-    claudeSessionWarningEvent: {
+    localChatTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    localChatToolResultEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    permissionRequestEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    localChatSessionEndEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    localChatSessionErrorEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    localChatSessionWarningEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },
@@ -100,8 +118,9 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
     label: "Test Task",
     messages: [],
     status: "open",
-    claudeSessionId: null,
-    claudeConversationId: null,
+    harness: "claude",
+    backendSessionId: null,
+    providerResumeId: null,
     ...overrides,
   };
 }
@@ -122,15 +141,15 @@ describe("ChatWindowManager", () => {
       status: "ok",
       data: savedProjects,
     });
-    vi.mocked(commands.createClaudeSession).mockResolvedValue({
+    vi.mocked(commands.createLocalChatSession).mockResolvedValue({
       status: "ok",
       data: null,
     });
-    vi.mocked(commands.sendClaudeMessage).mockResolvedValue({
+    vi.mocked(commands.sendLocalChatMessage).mockResolvedValue({
       status: "ok",
       data: null,
     });
-    vi.mocked(commands.closeClaudeSession).mockResolvedValue({
+    vi.mocked(commands.closeLocalChatSession).mockResolvedValue({
       status: "ok",
       data: null,
     });
@@ -382,7 +401,7 @@ describe("ChatWindowManager", () => {
           timestamp: "2026-01-01T00:00:00Z",
         },
       ],
-      claudeConversationId: "conv-close",
+      providerResumeId: "conv-close",
       projectPath: "/test/project",
     });
     persistLocalChatSession(s1);
@@ -415,7 +434,7 @@ describe("ChatWindowManager", () => {
         timestamp: "2026-01-01T00:00:00Z",
       },
     ]);
-    expect(useChatStore.getState().sessions.s1.claudeConversationId).toBe(
+    expect(useChatStore.getState().sessions.s1.providerResumeId).toBe(
       "conv-close"
     );
   });
@@ -428,7 +447,7 @@ describe("ChatWindowManager", () => {
       text: "delete this",
       timestamp: "2026-01-01T00:00:00Z",
     });
-    useChatStore.getState().setClaudeConversationId(id, "conv-delete");
+    useChatStore.getState().setProviderResumeId(id, "conv-delete");
 
     render(<ChatWindowManager />);
 
@@ -451,7 +470,7 @@ describe("ChatWindowManager", () => {
     expect(screen.queryByText("delete this")).not.toBeInTheDocument();
     expect(useChatStore.getState().sessions[reopened].messages).toEqual([]);
     expect(
-      useChatStore.getState().sessions[reopened].claudeConversationId
+      useChatStore.getState().sessions[reopened].providerResumeId
     ).toBeNull();
   });
 
@@ -473,7 +492,7 @@ describe("ChatWindowManager", () => {
       text: "second saved answer",
       timestamp: "2026-01-02T00:00:00Z",
     });
-    useChatStore.getState().setClaudeConversationId(second, "conv-two");
+    useChatStore.getState().setProviderResumeId(second, "conv-two");
     useChatStore.getState().focusSession(first);
 
     render(<ChatWindowManager />);
@@ -487,7 +506,7 @@ describe("ChatWindowManager", () => {
 
     await user.click(screen.getByLabelText("Open local chat Task Two"));
     expect(useChatStore.getState().activeSessionId).toBe(second);
-    expect(useChatStore.getState().sessions[second].claudeConversationId).toBe(
+    expect(useChatStore.getState().sessions[second].providerResumeId).toBe(
       "conv-two"
     );
 
@@ -503,8 +522,8 @@ describe("ChatWindowManager", () => {
     const afterFresh = Object.keys(useChatStore.getState().sessions);
     expect(afterFresh).toHaveLength(beforeFresh.length + 1);
     expect(useChatStore.getState().activeSessionId).not.toBe(second);
-    expect(commands.createClaudeSession).not.toHaveBeenCalled();
-    expect(commands.sendClaudeMessage).not.toHaveBeenCalled();
+    expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+    expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
   });
 
   it("starts a fresh chat in the currently selected project instead of the active session's old project", async () => {
@@ -536,7 +555,7 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().sessions[fresh!]).toMatchObject({
       label: "New Chat",
       projectPath: "/new/project",
-      claudeConversationId: null,
+      providerResumeId: null,
     });
   });
 
@@ -740,7 +759,7 @@ describe("ChatWindowManager", () => {
     expect(state.sessions[paneSessionIds[1]]).toMatchObject({
       label: "New Chat",
       projectPath: "/test/project",
-      claudeSessionId: null,
+      backendSessionId: null,
     });
   });
 
@@ -822,13 +841,13 @@ describe("ChatWindowManager", () => {
     const left = createSession({
       id: "left",
       label: "Left Chat",
-      claudeSessionId: "backend-left",
+      backendSessionId: "backend-left",
       lifecycle: "idle",
     });
     const right = createSession({
       id: "right",
       label: "Right Chat",
-      claudeSessionId: "backend-right",
+      backendSessionId: "backend-right",
       lifecycle: "idle",
     });
     useChatStore.setState({
@@ -862,11 +881,11 @@ describe("ChatWindowManager", () => {
     await user.keyboard("{Enter}");
 
     await waitFor(() => {
-      expect(commands.sendClaudeMessage).toHaveBeenCalledWith(
+      expect(commands.sendLocalChatMessage).toHaveBeenCalledWith(
         "backend-left",
         "left message"
       );
-      expect(commands.sendClaudeMessage).toHaveBeenCalledWith(
+      expect(commands.sendLocalChatMessage).toHaveBeenCalledWith(
         "backend-right",
         "right message"
       );
@@ -887,14 +906,14 @@ describe("ChatWindowManager", () => {
     const left = createSession({
       id: "left",
       label: "Left Chat",
-      claudeSessionId: "backend-left",
+      backendSessionId: "backend-left",
       model: "claude-haiku",
       tokenUsage: { used: 28_000, max: 200_000 },
     });
     const right = createSession({
       id: "right",
       label: "Right Chat",
-      claudeSessionId: null,
+      backendSessionId: null,
     });
     useChatStore.setState({
       sessions: { left, right },
@@ -927,7 +946,7 @@ describe("ChatWindowManager", () => {
     const left = createSession({
       id: "left",
       label: "Left Chat",
-      claudeSessionId: "backend-left",
+      backendSessionId: "backend-left",
       lifecycle: "streaming",
       messages: [
         {
@@ -944,7 +963,7 @@ describe("ChatWindowManager", () => {
     const right = createSession({
       id: "right",
       label: "Right Chat",
-      claudeSessionId: "backend-right",
+      backendSessionId: "backend-right",
       lifecycle: "streaming",
       messages: [
         {
@@ -1207,9 +1226,7 @@ describe("ChatWindowManager", () => {
     });
     await waitFor(() => {
       expect(
-        screen.queryByLabelText(
-          "Load local chat History Only into active pane"
-        )
+        screen.queryByLabelText("Load local chat History Only into active pane")
       ).not.toBeInTheDocument();
     });
     expect(loadPersistedLocalChatSession("history-only")).toBeNull();
@@ -1259,8 +1276,12 @@ describe("ChatWindowManager", () => {
       value: 1800,
     });
     const first = useChatStore.getState().openSession("Task One");
-    const second = useChatStore.getState().startFreshSessionInNewPane("Task Two");
-    const third = useChatStore.getState().startFreshSessionInNewPane("Task Three");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two");
+    const third = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Three");
 
     render(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
@@ -1375,7 +1396,9 @@ describe("ChatWindowManager", () => {
   });
 
   it("uses keyboard shortcuts to open history and start fresh chats", async () => {
-    const first = useChatStore.getState().openSession("Task One", "/test/project");
+    const first = useChatStore
+      .getState()
+      .openSession("Task One", "/test/project");
 
     render(<ChatWindowManager />);
 
@@ -1648,7 +1671,7 @@ describe("ChatWindowManager", () => {
     const id = useChatStore
       .getState()
       .openSession("Live Task", "/test/project");
-    useChatStore.getState().setClaudeSessionId(id, "live-backend-session");
+    useChatStore.getState().setBackendSessionId(id, "live-backend-session");
 
     render(<ChatWindowManager />);
 
@@ -1657,7 +1680,7 @@ describe("ChatWindowManager", () => {
       await screen.findByLabelText("Delete local chat Live Task")
     );
 
-    expect(commands.closeClaudeSession).toHaveBeenCalledWith(
+    expect(commands.closeLocalChatSession).toHaveBeenCalledWith(
       "live-backend-session"
     );
     expect(loadPersistedLocalChatSession(id)).toBeNull();
@@ -1677,7 +1700,7 @@ describe("ChatWindowManager", () => {
     const active = useChatStore
       .getState()
       .startFreshSession("Live Task", "/test/project");
-    useChatStore.getState().setClaudeSessionId(active, "live-backend-session");
+    useChatStore.getState().setBackendSessionId(active, "live-backend-session");
 
     render(<ChatWindowManager />);
 
@@ -1688,7 +1711,7 @@ describe("ChatWindowManager", () => {
     );
 
     await waitFor(() => {
-      expect(commands.closeClaudeSession).toHaveBeenCalledWith(
+      expect(commands.closeLocalChatSession).toHaveBeenCalledWith(
         "live-backend-session"
       );
       expect(
@@ -1699,7 +1722,7 @@ describe("ChatWindowManager", () => {
   });
 
   it("keeps the local session and shows feedback when close fails during history delete", async () => {
-    vi.mocked(commands.closeClaudeSession).mockResolvedValueOnce({
+    vi.mocked(commands.closeLocalChatSession).mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "pipe closed" },
     } as never);
@@ -1712,7 +1735,7 @@ describe("ChatWindowManager", () => {
       text: "keep me",
       timestamp: "2026-01-01T00:00:00Z",
     });
-    useChatStore.getState().setClaudeSessionId(id, "live-backend-session");
+    useChatStore.getState().setBackendSessionId(id, "live-backend-session");
 
     render(<ChatWindowManager />);
 

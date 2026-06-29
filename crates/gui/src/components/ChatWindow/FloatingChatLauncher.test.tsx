@@ -94,7 +94,9 @@ describe("FloatingChatLauncher", () => {
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(useChatStore.getState().activeSessionId).not.toBe(otherProject);
     const activeSession =
-      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!];
+      useChatStore.getState().sessions[
+        useChatStore.getState().activeSessionId!
+      ];
     expect(activeSession).toMatchObject({
       label: "Project Chat",
       projectPath: "/test/project",
@@ -119,7 +121,9 @@ describe("FloatingChatLauncher", () => {
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(useChatStore.getState().activeSessionId).not.toBe(otherProject);
     const activeSession =
-      useChatStore.getState().sessions[useChatStore.getState().activeSessionId!];
+      useChatStore.getState().sessions[
+        useChatStore.getState().activeSessionId!
+      ];
     expect(activeSession).toMatchObject({
       label: "Project Chat",
       projectPath: null,
@@ -150,7 +154,7 @@ describe("FloatingChatLauncher", () => {
     const closedId = useChatStore
       .getState()
       .openSession("Task Chat", "/test/project");
-    useChatStore.getState().setClaudeConversationId(closedId, "conv-closed");
+    useChatStore.getState().setProviderResumeId(closedId, "conv-closed");
     useChatStore.getState().markSessionClosed(closedId);
     useChatStore.setState({
       activeSessionId: closedId,

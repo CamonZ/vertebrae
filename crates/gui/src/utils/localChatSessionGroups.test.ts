@@ -19,11 +19,12 @@ function makeSummary(
   return {
     id,
     label: id,
+    harness: "claude",
     preview: `${id} preview`,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt,
     projectPath,
-    claudeConversationId: null,
+    providerResumeId: null,
     messageCount: 1,
     lifecycle: "idle",
   };

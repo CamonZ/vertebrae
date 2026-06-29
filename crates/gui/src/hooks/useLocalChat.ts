@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef } from "react";
 import { commands, events } from "../bindings";
 import type {
-  ClaudeSessionInitEvent,
-  ClaudeSessionUsageEvent,
-  ClaudeTextEvent,
-  ClaudeToolCallEvent,
-  ClaudeToolResultEvent,
-  ClaudePermissionRequestEvent,
+  LocalChatSessionInitEvent,
+  LocalChatSessionUsageEvent,
+  LocalChatTextEvent,
+  LocalChatToolCallEvent,
+  LocalChatToolResultEvent,
   PermissionRequestEvent,
-  ClaudeSessionEndEvent,
-  ClaudeSessionErrorEvent,
-  ClaudeSessionWarningEvent,
+  LocalChatSessionEndEvent,
+  LocalChatSessionErrorEvent,
+  LocalChatSessionWarningEvent,
 } from "../bindings";
 import {
   getLocalChatLifecycle,
@@ -22,6 +21,7 @@ import type {
   ChatMessage,
   LocalChatLifecycle,
 } from "../stores/chatStore";
+import { DEFAULT_LOCAL_CHAT_HARNESS } from "../utils/localChatPersistence";
 import { resolveContextWindow } from "../utils/modelContextWindow";
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
@@ -37,7 +37,7 @@ function commandErrorMessage(error: unknown): string {
     if (typeof value === "string") return value;
     if (key) return key;
   }
-  return "Claude session failed";
+  return "Local chat session failed";
 }
 
 function commandErrorKind(error: unknown): string | null {
@@ -50,15 +50,15 @@ function isSessionNotFoundError(error: unknown): boolean {
 }
 
 export function handleInitEvent(
-  payload: ClaudeSessionInitEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatSessionInitEvent,
+  backendSessionId: string | null,
   sessionId: string,
-  setClaudeConversationId: (sessionId: string, convId: string) => void,
+  setProviderResumeId: (sessionId: string, providerResumeId: string) => void,
   setSessionModel: (sessionId: string, model: string) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
-  if (payload.claude_conversation_id) {
-    setClaudeConversationId(sessionId, payload.claude_conversation_id);
+  if (payload.backend_session_id !== backendSessionId) return;
+  if (payload.provider_resume_id) {
+    setProviderResumeId(sessionId, payload.provider_resume_id);
   }
   if (payload.model) {
     setSessionModel(sessionId, payload.model);
@@ -69,8 +69,8 @@ export function handleInitEvent(
 // + cache creation). Frontend lookup table wins for per-model maxes; see
 // modelContextWindow.ts.
 export function handleUsageEvent(
-  payload: ClaudeSessionUsageEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatSessionUsageEvent,
+  backendSessionId: string | null,
   sessionId: string,
   setSessionUsage: (
     sessionId: string,
@@ -78,7 +78,7 @@ export function handleUsageEvent(
     usage: { used: number; max: number }
   ) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   const max = resolveContextWindow(payload.model, payload.context_window);
   if (max && max > 0) {
     setSessionUsage(sessionId, payload.model, {
@@ -89,13 +89,13 @@ export function handleUsageEvent(
 }
 
 export function handleTextEvent(
-  payload: ClaudeTextEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatTextEvent,
+  backendSessionId: string | null,
   sessionId: string,
   updateLastAssistantMessage: (sessionId: string, text: string) => void,
   finalizeLastAssistantMessage: (sessionId: string, text: string) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   if (payload.is_partial) {
     updateLastAssistantMessage(sessionId, payload.text);
   } else {
@@ -104,12 +104,12 @@ export function handleTextEvent(
 }
 
 export function handleToolCallEvent(
-  payload: ClaudeToolCallEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatToolCallEvent,
+  backendSessionId: string | null,
   sessionId: string,
   addMessage: (sessionId: string, msg: ChatMessage) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   addMessage(sessionId, {
     kind: "tool_call",
     toolName: payload.tool_name,
@@ -121,12 +121,12 @@ export function handleToolCallEvent(
 }
 
 export function handleToolResultEvent(
-  payload: ClaudeToolResultEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatToolResultEvent,
+  backendSessionId: string | null,
   sessionId: string,
   addMessage: (sessionId: string, msg: ChatMessage) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   addMessage(sessionId, {
     kind: "tool_result",
     toolId: payload.tool_id,
@@ -137,28 +137,13 @@ export function handleToolResultEvent(
   });
 }
 
-export function handlePermissionRequestEvent(
-  payload: ClaudePermissionRequestEvent,
-  claudeSessionId: string | null,
-  sessionId: string,
-  addMessage: (sessionId: string, msg: ChatMessage) => void
-) {
-  if (payload.session_id !== claudeSessionId) return;
-  addMessage(sessionId, {
-    kind: "permission_request",
-    toolName: payload.tool_name,
-    message: payload.permission_message,
-    timestamp: new Date().toISOString(),
-  });
-}
-
 export function handleSacrumPermissionRequestEvent(
   payload: PermissionRequestEvent,
-  claudeSessionId: string | null,
+  backendSessionId: string | null,
   sessionId: string,
   addMessage: (sessionId: string, msg: ChatMessage) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.session_id !== backendSessionId) return;
   addMessage(sessionId, {
     kind: "permission_request",
     requestId: payload.request_id,
@@ -170,8 +155,8 @@ export function handleSacrumPermissionRequestEvent(
 }
 
 export function handleEndEvent(
-  payload: ClaudeSessionEndEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatSessionEndEvent,
+  backendSessionId: string | null,
   sessionId: string,
   setSessionLifecycle: (
     sessionId: string,
@@ -182,20 +167,20 @@ export function handleEndEvent(
     sessionId: string,
     commitToMessages?: boolean
   ) => void,
-  setClaudeSessionId: (sessionId: string, backendId: string | null) => void,
-  setClaudeSessionIdRef: (backendId: string | null) => void
+  setBackendSessionId: (sessionId: string, backendId: string | null) => void,
+  setBackendSessionIdRef: (backendId: string | null) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
-  setClaudeSessionId(sessionId, null);
-  setClaudeSessionIdRef(null);
+  setBackendSessionId(sessionId, null);
+  setBackendSessionIdRef(null);
   if (payload.is_error) {
     setSessionLifecycle(
       sessionId,
       "error",
-      payload.result || "Claude session ended with an error"
+      payload.result || "Local chat session ended with an error"
     );
     return;
   }
@@ -203,8 +188,8 @@ export function handleEndEvent(
 }
 
 export function handleErrorEvent(
-  payload: ClaudeSessionErrorEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatSessionErrorEvent,
+  backendSessionId: string | null,
   sessionId: string,
   addMessage: (sessionId: string, msg: ChatMessage) => void,
   setSessionLifecycle: (
@@ -217,7 +202,7 @@ export function handleErrorEvent(
     commitToMessages?: boolean
   ) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   clearStreamingAssistant(sessionId, true);
   setSessionLifecycle(sessionId, "error", payload.error);
   addMessage(sessionId, {
@@ -228,12 +213,12 @@ export function handleErrorEvent(
 }
 
 export function handleWarningEvent(
-  payload: ClaudeSessionWarningEvent,
-  claudeSessionId: string | null,
+  payload: LocalChatSessionWarningEvent,
+  backendSessionId: string | null,
   sessionId: string,
   addMessage: (sessionId: string, msg: ChatMessage) => void
 ) {
-  if (payload.session_id !== claudeSessionId) return;
+  if (payload.backend_session_id !== backendSessionId) return;
   addMessage(sessionId, {
     kind: "warning",
     message: payload.warning,
@@ -247,8 +232,8 @@ export async function doStartSession(
   session: ChatSession,
   sessionId: string,
   deps: {
-    setClaudeSessionId: (id: string, backendId: string | null) => void;
-    setClaudeSessionIdRef: (backendId: string | null) => void;
+    setBackendSessionId: (id: string, backendId: string | null) => void;
+    setBackendSessionIdRef: (backendId: string | null) => void;
     addMessage: (id: string, msg: ChatMessage) => void;
     setSessionLifecycle: (
       id: string,
@@ -260,12 +245,12 @@ export async function doStartSession(
 ) {
   deps.setSessionLifecycle(
     sessionId,
-    session.claudeConversationId ? "resuming" : "starting"
+    session.providerResumeId ? "resuming" : "starting"
   );
 
   const backendSessionId = `local-${sessionId}-${Date.now()}`;
-  deps.setClaudeSessionId(sessionId, backendSessionId);
-  deps.setClaudeSessionIdRef(backendSessionId);
+  deps.setBackendSessionId(sessionId, backendSessionId);
+  deps.setBackendSessionIdRef(backendSessionId);
 
   try {
     const initialPrompt = userMessage || undefined;
@@ -286,15 +271,16 @@ export async function doStartSession(
       }
     }
 
-    const resumeId = session.claudeConversationId;
+    const resumeId = session.providerResumeId;
     const modelId = resumeId ? null : (session.selectedModelId ?? null);
     const permissionMode = session.permissionMode ?? "default";
 
-    const result = await commands.createClaudeSession({
-      session_id: backendSessionId,
+    const result = await commands.createLocalChatSession({
+      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+      backend_session_id: backendSessionId,
       working_dir: workingDir,
       initial_prompt: initialPrompt ?? null,
-      resume_session_id: resumeId,
+      provider_resume_id: resumeId,
       model_id: modelId,
       permission_mode: permissionMode,
     });
@@ -303,14 +289,14 @@ export async function doStartSession(
     }
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
-    deps.setClaudeSessionId(sessionId, null);
-    deps.setClaudeSessionIdRef(null);
+    deps.setBackendSessionId(sessionId, null);
+    deps.setBackendSessionIdRef(null);
     deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
   }
 }
 
 export async function doSendMessage(
-  claudeSessionId: string,
+  backendSessionId: string,
   sessionId: string,
   content: string,
   deps: {
@@ -320,8 +306,8 @@ export async function doSendMessage(
       lifecycle: LocalChatLifecycle,
       errorMessage?: string | null
     ) => void;
-    setClaudeSessionId?: (id: string, backendId: string | null) => void;
-    setClaudeSessionIdRef?: (backendId: string | null) => void;
+    setBackendSessionId?: (id: string, backendId: string | null) => void;
+    setBackendSessionIdRef?: (backendId: string | null) => void;
   }
 ) {
   deps.setSessionLifecycle(sessionId, "sending");
@@ -332,12 +318,15 @@ export async function doSendMessage(
   });
 
   try {
-    const result = await commands.sendClaudeMessage(claudeSessionId, content);
+    const result = await commands.sendLocalChatMessage(
+      backendSessionId,
+      content
+    );
     if (result.status === "error") {
       const message = commandErrorMessage(result.error);
       if (isSessionNotFoundError(result.error)) {
-        deps.setClaudeSessionId?.(sessionId, null);
-        deps.setClaudeSessionIdRef?.(null);
+        deps.setBackendSessionId?.(sessionId, null);
+        deps.setBackendSessionIdRef?.(null);
       }
       throw new Error(message);
     }
@@ -349,7 +338,7 @@ export async function doSendMessage(
 }
 
 export async function doCloseSession(
-  claudeSessionId: string,
+  backendSessionId: string,
   sessionId: string | null,
   deps: {
     markSessionClosed: (id: string) => void;
@@ -358,8 +347,8 @@ export async function doCloseSession(
       lifecycle: LocalChatLifecycle,
       errorMessage?: string | null
     ) => void;
-    setClaudeSessionId: (id: string, backendId: string | null) => void;
-    setClaudeSessionIdRef: (backendId: string | null) => void;
+    setBackendSessionId: (id: string, backendId: string | null) => void;
+    setBackendSessionIdRef: (backendId: string | null) => void;
   }
 ): Promise<boolean> {
   if (sessionId) {
@@ -367,23 +356,23 @@ export async function doCloseSession(
   }
 
   try {
-    const result = await commands.closeClaudeSession(claudeSessionId);
+    const result = await commands.closeLocalChatSession(backendSessionId);
     if (result.status === "error") {
       if (isSessionNotFoundError(result.error)) {
         if (sessionId) {
           deps.markSessionClosed(sessionId);
-          deps.setClaudeSessionId(sessionId, null);
+          deps.setBackendSessionId(sessionId, null);
         }
-        deps.setClaudeSessionIdRef(null);
+        deps.setBackendSessionIdRef(null);
         return true;
       }
       throw new Error(commandErrorMessage(result.error));
     }
     if (sessionId) {
       deps.markSessionClosed(sessionId);
-      deps.setClaudeSessionId(sessionId, null);
+      deps.setBackendSessionId(sessionId, null);
     }
-    deps.setClaudeSessionIdRef(null);
+    deps.setBackendSessionIdRef(null);
     return true;
   } catch (error) {
     if (sessionId) {
@@ -394,11 +383,11 @@ export async function doCloseSession(
 }
 
 /**
- * Hook to manage a local Claude chat session.
+ * Hook to manage a provider-neutral local chat session.
  *
- * Wraps the chatStore with Claude CLI session lifecycle:
- * - Creates/resumes Claude CLI sessions
- * - Listens for Claude events and routes them to the correct store session
+ * Wraps the chatStore with local harness lifecycle:
+ * - Creates/resumes local chat sessions
+ * - Listens for local-chat events and routes them to the correct store session
  */
 export function useLocalChat(sessionId: string | null) {
   const session = useChatStore((s) =>
@@ -412,10 +401,8 @@ export function useLocalChat(sessionId: string | null) {
   const finalizeLastAssistantMessage = useChatStore(
     (s) => s.finalizeLastAssistantMessage
   );
-  const setClaudeSessionId = useChatStore((s) => s.setClaudeSessionId);
-  const setClaudeConversationId = useChatStore(
-    (s) => s.setClaudeConversationId
-  );
+  const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
+  const setProviderResumeId = useChatStore((s) => s.setProviderResumeId);
   const setSessionModel = useChatStore((s) => s.setSessionModel);
   const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
@@ -424,15 +411,15 @@ export function useLocalChat(sessionId: string | null) {
     (s) => s.clearStreamingAssistant
   );
 
-  // Track the Claude backend session ID for event filtering
-  const claudeSessionIdRef = useRef<string | null>(null);
+  // Track the runtime backend session ID for event filtering.
+  const backendSessionIdRef = useRef<string | null>(null);
 
   // Keep ref in sync
   useEffect(() => {
-    claudeSessionIdRef.current = session?.claudeSessionId ?? null;
-  }, [session?.claudeSessionId]);
+    backendSessionIdRef.current = session?.backendSessionId ?? null;
+  }, [session?.backendSessionId]);
 
-  // Subscribe to Claude events - filter by our backend session ID
+  // Subscribe to local-chat events - filter by our backend session ID.
   useEffect(() => {
     if (!sessionId) return;
 
@@ -440,12 +427,12 @@ export function useLocalChat(sessionId: string | null) {
     let isCancelled = false;
 
     const setup = async () => {
-      const initUn = await events.claudeSessionInitEvent.listen((event) => {
+      const initUn = await events.localChatSessionInitEvent.listen((event) => {
         handleInitEvent(
           event.payload,
-          claudeSessionIdRef.current,
+          backendSessionIdRef.current,
           sessionId,
-          setClaudeConversationId,
+          setProviderResumeId,
           setSessionModel
         );
       });
@@ -455,24 +442,26 @@ export function useLocalChat(sessionId: string | null) {
       }
       unlisteners.push(initUn);
 
-      const usageUn = await events.claudeSessionUsageEvent.listen((event) => {
-        handleUsageEvent(
-          event.payload,
-          claudeSessionIdRef.current,
-          sessionId,
-          setSessionUsage
-        );
-      });
+      const usageUn = await events.localChatSessionUsageEvent.listen(
+        (event) => {
+          handleUsageEvent(
+            event.payload,
+            backendSessionIdRef.current,
+            sessionId,
+            setSessionUsage
+          );
+        }
+      );
       if (isCancelled) {
         usageUn();
         return;
       }
       unlisteners.push(usageUn);
 
-      const textUn = await events.claudeTextEvent.listen((event) => {
+      const textUn = await events.localChatTextEvent.listen((event) => {
         handleTextEvent(
           event.payload,
-          claudeSessionIdRef.current,
+          backendSessionIdRef.current,
           sessionId,
           updateLastAssistantMessage,
           finalizeLastAssistantMessage
@@ -484,10 +473,10 @@ export function useLocalChat(sessionId: string | null) {
       }
       unlisteners.push(textUn);
 
-      const toolCallUn = await events.claudeToolCallEvent.listen((event) => {
+      const toolCallUn = await events.localChatToolCallEvent.listen((event) => {
         handleToolCallEvent(
           event.payload,
-          claudeSessionIdRef.current,
+          backendSessionIdRef.current,
           sessionId,
           addMessage
         );
@@ -498,11 +487,11 @@ export function useLocalChat(sessionId: string | null) {
       }
       unlisteners.push(toolCallUn);
 
-      const toolResultUn = await events.claudeToolResultEvent.listen(
+      const toolResultUn = await events.localChatToolResultEvent.listen(
         (event) => {
           handleToolResultEvent(
             event.payload,
-            claudeSessionIdRef.current,
+            backendSessionIdRef.current,
             sessionId,
             addMessage
           );
@@ -514,28 +503,12 @@ export function useLocalChat(sessionId: string | null) {
       }
       unlisteners.push(toolResultUn);
 
-      const permissionUn = await events.claudePermissionRequestEvent.listen(
-        (event) => {
-          handlePermissionRequestEvent(
-            event.payload,
-            claudeSessionIdRef.current,
-            sessionId,
-            addMessage
-          );
-        }
-      );
-      if (isCancelled) {
-        permissionUn();
-        return;
-      }
-      unlisteners.push(permissionUn);
-
       if (events.permissionRequestEvent) {
         const sacrumPermissionUn = await events.permissionRequestEvent.listen(
           (event) => {
             handleSacrumPermissionRequestEvent(
               event.payload,
-              claudeSessionIdRef.current,
+              backendSessionIdRef.current,
               sessionId,
               addMessage
             );
@@ -548,16 +521,16 @@ export function useLocalChat(sessionId: string | null) {
         unlisteners.push(sacrumPermissionUn);
       }
 
-      const endUn = await events.claudeSessionEndEvent.listen((event) => {
+      const endUn = await events.localChatSessionEndEvent.listen((event) => {
         handleEndEvent(
           event.payload,
-          claudeSessionIdRef.current,
+          backendSessionIdRef.current,
           sessionId,
           setSessionLifecycle,
           clearStreamingAssistant,
-          setClaudeSessionId,
+          setBackendSessionId,
           (id) => {
-            claudeSessionIdRef.current = id;
+            backendSessionIdRef.current = id;
           }
         );
       });
@@ -567,27 +540,29 @@ export function useLocalChat(sessionId: string | null) {
       }
       unlisteners.push(endUn);
 
-      const errorUn = await events.claudeSessionErrorEvent.listen((event) => {
-        handleErrorEvent(
-          event.payload,
-          claudeSessionIdRef.current,
-          sessionId,
-          addMessage,
-          setSessionLifecycle,
-          clearStreamingAssistant
-        );
-      });
+      const errorUn = await events.localChatSessionErrorEvent.listen(
+        (event) => {
+          handleErrorEvent(
+            event.payload,
+            backendSessionIdRef.current,
+            sessionId,
+            addMessage,
+            setSessionLifecycle,
+            clearStreamingAssistant
+          );
+        }
+      );
       if (isCancelled) {
         errorUn();
         return;
       }
       unlisteners.push(errorUn);
 
-      const warningUn = await events.claudeSessionWarningEvent.listen(
+      const warningUn = await events.localChatSessionWarningEvent.listen(
         (event) => {
           handleWarningEvent(
             event.payload,
-            claudeSessionIdRef.current,
+            backendSessionIdRef.current,
             sessionId,
             addMessage
           );
@@ -611,16 +586,16 @@ export function useLocalChat(sessionId: string | null) {
     addMessage,
     updateLastAssistantMessage,
     finalizeLastAssistantMessage,
-    setClaudeConversationId,
+    setProviderResumeId,
     setSessionModel,
     setSessionUsage,
     setSessionLifecycle,
-    setClaudeSessionId,
+    setBackendSessionId,
     clearStreamingAssistant,
   ]);
 
   /**
-   * Start the Claude CLI session.
+   * Start the local chat session.
    */
   const startSession = useCallback(
     async (userMessage?: string) => {
@@ -628,7 +603,7 @@ export function useLocalChat(sessionId: string | null) {
       const lifecycle = getLocalChatLifecycle(session);
       if (
         isLocalChatLifecycleBusy(lifecycle) ||
-        (session.claudeSessionId && lifecycle !== "error")
+        (session.backendSessionId && lifecycle !== "error")
       ) {
         return;
       }
@@ -637,9 +612,9 @@ export function useLocalChat(sessionId: string | null) {
         session,
         sessionId,
         {
-          setClaudeSessionId,
-          setClaudeSessionIdRef: (id) => {
-            claudeSessionIdRef.current = id;
+          setBackendSessionId,
+          setBackendSessionIdRef: (id) => {
+            backendSessionIdRef.current = id;
           },
           addMessage,
           setSessionLifecycle,
@@ -647,61 +622,64 @@ export function useLocalChat(sessionId: string | null) {
         userMessage
       );
     },
-    [session, sessionId, addMessage, setClaudeSessionId, setSessionLifecycle]
+    [session, sessionId, addMessage, setBackendSessionId, setSessionLifecycle]
   );
 
   /**
-   * Send a message to the active Claude session.
+   * Send a message to the active local chat session.
    */
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!session?.claudeSessionId || !sessionId) return;
+      if (!session?.backendSessionId || !sessionId) return;
 
-      await doSendMessage(session.claudeSessionId, sessionId, content, {
+      await doSendMessage(session.backendSessionId, sessionId, content, {
         addMessage,
         setSessionLifecycle,
-        setClaudeSessionId,
-        setClaudeSessionIdRef: (id) => {
-          claudeSessionIdRef.current = id;
+        setBackendSessionId,
+        setBackendSessionIdRef: (id) => {
+          backendSessionIdRef.current = id;
         },
       });
     },
     [
-      session?.claudeSessionId,
+      session?.backendSessionId,
       sessionId,
       addMessage,
       setSessionLifecycle,
-      setClaudeSessionId,
+      setBackendSessionId,
     ]
   );
 
   /**
-   * Close the Claude CLI session.
+   * Close the local chat session.
    */
-  const closeClaudeSession = useCallback(async (options?: { markClosed?: boolean }) => {
-    if (!session?.claudeSessionId) return true;
-    return doCloseSession(session.claudeSessionId, sessionId, {
-      markSessionClosed:
-        options?.markClosed === false
-          ? (id) => setSessionLifecycle(id, "idle")
-          : markSessionClosed,
+  const closeLocalChatSession = useCallback(
+    async (options?: { markClosed?: boolean }) => {
+      if (!session?.backendSessionId) return true;
+      return doCloseSession(session.backendSessionId, sessionId, {
+        markSessionClosed:
+          options?.markClosed === false
+            ? (id) => setSessionLifecycle(id, "idle")
+            : markSessionClosed,
+        setSessionLifecycle,
+        setBackendSessionId,
+        setBackendSessionIdRef: (id) => {
+          backendSessionIdRef.current = id;
+        },
+      });
+    },
+    [
+      session?.backendSessionId,
+      sessionId,
+      markSessionClosed,
       setSessionLifecycle,
-      setClaudeSessionId,
-      setClaudeSessionIdRef: (id) => {
-        claudeSessionIdRef.current = id;
-      },
-    });
-  }, [
-    session?.claudeSessionId,
-    sessionId,
-    markSessionClosed,
-    setSessionLifecycle,
-    setClaudeSessionId,
-  ]);
+      setBackendSessionId,
+    ]
+  );
 
   const isActive =
     session?.status === "open" &&
-    session?.claudeSessionId !== null &&
+    !!session?.backendSessionId &&
     session.lifecycle !== "closing" &&
     session.lifecycle !== "closed" &&
     session.lifecycle !== "error";
@@ -711,7 +689,7 @@ export function useLocalChat(sessionId: string | null) {
     isActive,
     startSession,
     sendMessage,
-    closeClaudeSession,
+    closeLocalChatSession,
   };
 }
 

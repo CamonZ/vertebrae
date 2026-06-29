@@ -52,53 +52,6 @@ fn test_claude_session_error_display() {
     assert_eq!(err.to_string(), "Failed to send message: IO error");
 }
 
-#[test]
-fn test_event_serialization() {
-    let init_event = ClaudeSessionInitEvent {
-        session_id: "test-session".to_string(),
-        claude_conversation_id: Some("conv-123".to_string()),
-        model: "claude-sonnet-4".to_string(),
-        tools: vec!["Read".to_string(), "Edit".to_string()],
-    };
-    let json = serde_json::to_string(&init_event).expect("Should serialize");
-    assert!(json.contains("test-session"));
-    assert!(json.contains("claude-sonnet-4"));
-    assert!(json.contains("conv-123"));
-
-    let text_event = ClaudeTextEvent {
-        session_id: "test".to_string(),
-        text: "Hello world".to_string(),
-        is_partial: false,
-    };
-    let json = serde_json::to_string(&text_event).expect("Should serialize");
-    assert!(json.contains("Hello world"));
-
-    let tool_call_event = ClaudeToolCallEvent {
-        session_id: "test".to_string(),
-        tool_id: "toolu_123".to_string(),
-        tool_name: "Read".to_string(),
-        input: r#"{"file_path":"/test.txt"}"#.to_string(),
-        parent_tool_use_id: None,
-    };
-    let json = serde_json::to_string(&tool_call_event).expect("Should serialize");
-    assert!(json.contains("toolu_123"));
-    assert!(json.contains("Read"));
-
-    let end_event = ClaudeSessionEndEvent {
-        session_id: "test".to_string(),
-        duration_ms: 5000,
-        cost_usd: 0.05,
-        num_turns: 3,
-        result: "Done".to_string(),
-        is_error: false,
-        context_tokens: 0,
-        context_window: 0,
-    };
-    let json = serde_json::to_string(&end_event).expect("Should serialize");
-    assert!(json.contains("5000"));
-    assert!(json.contains("0.05"));
-}
-
 #[tokio::test]
 async fn test_has_session_existing() {
     let manager = ClaudeSessionManager::new();

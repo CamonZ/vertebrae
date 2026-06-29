@@ -2,11 +2,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
 
-use crate::claude_session::{
-    ClaudeSessionEndEvent, ClaudeSessionErrorEvent, ClaudeSessionInitEvent,
-    ClaudeSessionUsageEvent, ClaudeSessionWarningEvent, ClaudeTextEvent, ClaudeToolCallEvent,
-    ClaudeToolResultEvent,
-};
 use crate::local_chat::harness::LocalChatHarnessKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
@@ -108,151 +103,23 @@ impl LocalChatEvent {
             LocalChatEvent::Warning(_) => "local-chat-session-warning-event",
         }
     }
-
-    pub(crate) fn claude_compatibility_event(&self) -> Option<ClaudeCompatibilityEvent> {
-        match self {
-            LocalChatEvent::Init(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::Init(ClaudeSessionInitEvent {
-                    session_id: event.backend_session_id.clone(),
-                    claude_conversation_id: event.provider_resume_id.clone(),
-                    model: event.model.clone(),
-                    tools: event.tools.clone(),
-                }))
-            }
-            LocalChatEvent::Text(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::Text(ClaudeTextEvent {
-                    session_id: event.backend_session_id.clone(),
-                    text: event.text.clone(),
-                    is_partial: event.is_partial,
-                }))
-            }
-            LocalChatEvent::ToolCall(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::ToolCall(ClaudeToolCallEvent {
-                    session_id: event.backend_session_id.clone(),
-                    tool_id: event.tool_id.clone(),
-                    tool_name: event.tool_name.clone(),
-                    input: event.input.clone(),
-                    parent_tool_use_id: event.parent_tool_use_id.clone(),
-                }))
-            }
-            LocalChatEvent::ToolResult(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::ToolResult(
-                    ClaudeToolResultEvent {
-                        session_id: event.backend_session_id.clone(),
-                        tool_id: event.tool_id.clone(),
-                        result: event.result.clone(),
-                        is_error: event.is_error,
-                        parent_tool_use_id: event.parent_tool_use_id.clone(),
-                    },
-                ))
-            }
-            LocalChatEvent::Usage(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::Usage(ClaudeSessionUsageEvent {
-                    session_id: event.backend_session_id.clone(),
-                    model: event.model.clone(),
-                    context_tokens: event.context_tokens,
-                    context_window: event.context_window,
-                }))
-            }
-            LocalChatEvent::End(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::End(ClaudeSessionEndEvent {
-                    session_id: event.backend_session_id.clone(),
-                    duration_ms: event.duration_ms,
-                    cost_usd: event.cost_usd,
-                    num_turns: event.num_turns,
-                    result: event.result.clone(),
-                    is_error: event.is_error,
-                    context_tokens: event.context_tokens,
-                    context_window: event.context_window,
-                }))
-            }
-            LocalChatEvent::Error(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::Error(ClaudeSessionErrorEvent {
-                    session_id: event.backend_session_id.clone(),
-                    error: event.error.clone(),
-                }))
-            }
-            LocalChatEvent::Warning(event) if event.harness == LocalChatHarnessKind::Claude => {
-                Some(ClaudeCompatibilityEvent::Warning(
-                    ClaudeSessionWarningEvent {
-                        session_id: event.backend_session_id.clone(),
-                        warning: event.warning.clone(),
-                    },
-                ))
-            }
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum ClaudeCompatibilityEvent {
-    Init(ClaudeSessionInitEvent),
-    Text(ClaudeTextEvent),
-    ToolCall(ClaudeToolCallEvent),
-    ToolResult(ClaudeToolResultEvent),
-    Usage(ClaudeSessionUsageEvent),
-    End(ClaudeSessionEndEvent),
-    Error(ClaudeSessionErrorEvent),
-    Warning(ClaudeSessionWarningEvent),
-}
-
-impl ClaudeCompatibilityEvent {
-    fn emit(&self, app_handle: &tauri::AppHandle) {
-        match self {
-            ClaudeCompatibilityEvent::Init(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::Text(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::ToolCall(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::ToolResult(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::Usage(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::End(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::Error(event) => {
-                let _ = event.emit(app_handle);
-            }
-            ClaudeCompatibilityEvent::Warning(event) => {
-                let _ = event.emit(app_handle);
-            }
-        }
-    }
 }
 
 #[derive(Clone)]
 pub(crate) struct LocalChatEventSink {
     app_handle: Option<tauri::AppHandle>,
-    mirror_claude_compatibility_events: bool,
 }
 
 impl LocalChatEventSink {
     pub(crate) fn tauri(app_handle: tauri::AppHandle) -> Self {
         Self {
             app_handle: Some(app_handle),
-            mirror_claude_compatibility_events: false,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn inert_for_tests() -> Self {
-        Self {
-            app_handle: None,
-            mirror_claude_compatibility_events: false,
-        }
-    }
-
-    pub(crate) fn with_claude_compatibility_events(mut self) -> Self {
-        self.mirror_claude_compatibility_events = true;
-        self
+        Self { app_handle: None }
     }
 
     pub(crate) fn emit(&self, event: LocalChatEvent) {
@@ -284,12 +151,6 @@ impl LocalChatEventSink {
             }
             LocalChatEvent::Warning(payload) => {
                 let _ = payload.emit(app_handle);
-            }
-        }
-
-        if self.mirror_claude_compatibility_events {
-            if let Some(compatibility_event) = event.claude_compatibility_event() {
-                compatibility_event.emit(app_handle);
             }
         }
     }

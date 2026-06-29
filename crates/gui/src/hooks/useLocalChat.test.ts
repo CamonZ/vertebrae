@@ -5,7 +5,7 @@ import {
   handleTextEvent,
   handleToolCallEvent,
   handleToolResultEvent,
-  handlePermissionRequestEvent,
+  handleSacrumPermissionRequestEvent,
   handleEndEvent,
   handleErrorEvent,
   handleWarningEvent,
@@ -22,9 +22,9 @@ vi.mock("../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
-    createClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    sendClaudeMessage: vi.fn().mockResolvedValue({ status: "ok" }),
-    closeClaudeSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
+    closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     getCurrentProject: vi.fn().mockResolvedValue({
       status: "ok",
       data: "test-project",
@@ -46,13 +46,14 @@ const CLAUDE_SESSION_ID = "claude-backend-123";
 const OTHER_SESSION_ID = "other-backend-456";
 
 describe("handleInitEvent", () => {
-  it("calls setClaudeConversationId and setSessionModel when session matches", () => {
+  it("calls setProviderResumeId and setSessionModel when session matches", () => {
     const setConvId = vi.fn();
     const setModel = vi.fn();
     handleInitEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
-        claude_conversation_id: "conv-abc",
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        provider_resume_id: "conv-abc",
         model: "claude-sonnet-4",
         tools: [],
       },
@@ -70,8 +71,9 @@ describe("handleInitEvent", () => {
     const setModel = vi.fn();
     handleInitEvent(
       {
-        session_id: OTHER_SESSION_ID,
-        claude_conversation_id: "conv-abc",
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
+        provider_resume_id: "conv-abc",
         model: "claude-sonnet-4",
         tools: [],
       },
@@ -84,13 +86,14 @@ describe("handleInitEvent", () => {
     expect(setModel).not.toHaveBeenCalled();
   });
 
-  it("does not call setClaudeConversationId when conversation ID is null", () => {
+  it("does not call setProviderResumeId when conversation ID is null", () => {
     const setConvId = vi.fn();
     const setModel = vi.fn();
     handleInitEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
-        claude_conversation_id: null,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        provider_resume_id: null,
         model: "claude-sonnet-4",
         tools: [],
       },
@@ -109,7 +112,8 @@ describe("handleUsageEvent", () => {
     const setUsage = vi.fn();
     handleUsageEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         model: "claude-opus-4-7-20250115",
         context_tokens: 100_050,
         // Backend reports 200k fallback — should be overridden by lookup table.
@@ -133,7 +137,8 @@ describe("handleUsageEvent", () => {
     const setUsage = vi.fn();
     handleUsageEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         model: "claude-mystery-9-9",
         context_tokens: 50_000,
         context_window: 250_000,
@@ -152,7 +157,8 @@ describe("handleUsageEvent", () => {
     const setUsage = vi.fn();
     handleUsageEvent(
       {
-        session_id: OTHER_SESSION_ID,
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
         model: "claude-opus-4-7",
         context_tokens: 1,
         context_window: 200_000,
@@ -170,7 +176,8 @@ describe("handleWarningEvent", () => {
     const addMsg = vi.fn();
     handleWarningEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         warning: "Unsupported model; using sonnet.",
       },
       CLAUDE_SESSION_ID,
@@ -190,7 +197,8 @@ describe("handleWarningEvent", () => {
     const addMsg = vi.fn();
     handleWarningEvent(
       {
-        session_id: OTHER_SESSION_ID,
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
         warning: "Unsupported model; using sonnet.",
       },
       CLAUDE_SESSION_ID,
@@ -206,7 +214,12 @@ describe("handleTextEvent", () => {
     const updateLastAssistantMessage = vi.fn();
     const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
-      { session_id: CLAUDE_SESSION_ID, text: "hello", is_partial: true },
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        text: "hello",
+        is_partial: true,
+      },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       updateLastAssistantMessage,
@@ -224,7 +237,12 @@ describe("handleTextEvent", () => {
     const finalizeLastAssistantMessage = vi.fn();
     for (const text of ["Hel", "lo", "!"]) {
       handleTextEvent(
-        { session_id: CLAUDE_SESSION_ID, text, is_partial: true },
+        {
+          backend_session_id: CLAUDE_SESSION_ID,
+          harness: "claude",
+          text,
+          is_partial: true,
+        },
         CLAUDE_SESSION_ID,
         SESSION_ID,
         updateLastAssistantMessage,
@@ -254,7 +272,12 @@ describe("handleTextEvent", () => {
     const updateLastAssistantMessage = vi.fn();
     const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
-      { session_id: CLAUDE_SESSION_ID, text: "done", is_partial: false },
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        text: "done",
+        is_partial: false,
+      },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       updateLastAssistantMessage,
@@ -271,7 +294,12 @@ describe("handleTextEvent", () => {
     const updateLastAssistantMessage = vi.fn();
     const finalizeLastAssistantMessage = vi.fn();
     handleTextEvent(
-      { session_id: OTHER_SESSION_ID, text: "hello", is_partial: true },
+      {
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
+        text: "hello",
+        is_partial: true,
+      },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       updateLastAssistantMessage,
@@ -287,7 +315,8 @@ describe("handleToolCallEvent", () => {
     const addMsg = vi.fn();
     handleToolCallEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         tool_name: "Read",
         input: '{"path":"file.ts"}',
@@ -312,7 +341,8 @@ describe("handleToolCallEvent", () => {
     const addMsg = vi.fn();
     handleToolCallEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         tool_name: "Read",
         input: "{}",
@@ -329,7 +359,8 @@ describe("handleToolCallEvent", () => {
     const addMsg = vi.fn();
     handleToolCallEvent(
       {
-        session_id: OTHER_SESSION_ID,
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         tool_name: "Read",
         input: "{}",
@@ -348,7 +379,8 @@ describe("handleToolResultEvent", () => {
     const addMsg = vi.fn();
     handleToolResultEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         result: "success",
         is_error: false,
@@ -373,7 +405,8 @@ describe("handleToolResultEvent", () => {
     const addMsg = vi.fn();
     handleToolResultEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         result: "fail",
         is_error: true,
@@ -390,7 +423,8 @@ describe("handleToolResultEvent", () => {
     const addMsg = vi.fn();
     handleToolResultEvent(
       {
-        session_id: OTHER_SESSION_ID,
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
         tool_id: "t1",
         result: "x",
         is_error: false,
@@ -404,14 +438,17 @@ describe("handleToolResultEvent", () => {
   });
 });
 
-describe("handlePermissionRequestEvent", () => {
+describe("handleSacrumPermissionRequestEvent", () => {
   it("adds a permission_request message when session matches", () => {
     const addMsg = vi.fn();
-    handlePermissionRequestEvent(
+    handleSacrumPermissionRequestEvent(
       {
+        request_id: "request-1",
         session_id: CLAUDE_SESSION_ID,
         tool_name: "Bash",
-        permission_message: "Allow rm -rf?",
+        tool_use_id: "tool-use-1",
+        input: { command: "rm -rf?" },
+        message: "Allow rm -rf?",
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -421,19 +458,24 @@ describe("handlePermissionRequestEvent", () => {
       SESSION_ID,
       expect.objectContaining({
         kind: "permission_request",
+        requestId: "request-1",
         toolName: "Bash",
         message: "Allow rm -rf?",
+        input: JSON.stringify({ command: "rm -rf?" }, null, 2),
       })
     );
   });
 
   it("does nothing when session does not match", () => {
     const addMsg = vi.fn();
-    handlePermissionRequestEvent(
+    handleSacrumPermissionRequestEvent(
       {
+        request_id: "request-1",
         session_id: OTHER_SESSION_ID,
         tool_name: "Bash",
-        permission_message: "x",
+        tool_use_id: "tool-use-1",
+        input: {},
+        message: "x",
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -447,11 +489,12 @@ describe("handleEndEvent", () => {
   it("clears stream state and returns lifecycle to idle when session matches", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setClaudeSessionId = vi.fn();
-    const setClaudeSessionIdRef = vi.fn();
+    const setBackendSessionId = vi.fn();
+    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -464,12 +507,12 @@ describe("handleEndEvent", () => {
       SESSION_ID,
       setLifecycle,
       clearStreaming,
-      setClaudeSessionId,
-      setClaudeSessionIdRef
+      setBackendSessionId,
+      setBackendSessionIdRef
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
-    expect(setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
   });
 
@@ -487,7 +530,8 @@ describe("handleEndEvent", () => {
 
     handleUsageEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         model: "claude-sonnet-4.5",
         context_tokens: 100_050,
         context_window: 200_000,
@@ -500,7 +544,8 @@ describe("handleEndEvent", () => {
     const setLifecycle = vi.fn();
     handleEndEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -525,11 +570,12 @@ describe("handleEndEvent", () => {
   it("sets error lifecycle when Claude reports an error result", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setClaudeSessionId = vi.fn();
-    const setClaudeSessionIdRef = vi.fn();
+    const setBackendSessionId = vi.fn();
+    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
-        session_id: CLAUDE_SESSION_ID,
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -542,12 +588,12 @@ describe("handleEndEvent", () => {
       SESSION_ID,
       setLifecycle,
       clearStreaming,
-      setClaudeSessionId,
-      setClaudeSessionIdRef
+      setBackendSessionId,
+      setBackendSessionIdRef
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
-    expect(setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(setLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
       "error",
@@ -558,11 +604,12 @@ describe("handleEndEvent", () => {
   it("does nothing when session does not match", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setClaudeSessionId = vi.fn();
-    const setClaudeSessionIdRef = vi.fn();
+    const setBackendSessionId = vi.fn();
+    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
-        session_id: OTHER_SESSION_ID,
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -575,13 +622,13 @@ describe("handleEndEvent", () => {
       SESSION_ID,
       setLifecycle,
       clearStreaming,
-      setClaudeSessionId,
-      setClaudeSessionIdRef
+      setBackendSessionId,
+      setBackendSessionIdRef
     );
     expect(setLifecycle).not.toHaveBeenCalled();
     expect(clearStreaming).not.toHaveBeenCalled();
-    expect(setClaudeSessionId).not.toHaveBeenCalled();
-    expect(setClaudeSessionIdRef).not.toHaveBeenCalled();
+    expect(setBackendSessionId).not.toHaveBeenCalled();
+    expect(setBackendSessionIdRef).not.toHaveBeenCalled();
   });
 });
 
@@ -591,7 +638,11 @@ describe("handleErrorEvent", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
     handleErrorEvent(
-      { session_id: CLAUDE_SESSION_ID, error: "something broke" },
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        error: "something broke",
+      },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       addMsg,
@@ -618,7 +669,11 @@ describe("handleErrorEvent", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
     handleErrorEvent(
-      { session_id: OTHER_SESSION_ID, error: "x" },
+      {
+        backend_session_id: OTHER_SESSION_ID,
+        harness: "claude",
+        error: "x",
+      },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       addMsg,
@@ -639,8 +694,9 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     label: "Test Task",
     messages: [],
     status: "open",
-    claudeSessionId: null,
-    claudeConversationId: null,
+    harness: "claude",
+    backendSessionId: null,
+    providerResumeId: null,
     ...overrides,
   };
 }
@@ -652,8 +708,8 @@ describe("doStartSession", () => {
 
   it("generates a backend session ID and sets it", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -661,11 +717,11 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(
+    expect(deps.setBackendSessionId).toHaveBeenCalledWith(
       SESSION_ID,
       expect.stringMatching(/^local-session-1-\d+$/)
     );
-    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(
+    expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(
       expect.stringMatching(/^local-session-1-\d+$/)
     );
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
@@ -678,10 +734,10 @@ describe("doStartSession", () => {
     );
   });
 
-  it("calls createClaudeSession with working directory", async () => {
+  it("calls createLocalChatSession with working directory", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -689,11 +745,12 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^local-/),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
@@ -701,8 +758,8 @@ describe("doStartSession", () => {
 
   it("uses the project path captured on the chat session", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -715,11 +772,12 @@ describe("doStartSession", () => {
     );
 
     expect(mockedCommands.getCurrentProjectPath).not.toHaveBeenCalled();
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^local-/),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
       working_dir: "/captured/project",
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
@@ -727,8 +785,8 @@ describe("doStartSession", () => {
 
   it("fetches the current project path when the captured project path is null", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -737,11 +795,12 @@ describe("doStartSession", () => {
     await doStartSession(makeSession({ projectPath: null }), SESSION_ID, deps);
 
     expect(mockedCommands.getCurrentProjectPath).toHaveBeenCalled();
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^local-/),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
@@ -749,8 +808,8 @@ describe("doStartSession", () => {
 
   it("passes the selected model id when the session has one", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -762,11 +821,12 @@ describe("doStartSession", () => {
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^local-/),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: "opus",
       permission_mode: "default",
     });
@@ -774,8 +834,8 @@ describe("doStartSession", () => {
 
   it("passes the selected permission mode when starting", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -787,11 +847,12 @@ describe("doStartSession", () => {
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.stringMatching(/^local-/),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "auto",
     });
@@ -799,8 +860,8 @@ describe("doStartSession", () => {
 
   it("adds user message when provided", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -823,8 +884,8 @@ describe("doStartSession", () => {
 
   it("does not add user message when not provided", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -837,8 +898,8 @@ describe("doStartSession", () => {
 
   it("starts without fetching, storing, or injecting local context", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -852,36 +913,38 @@ describe("doStartSession", () => {
     expect(mockedCommands.getWorkflowWithTasks).not.toHaveBeenCalled();
     expect(mockedCommands.getStep).not.toHaveBeenCalled();
     expect(deps.setContextSummary).not.toHaveBeenCalled();
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.any(String),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.any(String),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Help",
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
   });
 
-  it("passes resumeId when session has claudeConversationId", async () => {
+  it("passes resumeId when session has providerResumeId", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
     };
 
     await doStartSession(
-      makeSession({ claudeConversationId: "conv-xyz" }),
+      makeSession({ providerResumeId: "conv-xyz" }),
       SESSION_ID,
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.any(String),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.any(String),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: "conv-xyz",
+      provider_resume_id: "conv-xyz",
       model_id: null,
       permission_mode: "default",
     });
@@ -893,8 +956,8 @@ describe("doStartSession", () => {
 
   it("does not pass selected model id when resuming a Claude conversation", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -902,18 +965,19 @@ describe("doStartSession", () => {
 
     await doStartSession(
       makeSession({
-        claudeConversationId: "conv-xyz",
+        providerResumeId: "conv-xyz",
         selectedModelId: "opus",
       }),
       SESSION_ID,
       deps
     );
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.any(String),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.any(String),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: null,
-      resume_session_id: "conv-xyz",
+      provider_resume_id: "conv-xyz",
       model_id: null,
       permission_mode: "default",
     });
@@ -926,8 +990,8 @@ describe("doStartSession", () => {
     } as never);
 
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -935,11 +999,12 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.any(String),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.any(String),
+      harness: "claude",
       working_dir: null,
       initial_prompt: null,
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
@@ -947,8 +1012,8 @@ describe("doStartSession", () => {
 
   it("passes the user message as the initial prompt without context", async () => {
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -956,24 +1021,25 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps, "Question");
 
-    expect(mockedCommands.createClaudeSession).toHaveBeenCalledWith({
-      session_id: expect.any(String),
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.any(String),
+      harness: "claude",
       working_dir: "/test/project",
       initial_prompt: "Question",
-      resume_session_id: null,
+      provider_resume_id: null,
       model_id: null,
       permission_mode: "default",
     });
   });
 
-  it("sets error lifecycle and clears backend id when createClaudeSession fails", async () => {
-    mockedCommands.createClaudeSession.mockResolvedValueOnce({
+  it("sets error lifecycle and clears backend id when createLocalChatSession fails", async () => {
+    mockedCommands.createLocalChatSession.mockResolvedValueOnce({
       status: "error",
       error: { SpawnFailed: "claude missing" },
     } as never);
     const deps = {
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
       setContextSummary: vi.fn(),
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -981,8 +1047,8 @@ describe("doStartSession", () => {
 
     await doStartSession(makeSession(), SESSION_ID, deps);
 
-    expect(deps.setClaudeSessionId).toHaveBeenLastCalledWith(SESSION_ID, null);
-    expect(deps.setClaudeSessionIdRef).toHaveBeenLastCalledWith(null);
+    expect(deps.setBackendSessionId).toHaveBeenLastCalledWith(SESSION_ID, null);
+    expect(deps.setBackendSessionIdRef).toHaveBeenLastCalledWith(null);
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
@@ -996,12 +1062,12 @@ describe("doSendMessage", () => {
     vi.clearAllMocks();
   });
 
-  it("adds user message and calls sendClaudeMessage", async () => {
+  it("adds user message and calls sendLocalChatMessage", async () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hello", deps);
@@ -1018,7 +1084,7 @@ describe("doSendMessage", () => {
         text: "Hello",
       })
     );
-    expect(mockedCommands.sendClaudeMessage).toHaveBeenCalledWith(
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID,
       "Hello"
     );
@@ -1040,16 +1106,16 @@ describe("doSendMessage", () => {
     expect(deps.addMessage.mock.calls[0][1].timestamp).toBeDefined();
   });
 
-  it("sets error lifecycle when sendClaudeMessage fails", async () => {
-    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+  it("sets error lifecycle when sendLocalChatMessage fails", async () => {
+    mockedCommands.sendLocalChatMessage.mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "pipe closed" },
     } as never);
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
@@ -1061,22 +1127,22 @@ describe("doSendMessage", () => {
     );
   });
 
-  it("clears stale backend id when sendClaudeMessage reports not found", async () => {
-    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+  it("clears stale backend id when sendLocalChatMessage reports not found", async () => {
+    mockedCommands.sendLocalChatMessage.mockResolvedValueOnce({
       status: "error",
       error: { SessionNotFound: "missing" },
     } as never);
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
 
-    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
@@ -1085,21 +1151,21 @@ describe("doSendMessage", () => {
   });
 
   it("does not clear backend id for non-SessionNotFound errors containing not found", async () => {
-    mockedCommands.sendClaudeMessage.mockResolvedValueOnce({
+    mockedCommands.sendLocalChatMessage.mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "File not found: /project/config.ts" },
     } as never);
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
 
-    expect(deps.setClaudeSessionId).not.toHaveBeenCalled();
-    expect(deps.setClaudeSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionIdRef).not.toHaveBeenCalled();
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
@@ -1113,17 +1179,17 @@ describe("doCloseSession", () => {
     vi.clearAllMocks();
   });
 
-  it("calls closeClaudeSession and marks session closed", async () => {
+  it("calls closeLocalChatSession and marks session closed", async () => {
     const deps = {
       markSessionClosed: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
 
-    expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID
     );
     expect(closed).toBe(true);
@@ -1132,21 +1198,21 @@ describe("doCloseSession", () => {
       "closing"
     );
     expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
-    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
   });
 
   it("does not call markSessionClosed when sessionId is null", async () => {
     const deps = {
       markSessionClosed: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, null, deps);
 
-    expect(mockedCommands.closeClaudeSession).toHaveBeenCalledWith(
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
       CLAUDE_SESSION_ID
     );
     expect(closed).toBe(true);
@@ -1154,23 +1220,23 @@ describe("doCloseSession", () => {
   });
 
   it("treats missing backend session as already closed", async () => {
-    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
       status: "error",
       error: { SessionNotFound: "missing" },
     } as never);
     const deps = {
       markSessionClosed: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
 
     expect(closed).toBe(true);
     expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
-    expect(deps.setClaudeSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(deps.setClaudeSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(deps.setSessionLifecycle).not.toHaveBeenCalledWith(
       SESSION_ID,
       "error",
@@ -1178,24 +1244,24 @@ describe("doCloseSession", () => {
     );
   });
 
-  it("sets error lifecycle when closeClaudeSession fails for another reason", async () => {
-    mockedCommands.closeClaudeSession.mockResolvedValueOnce({
+  it("sets error lifecycle when closeLocalChatSession fails for another reason", async () => {
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
       status: "error",
       error: { SendFailed: "pipe closed" },
     } as never);
     const deps = {
       markSessionClosed: vi.fn(),
       setSessionLifecycle: vi.fn(),
-      setClaudeSessionId: vi.fn(),
-      setClaudeSessionIdRef: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
 
     expect(closed).toBe(false);
     expect(deps.markSessionClosed).not.toHaveBeenCalled();
-    expect(deps.setClaudeSessionId).not.toHaveBeenCalled();
-    expect(deps.setClaudeSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionIdRef).not.toHaveBeenCalled();
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",

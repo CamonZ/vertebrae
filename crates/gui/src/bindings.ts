@@ -796,53 +796,6 @@ async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, Loc
 }
 },
 /**
- * Create a new Claude session with JSONL streaming
- * 
- * Spawns the Claude CLI with streaming JSON input/output mode.
- * If `resume_session_id` is provided, continues an existing conversation.
- * Returns immediately; the session emits events for all output.
- */
-async createClaudeSession(input: CreateClaudeSessionInput) : Promise<Result<null, ClaudeSessionError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { input }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * List supported Claude Code models for local chat sessions.
- */
-async getSupportedClaudeModels() : Promise<ClaudeModelCatalog> {
-    return await TAURI_INVOKE("get_supported_claude_models");
-},
-/**
- * Send a message to a Claude session
- * 
- * Sends a user message to an active Claude session via stdin.
- */
-async sendClaudeMessage(sessionId: string, content: string) : Promise<Result<null, ClaudeSessionError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("send_claude_message", { sessionId, content }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Close a Claude session
- * 
- * Terminates the Claude CLI process for the given session.
- */
-async closeClaudeSession(sessionId: string) : Promise<Result<null, ClaudeSessionError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("close_claude_session", { sessionId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Resolve a Claude permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
@@ -925,15 +878,6 @@ async installComponents(installCli: boolean, installDaemon: boolean, installGate
 
 
 export const events = __makeEvents__<{
-claudePermissionRequestEvent: ClaudePermissionRequestEvent,
-claudeSessionEndEvent: ClaudeSessionEndEvent,
-claudeSessionErrorEvent: ClaudeSessionErrorEvent,
-claudeSessionInitEvent: ClaudeSessionInitEvent,
-claudeSessionUsageEvent: ClaudeSessionUsageEvent,
-claudeSessionWarningEvent: ClaudeSessionWarningEvent,
-claudeTextEvent: ClaudeTextEvent,
-claudeToolCallEvent: ClaudeToolCallEvent,
-claudeToolResultEvent: ClaudeToolResultEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
 localChatSessionInitEvent: LocalChatSessionInitEvent,
@@ -957,15 +901,6 @@ taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
-claudePermissionRequestEvent: "claude-permission-request-event",
-claudeSessionEndEvent: "claude-session-end-event",
-claudeSessionErrorEvent: "claude-session-error-event",
-claudeSessionInitEvent: "claude-session-init-event",
-claudeSessionUsageEvent: "claude-session-usage-event",
-claudeSessionWarningEvent: "claude-session-warning-event",
-claudeTextEvent: "claude-text-event",
-claudeToolCallEvent: "claude-tool-call-event",
-claudeToolResultEvent: "claude-tool-result-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
 localChatSessionInitEvent: "local-chat-session-init-event",
@@ -1060,95 +995,6 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
-export type ClaudeModelCatalog = { defaultModelId: string; models: ClaudeModelOption[] }
-export type ClaudeModelOption = { id: string; label: string }
-/**
- * Event emitted when Claude requests permission
- */
-export type ClaudePermissionRequestEvent = { session_id: string; tool_name: string; permission_message: string }
-/**
- * Event emitted when Claude session ends
- */
-export type ClaudeSessionEndEvent = { session_id: string; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; 
-/**
- * Sum of per-model input contexts from result model usage (input + cache,
- * excluding output). This is a session summary and may exceed any single
- * model's context window.
- */
-context_tokens: number; 
-/**
- * Maximum reported model context window size
- */
-context_window: number }
-/**
- * Claude session errors
- */
-export type ClaudeSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string }
-/**
- * Event emitted when Claude session encounters an error
- */
-export type ClaudeSessionErrorEvent = { session_id: string; error: string }
-/**
- * Event emitted when Claude session initializes
- */
-export type ClaudeSessionInitEvent = { session_id: string; 
-/**
- * Claude's conversation ID - use this with --resume for multi-turn
- */
-claude_conversation_id: string | null; model: string; tools: string[] }
-/**
- * Event emitted after each assistant message with the latest input-context figure.
- * 
- * `context_tokens` is the total request input for the most recent assistant
- * turn: `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`.
- * This is the source of truth for the chat badge's current request context
- * occupancy. Output tokens are excluded because they are response tokens, not
- * request input.
- */
-export type ClaudeSessionUsageEvent = { session_id: string; 
-/**
- * Model name reported by the assistant message
- */
-model: string; 
-/**
- * Current request input-context tokens for the latest assistant turn
- */
-context_tokens: number; 
-/**
- * Backend-reported context window (fallback when frontend lookup misses)
- */
-context_window: number }
-/**
- * Event emitted when Claude session startup recovers from a non-fatal issue.
- */
-export type ClaudeSessionWarningEvent = { session_id: string; warning: string }
-/**
- * Event emitted when Claude produces text output
- */
-export type ClaudeTextEvent = { session_id: string; text: string; 
-/**
- * Whether this is a partial (streaming) message
- */
-is_partial: boolean }
-/**
- * Event emitted when Claude calls a tool
- */
-export type ClaudeToolCallEvent = { session_id: string; tool_id: string; tool_name: string; input: string; 
-/**
- * `tool_use` id of the parent spawn (Task/Agent) tool call when this call
- * was made by a sub-agent; `None` for main-thread calls. Drives sub-agent
- * nesting in the chat thread.
- */
-parent_tool_use_id: string | null }
-/**
- * Event emitted when a tool returns a result
- */
-export type ClaudeToolResultEvent = { session_id: string; tool_id: string; result: string; is_error: boolean; 
-/**
- * Parent spawn `tool_use` id when this result belongs to a sub-agent;
- * `None` for main-thread results. See [`ClaudeToolCallEvent`].
- */
-parent_tool_use_id: string | null }
 /**
  * Code reference - file location reference
  */
@@ -1202,7 +1048,6 @@ symlink_path: string;
  * avoid pestering users who already have `vtb` from `cargo install`.
  */
 on_path: boolean }
-export type CreateClaudeSessionInput = { session_id: string; working_dir: string | null; initial_prompt: string | null; resume_session_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
 export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
 /**
  * Options for creating a workflow step.

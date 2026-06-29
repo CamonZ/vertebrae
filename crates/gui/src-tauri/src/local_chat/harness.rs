@@ -104,7 +104,7 @@ impl LocalChatRuntime {
     pub(crate) fn new(app_handle: tauri::AppHandle, permission_bridge: PermissionBridge) -> Self {
         Self {
             app_handle: Some(app_handle.clone()),
-            event_sink: LocalChatEventSink::tauri(app_handle).with_claude_compatibility_events(),
+            event_sink: LocalChatEventSink::tauri(app_handle),
             permission_bridge,
         }
     }
