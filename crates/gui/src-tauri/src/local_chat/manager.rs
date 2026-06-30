@@ -20,10 +20,10 @@ pub struct LocalChatSessionManager {
 
 impl LocalChatSessionManager {
     pub fn new() -> Self {
-        Self::with_claude_manager(ClaudeSessionManager::new())
+        Self::with_default_harnesses(ClaudeSessionManager::new())
     }
 
-    pub fn with_claude_manager(claude_manager: ClaudeSessionManager) -> Self {
+    pub fn with_default_harnesses(claude_manager: ClaudeSessionManager) -> Self {
         let permission_bridge = claude_manager.permission_bridge();
         Self::with_harnesses_and_permission_bridge(
             vec![

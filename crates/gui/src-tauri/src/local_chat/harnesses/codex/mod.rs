@@ -21,13 +21,16 @@ use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarness,
     LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption, LocalChatRuntime,
     LocalChatSessionEndEvent, LocalChatSessionError, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatTextEvent,
+    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent,
 };
+use crate::types::PermissionMode;
 
 const CODEX_DEFAULT_MODEL_ID: &str = "default";
 const CODEX_DEFAULT_MODEL_LABEL: &str = "Codex default";
 const APP_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const APP_SERVER_READY_POLL: Duration = Duration::from_millis(50);
+const APP_SERVER_LAUNCH_ATTEMPTS: usize = 3;
 
 #[derive(Clone)]
 pub(crate) struct CodexLocalChatHarness {
@@ -97,11 +100,15 @@ impl LocalChatHarness for CodexLocalChatHarness {
         }
 
         let model_override = requested_model_override(input.model_id.as_deref());
+        let permission_settings =
+            CodexPermissionSettings::from_permission_mode(input.permission_mode.as_ref());
+        let initial_prompt = input.initial_prompt.clone();
         let thread = match connection
             .start_or_resume_thread(ThreadRequest {
                 provider_resume_id: input.provider_resume_id.as_deref(),
                 working_dir: input.working_dir.as_deref(),
                 model: model_override,
+                permission_settings,
             })
             .await
         {
@@ -128,17 +135,8 @@ impl LocalChatHarness for CodexLocalChatHarness {
             connection: Mutex::new(connection),
             process: Mutex::new(launched.process),
             stats: Mutex::new(SessionStats::default()),
+            permission_settings,
         });
-
-        if let Some(initial_prompt) = input.initial_prompt.as_deref() {
-            if let Err(error) = session
-                .run_turn(initial_prompt, TurnFailureSurface::Start)
-                .await
-            {
-                session.shutdown().await;
-                return Err(error);
-            }
-        }
 
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&backend_session_id) {
@@ -146,7 +144,19 @@ impl LocalChatHarness for CodexLocalChatHarness {
             session.shutdown().await;
             return Err(LocalChatSessionError::SessionExists(backend_session_id));
         }
-        sessions.insert(backend_session_id, session);
+        sessions.insert(backend_session_id, session.clone());
+
+        if let Some(initial_prompt) = initial_prompt {
+            tokio::spawn(async move {
+                if let Err(error) = session
+                    .run_turn(&initial_prompt, TurnFailureSurface::Start)
+                    .await
+                {
+                    session.emit_error(error.to_string());
+                }
+            });
+        }
+
         Ok(())
     }
 
@@ -191,6 +201,7 @@ struct CodexLocalChatSession {
     connection: Mutex<CodexRpcConnection>,
     process: Mutex<Option<Child>>,
     stats: Mutex<SessionStats>,
+    permission_settings: CodexPermissionSettings,
 }
 
 impl CodexLocalChatSession {
@@ -212,6 +223,7 @@ impl CodexLocalChatSession {
                 model: &self.model,
                 num_turns,
                 event_sink: &self.event_sink,
+                permission_settings: self.permission_settings,
             })
             .await
             .map_err(|err| failure_surface.error(err))?;
@@ -235,6 +247,15 @@ impl CodexLocalChatSession {
 
         let mut process = self.process.lock().await;
         stop_process(&mut process).await;
+    }
+
+    fn emit_error(&self, error: String) {
+        self.event_sink
+            .emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
+                backend_session_id: self.backend_session_id.clone(),
+                harness: LocalChatHarnessKind::Codex,
+                error,
+            }));
     }
 }
 
@@ -268,10 +289,58 @@ impl TurnFailureSurface {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+struct CodexPermissionSettings {
+    approval_policy: Option<&'static str>,
+    permissions: Option<&'static str>,
+}
+
+impl CodexPermissionSettings {
+    fn from_permission_mode(permission_mode: Option<&PermissionMode>) -> Self {
+        match permission_mode {
+            Some(PermissionMode::AcceptEdits) => Self {
+                approval_policy: Some("on-request"),
+                permissions: Some(":workspace"),
+            },
+            Some(PermissionMode::Auto) => Self {
+                approval_policy: Some("on-failure"),
+                permissions: Some(":workspace"),
+            },
+            Some(PermissionMode::BypassPermissions) => Self {
+                approval_policy: Some("never"),
+                permissions: Some(":danger-full-access"),
+            },
+            Some(PermissionMode::Default) => Self {
+                approval_policy: Some("on-request"),
+                permissions: Some(":read-only"),
+            },
+            Some(PermissionMode::DontAsk) => Self {
+                approval_policy: Some("never"),
+                permissions: Some(":workspace"),
+            },
+            Some(PermissionMode::Plan) => Self {
+                approval_policy: Some("never"),
+                permissions: Some(":read-only"),
+            },
+            None => Self::default(),
+        }
+    }
+
+    fn apply_to_params(self, params: &mut Value) {
+        if let Some(approval_policy) = self.approval_policy {
+            params["approvalPolicy"] = json!(approval_policy);
+        }
+        if let Some(permissions) = self.permissions {
+            params["permissions"] = json!(permissions);
+        }
+    }
+}
+
 struct ThreadRequest<'a> {
     provider_resume_id: Option<&'a str>,
     working_dir: Option<&'a str>,
     model: Option<&'a str>,
+    permission_settings: CodexPermissionSettings,
 }
 
 struct ThreadStart {
@@ -286,6 +355,7 @@ struct TurnRequest<'a> {
     model: &'a str,
     num_turns: u32,
     event_sink: &'a LocalChatEventSink,
+    permission_settings: CodexPermissionSettings,
 }
 
 struct TurnOutcome {
@@ -353,6 +423,7 @@ impl CodexRpcConnection {
         if let Some(model) = request.model {
             params["model"] = json!(model);
         }
+        request.permission_settings.apply_to_params(&mut params);
 
         let response = self.request(method, params, None).await?;
         let thread_id = response
@@ -371,7 +442,7 @@ impl CodexRpcConnection {
     }
 
     async fn start_turn(&mut self, request: TurnRequest<'_>) -> Result<TurnOutcome, String> {
-        let params = json!({
+        let mut params = json!({
             "threadId": request.thread_id,
             "input": [
                 {
@@ -380,6 +451,7 @@ impl CodexRpcConnection {
                 }
             ],
         });
+        request.permission_settings.apply_to_params(&mut params);
         let mut handler = TurnNotificationHandler::new(
             request.backend_session_id,
             request.thread_id,
@@ -393,15 +465,14 @@ impl CodexRpcConnection {
         let turn_id = response
             .pointer("/turn/id")
             .and_then(Value::as_str)
-            .map(str::to_string);
+            .ok_or_else(|| "turn/start response did not include turn.id".to_string())?
+            .to_string();
+        handler.set_expected_turn_id(&turn_id);
 
         while !handler.is_completed() {
             let message = self.read_message().await?;
             self.handle_message(message, None, Some(&mut handler))
                 .await?;
-            if let Some(expected_turn_id) = &turn_id {
-                handler.retain_completion_for_turn(expected_turn_id);
-            }
         }
 
         Ok(handler.into_outcome())
@@ -474,7 +545,7 @@ impl CodexRpcConnection {
         &mut self,
         message: RpcMessage,
         response_id: Option<u64>,
-        notification_handler: Option<&mut TurnNotificationHandler<'_>>,
+        mut notification_handler: Option<&mut TurnNotificationHandler<'_>>,
     ) -> Result<Option<Value>, String> {
         if let (Some(expected_id), Some(message_id)) = (response_id, message.id.as_ref()) {
             if message_id.as_u64() == Some(expected_id) {
@@ -486,6 +557,9 @@ impl CodexRpcConnection {
         }
 
         if let (Some(id), Some(method)) = (message.id.as_ref(), message.method.as_deref()) {
+            if let Some(handler) = notification_handler.as_deref_mut() {
+                handler.emit_approval_warning(method);
+            }
             self.respond_to_server_request(id.clone(), method).await?;
             return Ok(None);
         }
@@ -502,6 +576,15 @@ impl CodexRpcConnection {
     }
 
     async fn respond_to_server_request(&mut self, id: Value, method: &str) -> Result<(), String> {
+        if let Some(result) = fallback_server_request_result(method) {
+            return self
+                .send_json(&json!({
+                    "id": id,
+                    "result": result,
+                }))
+                .await;
+        }
+
         self.send_json(&json!({
             "id": id,
             "error": {
@@ -528,6 +611,32 @@ struct RpcError {
     message: String,
 }
 
+fn fallback_server_request_result(method: &str) -> Option<Value> {
+    match method {
+        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+            Some(json!({ "decision": "decline" }))
+        }
+        "item/permissions/requestApproval" => Some(json!({ "permissions": {}, "scope": "turn" })),
+        _ => None,
+    }
+}
+
+fn approval_request_kind(method: &str) -> Option<&'static str> {
+    match method {
+        "item/commandExecution/requestApproval" => Some("command execution"),
+        "item/fileChange/requestApproval" => Some("file change"),
+        "item/permissions/requestApproval" => Some("additional permission"),
+        _ => None,
+    }
+}
+
+fn is_turn_notification(method: &str) -> bool {
+    matches!(
+        method,
+        "item/agentMessage/delta" | "thread/tokenUsage/updated" | "turn/completed" | "error"
+    )
+}
+
 struct TurnNotificationHandler<'a> {
     backend_session_id: &'a str,
     thread_id: &'a str,
@@ -538,6 +647,8 @@ struct TurnNotificationHandler<'a> {
     context_tokens: u32,
     context_window: u32,
     completed: Option<TurnCompletion>,
+    expected_turn_id: Option<String>,
+    pending_notifications: Vec<(String, Value)>,
 }
 
 impl<'a> TurnNotificationHandler<'a> {
@@ -558,11 +669,21 @@ impl<'a> TurnNotificationHandler<'a> {
             context_tokens: 0,
             context_window: 0,
             completed: None,
+            expected_turn_id: None,
+            pending_notifications: Vec::new(),
         }
     }
 
     fn handle(&mut self, method: &str, params: &Value) {
         if params.get("threadId").and_then(Value::as_str) != Some(self.thread_id) {
+            return;
+        }
+        if self.expected_turn_id.is_none() && is_turn_notification(method) {
+            self.pending_notifications
+                .push((method.to_string(), params.clone()));
+            return;
+        }
+        if !self.matches_expected_turn(method, params) {
             return;
         }
 
@@ -572,6 +693,28 @@ impl<'a> TurnNotificationHandler<'a> {
             "turn/completed" => self.handle_turn_completed(params),
             "error" => self.handle_error(params),
             _ => {}
+        }
+    }
+
+    fn set_expected_turn_id(&mut self, turn_id: &str) {
+        self.expected_turn_id = Some(turn_id.to_string());
+        let pending_notifications = std::mem::take(&mut self.pending_notifications);
+        for (method, params) in pending_notifications {
+            self.handle(&method, &params);
+        }
+    }
+
+    fn matches_expected_turn(&self, method: &str, params: &Value) -> bool {
+        let Some(expected_turn_id) = self.expected_turn_id.as_deref() else {
+            return true;
+        };
+        let turn_id = match method {
+            "turn/completed" => params.pointer("/turn/id").and_then(Value::as_str),
+            _ => params.get("turnId").and_then(Value::as_str),
+        };
+        match turn_id {
+            Some(turn_id) => turn_id == expected_turn_id,
+            None => true,
         }
     }
 
@@ -609,10 +752,6 @@ impl<'a> TurnNotificationHandler<'a> {
             .pointer("/turn/status")
             .and_then(Value::as_str)
             .unwrap_or("completed");
-        let turn_id = params
-            .pointer("/turn/id")
-            .and_then(Value::as_str)
-            .map(str::to_string);
         let duration_ms = value_to_u32(params.pointer("/turn/durationMs")).unwrap_or(0);
         let error = if status == "completed" {
             None
@@ -643,7 +782,7 @@ impl<'a> TurnNotificationHandler<'a> {
                 context_window: self.context_window,
             }));
 
-        self.completed = Some(TurnCompletion { turn_id, error });
+        self.completed = Some(TurnCompletion { error });
     }
 
     fn handle_error(&mut self, params: &Value) {
@@ -653,10 +792,7 @@ impl<'a> TurnNotificationHandler<'a> {
             .unwrap_or("Codex app-server error")
             .to_string();
         self.emit_error(error.clone());
-        self.completed = Some(TurnCompletion {
-            turn_id: None,
-            error: Some(error),
-        });
+        self.completed = Some(TurnCompletion { error: Some(error) });
     }
 
     fn emit_error(&self, error: String) {
@@ -668,15 +804,18 @@ impl<'a> TurnNotificationHandler<'a> {
             }));
     }
 
-    fn retain_completion_for_turn(&mut self, expected_turn_id: &str) {
-        if self
-            .completed
-            .as_ref()
-            .and_then(|completion| completion.turn_id.as_deref())
-            .is_some_and(|turn_id| turn_id != expected_turn_id)
-        {
-            self.completed = None;
-        }
+    fn emit_approval_warning(&self, method: &str) {
+        let Some(request_kind) = approval_request_kind(method) else {
+            return;
+        };
+        self.event_sink
+            .emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
+                backend_session_id: self.backend_session_id.to_string(),
+                harness: LocalChatHarnessKind::Codex,
+                warning: format!(
+                    "Codex requested {request_kind} approval, but Vertebrae local chat does not have a Codex approval UI yet, so the request was denied."
+                ),
+            }));
     }
 
     fn is_completed(&self) -> bool {
@@ -693,7 +832,6 @@ impl<'a> TurnNotificationHandler<'a> {
 }
 
 struct TurnCompletion {
-    turn_id: Option<String>,
     error: Option<String>,
 }
 
@@ -759,17 +897,29 @@ impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
 
     async fn launch(&self) -> Result<LaunchedCodexAppServer, String> {
         let binary = find_codex_binary()?;
-        let (ws_url, ready_addr) = reserve_local_ws_url()?;
-        let mut process = spawn_codex_app_server(&binary, &ws_url)?;
-        if let Err(err) = wait_for_ready(ready_addr).await {
-            let _ = process.kill().await;
-            let _ = process.wait().await;
-            return Err(err);
+        let mut last_error = None;
+
+        for _ in 0..APP_SERVER_LAUNCH_ATTEMPTS {
+            let (ws_url, ready_addr) = reserve_local_ws_url()?;
+            let mut process = spawn_codex_app_server(&binary, &ws_url)?;
+            match wait_for_ready(ready_addr).await {
+                Ok(()) => {
+                    return Ok(LaunchedCodexAppServer {
+                        ws_url,
+                        process: Some(process),
+                    });
+                }
+                Err(err) => {
+                    let _ = process.kill().await;
+                    let _ = process.wait().await;
+                    last_error = Some(err);
+                }
+            }
         }
-        Ok(LaunchedCodexAppServer {
-            ws_url,
-            process: Some(process),
-        })
+
+        Err(last_error.unwrap_or_else(|| {
+            "Failed to start Codex app-server after all launch attempts".to_string()
+        }))
     }
 }
 
@@ -814,16 +964,26 @@ async fn ready_probe(addr: impl ToSocketAddrs) -> Result<bool, String> {
         .write_all(b"GET /readyz HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .await
         .map_err(|err| format!("Failed to write Codex app-server readiness probe: {err}"))?;
-    let mut response = [0_u8; 64];
-    let bytes = stream
-        .read(&mut response)
-        .await
-        .map_err(|err| format!("Failed to read Codex app-server readiness probe: {err}"))?;
-    Ok(
-        std::str::from_utf8(&response[..bytes]).is_ok_and(|response| {
-            response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
-        }),
-    )
+
+    let mut response = Vec::new();
+    let mut chunk = [0_u8; 64];
+    loop {
+        let bytes = stream
+            .read(&mut chunk)
+            .await
+            .map_err(|err| format!("Failed to read Codex app-server readiness probe: {err}"))?;
+        if bytes == 0 {
+            break;
+        }
+        response.extend_from_slice(&chunk[..bytes]);
+        if response.windows(4).any(|window| window == b"\r\n\r\n") || response.len() >= 1024 {
+            break;
+        }
+    }
+
+    Ok(std::str::from_utf8(&response).is_ok_and(|response| {
+        response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
+    }))
 }
 
 #[cfg(test)]
@@ -871,6 +1031,9 @@ mod tests {
         thread_id: &'static str,
         model: &'static str,
         rpc_error_method: Option<&'static str>,
+        server_request_method: Option<&'static str>,
+        stale_completion_before_turn_response: bool,
+        turn_response_delay: Duration,
         turn_status: &'static str,
         turn_error: Option<&'static str>,
     }
@@ -881,6 +1044,9 @@ mod tests {
                 thread_id: "codex-thread-1",
                 model: "mock-codex-model",
                 rpc_error_method: None,
+                server_request_method: None,
+                stale_completion_before_turn_response: false,
+                turn_response_delay: Duration::from_millis(0),
                 turn_status: "completed",
                 turn_error: None,
             }
@@ -987,6 +1153,27 @@ mod tests {
                             .await;
                         }
                         ("turn/start", Some(id)) => {
+                            if script.stale_completion_before_turn_response {
+                                send_json(
+                                    &mut socket,
+                                    json!({
+                                        "method": "turn/completed",
+                                        "params": {
+                                            "threadId": script.thread_id,
+                                            "turn": {
+                                                "id": "stale-turn",
+                                                "status": "completed",
+                                                "durationMs": 1,
+                                                "error": null,
+                                            },
+                                        },
+                                    }),
+                                )
+                                .await;
+                            }
+                            if script.turn_response_delay > Duration::from_millis(0) {
+                                sleep(script.turn_response_delay).await;
+                            }
                             send_json(
                                 &mut socket,
                                 json!({
@@ -1002,6 +1189,22 @@ mod tests {
                                 }),
                             )
                             .await;
+                            if let Some(method) = script.server_request_method {
+                                send_json(
+                                    &mut socket,
+                                    json!({
+                                        "id": 1000,
+                                        "method": method,
+                                        "params": {
+                                            "threadId": script.thread_id,
+                                            "turnId": "turn-1",
+                                            "itemId": "item-approval-1",
+                                            "startedAtMs": 1,
+                                        },
+                                    }),
+                                )
+                                .await;
+                            }
                             send_json(
                                 &mut socket,
                                 json!({
@@ -1098,9 +1301,38 @@ mod tests {
             self.requests.lock().expect("requests lock").clone()
         }
 
+        async fn wait_for_request_count(&self, count: usize) {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while self.requests().len() < count {
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("mock server should receive expected requests");
+        }
+
         fn closed(&self) -> bool {
             *self.closed.lock().expect("closed lock")
         }
+    }
+
+    async fn wait_for_event<F>(events: &Arc<std::sync::Mutex<Vec<LocalChatEvent>>>, predicate: F)
+    where
+        F: Fn(&LocalChatEvent) -> bool,
+    {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                {
+                    let events = events.lock().expect("events lock");
+                    if events.iter().any(&predicate) {
+                        break;
+                    }
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("expected local chat event");
     }
 
     async fn send_json(
@@ -1168,6 +1400,18 @@ mod tests {
             .expect("create codex session");
 
         assert!(harness.has_session("backend-1").await);
+        server.wait_for_request_count(4).await;
+        wait_for_event(&events, |event| {
+            matches!(
+                event,
+                LocalChatEvent::End(LocalChatSessionEndEvent {
+                    backend_session_id,
+                    ..
+                }) if backend_session_id == "backend-1"
+            )
+        })
+        .await;
+
         let requests = server.requests();
         assert_eq!(requests[0]["method"], "initialize");
         assert_eq!(requests[1]["method"], "initialized");
@@ -1216,6 +1460,138 @@ mod tests {
                 context_window: 200000,
             }))
         );
+    }
+
+    #[tokio::test]
+    async fn create_session_registers_before_initial_turn_finishes() {
+        let server = MockAppServer::start(MockScript {
+            turn_response_delay: Duration::from_millis(250),
+            ..MockScript::default()
+        })
+        .await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            harness.create_session(
+                create_input("backend-async-start", Some("slow prompt"), None),
+                runtime,
+            ),
+        )
+        .await
+        .expect("create_session should not wait for the initial turn")
+        .expect("create codex session");
+
+        assert!(harness.has_session("backend-async-start").await);
+        server.wait_for_request_count(4).await;
+        wait_for_event(&events, |event| {
+            matches!(
+                event,
+                LocalChatEvent::End(LocalChatSessionEndEvent {
+                    backend_session_id,
+                    ..
+                }) if backend_session_id == "backend-async-start"
+            )
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn permission_mode_is_forwarded_to_thread_and_turn_requests() {
+        let server = MockAppServer::start(MockScript::default()).await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+        let mut input = create_input("backend-permissions", None, None);
+        input.permission_mode = Some(PermissionMode::Plan);
+
+        harness
+            .create_session(input, runtime)
+            .await
+            .expect("create codex session");
+        harness
+            .send_message("backend-permissions", "plan this")
+            .await
+            .expect("send codex message");
+
+        let requests = server.requests();
+        assert_eq!(requests[2]["method"], "thread/start");
+        assert_eq!(requests[2]["params"]["approvalPolicy"], "never");
+        assert_eq!(requests[2]["params"]["permissions"], ":read-only");
+        assert_eq!(requests[3]["method"], "turn/start");
+        assert_eq!(requests[3]["params"]["approvalPolicy"], "never");
+        assert_eq!(requests[3]["params"]["permissions"], ":read-only");
+    }
+
+    #[tokio::test]
+    async fn server_approval_requests_are_denied_with_warning() {
+        let server = MockAppServer::start(MockScript {
+            server_request_method: Some("item/commandExecution/requestApproval"),
+            ..MockScript::default()
+        })
+        .await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+        harness
+            .create_session(create_input("backend-approval", None, None), runtime)
+            .await
+            .expect("create codex session");
+        harness
+            .send_message("backend-approval", "run command")
+            .await
+            .expect("send codex message");
+
+        server.wait_for_request_count(5).await;
+        let requests = server.requests();
+        assert!(requests.iter().any(|request| {
+            request.get("id") == Some(&json!(1000))
+                && request.pointer("/result/decision") == Some(&json!("decline"))
+        }));
+        assert!(events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .any(|event| matches!(
+                event,
+                LocalChatEvent::Warning(LocalChatSessionWarningEvent { warning, .. })
+                    if warning.contains("command execution approval")
+            )));
+    }
+
+    #[tokio::test]
+    async fn stale_turn_completion_before_turn_response_is_ignored() {
+        let server = MockAppServer::start(MockScript {
+            stale_completion_before_turn_response: true,
+            ..MockScript::default()
+        })
+        .await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+        harness
+            .create_session(create_input("backend-stale", None, None), runtime)
+            .await
+            .expect("create codex session");
+        harness
+            .send_message("backend-stale", "current turn")
+            .await
+            .expect("send codex message");
+
+        let events = events.lock().expect("events lock").clone();
+        let end_events: Vec<_> = events
+            .iter()
+            .filter_map(|event| {
+                if let LocalChatEvent::End(event) = event {
+                    Some(event)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(end_events.len(), 1);
+        assert_eq!(end_events[0].duration_ms, 17);
+        assert_eq!(end_events[0].result, "hello world");
     }
 
     #[tokio::test]
@@ -1336,5 +1712,27 @@ mod tests {
         })
         .await
         .expect("mock server should observe websocket close");
+    }
+
+    #[tokio::test]
+    async fn ready_probe_handles_status_line_split_across_reads() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind readiness probe listener");
+        let addr = listener.local_addr().expect("read readiness probe addr");
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept readiness probe");
+            let mut request = [0_u8; 128];
+            let _ = stream.read(&mut request).await;
+            stream.write_all(b"HT").await.expect("write split status");
+            sleep(Duration::from_millis(10)).await;
+            stream
+                .write_all(b"TP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .expect("write remainder");
+        });
+
+        assert!(ready_probe(addr).await.expect("readiness probe"));
     }
 }

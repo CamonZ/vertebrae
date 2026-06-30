@@ -37,18 +37,16 @@ pub fn find_codex_binary() -> Result<PathBuf, String> {
 fn find_binary(spec: &BinarySpec) -> Result<PathBuf, String> {
     if let Ok(raw_path) = std::env::var(spec.env_override) {
         let trimmed = raw_path.trim();
-        if !trimmed.is_empty() {
-            let path = PathBuf::from(trimmed);
-            if path.exists() {
-                return Ok(path);
-            }
-            return Err(format!(
-                "{} path specified in {} does not exist: {}",
-                spec.display_name,
-                spec.env_override,
-                path.display()
-            ));
+        let path = PathBuf::from(trimmed);
+        if path.exists() {
+            return Ok(path);
         }
+        return Err(format!(
+            "{} path specified in {} does not exist: {}",
+            spec.display_name,
+            spec.env_override,
+            path.display()
+        ));
     }
 
     if let Ok(output) = std::process::Command::new("which")
@@ -225,6 +223,26 @@ mod tests {
     }
 
     #[test]
+    fn test_find_claude_binary_empty_env_var_returns_error() {
+        let _lock = BINARY_ENV_MUTEX.lock().unwrap();
+
+        let original = std::env::var("CLAUDE_CODE_PATH").ok();
+
+        std::env::set_var("CLAUDE_CODE_PATH", "  ");
+        let result = find_claude_binary();
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("does not exist"));
+        assert!(error_msg.contains("CLAUDE_CODE_PATH"));
+
+        match original {
+            Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
+            None => std::env::remove_var("CLAUDE_CODE_PATH"),
+        }
+    }
+
+    #[test]
     fn test_find_codex_binary_with_env_var() {
         let _lock = BINARY_ENV_MUTEX.lock().unwrap();
 
@@ -248,6 +266,26 @@ mod tests {
         let original = std::env::var("CODEX_PATH").ok();
 
         std::env::set_var("CODEX_PATH", "/nonexistent/path/to/codex");
+        let result = find_codex_binary();
+
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("does not exist"));
+        assert!(error_msg.contains("CODEX_PATH"));
+
+        match original {
+            Some(v) => std::env::set_var("CODEX_PATH", v),
+            None => std::env::remove_var("CODEX_PATH"),
+        }
+    }
+
+    #[test]
+    fn test_find_codex_binary_empty_env_var_returns_error() {
+        let _lock = BINARY_ENV_MUTEX.lock().unwrap();
+
+        let original = std::env::var("CODEX_PATH").ok();
+
+        std::env::set_var("CODEX_PATH", "  ");
         let result = find_codex_binary();
 
         assert!(result.is_err());
