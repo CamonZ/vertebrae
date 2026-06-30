@@ -831,11 +831,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     addMessage: (sessionId, message) => {
-      updateSession(sessionId, (session) => ({
-        ...session,
-        messages: [...session.messages, message],
-        updatedAt: message.timestamp,
-      }));
+      updateSession(sessionId, (session) => {
+        const messages = [...session.messages];
+        const last = messages[messages.length - 1];
+        if (
+          message.kind === "assistant" &&
+          message.parentToolUseId &&
+          last?.kind === "assistant" &&
+          last.parentToolUseId === message.parentToolUseId &&
+          last.isPartial
+        ) {
+          messages[messages.length - 1] = {
+            ...last,
+            text: message.isPartial
+              ? `${last.text}${message.text}`
+              : message.text,
+            isPartial: message.isPartial,
+            timestamp: message.timestamp,
+          };
+        } else {
+          messages.push(message);
+        }
+        return {
+          ...session,
+          messages,
+          updatedAt: message.timestamp,
+        };
+      });
     },
 
     updateLastAssistantMessage: (sessionId, text) => {

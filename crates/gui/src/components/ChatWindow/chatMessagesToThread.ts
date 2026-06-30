@@ -125,6 +125,7 @@ export function chatMessagesToThread(
           kind: "assistant_message",
           text: m.text,
           timestamp: m.timestamp,
+          parentToolUseId: m.parentToolUseId,
         });
         endsWithPartialAssistant = m.isPartial === true;
         continue;

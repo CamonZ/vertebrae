@@ -748,6 +748,76 @@ describe("chatStore", () => {
       expect(session.updatedAt).toBe("2024-01-01T00:00:00Z");
     });
 
+    it("coalesces parent-linked assistant deltas into one child transcript row", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child ",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "stream",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toEqual([
+        {
+          kind: "assistant",
+          text: "child stream",
+          timestamp: "2024-01-01T00:00:01Z",
+          isPartial: true,
+          parentToolUseId: "agent-1",
+        },
+      ]);
+      expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
+    });
+
+    it("keeps separate child transcript rows across child tool activity", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "before",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Read",
+        toolId: "tool-1",
+        input: "{}",
+        timestamp: "2024-01-01T00:00:01Z",
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "after",
+        timestamp: "2024-01-01T00:00:02Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages.map((message) => message.kind)).toEqual([
+        "assistant",
+        "tool_call",
+        "assistant",
+      ]);
+      expect(session.messages[2]).toMatchObject({
+        kind: "assistant",
+        text: "after",
+        parentToolUseId: "agent-1",
+      });
+    });
+
     it("does nothing for non-existent session", () => {
       useChatStore.getState().addMessage("non-existent", {
         kind: "user",

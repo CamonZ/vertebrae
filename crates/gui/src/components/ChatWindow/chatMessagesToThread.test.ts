@@ -246,6 +246,13 @@ describe("chatMessagesToThread", () => {
         timestamp: TS,
         parentToolUseId: "toolu_AGENT",
       },
+      {
+        kind: "assistant",
+        text: "child analysis",
+        timestamp: TS,
+        isPartial: false,
+        parentToolUseId: "toolu_AGENT",
+      },
     ]);
     const msgs = thread.turns[0].messages;
 
@@ -262,10 +269,17 @@ describe("chatMessagesToThread", () => {
     expect(childTools.find((t) => t.evt === "toolu_child")?.body).toBe(
       "file body"
     );
+    const childAgents = spawn.thread.turns
+      .flatMap((t) => t.messages)
+      .filter((m) => m.type === "agent") as AgentMessage[];
+    expect(childAgents.map((m) => m.prose)).toContain("child analysis");
 
     // ...and does NOT leak into the main turn series.
     expect(
       msgs.some((m) => m.type === "tool" && m.evt === "toolu_child")
+    ).toBe(false);
+    expect(
+      msgs.some((m) => m.type === "agent" && m.prose === "child analysis")
     ).toBe(false);
   });
 
