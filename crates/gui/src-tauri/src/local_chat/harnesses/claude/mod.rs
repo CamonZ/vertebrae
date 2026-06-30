@@ -3,24 +3,37 @@ use async_trait::async_trait;
 pub(crate) mod args;
 pub(crate) mod jsonl;
 pub(crate) mod live_jsonl;
+pub(crate) mod session;
 
-use crate::claude_session::{ClaudeSessionError, ClaudeSessionManager};
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
     LocalChatModelOption, LocalChatRuntime, LocalChatSessionError,
 };
-use crate::types::CreateClaudeSessionInput;
+
+pub(crate) use session::ClaudeSessionRuntime;
 
 use self::args::supported_claude_model_catalog;
 
+// Re-export public catalog types for tests.
+#[cfg(test)]
+pub(crate) use self::args::{ClaudeModelCatalog, ClaudeModelOption};
+
 #[derive(Clone)]
 pub(crate) struct ClaudeLocalChatHarness {
-    manager: ClaudeSessionManager,
+    runtime: ClaudeSessionRuntime,
 }
 
 impl ClaudeLocalChatHarness {
-    pub(crate) fn new(manager: ClaudeSessionManager) -> Self {
-        Self { manager }
+    pub(crate) fn new() -> Self {
+        Self {
+            runtime: ClaudeSessionRuntime::new(),
+        }
+    }
+}
+
+impl Default for ClaudeLocalChatHarness {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -46,32 +59,6 @@ pub(crate) fn claude_local_chat_harness_info() -> LocalChatHarnessInfo {
     }
 }
 
-fn to_claude_input(input: HarnessCreateSessionInput) -> CreateClaudeSessionInput {
-    CreateClaudeSessionInput {
-        session_id: input.backend_session_id,
-        working_dir: input.working_dir,
-        initial_prompt: input.initial_prompt,
-        resume_session_id: input.provider_resume_id,
-        model_id: input.model_id,
-        permission_mode: input.permission_mode,
-    }
-}
-
-impl From<ClaudeSessionError> for LocalChatSessionError {
-    fn from(error: ClaudeSessionError) -> Self {
-        match error {
-            ClaudeSessionError::SessionExists(session_id) => {
-                LocalChatSessionError::SessionExists(session_id)
-            }
-            ClaudeSessionError::SessionNotFound(session_id) => {
-                LocalChatSessionError::SessionNotFound(session_id)
-            }
-            ClaudeSessionError::SendFailed(error) => LocalChatSessionError::SendFailed(error),
-            ClaudeSessionError::SpawnFailed(error) => LocalChatSessionError::SpawnFailed(error),
-        }
-    }
-}
-
 #[async_trait]
 impl LocalChatHarness for ClaudeLocalChatHarness {
     fn kind(&self) -> LocalChatHarnessKind {
@@ -87,10 +74,7 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         input: HarnessCreateSessionInput,
         runtime: LocalChatRuntime,
     ) -> Result<(), LocalChatSessionError> {
-        self.manager
-            .create_session_with_runtime(to_claude_input(input), runtime)
-            .await
-            .map_err(LocalChatSessionError::from)
+        self.runtime.create_session(input, runtime).await
     }
 
     async fn send_message(
@@ -98,28 +82,23 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         backend_session_id: &str,
         content: &str,
     ) -> Result<(), LocalChatSessionError> {
-        self.manager
-            .send_message(backend_session_id, content)
-            .await
-            .map_err(LocalChatSessionError::from)
+        self.runtime.send_message(backend_session_id, content).await
     }
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
-        self.manager
-            .close_session(backend_session_id)
-            .await
-            .map_err(LocalChatSessionError::from)
+        self.runtime.close_session(backend_session_id).await
     }
 
     async fn has_session(&self, backend_session_id: &str) -> bool {
-        self.manager.has_session(backend_session_id).await
+        self.runtime.has_session(backend_session_id).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::claude_session::{ClaudeModelCatalog, ClaudeModelOption};
+    use crate::local_chat::HarnessCreateSessionInput;
+    use crate::types::PermissionMode;
 
     #[test]
     fn neutral_claude_catalog_matches_supported_claude_models() {
@@ -179,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn harness_create_input_maps_to_claude_compatibility_input() {
+    fn harness_create_input_is_passed_directly_to_runtime() {
         let input = HarnessCreateSessionInput {
             backend_session_id: "backend-1".to_string(),
             working_dir: Some("/tmp/project".to_string()),
@@ -187,22 +166,17 @@ mod tests {
             provider_resume_id: Some("claude-conversation-1".to_string()),
             model_id: Some("opus".to_string()),
             reasoning_effort: Some("high".to_string()),
-            permission_mode: Some(crate::types::PermissionMode::Plan),
+            permission_mode: Some(PermissionMode::Plan),
         };
 
-        let claude_input = to_claude_input(input);
-
-        assert_eq!(claude_input.session_id, "backend-1");
-        assert_eq!(claude_input.working_dir, Some("/tmp/project".to_string()));
-        assert_eq!(claude_input.initial_prompt, Some("start".to_string()));
+        assert_eq!(input.backend_session_id, "backend-1");
+        assert_eq!(input.working_dir, Some("/tmp/project".to_string()));
+        assert_eq!(input.initial_prompt, Some("start".to_string()));
         assert_eq!(
-            claude_input.resume_session_id,
+            input.provider_resume_id,
             Some("claude-conversation-1".to_string())
         );
-        assert_eq!(claude_input.model_id, Some("opus".to_string()));
-        assert_eq!(
-            claude_input.permission_mode,
-            Some(crate::types::PermissionMode::Plan)
-        );
+        assert_eq!(input.model_id, Some("opus".to_string()));
+        assert_eq!(input.permission_mode, Some(PermissionMode::Plan));
     }
 }

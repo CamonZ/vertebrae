@@ -1,12 +1,10 @@
-//! Claude CLI session management with JSONL streaming
+//! Claude CLI session runtime with JSONL streaming
 //!
-//! Provides structured chat interaction with Claude CLI using
-//! streaming JSON input/output instead of PTY-based terminal emulation.
+//! Harness-private runtime that owns the live Claude process registry and
+//! translates JSONL stream events into neutral [`LocalChatEvent`] payloads.
 
 #![allow(dead_code)] // Some fields are parsed but not yet used
 
-use serde::{Deserialize, Serialize};
-use specta::Type;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::process::{Command, Stdio};
@@ -20,9 +18,6 @@ use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
 use crate::local_chat::harnesses::claude::args::{
     build_claude_args, resolve_requested_claude_model,
 };
-pub use crate::local_chat::harnesses::claude::args::{
-    supported_claude_model_catalog, ClaudeModelCatalog, ClaudeModelOption,
-};
 use crate::local_chat::harnesses::claude::jsonl::{self, EmittedEvent};
 use crate::local_chat::harnesses::claude::live_jsonl::{
     encode_claude_user_jsonl_message, process_claude_stderr_lines, ClaudeLiveJsonlCommand,
@@ -30,8 +25,8 @@ use crate::local_chat::harnesses::claude::live_jsonl::{
 };
 use crate::local_chat::permissions::PermissionBridge;
 use crate::local_chat::{
-    LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind, LocalChatRuntime,
-    LocalChatSessionEndEvent as NeutralSessionEndEvent,
+    HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
+    LocalChatRuntime, LocalChatSessionEndEvent as NeutralSessionEndEvent, LocalChatSessionError,
     LocalChatSessionErrorEvent as NeutralSessionErrorEvent,
     LocalChatSessionInitEvent as NeutralSessionInitEvent,
     LocalChatSessionUsageEvent as NeutralSessionUsageEvent,
@@ -39,17 +34,8 @@ use crate::local_chat::{
     LocalChatTextEvent as NeutralTextEvent, LocalChatToolCallEvent as NeutralToolCallEvent,
     LocalChatToolResultEvent as NeutralToolResultEvent,
 };
-use crate::types::CreateClaudeSessionInput;
-
-pub use crate::local_chat::permissions::LocalPermissionDecision;
 
 /// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
-///
-/// macOS GUI applications inherit a minimal PATH (typically just `/usr/bin:/bin:/usr/sbin:/sbin`)
-/// because they don't source shell profiles. This function prepends `~/.cargo/bin`,
-/// `~/.local/bin`, `/opt/homebrew/bin`, and `/usr/local/bin` so that tools installed via cargo,
-/// the Vertebrae installer, Homebrew, or manually into `/usr/local/bin` are discoverable by
-/// subprocesses.
 fn build_augmented_path() -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -70,13 +56,11 @@ fn build_augmented_path() -> String {
 }
 
 /// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
-/// Walks backwards from the target offset to find the nearest char boundary.
 fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
     if max_bytes >= s.len() {
         return s;
     }
     let mut end = max_bytes;
-    // is_char_boundary(0) is always true, so this loop always terminates
     while !s.is_char_boundary(end) {
         end -= 1;
     }
@@ -112,10 +96,9 @@ fn resolve_working_dir<R: tauri::Runtime>(
 }
 
 // ============================================================================
-// Session management
+// Session runtime
 // ============================================================================
 
-/// Handle to a Claude session
 struct SessionHandle {
     command_tx: mpsc::UnboundedSender<ClaudeLiveJsonlCommand>,
 }
@@ -156,65 +139,44 @@ impl Drop for SessionCleanup {
     }
 }
 
-/// Manages active Claude CLI sessions
+/// Harness-private runtime that manages active Claude CLI sessions.
 #[derive(Clone)]
-pub struct ClaudeSessionManager {
+pub(crate) struct ClaudeSessionRuntime {
     sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-    permission_bridge: PermissionBridge,
 }
 
-impl ClaudeSessionManager {
-    pub fn new() -> Self {
+impl ClaudeSessionRuntime {
+    pub(crate) fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            permission_bridge: PermissionBridge::new(),
         }
     }
 
-    pub(crate) fn permission_bridge(&self) -> PermissionBridge {
-        self.permission_bridge.clone()
-    }
-
-    /// Create a new Claude session with JSONL streaming
-    /// If `resume_session_id` is provided, continues an existing Claude conversation
-    pub async fn create_session(
+    pub(crate) async fn create_session(
         &self,
-        input: CreateClaudeSessionInput,
-        app_handle: tauri::AppHandle,
-    ) -> Result<(), ClaudeSessionError> {
-        let runtime = LocalChatRuntime::new(app_handle, self.permission_bridge.clone());
-        self.create_session_with_runtime(input, runtime).await
-    }
-
-    pub(crate) async fn create_session_with_runtime(
-        &self,
-        input: CreateClaudeSessionInput,
+        input: HarnessCreateSessionInput,
         runtime: LocalChatRuntime,
-    ) -> Result<(), ClaudeSessionError> {
-        let session_id = input.session_id.clone();
+    ) -> Result<(), LocalChatSessionError> {
+        let session_id = input.backend_session_id.clone();
         if runtime.app_handle().is_none() {
-            return Err(ClaudeSessionError::SpawnFailed(
+            return Err(LocalChatSessionError::SpawnFailed(
                 "Tauri app handle is required to start a Claude session".to_string(),
             ));
         }
-        // Check if session already exists
         {
             let sessions = self.sessions.read().await;
             if sessions.contains_key(&session_id) {
-                return Err(ClaudeSessionError::SessionExists(session_id));
+                return Err(LocalChatSessionError::SessionExists(session_id));
             }
         }
 
-        // Create command channel
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-        // Store session handle
         {
             let mut sessions = self.sessions.write().await;
             sessions.insert(session_id.clone(), SessionHandle { command_tx });
         }
 
-        // Spawn the session thread
         let runtime_state = SessionRuntimeState {
             runtime,
             sessions: self.sessions.clone(),
@@ -227,19 +189,19 @@ impl ClaudeSessionManager {
         Ok(())
     }
 
-    /// Run the Claude CLI session in a dedicated thread
     fn run_session(
-        input: CreateClaudeSessionInput,
+        input: HarnessCreateSessionInput,
         command_rx: mpsc::UnboundedReceiver<ClaudeLiveJsonlCommand>,
         runtime_state: SessionRuntimeState,
     ) {
-        let CreateClaudeSessionInput {
-            session_id,
+        let HarnessCreateSessionInput {
+            backend_session_id: session_id,
             working_dir,
             initial_prompt,
-            resume_session_id,
+            provider_resume_id: resume_session_id,
             model_id: requested_model_id,
             permission_mode,
+            ..
         } = input;
         let SessionRuntimeState { runtime, sessions } = runtime_state;
         let Some(app_handle) = runtime.app_handle() else {
@@ -264,12 +226,10 @@ impl ClaudeSessionManager {
             Self::emit_warning(&event_sink, &session_id, warning.clone());
         }
 
-        // Find the Claude Code CLI binary using unified discovery logic
         let claude_binary = match find_claude_binary() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(e) => {
                 log::error!("Failed to find Claude Code CLI: {}", e);
-                // Notify frontend of initialization failure
                 Self::emit_init(&event_sink, &session_id, None, String::new(), vec![]);
                 return;
             }
@@ -510,32 +470,20 @@ impl ClaudeSessionManager {
         }));
     }
 
-    pub fn resolve_permission_request(
-        &self,
-        request_id: &str,
-        decision: LocalPermissionDecision,
-    ) -> Result<serde_json::Value, String> {
-        self.permission_bridge
-            .resolve_permission_request(request_id, decision)
-    }
-
     /// Process stderr lines from the Claude CLI.
-    /// Passes each non-empty line (prefixed with `[stderr]`) to the callback.
-    /// Stops on read error.
     fn process_stderr_lines(reader: impl BufRead, session_id: &str, on_error: impl FnMut(String)) {
         process_claude_stderr_lines(reader, session_id, on_error);
     }
 
-    /// Send a message to a Claude session
-    pub async fn send_message(
+    pub(crate) async fn send_message(
         &self,
         session_id: &str,
         content: &str,
-    ) -> Result<(), ClaudeSessionError> {
+    ) -> Result<(), LocalChatSessionError> {
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(session_id)
-            .ok_or_else(|| ClaudeSessionError::SessionNotFound(session_id.to_string()))?;
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
 
         let (response_tx, response_rx) = oneshot::channel();
         session
@@ -544,20 +492,22 @@ impl ClaudeSessionManager {
                 content: content.to_string(),
                 response: response_tx,
             })
-            .map_err(|_| ClaudeSessionError::SessionNotFound(session_id.to_string()))?;
+            .map_err(|_| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
 
         response_rx
             .await
-            .map_err(|_| ClaudeSessionError::SendFailed("Session closed".to_string()))?
-            .map_err(ClaudeSessionError::SendFailed)
+            .map_err(|_| LocalChatSessionError::SendFailed("Session closed".to_string()))?
+            .map_err(LocalChatSessionError::SendFailed)
     }
 
-    /// Close a Claude session
-    pub async fn close_session(&self, session_id: &str) -> Result<(), ClaudeSessionError> {
+    pub(crate) async fn close_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
         let sessions = self.sessions.read().await;
         let session = sessions
             .get(session_id)
-            .ok_or_else(|| ClaudeSessionError::SessionNotFound(session_id.to_string()))?;
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
 
         let (response_tx, response_rx) = oneshot::channel();
         session
@@ -565,38 +515,24 @@ impl ClaudeSessionManager {
             .send(ClaudeLiveJsonlCommand::Close {
                 response: response_tx,
             })
-            .map_err(|_| ClaudeSessionError::SessionNotFound(session_id.to_string()))?;
+            .map_err(|_| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
 
         response_rx
             .await
-            .map_err(|_| ClaudeSessionError::SessionNotFound("Session closed".to_string()))?
-            .map_err(ClaudeSessionError::SessionNotFound)
+            .map_err(|_| LocalChatSessionError::SessionNotFound("Session closed".to_string()))?
+            .map_err(LocalChatSessionError::SessionNotFound)
     }
 
-    /// Check if a session exists
-    pub async fn has_session(&self, session_id: &str) -> bool {
+    pub(crate) async fn has_session(&self, session_id: &str) -> bool {
         let sessions = self.sessions.read().await;
         sessions.contains_key(session_id)
     }
 }
 
-impl Default for ClaudeSessionManager {
+impl Default for ClaudeSessionRuntime {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Claude session errors
-#[derive(Debug, Clone, Serialize, Deserialize, Type, thiserror::Error)]
-pub enum ClaudeSessionError {
-    #[error("Session already exists: {0}")]
-    SessionExists(String),
-    #[error("Session not found: {0}")]
-    SessionNotFound(String),
-    #[error("Failed to send message: {0}")]
-    SendFailed(String),
-    #[error("Failed to spawn Claude: {0}")]
-    SpawnFailed(String),
 }
 
 #[cfg(test)]

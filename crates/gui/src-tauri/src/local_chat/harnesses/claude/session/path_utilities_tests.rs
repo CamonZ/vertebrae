@@ -29,20 +29,15 @@ fn test_resolve_working_dir_rejects_blank_path_without_fallback() {
 
 #[test]
 fn test_utf8_safe_truncation_does_not_panic() {
-    // '…' (U+2026) is 3 bytes in UTF-8 (0xE2 0x80 0xA6).
-    // Place it so a naive byte slice at 200 would land inside the character.
-    let line = "a".repeat(198) + "…" + &"b".repeat(50); // '…' spans bytes 198..201
-    assert_eq!(line.len(), 251); // 198 + 3 + 50
+    let line = "a".repeat(198) + "\u{2026}" + &"b".repeat(50);
+    assert_eq!(line.len(), 251);
 
-    // Truncation at 200 must not panic and must land on a char boundary
     let truncated = truncate_utf8(&line, 200);
     assert!(truncated.is_char_boundary(truncated.len()));
-    // Should truncate before the '…' since byte 200 is inside it
     assert_eq!(truncated.len(), 198);
     assert_eq!(truncated, "a".repeat(198).as_str());
 
-    // Same test for the 100-byte truncation path
-    let line_100 = "x".repeat(98) + "…" + &"y".repeat(50); // '…' spans bytes 98..101
+    let line_100 = "x".repeat(98) + "\u{2026}" + &"y".repeat(50);
     assert_eq!(line_100.len(), 151);
 
     let truncated_100 = truncate_utf8(&line_100, 100);
@@ -53,8 +48,8 @@ fn test_utf8_safe_truncation_does_not_panic() {
 
 #[test]
 fn test_utf8_safe_truncation_with_string_shorter_than_limit() {
-    let short = "hello…world";
-    let len = short.len(); // "hello" = 5, "…" = 3, "world" = 5 => 13
+    let short = "hello\u{2026}world";
+    let len = short.len();
     assert_eq!(len, 13);
 
     let truncated = truncate_utf8(short, 200);
@@ -70,26 +65,24 @@ fn test_utf8_safe_truncation_zero_max_bytes() {
 
 #[test]
 fn test_utf8_safe_truncation_all_multibyte() {
-    // All 3-byte characters — truncating at 1 or 2 must walk back to 0
-    let s = "………"; // 3 × 3 bytes = 9 bytes
+    let s = "\u{2026}\u{2026}\u{2026}";
     assert_eq!(s.len(), 9);
 
     assert_eq!(truncate_utf8(s, 1), "");
     assert_eq!(truncate_utf8(s, 2), "");
-    assert_eq!(truncate_utf8(s, 3), "…");
-    assert_eq!(truncate_utf8(s, 5), "…");
-    assert_eq!(truncate_utf8(s, 6), "……");
+    assert_eq!(truncate_utf8(s, 3), "\u{2026}");
+    assert_eq!(truncate_utf8(s, 5), "\u{2026}");
+    assert_eq!(truncate_utf8(s, 6), "\u{2026}\u{2026}");
 }
 
 #[test]
 fn test_utf8_safe_truncation_exact_boundary() {
-    let s = "abc…def"; // 3 + 3 + 3 = 9 bytes
+    let s = "abc\u{2026}def";
     assert_eq!(s.len(), 9);
 
-    // Truncate exactly at char boundary
     assert_eq!(truncate_utf8(s, 3), "abc");
-    assert_eq!(truncate_utf8(s, 6), "abc…");
-    assert_eq!(truncate_utf8(s, 9), "abc…def");
+    assert_eq!(truncate_utf8(s, 6), "abc\u{2026}");
+    assert_eq!(truncate_utf8(s, 9), "abc\u{2026}def");
 }
 
 // ========================================================================
@@ -148,7 +141,6 @@ fn test_build_augmented_path_contains_usr_local_bin() {
 
 #[test]
 fn test_build_augmented_path_preserves_existing_path() {
-    // The current process PATH should appear in the augmented result
     let current = std::env::var("PATH").unwrap_or_default();
     if !current.is_empty() {
         let path = build_augmented_path();
@@ -174,8 +166,6 @@ fn test_build_augmented_path_cargo_bin_before_existing_path() {
     let cargo_pos = path.find(&cargo_bin).expect("cargo/bin should be in PATH");
     let current = std::env::var("PATH").unwrap_or_default();
     if !current.is_empty() {
-        // Find the start of the original PATH within the augmented one.
-        // The original PATH is appended as the last segment, so find it from the end.
         let original_pos = path
             .rfind(&current)
             .expect("original PATH should be in PATH");
@@ -192,7 +182,6 @@ fn test_build_augmented_path_cargo_bin_before_existing_path() {
 fn test_build_augmented_path_is_colon_separated() {
     let path = build_augmented_path();
     let segments: Vec<&str> = path.split(':').collect();
-    // At minimum: ~/.cargo/bin, ~/.local/bin, /opt/homebrew/bin, /usr/local/bin
     assert!(
         segments.len() >= 4,
         "PATH should have at least 4 segments, got {}: {}",

@@ -72,7 +72,7 @@ fn test_process_stderr_lines_collects_errors() {
     let input = "something went wrong\nanother error\n";
 
     let mut errors = Vec::new();
-    ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
+    ClaudeSessionRuntime::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
         errors.push(msg)
     });
 
@@ -86,7 +86,7 @@ fn test_process_stderr_lines_skips_empty_lines() {
     let input = "error one\n\n\nerror two\n";
 
     let mut errors = Vec::new();
-    ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
+    ClaudeSessionRuntime::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
         errors.push(msg)
     });
 
@@ -96,7 +96,7 @@ fn test_process_stderr_lines_skips_empty_lines() {
 #[test]
 fn test_process_stderr_lines_empty_input() {
     let mut called = false;
-    ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(""), "sess-1", |_| {
+    ClaudeSessionRuntime::process_stderr_lines(std::io::Cursor::new(""), "sess-1", |_| {
         called = true
     });
     assert!(!called);
@@ -107,7 +107,7 @@ fn test_process_stderr_lines_stops_on_read_error() {
     let reader = FailingReader::new("first error\n");
 
     let mut errors = Vec::new();
-    ClaudeSessionManager::process_stderr_lines(reader, "sess-1", |msg| errors.push(msg));
+    ClaudeSessionRuntime::process_stderr_lines(reader, "sess-1", |msg| errors.push(msg));
 
     // Should have processed the one valid line before the error
     assert_eq!(errors.len(), 1);

@@ -401,16 +401,6 @@ impl PermissionMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct CreateClaudeSessionInput {
-    pub session_id: String,
-    pub working_dir: Option<String>,
-    pub initial_prompt: Option<String>,
-    pub resume_session_id: Option<String>,
-    pub model_id: Option<String>,
-    pub permission_mode: Option<PermissionMode>,
-}
-
 impl From<vertebrae_core::PermissionMode> for PermissionMode {
     fn from(mode: vertebrae_core::PermissionMode) -> Self {
         match mode {

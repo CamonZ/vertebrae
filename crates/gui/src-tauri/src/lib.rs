@@ -1,6 +1,5 @@
 #![allow(deprecated)]
 
-pub mod claude_session;
 pub mod commands;
 pub mod events;
 pub mod helpers;
@@ -21,7 +20,6 @@ use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
-use claude_session::ClaudeSessionManager;
 use commands::AppState;
 use events::{
     PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
@@ -231,13 +229,10 @@ pub fn run() {
                 project_config,
             });
 
-            // Initialize shared local chat session managers for JSONL chat
-            let claude_manager = ClaudeSessionManager::new();
-            let local_chat_manager =
-                LocalChatSessionManager::with_default_harnesses(claude_manager.clone());
-            app.manage(claude_manager);
+            // Initialize local chat session manager (owns Claude + Codex harnesses)
+            let local_chat_manager = LocalChatSessionManager::new();
             app.manage(local_chat_manager);
-            log::info!("[STARTUP] Claude session manager initialized");
+            log::info!("[STARTUP] Local chat session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
             let socket = if let Some(config) = sacrum_config {

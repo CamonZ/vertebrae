@@ -796,7 +796,7 @@ async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, Loc
 }
 },
 /**
- * Resolve a Claude permission request shown in the GUI.
+ * Resolve a local chat permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
     try {
@@ -1560,7 +1560,7 @@ step_name: string | null;
 /**
  * Current step type (if task has a current step in workflow)
  */
-step_type: StepType | null;
+step_type: StepType | null; 
 /**
  * Server-derived TaskRun controls for Run/Stop surfaces
  */

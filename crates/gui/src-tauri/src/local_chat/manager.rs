@@ -3,10 +3,9 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::claude_session::ClaudeSessionManager;
 use crate::local_chat::harnesses::claude::ClaudeLocalChatHarness;
 use crate::local_chat::harnesses::codex::CodexLocalChatHarness;
-use crate::local_chat::permissions::PermissionBridge;
+use crate::local_chat::permissions::{LocalPermissionDecision, PermissionBridge};
 use crate::local_chat::{
     CreateLocalChatSessionInput, LocalChatHarness, LocalChatHarnessCatalog, LocalChatHarnessKind,
     LocalChatRuntime, LocalChatSessionError,
@@ -20,17 +19,12 @@ pub struct LocalChatSessionManager {
 
 impl LocalChatSessionManager {
     pub fn new() -> Self {
-        Self::with_default_harnesses(ClaudeSessionManager::new())
-    }
-
-    pub fn with_default_harnesses(claude_manager: ClaudeSessionManager) -> Self {
-        let permission_bridge = claude_manager.permission_bridge();
         Self::with_harnesses_and_permission_bridge(
             vec![
-                Arc::new(ClaudeLocalChatHarness::new(claude_manager)),
+                Arc::new(ClaudeLocalChatHarness::new()),
                 Arc::new(CodexLocalChatHarness::new()),
             ],
-            permission_bridge,
+            PermissionBridge::new(),
         )
     }
 
@@ -159,6 +153,16 @@ impl LocalChatSessionManager {
             return false;
         };
         harness.has_session(backend_session_id).await
+    }
+
+    /// Resolve a permission request through the neutral permission bridge.
+    pub fn resolve_permission_request(
+        &self,
+        request_id: &str,
+        decision: LocalPermissionDecision,
+    ) -> Result<serde_json::Value, String> {
+        self.permission_bridge
+            .resolve_permission_request(request_id, decision)
     }
 
     fn harness(
