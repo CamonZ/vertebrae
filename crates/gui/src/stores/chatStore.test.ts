@@ -163,6 +163,7 @@ describe("chatStore", () => {
       useChatStore.getState().setBackendSessionId(id, "backend-1");
       useChatStore.getState().setProviderResumeId(id, "conv-1");
       useChatStore.getState().setSessionSelectedModel(id, "opus");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
       useChatStore
         .getState()
         .setSessionUsage(id, "claude-sonnet-4", { used: 50, max: 200000 });
@@ -186,6 +187,7 @@ describe("chatStore", () => {
         backendSessionId: null,
         providerResumeId: "conv-1",
         selectedModelId: "opus",
+        selectedReasoningEffort: "high",
         model: "claude-sonnet-4",
         tokenUsage: { used: 50, max: 200000 },
       });
@@ -221,6 +223,42 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id].selectedModelId).toBeNull();
       expect(loadPersistedLocalChatSession(id)?.selectedModelId).toBeNull();
       expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+    });
+
+    it("stores selected harness before start and clears provider-specific model state", () => {
+      const id = useChatStore.getState().openSession("Task Provider");
+
+      useChatStore.getState().setSessionSelectedModel(id, "sonnet");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionModel(id, "claude-sonnet");
+      useChatStore.getState().setSessionTokenUsage(id, { used: 10, max: 100 });
+      useChatStore.getState().setSessionHarness(id, "codex");
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        harness: "codex",
+        selectedModelId: undefined,
+        selectedReasoningEffort: undefined,
+        model: undefined,
+        tokenUsage: undefined,
+      });
+      expect(loadPersistedLocalChatSession(id)?.harness).toBe("codex");
+      expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+    });
+
+    it("locks harness changes after a backend or provider resume id exists", () => {
+      const backendId = useChatStore.getState().openSession("Task Backend");
+      useChatStore.getState().setBackendSessionId(backendId, "backend-1");
+      useChatStore.getState().setSessionHarness(backendId, "codex");
+
+      expect(useChatStore.getState().sessions[backendId].harness).toBe(
+        "claude"
+      );
+
+      const resumeId = useChatStore.getState().startFreshSession("Task Resume");
+      useChatStore.getState().setProviderResumeId(resumeId, "resume-1");
+      useChatStore.getState().setSessionHarness(resumeId, "codex");
+
+      expect(useChatStore.getState().sessions[resumeId].harness).toBe("claude");
     });
 
     it("reuses the matching project path when persisted sessions are already loaded", () => {
@@ -968,6 +1006,31 @@ describe("chatStore", () => {
 
       expect(useChatStore.getState().sessions[id]).toBe(sessionBefore);
       expect(setItem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setSessionReasoningEffort", () => {
+    it("stores the selected reasoning effort on the session", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      expect(useChatStore.getState().sessions[id].selectedReasoningEffort).toBe(
+        "high"
+      );
+      expect(loadPersistedLocalChatSession(id)?.selectedReasoningEffort).toBe(
+        "high"
+      );
+    });
+
+    it("normalizes an empty reasoning effort to provider default", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionReasoningEffort(id, "");
+      expect(useChatStore.getState().sessions[id].selectedReasoningEffort).toBe(
+        null
+      );
+      expect(
+        loadPersistedLocalChatSession(id)?.selectedReasoningEffort
+      ).toBeNull();
     });
   });
 

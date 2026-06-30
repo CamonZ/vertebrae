@@ -273,6 +273,9 @@ export async function doStartSession(
 
     const resumeId = session.providerResumeId;
     const modelId = resumeId ? null : (session.selectedModelId ?? null);
+    const reasoningEffort = resumeId
+      ? null
+      : (session.selectedReasoningEffort ?? null);
     const permissionMode = session.permissionMode ?? "default";
 
     const result = await commands.createLocalChatSession({
@@ -282,6 +285,7 @@ export async function doStartSession(
       initial_prompt: initialPrompt ?? null,
       provider_resume_id: resumeId,
       model_id: modelId,
+      reasoning_effort: reasoningEffort,
       permission_mode: permissionMode,
     });
     if (result.status === "error") {
@@ -289,9 +293,15 @@ export async function doStartSession(
     }
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
+    const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
     deps.setBackendSessionIdRef(null);
-    deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+    deps.addMessage(sessionId, {
+      kind: "error",
+      message,
+      timestamp: new Date().toISOString(),
+    });
+    deps.setSessionLifecycle(sessionId, "error", message);
   }
 }
 

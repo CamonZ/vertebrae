@@ -1048,7 +1048,7 @@ symlink_path: string;
  * avoid pestering users who already have `vtb` from `cargo install`.
  */
 on_path: boolean }
-export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; permission_mode: PermissionMode | null }
+export type CreateLocalChatSessionInput = { harness: LocalChatHarnessKind; backend_session_id: string; working_dir: string | null; initial_prompt: string | null; provider_resume_id: string | null; model_id: string | null; reasoning_effort: string | null; permission_mode: PermissionMode | null }
 /**
  * Options for creating a workflow step.
  */
@@ -1097,9 +1097,10 @@ skills_target: string }
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
-export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; supports_resume: boolean }
+export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
 export type LocalChatModelOption = { id: string; label: string }
+export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; error: string }

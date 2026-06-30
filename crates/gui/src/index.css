@@ -2629,7 +2629,19 @@ html.window-transparent #root {
   background: var(--err-wash);
   color: var(--err);
 }
-.hc-panel .hc-model-picker {
+.hc-panel .hc-chat-controls {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-2);
+}
+.hc-panel .hc-chat-controls.right {
+  justify-content: flex-end;
+}
+.hc-panel .hc-model-picker,
+.hc-panel .hc-effort-picker,
+.hc-panel .hc-provider-picker {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
@@ -2650,6 +2662,8 @@ html.window-transparent #root {
   color: var(--fg-mute);
 }
 .hc-panel .hc-model-picker select,
+.hc-panel .hc-effort-picker select,
+.hc-panel .hc-provider-picker select,
 .hc-panel .hc-permission-picker select {
   min-width: 78px;
   max-width: 132px;
@@ -2664,15 +2678,34 @@ html.window-transparent #root {
 .hc-panel .hc-permission-picker select {
   max-width: 116px;
 }
+.hc-panel .hc-provider-picker select {
+  max-width: 104px;
+}
+.hc-panel .hc-effort-picker select {
+  max-width: 112px;
+}
 .hc-panel .hc-model-picker select:focus-visible,
+.hc-panel .hc-effort-picker select:focus-visible,
+.hc-panel .hc-provider-picker select:focus-visible,
 .hc-panel .hc-permission-picker select:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 .hc-panel .hc-model-picker select:disabled,
+.hc-panel .hc-effort-picker select:disabled,
+.hc-panel .hc-provider-picker select:disabled,
 .hc-panel .hc-permission-picker select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+.hc-panel .hc-provider-unavailable {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--err);
 }
 
 /* Composer footer: a thin context-utilization bar rides the top edge, the

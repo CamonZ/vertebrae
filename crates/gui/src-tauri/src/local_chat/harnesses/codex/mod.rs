@@ -19,15 +19,16 @@ use tungstenite::Message;
 use crate::helpers::find_codex_binary;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarness,
-    LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption, LocalChatRuntime,
-    LocalChatSessionEndEvent, LocalChatSessionError, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatTextEvent,
+    LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
+    LocalChatReasoningEffortOption, LocalChatRuntime, LocalChatSessionEndEvent,
+    LocalChatSessionError, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
+    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
 };
 use crate::types::PermissionMode;
 
 const CODEX_DEFAULT_MODEL_ID: &str = "default";
 const CODEX_DEFAULT_MODEL_LABEL: &str = "Codex default";
+const CODEX_DEFAULT_REASONING_EFFORT: &str = "medium";
 const APP_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const APP_SERVER_READY_POLL: Duration = Duration::from_millis(50);
 const APP_SERVER_LAUNCH_ATTEMPTS: usize = 3;
@@ -77,6 +78,16 @@ impl LocalChatHarness for CodexLocalChatHarness {
         runtime: LocalChatRuntime,
     ) -> Result<(), LocalChatSessionError> {
         let backend_session_id = input.backend_session_id.clone();
+        log::info!(
+            "[Codex local chat] create_session starting: backend_session_id={}, working_dir={:?}, resume={:?}, model={:?}, effort={:?}, permission_mode={:?}, has_initial_prompt={}",
+            backend_session_id,
+            input.working_dir,
+            input.provider_resume_id,
+            input.model_id,
+            input.reasoning_effort,
+            input.permission_mode,
+            input.initial_prompt.is_some()
+        );
         {
             let sessions = self.sessions.read().await;
             if sessions.contains_key(&backend_session_id) {
@@ -84,30 +95,75 @@ impl LocalChatHarness for CodexLocalChatHarness {
             }
         }
 
-        let mut launched = self.launcher.launch().await.map_err(|err| {
-            LocalChatSessionError::SpawnFailed(format!("Failed to start Codex app-server: {err}"))
-        })?;
+        let event_sink = runtime.event_sink();
+        let mut launched = match self.launcher.launch().await {
+            Ok(launched) => launched,
+            Err(err) => {
+                let error = format!("Failed to start Codex app-server: {err}");
+                log::error!(
+                    "[Codex local chat] app-server launch failed for {}: {}",
+                    backend_session_id,
+                    error
+                );
+                emit_start_error(&event_sink, &backend_session_id, error.clone());
+                return Err(LocalChatSessionError::SpawnFailed(error));
+            }
+        };
+        log::info!(
+            "[Codex local chat] app-server launched for {} at {}",
+            backend_session_id,
+            launched.ws_url
+        );
         let mut connection = match CodexRpcConnection::connect(&launched.ws_url).await {
             Ok(connection) => connection,
             Err(error) => {
                 stop_process(&mut launched.process).await;
+                log::error!(
+                    "[Codex local chat] websocket connect failed for {}: {}",
+                    backend_session_id,
+                    error
+                );
+                emit_start_error(&event_sink, &backend_session_id, error.clone());
                 return Err(LocalChatSessionError::StartFailed(error));
             }
         };
+        log::info!(
+            "[Codex local chat] websocket connected for {}",
+            backend_session_id
+        );
         if let Err(error) = connection.initialize().await {
             stop_process(&mut launched.process).await;
+            log::error!(
+                "[Codex local chat] initialize failed for {}: {}",
+                backend_session_id,
+                error
+            );
+            emit_start_error(&event_sink, &backend_session_id, error.clone());
             return Err(LocalChatSessionError::StartFailed(error));
         }
+        log::info!(
+            "[Codex local chat] initialized app-server for {}",
+            backend_session_id
+        );
 
         let model_override = requested_model_override(input.model_id.as_deref());
+        let reasoning_effort = requested_reasoning_effort(input.reasoning_effort.as_deref());
         let permission_settings =
             CodexPermissionSettings::from_permission_mode(input.permission_mode.as_ref());
         let initial_prompt = input.initial_prompt.clone();
+        log::info!(
+            "[Codex local chat] starting provider thread for {}: resume={:?}, model_override={:?}, effort={:?}",
+            backend_session_id,
+            input.provider_resume_id,
+            model_override,
+            reasoning_effort
+        );
         let thread = match connection
             .start_or_resume_thread(ThreadRequest {
                 provider_resume_id: input.provider_resume_id.as_deref(),
                 working_dir: input.working_dir.as_deref(),
                 model: model_override,
+                reasoning_effort,
                 permission_settings,
             })
             .await
@@ -115,11 +171,22 @@ impl LocalChatHarness for CodexLocalChatHarness {
             Ok(thread) => thread,
             Err(error) => {
                 stop_process(&mut launched.process).await;
+                log::error!(
+                    "[Codex local chat] provider thread start failed for {}: {}",
+                    backend_session_id,
+                    error
+                );
+                emit_start_error(&event_sink, &backend_session_id, error.clone());
                 return Err(LocalChatSessionError::StartFailed(error));
             }
         };
+        log::info!(
+            "[Codex local chat] provider thread ready for {}: thread_id={}, model={}",
+            backend_session_id,
+            thread.thread_id,
+            thread.model
+        );
 
-        let event_sink = runtime.event_sink();
         emit_init(
             &event_sink,
             &backend_session_id,
@@ -145,6 +212,10 @@ impl LocalChatHarness for CodexLocalChatHarness {
             return Err(LocalChatSessionError::SessionExists(backend_session_id));
         }
         sessions.insert(backend_session_id, session.clone());
+        log::info!(
+            "[Codex local chat] session registered for {}",
+            session.backend_session_id
+        );
 
         if let Some(initial_prompt) = initial_prompt {
             tokio::spawn(async move {
@@ -152,7 +223,11 @@ impl LocalChatHarness for CodexLocalChatHarness {
                     .run_turn(&initial_prompt, TurnFailureSurface::Start)
                     .await
                 {
-                    session.emit_error(error.to_string());
+                    log::error!(
+                        "[Codex local chat] initial turn failed for {}: {}",
+                        session.backend_session_id,
+                        error
+                    );
                 }
             });
         }
@@ -215,7 +290,7 @@ impl CodexLocalChatSession {
             stats.num_turns.saturating_add(1)
         };
         let mut connection = self.connection.lock().await;
-        let outcome = connection
+        let outcome = match connection
             .start_turn(TurnRequest {
                 backend_session_id: &self.backend_session_id,
                 thread_id: &self.thread_id,
@@ -226,7 +301,18 @@ impl CodexLocalChatSession {
                 permission_settings: self.permission_settings,
             })
             .await
-            .map_err(|err| failure_surface.error(err))?;
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                log::error!(
+                    "[Codex local chat] turn RPC failed for {}: {}",
+                    self.backend_session_id,
+                    error
+                );
+                self.emit_error(error.clone());
+                return Err(failure_surface.error(error));
+            }
+        };
 
         let mut stats = self.stats.lock().await;
         stats.num_turns = stats.num_turns.saturating_add(1);
@@ -340,6 +426,7 @@ struct ThreadRequest<'a> {
     provider_resume_id: Option<&'a str>,
     working_dir: Option<&'a str>,
     model: Option<&'a str>,
+    reasoning_effort: Option<&'a str>,
     permission_settings: CodexPermissionSettings,
 }
 
@@ -371,6 +458,10 @@ struct CodexRpcConnection {
 
 impl CodexRpcConnection {
     async fn connect(ws_url: &str) -> Result<Self, String> {
+        log::info!(
+            "[Codex local chat] connecting to app-server websocket: {}",
+            ws_url
+        );
         let (stream, _) = connect_async(ws_url)
             .await
             .map_err(|err| format!("Failed to connect to Codex app-server websocket: {err}"))?;
@@ -422,6 +513,9 @@ impl CodexRpcConnection {
         }
         if let Some(model) = request.model {
             params["model"] = json!(model);
+        }
+        if let Some(reasoning_effort) = request.reasoning_effort {
+            params["effort"] = json!(reasoning_effort);
         }
         request.permission_settings.apply_to_params(&mut params);
 
@@ -492,11 +586,13 @@ impl CodexRpcConnection {
             "params": params,
         }))
         .await?;
+        log::info!("[Codex local chat] RPC request sent: method={method}, id={id}");
 
         loop {
             let message = self.read_message().await?;
             let handler = notification_handler.as_deref_mut();
             if let Some(response) = self.handle_message(message, Some(id), handler).await? {
+                log::info!("[Codex local chat] RPC response received: method={method}, id={id}");
                 return Ok(response);
             }
         }
@@ -550,6 +646,12 @@ impl CodexRpcConnection {
         if let (Some(expected_id), Some(message_id)) = (response_id, message.id.as_ref()) {
             if message_id.as_u64() == Some(expected_id) {
                 if let Some(error) = message.error {
+                    log::error!(
+                        "[Codex local chat] RPC error response: id={}, code={}, message={}",
+                        expected_id,
+                        error.code,
+                        error.message
+                    );
                     return Err(format!("{} ({})", error.message, error.code));
                 }
                 return Ok(Some(message.result.unwrap_or(Value::Null)));
@@ -557,6 +659,9 @@ impl CodexRpcConnection {
         }
 
         if let (Some(id), Some(method)) = (message.id.as_ref(), message.method.as_deref()) {
+            log::info!(
+                "[Codex local chat] app-server request received during turn: method={method}, id={id}"
+            );
             if let Some(handler) = notification_handler.as_deref_mut() {
                 handler.emit_approval_warning(method);
             }
@@ -756,16 +861,17 @@ impl<'a> TurnNotificationHandler<'a> {
         let error = if status == "completed" {
             None
         } else {
-            Some(
-                params
-                    .pointer("/turn/error/message")
-                    .and_then(Value::as_str)
-                    .unwrap_or(status)
-                    .to_string(),
-            )
+            Some(codex_error_message(params).unwrap_or_else(|| status.to_string()))
         };
 
         if let Some(error) = &error {
+            log::error!(
+                "[Codex local chat] turn completed with error for {}: status={}, error={}, params={}",
+                self.backend_session_id,
+                status,
+                error,
+                params
+            );
             self.emit_error(error.clone());
         }
 
@@ -786,11 +892,13 @@ impl<'a> TurnNotificationHandler<'a> {
     }
 
     fn handle_error(&mut self, params: &Value) {
-        let error = params
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("Codex app-server error")
-            .to_string();
+        let error = codex_error_message(params)
+            .unwrap_or_else(|| format!("Codex app-server error: {params}"));
+        log::error!(
+            "[Codex local chat] app-server error notification for {}: {}",
+            self.backend_session_id,
+            params
+        );
         self.emit_error(error.clone());
         self.completed = Some(TurnCompletion { error: Some(error) });
     }
@@ -850,11 +958,76 @@ fn emit_init(
     }));
 }
 
+fn emit_start_error(event_sink: &LocalChatEventSink, backend_session_id: &str, error: String) {
+    event_sink.emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
+        backend_session_id: backend_session_id.to_string(),
+        harness: LocalChatHarnessKind::Codex,
+        error,
+    }));
+}
+
 fn requested_model_override(model_id: Option<&str>) -> Option<&str> {
     match model_id {
         Some(CODEX_DEFAULT_MODEL_ID) | None => None,
         Some(model_id) => Some(model_id),
     }
+}
+
+fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Option<&str> {
+    match reasoning_effort {
+        Some(CODEX_DEFAULT_REASONING_EFFORT) | None => None,
+        Some(reasoning_effort) => Some(reasoning_effort),
+    }
+}
+
+fn codex_error_message(params: &Value) -> Option<String> {
+    [
+        "/message",
+        "/error/message",
+        "/turn/error/message",
+        "/error",
+        "/turn/error",
+    ]
+    .into_iter()
+    .find_map(|pointer| {
+        let value = params.pointer(pointer)?;
+        match value {
+            Value::String(message) if !message.is_empty() => Some(message.clone()),
+            Value::Object(_) | Value::Array(_) => Some(value.to_string()),
+            _ => None,
+        }
+    })
+}
+
+fn codex_model_options() -> Vec<LocalChatModelOption> {
+    [
+        (CODEX_DEFAULT_MODEL_ID, CODEX_DEFAULT_MODEL_LABEL),
+        ("gpt-5.5", "GPT-5.5"),
+        ("gpt-5.4", "GPT-5.4"),
+        ("gpt-5.4-mini", "GPT-5.4 Mini"),
+        ("gpt-5.3-codex", "GPT-5.3 Codex"),
+    ]
+    .into_iter()
+    .map(|(id, label)| LocalChatModelOption {
+        id: id.to_string(),
+        label: label.to_string(),
+    })
+    .collect()
+}
+
+fn codex_reasoning_effort_options() -> Vec<LocalChatReasoningEffortOption> {
+    [
+        ("low", "Low"),
+        (CODEX_DEFAULT_REASONING_EFFORT, "Medium"),
+        ("high", "High"),
+        ("xhigh", "Extra high"),
+    ]
+    .into_iter()
+    .map(|(id, label)| LocalChatReasoningEffortOption {
+        id: id.to_string(),
+        label: label.to_string(),
+    })
+    .collect()
 }
 
 fn value_to_u32(value: Option<&Value>) -> Option<u32> {
@@ -887,10 +1060,9 @@ impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
             available: availability.is_ok(),
             unavailable_reason: availability.err(),
             default_model_id: Some(CODEX_DEFAULT_MODEL_ID.to_string()),
-            models: vec![LocalChatModelOption {
-                id: CODEX_DEFAULT_MODEL_ID.to_string(),
-                label: CODEX_DEFAULT_MODEL_LABEL.to_string(),
-            }],
+            models: codex_model_options(),
+            default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.to_string()),
+            reasoning_efforts: codex_reasoning_effort_options(),
             supports_resume: true,
         }
     }
@@ -1007,10 +1179,9 @@ mod tests {
                 available: self.info_error.is_none(),
                 unavailable_reason: self.info_error.clone(),
                 default_model_id: Some(CODEX_DEFAULT_MODEL_ID.to_string()),
-                models: vec![LocalChatModelOption {
-                    id: CODEX_DEFAULT_MODEL_ID.to_string(),
-                    label: CODEX_DEFAULT_MODEL_LABEL.to_string(),
-                }],
+                models: codex_model_options(),
+                default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.to_string()),
+                reasoning_efforts: codex_reasoning_effort_options(),
                 supports_resume: true,
             }
         }
@@ -1356,6 +1527,7 @@ mod tests {
             initial_prompt: initial_prompt.map(str::to_string),
             provider_resume_id: provider_resume_id.map(str::to_string),
             model_id: Some(CODEX_DEFAULT_MODEL_ID.to_string()),
+            reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.to_string()),
             permission_mode: None,
         }
     }
@@ -1375,14 +1547,45 @@ mod tests {
         assert!(!info.available);
         assert_eq!(info.unavailable_reason, Some("codex missing".to_string()));
         assert_eq!(info.default_model_id, Some("default".to_string()));
-        assert_eq!(
-            info.models,
-            vec![LocalChatModelOption {
-                id: "default".to_string(),
-                label: "Codex default".to_string(),
-            }]
-        );
+        assert!(info.models.iter().any(|model| model.id == "gpt-5.5"));
+        assert!(info.models.iter().any(|model| model.id == "gpt-5.4"));
+        assert_eq!(info.default_reasoning_effort, Some("medium".to_string()));
+        assert!(info
+            .reasoning_efforts
+            .iter()
+            .any(|effort| effort.id == "xhigh"));
         assert!(info.supports_resume);
+    }
+
+    #[test]
+    fn codex_error_message_reads_common_error_payload_shapes() {
+        assert_eq!(
+            codex_error_message(&json!({ "message": "plain failure" })),
+            Some("plain failure".to_string())
+        );
+        assert_eq!(
+            codex_error_message(&json!({ "error": { "message": "nested failure" } })),
+            Some("nested failure".to_string())
+        );
+        assert_eq!(
+            codex_error_message(&json!({
+                "type": "error",
+                "status": 400,
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "The model is not supported.",
+                }
+            })),
+            Some("The model is not supported.".to_string())
+        );
+        assert_eq!(
+            codex_error_message(&json!({ "turn": { "error": { "message": "turn failure" } } })),
+            Some("turn failure".to_string())
+        );
+        assert_eq!(
+            codex_error_message(&json!({ "error": { "code": "bad_model" } })),
+            Some(json!({ "code": "bad_model" }).to_string())
+        );
     }
 
     #[tokio::test]
@@ -1418,6 +1621,7 @@ mod tests {
         assert_eq!(requests[2]["method"], "thread/start");
         assert_eq!(requests[2]["params"]["cwd"], "/tmp/project");
         assert!(requests[2]["params"].get("model").is_none());
+        assert!(requests[2]["params"].get("effort").is_none());
         assert_eq!(requests[3]["method"], "turn/start");
         assert_eq!(requests[3]["params"]["threadId"], "codex-thread-1");
         assert_eq!(requests[3]["params"]["input"][0]["text"], "first prompt");
@@ -1521,6 +1725,26 @@ mod tests {
         assert_eq!(requests[3]["method"], "turn/start");
         assert_eq!(requests[3]["params"]["approvalPolicy"], "never");
         assert_eq!(requests[3]["params"]["permissions"], ":read-only");
+    }
+
+    #[tokio::test]
+    async fn selected_model_and_reasoning_effort_are_forwarded_to_thread_start() {
+        let server = MockAppServer::start(MockScript::default()).await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+        let mut input = create_input("backend-model-effort", None, None);
+        input.model_id = Some("gpt-5.5".to_string());
+        input.reasoning_effort = Some("high".to_string());
+
+        harness
+            .create_session(input, runtime)
+            .await
+            .expect("create codex session");
+
+        let requests = server.requests();
+        assert_eq!(requests[2]["method"], "thread/start");
+        assert_eq!(requests[2]["params"]["model"], "gpt-5.5");
+        assert_eq!(requests[2]["params"]["effort"], "high");
     }
 
     #[tokio::test]
@@ -1633,7 +1857,7 @@ mod tests {
         })
         .await;
         let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
-        let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+        let (runtime, events) = LocalChatRuntime::capturing_for_tests();
 
         let result = harness
             .create_session(create_input("backend-error", None, None), runtime)
@@ -1646,6 +1870,14 @@ mod tests {
             ))
         );
         assert!(!harness.has_session("backend-error").await);
+        assert!(events
+            .lock()
+            .expect("events lock")
+            .contains(&LocalChatEvent::Error(LocalChatSessionErrorEvent {
+                backend_session_id: "backend-error".to_string(),
+                harness: LocalChatHarnessKind::Codex,
+                error: "thread/start exploded (-32000)".to_string(),
+            })));
     }
 
     #[tokio::test]

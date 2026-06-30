@@ -101,8 +101,10 @@ export interface ChatSession {
   providerResumeId: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
-  /** User-selected Claude Code model alias for session startup/resume overrides. */
+  /** User-selected provider model alias for session startup overrides. */
   selectedModelId?: string | null;
+  /** User-selected provider reasoning effort for session startup overrides. */
+  selectedReasoningEffort?: string | null;
   /** User-selected Claude Code permission mode for local session startup. */
   permissionMode?: PermissionMode | null;
   /** Model name reported by the Claude CLI (from init or per-turn usage) */
@@ -207,8 +209,15 @@ interface ChatStoreActions {
   ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
-  /** Set the user-selected Claude Code model for this session */
+  /** Set the local chat harness for this session before it starts */
+  setSessionHarness: (sessionId: string, harness: LocalChatHarnessKind) => void;
+  /** Set the user-selected provider model for this session */
   setSessionSelectedModel: (sessionId: string, modelId: string | null) => void;
+  /** Set the user-selected provider reasoning effort for this session */
+  setSessionReasoningEffort: (
+    sessionId: string,
+    reasoningEffort: string | null
+  ) => void;
   /** Set the user-selected Claude Code permission mode for this session */
   setSessionPermissionMode: (
     sessionId: string,
@@ -956,6 +965,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
+    setSessionHarness: (sessionId, harness) => {
+      updateSession(sessionId, (session) => {
+        if (session.backendSessionId || session.providerResumeId) {
+          return session;
+        }
+        if (session.harness === harness) return session;
+        return {
+          ...session,
+          harness,
+          selectedModelId: undefined,
+          selectedReasoningEffort: undefined,
+          model: undefined,
+          tokenUsage: undefined,
+        };
+      });
+      clearLastUsedLocalChatModelId();
+    },
+
     setSessionSelectedModel: (sessionId, modelId) => {
       const normalized = modelId?.trim() || null;
       updateSession(sessionId, (session) =>
@@ -968,6 +995,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
       } else {
         clearLastUsedLocalChatModelId();
       }
+    },
+
+    setSessionReasoningEffort: (sessionId, reasoningEffort) => {
+      const normalized = reasoningEffort?.trim() || null;
+      updateSession(sessionId, (session) =>
+        session.selectedReasoningEffort === normalized
+          ? session
+          : { ...session, selectedReasoningEffort: normalized }
+      );
     },
 
     setSessionPermissionMode: (sessionId, permissionMode) => {

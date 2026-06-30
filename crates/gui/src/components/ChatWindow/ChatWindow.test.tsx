@@ -13,7 +13,9 @@ import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
 
 const { permissionRequestListeners } = vi.hoisted(() => ({
-  permissionRequestListeners: [] as Array<(event: { payload: unknown }) => void>,
+  permissionRequestListeners: [] as Array<
+    (event: { payload: unknown }) => void
+  >,
 }));
 
 // Mock scrollIntoView
@@ -36,6 +38,8 @@ vi.mock("../../bindings", () => ({
           available: true,
           unavailable_reason: null,
           default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
           supports_resume: true,
           models: [
             { id: "sonnet", label: "Sonnet" },
@@ -43,6 +47,17 @@ vi.mock("../../bindings", () => ({
             { id: "haiku", label: "Haiku" },
             { id: "fable", label: "Fable" },
           ],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: false,
+          unavailable_reason: "Codex app-server is not installed",
+          default_model_id: null,
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
         },
       ],
     }),
@@ -380,6 +395,134 @@ describe("ChatWindow", () => {
     ).toBeUndefined();
   });
 
+  it("renders unavailable Codex from the harness catalog as disabled with a reason", async () => {
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [{ id: "sonnet", label: "Sonnet" }],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: false,
+          unavailable_reason: "Codex CLI not found",
+          default_model_id: null,
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
+        },
+      ],
+    });
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const providerPicker = await screen.findByTestId(
+      "local-chat-provider-picker"
+    );
+    expect(providerPicker).toHaveValue("claude");
+    const codexOption = Array.from(
+      (providerPicker as HTMLSelectElement).options
+    ).find((option) => option.value === "codex");
+    expect(codexOption).toBeDefined();
+    expect(codexOption).toBeDisabled();
+    expect(codexOption).toHaveTextContent("Codex: Codex CLI not found");
+  });
+
+  it("selects Codex provider models from the catalog and starts with neutral commands", async () => {
+    const user = userEvent.setup();
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [{ id: "sonnet", label: "Sonnet" }],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "catalog-codex-default",
+          default_reasoning_effort: "medium",
+          reasoning_efforts: [
+            { id: "low", label: "Low" },
+            { id: "medium", label: "Medium" },
+            { id: "high", label: "High" },
+          ],
+          supports_resume: true,
+          models: [
+            { id: "catalog-codex-default", label: "Catalog Default" },
+            { id: "catalog-codex-alt", label: "Catalog Alt" },
+          ],
+        },
+      ],
+    });
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-provider-picker"),
+      "codex"
+    );
+    await waitFor(() => {
+      expect(useChatStore.getState().sessions["test-session"].harness).toBe(
+        "codex"
+      );
+    });
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-model-picker"),
+      "catalog-codex-alt"
+    );
+    await user.selectOptions(
+      await screen.findByTestId("local-chat-effort-picker"),
+      "high"
+    );
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+        backend_session_id: expect.any(String),
+        harness: "codex",
+        working_dir: "/test/project",
+        initial_prompt: "Start",
+        provider_resume_id: null,
+        model_id: "catalog-codex-alt",
+        reasoning_effort: "high",
+        permission_mode: "default",
+      });
+    });
+  });
+
   it("renders model and permission controls in the composer footer", async () => {
     const session = createSession();
     useChatStore.setState({
@@ -398,6 +541,11 @@ describe("ChatWindow", () => {
     expect(modelPicker.closest(".hc-foot")).not.toBeNull();
     expect(permissionPicker.closest(".hc-foot")).not.toBeNull();
     expect(
+      (await screen.findByTestId("local-chat-provider-picker")).closest(
+        ".hc-foot"
+      )
+    ).not.toBeNull();
+    expect(
       document.querySelector(".hc-head [data-testid='local-chat-model-picker']")
     ).toBeNull();
     expect(permissionPicker).toHaveValue("default");
@@ -414,6 +562,93 @@ describe("ChatWindow", () => {
       ["Don't ask", "dont_ask"],
       ["Bypass permissions", "bypass_permissions"],
     ]);
+  });
+
+  it("shows unavailable reason when viewing an unavailable Codex session", async () => {
+    const user = userEvent.setup();
+    const session = createSession({ harness: "codex" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(
+      await screen.findByTestId("local-chat-provider-unavailable")
+    ).toHaveTextContent("Codex unavailable: Codex app-server is not installed");
+    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+
+    await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
+
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+  });
+
+  it("locks persisted Codex sessions and resumes with providerResumeId", async () => {
+    const user = userEvent.setup();
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [{ id: "sonnet", label: "Sonnet" }],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "catalog-codex-default",
+          default_reasoning_effort: "medium",
+          reasoning_efforts: [{ id: "medium", label: "Medium" }],
+          supports_resume: true,
+          models: [{ id: "catalog-codex-default", label: "Catalog Default" }],
+        },
+      ],
+    });
+    const session = createSession({
+      harness: "codex",
+      providerResumeId: "codex-resume-1",
+      selectedModelId: "catalog-codex-default",
+      selectedReasoningEffort: "medium",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(
+      await screen.findByTestId("local-chat-provider-picker")
+    ).toBeDisabled();
+    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+
+    await user.type(screen.getByTestId("local-chat-composer"), "Resume Codex");
+    await user.click(screen.getByTitle("Resume session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+        backend_session_id: expect.any(String),
+        harness: "codex",
+        working_dir: "/test/project",
+        initial_prompt: "Resume Codex",
+        provider_resume_id: "codex-resume-1",
+        model_id: null,
+        reasoning_effort: null,
+        permission_mode: "default",
+      });
+    });
   });
 
   it("persists selected model changes and sends the model when starting", async () => {
@@ -442,6 +677,7 @@ describe("ChatWindow", () => {
         initial_prompt: "Start",
         provider_resume_id: null,
         model_id: "opus",
+        reasoning_effort: null,
         permission_mode: "default",
       });
     });
@@ -476,6 +712,7 @@ describe("ChatWindow", () => {
         initial_prompt: "Start",
         provider_resume_id: null,
         model_id: null,
+        reasoning_effort: null,
         permission_mode: "plan",
       });
     });
@@ -550,6 +787,7 @@ describe("ChatWindow", () => {
         initial_prompt: "Start",
         provider_resume_id: null,
         model_id: null,
+        reasoning_effort: null,
         permission_mode: "default",
       });
     });
@@ -608,6 +846,54 @@ describe("ChatWindow", () => {
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBe("claude-retired");
+  });
+
+  it("clears saved model override when selected harness has no selectable models", async () => {
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [{ id: "sonnet", label: "Sonnet" }],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: null,
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
+        },
+      ],
+    });
+    const session = createSession({
+      harness: "codex",
+      selectedModelId: "stale-catalog-id",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().sessions["test-session"].selectedModelId
+      ).toBeNull();
+    });
   });
 
   it("clears messages when clear button is clicked", async () => {
@@ -698,6 +984,63 @@ describe("ChatWindow", () => {
         lifecycle: "idle",
       });
       expect(useChatStore.getState().panelOpen).toBe(true);
+    });
+  });
+
+  it("stops an active backend session without clearing messages", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      backendSessionId: "codex-active",
+      harness: "codex",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Hello",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTestId("local-chat-stop-generation"));
+
+    await waitFor(() => {
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
+        "codex-active"
+      );
+      expect(
+        useChatStore.getState().sessions["test-session"].messages
+      ).toHaveLength(1);
+    });
+  });
+
+  it("stops an active backend session with Cmd+period", async () => {
+    const session = createSession({
+      backendSessionId: "codex-hotkey",
+      harness: "codex",
+      lifecycle: "streaming",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+
+    await waitFor(() => {
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
+        "codex-hotkey"
+      );
     });
   });
 
@@ -1351,7 +1694,7 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
   });
 
-  it("shows an error banner and allows retry text after an error", async () => {
+  it("keeps chat errors in the transcript and allows retry text after an error", async () => {
     const user = userEvent.setup();
     const session = createSession({
       lifecycle: "error",
@@ -1370,9 +1713,7 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByTestId("chat-lifecycle-error")).toHaveTextContent(
-      "Claude failed"
-    );
+    expect(screen.queryByTestId("chat-lifecycle-error")).not.toBeInTheDocument();
     const textarea = screen.getByPlaceholderText("Type a message to resume...");
     await user.type(textarea, "Retry");
     expect(screen.getByTitle("Resume session")).not.toBeDisabled();
@@ -1567,9 +1908,7 @@ describe("ChatWindow", () => {
 
     expect(screen.getByText("Permission required")).toBeInTheDocument();
     expect(screen.getByText("Allow running pwd?")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Approve" })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
   });
 
   it("resolves a permission request when Approve is clicked", async () => {

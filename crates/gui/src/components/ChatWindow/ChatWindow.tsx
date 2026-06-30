@@ -4,6 +4,8 @@ import { commands } from "../../bindings";
 import type {
   JsonValue,
   LocalChatHarnessCatalog,
+  LocalChatHarnessInfo,
+  LocalChatHarnessKind,
   PermissionMode,
 } from "../../bindings";
 import {
@@ -24,6 +26,7 @@ import {
 import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { ChatInput } from "../ChatInput";
+import { StopIcon } from "../panels";
 import { chatMessagesToThread } from "./chatMessagesToThread";
 
 const PERMISSION_MODE_OPTIONS: Array<{
@@ -37,6 +40,31 @@ const PERMISSION_MODE_OPTIONS: Array<{
   { value: "dont_ask", label: "Don't ask" },
   { value: "bypass_permissions", label: "Bypass permissions" },
 ];
+
+function harnessDisplayName(harness: LocalChatHarnessKind): string {
+  switch (harness) {
+    case "claude":
+      return "Claude";
+    case "codex":
+      return "Codex";
+  }
+}
+
+function isSessionHarnessLocked(session: {
+  backendSessionId: string | null;
+  providerResumeId: string | null;
+}): boolean {
+  return !!session.backendSessionId || !!session.providerResumeId;
+}
+
+function isHarnessSelectable(
+  info: LocalChatHarnessInfo,
+  currentHarness: LocalChatHarnessKind,
+  locked: boolean
+): boolean {
+  if (locked) return info.harness === currentHarness;
+  return info.available;
+}
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -330,6 +358,10 @@ export function ChatWindow({
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
+  const setSessionReasoningEffort = useChatStore(
+    (s) => s.setSessionReasoningEffort
+  );
+  const setSessionHarness = useChatStore((s) => s.setSessionHarness);
   const setSessionPermissionMode = useChatStore(
     (s) => s.setSessionPermissionMode
   );
@@ -349,23 +381,41 @@ export function ChatWindow({
     };
   }, []);
 
+  const selectedHarness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
+  const lockedHarness = session ? isSessionHarnessLocked(session) : false;
   const visibleHarness = useMemo(() => {
     if (!harnessCatalog) return null;
-    const harness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
     return (
-      harnessCatalog.harnesses.find((item) => item.harness === harness) ??
+      harnessCatalog.harnesses.find(
+        (item) => item.harness === selectedHarness
+      ) ??
       harnessCatalog.harnesses.find(
         (item) => item.harness === harnessCatalog.default_harness
       ) ??
       null
     );
-  }, [harnessCatalog, session?.harness]);
+  }, [harnessCatalog, selectedHarness]);
+  const providerOptions = useMemo(() => {
+    if (!harnessCatalog) return [];
+    return harnessCatalog.harnesses.map((info) => ({
+      info,
+      disabled: !isHarnessSelectable(info, selectedHarness, lockedHarness),
+    }));
+  }, [harnessCatalog, lockedHarness, selectedHarness]);
 
   const supportedModelIds = useMemo(
-    () => new Set(visibleHarness?.models.map((model) => model.id) ?? []),
+    () => new Set((visibleHarness?.models ?? []).map((model) => model.id)),
+    [visibleHarness]
+  );
+  const supportedReasoningEffortIds = useMemo(
+    () =>
+      new Set(
+        (visibleHarness?.reasoning_efforts ?? []).map((effort) => effort.id)
+      ),
     [visibleHarness]
   );
   const selectedModelId = session?.selectedModelId;
+  const selectedReasoningEffort = session?.selectedReasoningEffort;
   const hasSession = !!session;
   const hasConversation = !!session?.providerResumeId;
   const messageCount = session?.messages.length ?? 0;
@@ -389,6 +439,39 @@ export function ChatWindow({
     sessionId,
     setSessionSelectedModel,
     supportedModelIds,
+  ]);
+
+  useEffect(() => {
+    if (!hasSession || !visibleHarness) return;
+    if (lockedHarness || hasConversation) return;
+    if (!selectedModelId) return;
+    if (visibleHarness.models.length > 0) return;
+    setSessionSelectedModel(sessionId, null);
+  }, [
+    hasConversation,
+    hasSession,
+    lockedHarness,
+    selectedModelId,
+    sessionId,
+    setSessionSelectedModel,
+    visibleHarness,
+  ]);
+
+  useEffect(() => {
+    if (!hasSession || !visibleHarness) return;
+    if (lockedHarness || hasConversation) return;
+    if (!selectedReasoningEffort) return;
+    if (supportedReasoningEffortIds.has(selectedReasoningEffort)) return;
+    setSessionReasoningEffort(sessionId, null);
+  }, [
+    hasConversation,
+    hasSession,
+    lockedHarness,
+    selectedReasoningEffort,
+    sessionId,
+    setSessionReasoningEffort,
+    supportedReasoningEffortIds,
+    visibleHarness,
   ]);
 
   // Auto-scroll to bottom when messages change
@@ -429,11 +512,28 @@ export function ChatWindow({
     sessionId,
   ]);
 
+  const handleStopGeneration = useCallback(async () => {
+    if (!session?.backendSessionId) return;
+    await closeLocalChatSession({ markClosed: false });
+  }, [closeLocalChatSession, session?.backendSessionId]);
+
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       setSessionSelectedModel(sessionId, event.target.value || null);
     },
     [sessionId, setSessionSelectedModel]
+  );
+  const handleReasoningEffortChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      setSessionReasoningEffort(sessionId, event.target.value || null);
+    },
+    [sessionId, setSessionReasoningEffort]
+  );
+  const handleHarnessChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      setSessionHarness(sessionId, event.target.value as LocalChatHarnessKind);
+    },
+    [sessionId, setSessionHarness]
   );
   const handlePermissionModeChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -448,9 +548,29 @@ export function ChatWindow({
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
   const hasResume = !!session?.providerResumeId;
-  const canUseComposer = !isBusy;
+  const selectedHarnessAvailable = visibleHarness?.available !== false;
+  const canUseComposer = !isBusy && selectedHarnessAvailable;
   const canSendMessage = isActive && canUseComposer;
   const shouldStartOrResume = !isActive && canUseComposer;
+  const canStopGeneration =
+    !!session?.backendSessionId &&
+    (lifecycle === "starting" ||
+      lifecycle === "resuming" ||
+      lifecycle === "sending" ||
+      lifecycle === "streaming" ||
+      isActive);
+
+  useEffect(() => {
+    if (!canStopGeneration) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "." || (!event.metaKey && !event.ctrlKey)) return;
+      event.preventDefault();
+      void handleStopGeneration();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canStopGeneration, handleStopGeneration]);
+
   const submitLabel =
     lifecycle === "starting"
       ? "Start session"
@@ -505,6 +625,37 @@ export function ChatWindow({
   const selectedModelUnsupported =
     !!session.selectedModelId &&
     !supportedModelIds.has(session.selectedModelId);
+  const selectedReasoningEffortUnsupported =
+    !!session.selectedReasoningEffort &&
+    !supportedReasoningEffortIds.has(session.selectedReasoningEffort);
+  const modelPickerDisabled =
+    isBusy ||
+    isActive ||
+    lockedHarness ||
+    !visibleHarness?.available ||
+    (visibleHarness.models ?? []).length === 0;
+  const modelDefaultLabel = session.providerResumeId
+    ? "Original model"
+    : visibleHarness?.default_model_id
+      ? "Default model"
+      : "CLI default";
+  const effortPickerDisabled =
+    isBusy ||
+    isActive ||
+    lockedHarness ||
+    hasResume ||
+    !visibleHarness?.available ||
+    (visibleHarness.reasoning_efforts ?? []).length === 0;
+  const effortDefaultLabel = hasResume
+    ? "Original effort"
+    : visibleHarness?.default_reasoning_effort
+      ? "Default effort"
+      : "Provider default";
+  const unavailableReason =
+    visibleHarness && !visibleHarness.available
+      ? (visibleHarness.unavailable_reason ??
+        `${visibleHarness.label} is unavailable`)
+      : null;
 
   // Current request input-context utilization for the footer bar + readout.
   // Falls back to an empty bar before the first usage event lands.
@@ -714,6 +865,16 @@ export function ChatWindow({
               </svg>
             </button>
             <button
+              className="hc-ctrl danger"
+              onClick={() => void handleStopGeneration()}
+              disabled={!canStopGeneration}
+              title="Stop generation (Cmd+.)"
+              aria-label="Stop generation"
+              data-testid="local-chat-stop-generation"
+            >
+              <StopIcon />
+            </button>
+            <button
               className="hc-ctrl"
               onClick={onClosePanel}
               title="Close chat panel"
@@ -736,15 +897,6 @@ export function ChatWindow({
           </div>
         </div>
       </div>
-
-      {lifecycle === "error" && session.lifecycleError && (
-        <div
-          data-testid="chat-lifecycle-error"
-          className="border-b border-[var(--color-err)]/30 bg-[var(--color-err)]/10 px-3 py-2 text-xs text-[var(--color-err)]"
-        >
-          {session.lifecycleError}
-        </div>
-      )}
 
       {/* Messages area */}
       <div className="flex-1 overflow-y-auto p-4">
@@ -821,51 +973,119 @@ export function ChatWindow({
             buttonAriaLabel={submitLabel}
             textareaTestId="local-chat-composer"
             footerLeft={
-              <label className="hc-permission-picker">
-                <span>Permission</span>
-                <select
-                  aria-label="Claude permission mode"
-                  data-testid="local-chat-permission-mode-picker"
-                  value={session.permissionMode ?? "default"}
-                  onChange={handlePermissionModeChange}
-                  disabled={isBusy || isActive}
-                >
-                  {PERMISSION_MODE_OPTIONS.map((mode) => (
-                    <option key={mode.value} value={mode.value}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            }
-            footerRight={
-              visibleHarness ? (
-                <label className="hc-model-picker">
-                  <span>Model</span>
+              <div className="hc-chat-controls">
+                {harnessCatalog && (
+                  <label className="hc-provider-picker">
+                    <span>Provider</span>
+                    <select
+                      aria-label="Local chat provider"
+                      data-testid="local-chat-provider-picker"
+                      value={session.harness}
+                      onChange={handleHarnessChange}
+                      disabled={isBusy || isActive || lockedHarness}
+                    >
+                      {providerOptions.map(({ info, disabled }) => (
+                        <option
+                          key={info.harness}
+                          value={info.harness}
+                          disabled={disabled}
+                        >
+                          {info.available
+                            ? info.label
+                            : `${info.label}: ${
+                                info.unavailable_reason ?? "Unavailable"
+                              }`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label className="hc-permission-picker">
+                  <span>Permission</span>
                   <select
-                    aria-label="Claude model"
-                    data-testid="local-chat-model-picker"
-                    value={session.selectedModelId ?? ""}
-                    onChange={handleModelChange}
+                    aria-label="Local chat permission mode"
+                    data-testid="local-chat-permission-mode-picker"
+                    value={session.permissionMode ?? "default"}
+                    onChange={handlePermissionModeChange}
                     disabled={isBusy || isActive}
                   >
-                    <option value="">
-                      {session.providerResumeId
-                        ? "Original model"
-                        : "CLI default"}
-                    </option>
-                    {selectedModelUnsupported && (
-                      <option value={session.selectedModelId ?? ""}>
-                        Unsupported: {session.selectedModelId}
-                      </option>
-                    )}
-                    {visibleHarness.models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
+                    {PERMISSION_MODE_OPTIONS.map((mode) => (
+                      <option key={mode.value} value={mode.value}>
+                        {mode.label}
                       </option>
                     ))}
                   </select>
                 </label>
+              </div>
+            }
+            footerRight={
+              visibleHarness ? (
+                <div className="hc-chat-controls right">
+                  <label className="hc-model-picker">
+                    <span>Model</span>
+                    <select
+                      aria-label={`${visibleHarness.label} model`}
+                      data-testid="local-chat-model-picker"
+                      value={session.selectedModelId ?? ""}
+                      onChange={handleModelChange}
+                      disabled={modelPickerDisabled}
+                    >
+                      <option value="">{modelDefaultLabel}</option>
+                      {selectedModelUnsupported && (
+                        <option value={session.selectedModelId ?? ""}>
+                          Unsupported: {session.selectedModelId}
+                        </option>
+                      )}
+                      {(visibleHarness.models ?? []).map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label}
+                          {model.id === visibleHarness.default_model_id
+                            ? " (default)"
+                            : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {(visibleHarness.reasoning_efforts ?? []).length > 0 && (
+                    <label className="hc-effort-picker">
+                      <span>Effort</span>
+                      <select
+                        aria-label={`${visibleHarness.label} reasoning effort`}
+                        data-testid="local-chat-effort-picker"
+                        value={session.selectedReasoningEffort ?? ""}
+                        onChange={handleReasoningEffortChange}
+                        disabled={effortPickerDisabled}
+                      >
+                        <option value="">{effortDefaultLabel}</option>
+                        {selectedReasoningEffortUnsupported && (
+                          <option value={session.selectedReasoningEffort ?? ""}>
+                            Unsupported: {session.selectedReasoningEffort}
+                          </option>
+                        )}
+                        {(visibleHarness.reasoning_efforts ?? []).map(
+                          (effort) => (
+                            <option key={effort.id} value={effort.id}>
+                              {effort.label}
+                              {effort.id ===
+                              visibleHarness.default_reasoning_effort
+                                ? " (default)"
+                                : ""}
+                            </option>
+                          )
+                        )}
+                      </select>
+                    </label>
+                  )}
+                  {unavailableReason && (
+                    <span
+                      className="hc-provider-unavailable"
+                      data-testid="local-chat-provider-unavailable"
+                    >
+                      {harnessDisplayName(visibleHarness.harness)} unavailable:{" "}
+                      {unavailableReason}
+                    </span>
+                  )}
+                </div>
               ) : null
             }
           />

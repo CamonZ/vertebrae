@@ -40,6 +40,8 @@ pub(crate) fn claude_local_chat_harness_info() -> LocalChatHarnessInfo {
                 label: model.label,
             })
             .collect(),
+        default_reasoning_effort: None,
+        reasoning_efforts: Vec::new(),
         supports_resume: true,
     }
 }
@@ -184,6 +186,7 @@ mod tests {
             initial_prompt: Some("start".to_string()),
             provider_resume_id: Some("claude-conversation-1".to_string()),
             model_id: Some("opus".to_string()),
+            reasoning_effort: Some("high".to_string()),
             permission_mode: Some(crate::types::PermissionMode::Plan),
         };
 

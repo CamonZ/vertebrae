@@ -41,6 +41,7 @@ export interface LocalChatSessionSummary {
   preview: string;
   model?: string;
   selectedModelId?: string | null;
+  selectedReasoningEffort?: string | null;
   createdAt: string;
   updatedAt: string;
   projectPath: string | null;
@@ -137,6 +138,12 @@ export function normalizeLocalChatSession(
       typeof candidate.selectedModelId === "string"
         ? candidate.selectedModelId
         : candidate.selectedModelId === null
+          ? null
+          : undefined,
+    selectedReasoningEffort:
+      typeof candidate.selectedReasoningEffort === "string"
+        ? candidate.selectedReasoningEffort
+        : candidate.selectedReasoningEffort === null
           ? null
           : undefined,
     permissionMode:
@@ -298,6 +305,7 @@ function serializeSession(
     providerResumeId: session.providerResumeId ?? null,
     projectPath: session.projectPath ?? null,
     selectedModelId: session.selectedModelId,
+    selectedReasoningEffort: session.selectedReasoningEffort,
     permissionMode: session.permissionMode ?? "default",
     model: session.model,
     tokenUsage: session.tokenUsage,
@@ -392,6 +400,7 @@ export function listPersistedLocalChatSessions(
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       model: session.model,
       selectedModelId: session.selectedModelId,
+      selectedReasoningEffort: session.selectedReasoningEffort,
       createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
       updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
       projectPath: session.projectPath ?? null,
