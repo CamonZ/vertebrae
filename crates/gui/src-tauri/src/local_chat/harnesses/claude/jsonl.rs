@@ -224,7 +224,7 @@ pub(crate) fn process_jsonl_lines(
     for line in reader.lines() {
         match line {
             Ok(line) if !line.is_empty() => {
-                log::info!(
+                log::debug!(
                     "[Claude JSONL] session={} msg={}",
                     &session_id[..8.min(session_id.len())],
                     line

@@ -627,6 +627,7 @@ impl CodexRpcConnection {
                 frame.map_err(|err| format!("Failed to read Codex app-server response: {err}"))?;
             match frame {
                 Message::Text(text) => {
+                    log::debug!("[Codex local chat] received websocket message: {text}");
                     return serde_json::from_str(&text)
                         .map_err(|err| format!("Invalid Codex app-server JSON frame: {err}"));
                 }
