@@ -439,6 +439,7 @@ impl ClaudeSessionManager {
                 harness: LocalChatHarnessKind::Claude,
                 text: e.text,
                 is_partial: e.is_partial,
+                parent_tool_use_id: e.parent_tool_use_id,
             }),
             EmittedEvent::ToolCall(e) => LocalChatEvent::ToolCall(NeutralToolCallEvent {
                 backend_session_id: e.session_id,

@@ -20,11 +20,13 @@ function build(
   opts?: {
     collapsed?: Set<string>;
     onToggleTool?: (toolId: string) => void;
+    assistantLabel?: string;
   }
 ) {
   return chatMessagesToThread(messages, {
     collapsed: opts?.collapsed ?? new Set<string>(),
     onToggleTool: opts?.onToggleTool,
+    assistantLabel: opts?.assistantLabel,
   });
 }
 
@@ -52,14 +54,14 @@ describe("chatMessagesToThread", () => {
     expect(msg.text).toBe("hi there");
   });
 
-  it("maps an assistant message to an agent message with Claude speaker + prose", () => {
+  it("maps an assistant message to an agent message with a provider speaker + prose", () => {
     const thread = build([
       { kind: "user", text: "q", timestamp: TS },
       { kind: "assistant", text: "the answer", timestamp: TS, isPartial: false },
-    ]);
+    ], { assistantLabel: "Codex" });
     const agent = thread.turns[0].messages[1] as AgentMessage;
     expect(agent.type).toBe("agent");
-    expect(agent.speaker).toBe("Claude");
+    expect(agent.speaker).toBe("Codex");
     expect(agent.prose).toBe("the answer");
     expect(agent.streaming ?? false).toBe(false);
   });

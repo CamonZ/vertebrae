@@ -40,6 +40,7 @@ const PERMISSION_MODE_OPTIONS: Array<{
   { value: "dont_ask", label: "Don't ask" },
   { value: "bypass_permissions", label: "Bypass permissions" },
 ];
+const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 
 function harnessDisplayName(harness: LocalChatHarnessKind): string {
   switch (harness) {
@@ -239,7 +240,8 @@ type ChatRenderItem =
     };
 
 function buildChatRenderItems(
-  messages: readonly ChatMessage[]
+  messages: readonly ChatMessage[],
+  assistantLabel: string
 ): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
   let segment: ChatMessage[] = [];
@@ -254,7 +256,9 @@ function buildChatRenderItems(
   const childrenByParent = new Map<string, ChatMessage[]>();
   for (const message of messages) {
     const parent =
-      (message.kind === "tool_call" || message.kind === "tool_result") &&
+      (message.kind === "assistant" ||
+        message.kind === "tool_call" ||
+        message.kind === "tool_result") &&
       message.parentToolUseId
         ? message.parentToolUseId
         : undefined;
@@ -269,7 +273,10 @@ function buildChatRenderItems(
     items.push({
       kind: "thread",
       key: `thread-${segmentSeq++}`,
-      thread: chatMessagesToThread(segment, { childrenByParent }),
+      thread: chatMessagesToThread(segment, {
+        childrenByParent,
+        assistantLabel,
+      }),
     });
     segment = [];
   };
@@ -288,7 +295,9 @@ function buildChatRenderItems(
     // Sub-agent messages are re-injected via childrenByParent at their parent
     // spawn's position; keep them out of the main segment stream.
     if (
-      (message.kind === "tool_call" || message.kind === "tool_result") &&
+      (message.kind === "assistant" ||
+        message.kind === "tool_call" ||
+        message.kind === "tool_result") &&
       message.parentToolUseId
     ) {
       return;
@@ -342,6 +351,7 @@ export function ChatWindow({
 }: ChatWindowProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const messageRefs = useRef(new Map<string, HTMLElement>());
   const [inputValue, setInputValue] = useState("");
   const [harnessCatalog, setHarnessCatalog] =
     useState<LocalChatHarnessCatalog | null>(null);
@@ -416,6 +426,17 @@ export function ChatWindow({
   );
   const selectedModelId = session?.selectedModelId;
   const selectedReasoningEffort = session?.selectedReasoningEffort;
+  const lifecycle = getLocalChatLifecycle(session);
+  const isBusy = isLocalChatLifecycleBusy(lifecycle);
+  const canQueueMessage =
+    !!session?.backendSessionId &&
+    (lifecycle === "sending" || lifecycle === "streaming");
+  const hasResume = !!session?.providerResumeId;
+  const selectedHarnessAvailable = visibleHarness?.available !== false;
+  const canUseComposer =
+    selectedHarnessAvailable && (!isBusy || canQueueMessage);
+  const canSendMessage = (isActive || canQueueMessage) && canUseComposer;
+  const shouldStartOrResume = !isActive && canUseComposer;
   const hasSession = !!session;
   const hasConversation = !!session?.providerResumeId;
   const messageCount = session?.messages.length ?? 0;
@@ -486,12 +507,31 @@ export function ChatWindow({
     inputRef.current?.focus();
   }, [autoFocusComposer]);
 
+  useEffect(() => {
+    const handleScrollToSpawn = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        sessionId?: string;
+        spawnId?: string;
+      }>).detail;
+      if (detail?.sessionId !== sessionId || !detail.spawnId) return;
+      messageRefs.current
+        .get(detail.spawnId)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.addEventListener(LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT, handleScrollToSpawn);
+    return () =>
+      window.removeEventListener(
+        LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT,
+        handleScrollToSpawn
+      );
+  }, [sessionId]);
+
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
-    if (!trimmed || !isActive) return;
+    if (!trimmed || !canSendMessage) return;
     void sendMessage(trimmed);
     setInputValue("");
-  }, [inputValue, isActive, sendMessage]);
+  }, [canSendMessage, inputValue, sendMessage]);
 
   const handleStartSession = useCallback(() => {
     const initialPrompt = inputValue.trim();
@@ -545,13 +585,6 @@ export function ChatWindow({
     [sessionId, setSessionPermissionMode]
   );
 
-  const lifecycle = getLocalChatLifecycle(session);
-  const isBusy = isLocalChatLifecycleBusy(lifecycle);
-  const hasResume = !!session?.providerResumeId;
-  const selectedHarnessAvailable = visibleHarness?.available !== false;
-  const canUseComposer = !isBusy && selectedHarnessAvailable;
-  const canSendMessage = isActive && canUseComposer;
-  const shouldStartOrResume = !isActive && canUseComposer;
   const canStopGeneration =
     !!session?.backendSessionId &&
     (lifecycle === "starting" ||
@@ -581,13 +614,15 @@ export function ChatWindow({
           : hasResume || lifecycle === "closed" || lifecycle === "error"
             ? "Resume session"
             : "Start session";
-  const composerPlaceholder = isBusy
-    ? `${lifecycleLabel(lifecycle)}...`
-    : canSendMessage
-      ? "Type a message..."
-      : hasResume || lifecycle === "closed" || lifecycle === "error"
-        ? "Type a message to resume..."
-        : "Type a message to start...";
+  const composerPlaceholder = canQueueMessage
+    ? "Type a message to queue..."
+    : isBusy
+      ? `${lifecycleLabel(lifecycle)}...`
+      : canSendMessage
+        ? "Type a message..."
+        : hasResume || lifecycle === "closed" || lifecycle === "error"
+          ? "Type a message to resume..."
+          : "Type a message to start...";
 
   const sessionMessages = session?.messages;
   const streamingAssistant = session?.streamingAssistant;
@@ -618,7 +653,13 @@ export function ChatWindow({
   // Normalize-on-render: derive canonical Thread chunks from the live store
   // messages, interleaving interactive permission cards at their original
   // message positions so the chat stays chronological.
-  const renderItems = useMemo(() => buildChatRenderItems(messages), [messages]);
+  const assistantLabel = session
+    ? harnessDisplayName(session.harness)
+    : "Assistant";
+  const renderItems = useMemo(
+    () => buildChatRenderItems(messages, assistantLabel),
+    [assistantLabel, messages]
+  );
 
   if (!session) return null;
 
@@ -937,6 +978,13 @@ export function ChatWindow({
                 reveal="shallow"
                 showHead={false}
                 interactive
+                registerRef={(id, element) => {
+                  if (element) {
+                    messageRefs.current.set(id, element);
+                  } else {
+                    messageRefs.current.delete(id);
+                  }
+                }}
               />
             ) : (
               <PermissionRequestTurn key={item.key} message={item.message} />

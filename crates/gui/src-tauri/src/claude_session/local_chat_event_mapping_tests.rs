@@ -32,6 +32,7 @@ fn maps_claude_text_and_tool_events_to_neutral_payloads() {
             session_id: "backend-1".to_string(),
             text: "hello".to_string(),
             is_partial: true,
+            parent_tool_use_id: Some("parent-tool".to_string()),
         }));
     assert_eq!(
         text,
@@ -40,6 +41,7 @@ fn maps_claude_text_and_tool_events_to_neutral_payloads() {
             harness: LocalChatHarnessKind::Claude,
             text: "hello".to_string(),
             is_partial: true,
+            parent_tool_use_id: Some("parent-tool".to_string()),
         })
     );
 

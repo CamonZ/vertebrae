@@ -219,6 +219,7 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "hello",
         is_partial: true,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -242,6 +243,7 @@ describe("handleTextEvent", () => {
           harness: "claude",
           text,
           is_partial: true,
+          parent_tool_use_id: null,
         },
         CLAUDE_SESSION_ID,
         SESSION_ID,
@@ -277,6 +279,7 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "done",
         is_partial: false,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -299,11 +302,43 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "hello",
         is_partial: true,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       updateLastAssistantMessage,
       finalizeLastAssistantMessage
+    );
+    expect(updateLastAssistantMessage).not.toHaveBeenCalled();
+    expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("adds parent-linked assistant text as a child transcript message", () => {
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
+    const addMessage = vi.fn();
+    handleTextEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "codex",
+        text: "child agent",
+        is_partial: true,
+        parent_tool_use_id: "agent-tool",
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage,
+      addMessage
+    );
+
+    expect(addMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "assistant",
+        text: "child agent",
+        parentToolUseId: "agent-tool",
+      })
     );
     expect(updateLastAssistantMessage).not.toHaveBeenCalled();
     expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();

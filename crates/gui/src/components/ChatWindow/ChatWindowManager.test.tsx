@@ -267,6 +267,65 @@ describe("ChatWindowManager", () => {
     expect(panel).not.toHaveAttribute("data-maximized");
   });
 
+  it("shows spawned agents under the active chat in wide view and jumps to the spawn", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({
+      id: "s1",
+      label: "Project Chat",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "assistant",
+          text: "spawning",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "agent-1",
+          input: JSON.stringify({
+            description: "Inspect repo",
+            subagent_type: "analysis",
+          }),
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "child output",
+          timestamp: "2024-01-01T12:00:02Z",
+          parentToolUseId: "agent-1",
+        },
+      ],
+    });
+    persistLocalChatSession(s1);
+
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+
+    expect(screen.getByRole("button", { name: "Jump to spawned agent Inspect repo" }))
+      .toBeInTheDocument();
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+
+    await user.click(
+      screen.getByRole("button", { name: "Jump to spawned agent Inspect repo" })
+    );
+
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "center",
+    });
+  });
+
   it("updates maximized width when the viewport resizes", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

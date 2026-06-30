@@ -1642,7 +1642,7 @@ describe("ChatWindow", () => {
     expect(screen.getByTitle("Start session")).toBeDisabled();
   });
 
-  it("disables composer while sending", () => {
+  it("keeps composer available for queued input while sending", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       lifecycle: "sending",
@@ -1665,12 +1665,12 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Sending...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Type a message to queue...")).toBeEnabled();
     expect(screen.getByTitle("Send message")).toBeDisabled();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
-  it("disables composer while streaming", () => {
+  it("keeps composer available for queued input while streaming", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       lifecycle: "streaming",
@@ -1690,7 +1690,7 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Streaming...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Type a message to queue...")).toBeEnabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
   });
 

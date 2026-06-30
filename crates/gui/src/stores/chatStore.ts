@@ -27,7 +27,13 @@ import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
  */
 export type ChatMessage =
   | { kind: "user"; text: string; timestamp: string }
-  | { kind: "assistant"; text: string; timestamp: string; isPartial?: boolean }
+  | {
+      kind: "assistant";
+      text: string;
+      timestamp: string;
+      isPartial?: boolean;
+      parentToolUseId?: string;
+    }
   | {
       kind: "tool_call";
       toolName: string;

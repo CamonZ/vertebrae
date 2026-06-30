@@ -975,6 +975,8 @@ export interface ChatTurnOptions {
   onToggleTool?: (toolId: string) => void;
   /** Tool ids currently COLLAPSED; when omitted tools start collapsed. */
   collapsed?: Set<string>;
+  /** Provider label shown on assistant prose rows. */
+  assistantLabel?: string;
 }
 
 /**
@@ -997,7 +999,13 @@ export function chatTurnEventsToMessages(
   for (const ev of events) {
     if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
   }
-  const msgs = groupBySpawn(events, resultById, "Claude", undefined, null);
+  const msgs = groupBySpawn(
+    events,
+    resultById,
+    opts.assistantLabel ?? "Assistant",
+    undefined,
+    null
+  );
   wireChatToolCollapse(msgs, opts);
   return msgs;
 }

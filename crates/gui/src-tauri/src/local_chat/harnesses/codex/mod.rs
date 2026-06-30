@@ -23,6 +23,7 @@ use crate::local_chat::{
     LocalChatReasoningEffortOption, LocalChatRuntime, LocalChatSessionEndEvent,
     LocalChatSessionError, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
     LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
+    LocalChatToolCallEvent, LocalChatToolResultEvent,
 };
 use crate::types::PermissionMode;
 
@@ -738,8 +739,134 @@ fn approval_request_kind(method: &str) -> Option<&'static str> {
 fn is_turn_notification(method: &str) -> bool {
     matches!(
         method,
-        "item/agentMessage/delta" | "thread/tokenUsage/updated" | "turn/completed" | "error"
+        "item/agentMessage/delta"
+            | "item/started"
+            | "item/completed"
+            | "thread/tokenUsage/updated"
+            | "turn/completed"
+            | "error"
     )
+}
+
+fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
+    let item_type = item.get("type").and_then(Value::as_str)?;
+    let id = item.get("id").and_then(Value::as_str)?.to_string();
+    let (tool_name, input) = match item_type {
+        "commandExecution" => (
+            "Bash".to_string(),
+            json!({
+                "command": item.get("command").and_then(Value::as_str).unwrap_or_default(),
+                "cwd": item.get("cwd").and_then(Value::as_str),
+            }),
+        ),
+        "fileChange" => (
+            "apply_patch".to_string(),
+            item.get("changes").cloned().unwrap_or(Value::Null),
+        ),
+        "mcpToolCall" => {
+            let server = item.get("server").and_then(Value::as_str).unwrap_or("mcp");
+            let tool = item.get("tool").and_then(Value::as_str).unwrap_or("tool");
+            (
+                format!("{server}.{tool}"),
+                item.get("arguments").cloned().unwrap_or(Value::Null),
+            )
+        }
+        "dynamicToolCall" => {
+            let tool = item.get("tool").and_then(Value::as_str).unwrap_or("tool");
+            let namespace = item.get("namespace").and_then(Value::as_str);
+            let tool_name = namespace
+                .map(|namespace| format!("{namespace}.{tool}"))
+                .unwrap_or_else(|| tool.to_string());
+            (
+                tool_name,
+                item.get("arguments").cloned().unwrap_or(Value::Null),
+            )
+        }
+        "webSearch" => ("web_search".to_string(), Value::Object(Default::default())),
+        "collabAgentToolCall" => {
+            let tool = item
+                .get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("spawnAgent");
+            let tool_name = if tool == "spawnAgent" {
+                "Agent"
+            } else {
+                "agent"
+            };
+            (
+                tool_name.to_string(),
+                json!({
+                    "description": item.get("prompt").and_then(Value::as_str).unwrap_or(tool),
+                    "subagent_type": item.get("model").and_then(Value::as_str).unwrap_or("agent"),
+                    "receiver_thread_ids": item.get("receiverThreadIds").cloned().unwrap_or(Value::Null),
+                }),
+            )
+        }
+        _ => return None,
+    };
+    Some((
+        id,
+        tool_name,
+        serde_json::to_string(&input).unwrap_or_default(),
+    ))
+}
+
+fn codex_tool_result(item: &Value) -> Option<(String, String, bool)> {
+    let item_type = item.get("type").and_then(Value::as_str)?;
+    let id = item.get("id").and_then(Value::as_str)?.to_string();
+    let (result, is_error) = match item_type {
+        "commandExecution" => {
+            let status = item
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            (
+                item.get("aggregatedOutput")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                matches!(status, "failed" | "declined"),
+            )
+        }
+        "fileChange" => {
+            let status = item
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            (
+                serde_json::to_string(item.get("changes").unwrap_or(&Value::Null))
+                    .unwrap_or_default(),
+                matches!(status, "failed" | "declined"),
+            )
+        }
+        "mcpToolCall" => {
+            if let Some(error) = item.get("error") {
+                (serde_json::to_string(error).unwrap_or_default(), true)
+            } else {
+                (
+                    serde_json::to_string(item.get("result").unwrap_or(&Value::Null))
+                        .unwrap_or_default(),
+                    item.get("status").and_then(Value::as_str) == Some("failed"),
+                )
+            }
+        }
+        "dynamicToolCall" => (
+            serde_json::to_string(item.get("contentItems").unwrap_or(&Value::Null))
+                .unwrap_or_default(),
+            item.get("success").and_then(Value::as_bool) == Some(false)
+                || item.get("status").and_then(Value::as_str) == Some("failed"),
+        ),
+        "webSearch" => ("Web search completed".to_string(), false),
+        "collabAgentToolCall" => (
+            item.get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("completed")
+                .to_string(),
+            item.get("status").and_then(Value::as_str) == Some("failed"),
+        ),
+        _ => return None,
+    };
+    Some((id, result, is_error))
 }
 
 struct TurnNotificationHandler<'a> {
@@ -754,6 +881,7 @@ struct TurnNotificationHandler<'a> {
     completed: Option<TurnCompletion>,
     expected_turn_id: Option<String>,
     pending_notifications: Vec<(String, Value)>,
+    child_thread_parents: HashMap<String, String>,
 }
 
 impl<'a> TurnNotificationHandler<'a> {
@@ -776,24 +904,36 @@ impl<'a> TurnNotificationHandler<'a> {
             completed: None,
             expected_turn_id: None,
             pending_notifications: Vec::new(),
+            child_thread_parents: HashMap::new(),
         }
     }
 
     fn handle(&mut self, method: &str, params: &Value) {
-        if params.get("threadId").and_then(Value::as_str) != Some(self.thread_id) {
+        let notification_thread_id = params.get("threadId").and_then(Value::as_str);
+        let parent_tool_use_id = notification_thread_id
+            .and_then(|thread_id| self.child_thread_parents.get(thread_id))
+            .cloned();
+        if notification_thread_id != Some(self.thread_id) && parent_tool_use_id.is_none() {
             return;
         }
-        if self.expected_turn_id.is_none() && is_turn_notification(method) {
+        if self.expected_turn_id.is_none()
+            && parent_tool_use_id.is_none()
+            && is_turn_notification(method)
+        {
             self.pending_notifications
                 .push((method.to_string(), params.clone()));
             return;
         }
-        if !self.matches_expected_turn(method, params) {
+        if parent_tool_use_id.is_none() && !self.matches_expected_turn(method, params) {
             return;
         }
 
         match method {
-            "item/agentMessage/delta" => self.handle_agent_delta(params),
+            "item/agentMessage/delta" => {
+                self.handle_agent_delta(params, parent_tool_use_id.as_deref())
+            }
+            "item/started" => self.handle_item_started(params, parent_tool_use_id.as_deref()),
+            "item/completed" => self.handle_item_completed(params, parent_tool_use_id.as_deref()),
             "thread/tokenUsage/updated" => self.handle_usage(params),
             "turn/completed" => self.handle_turn_completed(params),
             "error" => self.handle_error(params),
@@ -823,18 +963,65 @@ impl<'a> TurnNotificationHandler<'a> {
         }
     }
 
-    fn handle_agent_delta(&mut self, params: &Value) {
+    fn handle_agent_delta(&mut self, params: &Value, parent_tool_use_id: Option<&str>) {
         let Some(delta) = params.get("delta").and_then(Value::as_str) else {
             return;
         };
-        self.text.push_str(delta);
+        if parent_tool_use_id.is_none() {
+            self.text.push_str(delta);
+        }
         self.event_sink
             .emit(LocalChatEvent::Text(LocalChatTextEvent {
                 backend_session_id: self.backend_session_id.to_string(),
                 harness: LocalChatHarnessKind::Codex,
                 text: delta.to_string(),
                 is_partial: true,
+                parent_tool_use_id: parent_tool_use_id.map(str::to_string),
             }));
+    }
+
+    fn handle_item_started(&mut self, params: &Value, parent_tool_use_id: Option<&str>) {
+        let Some(item) = params.get("item") else {
+            return;
+        };
+        if let Some((tool_id, tool_name, input)) = codex_tool_call(item) {
+            if item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall") {
+                if let Some(receiver_thread_ids) =
+                    item.get("receiverThreadIds").and_then(Value::as_array)
+                {
+                    for thread_id in receiver_thread_ids.iter().filter_map(Value::as_str) {
+                        self.child_thread_parents
+                            .insert(thread_id.to_string(), tool_id.clone());
+                    }
+                }
+            }
+            self.event_sink
+                .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                    backend_session_id: self.backend_session_id.to_string(),
+                    harness: LocalChatHarnessKind::Codex,
+                    tool_id,
+                    tool_name,
+                    input,
+                    parent_tool_use_id: parent_tool_use_id.map(str::to_string),
+                }));
+        }
+    }
+
+    fn handle_item_completed(&mut self, params: &Value, parent_tool_use_id: Option<&str>) {
+        let Some(item) = params.get("item") else {
+            return;
+        };
+        if let Some((tool_id, result, is_error)) = codex_tool_result(item) {
+            self.event_sink
+                .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
+                    backend_session_id: self.backend_session_id.to_string(),
+                    harness: LocalChatHarnessKind::Codex,
+                    tool_id,
+                    result,
+                    is_error,
+                    parent_tool_use_id: parent_tool_use_id.map(str::to_string),
+                }));
+        }
     }
 
     fn handle_usage(&mut self, params: &Value) {
@@ -1641,6 +1828,7 @@ mod tests {
             harness: LocalChatHarnessKind::Codex,
             text: "hello ".to_string(),
             is_partial: true,
+            parent_tool_use_id: None,
         })));
         assert!(
             events.contains(&LocalChatEvent::Usage(LocalChatSessionUsageEvent {

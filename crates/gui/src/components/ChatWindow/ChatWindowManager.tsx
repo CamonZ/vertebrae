@@ -7,7 +7,7 @@ import {
   normalizePaneLayout,
   useChatStore,
 } from "../../stores/chatStore";
-import type { ChatPane } from "../../stores/chatStore";
+import type { ChatMessage, ChatPane, ChatSession } from "../../stores/chatStore";
 import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 import {
@@ -35,6 +35,7 @@ const RESIZE_STEP = 16;
 const EXIT_MS = 180;
 const PROJECT_LOAD_WARNING =
   "Could not load saved projects. Showing current project chats only.";
+const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 
 type ProjectLoadStatus = "idle" | "loaded" | "error";
 const EMPTY_SAVED_PROJECTS: SavedProject[] = [];
@@ -50,6 +51,11 @@ type ShortcutDispatchState = {
   startFreshActiveSession: () => Promise<boolean>;
   toggleHistorySelector: () => boolean;
   toggleMaximized: () => void;
+};
+type SpawnOutlineItem = {
+  id: string;
+  label: string;
+  detail: string;
 };
 const CHAT_SHORTCUT_SECTIONS = [
   {
@@ -681,6 +687,7 @@ export function ChatWindowManager() {
           {isMaximized && (
             <LocalChatMiniPanel
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
+              activeSession={activeSession}
               sessionGroups={localSessionGroups}
               projectWarning={projectGroupingWarning}
               onStartFresh={() => void startFreshActiveSession()}
@@ -796,8 +803,57 @@ function formatSessionModel(session: LocalChatSessionSummary): string {
   return model ? model.replace(/^claude-/i, "") : "Chat";
 }
 
+function buildSpawnOutline(messages: readonly ChatMessage[]): SpawnOutlineItem[] {
+  return messages
+    .filter(
+      (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
+        message.kind === "tool_call" &&
+        !message.parentToolUseId &&
+        isAgentSpawnTool(message.toolName)
+    )
+    .map((message) => {
+      const input = parseToolInput(message.input);
+      const description = stringValue(input.description);
+      const subagent = stringValue(input.subagent_type);
+      return {
+        id: message.toolId,
+        label: description || "Agent",
+        detail: subagent || message.toolName,
+      };
+    });
+}
+
+function isAgentSpawnTool(toolName: string): boolean {
+  return /^(agent|task)$/i.test(toolName);
+}
+
+function parseToolInput(input: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(input) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Fall through to empty input.
+  }
+  return {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function scrollToSpawn(sessionId: string, spawnId: string): void {
+  window.dispatchEvent(
+    new CustomEvent(LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT, {
+      detail: { sessionId, spawnId },
+    })
+  );
+}
+
 function LocalChatMiniPanel({
   activeSessionId,
+  activeSession,
   deletingSessionId,
   deleteError,
   projectWarning,
@@ -807,6 +863,7 @@ function LocalChatMiniPanel({
   onDelete,
 }: {
   activeSessionId: string;
+  activeSession: ChatSession | null;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
@@ -822,6 +879,10 @@ function LocalChatMiniPanel({
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
+  );
+  const activeSpawnOutline = useMemo(
+    () => buildSpawnOutline(activeSession?.messages ?? []),
+    [activeSession?.messages]
   );
 
   useEffect(() => {
@@ -995,6 +1056,23 @@ function LocalChatMiniPanel({
                         />
                       </svg>
                     </button>
+                    {isActive && activeSpawnOutline.length > 0 && (
+                      <div className="hc-mini-history-children">
+                        {activeSpawnOutline.map((spawn) => (
+                          <button
+                            key={spawn.id}
+                            type="button"
+                            className="hc-mini-history-child"
+                            onClick={() => scrollToSpawn(session.id, spawn.id)}
+                            title={`Jump to spawned agent ${spawn.label}`}
+                            aria-label={`Jump to spawned agent ${spawn.label}`}
+                          >
+                            <span className="label">{spawn.label}</span>
+                            <span className="meta">{spawn.detail}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
