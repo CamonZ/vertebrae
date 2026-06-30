@@ -11,7 +11,6 @@ import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
-import { LocalChatHistoryDrawer } from "./LocalChatHistoryDrawer";
 import { ChatShortcutHints } from "./ChatShortcutHints";
 
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
@@ -42,7 +41,6 @@ export function ChatWindowManager() {
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
 
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
     null
@@ -111,7 +109,6 @@ export function ChatWindowManager() {
     const projectPath = await loadCurrentProjectPath();
     commitCurrentProjectPath(projectPath);
     startFreshSession("New Chat", projectPath);
-    setHistoryOpen(false);
     return true;
   }, [
     activeSession,
@@ -126,7 +123,6 @@ export function ChatWindowManager() {
     if (!canAddSplitPane) return false;
     commitCurrentProjectPath(projectPath);
     startFreshSessionInNewPane("New Chat", projectPath);
-    setHistoryOpen(false);
     return true;
   }, [
     canAddSplitPane,
@@ -136,15 +132,17 @@ export function ChatWindowManager() {
   ]);
 
   const toggleHistorySelector = useCallback(() => {
-    if (isMaximized) {
+    if (!isMaximized) {
+      toggleMaximized();
+    }
+    // Focus the mini panel after maximize renders it.
+    requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>('[data-testid="local-chat-mini-panel"]')
         ?.focus();
-      return true;
-    }
-    setHistoryOpen((value) => !value);
+    });
     return true;
-  }, [isMaximized]);
+  }, [isMaximized, toggleMaximized]);
 
   const selectHistorySessionForActivePane = useCallback(
     (sessionId: string) => {
@@ -162,7 +160,6 @@ export function ChatWindowManager() {
     async (sessionId: string) => {
       setDeleteError(null);
       const target = useChatStore.getState().sessions[sessionId];
-      const wasActive = sessionId === useChatStore.getState().activeSessionId;
       if (target?.backendSessionId) {
         setDeletingSessionId(sessionId);
         const closed = await doCloseSession(
@@ -183,9 +180,6 @@ export function ChatWindowManager() {
       }
       deleteLocalSession(sessionId);
       bumpHistoryRevision();
-      if (wasActive) {
-        setHistoryOpen(false);
-      }
     },
     [
       bumpHistoryRevision,
@@ -283,26 +277,8 @@ export function ChatWindowManager() {
             toggleMaximized={toggleMaximized}
             startFreshActiveSession={startFreshActiveSession}
             splitWithFreshSession={splitWithFreshSession}
-            setHistoryOpen={setHistoryOpen}
           />
         </div>
-      )}
-      {historyOpen && activeSession && !isMaximized && (
-        <LocalChatHistoryDrawer
-          activeSessionId={activeSession.id}
-          sessionGroups={localSessionGroups}
-          projectWarning={projectGroupingWarning}
-          onClose={() => setHistoryOpen(false)}
-          onStartFresh={() => void startFreshActiveSession()}
-          onSelect={(sessionId) => {
-            if (selectHistorySessionForActivePane(sessionId)) {
-              setHistoryOpen(false);
-            }
-          }}
-          deletingSessionId={deletingSessionId}
-          deleteError={deleteError}
-          onDelete={handleDeleteSession}
-        />
       )}
       {shortcutsOpen && (
         <ChatShortcutHints onClose={() => setShortcutsOpen(false)} />

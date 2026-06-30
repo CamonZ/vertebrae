@@ -8,7 +8,6 @@ interface ChatHeaderProps {
   isClosing: boolean;
   canStopGeneration: boolean;
   onClosePanel?: () => void;
-  onToggleHistory?: () => void;
   onStartFresh?: () => void;
   onToggleWide?: () => void;
   isWide?: boolean;
@@ -58,7 +57,6 @@ export function ChatHeader({
   isClosing,
   canStopGeneration,
   onClosePanel,
-  onToggleHistory,
   onStartFresh,
   onToggleWide,
   isWide = false,
@@ -70,23 +68,6 @@ export function ChatHeader({
   onStopGeneration,
 }: ChatHeaderProps) {
   const actions: HeaderAction[] = [
-    {
-      key: "history",
-      title: "Toggle chat history",
-      ariaLabel: "Toggle chat history",
-      onClick: onToggleHistory!,
-      show: !!onToggleHistory,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 8v4l3 2m6-2a9 9 0 11-3-6.708M21 3v6h-6"
-          />
-        </SvgIcon>
-      ),
-    },
     {
       key: "fresh",
       title: "Start fresh local chat",

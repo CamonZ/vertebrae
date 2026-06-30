@@ -556,27 +556,30 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
-    const drawer = within(screen.getByTestId("local-chat-history-drawer"));
-    expect(drawer.getByText("Task One")).toBeInTheDocument();
-    expect(drawer.getByText("first saved question")).toBeInTheDocument();
-    expect(drawer.getByText("Task Two")).toBeInTheDocument();
-    expect(drawer.getByText("second saved answer")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Widen chat panel"));
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(miniPanel.getByText("Task One")).toBeInTheDocument();
+    expect(miniPanel.getByText("first saved question")).toBeInTheDocument();
+    expect(miniPanel.getByText("Task Two")).toBeInTheDocument();
+    expect(miniPanel.getByText("second saved answer")).toBeInTheDocument();
 
-    await user.click(screen.getByLabelText("Open local chat Task Two"));
+    await user.click(
+      screen.getByLabelText("Load local chat Task Two into active pane")
+    );
     expect(useChatStore.getState().activeSessionId).toBe(second);
     expect(useChatStore.getState().sessions[second].providerResumeId).toBe(
       "conv-two"
     );
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
     await user.click(screen.getByLabelText("Delete local chat Task One"));
     expect(loadPersistedLocalChatSession(first)).toBeNull();
     expect(loadPersistedLocalChatSession(second)?.id).toBe(second);
 
     const beforeFresh = Object.keys(useChatStore.getState().sessions);
     await user.click(
-      screen.getByLabelText("Start fresh local chat from history")
+      within(screen.getByTestId("local-chat-mini-panel")).getByLabelText(
+        "Start fresh local chat"
+      )
     );
     const afterFresh = Object.keys(useChatStore.getState().sessions);
     expect(afterFresh).toHaveLength(beforeFresh.length + 1);
@@ -601,9 +604,11 @@ describe("ChatWindowManager", () => {
       expect(commands.getCurrentProjectPath).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Widen chat panel"));
     await user.click(
-      screen.getByLabelText("Start fresh local chat from history")
+      within(screen.getByTestId("local-chat-mini-panel")).getByLabelText(
+        "Start fresh local chat"
+      )
     );
 
     await waitFor(() => {
@@ -663,35 +668,35 @@ describe("ChatWindowManager", () => {
       expect(commands.getCurrentProjectPath).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
-    const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+    await user.click(screen.getByLabelText("Widen chat panel"));
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     await waitFor(() => {
-      expect(drawer.getAllByRole("heading", { level: 3 })).toHaveLength(3);
+      expect(miniPanel.getAllByRole("heading", { level: 3 })).toHaveLength(3);
     });
     expect(
-      drawer
+      miniPanel
         .getAllByRole("heading", { level: 3 })
         .map((heading) => heading.textContent)
     ).toEqual(["new-project", "old-project", "Unknown project"]);
 
     const currentGroup = within(
-      drawer.getByRole("region", { name: "new-project chats" })
+      miniPanel.getByRole("region", { name: "new-project chats" })
     );
     expect(
       currentGroup
-        .getAllByRole("button", { name: /^Open local chat/ })
+        .getAllByRole("button", { name: /^Load local chat/ })
         .map((button) => button.getAttribute("aria-label"))
     ).toEqual([
-      "Open local chat Current Project Chat",
-      "Open local chat Older Current Project Chat",
+      "Load local chat Current Project Chat into active pane",
+      "Load local chat Older Current Project Chat into active pane",
     ]);
 
-    expect(drawer.getByText("Current Project Chat")).toBeInTheDocument();
-    expect(drawer.getByText("new project answer")).toBeInTheDocument();
-    expect(drawer.getByText("Old Project Chat")).toBeInTheDocument();
-    expect(drawer.getByText("old project answer")).toBeInTheDocument();
-    expect(drawer.getByText("Legacy Chat")).toBeInTheDocument();
-    expect(drawer.getByText("legacy answer")).toBeInTheDocument();
+    expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("new project answer")).toBeInTheDocument();
+    expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("old project answer")).toBeInTheDocument();
+    expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("legacy answer")).toBeInTheDocument();
   });
 
   it("keeps project load failures scoped to current-project chats", async () => {
@@ -729,18 +734,18 @@ describe("ChatWindowManager", () => {
         expect(commands.getProjects).toHaveBeenCalled();
       });
 
-      await user.click(screen.getByLabelText("Toggle chat history"));
-      const drawer = within(screen.getByTestId("local-chat-history-drawer"));
+      await user.click(screen.getByLabelText("Widen chat panel"));
+      const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
       expect(
-        await drawer.findByText(
+        await miniPanel.findByText(
           "Could not load saved projects. Showing current project chats only."
         )
       ).toBeInTheDocument();
-      expect(drawer.getByText("Current Project Chat")).toBeInTheDocument();
-      expect(drawer.getByText("new project answer")).toBeInTheDocument();
-      expect(drawer.queryByText("Old Project Chat")).not.toBeInTheDocument();
-      expect(drawer.queryByText("old project answer")).not.toBeInTheDocument();
+      expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
+      expect(miniPanel.getByText("new project answer")).toBeInTheDocument();
+      expect(miniPanel.queryByText("Old Project Chat")).not.toBeInTheDocument();
+      expect(miniPanel.queryByText("old project answer")).not.toBeInTheDocument();
     } finally {
       warnSpy.mockRestore();
     }
@@ -775,10 +780,6 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Toggle chat history")).toBeNull();
-    expect(
-      screen.queryByTestId("local-chat-history-drawer")
-    ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getAllByText("first saved question")).toHaveLength(2);
     });
@@ -1223,7 +1224,9 @@ describe("ChatWindowManager", () => {
       altKey: true,
       shiftKey: true,
     });
-    expect(miniPanel).toHaveFocus();
+    await waitFor(() => {
+      expect(miniPanel).toHaveFocus();
+    });
 
     const historyButtons = screen.getAllByRole("button", {
       name: /^Load local chat/,
@@ -1274,7 +1277,7 @@ describe("ChatWindowManager", () => {
     );
 
     render(<ChatWindowManager />);
-    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Widen chat panel"));
 
     await user.click(
       await screen.findByLabelText("Delete local chat History Only")
@@ -1468,7 +1471,7 @@ describe("ChatWindowManager", () => {
       altKey: true,
     });
     expect(
-      screen.queryByTestId("local-chat-history-drawer")
+      screen.queryByTestId("local-chat-mini-panel")
     ).not.toBeInTheDocument();
 
     fireEvent.keyDown(window, {
@@ -1478,7 +1481,16 @@ describe("ChatWindowManager", () => {
       altKey: true,
       shiftKey: true,
     });
-    expect(screen.getByTestId("local-chat-history-drawer")).toBeInTheDocument();
+    expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-window-manager")).toHaveAttribute(
+      "data-maximized",
+      "true"
+    );
+    // Flush the requestAnimationFrame that focuses the mini panel so it does
+    // not leak into subsequent tests.
+    await waitFor(() => {
+      expect(screen.getByTestId("local-chat-mini-panel")).toHaveFocus();
+    });
 
     fireEvent.keyDown(window, {
       key: "Dead",
@@ -1547,7 +1559,9 @@ describe("ChatWindowManager", () => {
       altKey: true,
       shiftKey: true,
     });
-    expect(screen.getByTestId("local-chat-mini-panel")).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByTestId("local-chat-mini-panel")).toHaveFocus();
+    });
 
     fireEvent.keyDown(window, {
       key: "Dead",
@@ -1734,7 +1748,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Widen chat panel"));
     await user.click(
       await screen.findByLabelText("Delete local chat Live Task")
     );
@@ -1744,40 +1758,6 @@ describe("ChatWindowManager", () => {
     );
     expect(loadPersistedLocalChatSession(id)).toBeNull();
     expect(useChatStore.getState().sessions[id]).toBeUndefined();
-  });
-
-  it("closes the history drawer after deleting the active live session", async () => {
-    const user = userEvent.setup();
-    const other = useChatStore
-      .getState()
-      .openSession("Other Task", "/test/project");
-    useChatStore.getState().addMessage(other, {
-      kind: "user",
-      text: "keep another session",
-      timestamp: "2026-01-01T00:00:00Z",
-    });
-    const active = useChatStore
-      .getState()
-      .startFreshSession("Live Task", "/test/project");
-    useChatStore.getState().setBackendSessionId(active, "live-backend-session");
-
-    render(<ChatWindowManager />);
-
-    await user.click(screen.getByLabelText("Toggle chat history"));
-    expect(screen.getByTestId("local-chat-history-drawer")).toBeInTheDocument();
-    await user.click(
-      await screen.findByLabelText("Delete local chat Live Task")
-    );
-
-    await waitFor(() => {
-      expect(commands.closeLocalChatSession).toHaveBeenCalledWith(
-        "live-backend-session"
-      );
-      expect(
-        screen.queryByTestId("local-chat-history-drawer")
-      ).not.toBeInTheDocument();
-    });
-    expect(useChatStore.getState().activeSessionId).toBe(other);
   });
 
   it("keeps the local session and shows feedback when close fails during history delete", async () => {
@@ -1798,7 +1778,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Toggle chat history"));
+    await user.click(screen.getByLabelText("Widen chat panel"));
     await user.click(
       await screen.findByLabelText("Delete local chat Live Task")
     );

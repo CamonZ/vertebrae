@@ -8,8 +8,6 @@ interface ChatWindowProps {
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
   onClosePanel?: () => void;
-  /** Opens the local-only persisted session history drawer. */
-  onToggleHistory?: () => void;
   /** Starts a fresh local chat for the current project. */
   onStartFresh?: () => void;
   /** Expands/collapses the project chat panel session view. */
@@ -33,7 +31,6 @@ interface ChatWindowProps {
 export function ChatWindow({
   sessionId,
   onClosePanel,
-  onToggleHistory,
   onStartFresh,
   onToggleWide,
   isWide = false,
@@ -66,7 +63,6 @@ export function ChatWindow({
         isClosing={chat.lifecycle === "closing"}
         canStopGeneration={chat.canStopGeneration}
         onClosePanel={onClosePanel}
-        onToggleHistory={onToggleHistory}
         onStartFresh={onStartFresh}
         onToggleWide={onToggleWide}
         isWide={isWide}

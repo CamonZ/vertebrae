@@ -16,7 +16,6 @@ interface ChatPaneListProps {
   toggleMaximized: () => void;
   startFreshActiveSession: () => Promise<boolean>;
   splitWithFreshSession: () => Promise<boolean>;
-  setHistoryOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 /**
@@ -38,7 +37,6 @@ export function ChatPaneList({
   toggleMaximized,
   startFreshActiveSession,
   splitWithFreshSession,
-  setHistoryOpen,
 }: ChatPaneListProps) {
   const paneCount = visiblePanes.length;
 
@@ -75,11 +73,6 @@ export function ChatPaneList({
                 key={`${pane.id}:${session.id}`}
                 sessionId={session.id}
                 onClosePanel={closeChatPanel}
-                onToggleHistory={
-                  isMaximized
-                    ? undefined
-                    : () => setHistoryOpen((value) => !value)
-                }
                 onStartFresh={() => void startFreshActiveSession()}
                 onToggleWide={toggleMaximized}
                 isWide={isMaximized}

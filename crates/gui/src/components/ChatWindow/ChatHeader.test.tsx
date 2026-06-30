@@ -98,22 +98,6 @@ describe("ChatHeader", () => {
 
   // --- Conditional actions ---
 
-  it("shows history button when onToggleHistory is provided", () => {
-    const onToggleHistory = vi.fn();
-    renderHeader({ onToggleHistory });
-
-    const btn = screen.getByRole("button", { name: "Toggle chat history" });
-    fireEvent.click(btn);
-    expect(onToggleHistory).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides history button when onToggleHistory is absent", () => {
-    renderHeader();
-    expect(
-      screen.queryByRole("button", { name: "Toggle chat history" })
-    ).not.toBeInTheDocument();
-  });
-
   it("shows start fresh button when onStartFresh is provided", () => {
     const onStartFresh = vi.fn();
     renderHeader({ onStartFresh });
@@ -232,7 +216,6 @@ describe("ChatHeader", () => {
 
   it("renders all optional buttons when all callbacks are provided", () => {
     renderHeader({
-      onToggleHistory: vi.fn(),
       onStartFresh: vi.fn(),
       onToggleWide: vi.fn(),
       onSplitPane: vi.fn(),
@@ -241,8 +224,8 @@ describe("ChatHeader", () => {
       onClosePanel: vi.fn(),
     });
     const buttons = screen.getAllByRole("button");
-    // 7 optional + 2 always (clear + stop) = 9
-    expect(buttons).toHaveLength(9);
+    // 6 optional + 2 always (clear + stop) = 8
+    expect(buttons).toHaveLength(8);
   });
 
   it("applies danger class to stop generation button", () => {
