@@ -126,6 +126,22 @@ impl LocalChatRuntime {
         self.event_sink.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) fn capturing_for_tests() -> (
+        Self,
+        std::sync::Arc<std::sync::Mutex<Vec<crate::local_chat::LocalChatEvent>>>,
+    ) {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        (
+            Self {
+                app_handle: None,
+                event_sink,
+                permission_bridge: PermissionBridge::new(),
+            },
+            events,
+        )
+    }
+
     pub(crate) fn permission_bridge(&self) -> PermissionBridge {
         self.permission_bridge.clone()
     }

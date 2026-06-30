@@ -134,6 +134,22 @@ fn create_input(
     }
 }
 
+#[test]
+fn default_manager_catalog_includes_codex_backend_harness_but_keeps_claude_default() {
+    let manager = LocalChatSessionManager::new();
+    let catalog = manager.catalog();
+
+    assert_eq!(catalog.default_harness, LocalChatHarnessKind::Claude);
+    assert!(catalog
+        .harnesses
+        .iter()
+        .any(|info| info.harness == LocalChatHarnessKind::Claude));
+    assert!(catalog
+        .harnesses
+        .iter()
+        .any(|info| info.harness == LocalChatHarnessKind::Codex));
+}
+
 #[tokio::test]
 async fn manager_routes_create_send_and_close_through_registry() {
     let claude = MockHarness::new(LocalChatHarnessKind::Claude);

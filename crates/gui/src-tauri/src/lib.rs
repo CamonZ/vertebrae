@@ -234,7 +234,7 @@ pub fn run() {
             // Initialize shared local chat session managers for JSONL chat
             let claude_manager = ClaudeSessionManager::new();
             let local_chat_manager =
-                LocalChatSessionManager::with_claude_manager(claude_manager.clone());
+                LocalChatSessionManager::with_default_harnesses(claude_manager.clone());
             app.manage(claude_manager);
             app.manage(local_chat_manager);
             log::info!("[STARTUP] Claude session manager initialized");
