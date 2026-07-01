@@ -834,6 +834,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => {
         const messages = [...session.messages];
         const last = messages[messages.length - 1];
+        if (message.kind === "tool_call") {
+          const existingIndex = messages.findIndex(
+            (existing) =>
+              existing.kind === "tool_call" && existing.toolId === message.toolId
+          );
+          if (existingIndex !== -1) {
+            messages[existingIndex] = {
+              ...messages[existingIndex],
+              ...message,
+              timestamp: messages[existingIndex].timestamp,
+            };
+            return {
+              ...session,
+              messages,
+              updatedAt: message.timestamp,
+            };
+          }
+        }
         if (
           message.kind === "assistant" &&
           message.parentToolUseId &&

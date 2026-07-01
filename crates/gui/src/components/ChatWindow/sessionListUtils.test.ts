@@ -171,14 +171,95 @@ describe("buildSpawnOutline", () => {
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({
       id: "spawn-1",
+      spawnId: "spawn-1",
       label: "Run worker",
       detail: "worker",
     });
     expect(result[1]).toEqual({
       id: "spawn-2",
+      spawnId: "spawn-2",
       label: "Run tests",
       detail: "task",
     });
+  });
+
+  it("renders one child row per named Codex receiver agent", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "spawn-1",
+        toolName: "Agent",
+        input: JSON.stringify({
+          description: "Inspect the feature",
+          subagent_type: "gpt-5-codex",
+          receiver_agents: [
+            {
+              thread_id: "019f0000-0000-0000-0000-000000pasteur",
+              agent_nickname: "Pasteur",
+              agent_role: "reviewer",
+            },
+            {
+              thread_id: "019f0000-0000-0000-0000-000000meitner",
+              agent_nickname: "Meitner",
+              agent_role: "tester",
+            },
+          ],
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "spawn-1:019f0000-0000-0000-0000-000000pasteur",
+        spawnId: "spawn-1",
+        label: "Pasteur",
+        detail: "reviewer",
+      },
+      {
+        id: "spawn-1:019f0000-0000-0000-0000-000000meitner",
+        spawnId: "spawn-1",
+        label: "Meitner",
+        detail: "tester",
+      },
+    ]);
+  });
+
+  it("uses Codex agent status metadata when receiver agents are not present", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "wait-1",
+        toolName: "agent",
+        input: JSON.stringify({
+          receiver_thread_ids: ["thread-a", "thread-b"],
+          agent_statuses: [
+            {
+              thread_id: "thread-a",
+              agent_nickname: "Pasteur",
+              status: "completed",
+            },
+            {
+              thread_id: "thread-b",
+              agent_nickname: "Meitner",
+              status: "running",
+            },
+          ],
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "wait-1:thread-a",
+        spawnId: "wait-1",
+        label: "Pasteur",
+        detail: "completed",
+      },
+      {
+        id: "wait-1:thread-b",
+        spawnId: "wait-1",
+        label: "Meitner",
+        detail: "running",
+      },
+    ]);
   });
 
   it("filters out non-spawn tool calls", () => {

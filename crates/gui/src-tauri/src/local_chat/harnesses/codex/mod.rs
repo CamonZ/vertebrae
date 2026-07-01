@@ -799,7 +799,18 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
                 json!({
                     "description": item.get("prompt").and_then(Value::as_str).unwrap_or(tool),
                     "subagent_type": item.get("model").and_then(Value::as_str).unwrap_or("agent"),
+                    "agent_nickname": item.get("newAgentNickname")
+                        .or_else(|| item.get("receiverAgentNickname"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    "agent_role": item.get("newAgentRole")
+                        .or_else(|| item.get("receiverAgentRole"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
                     "receiver_thread_ids": item.get("receiverThreadIds").cloned().unwrap_or(Value::Null),
+                    "receiver_agents": item.get("receiverAgents").cloned().unwrap_or(Value::Null),
+                    "agent_statuses": item.get("agentStatuses").cloned().unwrap_or(Value::Null),
+                    "agents_states": item.get("agentsStates").cloned().unwrap_or(Value::Null),
                 }),
             )
         }
@@ -987,14 +998,7 @@ impl<'a> TurnNotificationHandler<'a> {
         };
         if let Some((tool_id, tool_name, input)) = codex_tool_call(item) {
             if item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall") {
-                if let Some(receiver_thread_ids) =
-                    item.get("receiverThreadIds").and_then(Value::as_array)
-                {
-                    for thread_id in receiver_thread_ids.iter().filter_map(Value::as_str) {
-                        self.child_thread_parents
-                            .insert(thread_id.to_string(), tool_id.clone());
-                    }
-                }
+                self.remember_child_thread_parents(item, &tool_id);
             }
             self.event_sink
                 .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
@@ -1012,6 +1016,20 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(item) = params.get("item") else {
             return;
         };
+        if item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall") {
+            if let Some((tool_id, tool_name, input)) = codex_tool_call(item) {
+                self.remember_child_thread_parents(item, &tool_id);
+                self.event_sink
+                    .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                        backend_session_id: self.backend_session_id.to_string(),
+                        harness: LocalChatHarnessKind::Codex,
+                        tool_id,
+                        tool_name,
+                        input,
+                        parent_tool_use_id: parent_tool_use_id.map(str::to_string),
+                    }));
+            }
+        }
         if let Some((tool_id, result, is_error)) = codex_tool_result(item) {
             self.event_sink
                 .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
@@ -1022,6 +1040,17 @@ impl<'a> TurnNotificationHandler<'a> {
                     is_error,
                     parent_tool_use_id: parent_tool_use_id.map(str::to_string),
                 }));
+        }
+    }
+
+    fn remember_child_thread_parents(&mut self, item: &Value, tool_id: &str) {
+        let Some(receiver_thread_ids) = item.get("receiverThreadIds").and_then(Value::as_array)
+        else {
+            return;
+        };
+        for thread_id in receiver_thread_ids.iter().filter_map(Value::as_str) {
+            self.child_thread_parents
+                .insert(thread_id.to_string(), tool_id.to_string());
         }
     }
 
@@ -1410,6 +1439,56 @@ mod tests {
                 turn_error: None,
             }
         }
+    }
+
+    #[test]
+    fn codex_collab_tool_call_preserves_agent_outline_metadata() {
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "prompt": "Inspect the implementation",
+            "model": "gpt-5-codex",
+            "newAgentNickname": "Pasteur",
+            "newAgentRole": "reviewer",
+            "receiverThreadIds": ["thread-pasteur"],
+            "receiverAgents": [
+                {
+                    "threadId": "thread-pasteur",
+                    "agentNickname": "Pasteur",
+                    "agentRole": "reviewer"
+                }
+            ],
+            "agentStatuses": [
+                {
+                    "threadId": "thread-pasteur",
+                    "agentNickname": "Pasteur",
+                    "status": "running"
+                }
+            ],
+            "agentsStates": {
+                "thread-pasteur": {
+                    "status": "running"
+                }
+            }
+        });
+
+        let (tool_id, tool_name, input) = codex_tool_call(&item).expect("tool call");
+        let input: Value = serde_json::from_str(&input).expect("json input");
+
+        assert_eq!(tool_id, "spawn-1");
+        assert_eq!(tool_name, "Agent");
+        assert_eq!(input["description"], "Inspect the implementation");
+        assert_eq!(input["subagent_type"], "gpt-5-codex");
+        assert_eq!(input["agent_nickname"], "Pasteur");
+        assert_eq!(input["agent_role"], "reviewer");
+        assert_eq!(input["receiver_thread_ids"][0], "thread-pasteur");
+        assert_eq!(input["receiver_agents"][0]["agentNickname"], "Pasteur");
+        assert_eq!(input["agent_statuses"][0]["agentNickname"], "Pasteur");
+        assert_eq!(
+            input["agents_states"]["thread-pasteur"]["status"],
+            "running"
+        );
     }
 
     struct MockAppServer {

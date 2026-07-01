@@ -818,6 +818,36 @@ describe("chatStore", () => {
       });
     });
 
+    it("updates an existing tool_call with the same toolId in place", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"description":"Spawn agent"}',
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"receiver_agents":[{"agent_nickname":"Pasteur"}]}',
+        timestamp: "2024-01-01T00:00:01Z",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toEqual({
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"receiver_agents":[{"agent_nickname":"Pasteur"}]}',
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+      expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
+    });
+
     it("does nothing for non-existent session", () => {
       useChatStore.getState().addMessage("non-existent", {
         kind: "user",

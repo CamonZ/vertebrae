@@ -216,7 +216,9 @@ export function LocalChatMiniPanel({
                           key={spawn.id}
                           type="button"
                           className="hc-mini-history-child"
-                          onClick={() => scrollToSpawn(session.id, spawn.id)}
+                          onClick={() =>
+                            scrollToSpawn(session.id, spawn.spawnId)
+                          }
                           title={`Jump to spawned agent ${spawn.label}`}
                           aria-label={`Jump to spawned agent ${spawn.label}`}
                         >
