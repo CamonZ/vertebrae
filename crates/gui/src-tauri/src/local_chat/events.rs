@@ -21,6 +21,7 @@ pub struct LocalChatTextEvent {
     pub harness: LocalChatHarnessKind,
     pub text: String,
     pub is_partial: bool,
+    pub parent_tool_use_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]

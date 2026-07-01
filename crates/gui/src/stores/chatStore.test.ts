@@ -163,6 +163,7 @@ describe("chatStore", () => {
       useChatStore.getState().setBackendSessionId(id, "backend-1");
       useChatStore.getState().setProviderResumeId(id, "conv-1");
       useChatStore.getState().setSessionSelectedModel(id, "opus");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
       useChatStore
         .getState()
         .setSessionUsage(id, "claude-sonnet-4", { used: 50, max: 200000 });
@@ -186,6 +187,7 @@ describe("chatStore", () => {
         backendSessionId: null,
         providerResumeId: "conv-1",
         selectedModelId: "opus",
+        selectedReasoningEffort: "high",
         model: "claude-sonnet-4",
         tokenUsage: { used: 50, max: 200000 },
       });
@@ -221,6 +223,42 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id].selectedModelId).toBeNull();
       expect(loadPersistedLocalChatSession(id)?.selectedModelId).toBeNull();
       expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+    });
+
+    it("stores selected harness before start and clears provider-specific model state", () => {
+      const id = useChatStore.getState().openSession("Task Provider");
+
+      useChatStore.getState().setSessionSelectedModel(id, "sonnet");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionModel(id, "claude-sonnet");
+      useChatStore.getState().setSessionTokenUsage(id, { used: 10, max: 100 });
+      useChatStore.getState().setSessionHarness(id, "codex");
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        harness: "codex",
+        selectedModelId: undefined,
+        selectedReasoningEffort: undefined,
+        model: undefined,
+        tokenUsage: undefined,
+      });
+      expect(loadPersistedLocalChatSession(id)?.harness).toBe("codex");
+      expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+    });
+
+    it("locks harness changes after a backend or provider resume id exists", () => {
+      const backendId = useChatStore.getState().openSession("Task Backend");
+      useChatStore.getState().setBackendSessionId(backendId, "backend-1");
+      useChatStore.getState().setSessionHarness(backendId, "codex");
+
+      expect(useChatStore.getState().sessions[backendId].harness).toBe(
+        "claude"
+      );
+
+      const resumeId = useChatStore.getState().startFreshSession("Task Resume");
+      useChatStore.getState().setProviderResumeId(resumeId, "resume-1");
+      useChatStore.getState().setSessionHarness(resumeId, "codex");
+
+      expect(useChatStore.getState().sessions[resumeId].harness).toBe("claude");
     });
 
     it("reuses the matching project path when persisted sessions are already loaded", () => {
@@ -710,6 +748,107 @@ describe("chatStore", () => {
       expect(session.updatedAt).toBe("2024-01-01T00:00:00Z");
     });
 
+    it("coalesces parent-linked assistant deltas into one child transcript row", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child ",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "stream",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toEqual([
+        {
+          kind: "assistant",
+          text: "child stream",
+          timestamp: "2024-01-01T00:00:01Z",
+          isPartial: true,
+          parentToolUseId: "agent-1",
+        },
+      ]);
+      expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
+    });
+
+    it("keeps separate child transcript rows across child tool activity", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "before",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Read",
+        toolId: "tool-1",
+        input: "{}",
+        timestamp: "2024-01-01T00:00:01Z",
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "after",
+        timestamp: "2024-01-01T00:00:02Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages.map((message) => message.kind)).toEqual([
+        "assistant",
+        "tool_call",
+        "assistant",
+      ]);
+      expect(session.messages[2]).toMatchObject({
+        kind: "assistant",
+        text: "after",
+        parentToolUseId: "agent-1",
+      });
+    });
+
+    it("updates an existing tool_call with the same toolId in place", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"description":"Spawn agent","agent_nickname":"Pasteur"}',
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: '{"receiver_agents":[{"agent_nickname":"Pasteur"}]}',
+        timestamp: "2024-01-01T00:00:01Z",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toEqual({
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input:
+          '{"description":"Spawn agent","agent_nickname":"Pasteur","receiver_agents":[{"agent_nickname":"Pasteur"}]}',
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+      expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
+    });
+
     it("does nothing for non-existent session", () => {
       useChatStore.getState().addMessage("non-existent", {
         kind: "user",
@@ -968,6 +1107,31 @@ describe("chatStore", () => {
 
       expect(useChatStore.getState().sessions[id]).toBe(sessionBefore);
       expect(setItem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setSessionReasoningEffort", () => {
+    it("stores the selected reasoning effort on the session", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      expect(useChatStore.getState().sessions[id].selectedReasoningEffort).toBe(
+        "high"
+      );
+      expect(loadPersistedLocalChatSession(id)?.selectedReasoningEffort).toBe(
+        "high"
+      );
+    });
+
+    it("normalizes an empty reasoning effort to provider default", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionReasoningEffort(id, "");
+      expect(useChatStore.getState().sessions[id].selectedReasoningEffort).toBe(
+        null
+      );
+      expect(
+        loadPersistedLocalChatSession(id)?.selectedReasoningEffort
+      ).toBeNull();
     });
   });
 

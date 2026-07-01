@@ -15,6 +15,7 @@ fn local_chat_event_names_match_public_contract() {
             harness: LocalChatHarnessKind::Claude,
             text: "hello".to_string(),
             is_partial: true,
+            parent_tool_use_id: None,
         }),
         LocalChatEvent::ToolCall(LocalChatToolCallEvent {
             backend_session_id: "session-1".to_string(),

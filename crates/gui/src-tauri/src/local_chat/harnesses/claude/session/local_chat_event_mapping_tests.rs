@@ -6,7 +6,7 @@ use crate::local_chat::harnesses::claude::jsonl::{
 #[test]
 fn maps_claude_init_to_neutral_local_chat_init() {
     let event =
-        ClaudeSessionManager::local_chat_event_from_claude_emitted(EmittedEvent::Init(InitEvent {
+        ClaudeSessionRuntime::local_chat_event_from_claude_emitted(EmittedEvent::Init(InitEvent {
             session_id: "backend-1".to_string(),
             claude_conversation_id: Some("conversation-1".to_string()),
             model: "claude-sonnet-4".to_string(),
@@ -28,10 +28,11 @@ fn maps_claude_init_to_neutral_local_chat_init() {
 #[test]
 fn maps_claude_text_and_tool_events_to_neutral_payloads() {
     let text =
-        ClaudeSessionManager::local_chat_event_from_claude_emitted(EmittedEvent::Text(TextEvent {
+        ClaudeSessionRuntime::local_chat_event_from_claude_emitted(EmittedEvent::Text(TextEvent {
             session_id: "backend-1".to_string(),
             text: "hello".to_string(),
             is_partial: true,
+            parent_tool_use_id: Some("parent-tool".to_string()),
         }));
     assert_eq!(
         text,
@@ -40,10 +41,11 @@ fn maps_claude_text_and_tool_events_to_neutral_payloads() {
             harness: LocalChatHarnessKind::Claude,
             text: "hello".to_string(),
             is_partial: true,
+            parent_tool_use_id: Some("parent-tool".to_string()),
         })
     );
 
-    let tool_call = ClaudeSessionManager::local_chat_event_from_claude_emitted(
+    let tool_call = ClaudeSessionRuntime::local_chat_event_from_claude_emitted(
         EmittedEvent::ToolCall(ToolCallEvent {
             session_id: "backend-1".to_string(),
             tool_id: "toolu_1".to_string(),
@@ -64,7 +66,7 @@ fn maps_claude_text_and_tool_events_to_neutral_payloads() {
         })
     );
 
-    let tool_result = ClaudeSessionManager::local_chat_event_from_claude_emitted(
+    let tool_result = ClaudeSessionRuntime::local_chat_event_from_claude_emitted(
         EmittedEvent::ToolResult(ToolResultEvent {
             session_id: "backend-1".to_string(),
             tool_id: "toolu_1".to_string(),
@@ -88,7 +90,7 @@ fn maps_claude_text_and_tool_events_to_neutral_payloads() {
 
 #[test]
 fn maps_claude_usage_and_end_to_neutral_payloads() {
-    let usage = ClaudeSessionManager::local_chat_event_from_claude_emitted(EmittedEvent::Usage(
+    let usage = ClaudeSessionRuntime::local_chat_event_from_claude_emitted(EmittedEvent::Usage(
         UsageEvent {
             session_id: "backend-1".to_string(),
             model: "claude-opus-4".to_string(),
@@ -107,7 +109,7 @@ fn maps_claude_usage_and_end_to_neutral_payloads() {
         })
     );
 
-    let end = ClaudeSessionManager::local_chat_event_from_claude_emitted(EmittedEvent::SessionEnd(
+    let end = ClaudeSessionRuntime::local_chat_event_from_claude_emitted(EmittedEvent::SessionEnd(
         SessionEndEvent {
             session_id: "backend-1".to_string(),
             duration_ms: 5000,

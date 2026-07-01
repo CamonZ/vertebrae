@@ -62,6 +62,8 @@ export interface ChatThreadOptions {
    * not consumed here (the ThinkingIndicator is a sibling of <Thread>).
    */
   isWaiting?: boolean;
+  /** Provider label shown on assistant response rows. */
+  assistantLabel?: string;
 }
 
 /** Stable thread id for the single local-chat thread. */
@@ -71,7 +73,7 @@ export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
-  const { onToggleTool, collapsed, childrenByParent } = opts;
+  const { onToggleTool, collapsed, childrenByParent, assistantLabel } = opts;
 
   const turns: Turn[] = [];
   let turnSeq = 0;
@@ -87,6 +89,7 @@ export function chatMessagesToThread(
     const grouped = chatTurnEventsToMessages(events, {
       collapsed,
       onToggleTool,
+      assistantLabel,
     });
     stabilizeKeys(grouped, turnId);
     if (endsWithPartialAssistant) markLastAgentStreaming(grouped);
@@ -122,6 +125,7 @@ export function chatMessagesToThread(
           kind: "assistant_message",
           text: m.text,
           timestamp: m.timestamp,
+          parentToolUseId: m.parentToolUseId,
         });
         endsWithPartialAssistant = m.isPartial === true;
         continue;
@@ -230,6 +234,14 @@ function toToolResultEvent(
 
 /** Convert a sub-agent child message (tool_call/tool_result) to an event. */
 function toChildEvent(m: ChatMessage): ConversationEvent | null {
+  if (m.kind === "assistant") {
+    return {
+      kind: "assistant_message",
+      text: m.text,
+      timestamp: m.timestamp,
+      parentToolUseId: m.parentToolUseId,
+    };
+  }
   if (m.kind === "tool_call") return toToolCallEvent(m);
   if (m.kind === "tool_result") return toToolResultEvent(m);
   return null;

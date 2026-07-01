@@ -3,7 +3,6 @@
 //! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
-use crate::claude_session::ClaudeSessionManager;
 use crate::local_chat::permissions::LocalPermissionDecision;
 use crate::local_chat::{
     CreateLocalChatSessionInput, LocalChatHarnessCatalog, LocalChatSessionError,
@@ -1647,11 +1646,11 @@ pub async fn close_local_chat_session(
     local_chat_manager.close_session(&backend_session_id).await
 }
 
-/// Resolve a Claude permission request shown in the GUI.
+/// Resolve a local chat permission request shown in the GUI.
 #[tauri::command]
 #[specta::specta]
 pub async fn resolve_permission_request(
-    claude_manager: State<'_, ClaudeSessionManager>,
+    local_chat_manager: State<'_, LocalChatSessionManager>,
     input: ResolvePermissionRequestInput,
 ) -> Result<serde_json::Value, CommandError> {
     let (behavior, message, updated_input) = match input.behavior {
@@ -1680,7 +1679,7 @@ pub async fn resolve_permission_request(
         ),
     };
 
-    claude_manager
+    local_chat_manager
         .resolve_permission_request(
             &input.request_id,
             LocalPermissionDecision {

@@ -219,6 +219,7 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "hello",
         is_partial: true,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -242,6 +243,7 @@ describe("handleTextEvent", () => {
           harness: "claude",
           text,
           is_partial: true,
+          parent_tool_use_id: null,
         },
         CLAUDE_SESSION_ID,
         SESSION_ID,
@@ -277,6 +279,7 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "done",
         is_partial: false,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -299,11 +302,43 @@ describe("handleTextEvent", () => {
         harness: "claude",
         text: "hello",
         is_partial: true,
+        parent_tool_use_id: null,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
       updateLastAssistantMessage,
       finalizeLastAssistantMessage
+    );
+    expect(updateLastAssistantMessage).not.toHaveBeenCalled();
+    expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
+  });
+
+  it("adds parent-linked assistant text as a child transcript message", () => {
+    const updateLastAssistantMessage = vi.fn();
+    const finalizeLastAssistantMessage = vi.fn();
+    const addMessage = vi.fn();
+    handleTextEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "codex",
+        text: "child agent",
+        is_partial: true,
+        parent_tool_use_id: "agent-tool",
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage,
+      addMessage
+    );
+
+    expect(addMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "assistant",
+        text: "child agent",
+        parentToolUseId: "agent-tool",
+      })
     );
     expect(updateLastAssistantMessage).not.toHaveBeenCalled();
     expect(finalizeLastAssistantMessage).not.toHaveBeenCalled();
@@ -752,6 +787,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -779,6 +815,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -802,6 +839,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -828,6 +866,68 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: "opus",
+      reasoning_effort: null,
+      permission_mode: "default",
+    });
+  });
+
+  it("passes selected Codex harness and model id to the neutral create command", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        harness: "codex",
+        selectedModelId: "catalog-codex-alt",
+      }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "codex",
+      working_dir: "/test/project",
+      initial_prompt: null,
+      provider_resume_id: null,
+      model_id: "catalog-codex-alt",
+      reasoning_effort: null,
+      permission_mode: "default",
+    });
+  });
+
+  it("passes selected Codex reasoning effort to the neutral create command", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      setContextSummary: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        harness: "codex",
+        selectedModelId: "gpt-5.5",
+        selectedReasoningEffort: "high",
+      }),
+      SESSION_ID,
+      deps
+    );
+
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "codex",
+      working_dir: "/test/project",
+      initial_prompt: null,
+      provider_resume_id: null,
+      model_id: "gpt-5.5",
+      reasoning_effort: "high",
       permission_mode: "default",
     });
   });
@@ -854,6 +954,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "auto",
     });
   });
@@ -920,6 +1021,7 @@ describe("doStartSession", () => {
       initial_prompt: "Help",
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -946,6 +1048,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: "conv-xyz",
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
     expect(deps.setSessionLifecycle).toHaveBeenCalledWith(
@@ -967,6 +1070,7 @@ describe("doStartSession", () => {
       makeSession({
         providerResumeId: "conv-xyz",
         selectedModelId: "opus",
+        selectedReasoningEffort: "high",
       }),
       SESSION_ID,
       deps
@@ -979,6 +1083,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: "conv-xyz",
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -1006,6 +1111,7 @@ describe("doStartSession", () => {
       initial_prompt: null,
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -1028,6 +1134,7 @@ describe("doStartSession", () => {
       initial_prompt: "Question",
       provider_resume_id: null,
       model_id: null,
+      reasoning_effort: null,
       permission_mode: "default",
     });
   });
@@ -1049,6 +1156,13 @@ describe("doStartSession", () => {
 
     expect(deps.setBackendSessionId).toHaveBeenLastCalledWith(SESSION_ID, null);
     expect(deps.setBackendSessionIdRef).toHaveBeenLastCalledWith(null);
+    expect(deps.addMessage).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "error",
+        message: "claude missing",
+      })
+    );
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",

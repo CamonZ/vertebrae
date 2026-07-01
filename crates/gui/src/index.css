@@ -2629,7 +2629,19 @@ html.window-transparent #root {
   background: var(--err-wash);
   color: var(--err);
 }
-.hc-panel .hc-model-picker {
+.hc-panel .hc-chat-controls {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-2);
+}
+.hc-panel .hc-chat-controls.right {
+  justify-content: flex-end;
+}
+.hc-panel .hc-model-picker,
+.hc-panel .hc-effort-picker,
+.hc-panel .hc-provider-picker {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
@@ -2650,6 +2662,8 @@ html.window-transparent #root {
   color: var(--fg-mute);
 }
 .hc-panel .hc-model-picker select,
+.hc-panel .hc-effort-picker select,
+.hc-panel .hc-provider-picker select,
 .hc-panel .hc-permission-picker select {
   min-width: 78px;
   max-width: 132px;
@@ -2664,15 +2678,34 @@ html.window-transparent #root {
 .hc-panel .hc-permission-picker select {
   max-width: 116px;
 }
+.hc-panel .hc-provider-picker select {
+  max-width: 104px;
+}
+.hc-panel .hc-effort-picker select {
+  max-width: 112px;
+}
 .hc-panel .hc-model-picker select:focus-visible,
+.hc-panel .hc-effort-picker select:focus-visible,
+.hc-panel .hc-provider-picker select:focus-visible,
 .hc-panel .hc-permission-picker select:focus-visible {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 .hc-panel .hc-model-picker select:disabled,
+.hc-panel .hc-effort-picker select:disabled,
+.hc-panel .hc-provider-picker select:disabled,
 .hc-panel .hc-permission-picker select:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+.hc-panel .hc-provider-unavailable {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--err);
 }
 
 /* Composer footer: a thin context-utilization bar rides the top edge, the
@@ -2772,6 +2805,7 @@ html.window-transparent #root {
 }
 .hc-panel .hc-mini-history-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: var(--s-1);
   margin-bottom: var(--s-1);
@@ -2820,6 +2854,43 @@ html.window-transparent #root {
   font-family: var(--mono);
   font-size: var(--text-9);
   letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.hc-panel .hc-mini-history-children {
+  flex-basis: 100%;
+  display: grid;
+  gap: 2px;
+  margin-left: var(--s-2);
+  padding-left: var(--s-2);
+  border-left: 1px solid color-mix(in oklch, var(--accent) 34%, var(--line));
+}
+.hc-panel .hc-mini-history-child {
+  min-width: 0;
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  padding: 3px var(--s-1);
+  text-align: left;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-child:hover {
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.hc-panel .hc-mini-history-child .label,
+.hc-panel .hc-mini-history-child .meta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-mini-history-child .label {
+  font-size: var(--text-11);
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-child .meta {
+  font-family: var(--mono);
+  font-size: var(--text-9);
   text-transform: uppercase;
   color: var(--fg-faint);
 }

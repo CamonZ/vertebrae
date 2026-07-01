@@ -22,6 +22,12 @@ pub struct LocalChatModelOption {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatReasoningEffortOption {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 pub struct LocalChatHarnessInfo {
     pub harness: LocalChatHarnessKind,
     pub label: String,
@@ -29,6 +35,8 @@ pub struct LocalChatHarnessInfo {
     pub unavailable_reason: Option<String>,
     pub default_model_id: Option<String>,
     pub models: Vec<LocalChatModelOption>,
+    pub default_reasoning_effort: Option<String>,
+    pub reasoning_efforts: Vec<LocalChatReasoningEffortOption>,
     pub supports_resume: bool,
 }
 
@@ -46,6 +54,7 @@ pub struct CreateLocalChatSessionInput {
     pub initial_prompt: Option<String>,
     pub provider_resume_id: Option<String>,
     pub model_id: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub permission_mode: Option<PermissionMode>,
 }
 
@@ -56,6 +65,7 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) initial_prompt: Option<String>,
     pub(crate) provider_resume_id: Option<String>,
     pub(crate) model_id: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) permission_mode: Option<PermissionMode>,
 }
 
@@ -67,6 +77,7 @@ impl CreateLocalChatSessionInput {
             initial_prompt: self.initial_prompt,
             provider_resume_id: self.provider_resume_id,
             model_id: self.model_id,
+            reasoning_effort: self.reasoning_effort,
             permission_mode: self.permission_mode,
         }
     }

@@ -172,6 +172,7 @@ pub(crate) struct TextEvent {
     pub(crate) session_id: String,
     pub(crate) text: String,
     pub(crate) is_partial: bool,
+    pub(crate) parent_tool_use_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -223,7 +224,7 @@ pub(crate) fn process_jsonl_lines(
     for line in reader.lines() {
         match line {
             Ok(line) if !line.is_empty() => {
-                log::info!(
+                log::debug!(
                     "[Claude JSONL] session={} msg={}",
                     &session_id[..8.min(session_id.len())],
                     line
@@ -279,6 +280,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
                                     session_id: session_id.to_string(),
                                     text,
                                     is_partial: true,
+                                    parent_tool_use_id: parent_tool_use_id.clone(),
                                 }));
                             }
                         }
@@ -305,6 +307,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
                             session_id: session_id.to_string(),
                             text,
                             is_partial: true,
+                            parent_tool_use_id: parent_tool_use_id.clone(),
                         }));
                     }
                 }
@@ -346,6 +349,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
                                     session_id: session_id.to_string(),
                                     text,
                                     is_partial: false,
+                                    parent_tool_use_id: parent_tool_use_id.clone(),
                                 }));
                             }
                             ClaudeContentItem::ToolUse { id, name, input } => {

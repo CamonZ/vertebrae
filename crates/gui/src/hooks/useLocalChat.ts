@@ -93,9 +93,21 @@ export function handleTextEvent(
   backendSessionId: string | null,
   sessionId: string,
   updateLastAssistantMessage: (sessionId: string, text: string) => void,
-  finalizeLastAssistantMessage: (sessionId: string, text: string) => void
+  finalizeLastAssistantMessage: (sessionId: string, text: string) => void,
+  addMessage?: (sessionId: string, msg: ChatMessage) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
+  const parentToolUseId = payload.parent_tool_use_id ?? undefined;
+  if (parentToolUseId) {
+    addMessage?.(sessionId, {
+      kind: "assistant",
+      text: payload.text,
+      timestamp: new Date().toISOString(),
+      isPartial: payload.is_partial,
+      parentToolUseId,
+    });
+    return;
+  }
   if (payload.is_partial) {
     updateLastAssistantMessage(sessionId, payload.text);
   } else {
@@ -241,7 +253,8 @@ export async function doStartSession(
       errorMessage?: string | null
     ) => void;
   },
-  userMessage?: string
+  userMessage?: string,
+  options: { addUserMessage?: boolean } = {}
 ) {
   deps.setSessionLifecycle(
     sessionId,
@@ -255,7 +268,7 @@ export async function doStartSession(
   try {
     const initialPrompt = userMessage || undefined;
 
-    if (userMessage) {
+    if (userMessage && options.addUserMessage !== false) {
       deps.addMessage(sessionId, {
         kind: "user",
         text: userMessage,
@@ -273,6 +286,9 @@ export async function doStartSession(
 
     const resumeId = session.providerResumeId;
     const modelId = resumeId ? null : (session.selectedModelId ?? null);
+    const reasoningEffort = resumeId
+      ? null
+      : (session.selectedReasoningEffort ?? null);
     const permissionMode = session.permissionMode ?? "default";
 
     const result = await commands.createLocalChatSession({
@@ -282,6 +298,7 @@ export async function doStartSession(
       initial_prompt: initialPrompt ?? null,
       provider_resume_id: resumeId,
       model_id: modelId,
+      reasoning_effort: reasoningEffort,
       permission_mode: permissionMode,
     });
     if (result.status === "error") {
@@ -289,9 +306,15 @@ export async function doStartSession(
     }
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
+    const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
     deps.setBackendSessionIdRef(null);
-    deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+    deps.addMessage(sessionId, {
+      kind: "error",
+      message,
+      timestamp: new Date().toISOString(),
+    });
+    deps.setSessionLifecycle(sessionId, "error", message);
   }
 }
 
@@ -308,14 +331,17 @@ export async function doSendMessage(
     ) => void;
     setBackendSessionId?: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
-  }
+  },
+  options: { addUserMessage?: boolean } = {}
 ) {
   deps.setSessionLifecycle(sessionId, "sending");
-  deps.addMessage(sessionId, {
-    kind: "user",
-    text: content,
-    timestamp: new Date().toISOString(),
-  });
+  if (options.addUserMessage !== false) {
+    deps.addMessage(sessionId, {
+      kind: "user",
+      text: content,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   try {
     const result = await commands.sendLocalChatMessage(
@@ -413,6 +439,7 @@ export function useLocalChat(sessionId: string | null) {
 
   // Track the runtime backend session ID for event filtering.
   const backendSessionIdRef = useRef<string | null>(null);
+  const queuedMessagesRef = useRef<string[]>([]);
 
   // Keep ref in sync
   useEffect(() => {
@@ -464,7 +491,8 @@ export function useLocalChat(sessionId: string | null) {
           backendSessionIdRef.current,
           sessionId,
           updateLastAssistantMessage,
-          finalizeLastAssistantMessage
+          finalizeLastAssistantMessage,
+          addMessage
         );
       });
       if (isCancelled) {
@@ -625,12 +653,77 @@ export function useLocalChat(sessionId: string | null) {
     [session, sessionId, addMessage, setBackendSessionId, setSessionLifecycle]
   );
 
+  useEffect(() => {
+    if (!session || !sessionId) return;
+    if (queuedMessagesRef.current.length === 0) return;
+
+    const lifecycle = getLocalChatLifecycle(session);
+    if (lifecycle !== "idle") return;
+
+    const content = queuedMessagesRef.current.shift();
+    if (!content) return;
+
+    if (session.backendSessionId) {
+      void doSendMessage(
+        session.backendSessionId,
+        sessionId,
+        content,
+        {
+          addMessage,
+          setSessionLifecycle,
+          setBackendSessionId,
+          setBackendSessionIdRef: (id) => {
+            backendSessionIdRef.current = id;
+          },
+        },
+        { addUserMessage: false }
+      );
+      return;
+    }
+
+    void doStartSession(
+      session,
+      sessionId,
+      {
+        setBackendSessionId,
+        setBackendSessionIdRef: (id) => {
+          backendSessionIdRef.current = id;
+        },
+        addMessage,
+        setSessionLifecycle,
+      },
+      content,
+      { addUserMessage: false }
+    );
+  }, [
+    session,
+    sessionId,
+    addMessage,
+    setBackendSessionId,
+    setSessionLifecycle,
+  ]);
+
   /**
    * Send a message to the active local chat session.
    */
   const sendMessage = useCallback(
     async (content: string) => {
       if (!session?.backendSessionId || !sessionId) return;
+      const lifecycle = getLocalChatLifecycle(session);
+      if (
+        lifecycle === "starting" ||
+        lifecycle === "resuming" ||
+        lifecycle === "sending" ||
+        lifecycle === "streaming"
+      ) {
+        queuedMessagesRef.current.push(content);
+        addMessage(sessionId, {
+          kind: "user",
+          text: content,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
 
       await doSendMessage(session.backendSessionId, sessionId, content, {
         addMessage,
@@ -642,7 +735,7 @@ export function useLocalChat(sessionId: string | null) {
       });
     },
     [
-      session?.backendSessionId,
+      session,
       sessionId,
       addMessage,
       setSessionLifecycle,

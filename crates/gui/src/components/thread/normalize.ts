@@ -797,11 +797,16 @@ function groupBySpawn(
   model: string | undefined,
   runStartMs: number | null
 ): Message[] {
+  const parentRedirects = buildCollabParentRedirects(events);
+
   // Partition: main-agent events vs subagent events keyed by parent tool id.
   const main: ConversationEvent[] = [];
   const childGroups = new Map<string, ConversationEvent[]>();
   for (const ev of events) {
-    const parentId = readParentToolUseId(ev);
+    const initialParentId = readParentToolUseId(ev);
+    const parentId = initialParentId
+      ? parentRedirects.get(initialParentId) || initialParentId
+      : undefined;
     if (parentId === undefined) {
       main.push(ev);
       continue;
@@ -822,6 +827,7 @@ function groupBySpawn(
   const out: Message[] = [];
   const spawned = new Set<string>();
   for (const ev of main) {
+    if (isNonSpawnCollabAgentCall(ev)) continue;
     // When this is the parent spawn tool_call, swap its row for the nested
     // child Thread carrying the subagent's events.
     if (ev.kind === "tool_call" && childGroups.has(ev.toolId)) {
@@ -844,6 +850,43 @@ function groupBySpawn(
   }
 
   return out;
+}
+
+function buildCollabParentRedirects(
+  events: ConversationEvent[]
+): Map<string, string> {
+  const spawnByAgentKey = new Map<string, string>();
+  const pendingNonSpawn: Array<{ toolId: string; agentKeys: string[] }> = [];
+
+  for (const ev of events) {
+    if (ev.kind !== "tool_call") continue;
+    const collabTool = inputStringField(ev.input, [
+      "collab_tool",
+      "collabTool",
+    ]);
+    if (!collabTool) continue;
+    const agentKeys = agentIdentityKeys(ev.input);
+    if (collabTool === "spawnAgent") {
+      agentKeys.forEach((key) => spawnByAgentKey.set(key, ev.toolId));
+    } else {
+      pendingNonSpawn.push({ toolId: ev.toolId, agentKeys });
+    }
+  }
+
+  const redirects = new Map<string, string>();
+  for (const update of pendingNonSpawn) {
+    const spawnToolId = update.agentKeys
+      .map((key) => spawnByAgentKey.get(key))
+      .find((toolId): toolId is string => Boolean(toolId));
+    if (spawnToolId) redirects.set(update.toolId, spawnToolId);
+  }
+  return redirects;
+}
+
+function isNonSpawnCollabAgentCall(ev: ConversationEvent): boolean {
+  if (ev.kind !== "tool_call") return false;
+  const collabTool = inputStringField(ev.input, ["collab_tool", "collabTool"]);
+  return Boolean(collabTool && collabTool !== "spawnAgent");
 }
 
 /**
@@ -894,7 +937,7 @@ function spawnMessage(
 
   const childThread: Thread = {
     id: threadId,
-    label: parentCall?.displayName || "subagent",
+    label: spawnLabel(parentCall),
     kind: "execute",
     spawnLabel: "subagent",
     summary,
@@ -906,6 +949,108 @@ function spawnMessage(
     thread: childThread,
     evt: parentCall?.toolId || threadId,
   };
+}
+
+function spawnLabel(parentCall: ToolCallEvent | undefined): string {
+  if (!parentCall) return "subagent";
+  const input = parentCall.input;
+  const direct =
+    inputStringField(input, [
+      "agent_nickname",
+      "agentNickname",
+      "new_agent_nickname",
+      "newAgentNickname",
+      "receiver_agent_nickname",
+      "receiverAgentNickname",
+      "nickname",
+      "name",
+    ]) || singleReceiverAgentName(input);
+  return (
+    direct ||
+    agentIdentityLabel(input) ||
+    inputStringField(input, ["description", "prompt"]) ||
+    parentCall.displayName ||
+    "subagent"
+  );
+}
+
+function inputStringField(
+  input: Record<string, unknown>,
+  fields: readonly string[]
+): string {
+  for (const field of fields) {
+    const value = input[field];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function singleReceiverAgentName(input: Record<string, unknown>): string {
+  const receivers = input.receiver_agents ?? input.receiverAgents;
+  if (!Array.isArray(receivers) || receivers.length !== 1) return "";
+  const receiver = receivers[0];
+  if (!receiver || typeof receiver !== "object" || Array.isArray(receiver)) {
+    return "";
+  }
+  return inputStringField(receiver as Record<string, unknown>, [
+    "agent_nickname",
+    "agentNickname",
+    "nickname",
+    "name",
+  ]);
+}
+
+function agentIdentityLabel(input: Record<string, unknown>): string {
+  const id = agentIdentityKeys(input)[0] || "";
+  return id ? `Agent ${shortAgentId(id)}` : "";
+}
+
+function agentIdentityKeys(input: Record<string, unknown>): string[] {
+  return [
+    ...stringsFromArray(input.receiver_thread_ids),
+    ...stringsFromArray(input.receiverThreadIds),
+    ...receiverAgentIds(input),
+  ].filter((value, index, values) => values.indexOf(value) === index);
+}
+
+function stringsFromArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(
+      (item): item is string =>
+        typeof item === "string" && item.trim().length > 0
+    )
+    .map((item) => item.trim());
+}
+
+function receiverAgentIds(input: Record<string, unknown>): string[] {
+  const receivers = input.receiver_agents ?? input.receiverAgents;
+  if (!Array.isArray(receivers)) return [];
+  return receivers
+    .map((receiver) => {
+      if (
+        !receiver ||
+        typeof receiver !== "object" ||
+        Array.isArray(receiver)
+      ) {
+        return "";
+      }
+      return inputStringField(receiver as Record<string, unknown>, [
+        "thread_id",
+        "threadId",
+        "agent_id",
+        "agentId",
+        "agent_path",
+        "agentPath",
+        "path",
+        "id",
+      ]);
+    })
+    .filter(Boolean);
+}
+
+function shortAgentId(id: string): string {
+  return id.length > 8 ? id.slice(-8) : id;
 }
 
 // ===========================================================================
@@ -975,6 +1120,8 @@ export interface ChatTurnOptions {
   onToggleTool?: (toolId: string) => void;
   /** Tool ids currently COLLAPSED; when omitted tools start collapsed. */
   collapsed?: Set<string>;
+  /** Provider label shown on assistant prose rows. */
+  assistantLabel?: string;
 }
 
 /**
@@ -997,7 +1144,13 @@ export function chatTurnEventsToMessages(
   for (const ev of events) {
     if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
   }
-  const msgs = groupBySpawn(events, resultById, "Claude", undefined, null);
+  const msgs = groupBySpawn(
+    events,
+    resultById,
+    opts.assistantLabel ?? "Assistant",
+    undefined,
+    null
+  );
   wireChatToolCollapse(msgs, opts);
   return msgs;
 }
