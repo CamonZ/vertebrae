@@ -13,9 +13,7 @@ import type { ChatMessage } from "../../stores/chatStore";
 import type { LocalChatSessionSummary } from "../../utils/localChatPersistence";
 
 function makeToolCallMessage(
-  overrides: Partial<
-    Extract<ChatMessage, { kind: "tool_call" }>
-  > = {}
+  overrides: Partial<Extract<ChatMessage, { kind: "tool_call" }>> = {}
 ): Extract<ChatMessage, { kind: "tool_call" }> {
   return {
     kind: "tool_call",
@@ -158,8 +156,7 @@ describe("buildSpawnOutline", () => {
       makeToolCallMessage({
         toolId: "spawn-1",
         toolName: "agent",
-        input:
-          '{"description": "Run worker", "subagent_type": "worker"}',
+        input: '{"description": "Run worker", "subagent_type": "worker"}',
       }),
       makeToolCallMessage({
         toolId: "spawn-2",
@@ -262,6 +259,110 @@ describe("buildSpawnOutline", () => {
     ]);
   });
 
+  it("merges receiver, status, state, and single-agent metadata for the same agent", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "spawn-1",
+        toolName: "Agent",
+        input: JSON.stringify({
+          agent_nickname: "Agent bd0d74f",
+          agent_role: "explorer",
+          receiver_thread_ids: ["019f1cae-6a6c-71f0-a082-9a2dbd0d074f"],
+          agent_statuses: [
+            {
+              agent_nickname: "Agent bd0d74f",
+              status: "pending_init",
+            },
+          ],
+          agents_states: {
+            "019f1cae-6a6c-71f0-a082-9a2dbd0d074f": {
+              status: "pending_init",
+            },
+          },
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "spawn-1:019f1cae-6a6c-71f0-a082-9a2dbd0d074f",
+        spawnId: "spawn-1",
+        label: "Agent bd0d74f",
+        detail: "explorer",
+      },
+    ]);
+  });
+
+  it("uses nickname and agent id aliases for spawned agent rows", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "spawn-1",
+        toolName: "Agent",
+        input: JSON.stringify({
+          receiver_agents: [
+            {
+              agent_id: "019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
+              nickname: "Hegel",
+              role: "reviewer",
+            },
+          ],
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "spawn-1:019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
+        spawnId: "spawn-1",
+        label: "Hegel",
+        detail: "reviewer",
+      },
+    ]);
+  });
+
+  it("merges wait/status updates into the original spawned agent row", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "spawn-1",
+        toolName: "Agent",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          receiver_thread_ids: ["019f1cae-6fb7-7d83-b4c0-5f65c0bd3880"],
+          agent_statuses: [
+            {
+              thread_id: "019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
+              status: "pending_init",
+            },
+          ],
+        }),
+      }),
+      makeToolCallMessage({
+        toolId: "wait-1",
+        toolName: "agent",
+        input: JSON.stringify({
+          collab_tool: "wait_agent",
+          receiver_thread_ids: ["019f1cae-6fb7-7d83-b4c0-5f65c0bd3880"],
+          agent_statuses: [
+            {
+              thread_id: "019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
+              nickname: "Hegel",
+              status: "completed",
+            },
+          ],
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "spawn-1:019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
+        spawnId: "spawn-1",
+        label: "Hegel",
+        detail: "completed",
+      },
+    ]);
+  });
+
   it("filters out non-spawn tool calls", () => {
     const messages: ChatMessage[] = [
       makeToolCallMessage({ toolId: "t1", toolName: "write" }),
@@ -328,7 +429,10 @@ describe("scrollToSpawn", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     const event = handler.mock.calls[0][0] as CustomEvent;
-    expect(event.detail).toEqual({ sessionId: "session-1", spawnId: "spawn-1" });
+    expect(event.detail).toEqual({
+      sessionId: "session-1",
+      spawnId: "spawn-1",
+    });
 
     window.removeEventListener(LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT, handler);
   });

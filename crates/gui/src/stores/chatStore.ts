@@ -75,6 +75,30 @@ export type ChatMessage =
     }
   | { kind: "error"; message: string; timestamp: string };
 
+function parseJsonObjectInput(input: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(input) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Keep non-JSON tool inputs unchanged.
+  }
+  return null;
+}
+
+function mergeToolCallInput(previous: string, next: string): string {
+  const previousObject = parseJsonObjectInput(previous);
+  const nextObject = parseJsonObjectInput(next);
+  if (!previousObject || !nextObject) return next;
+  const merged: Record<string, unknown> = { ...previousObject };
+  for (const [key, value] of Object.entries(nextObject)) {
+    if (value === null || value === "") continue;
+    merged[key] = value;
+  }
+  return JSON.stringify(merged);
+}
+
 export type LocalChatLifecycle =
   | "idle"
   | "starting"
@@ -837,13 +861,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
         if (message.kind === "tool_call") {
           const existingIndex = messages.findIndex(
             (existing) =>
-              existing.kind === "tool_call" && existing.toolId === message.toolId
+              existing.kind === "tool_call" &&
+              existing.toolId === message.toolId
           );
           if (existingIndex !== -1) {
+            const existing = messages[existingIndex] as Extract<
+              ChatMessage,
+              { kind: "tool_call" }
+            >;
             messages[existingIndex] = {
-              ...messages[existingIndex],
+              ...existing,
               ...message,
-              timestamp: messages[existingIndex].timestamp,
+              input: mergeToolCallInput(existing.input, message.input),
+              timestamp: existing.timestamp,
             };
             return {
               ...session,

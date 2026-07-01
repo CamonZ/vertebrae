@@ -52,6 +52,11 @@ type AgentOutlineSource = {
   status: string;
 };
 
+type SpawnOutlineCandidate = SpawnOutlineItem & {
+  agentKey: string;
+  isSpawn: boolean;
+};
+
 function recordValue(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -68,14 +73,29 @@ function stringField(
   return "";
 }
 
-function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] {
+function collectAgentRows(
+  input: Record<string, unknown>
+): AgentOutlineSource[] {
   const rows = new Map<string, AgentOutlineSource>();
+  const receiverThreadIds =
+    input.receiver_thread_ids ?? input.receiverThreadIds ?? [];
+  const receiverThreadIdAt = (index: number): string => {
+    if (!Array.isArray(receiverThreadIds)) return "";
+    return stringValue(receiverThreadIds[index]);
+  };
+
   const addRow = (source: Record<string, unknown>, fallbackKey: string) => {
     const threadId = stringField(source, [
       "thread_id",
       "threadId",
       "receiver_thread_id",
       "receiverThreadId",
+      "agent_id",
+      "agentId",
+      "agent_path",
+      "agentPath",
+      "path",
+      "id",
     ]);
     const name = stringField(source, [
       "agent_nickname",
@@ -104,17 +124,19 @@ function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] 
         ? statusValue
         : stringField(recordValue(statusValue) ?? {}, ["status", "message"]);
     const key = threadId || name || role || fallbackKey;
-    if (!rows.has(key)) {
+    const existingKey = findMergeKey(rows, { key, name, threadId });
+    if (!existingKey) {
       rows.set(key, { key, name, role, status });
       return;
     }
-    const previous = rows.get(key);
+    const previous = rows.get(existingKey);
     if (!previous) return;
-    rows.set(key, {
-      key,
+    rows.delete(existingKey);
+    rows.set(threadId || previous.key || key, {
+      key: threadId || previous.key || key,
       name: previous.name || name,
       role: previous.role || role,
-      status: previous.status || status,
+      status: status || previous.status,
     });
   };
 
@@ -128,7 +150,17 @@ function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] 
     if (!Array.isArray(agents)) continue;
     agents.forEach((agent, index) => {
       const record = recordValue(agent);
-      if (record) addRow(record, `${field}-${index}`);
+      if (record) {
+        addRow(
+          {
+            thread_id:
+              stringField(record, ["thread_id", "threadId"]) ||
+              receiverThreadIdAt(index),
+            ...record,
+          },
+          `${field}-${index}`
+        );
+      }
     });
   }
 
@@ -148,8 +180,6 @@ function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] 
     }
   }
 
-  const receiverThreadIds =
-    input.receiver_thread_ids ?? input.receiverThreadIds ?? [];
   if (Array.isArray(receiverThreadIds)) {
     receiverThreadIds.forEach((threadId, index) => {
       const value = stringValue(threadId);
@@ -176,6 +206,7 @@ function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] 
   if (singleAgentName || singleAgentRole) {
     addRow(
       {
+        thread_id: receiverThreadIdAt(0),
         agent_nickname: singleAgentName,
         agent_role: singleAgentRole,
       },
@@ -186,6 +217,22 @@ function collectAgentRows(input: Record<string, unknown>): AgentOutlineSource[] 
   return Array.from(rows.values());
 }
 
+function findMergeKey(
+  rows: Map<string, AgentOutlineSource>,
+  incoming: { key: string; name: string; threadId: string }
+): string | null {
+  if (rows.has(incoming.key)) return incoming.key;
+  for (const [key, row] of rows) {
+    if (incoming.name && row.name === incoming.name) return key;
+    if (incoming.threadId && row.key === incoming.threadId) return key;
+  }
+  if (rows.size !== 1) return null;
+  const [[key, row]] = Array.from(rows.entries());
+  if (incoming.name && !row.name) return key;
+  if (incoming.threadId && row.name && !incoming.name) return key;
+  return null;
+}
+
 function shortThreadLabel(threadId: string): string {
   return threadId.length > 8 ? threadId.slice(-8) : threadId;
 }
@@ -193,37 +240,89 @@ function shortThreadLabel(threadId: string): string {
 export function buildSpawnOutline(
   messages: readonly ChatMessage[]
 ): SpawnOutlineItem[] {
-  return messages
-    .filter(
-      (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
-        message.kind === "tool_call" &&
-        !message.parentToolUseId &&
-        isAgentSpawnTool(message.toolName)
-    )
-    .flatMap((message) => {
-      const input = parseToolInput(message.input);
-      const description = stringValue(input.description);
-      const subagent = stringValue(input.subagent_type);
-      const agents = collectAgentRows(input);
-      if (agents.length === 0) {
-        return [
-          {
-            id: message.toolId,
-            spawnId: message.toolId,
-            label: description || "Agent",
-            detail: subagent || message.toolName,
-          },
-        ];
+  const byAgent = new Map<string, SpawnOutlineCandidate>();
+
+  messages.forEach((message) => {
+    if (
+      message.kind !== "tool_call" ||
+      message.parentToolUseId ||
+      !isAgentSpawnTool(message.toolName)
+    ) {
+      return;
+    }
+
+    const input = parseToolInput(message.input);
+    const isSpawn = isSpawnAgentCall(input);
+    const description = stringValue(input.description);
+    const subagent = stringValue(input.subagent_type);
+    const agents = collectAgentRows(input);
+    if (agents.length === 0) {
+      if (isSpawn) {
+        mergeSpawnCandidate(byAgent, {
+          agentKey: message.toolId,
+          isSpawn,
+          id: message.toolId,
+          spawnId: message.toolId,
+          label: description || "Agent",
+          detail: subagent || message.toolName,
+        });
       }
-      return agents.map((agent, index) => ({
+      return;
+    }
+
+    agents.forEach((agent, index) => {
+      mergeSpawnCandidate(byAgent, {
+        agentKey: agent.key || `${message.toolId}:${index}`,
+        isSpawn,
         id: `${message.toolId}:${agent.key || index}`,
         spawnId: message.toolId,
         label:
           agent.name ||
           (agent.key ? `Agent ${shortThreadLabel(agent.key)}` : "Agent"),
         detail: agent.role || agent.status || subagent || message.toolName,
-      }));
+      });
     });
+  });
+
+  return Array.from(byAgent.values())
+    .filter((candidate) => candidate.isSpawn)
+    .map((candidate) => ({
+      id: candidate.id,
+      spawnId: candidate.spawnId,
+      label: candidate.label,
+      detail: candidate.detail,
+    }));
+}
+
+function isSpawnAgentCall(input: Record<string, unknown>): boolean {
+  const collabTool = stringValue(input.collab_tool ?? input.collabTool);
+  return !collabTool || collabTool === "spawnAgent";
+}
+
+function mergeSpawnCandidate(
+  byAgent: Map<string, SpawnOutlineCandidate>,
+  candidate: SpawnOutlineCandidate
+): void {
+  const previous = byAgent.get(candidate.agentKey);
+  if (!previous) {
+    byAgent.set(candidate.agentKey, candidate);
+    return;
+  }
+
+  byAgent.set(candidate.agentKey, {
+    agentKey: candidate.agentKey,
+    isSpawn: previous.isSpawn || candidate.isSpawn,
+    id: previous.isSpawn ? previous.id : candidate.id,
+    spawnId: previous.isSpawn ? previous.spawnId : candidate.spawnId,
+    label: betterLabel(previous.label, candidate.label),
+    detail: candidate.detail || previous.detail,
+  });
+}
+
+function betterLabel(previous: string, next: string): string {
+  if (!previous || /^Agent(?:\s|$)/.test(previous)) return next || previous;
+  if (next && !/^Agent(?:\s|$)/.test(next)) return next;
+  return previous;
 }
 
 export function scrollToSpawn(sessionId: string, spawnId: string): void {

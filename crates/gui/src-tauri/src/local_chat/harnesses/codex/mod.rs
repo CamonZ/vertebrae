@@ -749,6 +749,151 @@ fn is_turn_notification(method: &str) -> bool {
     )
 }
 
+fn useful_json_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::String(value) => !value.trim().is_empty(),
+        Value::Array(value) => !value.is_empty(),
+        Value::Object(value) => !value.is_empty(),
+        _ => true,
+    }
+}
+
+fn first_value_at(item: &Value, paths: &[&str]) -> Value {
+    paths
+        .iter()
+        .filter_map(|path| item.pointer(path))
+        .find(|value| useful_json_value(value))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn collab_agent_nickname(item: &Value) -> Value {
+    first_value_at(
+        item,
+        &[
+            "/newAgentNickname",
+            "/receiverAgentNickname",
+            "/agentNickname",
+            "/nickname",
+            "/name",
+            "/newAgent/nickname",
+            "/newAgent/agentNickname",
+            "/receiverAgent/nickname",
+            "/receiverAgent/agentNickname",
+            "/agent/nickname",
+            "/agent/agentNickname",
+            "/result/nickname",
+            "/result/agentNickname",
+            "/result/agent_nickname",
+            "/output/nickname",
+            "/output/agentNickname",
+            "/response/nickname",
+            "/response/agentNickname",
+        ],
+    )
+}
+
+fn collab_agent_role(item: &Value) -> Value {
+    first_value_at(
+        item,
+        &[
+            "/newAgentRole",
+            "/receiverAgentRole",
+            "/agentRole",
+            "/role",
+            "/newAgent/role",
+            "/newAgent/agentRole",
+            "/receiverAgent/role",
+            "/receiverAgent/agentRole",
+            "/agent/role",
+            "/agent/agentRole",
+            "/result/role",
+            "/result/agentRole",
+            "/result/agent_role",
+            "/output/role",
+            "/output/agentRole",
+            "/response/role",
+            "/response/agentRole",
+        ],
+    )
+}
+
+fn collab_agent_thread_id(item: &Value) -> Value {
+    first_value_at(
+        item,
+        &[
+            "/receiverThreadIds/0",
+            "/receiverThreadId",
+            "/threadId",
+            "/thread_id",
+            "/agentId",
+            "/agent_id",
+            "/agentPath",
+            "/agent_path",
+            "/path",
+            "/newAgent/threadId",
+            "/newAgent/agentId",
+            "/newAgent/agentPath",
+            "/receiverAgent/threadId",
+            "/receiverAgent/agentId",
+            "/receiverAgent/agentPath",
+            "/agent/threadId",
+            "/agent/agentId",
+            "/agent/agentPath",
+            "/result/threadId",
+            "/result/thread_id",
+            "/result/agentId",
+            "/result/agent_id",
+            "/result/agentPath",
+            "/result/agent_path",
+            "/result/path",
+            "/result/id",
+            "/output/agentId",
+            "/output/agentPath",
+            "/response/agentId",
+            "/response/agentPath",
+        ],
+    )
+}
+
+fn collab_receiver_thread_ids(item: &Value) -> Value {
+    item.get("receiverThreadIds")
+        .filter(|value| useful_json_value(value))
+        .cloned()
+        .unwrap_or_else(|| {
+            let thread_id = collab_agent_thread_id(item);
+            if useful_json_value(&thread_id) {
+                json!([thread_id])
+            } else {
+                Value::Null
+            }
+        })
+}
+
+fn collab_receiver_agents(item: &Value) -> Value {
+    item.get("receiverAgents")
+        .filter(|value| useful_json_value(value))
+        .cloned()
+        .unwrap_or_else(|| {
+            let thread_id = collab_agent_thread_id(item);
+            let nickname = collab_agent_nickname(item);
+            let role = collab_agent_role(item);
+            if useful_json_value(&thread_id)
+                || useful_json_value(&nickname)
+                || useful_json_value(&role)
+            {
+                json!([{
+                    "threadId": thread_id,
+                    "agentNickname": nickname,
+                    "agentRole": role,
+                }])
+            } else {
+                Value::Null
+            }
+        })
+}
+
 fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
     let item_type = item.get("type").and_then(Value::as_str)?;
     let id = item.get("id").and_then(Value::as_str)?.to_string();
@@ -798,17 +943,12 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
                 tool_name.to_string(),
                 json!({
                     "description": item.get("prompt").and_then(Value::as_str).unwrap_or(tool),
+                    "collab_tool": tool,
                     "subagent_type": item.get("model").and_then(Value::as_str).unwrap_or("agent"),
-                    "agent_nickname": item.get("newAgentNickname")
-                        .or_else(|| item.get("receiverAgentNickname"))
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                    "agent_role": item.get("newAgentRole")
-                        .or_else(|| item.get("receiverAgentRole"))
-                        .cloned()
-                        .unwrap_or(Value::Null),
-                    "receiver_thread_ids": item.get("receiverThreadIds").cloned().unwrap_or(Value::Null),
-                    "receiver_agents": item.get("receiverAgents").cloned().unwrap_or(Value::Null),
+                    "agent_nickname": collab_agent_nickname(item),
+                    "agent_role": collab_agent_role(item),
+                    "receiver_thread_ids": collab_receiver_thread_ids(item),
+                    "receiver_agents": collab_receiver_agents(item),
                     "agent_statuses": item.get("agentStatuses").cloned().unwrap_or(Value::Null),
                     "agents_states": item.get("agentsStates").cloned().unwrap_or(Value::Null),
                 }),
@@ -1048,9 +1188,20 @@ impl<'a> TurnNotificationHandler<'a> {
         else {
             return;
         };
+        let is_spawn_agent = item
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or("spawnAgent")
+            == "spawnAgent";
         for thread_id in receiver_thread_ids.iter().filter_map(Value::as_str) {
-            self.child_thread_parents
-                .insert(thread_id.to_string(), tool_id.to_string());
+            if is_spawn_agent {
+                self.child_thread_parents
+                    .insert(thread_id.to_string(), tool_id.to_string());
+            } else {
+                self.child_thread_parents
+                    .entry(thread_id.to_string())
+                    .or_insert_with(|| tool_id.to_string());
+            }
         }
     }
 
@@ -1479,6 +1630,7 @@ mod tests {
         assert_eq!(tool_id, "spawn-1");
         assert_eq!(tool_name, "Agent");
         assert_eq!(input["description"], "Inspect the implementation");
+        assert_eq!(input["collab_tool"], "spawnAgent");
         assert_eq!(input["subagent_type"], "gpt-5-codex");
         assert_eq!(input["agent_nickname"], "Pasteur");
         assert_eq!(input["agent_role"], "reviewer");
@@ -1488,6 +1640,67 @@ mod tests {
         assert_eq!(
             input["agents_states"]["thread-pasteur"]["status"],
             "running"
+        );
+    }
+
+    #[test]
+    fn codex_collab_tool_call_extracts_agent_nickname_from_spawn_result() {
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "prompt": "Inspect the implementation",
+            "model": "gpt-5-codex",
+            "result": {
+                "agent_id": "019f1cae-6a6c-71f0-a082-9a2dbd0d074f",
+                "nickname": "Faraday",
+                "role": "explorer"
+            }
+        });
+
+        let (_tool_id, _tool_name, input) = codex_tool_call(&item).expect("tool call");
+        let input: Value = serde_json::from_str(&input).expect("json input");
+
+        assert_eq!(input["agent_nickname"], "Faraday");
+        assert_eq!(input["agent_role"], "explorer");
+        assert_eq!(
+            input["receiver_thread_ids"][0],
+            "019f1cae-6a6c-71f0-a082-9a2dbd0d074f"
+        );
+        assert_eq!(input["receiver_agents"][0]["agentNickname"], "Faraday");
+        assert_eq!(
+            input["receiver_agents"][0]["threadId"],
+            "019f1cae-6a6c-71f0-a082-9a2dbd0d074f"
+        );
+    }
+
+    #[test]
+    fn codex_wait_agent_does_not_reparent_child_thread_from_original_spawn() {
+        let event_sink = LocalChatEventSink::inert_for_tests();
+        let mut handler =
+            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-thread"]
+        });
+        let wait = json!({
+            "type": "collabAgentToolCall",
+            "id": "wait-1",
+            "tool": "wait_agent",
+            "receiverThreadIds": ["child-thread"]
+        });
+
+        handler.remember_child_thread_parents(&spawn, "spawn-1");
+        handler.remember_child_thread_parents(&wait, "wait-1");
+
+        assert_eq!(
+            handler
+                .child_thread_parents
+                .get("child-thread")
+                .map(String::as_str),
+            Some("spawn-1")
         );
     }
 

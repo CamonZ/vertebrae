@@ -825,7 +825,7 @@ describe("chatStore", () => {
         kind: "tool_call",
         toolName: "Agent",
         toolId: "agent-1",
-        input: '{"description":"Spawn agent"}',
+        input: '{"description":"Spawn agent","agent_nickname":"Pasteur"}',
         timestamp: "2024-01-01T00:00:00Z",
       });
       useChatStore.getState().addMessage(id, {
@@ -842,7 +842,8 @@ describe("chatStore", () => {
         kind: "tool_call",
         toolName: "Agent",
         toolId: "agent-1",
-        input: '{"receiver_agents":[{"agent_nickname":"Pasteur"}]}',
+        input:
+          '{"description":"Spawn agent","agent_nickname":"Pasteur","receiver_agents":[{"agent_nickname":"Pasteur"}]}',
         timestamp: "2024-01-01T00:00:00Z",
       });
       expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
