@@ -363,6 +363,49 @@ describe("buildSpawnOutline", () => {
     ]);
   });
 
+  it("merges suffix-only pending rows with later nickname and status updates", () => {
+    const messages: ChatMessage[] = [
+      makeToolCallMessage({
+        toolId: "spawn-1",
+        toolName: "Agent",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          agent_nickname: "Agent 415725e6",
+          agent_statuses: [
+            {
+              agent_nickname: "Agent 415725e6",
+              status: "pending_init",
+            },
+          ],
+        }),
+      }),
+      makeToolCallMessage({
+        toolId: "wait-1",
+        toolName: "agent",
+        input: JSON.stringify({
+          collab_tool: "wait_agent",
+          receiver_thread_ids: ["019f1cae-0000-0000-0000-0000415725e6"],
+          agent_statuses: [
+            {
+              thread_id: "019f1cae-0000-0000-0000-0000415725e6",
+              nickname: "Mencius",
+              status: "completed",
+            },
+          ],
+        }),
+      }),
+    ];
+
+    expect(buildSpawnOutline(messages)).toEqual([
+      {
+        id: "spawn-1:Agent 415725e6",
+        spawnId: "spawn-1",
+        label: "Mencius",
+        detail: "completed",
+      },
+    ]);
+  });
+
   it("filters out non-spawn tool calls", () => {
     const messages: ChatMessage[] = [
       makeToolCallMessage({ toolId: "t1", toolName: "write" }),

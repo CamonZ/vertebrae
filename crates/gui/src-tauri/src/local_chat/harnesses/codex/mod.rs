@@ -894,6 +894,137 @@ fn collab_receiver_agents(item: &Value) -> Value {
         })
 }
 
+fn string_values_at(item: &Value, paths: &[&str]) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| item.pointer(path).and_then(Value::as_str))
+        .filter_map(|value| {
+            let value = value.trim();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+        .collect()
+}
+
+fn string_array_at(item: &Value, paths: &[&str]) -> Vec<String> {
+    paths
+        .iter()
+        .filter_map(|path| item.pointer(path).and_then(Value::as_array))
+        .flat_map(|values| values.iter().filter_map(Value::as_str))
+        .filter_map(|value| {
+            let value = value.trim();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        })
+        .collect()
+}
+
+fn collab_agent_identity_keys(item: &Value) -> Vec<String> {
+    let mut keys = Vec::new();
+    keys.extend(string_array_at(
+        item,
+        &[
+            "/receiverThreadIds",
+            "/receiver_thread_ids",
+            "/result/receiverThreadIds",
+            "/result/receiver_thread_ids",
+            "/output/receiverThreadIds",
+            "/response/receiverThreadIds",
+        ],
+    ));
+    keys.extend(string_values_at(
+        item,
+        &[
+            "/threadId",
+            "/thread_id",
+            "/receiverThreadId",
+            "/receiver_thread_id",
+            "/agentId",
+            "/agent_id",
+            "/agentPath",
+            "/agent_path",
+            "/path",
+            "/id",
+            "/newAgent/threadId",
+            "/newAgent/thread_id",
+            "/newAgent/agentId",
+            "/newAgent/agent_id",
+            "/newAgent/agentPath",
+            "/newAgent/agent_path",
+            "/receiverAgent/threadId",
+            "/receiverAgent/thread_id",
+            "/receiverAgent/agentId",
+            "/receiverAgent/agent_id",
+            "/receiverAgent/agentPath",
+            "/receiverAgent/agent_path",
+            "/agent/threadId",
+            "/agent/thread_id",
+            "/agent/agentId",
+            "/agent/agent_id",
+            "/agent/agentPath",
+            "/agent/agent_path",
+            "/item/threadId",
+            "/item/thread_id",
+            "/item/agentId",
+            "/item/agent_id",
+            "/item/agentPath",
+            "/item/agent_path",
+            "/result/threadId",
+            "/result/thread_id",
+            "/result/agentId",
+            "/result/agent_id",
+            "/result/agentPath",
+            "/result/agent_path",
+            "/result/path",
+            "/result/id",
+            "/output/threadId",
+            "/output/agentId",
+            "/output/agentPath",
+            "/response/threadId",
+            "/response/agentId",
+            "/response/agentPath",
+        ],
+    ));
+    for path in [
+        "/receiverAgents",
+        "/receiver_agents",
+        "/agentStatuses",
+        "/agent_statuses",
+        "/result/receiverAgents",
+        "/result/agentStatuses",
+    ] {
+        let Some(values) = item.pointer(path).and_then(Value::as_array) else {
+            continue;
+        };
+        for value in values {
+            keys.extend(string_values_at(
+                value,
+                &[
+                    "/threadId",
+                    "/thread_id",
+                    "/receiverThreadId",
+                    "/receiver_thread_id",
+                    "/agentId",
+                    "/agent_id",
+                    "/agentPath",
+                    "/agent_path",
+                    "/path",
+                    "/id",
+                ],
+            ));
+        }
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
 fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
     let item_type = item.get("type").and_then(Value::as_str)?;
     let id = item.get("id").and_then(Value::as_str)?.to_string();
@@ -1062,9 +1193,7 @@ impl<'a> TurnNotificationHandler<'a> {
 
     fn handle(&mut self, method: &str, params: &Value) {
         let notification_thread_id = params.get("threadId").and_then(Value::as_str);
-        let parent_tool_use_id = notification_thread_id
-            .and_then(|thread_id| self.child_thread_parents.get(thread_id))
-            .cloned();
+        let parent_tool_use_id = self.parent_tool_use_id_for_notification(params);
         if notification_thread_id != Some(self.thread_id) && parent_tool_use_id.is_none() {
             return;
         }
@@ -1086,8 +1215,23 @@ impl<'a> TurnNotificationHandler<'a> {
             }
             "item/started" => self.handle_item_started(params, parent_tool_use_id.as_deref()),
             "item/completed" => self.handle_item_completed(params, parent_tool_use_id.as_deref()),
-            "thread/tokenUsage/updated" => self.handle_usage(params),
-            "turn/completed" => self.handle_turn_completed(params),
+            "thread/status/changed" => {
+                if let Some(parent_tool_use_id) = parent_tool_use_id.as_deref() {
+                    self.handle_child_thread_status(params, parent_tool_use_id);
+                }
+            }
+            "thread/tokenUsage/updated" => {
+                if parent_tool_use_id.is_none() {
+                    self.handle_usage(params);
+                }
+            }
+            "turn/completed" => {
+                if let Some(parent_tool_use_id) = parent_tool_use_id.as_deref() {
+                    self.handle_child_turn_completed(params, parent_tool_use_id);
+                } else {
+                    self.handle_turn_completed(params);
+                }
+            }
             "error" => self.handle_error(params),
             _ => {}
         }
@@ -1156,6 +1300,9 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(item) = params.get("item") else {
             return;
         };
+        if item.get("type").and_then(Value::as_str) == Some("agentMessage") {
+            self.handle_agent_message_completed(item, parent_tool_use_id);
+        }
         if item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall") {
             if let Some((tool_id, tool_name, input)) = codex_tool_call(item) {
                 self.remember_child_thread_parents(item, &tool_id);
@@ -1183,26 +1330,46 @@ impl<'a> TurnNotificationHandler<'a> {
         }
     }
 
-    fn remember_child_thread_parents(&mut self, item: &Value, tool_id: &str) {
-        let Some(receiver_thread_ids) = item.get("receiverThreadIds").and_then(Value::as_array)
-        else {
+    fn handle_agent_message_completed(&mut self, item: &Value, parent_tool_use_id: Option<&str>) {
+        let Some(text) = item.get("text").and_then(Value::as_str) else {
             return;
         };
+        if text.is_empty() {
+            return;
+        }
+        self.event_sink
+            .emit(LocalChatEvent::Text(LocalChatTextEvent {
+                backend_session_id: self.backend_session_id.to_string(),
+                harness: LocalChatHarnessKind::Codex,
+                text: text.to_string(),
+                is_partial: false,
+                parent_tool_use_id: parent_tool_use_id.map(str::to_string),
+            }));
+    }
+
+    fn remember_child_thread_parents(&mut self, item: &Value, tool_id: &str) {
+        let child_keys = collab_agent_identity_keys(item);
         let is_spawn_agent = item
             .get("tool")
             .and_then(Value::as_str)
             .unwrap_or("spawnAgent")
             == "spawnAgent";
-        for thread_id in receiver_thread_ids.iter().filter_map(Value::as_str) {
+        for child_key in child_keys {
             if is_spawn_agent {
                 self.child_thread_parents
-                    .insert(thread_id.to_string(), tool_id.to_string());
+                    .insert(child_key, tool_id.to_string());
             } else {
                 self.child_thread_parents
-                    .entry(thread_id.to_string())
+                    .entry(child_key)
                     .or_insert_with(|| tool_id.to_string());
             }
         }
+    }
+
+    fn parent_tool_use_id_for_notification(&self, params: &Value) -> Option<String> {
+        collab_agent_identity_keys(params)
+            .into_iter()
+            .find_map(|key| self.child_thread_parents.get(&key).cloned())
     }
 
     fn handle_usage(&mut self, params: &Value) {
@@ -1217,6 +1384,56 @@ impl<'a> TurnNotificationHandler<'a> {
                 model: self.model.to_string(),
                 context_tokens: self.context_tokens,
                 context_window: self.context_window,
+            }));
+    }
+
+    fn handle_child_thread_status(&self, params: &Value, parent_tool_use_id: &str) {
+        let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(status) = params
+            .pointer("/status/type")
+            .and_then(Value::as_str)
+            .and_then(child_thread_status_label)
+        else {
+            return;
+        };
+        self.emit_child_agent_status(parent_tool_use_id, thread_id, status);
+    }
+
+    fn handle_child_turn_completed(&self, params: &Value, parent_tool_use_id: &str) {
+        let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        let status = params
+            .pointer("/turn/status")
+            .and_then(Value::as_str)
+            .unwrap_or("completed");
+        self.emit_child_agent_status(parent_tool_use_id, thread_id, status);
+    }
+
+    fn emit_child_agent_status(&self, parent_tool_use_id: &str, thread_id: &str, status: &str) {
+        let mut agents_states = serde_json::Map::new();
+        agents_states.insert(
+            thread_id.to_string(),
+            json!({
+                "status": status,
+                "message": Value::Null,
+            }),
+        );
+        self.event_sink
+            .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                backend_session_id: self.backend_session_id.to_string(),
+                harness: LocalChatHarnessKind::Codex,
+                tool_id: parent_tool_use_id.to_string(),
+                tool_name: "Agent".to_string(),
+                input: serde_json::to_string(&json!({
+                    "collab_tool": "spawnAgent",
+                    "receiver_thread_ids": [thread_id],
+                    "agents_states": Value::Object(agents_states),
+                }))
+                .unwrap_or_default(),
+                parent_tool_use_id: None,
             }));
     }
 
@@ -1345,6 +1562,17 @@ fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Option<&str> {
     match reasoning_effort {
         Some(CODEX_DEFAULT_REASONING_EFFORT) | None => None,
         Some(reasoning_effort) => Some(reasoning_effort),
+    }
+}
+
+fn child_thread_status_label(status: &str) -> Option<&'static str> {
+    match status {
+        "active" => Some("running"),
+        "idle" => Some("pendingInit"),
+        "failed" => Some("failed"),
+        "cancelled" | "canceled" => Some("cancelled"),
+        "completed" => Some("completed"),
+        _ => None,
     }
 }
 
@@ -1702,6 +1930,155 @@ mod tests {
                 .map(String::as_str),
             Some("spawn-1")
         );
+    }
+
+    #[test]
+    fn codex_child_notifications_resolve_parent_from_agent_identity_aliases() {
+        let event_sink = LocalChatEventSink::inert_for_tests();
+        let mut handler =
+            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "result": {
+                "agent_id": "agent-20513969",
+                "nickname": "Leibniz"
+            }
+        });
+        let notification = json!({
+            "threadId": "different-child-thread",
+            "item": {
+                "type": "commandExecution",
+                "id": "tool-1",
+                "agentId": "agent-20513969"
+            }
+        });
+
+        handler.remember_child_thread_parents(&spawn, "spawn-1");
+
+        assert_eq!(
+            handler
+                .parent_tool_use_id_for_notification(&notification)
+                .as_deref(),
+            Some("spawn-1")
+        );
+    }
+
+    #[test]
+    fn codex_child_tool_call_emits_parent_tool_use_id_from_agent_id() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler =
+            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "result": {
+                "agent_id": "agent-20513969",
+                "nickname": "Leibniz"
+            }
+        });
+        handler.remember_child_thread_parents(&spawn, "spawn-1");
+
+        handler.handle(
+            "item/started",
+            &json!({
+                "threadId": "child-thread-from-server",
+                "item": {
+                    "type": "commandExecution",
+                    "id": "tool-1",
+                    "command": "rg --files crates/core",
+                    "agentId": "agent-20513969"
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let tool_call = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolCall(event) => Some(event),
+            _ => None,
+        });
+        assert_eq!(
+            tool_call.and_then(|event| event.parent_tool_use_id.as_deref()),
+            Some("spawn-1")
+        );
+    }
+
+    #[test]
+    fn codex_child_turn_completed_updates_agent_status_without_ending_parent() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler =
+            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-thread"]
+        });
+        handler.remember_child_thread_parents(&spawn, "spawn-1");
+
+        handler.handle(
+            "turn/completed",
+            &json!({
+                "threadId": "child-thread",
+                "turn": {
+                    "id": "child-turn",
+                    "status": "completed",
+                    "durationMs": 145489
+                }
+            }),
+        );
+
+        assert!(handler.completed.is_none());
+        let events = events.lock().expect("events lock");
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, LocalChatEvent::End(_))));
+        let tool_call = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolCall(event) => Some(event),
+            _ => None,
+        });
+        let tool_call = tool_call.expect("status update tool call");
+        let input: Value = serde_json::from_str(&tool_call.input).expect("json input");
+        assert_eq!(tool_call.tool_id, "spawn-1");
+        assert_eq!(tool_call.parent_tool_use_id, None);
+        assert_eq!(
+            input["agents_states"]["child-thread"]["status"],
+            "completed"
+        );
+    }
+
+    #[test]
+    fn codex_agent_message_completed_emits_final_text_event() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler =
+            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        handler.set_expected_turn_id("turn-1");
+
+        handler.handle(
+            "item/completed",
+            &json!({
+                "threadId": "parent-thread",
+                "turnId": "turn-1",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "msg-1",
+                    "text": "Final text",
+                    "phase": "commentary"
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let text = events.iter().find_map(|event| match event {
+            LocalChatEvent::Text(event) => Some(event),
+            _ => None,
+        });
+        let text = text.expect("final text event");
+        assert_eq!(text.text, "Final text");
+        assert!(!text.is_partial);
+        assert_eq!(text.parent_tool_use_id, None);
     }
 
     struct MockAppServer {

@@ -303,26 +303,70 @@ function mergeSpawnCandidate(
   byAgent: Map<string, SpawnOutlineCandidate>,
   candidate: SpawnOutlineCandidate
 ): void {
-  const previous = byAgent.get(candidate.agentKey);
+  const mergeKey = findCandidateMergeKey(byAgent, candidate);
+  const previous = mergeKey ? byAgent.get(mergeKey) : undefined;
   if (!previous) {
     byAgent.set(candidate.agentKey, candidate);
     return;
   }
 
-  byAgent.set(candidate.agentKey, {
-    agentKey: candidate.agentKey,
+  byAgent.delete(previous.agentKey);
+  byAgent.set(candidate.agentKey || previous.agentKey, {
+    agentKey: candidate.agentKey || previous.agentKey,
     isSpawn: previous.isSpawn || candidate.isSpawn,
     id: previous.isSpawn ? previous.id : candidate.id,
     spawnId: previous.isSpawn ? previous.spawnId : candidate.spawnId,
     label: betterLabel(previous.label, candidate.label),
-    detail: candidate.detail || previous.detail,
+    detail: betterDetail(previous.detail, candidate.detail),
   });
+}
+
+function findCandidateMergeKey(
+  byAgent: Map<string, SpawnOutlineCandidate>,
+  candidate: SpawnOutlineCandidate
+): string | null {
+  if (byAgent.has(candidate.agentKey)) return candidate.agentKey;
+  const candidateSuffix = shortThreadLabel(candidate.agentKey);
+  for (const [key, previous] of byAgent) {
+    const previousSuffix = shortThreadLabel(key);
+    if (candidateSuffix && previous.label === `Agent ${candidateSuffix}`) {
+      return key;
+    }
+    if (previousSuffix && candidate.label === `Agent ${previousSuffix}`) {
+      return key;
+    }
+    if (
+      candidateSuffix &&
+      previousSuffix &&
+      candidateSuffix === previousSuffix
+    ) {
+      return key;
+    }
+  }
+  return null;
 }
 
 function betterLabel(previous: string, next: string): string {
   if (!previous || /^Agent(?:\s|$)/.test(previous)) return next || previous;
   if (next && !/^Agent(?:\s|$)/.test(next)) return next;
   return previous;
+}
+
+function betterDetail(previous: string, next: string): string {
+  if (!next) return previous;
+  if (isLifecycleStatus(next)) return formatLifecycleStatus(next);
+  if (isLifecycleStatus(previous)) return formatLifecycleStatus(previous);
+  return next || previous;
+}
+
+function isLifecycleStatus(value: string): boolean {
+  return /^(pending_?init|running|completed|failed|cancelled|canceled|timed_?out|error)$/i.test(
+    value.trim()
+  );
+}
+
+function formatLifecycleStatus(value: string): string {
+  return value.trim().replace(/_/g, " ");
 }
 
 export function scrollToSpawn(sessionId: string, spawnId: string): void {
