@@ -127,7 +127,7 @@ export function LocalChatMiniPanel({
           type="button"
           className="hc-ctrl"
           onClick={() => void onStartFresh()}
-          title="Start fresh local chat"
+          title="Start fresh local chat from history"
           aria-label="Start fresh local chat"
         >
           <svg
@@ -145,20 +145,21 @@ export function LocalChatMiniPanel({
           </svg>
         </button>
       </div>
-      {deleteError && (
-        <div role="alert" className="hc-mini-history-error">
-          {deleteError}
-        </div>
-      )}
-      {projectWarning && (
-        <div role="alert" className="hc-mini-history-error">
-          {projectWarning}
-        </div>
-      )}
-      {sessionGroups.length === 0 ? (
-        <div className="hc-mini-history-empty">No local chats yet.</div>
-      ) : (
-        <div className="hc-mini-history-list">
+      <div data-testid="local-chat-history-drawer">
+        {deleteError && (
+          <div role="alert" className="hc-mini-history-error">
+            {deleteError}
+          </div>
+        )}
+        {projectWarning && (
+          <div role="alert" className="hc-mini-history-error">
+            {projectWarning}
+          </div>
+        )}
+        {sessionGroups.length === 0 ? (
+          <div className="hc-mini-history-empty">No local chats yet.</div>
+        ) : (
+          <div className="hc-mini-history-list">
           <SessionGroupList
             sessionGroups={sessionGroups}
             activeSessionId={activeSessionId}
@@ -195,7 +196,7 @@ export function LocalChatMiniPanel({
                     }}
                     onFocus={() => setKeyboardSessionId(session.id)}
                     onClick={() => onSelect(session.id)}
-                    title={`Load local chat ${session.label} into active pane`}
+                    title={`Open local chat ${session.label}`}
                     aria-label={`Load local chat ${session.label} into active pane`}
                     aria-current={isActive ? "true" : undefined}
                   >
@@ -232,8 +233,9 @@ export function LocalChatMiniPanel({
               );
             }}
           />
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </aside>
   );
 }

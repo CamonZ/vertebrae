@@ -254,7 +254,13 @@ export function ChatWindowManager() {
               activeSession={activeSession}
               sessionGroups={localSessionGroups}
               projectWarning={projectGroupingWarning}
-              onStartFresh={() => void startFreshActiveSession()}
+              onStartFresh={() => {
+                void startFreshActiveSession().then((started) => {
+                  if (started) {
+                    collapseMaximized();
+                  }
+                });
+              }}
               onSelect={(sessionId) => {
                 selectHistorySessionForActivePane(sessionId);
               }}
@@ -274,6 +280,7 @@ export function ChatWindowManager() {
             unsplitPanes={unsplitPanes}
             reattachSession={reattachSession}
             closeChatPanel={closeChatPanel}
+            toggleHistorySelector={toggleHistorySelector}
             toggleMaximized={toggleMaximized}
             startFreshActiveSession={startFreshActiveSession}
             splitWithFreshSession={splitWithFreshSession}

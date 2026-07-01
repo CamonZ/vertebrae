@@ -13,6 +13,7 @@ interface ChatPaneListProps {
   unsplitPanes: (paneId?: string) => void;
   reattachSession: (sessionId: string) => void;
   closeChatPanel: () => void;
+  toggleHistorySelector: () => boolean;
   toggleMaximized: () => void;
   startFreshActiveSession: () => Promise<boolean>;
   splitWithFreshSession: () => Promise<boolean>;
@@ -34,6 +35,7 @@ export function ChatPaneList({
   unsplitPanes,
   reattachSession,
   closeChatPanel,
+  toggleHistorySelector,
   toggleMaximized,
   startFreshActiveSession,
   splitWithFreshSession,
@@ -74,6 +76,9 @@ export function ChatPaneList({
                 sessionId={session.id}
                 onClosePanel={closeChatPanel}
                 onStartFresh={() => void startFreshActiveSession()}
+                onToggleHistory={() => {
+                  toggleHistorySelector();
+                }}
                 onToggleWide={toggleMaximized}
                 isWide={isMaximized}
                 onSplitPane={

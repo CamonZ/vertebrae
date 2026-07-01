@@ -9,6 +9,7 @@ interface ChatHeaderProps {
   canStopGeneration: boolean;
   onClosePanel?: () => void;
   onStartFresh?: () => void;
+  onToggleHistory?: () => void;
   onToggleWide?: () => void;
   isWide?: boolean;
   onSplitPane?: () => void;
@@ -58,6 +59,7 @@ export function ChatHeader({
   canStopGeneration,
   onClosePanel,
   onStartFresh,
+  onToggleHistory,
   onToggleWide,
   isWide = false,
   onSplitPane,
@@ -81,6 +83,23 @@ export function ChatHeader({
             strokeLinejoin="round"
             strokeWidth={2}
             d="M12 5v14m7-7H5"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "history",
+      title: "Toggle chat history",
+      ariaLabel: "Toggle chat history",
+      onClick: onToggleHistory!,
+      show: !!onToggleHistory,
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 6h16M4 12h16M4 18h10"
           />
         </SvgIcon>
       ),

@@ -10,6 +10,8 @@ interface ChatWindowProps {
   onClosePanel?: () => void;
   /** Starts a fresh local chat for the current project. */
   onStartFresh?: () => void;
+  /** Opens/focuses the local chat history drawer. */
+  onToggleHistory?: () => void;
   /** Expands/collapses the project chat panel session view. */
   onToggleWide?: () => void;
   isWide?: boolean;
@@ -32,6 +34,7 @@ export function ChatWindow({
   sessionId,
   onClosePanel,
   onStartFresh,
+  onToggleHistory,
   onToggleWide,
   isWide = false,
   onSplitPane,
@@ -64,6 +67,7 @@ export function ChatWindow({
         canStopGeneration={chat.canStopGeneration}
         onClosePanel={onClosePanel}
         onStartFresh={onStartFresh}
+        onToggleHistory={onToggleHistory}
         onToggleWide={onToggleWide}
         isWide={isWide}
         onSplitPane={onSplitPane}
