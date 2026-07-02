@@ -3,6 +3,7 @@ pub(crate) mod harness;
 pub(crate) mod harnesses;
 pub(crate) mod manager;
 pub(crate) mod permissions;
+pub(crate) mod title_inference;
 
 pub(crate) use events::{
     LocalChatEvent, LocalChatEventSink, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
@@ -15,3 +16,6 @@ pub(crate) use harness::{
     LocalChatReasoningEffortOption, LocalChatRuntime, LocalChatSessionError,
 };
 pub(crate) use manager::LocalChatSessionManager;
+pub use title_inference::{
+    infer_session_title, InferLocalChatSessionTitleInput, InferLocalChatSessionTitleOutput,
+};

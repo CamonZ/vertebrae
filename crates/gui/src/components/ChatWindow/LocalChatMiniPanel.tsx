@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { ChatSession } from "../../stores/chatStore";
+import type { LocalChatHarnessKind } from "../../bindings";
 import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
-import {
-  buildSpawnOutline,
-  formatSessionModel,
-  scrollToSpawn,
-} from "./sessionListUtils";
+import { formatRelative } from "../../utils/formatRelative";
+import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
+import { harnessDisplayName } from "./chatHelpers";
+import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
 
 interface LocalChatMiniPanelProps {
   activeSessionId: string;
-  activeSession: ChatSession | null;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
@@ -25,11 +23,10 @@ interface LocalChatMiniPanelProps {
 /**
  * Compact session-list column shown alongside split panes in maximized mode.
  * Owns its own keyboard navigation (up/down/home/end/enter) over the flattened
- * session list. Active session's spawned-agent outline is rendered inline.
+ * session list.
  */
 export function LocalChatMiniPanel({
   activeSessionId,
-  activeSession,
   deletingSessionId,
   deleteError,
   projectWarning,
@@ -42,13 +39,23 @@ export function LocalChatMiniPanel({
     () => sessionGroups.flatMap((group) => group.sessions),
     [sessionGroups]
   );
+  const spawnOutlineBySessionId = useMemo(() => {
+    const outlines = new Map<
+      string,
+      ReturnType<typeof buildSpawnOutline>
+    >();
+    for (const session of sessionItems) {
+      const persistedSession = loadPersistedLocalChatSession(session.id);
+      outlines.set(
+        session.id,
+        persistedSession ? buildSpawnOutline(persistedSession.messages) : []
+      );
+    }
+    return outlines;
+  }, [sessionItems]);
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
-  );
-  const activeSpawnOutline = useMemo(
-    () => buildSpawnOutline(activeSession?.messages ?? []),
-    [activeSession?.messages]
   );
 
   useEffect(() => {
@@ -160,82 +167,148 @@ export function LocalChatMiniPanel({
           <div className="hc-mini-history-empty">No local chats yet.</div>
         ) : (
           <div className="hc-mini-history-list">
-          <SessionGroupList
-            sessionGroups={sessionGroups}
-            activeSessionId={activeSessionId}
-            deletingSessionId={deletingSessionId}
-            renderGroup={(group, rows) => (
-              <section
-                key={group.id}
-                className="hc-mini-history-group"
-                aria-label={`${group.label} chats`}
-              >
-                <h3 className="hc-mini-history-group-title">{group.label}</h3>
-                {rows}
-              </section>
-            )}
-            renderRow={(session, { isActive, isDeleting }) => {
-              const modelLabel = formatSessionModel(session);
-              return (
-                <div
-                  className="hc-mini-history-row"
-                  data-active={isActive || undefined}
-                  data-keyboard-active={
-                    keyboardSessionId === session.id || undefined
-                  }
+            <SessionGroupList
+              sessionGroups={sessionGroups}
+              activeSessionId={activeSessionId}
+              deletingSessionId={deletingSessionId}
+              renderGroup={(group, rows) => (
+                <section
+                  key={group.id}
+                  className="hc-mini-history-group"
+                  aria-label={`${group.label} chats`}
                 >
-                  <button
-                    type="button"
-                    className="hc-mini-history-open"
-                    ref={(node) => {
-                      if (node) {
-                        sessionButtonRefs.current.set(session.id, node);
-                      } else {
-                        sessionButtonRefs.current.delete(session.id);
+                  <h3 className="hc-mini-history-group-title">{group.label}</h3>
+                  {rows}
+                </section>
+              )}
+              renderRow={(session, { isActive, isDeleting }) => {
+                const age = miniThreadAge(session.updatedAt);
+                const title = miniThreadTitle(session.title, session.label);
+                const spawnOutline =
+                  spawnOutlineBySessionId.get(session.id) ?? [];
+                return (
+                  <>
+                    <div
+                      className="hc-mini-history-row"
+                      data-active={isActive || undefined}
+                      data-keyboard-active={
+                        keyboardSessionId === session.id || undefined
                       }
-                    }}
-                    onFocus={() => setKeyboardSessionId(session.id)}
-                    onClick={() => onSelect(session.id)}
-                    title={`Open local chat ${session.label}`}
-                    aria-label={`Load local chat ${session.label} into active pane`}
-                    aria-current={isActive ? "true" : undefined}
-                  >
-                    <span className="label">{session.label}</span>
-                    <span className="preview">{session.preview}</span>
-                    <span className="meta">{modelLabel}</span>
-                  </button>
-                  <SessionDeleteButton
-                    label={session.label}
-                    disabled={isDeleting}
-                    onClick={() => void onDelete(session.id)}
-                    dataMiniDelete
-                  />
-                  {isActive && activeSpawnOutline.length > 0 && (
-                    <div className="hc-mini-history-children">
-                      {activeSpawnOutline.map((spawn) => (
-                        <button
-                          key={spawn.id}
-                          type="button"
-                          className="hc-mini-history-child"
-                          onClick={() =>
-                            scrollToSpawn(session.id, spawn.spawnId)
+                    >
+                      <button
+                        type="button"
+                        className="hc-mini-history-open"
+                        ref={(node) => {
+                          if (node) {
+                            sessionButtonRefs.current.set(session.id, node);
+                          } else {
+                            sessionButtonRefs.current.delete(session.id);
                           }
-                          title={`Jump to spawned agent ${spawn.label}`}
-                          aria-label={`Jump to spawned agent ${spawn.label}`}
-                        >
-                          <span className="label">{spawn.label}</span>
-                          <span className="meta">{spawn.detail}</span>
-                        </button>
-                      ))}
+                        }}
+                        onFocus={() => setKeyboardSessionId(session.id)}
+                        onClick={() => onSelect(session.id)}
+                        title={`Open local chat ${title}`}
+                        aria-label={`Load local chat ${title} into active pane`}
+                        aria-current={isActive ? "true" : undefined}
+                      >
+                        <HarnessBadge harness={session.harness} />
+                        <span className="label">{title}</span>
+                        {age && <span className="meta">{age}</span>}
+                      </button>
+                      <SessionDeleteButton
+                        label={title}
+                        disabled={isDeleting}
+                        onClick={() => void onDelete(session.id)}
+                        dataMiniDelete
+                      />
                     </div>
-                  )}
-                </div>
-              );
-            }}
-          />
+                    {spawnOutline.map((spawn) => (
+                      <button
+                        key={spawn.id}
+                        type="button"
+                        className="hc-mini-history-agent"
+                        onClick={() => {
+                          onSelect(session.id);
+                          requestAnimationFrame(() =>
+                            scrollToSpawn(session.id, spawn.spawnId)
+                          );
+                        }}
+                        title={`Jump to spawned agent ${spawn.label}`}
+                        aria-label={`Jump to spawned agent ${spawn.label} in ${title}`}
+                      >
+                        <span className="rail" aria-hidden="true" />
+                        <span className="label">{spawn.label}</span>
+                        {spawn.detail && (
+                          <span className="meta">{spawn.detail}</span>
+                        )}
+                      </button>
+                    ))}
+                  </>
+                );
+              }}
+            />
           </div>
         )}
       </div>
     </aside>
+  );
+}
+
+function miniThreadAge(updatedAt: string): string {
+  const relative = formatRelative(updatedAt);
+  if (relative === "Just now") return "now";
+  return relative.replace(/ ago$/, "");
+}
+
+function miniThreadTitle(
+  inferredTitle: string | null | undefined,
+  fallbackLabel: string
+): string {
+  const generated = inferredTitle?.trim();
+  if (generated) return generated;
+  return fallbackLabel.trim() || "New Chat";
+}
+
+function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {
+  const label = harnessDisplayName(harness);
+  const isCodex = harness === "codex";
+  return (
+    <span
+      className="hc-mini-history-harness"
+      data-harness={harness}
+      role="img"
+      aria-label={`${label} harness`}
+      title={label}
+    >
+      <svg
+        aria-hidden="true"
+        viewBox={isCodex ? "0 0 24 24" : "0 0 100 100"}
+        focusable="false"
+      >
+        {isCodex ? (
+          <>
+            <path
+              className="codex-cloud-shadow"
+              d="M7.84 19.13c-2.59 0-4.69-1.98-4.69-4.42 0-.84.25-1.63.68-2.3A4.23 4.23 0 0 1 5.7 5.58c.34 0 .66.04.97.12A5.34 5.34 0 0 1 11.58 2.5c2.04 0 3.82 1.13 4.72 2.8.34-.07.69-.11 1.05-.11 2.7 0 4.89 2.06 4.89 4.6 0 .76-.2 1.48-.55 2.11a3.87 3.87 0 0 1-2.57 6.76h-2.03a5.8 5.8 0 0 1-8.51.28c-.24.12-.49.19-.74.19Z"
+            />
+            <path
+              className="codex-cloud"
+              d="M7.84 18.23c-2.1 0-3.79-1.58-3.79-3.52 0-.84.31-1.61.83-2.21a3.3 3.3 0 0 1 .82-6.02c.5 0 .96.1 1.38.28A4.42 4.42 0 0 1 11.58 3.4c1.91 0 3.55 1.14 4.27 2.78.46-.13.96-.1 1.5-.1 2.2 0 3.99 1.66 3.99 3.71 0 .85-.31 1.63-.83 2.26a2.97 2.97 0 0 1-1.39 5.71h-2.6a4.85 4.85 0 0 1-7.55.2c-.35.17-.73.27-1.13.27Z"
+            />
+            <path
+              className="codex-cloud-highlight"
+              d="M7.2 7.58c.77-1.84 2.4-2.93 4.3-2.93 1.57 0 3.02.79 3.86 2.14.16.25.46.37.75.29.39-.11.8-.17 1.24-.17 1.57 0 2.91.99 3.32 2.32-.26-1.79-1.83-3.15-3.75-3.15-.43 0-.83.06-1.2.18A4.47 4.47 0 0 0 11.58 3.4 4.42 4.42 0 0 0 7.2 6.76c-.42-.18-.88-.28-1.38-.28a3.3 3.3 0 0 0-3.17 2.4A3.5 3.5 0 0 1 5.7 7.1c.56 0 1.05.13 1.5.48Z"
+            />
+            <path className="codex-glyph" d="m8.7 8.05 3 3.95-3 3.95" />
+            <path className="codex-glyph" d="M14.05 15.55h4.45" />
+          </>
+        ) : (
+          <path
+            className="anthropic-mark"
+            d="M25.7146 63.2153L41.4393 54.3917L41.7025 53.6226L41.4393 53.1976H40.6705L38.0394 53.0359L29.054 52.7929L21.2624 52.4691L13.7134 52.0644L11.8111 51.6594L10.0303 49.3118L10.2123 48.138L11.8111 47.0657L14.0981 47.2681L19.1574 47.6119L26.7467 48.138L32.2516 48.4618L40.4073 49.3118H41.7025L41.8846 48.7857L41.4393 48.4618L41.0955 48.138L33.243 42.8155L24.7432 37.1894L20.2909 33.9513L17.8824 32.3119L16.6684 30.774L16.1422 27.4147L18.328 25.0062L21.2624 25.2088L22.0112 25.4112L24.9861 27.6979L31.3407 32.616L39.6381 38.7273L40.8525 39.7391L41.3381 39.395L41.399 39.1523L40.8525 38.2415L36.3394 30.0858L31.5227 21.7883L29.3775 18.3478L28.811 16.2837C28.6087 15.4334 28.4669 14.7252 28.4669 13.8549L30.9563 10.4753L32.3321 10.0303L35.6515 10.4756L37.0479 11.6897L39.112 16.4052L42.4513 23.8327L47.6321 33.9313L49.15 36.9265L49.9594 39.6991L50.2632 40.5491H50.7894V40.0632L51.2141 34.3766L52.0035 27.3944L52.7726 18.4087L53.0358 15.8793L54.2905 12.8435L56.7795 11.2041L58.7224 12.135L60.3212 14.422L60.0986 15.899L59.1474 22.0718L57.2857 31.7458L56.0713 38.2218H56.7795L57.5892 37.4121L60.8677 33.061L66.3723 26.18L68.801 23.448L71.6342 20.4325L73.4556 18.9957H76.8962L79.4255 22.7601L78.2926 26.6456L74.7509 31.1384L71.8163 34.943L67.607 40.6097L64.9758 45.1431L65.2188 45.5072L65.8464 45.4466L75.358 43.4228L80.4984 42.4917L86.6304 41.4393L89.4033 42.7346L89.7065 44.0502L88.6135 46.7419L82.0566 48.3607L74.3662 49.8989L62.9118 52.6109L62.77 52.7121L62.9321 52.9144L68.0925 53.4L70.2987 53.5214H75.7021L85.7601 54.2702L88.3912 56.0108L89.9697 58.1358L89.7065 59.7545L85.6589 61.8189L80.1949 60.5236L67.4452 57.4881L63.0735 56.3952H62.4665V56.7596L66.1093 60.3213L72.7877 66.3523L81.1461 74.1236L81.5707 76.0462L80.4984 77.5638L79.3649 77.4021L72.0186 71.8772L69.1854 69.3879L62.77 63.9844H62.3453V64.5509L63.8223 66.7164L71.6342 78.4544L72.0389 82.0567L71.4725 83.2308L69.4487 83.939L67.2222 83.534L62.6485 77.1189L57.9333 69.8937L54.1284 63.4177L53.6631 63.6809L51.4167 87.8651L50.3644 89.0995L47.9356 90.0303L45.9121 88.4924L44.8392 86.0031L45.9118 81.0852L47.2071 74.6701L48.2594 69.5699L49.2106 63.2356L49.7773 61.131L49.7367 60.9892L49.2715 61.0498L44.4954 67.607L37.23 77.4224L31.4825 83.5746L30.1063 84.1211L27.7181 82.8864L27.9408 80.6805L29.2763 78.7177L37.2297 68.5988L42.026 62.3248L45.1227 58.7025L45.1024 58.176H44.9204L23.7917 71.8975L20.0274 72.3831L18.4083 70.8655L18.6106 68.3761L19.3798 67.5664L25.7343 63.195L25.7146 63.2153Z"
+          />
+        )}
+      </svg>
+    </span>
   );
 }

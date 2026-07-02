@@ -1,4 +1,5 @@
 use super::*;
+use crate::helpers::build_augmented_path;
 
 #[test]
 fn test_current_project_path_returns_none_without_managed_state() {

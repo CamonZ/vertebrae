@@ -14,7 +14,7 @@ use tauri::Manager;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::commands::AppState;
-use crate::helpers::{find_claude_binary, find_vtb_gate_binary};
+use crate::helpers::{build_augmented_path, find_claude_binary, find_vtb_gate_binary};
 use crate::local_chat::harnesses::claude::args::{
     build_claude_args, resolve_requested_claude_model,
 };
@@ -34,26 +34,6 @@ use crate::local_chat::{
     LocalChatTextEvent as NeutralTextEvent, LocalChatToolCallEvent as NeutralToolCallEvent,
     LocalChatToolResultEvent as NeutralToolResultEvent,
 };
-
-/// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
-fn build_augmented_path() -> String {
-    let mut parts: Vec<String> = Vec::new();
-
-    if let Some(home) = dirs::home_dir() {
-        parts.push(home.join(".cargo/bin").to_string_lossy().into_owned());
-        parts.push(home.join(".local/bin").to_string_lossy().into_owned());
-    }
-
-    parts.push("/opt/homebrew/bin".to_string());
-    parts.push("/usr/local/bin".to_string());
-
-    let current_path = std::env::var("PATH").unwrap_or_default();
-    if !current_path.is_empty() {
-        parts.push(current_path);
-    }
-
-    parts.join(":")
-}
 
 /// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
 fn truncate_utf8(s: &str, max_bytes: usize) -> &str {

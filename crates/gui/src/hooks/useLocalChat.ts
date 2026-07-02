@@ -19,10 +19,14 @@ import {
 import type {
   ChatSession,
   ChatMessage,
+  ChatTitleCandidate,
   LocalChatLifecycle,
 } from "../stores/chatStore";
 import { DEFAULT_LOCAL_CHAT_HARNESS } from "../utils/localChatPersistence";
 import { resolveContextWindow } from "../utils/modelContextWindow";
+
+const AUTOMATIC_LOCAL_CHAT_LABELS = new Set(["New Chat", "Project Chat"]);
+const MAX_TITLE_USER_MESSAGES = 3;
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
 
@@ -47,6 +51,80 @@ function commandErrorKind(error: unknown): string | null {
 
 function isSessionNotFoundError(error: unknown): boolean {
   return commandErrorKind(error) === "SessionNotFound";
+}
+
+function earlyTitleUserMessages(
+  messages: ChatMessage[],
+  pendingUserMessage?: string | null
+): string[] {
+  const userMessages = messages
+    .filter((message): message is Extract<ChatMessage, { kind: "user" }> =>
+      message.kind === "user"
+    )
+    .map((message) => message.text.trim())
+    .filter(Boolean);
+  const pending = pendingUserMessage?.trim();
+  if (pending) {
+    userMessages.push(pending);
+  }
+  return userMessages.slice(0, MAX_TITLE_USER_MESSAGES);
+}
+
+function shouldInferSessionTitle(session: ChatSession, userMessages: string[]) {
+  return (
+    userMessages.length > 0 &&
+    userMessages.length <= MAX_TITLE_USER_MESSAGES &&
+    !session.title?.trim() &&
+    session.titleStatus !== "generated" &&
+    session.titleStatus !== "manual" &&
+    (session.titleUserMessageCount ?? 0) < userMessages.length &&
+    AUTOMATIC_LOCAL_CHAT_LABELS.has(session.label)
+  );
+}
+
+function inferSessionTitleInBackground(
+  session: ChatSession,
+  sessionId: string,
+  userMessages: string[],
+  workingDir: string | null,
+  setSessionTitleCandidate?: (
+    sessionId: string,
+    candidate: ChatTitleCandidate
+  ) => void
+) {
+  if (
+    !setSessionTitleCandidate ||
+    !shouldInferSessionTitle(session, userMessages)
+  ) {
+    return;
+  }
+
+  const userMessageCount = userMessages.length;
+
+  void commands
+    .inferLocalChatSessionTitle({
+      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+      initial_prompts: userMessages,
+      working_dir: workingDir,
+    })
+    .then((result) => {
+      if (result.status === "ok") {
+        setSessionTitleCandidate(sessionId, {
+          title: result.data.title,
+          confidence: result.data.confidence,
+          sufficientSignal: result.data.sufficient_signal,
+          userMessageCount,
+        });
+      } else {
+        console.warn(
+          "Failed to infer local chat session title",
+          commandErrorMessage(result.error)
+        );
+      }
+    })
+    .catch((error) => {
+      console.warn("Failed to infer local chat session title", error);
+    });
 }
 
 export function handleInitEvent(
@@ -247,6 +325,10 @@ export async function doStartSession(
     setBackendSessionId: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef: (backendId: string | null) => void;
     addMessage: (id: string, msg: ChatMessage) => void;
+    setSessionTitleCandidate?: (
+      id: string,
+      candidate: ChatTitleCandidate
+    ) => void;
     setSessionLifecycle: (
       id: string,
       lifecycle: LocalChatLifecycle,
@@ -290,6 +372,20 @@ export async function doStartSession(
       ? null
       : (session.selectedReasoningEffort ?? null);
     const permissionMode = session.permissionMode ?? "default";
+
+    const titleUserMessages = earlyTitleUserMessages(
+      session.messages,
+      options.addUserMessage === false ? null : initialPrompt
+    );
+    if (titleUserMessages.length > 0) {
+      inferSessionTitleInBackground(
+        session,
+        sessionId,
+        titleUserMessages,
+        workingDir,
+        deps.setSessionTitleCandidate
+      );
+    }
 
     const result = await commands.createLocalChatSession({
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
@@ -430,6 +526,9 @@ export function useLocalChat(sessionId: string | null) {
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
   const setProviderResumeId = useChatStore((s) => s.setProviderResumeId);
   const setSessionModel = useChatStore((s) => s.setSessionModel);
+  const setSessionTitleCandidate = useChatStore(
+    (s) => s.setSessionTitleCandidate
+  );
   const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
@@ -645,12 +744,20 @@ export function useLocalChat(sessionId: string | null) {
             backendSessionIdRef.current = id;
           },
           addMessage,
+          setSessionTitleCandidate,
           setSessionLifecycle,
         },
         userMessage
       );
     },
-    [session, sessionId, addMessage, setBackendSessionId, setSessionLifecycle]
+    [
+      session,
+      sessionId,
+      addMessage,
+      setBackendSessionId,
+      setSessionLifecycle,
+      setSessionTitleCandidate,
+    ]
   );
 
   useEffect(() => {
@@ -690,6 +797,7 @@ export function useLocalChat(sessionId: string | null) {
           backendSessionIdRef.current = id;
         },
         addMessage,
+        setSessionTitleCandidate,
         setSessionLifecycle,
       },
       content,
@@ -701,6 +809,7 @@ export function useLocalChat(sessionId: string | null) {
     addMessage,
     setBackendSessionId,
     setSessionLifecycle,
+    setSessionTitleCandidate,
   ]);
 
   /**
@@ -716,6 +825,13 @@ export function useLocalChat(sessionId: string | null) {
         lifecycle === "sending" ||
         lifecycle === "streaming"
       ) {
+        inferSessionTitleInBackground(
+          session,
+          sessionId,
+          earlyTitleUserMessages(session.messages, content),
+          session.projectPath ?? null,
+          setSessionTitleCandidate
+        );
         queuedMessagesRef.current.push(content);
         addMessage(sessionId, {
           kind: "user",
@@ -725,6 +841,13 @@ export function useLocalChat(sessionId: string | null) {
         return;
       }
 
+      inferSessionTitleInBackground(
+        session,
+        sessionId,
+        earlyTitleUserMessages(session.messages, content),
+        session.projectPath ?? null,
+        setSessionTitleCandidate
+      );
       await doSendMessage(session.backendSessionId, sessionId, content, {
         addMessage,
         setSessionLifecycle,
@@ -740,6 +863,7 @@ export function useLocalChat(sessionId: string | null) {
       addMessage,
       setSessionLifecycle,
       setBackendSessionId,
+      setSessionTitleCandidate,
     ]
   );
 
@@ -793,7 +917,7 @@ export function useOpenChat() {
   const openSession = useChatStore((s) => s.openSession);
 
   return useCallback(
-    async (label = "Project Chat", projectPathOverride?: string | null) => {
+    async (label = "New Chat", projectPathOverride?: string | null) => {
       let projectPath: string | null = projectPathOverride ?? null;
       if (projectPathOverride === undefined) {
         try {

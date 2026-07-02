@@ -52,8 +52,8 @@ export function ChatWindowManager() {
     .map(
       (session) =>
         `${session.id}:${session.projectPath ?? ""}:${session.updatedAt ?? ""}:${
-          session.messages.length
-        }`
+          session.title ?? ""
+        }:${session.messages.length}`
     )
     .join("\0");
   const activeSession: ChatSession | null = activeSessionId
@@ -251,7 +251,6 @@ export function ChatWindowManager() {
           {isMaximized && (
             <LocalChatMiniPanel
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
-              activeSession={activeSession}
               sessionGroups={localSessionGroups}
               projectWarning={projectGroupingWarning}
               onStartFresh={() => {

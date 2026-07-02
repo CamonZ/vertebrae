@@ -6,7 +6,7 @@ Feature: Local project chat lifecycle
   Scenario: Project chat streams and reopens the local transcript
     Given the GUI is showing the task list
     When I click on the element with test id "local-chat-launcher"
-    Then the GUI should show "Project Chat" within 5 seconds
+    Then the GUI should show "New Chat" within 5 seconds
     When I type "hello from acceptance" into the element with test id "local-chat-composer"
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
@@ -23,9 +23,7 @@ Feature: Local project chat lifecycle
     When I click on the element with title "Start fresh local chat from history"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds
     When I click on the element with title "Toggle chat history"
+    And I click on the inactive local chat row with title "Open local chat New Chat"
     Then the GUI should show "local-chat-acceptance reply" within 5 seconds
-    When I click on the element with title "Open local chat Project Chat"
-    Then the GUI should show "local-chat-acceptance reply" within 5 seconds
-    When I click on the element with title "Toggle chat history"
-    And I click on the element with title "Delete local chat Project Chat"
+    And I click on the active local chat row with title "Delete local chat New Chat"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds

@@ -34,6 +34,26 @@ pub fn find_codex_binary() -> Result<PathBuf, String> {
     find_binary(&CODEX_SPEC)
 }
 
+/// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
+pub fn build_augmented_path() -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        parts.push(home.join(".cargo/bin").to_string_lossy().into_owned());
+        parts.push(home.join(".local/bin").to_string_lossy().into_owned());
+    }
+
+    parts.push("/opt/homebrew/bin".to_string());
+    parts.push("/usr/local/bin".to_string());
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    if !current_path.is_empty() {
+        parts.push(current_path);
+    }
+
+    parts.join(":")
+}
+
 fn find_binary(spec: &BinarySpec) -> Result<PathBuf, String> {
     if let Ok(raw_path) = std::env::var(spec.env_override) {
         let trimmed = raw_path.trim();

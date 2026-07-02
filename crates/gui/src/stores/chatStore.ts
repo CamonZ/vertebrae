@@ -99,6 +99,100 @@ function mergeToolCallInput(previous: string, next: string): string {
   return JSON.stringify(merged);
 }
 
+type AssistantChatMessage = Extract<ChatMessage, { kind: "assistant" }>;
+
+function sameParentToolUseId(
+  message: AssistantChatMessage,
+  parentToolUseId: string | undefined
+): boolean {
+  return (message.parentToolUseId ?? undefined) === parentToolUseId;
+}
+
+function lastCompleteAssistantHasText(
+  messages: readonly ChatMessage[],
+  text: string,
+  parentToolUseId?: string
+): boolean {
+  const last = messages[messages.length - 1];
+  return (
+    last?.kind === "assistant" &&
+    last.isPartial !== true &&
+    last.text === text &&
+    (last.parentToolUseId ?? undefined) === parentToolUseId
+  );
+}
+
+function mergeAssistantPartialText(current: string, next: string): string {
+  if (!current) return next;
+  if (!next) return current;
+  if (next.startsWith(current)) return next;
+  return `${current}${next}`;
+}
+
+function coalesceParentAssistantMessage(
+  messages: ChatMessage[],
+  message: AssistantChatMessage
+): ChatMessage[] {
+  const parentToolUseId = message.parentToolUseId;
+  const last = messages[messages.length - 1];
+  if (
+    message.isPartial &&
+    last?.kind === "assistant" &&
+    last.isPartial &&
+    sameParentToolUseId(last, parentToolUseId)
+  ) {
+    messages[messages.length - 1] = {
+      ...last,
+      text: mergeAssistantPartialText(last.text, message.text),
+      timestamp: message.timestamp,
+    };
+    return messages;
+  }
+
+  if (message.isPartial) {
+    messages.push(message);
+    return messages;
+  }
+
+  if (lastCompleteAssistantHasText(messages, message.text, parentToolUseId)) {
+    return messages;
+  }
+
+  const partialIndexes = messages
+    .map((candidate, index) => ({ candidate, index }))
+    .filter(
+      ({ candidate }) =>
+        candidate.kind === "assistant" &&
+        candidate.isPartial &&
+        sameParentToolUseId(candidate, parentToolUseId)
+    );
+  const streamedText = partialIndexes
+    .map(({ candidate }) =>
+      candidate.kind === "assistant" ? candidate.text : ""
+    )
+    .join("");
+  if (partialIndexes.length > 0 && streamedText === message.text) {
+    const partialIndexSet = new Set(partialIndexes.map(({ index }) => index));
+    return [
+      ...messages.filter((_, index) => !partialIndexSet.has(index)),
+      { ...message, isPartial: false },
+    ];
+  }
+
+  const lastPartial = partialIndexes[partialIndexes.length - 1];
+  const lastPartialIndex = lastPartial?.index;
+  if (lastPartialIndex !== undefined) {
+    const lastPartial = messages[lastPartialIndex];
+    if (lastPartial.kind === "assistant" && lastPartial.text === message.text) {
+      messages[lastPartialIndex] = { ...message, isPartial: false };
+      return messages;
+    }
+  }
+
+  messages.push({ ...message, isPartial: false });
+  return messages;
+}
+
 export type LocalChatLifecycle =
   | "idle"
   | "starting"
@@ -108,6 +202,19 @@ export type LocalChatLifecycle =
   | "closing"
   | "closed"
   | "error";
+
+export type ChatTitleStatus =
+  | "pending"
+  | "low_confidence"
+  | "generated"
+  | "manual";
+
+export interface ChatTitleCandidate {
+  title: string | null;
+  confidence: number;
+  sufficientSignal: boolean;
+  userMessageCount: number;
+}
 
 export interface StreamingAssistantMessage {
   text: string;
@@ -119,6 +226,14 @@ export interface ChatSession {
   id: string;
   /** Human-readable label for the session tab */
   label: string;
+  /** Inferred concise display title for history and tab surfaces */
+  title?: string | null;
+  /** Title inference lifecycle; generated/manual titles are frozen */
+  titleStatus?: ChatTitleStatus;
+  /** Model-reported confidence for the latest title inference attempt */
+  titleConfidence?: number | null;
+  /** Number of early user messages used by the latest title inference attempt */
+  titleUserMessageCount?: number;
   /** Chat messages in this session */
   messages: ChatMessage[];
   /** Session status */
@@ -237,6 +352,13 @@ interface ChatStoreActions {
     sessionId: string,
     providerResumeId: string | null
   ) => void;
+  /** Set the inferred display title for a local chat session */
+  setSessionTitle: (sessionId: string, title: string | null) => void;
+  /** Apply a generated title candidate when it is confident enough */
+  setSessionTitleCandidate: (
+    sessionId: string,
+    candidate: ChatTitleCandidate
+  ) => void;
   /** Set the model reported by the Claude CLI for a session */
   setSessionModel: (sessionId: string, model: string) => void;
   /** Set the local chat harness for this session before it starts */
@@ -296,6 +418,8 @@ const emptyState: ChatStoreState = {
   panelOpen: false,
 };
 
+const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
+
 const initialState: ChatStoreState = {
   ...emptyState,
 };
@@ -316,6 +440,10 @@ function createLocalSession(
   return {
     id: generateSessionId(),
     label,
+    title: null,
+    titleStatus: "pending",
+    titleConfidence: null,
+    titleUserMessageCount: 0,
     messages: [],
     status: "open",
     harness: DEFAULT_LOCAL_CHAT_HARNESS,
@@ -333,8 +461,13 @@ function createLocalSession(
 }
 
 function hydrateLocalSession(session: ChatSession): ChatSession {
+  const title = session.title?.trim() ? session.title : null;
   return {
     ...session,
+    title,
+    titleStatus: session.titleStatus ?? (title ? "generated" : "pending"),
+    titleConfidence: session.titleConfidence ?? (title ? 1 : null),
+    titleUserMessageCount: session.titleUserMessageCount ?? 0,
     isDetached: false,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
@@ -857,7 +990,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     addMessage: (sessionId, message) => {
       updateSession(sessionId, (session) => {
         const messages = [...session.messages];
-        const last = messages[messages.length - 1];
         if (message.kind === "tool_call") {
           const existingIndex = messages.findIndex(
             (existing) =>
@@ -884,18 +1016,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
         if (
           message.kind === "assistant" &&
-          message.parentToolUseId &&
-          last?.kind === "assistant" &&
-          last.parentToolUseId === message.parentToolUseId &&
-          last.isPartial
+          message.parentToolUseId
         ) {
-          messages[messages.length - 1] = {
-            ...last,
-            text: message.isPartial
-              ? `${last.text}${message.text}`
-              : message.text,
-            isPartial: message.isPartial,
-            timestamp: message.timestamp,
+          return {
+            ...session,
+            messages: coalesceParentAssistantMessage(messages, message),
+            updatedAt: message.timestamp,
           };
         } else {
           messages.push(message);
@@ -919,7 +1045,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             lifecycle: "streaming",
             lifecycleError: null,
             streamingAssistant: {
-              text: `${current?.text ?? ""}${text}`,
+              text: mergeAssistantPartialText(current?.text ?? "", text),
               timestamp: current?.timestamp ?? new Date().toISOString(),
             },
           };
@@ -939,6 +1065,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
             text,
             isPartial: false,
           };
+        } else if (lastCompleteAssistantHasText(messages, text)) {
+          // Final provider payloads can arrive after an end event has already
+          // committed the streamed overlay; keep the durable transcript single.
         } else {
           messages.push({
             kind: "assistant",
@@ -994,15 +1123,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
               : streaming.timestamp;
           const messages =
             commitToMessages && streaming.text
-              ? [
-                  ...session.messages,
-                  {
-                    kind: "assistant" as const,
-                    text: streaming.text,
-                    timestamp,
-                    isPartial: false,
-                  },
-                ]
+              ? lastCompleteAssistantHasText(
+                  session.messages,
+                  streaming.text
+                )
+                ? session.messages
+                : [
+                    ...session.messages,
+                    {
+                      kind: "assistant" as const,
+                      text: streaming.text,
+                      timestamp,
+                      isPartial: false,
+                    },
+                  ]
               : session.messages;
           return {
             ...session,
@@ -1033,6 +1167,46 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ...session,
         providerResumeId,
       }));
+    },
+
+    setSessionTitle: (sessionId, title) => {
+      const normalized = title?.replace(/\s+/g, " ").trim() || null;
+      updateSession(sessionId, (session) => {
+        if (!normalized || session.title?.trim()) return session;
+        return {
+          ...session,
+          title: normalized,
+          titleStatus: "generated",
+          titleConfidence: 1,
+        };
+      });
+    },
+
+    setSessionTitleCandidate: (sessionId, candidate) => {
+      const normalized = candidate.title?.replace(/\s+/g, " ").trim() || null;
+      const confidence = Number.isFinite(candidate.confidence)
+        ? Math.max(0, Math.min(1, candidate.confidence))
+        : 0;
+      const confident =
+        !!normalized &&
+        candidate.sufficientSignal &&
+        confidence >= GENERATED_TITLE_CONFIDENCE_THRESHOLD;
+      updateSession(sessionId, (session) => {
+        if (
+          session.titleStatus === "manual" ||
+          session.titleStatus === "generated" ||
+          session.title?.trim()
+        ) {
+          return session;
+        }
+        return {
+          ...session,
+          title: confident ? normalized : null,
+          titleStatus: confident ? "generated" : "low_confidence",
+          titleConfidence: confidence,
+          titleUserMessageCount: candidate.userMessageCount,
+        };
+      });
     },
 
     setSessionModel: (sessionId, model) => {
@@ -1151,6 +1325,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
             [sessionId]: {
               ...session,
               messages: [],
+              title: null,
+              titleStatus: "pending",
+              titleConfidence: null,
+              titleUserMessageCount: 0,
               backendSessionId: null,
               providerResumeId: null,
               selectedModelId: session.selectedModelId ?? null,
@@ -1217,7 +1395,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         `/chat?sessionId=${encodeURIComponent(sessionId)}`,
         `chat-${sessionId}`,
         {
-          title: session.label,
+          title: session.title || session.label,
           width: 600,
           height: 800,
         }

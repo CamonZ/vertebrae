@@ -715,6 +715,74 @@ async fn click_element_with_title(world: &mut GuiWorld, title: String) {
         .await;
 }
 
+#[when(expr = "I click on the inactive local chat row with title {string}")]
+async fn click_inactive_local_chat_row_with_title(world: &mut GuiWorld, title: String) {
+    click_local_chat_row_with_title(world, &title, false).await;
+}
+
+#[when(expr = "I click on the active local chat row with title {string}")]
+async fn click_active_local_chat_row_with_title(world: &mut GuiWorld, title: String) {
+    click_local_chat_row_with_title(world, &title, true).await;
+}
+
+async fn click_local_chat_row_with_title(world: &mut GuiWorld, title: &str, active: bool) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let active_predicate = if active {
+        "@data-active='true'"
+    } else {
+        "not(@data-active='true')"
+    };
+    let title_literal = xpath_literal(title);
+    let locator = Locator::XPath(&format!(
+        "//*[@data-testid='local-chat-history-drawer']\
+         //*[contains(concat(' ', normalize-space(@class), ' '), ' hc-mini-history-row ') and {active_predicate}]\
+         //*[@title={title_literal}]"
+    ));
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(locator)
+        .await
+        .unwrap_or_else(|_| {
+            let state = if active { "active" } else { "inactive" };
+            panic!("local chat {state} row with title '{title}' not found within 5 seconds")
+        });
+
+    element.click().await.unwrap_or_else(|_| {
+        let state = if active { "active" } else { "inactive" };
+        panic!("failed to click local chat {state} row with title '{title}'")
+    });
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let state = if active { "active" } else { "inactive" };
+    world
+        .screenshot(&client, &format!("after-click-{state}-local-chat-{title}"))
+        .await;
+}
+
+fn xpath_literal(value: &str) -> String {
+    if !value.contains('\'') {
+        return format!("'{value}'");
+    }
+    if !value.contains('"') {
+        return format!("\"{value}\"");
+    }
+
+    let parts = value
+        .split('\'')
+        .map(|part| format!("'{part}'"))
+        .collect::<Vec<_>>()
+        .join(", \"'\", ");
+    format!("concat({parts})")
+}
+
 #[when(expr = "I click on the element with test id {string}")]
 async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
     let wd = world

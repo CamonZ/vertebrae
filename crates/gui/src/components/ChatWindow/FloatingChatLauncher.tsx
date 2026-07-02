@@ -72,7 +72,7 @@ export function FloatingChatLauncher() {
         focusSession(session.id);
         setPanelOpen(true);
       } else {
-        void openChat("Project Chat", projectPath);
+        void openChat("New Chat", projectPath);
       }
     }
   }, [focusSession, openChat, setPanelOpen, togglePanel]);

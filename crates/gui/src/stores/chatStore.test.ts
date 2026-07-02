@@ -38,6 +38,10 @@ describe("chatStore", () => {
       expect(session.backendSessionId).toBeNull();
       expect(session.lifecycle).toBe("idle");
       expect(session.streamingAssistant).toBeNull();
+      expect(session.title).toBeNull();
+      expect(session.titleStatus).toBe("pending");
+      expect(session.titleConfidence).toBeNull();
+      expect(session.titleUserMessageCount).toBe(0);
     });
 
     it("sets the new session as active and opens the panel", () => {
@@ -104,7 +108,7 @@ describe("chatStore", () => {
 
       const reopened = useChatStore
         .getState()
-        .openSession("Project Chat", "/repo/root");
+        .openSession("New Chat", "/repo/root");
 
       expect(reopened).toBe("newer");
       expect(useChatStore.getState().activeSessionId).toBe("newer");
@@ -133,7 +137,7 @@ describe("chatStore", () => {
     });
 
     it("persists sessions without scope or entity fields", () => {
-      const id = useChatStore.getState().openSession("Project Chat");
+      const id = useChatStore.getState().openSession("New Chat");
 
       const session = useChatStore.getState().sessions[id];
       const persisted = loadPersistedLocalChatSession(id);
@@ -144,9 +148,7 @@ describe("chatStore", () => {
     });
 
     it("stores the project path captured when the session is opened", () => {
-      const id = useChatStore
-        .getState()
-        .openSession("Project Chat", "/repo/root");
+      const id = useChatStore.getState().openSession("New Chat", "/repo/root");
 
       expect(useChatStore.getState().sessions[id].projectPath).toBe(
         "/repo/root"
@@ -341,7 +343,7 @@ describe("chatStore", () => {
         panelOpen: false,
       });
 
-      const opened = useChatStore.getState().openSession("Project Chat", null);
+      const opened = useChatStore.getState().openSession("New Chat", null);
 
       expect(opened).toBe("legacy");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
@@ -779,6 +781,36 @@ describe("chatStore", () => {
       expect(session.updatedAt).toBe("2024-01-01T00:00:01Z");
     });
 
+    it("replaces parent-linked cumulative assistant snapshots while streaming", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child stream",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toEqual([
+        {
+          kind: "assistant",
+          text: "child stream",
+          timestamp: "2024-01-01T00:00:01Z",
+          isPartial: true,
+          parentToolUseId: "agent-1",
+        },
+      ]);
+    });
+
     it("keeps separate child transcript rows across child tool activity", () => {
       const id = useChatStore.getState().openSession("T1");
 
@@ -814,6 +846,86 @@ describe("chatStore", () => {
       expect(session.messages[2]).toMatchObject({
         kind: "assistant",
         text: "after",
+        parentToolUseId: "agent-1",
+      });
+    });
+
+    it("replaces accumulated parent-linked assistant deltas with their final materialized message", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "before ",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Read",
+        toolId: "tool-1",
+        input: "{}",
+        timestamp: "2024-01-01T00:00:01Z",
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "after",
+        timestamp: "2024-01-01T00:00:02Z",
+        isPartial: true,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "before after",
+        timestamp: "2024-01-01T00:00:03Z",
+        isPartial: false,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toEqual([
+        {
+          kind: "tool_call",
+          toolName: "Read",
+          toolId: "tool-1",
+          input: "{}",
+          timestamp: "2024-01-01T00:00:01Z",
+          parentToolUseId: "agent-1",
+        },
+        {
+          kind: "assistant",
+          text: "before after",
+          timestamp: "2024-01-01T00:00:03Z",
+          isPartial: false,
+          parentToolUseId: "agent-1",
+        },
+      ]);
+    });
+
+    it("ignores a duplicate parent-linked final assistant message", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child answer",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: false,
+        parentToolUseId: "agent-1",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "child answer",
+        timestamp: "2024-01-01T00:00:01Z",
+        isPartial: false,
+        parentToolUseId: "agent-1",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "child answer",
         parentToolUseId: "agent-1",
       });
     });
@@ -907,6 +1019,18 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
+    it("replaces cumulative streaming snapshots instead of appending them as deltas", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Hel");
+      useChatStore.getState().updateLastAssistantMessage(id, "Hello");
+      useChatStore.getState().updateLastAssistantMessage(id, "Hello world");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant?.text).toBe("Hello world");
+      expect(session.messages).toEqual([]);
+    });
+
     it("keeps durable user messages separate from the streaming overlay", () => {
       const id = useChatStore.getState().openSession("T1");
 
@@ -967,6 +1091,38 @@ describe("chatStore", () => {
           isPartial: false,
         },
       ]);
+    });
+
+    it("does not recommit streaming text when the final message is already durable", () => {
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
+
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Full answer");
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [id]: {
+            ...state.sessions[id],
+            streamingAssistant: {
+              text: "Full answer",
+              timestamp: "2024-01-01T00:00:00Z",
+            },
+          },
+        },
+      }));
+
+      useChatStore.getState().clearStreamingAssistant(id, true);
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant).toBeNull();
+      expect(session.messages).toMatchObject([
+        {
+          kind: "assistant",
+          text: "Full answer",
+          isPartial: false,
+        },
+      ]);
+      expect(session.messages).toHaveLength(1);
+      expect(loadPersistedLocalChatSession(id)?.messages).toHaveLength(1);
     });
   });
 
@@ -1047,6 +1203,26 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)?.messages).toMatchObject([
         { kind: "assistant", text: "complete", isPartial: false },
       ]);
+    });
+
+    it("does not duplicate a final message after an end event commits streamed text", () => {
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Full answer");
+      useChatStore.getState().clearStreamingAssistant(id, true);
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Full answer");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant).toBeNull();
+      expect(session.messages).toMatchObject([
+        {
+          kind: "assistant",
+          text: "Full answer",
+          isPartial: false,
+        },
+      ]);
+      expect(session.messages).toHaveLength(1);
+      expect(loadPersistedLocalChatSession(id)?.messages).toHaveLength(1);
     });
   });
 
@@ -1279,6 +1455,74 @@ describe("chatStore", () => {
 
       expect(useChatStore.getState().sessions[id].status).toBe("open");
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
+    });
+  });
+
+  describe("setSessionTitleCandidate", () => {
+    it("keeps low-confidence candidates hidden while tracking the attempt", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: null,
+        confidence: 0.12,
+        sufficientSignal: false,
+        userMessageCount: 1,
+      });
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: null,
+        titleStatus: "low_confidence",
+        titleConfidence: 0.12,
+        titleUserMessageCount: 1,
+      });
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        title: null,
+        titleStatus: "low_confidence",
+        titleConfidence: 0.12,
+        titleUserMessageCount: 1,
+      });
+    });
+
+    it("freezes confident generated titles", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Fix Local Chat Titles",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 2,
+      });
+
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        title: "Fix Local Chat Titles",
+        titleStatus: "generated",
+        titleConfidence: 0.86,
+        titleUserMessageCount: 2,
+      });
+    });
+
+    it("does not overwrite a frozen generated title", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Fix Local Chat Titles",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 2,
+      });
+
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Different Title",
+        confidence: 0.92,
+        sufficientSignal: true,
+        userMessageCount: 3,
+      });
+
+      expect(useChatStore.getState().sessions[id].title).toBe(
+        "Fix Local Chat Titles"
+      );
+      expect(useChatStore.getState().sessions[id].titleUserMessageCount).toBe(
+        2
+      );
     });
   });
 

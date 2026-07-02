@@ -44,12 +44,24 @@ describe("localChatPersistence", () => {
   });
 
   it("round-trips resumable local chat metadata", () => {
-    persistLocalChatSession(makeSession({ permissionMode: "auto" }));
+    persistLocalChatSession(
+      makeSession({
+        permissionMode: "auto",
+        title: "Inferred Session Title",
+        titleStatus: "generated",
+        titleConfidence: 0.88,
+        titleUserMessageCount: 2,
+      })
+    );
 
     const loaded = loadPersistedLocalChatSession("s-1");
     expect(loaded).toMatchObject({
       id: "s-1",
       label: "Task Chat",
+      title: "Inferred Session Title",
+      titleStatus: "generated",
+      titleConfidence: 0.88,
+      titleUserMessageCount: 2,
       status: "open",
       harness: "claude",
       backendSessionId: null,
@@ -322,6 +334,10 @@ describe("localChatPersistence", () => {
       makeSession({
         id: "newer",
         label: "Newer Task",
+        title: "Summarized Newer Task",
+        titleStatus: "generated",
+        titleConfidence: 0.9,
+        titleUserMessageCount: 2,
         messages: [
           {
             kind: "assistant",
@@ -339,6 +355,10 @@ describe("localChatPersistence", () => {
       expect.objectContaining({
         id: "newer",
         label: "Newer Task",
+        title: "Summarized Newer Task",
+        titleStatus: "generated",
+        titleConfidence: 0.9,
+        titleUserMessageCount: 2,
         preview: "new answer",
         createdAt: "2026-01-01T12:00:00Z",
         updatedAt: "2026-01-02T00:00:00Z",
