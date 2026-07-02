@@ -2,13 +2,9 @@
  * chatMessagesToThread — adapter: chatStore `ChatMessage[]` → canonical
  * `Thread` for the unified <Thread> primitive (chat surface).
  *
- * Sub-agent scoping (the reason this isn't a flat walk): tool calls/results a
- * Task/Agent spawns carry `parentToolUseId`. We convert each chat message into
- * the shared `ConversationEvent` shape and hand each turn to
- * {@link chatTurnEventsToMessages}, which reuses the SAME `groupBySpawn` the
- * Traces normalizer uses — so a spawned sub-agent surfaces as a nested
- * `SpawnMessage` child thread instead of its tool rows leaking into the main
- * stream. With no sub-agent linkage this degrades to a flat series.
+ * Child-agent transcript rows carry `parentToolUseId`. The parent chat does
+ * not inline those rows; it keeps the parent Agent/Task tool call as the
+ * chronological marker and leaves child exploration to the mini panel.
  *
  * Grouping contract:
  *   · session_start / session_end → dropped (no row).
@@ -50,14 +46,6 @@ export interface ChatThreadOptions {
    */
   collapsed?: Set<string>;
   /**
-   * Sub-agent (sidechain) messages keyed by their parent spawn `tool_use` id.
-   * The caller extracts these from the main chronological stream so a permission
-   * segment boundary can't separate a spawn from its children; here they are
-   * re-injected immediately after the matching spawn `tool_call` so the
-   * sub-agent nests in place (not as an orphaned thread dumped at the bottom).
-   */
-  childrenByParent?: Map<string, ChatMessage[]>;
-  /**
    * Whether the chat is awaiting a response. Carried for parity with the caller;
    * not consumed here (the ThinkingIndicator is a sibling of <Thread>).
    */
@@ -73,7 +61,7 @@ export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
-  const { onToggleTool, collapsed, childrenByParent, assistantLabel } = opts;
+  const { onToggleTool, collapsed, assistantLabel } = opts;
 
   const turns: Turn[] = [];
   let turnSeq = 0;
@@ -82,6 +70,7 @@ export function chatMessagesToThread(
   let userMsg: UserMessage | null = null;
   let events: ConversationEvent[] = [];
   let endsWithPartialAssistant = false;
+  const hiddenToolIds = new Set<string>();
 
   const flushTurn = () => {
     if (!userMsg && events.length === 0) return;
@@ -101,6 +90,18 @@ export function chatMessagesToThread(
   };
 
   for (const m of messages) {
+    if (
+      (m.kind === "assistant" ||
+        m.kind === "tool_call" ||
+        m.kind === "tool_result") &&
+      m.parentToolUseId
+    ) {
+      continue;
+    }
+    if (m.kind === "tool_result" && hiddenToolIds.has(m.toolId)) {
+      continue;
+    }
+
     switch (m.kind) {
       case "session_start":
       case "session_end":
@@ -132,16 +133,11 @@ export function chatMessagesToThread(
       }
 
       case "tool_call": {
-        events.push(toToolCallEvent(m));
-        // Re-inject this spawn's sub-agent messages right here so they nest in
-        // place; groupBySpawn pairs them to this tool_call by id.
-        const kids = childrenByParent?.get(m.toolId);
-        if (kids) {
-          for (const k of kids) {
-            const ev = toChildEvent(k);
-            if (ev) events.push(ev);
-          }
+        if (isNonSpawnAgentControlCall(m)) {
+          hiddenToolIds.add(m.toolId);
+          continue;
         }
+        events.push(toToolCallEvent(m));
         endsWithPartialAssistant = false;
         continue;
       }
@@ -169,6 +165,15 @@ export function chatMessagesToThread(
   flushTurn();
 
   return { id: LOCAL_CHAT_THREAD_ID, turns };
+}
+
+function isNonSpawnAgentControlCall(
+  m: Extract<ChatMessage, { kind: "tool_call" }>
+): boolean {
+  if (!/^(agent|task)$/i.test(m.toolName)) return false;
+  const input = parseToolInput(m.input);
+  const collabTool = input.collab_tool ?? input.collabTool;
+  return typeof collabTool === "string" && collabTool !== "spawnAgent";
 }
 
 /**
@@ -230,21 +235,6 @@ function toToolResultEvent(
     timestamp: m.timestamp,
     parentToolUseId: m.parentToolUseId,
   };
-}
-
-/** Convert a sub-agent child message (tool_call/tool_result) to an event. */
-function toChildEvent(m: ChatMessage): ConversationEvent | null {
-  if (m.kind === "assistant") {
-    return {
-      kind: "assistant_message",
-      text: m.text,
-      timestamp: m.timestamp,
-      parentToolUseId: m.parentToolUseId,
-    };
-  }
-  if (m.kind === "tool_call") return toToolCallEvent(m);
-  if (m.kind === "tool_result") return toToolResultEvent(m);
-  return null;
 }
 
 /**

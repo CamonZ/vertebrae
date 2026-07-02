@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   parseClaudeMessage,
   parseCodexMessage,
+  parseCodexRolloutMessage,
   parseSessionLogs,
   getToolIcon,
   type ClaudeRawMessage,
+  type CodexRolloutRawMessage,
   type CodexParseState,
   type CodexRawMessage,
 } from "./conversation";
@@ -112,6 +114,37 @@ describe("parseClaudeMessage", () => {
       expect(events).toHaveLength(2);
       expect(events[0].kind).toBe("assistant_message");
       expect(events[1].kind).toBe("tool_call");
+    });
+  });
+
+  describe("user messages", () => {
+    it("can include user text for full transcript replay", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: "hello",
+        },
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([{ kind: "user_message", timestamp, text: "hello" }]);
+    });
+
+    it("skips injected AGENTS.md instruction prompts during transcript replay", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: "# AGENTS.md instructions for /repo\nDo things",
+        },
+      };
+
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([]);
     });
   });
 
@@ -1095,6 +1128,86 @@ describe("parseCodexMessage", () => {
       text: "[error] codex error",
     });
     expect(events[1]).toMatchObject({ kind: "session_end" });
+  });
+});
+
+describe("parseCodexRolloutMessage", () => {
+  const timestamp = "2024-01-02T08:00:00Z";
+
+  it("can include user response_item messages for full transcript replay", () => {
+    const raw: CodexRolloutRawMessage = {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hello codex" }],
+      },
+    };
+
+    expect(parseCodexRolloutMessage(raw, timestamp)).toEqual([]);
+    expect(
+      parseCodexRolloutMessage(raw, timestamp, { includeUserMessages: true })
+    ).toEqual([{ kind: "user_message", timestamp, text: "hello codex" }]);
+  });
+
+  it("maps assistant messages and function calls from Codex rollout JSONL", () => {
+    const events = [
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "call-1",
+            name: "exec_command",
+            arguments: '{"cmd":"pwd"}',
+          },
+        },
+        timestamp
+      ),
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-1",
+            output: "ok",
+          },
+        },
+        timestamp
+      ),
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done" }],
+          },
+        },
+        timestamp
+      ),
+    ].flat();
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "tool_result",
+      "assistant_message",
+    ]);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "call-1",
+      toolName: "exec_command",
+      input: { cmd: "pwd" },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "call-1",
+      result: "ok",
+    });
+    expect(events[2]).toMatchObject({
+      kind: "assistant_message",
+      text: "done",
+    });
   });
 });
 

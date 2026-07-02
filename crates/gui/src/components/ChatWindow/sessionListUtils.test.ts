@@ -32,7 +32,6 @@ function makeSummary(
     id: "s1",
     label: "Chat",
     harness: "claude",
-    preview: "Hello",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     projectPath: null,

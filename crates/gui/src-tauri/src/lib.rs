@@ -133,6 +133,9 @@ fn create_builder() -> Builder {
             commands::send_local_chat_message,
             commands::close_local_chat_session,
             commands::infer_local_chat_session_title,
+            commands::load_local_chat_session_index,
+            commands::save_local_chat_session_index,
+            commands::load_local_chat_session_messages,
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,

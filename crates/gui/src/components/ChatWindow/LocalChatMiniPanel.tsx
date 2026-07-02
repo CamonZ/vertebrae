@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
-import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import { harnessDisplayName } from "./chatHelpers";
-import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
+import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
 
@@ -15,8 +14,9 @@ interface LocalChatMiniPanelProps {
   deleteError: string | null;
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
+  spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
   onStartFresh: () => void | Promise<void>;
-  onSelect: (sessionId: string) => void;
+  onSelect: (sessionId: string) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
 }
 
@@ -25,12 +25,13 @@ interface LocalChatMiniPanelProps {
  * Owns its own keyboard navigation (up/down/home/end/enter) over the flattened
  * session list.
  */
-export function LocalChatMiniPanel({
+export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activeSessionId,
   deletingSessionId,
   deleteError,
   projectWarning,
   sessionGroups,
+  spawnOutlineBySessionId,
   onStartFresh,
   onSelect,
   onDelete,
@@ -39,20 +40,6 @@ export function LocalChatMiniPanel({
     () => sessionGroups.flatMap((group) => group.sessions),
     [sessionGroups]
   );
-  const spawnOutlineBySessionId = useMemo(() => {
-    const outlines = new Map<
-      string,
-      ReturnType<typeof buildSpawnOutline>
-    >();
-    for (const session of sessionItems) {
-      const persistedSession = loadPersistedLocalChatSession(session.id);
-      outlines.set(
-        session.id,
-        persistedSession ? buildSpawnOutline(persistedSession.messages) : []
-      );
-    }
-    return outlines;
-  }, [sessionItems]);
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
@@ -252,7 +239,7 @@ export function LocalChatMiniPanel({
       </div>
     </aside>
   );
-}
+});
 
 function miniThreadAge(updatedAt: string): string {
   const relative = formatRelative(updatedAt);

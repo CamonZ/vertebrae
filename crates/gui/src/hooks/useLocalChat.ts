@@ -58,8 +58,9 @@ function earlyTitleUserMessages(
   pendingUserMessage?: string | null
 ): string[] {
   const userMessages = messages
-    .filter((message): message is Extract<ChatMessage, { kind: "user" }> =>
-      message.kind === "user"
+    .filter(
+      (message): message is Extract<ChatMessage, { kind: "user" }> =>
+        message.kind === "user"
     )
     .map((message) => message.text.trim())
     .filter(Boolean);

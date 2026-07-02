@@ -39,6 +39,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import type { ChatSession } from "../../stores/chatStore";
 import {
+  clearPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   persistLocalChatSession,
 } from "../../utils/localChatPersistence";
@@ -136,6 +137,7 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearPersistedLocalChatSessions();
     vi.clearAllMocks();
     vi.mocked(commands.getCurrentProject).mockResolvedValue({
       status: "ok",
@@ -166,6 +168,7 @@ describe("ChatWindowManager", () => {
       activeSessionId: null,
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
+      localSessionSummaries: {},
     });
     usePanelFocusStore.getState().reset();
   });
@@ -521,13 +524,7 @@ describe("ChatWindowManager", () => {
       reopened = useChatStore.getState().openSession("Task A", "/test/project");
     });
     expect(reopened).toBe("s1");
-    expect(useChatStore.getState().sessions.s1.messages).toEqual([
-      {
-        kind: "user",
-        text: "persist through close",
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    ]);
+    expect(useChatStore.getState().sessions.s1.messages).toEqual([]);
     expect(useChatStore.getState().sessions.s1.providerResumeId).toBe(
       "conv-close"
     );
@@ -675,7 +672,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Current Project Chat", "/new/project");
     useChatStore.getState().addMessage(current, {
-      kind: "assistant",
+      kind: "user",
       text: "new project answer",
       timestamp: "2026-01-02T00:00:00Z",
     });
@@ -683,16 +680,16 @@ describe("ChatWindowManager", () => {
       .getState()
       .startFreshSession("Older Current Project Chat", "/new/project");
     useChatStore.getState().addMessage(currentOlder, {
-      kind: "assistant",
+      kind: "user",
       text: "older current project answer",
       timestamp: "2026-01-01T12:00:00Z",
     });
-    const legacy = useChatStore
+    const noProject = useChatStore
       .getState()
-      .startFreshSession("Legacy Chat", null);
-    useChatStore.getState().addMessage(legacy, {
+      .startFreshSession("No Project Chat", null);
+    useChatStore.getState().addMessage(noProject, {
       kind: "assistant",
-      text: "legacy answer",
+      text: "no-project answer",
       timestamp: "2026-01-03T00:00:00Z",
     });
     useChatStore.getState().focusSession(stale);
@@ -727,7 +724,7 @@ describe("ChatWindowManager", () => {
 
     expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
   });
 
   it("keeps project load failures scoped to current-project chats", async () => {
@@ -1688,7 +1685,7 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Current Older Chat", "/new/project");
     useChatStore.getState().addMessage(currentOlder, {
-      kind: "assistant",
+      kind: "user",
       text: "older current answer",
       timestamp: "2026-01-01T00:00:00Z",
     });
@@ -1696,16 +1693,16 @@ describe("ChatWindowManager", () => {
       .getState()
       .startFreshSession("Current Newer Chat", "/new/project");
     useChatStore.getState().addMessage(currentNewer, {
-      kind: "assistant",
+      kind: "user",
       text: "newer current answer",
       timestamp: "2026-01-02T00:00:00Z",
     });
-    const legacy = useChatStore
+    const noProject = useChatStore
       .getState()
-      .startFreshSession("Legacy Chat", null);
-    useChatStore.getState().addMessage(legacy, {
+      .startFreshSession("No Project Chat", null);
+    useChatStore.getState().addMessage(noProject, {
       kind: "assistant",
-      text: "legacy answer",
+      text: "no-project answer",
       timestamp: "2026-01-04T00:00:00Z",
     });
     useChatStore.getState().focusSession(oldProject);
@@ -1735,7 +1732,7 @@ describe("ChatWindowManager", () => {
       "Load local chat Current Older Chat into active pane",
     ]);
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
+    expect(miniPanel.getByText("No Project Chat")).toBeInTheDocument();
   });
 
   it("shows chat harness indicators in the maximized mini thread selector", async () => {

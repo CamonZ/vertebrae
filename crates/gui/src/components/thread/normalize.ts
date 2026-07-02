@@ -720,6 +720,17 @@ function eventsToMessages(
   const out: Message[] = [];
   for (const ev of events) {
     switch (ev.kind) {
+      case "user_message":
+        out.push({
+          evt: nextEvt("user"),
+          type: "user",
+          role: "human",
+          label: "You",
+          at: clock(ev.timestamp),
+          rel: rel(runStartMs, ms(ev.timestamp)),
+          text: ev.text,
+        });
+        break;
       case "session_start":
       case "session_end":
         // No row — folded into step head / summary.

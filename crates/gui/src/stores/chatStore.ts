@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { commands } from "../bindings";
 import { popOut } from "../utils/popOut";
 import {
   discardStashedChatSession,
@@ -18,9 +19,19 @@ import {
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   projectPathMatches,
+  hydrateLocalChatSessionIndex,
+  summarizeLocalChatSession,
 } from "../utils/localChatPersistence";
+import {
+  parseSessionLogs,
+  type ConversationEvent,
+} from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
-import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
+import type {
+  LocalChatHarnessKind,
+  PermissionMode,
+  SessionLog,
+} from "../bindings";
 
 /**
  * Message types for the Claude chat
@@ -74,6 +85,220 @@ export type ChatMessage =
       timestamp: string;
     }
   | { kind: "error"; message: string; timestamp: string };
+
+function normalizeStoredChatMessage(value: unknown): ChatMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const timestamp =
+    typeof record.timestamp === "string"
+      ? record.timestamp
+      : new Date().toISOString();
+  switch (kind) {
+    case "user":
+      return typeof record.text === "string"
+        ? { kind: "user", text: record.text, timestamp }
+        : null;
+    case "assistant":
+      return typeof record.text === "string"
+        ? {
+            kind: "assistant",
+            text: record.text,
+            timestamp,
+            isPartial:
+              typeof record.isPartial === "boolean"
+                ? record.isPartial
+                : undefined,
+            parentToolUseId:
+              typeof record.parentToolUseId === "string"
+                ? record.parentToolUseId
+                : undefined,
+          }
+        : null;
+    case "tool_call":
+      return typeof record.toolName === "string" &&
+        typeof record.toolId === "string" &&
+        typeof record.input === "string"
+        ? {
+            kind: "tool_call",
+            toolName: record.toolName,
+            toolId: record.toolId,
+            input: record.input,
+            timestamp,
+            parentToolUseId:
+              typeof record.parentToolUseId === "string"
+                ? record.parentToolUseId
+                : undefined,
+          }
+        : null;
+    case "tool_result":
+      return typeof record.toolId === "string" &&
+        typeof record.result === "string"
+        ? {
+            kind: "tool_result",
+            toolId: record.toolId,
+            result: record.result,
+            isError:
+              typeof record.isError === "boolean" ? record.isError : false,
+            timestamp,
+            parentToolUseId:
+              typeof record.parentToolUseId === "string"
+                ? record.parentToolUseId
+                : undefined,
+          }
+        : null;
+    case "warning":
+      return typeof record.message === "string"
+        ? { kind: "warning", message: record.message, timestamp }
+        : null;
+    case "error":
+      return typeof record.message === "string"
+        ? { kind: "error", message: record.message, timestamp }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function jsonlLineTimestamp(line: string, fallback: string): string {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const timestamp = (parsed as { timestamp?: unknown }).timestamp;
+      if (typeof timestamp === "string" && timestamp.length > 0) {
+        return timestamp;
+      }
+    }
+  } catch {
+    // Invalid provider lines are ignored by parseSessionLogs; keep the fallback.
+  }
+  return fallback;
+}
+
+function providerJsonlLinesToSessionLogs(
+  lines: string[],
+  session: ChatSession
+): SessionLog[] {
+  const fallbackTimestamp = session.createdAt ?? new Date(0).toISOString();
+  return lines.map((line, index) => ({
+    id: `${session.id}:provider-jsonl:${index}`,
+    step_execution_id: session.id,
+    content: line,
+    created_at: jsonlLineTimestamp(line, fallbackTimestamp),
+  }));
+}
+
+function conversationEventToChatMessage(
+  event: ConversationEvent
+): ChatMessage | null {
+  switch (event.kind) {
+    case "user_message":
+      return {
+        kind: "user",
+        text: event.text,
+        timestamp: event.timestamp,
+      };
+    case "assistant_message":
+      return {
+        kind: "assistant",
+        text: event.text,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_call":
+      return {
+        kind: "tool_call",
+        toolName: event.toolName,
+        toolId: event.toolId,
+        input: JSON.stringify(event.input ?? {}),
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_result":
+      return {
+        kind: "tool_result",
+        toolId: event.toolUseId,
+        result: event.result,
+        isError: event.isError,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "session_start":
+      return {
+        kind: "session_start",
+        model: event.model,
+        timestamp: event.timestamp,
+      };
+    case "session_end":
+      return {
+        kind: "session_end",
+        durationMs: event.durationMs,
+        costUsd: event.costUsd,
+        numTurns: event.numTurns,
+        timestamp: event.timestamp,
+      };
+    case "thinking":
+      return event.text.startsWith("[error]")
+        ? {
+            kind: "error",
+            message: event.text.replace(/^\[error\]\s*/, ""),
+            timestamp: event.timestamp,
+          }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function providerJsonlLinesToChatMessages(
+  lines: string[],
+  session: ChatSession
+): ChatMessage[] {
+  return parseSessionLogs(providerJsonlLinesToSessionLogs(lines, session), {
+    includeUserMessages: true,
+  })
+    .map(conversationEventToChatMessage)
+    .filter((message): message is ChatMessage => message !== null);
+}
+
+function chatMessageKey(message: ChatMessage): string {
+  switch (message.kind) {
+    case "user":
+    case "assistant":
+      return `${message.kind}:${message.timestamp}:${message.text}`;
+    case "tool_call":
+      return `${message.kind}:${message.timestamp}:${message.toolId}:${message.toolName}:${message.input}`;
+    case "tool_result":
+      return `${message.kind}:${message.timestamp}:${message.toolId}:${message.result}`;
+    case "permission_request":
+      return `${message.kind}:${message.timestamp}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
+    case "session_start":
+      return `${message.kind}:${message.timestamp}:${message.model}`;
+    case "session_end":
+      return `${message.kind}:${message.timestamp}:${message.durationMs}:${message.numTurns}`;
+    case "warning":
+    case "error":
+      return `${message.kind}:${message.timestamp}:${message.message}`;
+  }
+}
+
+function mergeHydratedMessages(
+  hydrated: ChatMessage[],
+  current: ChatMessage[]
+): ChatMessage[] {
+  if (current.length === 0) return hydrated;
+  const currentKeys = new Set(current.map(chatMessageKey));
+  const missing = hydrated.filter(
+    (message) => !currentKeys.has(chatMessageKey(message))
+  );
+  return missing.length > 0 ? [...missing, ...current] : current;
+}
 
 function parseJsonObjectInput(input: string): Record<string, unknown> | null {
   try {
@@ -244,6 +469,8 @@ export interface ChatSession {
   backendSessionId: string | null;
   /** Provider-specific durable resume ID for this conversation. */
   providerResumeId: string | null;
+  /** Resolved provider JSONL path for direct transcript hydration. */
+  providerJsonlPath?: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected provider model alias for session startup overrides. */
@@ -268,8 +495,8 @@ export interface ChatSession {
   createdAt?: string;
   /** Durable local metadata for session-history ordering */
   updatedAt?: string;
-  /** Durable local preview for session-history display */
-  preview?: string;
+  /** Durable local message count without persisting transcript text */
+  messageCount?: number;
 }
 
 export interface ChatPane {
@@ -295,6 +522,8 @@ interface ChatStoreState {
   paneLayout: ChatPaneLayout;
   /** Whether the chat panel is visible */
   panelOpen: boolean;
+  /** Persisted metadata index used by history surfaces. */
+  localSessionSummaries: Record<string, LocalChatSessionSummary>;
 }
 
 interface ChatStoreActions {
@@ -319,8 +548,10 @@ interface ChatStoreActions {
   unsplitPanes: (paneId?: string) => void;
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
+  /** Hydrate local chat metadata from the app-managed index file. */
+  hydrateLocalSessionIndex: () => Promise<void>;
   /** Hydrate and focus a persisted local chat session */
-  selectPersistedSession: (sessionId: string) => boolean;
+  selectPersistedSession: (sessionId: string) => Promise<boolean>;
   /** Start a new local chat without reusing an existing session */
   startFreshSession: (label: string, projectPath?: string | null) => string;
   /** Delete one local persisted session and any in-memory copy */
@@ -416,6 +647,7 @@ const emptyState: ChatStoreState = {
   activeSessionId: null,
   paneLayout: emptyPaneLayout,
   panelOpen: false,
+  localSessionSummaries: {},
 };
 
 const GENERATED_TITLE_CONFIDENCE_THRESHOLD = 0.72;
@@ -456,7 +688,7 @@ function createLocalSession(
     streamingAssistant: null,
     createdAt: now,
     updatedAt: now,
-    preview: "No messages yet",
+    messageCount: 0,
   };
 }
 
@@ -474,7 +706,72 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     lifecycle: session.lifecycle ?? "idle",
     lifecycleError: null,
     streamingAssistant: null,
+    messageCount: session.messageCount ?? session.messages.length,
   };
+}
+
+function localSessionSummaryFor(
+  session: ChatSession
+): LocalChatSessionSummary | null {
+  if (
+    session.status !== "open" ||
+    isDisposableClosedLocalChatSession(session)
+  ) {
+    return null;
+  }
+  return summarizeLocalChatSession(session);
+}
+
+function localSessionSummariesFromSessions(
+  sessions: Record<string, ChatSession>
+): Record<string, LocalChatSessionSummary> {
+  return Object.fromEntries(
+    Object.values(sessions)
+      .map((session) => [session.id, localSessionSummaryFor(session)] as const)
+      .filter(
+        (entry): entry is [string, LocalChatSessionSummary] => entry[1] !== null
+      )
+  );
+}
+
+function hasStableLocalChatTitle(
+  session: Pick<LocalChatSessionSummary, "title" | "titleStatus">
+): boolean {
+  return (
+    !!session.title?.trim() &&
+    (session.titleStatus === "generated" || session.titleStatus === "manual")
+  );
+}
+
+function upsertLocalSessionSummary(
+  summaries: Record<string, LocalChatSessionSummary>,
+  session: ChatSession
+): Record<string, LocalChatSessionSummary> {
+  const summary = localSessionSummaryFor(session);
+  if (!summary) {
+    return omitLocalSessionSummary(summaries, session.id);
+  }
+  const existing = summaries[session.id];
+  if (
+    existing &&
+    hasStableLocalChatTitle(existing) &&
+    existing.title === summary.title
+  ) {
+    return summaries;
+  }
+  return {
+    ...summaries,
+    [session.id]: summary,
+  };
+}
+
+function omitLocalSessionSummary(
+  summaries: Record<string, LocalChatSessionSummary>,
+  sessionId: string
+): Record<string, LocalChatSessionSummary> {
+  const next = { ...summaries };
+  delete next[sessionId];
+  return next;
 }
 
 export function getLocalChatLifecycle(
@@ -731,6 +1028,117 @@ function collapsePaneLayout(
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
+  const loadStoredProviderMessages = async (
+    session: ChatSession
+  ): Promise<{ messages: ChatMessage[]; providerJsonlPath: string | null }> => {
+    if (!session.providerResumeId) {
+      return { messages: [], providerJsonlPath: null };
+    }
+    if (typeof commands.loadLocalChatSessionMessages !== "function") {
+      return { messages: [], providerJsonlPath: null };
+    }
+    try {
+      const result = await commands.loadLocalChatSessionMessages({
+        harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+        providerResumeId: session.providerResumeId,
+        projectPath: session.projectPath ?? null,
+        createdAt: session.createdAt ?? null,
+        providerJsonlPath: session.providerJsonlPath ?? null,
+      });
+      if (result.status !== "ok") {
+        if (result.status === "error") {
+          console.warn(
+            "Failed to load local chat provider transcript",
+            result.error
+          );
+        }
+        return { messages: [], providerJsonlPath: null };
+      }
+      const data = result.data as unknown;
+      const rawLines =
+        data &&
+        typeof data === "object" &&
+        Array.isArray((data as { lines?: unknown }).lines)
+          ? (data as { lines: unknown[] }).lines.filter(
+              (line): line is string => typeof line === "string"
+            )
+          : [];
+      const legacyRawMessages = Array.isArray(data)
+        ? data
+        : data &&
+            typeof data === "object" &&
+            Array.isArray((data as { messages?: unknown }).messages)
+          ? (data as { messages: unknown[] }).messages
+          : [];
+      const providerJsonlPath =
+        data &&
+        typeof data === "object" &&
+        typeof (data as { providerJsonlPath?: unknown }).providerJsonlPath ===
+          "string"
+          ? (data as { providerJsonlPath: string }).providerJsonlPath
+          : null;
+      const messages =
+        rawLines.length > 0
+          ? providerJsonlLinesToChatMessages(rawLines, session)
+          : legacyRawMessages
+              .map(normalizeStoredChatMessage)
+              .filter((message): message is ChatMessage => message !== null);
+      return { messages, providerJsonlPath };
+    } catch (error) {
+      console.warn("Failed to load local chat provider transcript", error);
+      return { messages: [], providerJsonlPath: null };
+    }
+  };
+
+  const hydrateProviderMessagesInPlace = (
+    sessionId: string,
+    session: ChatSession
+  ) => {
+    void loadStoredProviderMessages(session).then(
+      ({ messages, providerJsonlPath }) => {
+        if (messages.length === 0 && !providerJsonlPath) return;
+        set((state) => {
+          const current = state.sessions[sessionId];
+          if (!current) return state;
+          const merged = mergeHydratedMessages(messages, current.messages);
+          const nextProviderJsonlPath =
+            providerJsonlPath ?? current.providerJsonlPath ?? null;
+          if (
+            merged === current.messages &&
+            nextProviderJsonlPath === (current.providerJsonlPath ?? null)
+          ) {
+            return state;
+          }
+          const hydrated = {
+            ...current,
+            messages: merged,
+            messageCount: Math.max(merged.length, current.messageCount ?? 0),
+            providerJsonlPath: nextProviderJsonlPath,
+          };
+          if (
+            providerJsonlPath &&
+            providerJsonlPath !== current.providerJsonlPath
+          ) {
+            persistLocalChatSession(hydrated);
+          }
+          return {
+            sessions: {
+              ...state.sessions,
+              [sessionId]: hydrated,
+            },
+          };
+        });
+      }
+    );
+  };
+
+  const hydrateSessionIfAvailable = (sessionId: string) => {
+    const session = get().sessions[sessionId];
+    if (session) {
+      hydrateProviderMessagesInPlace(sessionId, session);
+    }
+  };
+
   const updateSession = (
     sessionId: string,
     updater: (session: ChatSession) => ChatSession,
@@ -742,16 +1150,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!session) return state;
       const next = updater(session);
       if (next === session) return state;
-      updated = next;
+      const normalized =
+        next.messages !== session.messages
+          ? { ...next, messageCount: next.messages.length }
+          : next;
+      updated = normalized;
       return {
         sessions: {
           ...state.sessions,
-          [sessionId]: next,
+          [sessionId]: normalized,
         },
       };
     });
-    if (updated && options.persist !== false) {
-      persistLocalChatSession(updated);
+    const updatedSession = updated as ChatSession | null;
+    if (updatedSession && options.persist !== false) {
+      persistLocalChatSession(updatedSession);
+      set((state) => ({
+        localSessionSummaries: upsertLocalSessionSummary(
+          state.localSessionSummaries,
+          updatedSession
+        ),
+      }));
     }
   };
 
@@ -762,6 +1181,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     openSession: (label, projectPath) => {
       const existing = findMatchingSession(get().sessions, projectPath);
       if (existing) {
+        hydrateSessionIfAvailable(existing);
         set((state) => ({
           ...focusSessionInPaneLayout(state, existing),
           panelOpen: true,
@@ -789,6 +1209,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             panelOpen: true,
           };
         });
+        hydrateProviderMessagesInPlace(hydrated.id, hydrated);
         return hydrated.id;
       }
 
@@ -801,6 +1222,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const nextSessions = { ...state.sessions, [id]: session };
         return {
           sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            session
+          ),
           ...focusSessionInPaneLayout({ ...state, sessions: nextSessions }, id),
           panelOpen: true,
         };
@@ -817,6 +1242,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     focusSession: (sessionId) => {
+      hydrateSessionIfAvailable(sessionId);
       set((state) => focusSessionInPaneLayout(state, sessionId));
     },
 
@@ -839,6 +1265,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     bindPaneToSession: (paneId, sessionId) => {
+      hydrateSessionIfAvailable(sessionId);
       let bound = false;
       set((state) => {
         const session = state.sessions[sessionId];
@@ -888,6 +1315,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const nextSessions = { ...state.sessions, [session.id]: session };
         return {
           sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            session
+          ),
           ...addSessionPane({ ...state, sessions: nextSessions }, session.id),
           panelOpen: true,
         };
@@ -903,13 +1334,36 @@ export const useChatStore = create<ChatStore>((set, get) => {
       set((state) => collapsePaneLayout(state, paneId));
     },
 
-    listLocalSessions: (projectPath) => {
-      return listPersistedLocalChatSessions(projectPath);
+    listLocalSessions: (projectPath) =>
+      [
+        ...listPersistedLocalChatSessions(projectPath),
+        ...Object.values(get().localSessionSummaries),
+      ]
+        .filter(
+          (session, index, sessions) =>
+            sessions.findIndex((candidate) => candidate.id === session.id) ===
+            index
+        )
+        .filter((session) =>
+          projectPathMatches(session.projectPath, projectPath)
+        )
+        .sort(compareLocalChatSessionRecency),
+
+    hydrateLocalSessionIndex: async () => {
+      const { sessions } = await hydrateLocalChatSessionIndex();
+      set((state) => ({
+        localSessionSummaries: localSessionSummariesFromSessions(sessions),
+        sessions: {
+          ...sessions,
+          ...state.sessions,
+        },
+      }));
     },
 
-    selectPersistedSession: (sessionId) => {
+    selectPersistedSession: async (sessionId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
+        hydrateProviderMessagesInPlace(sessionId, existing);
         let reattached: ChatSession | null = null;
         set((state) => {
           const current = state.sessions[sessionId];
@@ -933,14 +1387,34 @@ export const useChatStore = create<ChatStore>((set, get) => {
           };
         });
         if (reattached) {
-          persistLocalChatSession(reattached);
+          const reattachedSession = reattached;
+          persistLocalChatSession(reattachedSession);
+          set((state) => ({
+            localSessionSummaries: upsertLocalSessionSummary(
+              state.localSessionSummaries,
+              reattachedSession
+            ),
+          }));
         }
         return true;
       }
 
       const persisted = loadPersistedLocalChatSession(sessionId);
       if (!persisted || persisted.status !== "open") return false;
-      const hydrated = hydrateLocalSession(persisted);
+      const { messages, providerJsonlPath } =
+        await loadStoredProviderMessages(persisted);
+      const hydrated = hydrateLocalSession({
+        ...persisted,
+        messages,
+        providerJsonlPath:
+          providerJsonlPath ?? persisted.providerJsonlPath ?? null,
+      });
+      if (
+        providerJsonlPath &&
+        providerJsonlPath !== persisted.providerJsonlPath
+      ) {
+        persistLocalChatSession(hydrated);
+      }
       set((state) => {
         const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
         return {
@@ -965,6 +1439,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const nextSessions = { ...state.sessions, [session.id]: session };
         return {
           sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            session
+          ),
           ...focusSessionInPaneLayout(
             {
               ...state,
@@ -982,56 +1460,64 @@ export const useChatStore = create<ChatStore>((set, get) => {
       markLocalChatSessionCleared(sessionId);
       discardStashedChatSession(sessionId);
       set((state) => {
-        if (!state.sessions[sessionId]) return state;
-        return removeSessionFromRuntimeState(state, sessionId);
+        const localSessionSummaries = omitLocalSessionSummary(
+          state.localSessionSummaries,
+          sessionId
+        );
+        if (!state.sessions[sessionId]) return { localSessionSummaries };
+        return {
+          ...removeSessionFromRuntimeState(state, sessionId),
+          localSessionSummaries,
+        };
       });
     },
 
     addMessage: (sessionId, message) => {
-      updateSession(sessionId, (session) => {
-        const messages = [...session.messages];
-        if (message.kind === "tool_call") {
-          const existingIndex = messages.findIndex(
-            (existing) =>
-              existing.kind === "tool_call" &&
-              existing.toolId === message.toolId
-          );
-          if (existingIndex !== -1) {
-            const existing = messages[existingIndex] as Extract<
-              ChatMessage,
-              { kind: "tool_call" }
-            >;
-            messages[existingIndex] = {
-              ...existing,
-              ...message,
-              input: mergeToolCallInput(existing.input, message.input),
-              timestamp: existing.timestamp,
-            };
+      updateSession(
+        sessionId,
+        (session) => {
+          const messages = [...session.messages];
+          if (message.kind === "tool_call") {
+            const existingIndex = messages.findIndex(
+              (existing) =>
+                existing.kind === "tool_call" &&
+                existing.toolId === message.toolId
+            );
+            if (existingIndex !== -1) {
+              const existing = messages[existingIndex] as Extract<
+                ChatMessage,
+                { kind: "tool_call" }
+              >;
+              messages[existingIndex] = {
+                ...existing,
+                ...message,
+                input: mergeToolCallInput(existing.input, message.input),
+                timestamp: existing.timestamp,
+              };
+              return {
+                ...session,
+                messages,
+                updatedAt: message.timestamp,
+              };
+            }
+          }
+          if (message.kind === "assistant" && message.parentToolUseId) {
             return {
               ...session,
-              messages,
+              messages: coalesceParentAssistantMessage(messages, message),
               updatedAt: message.timestamp,
             };
+          } else {
+            messages.push(message);
           }
-        }
-        if (
-          message.kind === "assistant" &&
-          message.parentToolUseId
-        ) {
           return {
             ...session,
-            messages: coalesceParentAssistantMessage(messages, message),
+            messages,
             updatedAt: message.timestamp,
           };
-        } else {
-          messages.push(message);
-        }
-        return {
-          ...session,
-          messages,
-          updatedAt: message.timestamp,
-        };
-      });
+        },
+        { persist: message.kind === "user" }
+      );
     },
 
     updateLastAssistantMessage: (sessionId, text) => {
@@ -1123,10 +1609,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               : streaming.timestamp;
           const messages =
             commitToMessages && streaming.text
-              ? lastCompleteAssistantHasText(
-                  session.messages,
-                  streaming.text
-                )
+              ? lastCompleteAssistantHasText(session.messages, streaming.text)
                 ? session.messages
                 : [
                     ...session.messages,
@@ -1303,8 +1786,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (isDisposableClosedLocalChatSession(closedSession)) {
         persistLocalChatSession(closedSession);
         set((state) => {
-          if (!state.sessions[sessionId]) return state;
-          return removeSessionFromRuntimeState(state, sessionId);
+          const localSessionSummaries = omitLocalSessionSummary(
+            state.localSessionSummaries,
+            sessionId
+          );
+          if (!state.sessions[sessionId]) return { localSessionSummaries };
+          return {
+            ...removeSessionFromRuntimeState(state, sessionId),
+            localSessionSummaries,
+          };
         });
         return;
       }
@@ -1319,6 +1809,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
       set((state) => {
         const session = state.sessions[sessionId];
         if (!session) return state;
+        const localSessionSummaries = omitLocalSessionSummary(
+          state.localSessionSummaries,
+          sessionId
+        );
         return {
           sessions: {
             ...state.sessions,
@@ -1339,9 +1833,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
               lifecycleError: null,
               streamingAssistant: null,
               updatedAt: timestamp,
-              preview: "No messages yet",
+              messageCount: 0,
             },
           },
+          localSessionSummaries,
         };
       });
     },
@@ -1351,6 +1846,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setPanelOpen: (open) => {
+      if (open) {
+        const activeSessionId = get().activeSessionId;
+        if (activeSessionId) {
+          hydrateSessionIfAvailable(activeSessionId);
+        }
+      }
       set({ panelOpen: open });
     },
 
@@ -1386,6 +1887,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         );
         return {
           sessions: nextSessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updated
+          ),
           activeSessionId: nextActiveSessionId,
           paneLayout: nextPaneLayout,
         };
@@ -1457,13 +1962,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return {
           sessions: nextSessions,
           ...addSessionPane(nextState, sessionId),
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updated
+          ),
           panelOpen: true,
         };
       });
       if (wasCleared) {
         clearLocalChatSessionCleared(sessionId);
       } else if (updated) {
-        persistLocalChatSession(updated);
+        const updatedSession = updated;
+        persistLocalChatSession(updatedSession);
+        set((state) => ({
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updatedSession
+          ),
+        }));
       }
     },
 

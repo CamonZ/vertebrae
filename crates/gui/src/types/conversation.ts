@@ -15,6 +15,8 @@ import type { SessionLog } from "../bindings";
 /** Content item types in Claude messages */
 export type ClaudeContentItem =
   | { type: "text"; text: string }
+  | { type: "input_text"; text: string }
+  | { type: "output_text"; text: string }
   | {
       type: "tool_use";
       id: string;
@@ -30,7 +32,7 @@ export type ClaudeContentItem =
 
 export interface ClaudeMessageEnvelope {
   id?: string;
-  content?: ClaudeContentItem[];
+  content?: ClaudeContentItem[] | string;
   model?: string;
   role?: string;
 }
@@ -106,6 +108,12 @@ interface BaseEvent {
    * Undefined on the main agent's own events.
    */
   parentToolUseId?: string;
+}
+
+/** User prompt text from provider JSONL, emitted only for full transcript replay. */
+export interface UserMessageEvent extends BaseEvent {
+  kind: "user_message";
+  text: string;
 }
 
 /** Session start event - from 'system' type with subtype 'init' */
@@ -281,6 +289,7 @@ export interface TodoListEvent extends BaseEvent {
 
 /** Union of all conversation events */
 export type ConversationEvent =
+  | UserMessageEvent
   | SessionStartEvent
   | SessionEndEvent
   | ThinkingEvent
@@ -298,6 +307,15 @@ export type ConversationEvent =
 // ============================================================================
 // Parsing Utilities
 // ============================================================================
+
+export interface ParseSessionLogsOptions {
+  /**
+   * Include user-authored transcript messages. Traces leave this off because
+   * step prompts are already represented by StepExecution.prompt; local chat
+   * restore enables it to rebuild the complete conversation from provider JSONL.
+   */
+  includeUserMessages?: boolean;
+}
 
 /** Get a human-friendly display name for a tool */
 function getToolDisplayName(name: string): string {
@@ -362,10 +380,47 @@ function readNumber(value: unknown): number | undefined {
 
 function readClaudeMessageContent(
   message: ClaudeRawMessage["message"]
-): ClaudeContentItem[] | undefined {
+): ClaudeMessageEnvelope["content"] | undefined {
   return typeof message === "object" && message !== null && "content" in message
     ? message.content
     : undefined;
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const record = item as Record<string, unknown>;
+      return (
+        readString(record.text) ??
+        readString(record.input_text) ??
+        readString(record.output_text) ??
+        ""
+      );
+    })
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Preserve the original argument string under a stable key.
+  }
+  return { arguments: value };
+}
+
+function shouldKeepUserMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length > 0 && !trimmed.startsWith("# AGENTS.md instructions for ")
+  );
 }
 
 function readNotificationMessage(raw: ClaudeRawMessage): string | undefined {
@@ -408,7 +463,8 @@ function rateLimitEvent(
  */
 export function parseClaudeMessage(
   raw: ClaudeRawMessage,
-  timestamp: string
+  timestamp: string,
+  options: ParseSessionLogsOptions = {}
 ): ConversationEvent[] {
   const events: ConversationEvent[] = [];
 
@@ -469,7 +525,7 @@ export function parseClaudeMessage(
     case "assistant":
       {
         const content = readClaudeMessageContent(raw.message);
-        if (content) {
+        if (Array.isArray(content)) {
           for (const item of content) {
             if (item.type === "text" && item.text) {
               events.push({
@@ -497,7 +553,13 @@ export function parseClaudeMessage(
     case "user":
       {
         const content = readClaudeMessageContent(raw.message);
-        if (content) {
+        if (options.includeUserMessages) {
+          const text = contentText(content).trim();
+          if (shouldKeepUserMessage(text)) {
+            events.push({ kind: "user_message", timestamp, text });
+          }
+        }
+        if (Array.isArray(content)) {
           for (const item of content) {
             if (item.type === "tool_result") {
               const toolResultContent = item.content;
@@ -656,6 +718,22 @@ export interface CodexRawMessage {
   message?: string;
 }
 
+export interface CodexRolloutRawMessage {
+  type: "response_item" | "event_msg" | "session_meta" | string;
+  timestamp?: string;
+  payload?: {
+    type?: string;
+    role?: string;
+    content?: unknown;
+    call_id?: string;
+    id?: string;
+    name?: string;
+    arguments?: unknown;
+    output?: unknown;
+    message?: string;
+  };
+}
+
 /**
  * True if a parsed JSON object looks like a Codex `exec --json` event.
  *
@@ -674,6 +752,12 @@ function isCodexRawMessage(raw: unknown): raw is CodexRawMessage {
     t.startsWith("item.") ||
     t === "error"
   );
+}
+
+function isCodexRolloutRawMessage(raw: unknown): raw is CodexRolloutRawMessage {
+  if (raw === null || typeof raw !== "object") return false;
+  const t = (raw as { type?: unknown }).type;
+  return t === "response_item" || t === "event_msg" || t === "session_meta";
 }
 
 /**
@@ -952,6 +1036,74 @@ export function parseCodexMessage(
   return events;
 }
 
+export function parseCodexRolloutMessage(
+  raw: CodexRolloutRawMessage,
+  timestamp: string,
+  options: ParseSessionLogsOptions = {}
+): ConversationEvent[] {
+  const events: ConversationEvent[] = [];
+  if (raw.type !== "response_item") return events;
+  const payload = raw.payload;
+  if (!payload || typeof payload !== "object") return events;
+
+  switch (payload.type) {
+    case "message": {
+      const text = contentText(payload.content).trim();
+      if (!text) break;
+      if (payload.role === "user") {
+        if (options.includeUserMessages && shouldKeepUserMessage(text)) {
+          events.push({ kind: "user_message", timestamp, text });
+        }
+      } else if (payload.role === "assistant") {
+        events.push({ kind: "assistant_message", timestamp, text });
+      }
+      break;
+    }
+    case "function_call": {
+      const toolId =
+        readString(payload.call_id) ?? readString(payload.id) ?? "";
+      if (!toolId) break;
+      const toolName = readString(payload.name) ?? "tool";
+      const input =
+        typeof payload.arguments === "string"
+          ? payload.arguments
+          : payload.arguments && typeof payload.arguments === "object"
+            ? (payload.arguments as Record<string, unknown>)
+            : {};
+      const inputObject =
+        typeof input === "string" ? parseJsonObject(input) : input;
+      events.push({
+        kind: "tool_call",
+        timestamp,
+        toolId,
+        toolName,
+        displayName: getToolDisplayName(toolName),
+        icon: getToolIcon(toolName),
+        summary: getToolSummary(toolName, inputObject),
+        input: inputObject,
+      });
+      break;
+    }
+    case "function_call_output": {
+      const toolUseId =
+        readString(payload.call_id) ?? readString(payload.id) ?? "";
+      if (!toolUseId) break;
+      events.push({
+        kind: "tool_result",
+        timestamp,
+        toolUseId,
+        isError: false,
+        result: codexResultToString(payload.output),
+      });
+      break;
+    }
+    default:
+      break;
+  }
+
+  return events;
+}
+
 /** Build a TodoListEvent from a Codex item, returning null if the shape is unusable. */
 function makeTodoListEvent(
   item: CodexItem,
@@ -1026,7 +1178,10 @@ function claudeSnapshotKey(
  * top-level `error` event can emit a `session_end` with the right `numTurns`.
  * Entries that fail to parse as JSON are skipped.
  */
-export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
+export function parseSessionLogs(
+  logs: SessionLog[],
+  options: ParseSessionLogsOptions = {}
+): ConversationEvent[] {
   const events: ConversationEvent[] = [];
   // One Codex state per (step_execution_id) so concurrent executions don't
   // share turn counts. Anthropic logs ignore this map.
@@ -1060,6 +1215,10 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
         }
         events.push(ev);
       }
+    } else if (isCodexRolloutRawMessage(raw)) {
+      for (const ev of parseCodexRolloutMessage(raw, ts, options)) {
+        events.push(ev);
+      }
     } else {
       const execId = log.step_execution_id ?? "";
       let state = claudeStateByExecution.get(execId);
@@ -1067,7 +1226,11 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
         state = { latestSnapshotByKey: new Map() };
         claudeStateByExecution.set(execId, state);
       }
-      for (const ev of parseClaudeMessage(raw as ClaudeRawMessage, ts)) {
+      for (const ev of parseClaudeMessage(
+        raw as ClaudeRawMessage,
+        ts,
+        options
+      )) {
         const key = claudeSnapshotKey(ev, execId);
         if (key) {
           const priorIndex = state.latestSnapshotByKey.get(key);

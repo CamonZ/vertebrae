@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
@@ -12,6 +12,7 @@ import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
+import { buildSpawnOutline, isAgentSpawnTool } from "./sessionListUtils";
 
 /** Exit-animation duration (ms). Must match `.hc-panel.is-closing` (--t-base). */
 const EXIT_MS = 180;
@@ -40,6 +41,7 @@ export function ChatWindowManager() {
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
+  const localSessionSummaries = useChatStore((s) => s.localSessionSummaries);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(
@@ -48,17 +50,40 @@ export function ChatWindowManager() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const sessionList = Object.values(sessions);
-  const sessionChangeToken = sessionList
+  const sessionChangeToken = Object.values(localSessionSummaries)
     .map(
       (session) =>
         `${session.id}:${session.projectPath ?? ""}:${session.updatedAt ?? ""}:${
           session.title ?? ""
-        }:${session.messages.length}`
+        }:${session.providerResumeId ?? ""}:${session.lifecycle}`
     )
     .join("\0");
   const activeSession: ChatSession | null = activeSessionId
     ? sessions[activeSessionId]
     : null;
+  const spawnOutlineToken = sessionList
+    .map((session) =>
+      session.messages
+        .filter(
+          (message): message is Extract<ChatSession["messages"][number], { kind: "tool_call" }> =>
+            message.kind === "tool_call" &&
+            !message.parentToolUseId &&
+            isAgentSpawnTool(message.toolName)
+        )
+        .map((message) => `${session.id}:${message.toolId}:${message.input}`)
+        .join("\0")
+    )
+    .join("\0");
+  const spawnOutlineBySessionId = useMemo(() => {
+    const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
+    for (const session of sessionList) {
+      outlines.set(session.id, buildSpawnOutline(session.messages));
+    }
+    return outlines;
+    // Intentionally keyed by top-level agent tool-call inputs only; assistant
+    // streaming text should not re-render the mini-panel outline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spawnOutlineToken]);
 
   const {
     panelRef,
@@ -145,9 +170,9 @@ export function ChatWindowManager() {
   }, [isMaximized, toggleMaximized]);
 
   const selectHistorySessionForActivePane = useCallback(
-    (sessionId: string) => {
+    async (sessionId: string) => {
       setDeleteError(null);
-      const selected = selectPersistedSession(sessionId);
+      const selected = await selectPersistedSession(sessionId);
       if (!selected) {
         bumpHistoryRevision();
       }
@@ -252,6 +277,7 @@ export function ChatWindowManager() {
             <LocalChatMiniPanel
               activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
               sessionGroups={localSessionGroups}
+              spawnOutlineBySessionId={spawnOutlineBySessionId}
               projectWarning={projectGroupingWarning}
               onStartFresh={() => {
                 void startFreshActiveSession().then((started) => {

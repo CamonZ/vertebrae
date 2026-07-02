@@ -39,11 +39,7 @@ describe("ChatMessages", () => {
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
     ];
-    render(
-      <ChatMessages
-        {...defaultProps({ messages, isEmpty: false })}
-      />
-    );
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
     expect(
       screen.queryByText("Create, edit, and delete tasks, steps, and workflows")
     ).not.toBeInTheDocument();
@@ -51,9 +47,7 @@ describe("ChatMessages", () => {
 
   it("hides the empty state when active even with no messages", () => {
     render(
-      <ChatMessages
-        {...defaultProps({ isEmpty: true, isActive: true })}
-      />
+      <ChatMessages {...defaultProps({ isEmpty: true, isActive: true })} />
     );
     expect(
       screen.queryByText("Create, edit, and delete tasks, steps, and workflows")
@@ -66,11 +60,7 @@ describe("ChatMessages", () => {
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello world", timestamp: "2024-01-01T12:00:00Z" },
     ];
-    render(
-      <ChatMessages
-        {...defaultProps({ messages, isEmpty: false })}
-      />
-    );
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
     expect(screen.getByText("Hello world")).toBeInTheDocument();
   });
 
@@ -82,12 +72,29 @@ describe("ChatMessages", () => {
         timestamp: "2024-01-01T12:00:00Z",
       },
     ];
-    render(
-      <ChatMessages
-        {...defaultProps({ messages, isEmpty: false })}
-      />
-    );
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
     expect(screen.getByText("Hi there")).toBeInTheDocument();
+  });
+
+  it("renders the agent spawn marker without inlining child-agent transcript", () => {
+    const messages: ChatMessage[] = [
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent-1",
+        input: JSON.stringify({ description: "Inspect repo" }),
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+      {
+        kind: "assistant",
+        text: "child-only prose",
+        timestamp: "2024-01-01T12:00:01Z",
+        parentToolUseId: "agent-1",
+      },
+    ];
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.queryByText("child-only prose")).not.toBeInTheDocument();
   });
 
   it("renders permission request messages", () => {
@@ -101,11 +108,7 @@ describe("ChatMessages", () => {
         timestamp: "2024-01-01T12:00:00Z",
       },
     ];
-    render(
-      <ChatMessages
-        {...defaultProps({ messages, isEmpty: false })}
-      />
-    );
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
     expect(screen.getByText("Bash")).toBeInTheDocument();
     expect(screen.getByText("Run command")).toBeInTheDocument();
     expect(screen.getByText("Permission required")).toBeInTheDocument();

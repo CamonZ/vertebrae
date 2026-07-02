@@ -807,6 +807,39 @@ async inferLocalChatSessionTitle(input: InferLocalChatSessionTitleInput) : Promi
 }
 },
 /**
+ * Load the app-managed local chat metadata index.
+ */
+async loadLocalChatSessionIndex() : Promise<Result<LocalChatSessionIndexEntry[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_index") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Save the app-managed local chat metadata index atomically.
+ */
+async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_local_chat_session_index", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Load durable transcript messages from the owning harness JSONL store.
+ */
+async loadLocalChatSessionMessages(input: LoadLocalChatSessionMessagesInput) : Promise<Result<LoadLocalChatSessionMessagesOutput, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_messages", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Resolve a local chat permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
@@ -1109,6 +1142,8 @@ skills_target: string }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type LoadLocalChatSessionMessagesInput = { harness: LocalChatHarnessKind; providerResumeId: string; projectPath: string | null; createdAt: string | null; providerJsonlPath: string | null }
+export type LoadLocalChatSessionMessagesOutput = { lines: string[]; providerJsonlPath: string | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
@@ -1117,6 +1152,7 @@ export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; error: string }
+export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; providerJsonlPath: string | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[] }
 export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; model: string; context_tokens: number; context_window: number }
 export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; warning: string }
@@ -1204,6 +1240,7 @@ url: string;
  * Whether a non-empty API token is configured.
  */
 has_token: boolean }
+export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEntry[] }
 /**
  * A saved project in the project list
  */

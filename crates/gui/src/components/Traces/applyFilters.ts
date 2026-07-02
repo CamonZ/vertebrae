@@ -42,6 +42,8 @@ export function matchesSearch(
   const needle = search.toLowerCase();
   const ev = tagged.event;
   switch (ev.kind) {
+    case "user_message":
+      return ev.text.toLowerCase().includes(needle);
     case "thinking":
       return ev.text.toLowerCase().includes(needle);
     case "tool_call":

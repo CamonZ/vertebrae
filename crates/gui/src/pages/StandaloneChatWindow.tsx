@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ChatWindow } from "../components/ChatWindow/ChatWindow";
 import { WindowLayout } from "../components/WindowLayout";
@@ -21,6 +21,7 @@ import { loadPersistedLocalChatSession } from "../utils/localChatPersistence";
 export function StandaloneChatWindow() {
   const [params] = useSearchParams();
   const sessionId = params.get("sessionId");
+  const selectPersistedSession = useChatStore((state) => state.selectPersistedSession);
 
   const seededRef = useRef(false);
   if (!seededRef.current && sessionId) {
@@ -38,6 +39,11 @@ export function StandaloneChatWindow() {
       }));
     }
   }
+
+  useEffect(() => {
+    if (!sessionId) return;
+    void selectPersistedSession(sessionId);
+  }, [selectPersistedSession, sessionId]);
 
   if (!sessionId) {
     return (

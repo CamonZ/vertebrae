@@ -1,6 +1,9 @@
+import { waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { commands } from "../bindings";
 import { useChatStore } from "./chatStore";
 import {
+  clearPersistedLocalChatSessions,
   isLocalChatSessionCleared,
   loadPersistedLocalChatSession,
   persistLocalChatSession,
@@ -9,12 +12,14 @@ import {
 describe("chatStore", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearPersistedLocalChatSessions();
     // Reset store to initial state
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
+      localSessionSummaries: {},
     });
   });
 
@@ -193,13 +198,7 @@ describe("chatStore", () => {
         model: "claude-sonnet-4",
         tokenUsage: { used: 50, max: 200000 },
       });
-      expect(useChatStore.getState().sessions[id].messages).toEqual([
-        {
-          kind: "user",
-          text: "remember this",
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      ]);
+      expect(useChatStore.getState().sessions[id].messages).toEqual([]);
     });
 
     it("persists selected model and records it as the last used model", () => {
@@ -300,14 +299,14 @@ describe("chatStore", () => {
     it("does not reuse an in-memory unscoped session for a requested project path", () => {
       useChatStore.setState({
         sessions: {
-          legacy: {
-            id: "legacy",
-            label: "Legacy",
+          noProject: {
+            id: "noProject",
+            label: "No Project",
             messages: [],
             status: "open",
             harness: "claude",
             backendSessionId: null,
-            providerResumeId: "conv-legacy",
+            providerResumeId: "conv-no-project",
             projectPath: null,
           },
         },
@@ -317,7 +316,7 @@ describe("chatStore", () => {
 
       const opened = useChatStore.getState().openSession("Repo A", "/repo-a");
 
-      expect(opened).not.toBe("legacy");
+      expect(opened).not.toBe("noProject");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
         label: "Repo A",
         projectPath: "/repo-a",
@@ -328,14 +327,14 @@ describe("chatStore", () => {
     it("reuses an in-memory no-project session when the requested project path is null", () => {
       useChatStore.setState({
         sessions: {
-          legacy: {
-            id: "legacy",
-            label: "Legacy",
+          noProject: {
+            id: "noProject",
+            label: "No Project",
             messages: [],
             status: "open",
             harness: "claude",
             backendSessionId: null,
-            providerResumeId: "conv-legacy",
+            providerResumeId: "conv-no-project",
             projectPath: null,
           },
         },
@@ -345,11 +344,11 @@ describe("chatStore", () => {
 
       const opened = useChatStore.getState().openSession("New Chat", null);
 
-      expect(opened).toBe("legacy");
+      expect(opened).toBe("noProject");
       expect(useChatStore.getState().sessions[opened]).toMatchObject({
-        label: "Legacy",
+        label: "No Project",
         projectPath: null,
-        providerResumeId: "conv-legacy",
+        providerResumeId: "conv-no-project",
       });
     });
 
@@ -577,12 +576,11 @@ describe("chatStore", () => {
         useChatStore.getState().listLocalSessions("/repo-b")[0]
       ).toMatchObject({
         label: "Repo B",
-        preview: "from repo b",
         projectPath: "/repo-b",
       });
     });
 
-    it("selects a persisted session into the active store without duplicating it", () => {
+    it("selects a persisted session into the active store without duplicating it", async () => {
       persistLocalChatSession({
         id: "persisted",
         label: "Persisted Task",
@@ -600,9 +598,9 @@ describe("chatStore", () => {
         projectPath: "/repo",
       });
 
-      expect(useChatStore.getState().selectPersistedSession("persisted")).toBe(
-        true
-      );
+      await expect(
+        useChatStore.getState().selectPersistedSession("persisted")
+      ).resolves.toBe(true);
       expect(useChatStore.getState().activeSessionId).toBe("persisted");
       expect(Object.keys(useChatStore.getState().sessions)).toEqual([
         "persisted",
@@ -614,20 +612,157 @@ describe("chatStore", () => {
         streamingAssistant: null,
       });
 
-      expect(useChatStore.getState().selectPersistedSession("persisted")).toBe(
-        true
-      );
+      await expect(
+        useChatStore.getState().selectPersistedSession("persisted")
+      ).resolves.toBe(true);
       expect(Object.keys(useChatStore.getState().sessions)).toEqual([
         "persisted",
       ]);
     });
 
-    it("focuses an already-loaded session without dropping live runtime state", () => {
+    it("hydrates provider messages when reusing a metadata-only runtime session", async () => {
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
+        status: "ok",
+        data: {
+          lines: [
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:00Z",
+              type: "response_item",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "stored answer" }],
+              },
+            }),
+          ],
+          providerJsonlPath:
+            "/Users/test/.codex/sessions/2026/01/01/rollout-thread-1.jsonl",
+        },
+      });
+      useChatStore.setState({
+        sessions: {
+          metadata: {
+            id: "metadata",
+            label: "Metadata",
+            messages: [],
+            status: "open",
+            harness: "codex",
+            backendSessionId: null,
+            providerResumeId: "thread-1",
+            projectPath: "/repo",
+            createdAt: "2026-01-01T00:00:00Z",
+            messageCount: 1,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      const reopened = useChatStore.getState().openSession("New Chat", "/repo");
+
+      expect(reopened).toBe("metadata");
+      await waitFor(() =>
+        expect(useChatStore.getState().sessions.metadata.messages).toEqual([
+          {
+            kind: "assistant",
+            text: "stored answer",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ])
+      );
+      expect(commands.loadLocalChatSessionMessages).toHaveBeenCalledWith({
+        harness: "codex",
+        providerResumeId: "thread-1",
+        projectPath: "/repo",
+        createdAt: "2026-01-01T00:00:00Z",
+        providerJsonlPath: null,
+      });
+      expect(useChatStore.getState().sessions.metadata.providerJsonlPath).toBe(
+        "/Users/test/.codex/sessions/2026/01/01/rollout-thread-1.jsonl"
+      );
+      expect(loadPersistedLocalChatSession("metadata")).toMatchObject({
+        providerJsonlPath:
+          "/Users/test/.codex/sessions/2026/01/01/rollout-thread-1.jsonl",
+      });
+    });
+
+    it("keeps live messages that arrive before provider hydration finishes", async () => {
+      let resolveMessages!: (
+        value: Awaited<ReturnType<typeof commands.loadLocalChatSessionMessages>>
+      ) => void;
+      const pendingMessages = new Promise<
+        Awaited<ReturnType<typeof commands.loadLocalChatSessionMessages>>
+      >((resolve) => {
+        resolveMessages = resolve;
+      });
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockReturnValue(
+        pendingMessages
+      );
+      useChatStore.setState({
+        sessions: {
+          metadata: {
+            id: "metadata",
+            label: "Metadata",
+            messages: [],
+            status: "open",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-1",
+            projectPath: "/repo",
+            messageCount: 1,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      useChatStore.getState().focusSession("metadata");
+      useChatStore.getState().addMessage("metadata", {
+        kind: "user",
+        text: "live message",
+        timestamp: "2026-01-01T00:00:01Z",
+      });
+      resolveMessages({
+        status: "ok",
+        data: {
+          lines: [
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:00Z",
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "stored answer" }],
+              },
+            }),
+          ],
+          providerJsonlPath: null,
+        },
+      });
+
+      await waitFor(() =>
+        expect(useChatStore.getState().sessions.metadata.messages).toEqual([
+          {
+            kind: "assistant",
+            text: "stored answer",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+          {
+            kind: "user",
+            text: "live message",
+            timestamp: "2026-01-01T00:00:01Z",
+          },
+        ])
+      );
+    });
+
+    it("focuses an already-loaded session without dropping live runtime state", async () => {
       const id = useChatStore.getState().openSession("Live Task", "/repo");
       useChatStore.getState().setBackendSessionId(id, "live-backend");
       useChatStore.getState().setSessionLifecycle(id, "streaming");
 
-      expect(useChatStore.getState().selectPersistedSession(id)).toBe(true);
+      await expect(
+        useChatStore.getState().selectPersistedSession(id)
+      ).resolves.toBe(true);
 
       expect(useChatStore.getState().sessions[id]).toMatchObject({
         backendSessionId: "live-backend",
@@ -635,7 +770,7 @@ describe("chatStore", () => {
       });
     });
 
-    it("reattaches an already-loaded detached session when selected from history", () => {
+    it("reattaches an already-loaded detached session when selected from history", async () => {
       const first = useChatStore.getState().openSession("Pane One", "/repo");
       const second = useChatStore
         .getState()
@@ -659,9 +794,9 @@ describe("chatStore", () => {
         },
       }));
 
-      expect(useChatStore.getState().selectPersistedSession("detached")).toBe(
-        true
-      );
+      await expect(
+        useChatStore.getState().selectPersistedSession("detached")
+      ).resolves.toBe(true);
 
       const state = useChatStore.getState();
       expect(state.sessions.detached.isDetached).toBe(false);
@@ -1084,13 +1219,7 @@ describe("chatStore", () => {
       ]);
       expect(session.messages[0].timestamp).toBe("2024-01-02T00:00:00.000Z");
       expect(session.updatedAt).toBe("2024-01-02T00:00:00.000Z");
-      expect(loadPersistedLocalChatSession(id)?.messages).toMatchObject([
-        {
-          kind: "assistant",
-          text: "Partial answer",
-          isPartial: false,
-        },
-      ]);
+      expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
     it("does not recommit streaming text when the final message is already durable", () => {
@@ -1122,7 +1251,7 @@ describe("chatStore", () => {
         },
       ]);
       expect(session.messages).toHaveLength(1);
-      expect(loadPersistedLocalChatSession(id)?.messages).toHaveLength(1);
+      expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
   });
 
@@ -1194,15 +1323,13 @@ describe("chatStore", () => {
       });
     });
 
-    it("persists the finalized assistant message", () => {
+    it("does not persist the finalized assistant transcript", () => {
       const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().updateLastAssistantMessage(id, "partial");
 
       useChatStore.getState().finalizeLastAssistantMessage(id, "complete");
 
-      expect(loadPersistedLocalChatSession(id)?.messages).toMatchObject([
-        { kind: "assistant", text: "complete", isPartial: false },
-      ]);
+      expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
     it("does not duplicate a final message after an end event commits streamed text", () => {
@@ -1222,7 +1349,7 @@ describe("chatStore", () => {
         },
       ]);
       expect(session.messages).toHaveLength(1);
-      expect(loadPersistedLocalChatSession(id)?.messages).toHaveLength(1);
+      expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
   });
 
@@ -1439,13 +1566,7 @@ describe("chatStore", () => {
         lifecycle: "closed",
         backendSessionId: null,
         providerResumeId: "conv-keep",
-        messages: [
-          {
-            kind: "user",
-            text: "Hello",
-            timestamp: "2024-01-01T00:00:00Z",
-          },
-        ],
+        messages: [],
       });
     });
 
@@ -1498,6 +1619,36 @@ describe("chatStore", () => {
         titleStatus: "generated",
         titleConfidence: 0.86,
         titleUserMessageCount: 2,
+      });
+    });
+
+    it("freezes the mini-panel summary after a generated title is set", () => {
+      const id = useChatStore.getState().openSession("New Chat");
+      useChatStore.getState().setSessionTitleCandidate(id, {
+        title: "Fix Local Chat Titles",
+        confidence: 0.86,
+        sufficientSignal: true,
+        userMessageCount: 2,
+      });
+      const frozenSummary = useChatStore.getState().localSessionSummaries[id];
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "follow-up",
+        timestamp: "2026-01-02T00:00:00Z",
+      });
+
+      expect(useChatStore.getState().localSessionSummaries[id]).toBe(
+        frozenSummary
+      );
+      expect(useChatStore.getState().localSessionSummaries[id]).toMatchObject({
+        title: "Fix Local Chat Titles",
+        updatedAt: frozenSummary.updatedAt,
+        messageCount: frozenSummary.messageCount,
+      });
+      expect(loadPersistedLocalChatSession(id)).toMatchObject({
+        updatedAt: "2026-01-02T00:00:00Z",
+        messageCount: 1,
       });
     });
 
