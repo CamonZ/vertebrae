@@ -1,6 +1,7 @@
 import type {
   ChatMessage,
   ChatSession,
+  ChatTitleStatus,
   LocalChatLifecycle,
 } from "../stores/chatStore";
 import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
@@ -32,11 +33,21 @@ const VALID_LIFECYCLES = new Set<LocalChatLifecycle>([
   "error",
 ]);
 const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
+const VALID_TITLE_STATUSES = new Set<ChatTitleStatus>([
+  "pending",
+  "low_confidence",
+  "generated",
+  "manual",
+]);
 const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
 export interface LocalChatSessionSummary {
   id: string;
   label: string;
+  title?: string | null;
+  titleStatus?: ChatTitleStatus;
+  titleConfidence?: number | null;
+  titleUserMessageCount?: number;
   harness: LocalChatHarnessKind;
   preview: string;
   model?: string;
@@ -123,10 +134,34 @@ export function normalizeLocalChatSession(
       : typeof candidate.claudeConversationId === "string"
         ? candidate.claudeConversationId
         : null;
+  const title = typeof candidate.title === "string" ? candidate.title : null;
+  const titleStatus =
+    typeof candidate.titleStatus === "string" &&
+    VALID_TITLE_STATUSES.has(candidate.titleStatus as ChatTitleStatus)
+      ? (candidate.titleStatus as ChatTitleStatus)
+      : title
+        ? "generated"
+        : "pending";
+  const titleConfidence =
+    typeof candidate.titleConfidence === "number" &&
+    Number.isFinite(candidate.titleConfidence)
+      ? Math.max(0, Math.min(1, candidate.titleConfidence))
+      : title
+        ? 1
+        : null;
+  const titleUserMessageCount =
+    typeof candidate.titleUserMessageCount === "number" &&
+    Number.isFinite(candidate.titleUserMessageCount)
+      ? Math.max(0, Math.floor(candidate.titleUserMessageCount))
+      : 0;
 
   return {
     id: candidate.id,
     label: candidate.label,
+    title,
+    titleStatus,
+    titleConfidence,
+    titleUserMessageCount,
     messages,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
@@ -298,6 +333,12 @@ function serializeSession(
   return {
     id: session.id,
     label: session.label,
+    title: session.title ?? null,
+    titleStatus:
+      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
+    titleConfidence:
+      session.titleConfidence ?? (session.title?.trim() ? 1 : null),
+    titleUserMessageCount: session.titleUserMessageCount ?? 0,
     messages,
     status: session.status,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
@@ -396,6 +437,12 @@ export function listPersistedLocalChatSessions(
     .map((session) => ({
       id: session.id,
       label: session.label,
+      title: session.title ?? null,
+      titleStatus:
+        session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
+      titleConfidence:
+        session.titleConfidence ?? (session.title?.trim() ? 1 : null),
+      titleUserMessageCount: session.titleUserMessageCount ?? 0,
       preview: session.preview ?? buildPreview(session.messages),
       harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
       model: session.model,

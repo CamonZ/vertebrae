@@ -45,10 +45,10 @@ describe("FloatingChatLauncher", () => {
 
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     const session = Object.values(useChatStore.getState().sessions).find(
-      (s) => s.label === "Project Chat"
+      (s) => s.label === "New Chat"
     );
     expect(session).toBeDefined();
-    expect(session?.label).toBe("Project Chat");
+    expect(session?.label).toBe("New Chat");
     expect(session?.projectPath).toBe("/test/project");
   });
 
@@ -98,7 +98,7 @@ describe("FloatingChatLauncher", () => {
         useChatStore.getState().activeSessionId!
       ];
     expect(activeSession).toMatchObject({
-      label: "Project Chat",
+      label: "New Chat",
       projectPath: "/test/project",
     });
   });
@@ -125,7 +125,7 @@ describe("FloatingChatLauncher", () => {
         useChatStore.getState().activeSessionId!
       ];
     expect(activeSession).toMatchObject({
-      label: "Project Chat",
+      label: "New Chat",
       projectPath: null,
     });
   });
@@ -188,7 +188,7 @@ describe("FloatingChatLauncher", () => {
     await waitFor(() => expect(useChatStore.getState().panelOpen).toBe(true));
     expect(
       Object.values(useChatStore.getState().sessions).some(
-        (s) => s.label === "Project Chat"
+        (s) => s.label === "New Chat"
       )
     ).toBe(true);
   });

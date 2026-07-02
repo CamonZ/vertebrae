@@ -62,6 +62,14 @@ vi.mock("../../bindings", () => ({
       ],
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        title: "Inferred Title",
+        confidence: 0.91,
+        sufficient_signal: true,
+      },
+    }),
     sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
@@ -188,7 +196,7 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     const onToggleWide = vi.fn();
     const session = createSession({
-      label: "Project Chat",
+      label: "New Chat",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -207,7 +215,7 @@ describe("ChatWindow", () => {
 
   it("labels the widening control as collapse while the panel is wide", () => {
     const session = createSession({
-      label: "Project Chat",
+      label: "New Chat",
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1345,6 +1353,40 @@ describe("ChatWindow", () => {
     ).toHaveLength(1);
   });
 
+  it("does not render the same streamed assistant partial twice", () => {
+    const session = createSession({
+      backendSessionId: "claude-abc",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Question",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+        {
+          kind: "assistant",
+          text: "Overlay answer",
+          timestamp: "2024-01-01T12:00:01Z",
+          isPartial: true,
+        },
+      ],
+      streamingAssistant: {
+        text: "Overlay answer",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getAllByText("Overlay answer")).toHaveLength(1);
+    expect(document.querySelector(".ev-cursor")).toBeInTheDocument();
+  });
+
   it("does not show partial cursor for complete assistant messages", () => {
     const session = createSession({
       messages: [
@@ -1665,7 +1707,9 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Type a message to queue...")).toBeEnabled();
+    expect(
+      screen.getByPlaceholderText("Type a message to queue...")
+    ).toBeEnabled();
     expect(screen.getByTitle("Send message")).toBeDisabled();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
@@ -1690,7 +1734,9 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Type a message to queue...")).toBeEnabled();
+    expect(
+      screen.getByPlaceholderText("Type a message to queue...")
+    ).toBeEnabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
   });
 
@@ -1713,7 +1759,9 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-lifecycle-error")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("chat-lifecycle-error")
+    ).not.toBeInTheDocument();
     const textarea = screen.getByPlaceholderText("Type a message to resume...");
     await user.type(textarea, "Retry");
     expect(screen.getByTitle("Resume session")).not.toBeDisabled();

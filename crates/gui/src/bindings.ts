@@ -796,6 +796,17 @@ async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, Loc
 }
 },
 /**
+ * Infer a concise display title for a local chat from its initial prompt.
+ */
+async inferLocalChatSessionTitle(input: InferLocalChatSessionTitleInput) : Promise<Result<InferLocalChatSessionTitleOutput, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("infer_local_chat_session_title", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Resolve a local chat permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
@@ -1057,6 +1068,8 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null }
+export type InferLocalChatSessionTitleOutput = { title: string | null; confidence: number; sufficient_signal: boolean }
 /**
  * Result returned after GUI-native project initialization.
  */

@@ -82,6 +82,14 @@ vi.mock("../../bindings", () => ({
       ],
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        title: "Inferred Title",
+        confidence: 0.91,
+        sufficient_signal: true,
+      },
+    }),
     sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
   },
@@ -188,7 +196,7 @@ describe("ChatWindowManager", () => {
   it("renders the active session as a single header band, with no tabs", () => {
     const s1 = createSession({
       id: "s1",
-      label: "Project Chat",
+      label: "New Chat",
     });
 
     useChatStore.setState({
@@ -200,7 +208,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     // The session label is the header title; tabs were removed.
-    expect(screen.getByText("Project Chat")).toBeInTheDocument();
+    expect(screen.getByText("New Chat")).toBeInTheDocument();
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
@@ -211,7 +219,7 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      label: "Project Chat",
+      label: "New Chat",
     });
 
     useChatStore.setState({
@@ -243,7 +251,7 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      label: "Project Chat",
+      label: "New Chat",
     });
 
     useChatStore.setState({
@@ -267,7 +275,7 @@ describe("ChatWindowManager", () => {
     expect(panel).not.toHaveAttribute("data-maximized");
   });
 
-  it("shows spawned agents under the active chat in wide view and jumps to the spawn", async () => {
+  it("shows mini thread rows with harness indicators and compact agent children in wide view", async () => {
     const user = userEvent.setup();
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -275,7 +283,9 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      label: "Project Chat",
+      label: "Claude Chat",
+      title: "Inspect Repo",
+      titleStatus: "generated",
       projectPath: "/test/project",
       messages: [
         {
@@ -290,6 +300,13 @@ describe("ChatWindowManager", () => {
           input: JSON.stringify({
             description: "Inspect repo",
             subagent_type: "analysis",
+            receiver_agents: [
+              {
+                thread_id: "agent-thread-1",
+                agent_nickname: "Pasteur",
+                agent_role: "reviewer",
+              },
+            ],
           }),
           timestamp: "2024-01-01T12:00:01Z",
         },
@@ -301,10 +318,24 @@ describe("ChatWindowManager", () => {
         },
       ],
     });
+    const s2 = createSession({
+      id: "s2",
+      label: "Codex Chat",
+      harness: "codex",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "user",
+          text: "codex saved question",
+          timestamp: "2024-01-01T12:00:03Z",
+        },
+      ],
+    });
     persistLocalChatSession(s1);
+    persistLocalChatSession(s2);
 
     useChatStore.setState({
-      sessions: { s1 },
+      sessions: { s1, s2 },
       activeSessionId: "s1",
       panelOpen: true,
     });
@@ -312,18 +343,22 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
     await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
 
-    expect(screen.getByRole("button", { name: "Jump to spawned agent Inspect repo" }))
-      .toBeInTheDocument();
-    vi.mocked(Element.prototype.scrollIntoView).mockClear();
-
-    await user.click(
-      screen.getByRole("button", { name: "Jump to spawned agent Inspect repo" })
-    );
-
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({
-      behavior: "smooth",
-      block: "center",
-    });
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(miniPanel.getByText("Inspect Repo")).toBeInTheDocument();
+    expect(miniPanel.getByText("Pasteur")).toBeInTheDocument();
+    expect(miniPanel.getByText("reviewer")).toBeInTheDocument();
+    expect(miniPanel.getByText("Codex Chat")).toBeInTheDocument();
+    expect(miniPanel.queryByText("child output")).not.toBeInTheDocument();
+    expect(
+      miniPanel.queryByText("codex saved question")
+    ).not.toBeInTheDocument();
+    expect(miniPanel.getByLabelText("Claude harness")).toBeInTheDocument();
+    expect(miniPanel.getByLabelText("Codex harness")).toBeInTheDocument();
+    expect(
+      miniPanel.getByRole("button", {
+        name: "Jump to spawned agent Pasteur in Inspect Repo",
+      })
+    ).toBeInTheDocument();
   });
 
   it("updates maximized width when the viewport resizes", () => {
@@ -385,7 +420,7 @@ describe("ChatWindowManager", () => {
     });
     const s1 = createSession({
       id: "s1",
-      label: "Project Chat",
+      label: "New Chat",
     });
 
     useChatStore.setState({
@@ -559,9 +594,8 @@ describe("ChatWindowManager", () => {
     await user.click(screen.getByLabelText("Widen chat panel"));
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(miniPanel.getByText("Task One")).toBeInTheDocument();
-    expect(miniPanel.getByText("first saved question")).toBeInTheDocument();
     expect(miniPanel.getByText("Task Two")).toBeInTheDocument();
-    expect(miniPanel.getByText("second saved answer")).toBeInTheDocument();
+    expect(miniPanel.getAllByLabelText("Claude harness")).toHaveLength(2);
 
     await user.click(
       screen.getByLabelText("Load local chat Task Two into active pane")
@@ -692,11 +726,8 @@ describe("ChatWindowManager", () => {
     ]);
 
     expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("new project answer")).toBeInTheDocument();
     expect(miniPanel.getByText("Old Project Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("old project answer")).toBeInTheDocument();
     expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
-    expect(miniPanel.getByText("legacy answer")).toBeInTheDocument();
   });
 
   it("keeps project load failures scoped to current-project chats", async () => {
@@ -743,9 +774,9 @@ describe("ChatWindowManager", () => {
         )
       ).toBeInTheDocument();
       expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
-      expect(miniPanel.getByText("new project answer")).toBeInTheDocument();
-      expect(miniPanel.queryByText("Old Project Chat")).not.toBeInTheDocument();
-      expect(miniPanel.queryByText("old project answer")).not.toBeInTheDocument();
+      expect(
+        miniPanel.queryByText("Old Project Chat")
+      ).not.toBeInTheDocument();
     } finally {
       warnSpy.mockRestore();
     }
@@ -780,16 +811,20 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Load local chat Task One into active pane")
+    ).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getAllByText("first saved question")).toHaveLength(2);
+      expect(screen.getByText("first saved question")).toBeInTheDocument();
     });
+    expect(screen.getByText("Task Two")).toBeInTheDocument();
 
     await user.click(
       screen.getByLabelText("Load local chat Task Two into active pane")
     );
 
     expect(useChatStore.getState().activeSessionId).toBe(second);
-    expect(screen.getAllByText("second saved answer")).toHaveLength(2);
+    expect(screen.getByText("second saved answer")).toBeInTheDocument();
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
   });
 
@@ -1703,7 +1738,7 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.getByText("Legacy Chat")).toBeInTheDocument();
   });
 
-  it("shows the chat model in the maximized mini thread selector", async () => {
+  it("shows chat harness indicators in the maximized mini thread selector", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 1200,
@@ -1711,7 +1746,6 @@ describe("ChatWindowManager", () => {
     const first = useChatStore
       .getState()
       .openSession("Task One", "/test/project");
-    useChatStore.getState().setSessionModel(first, "claude-sonnet-4.5");
     useChatStore.getState().addMessage(first, {
       kind: "user",
       text: "first saved question",
@@ -1719,7 +1753,8 @@ describe("ChatWindowManager", () => {
     });
     const second = useChatStore
       .getState()
-      .startFreshSession("Project Chat", "/test/project");
+      .startFreshSession("New Chat", "/test/project");
+    useChatStore.getState().setSessionHarness(second, "codex");
     useChatStore.getState().addMessage(second, {
       kind: "user",
       text: "no model yet",
@@ -1733,10 +1768,10 @@ describe("ChatWindowManager", () => {
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
     await waitFor(() => {
-      expect(miniPanel.getByText("sonnet-4.5")).toBeInTheDocument();
+      expect(miniPanel.getByLabelText("Claude harness")).toBeInTheDocument();
     });
-    expect(miniPanel.getByText("Chat")).toBeInTheDocument();
-    expect(miniPanel.queryByText(/Jan/)).not.toBeInTheDocument();
+    expect(miniPanel.getByLabelText("Codex harness")).toBeInTheDocument();
+    expect(miniPanel.queryByText("sonnet-4.5")).not.toBeInTheDocument();
   });
 
   it("closes a live Claude session before deleting it from history", async () => {
@@ -1779,9 +1814,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     await user.click(screen.getByLabelText("Widen chat panel"));
-    await user.click(
-      await screen.findByLabelText("Delete local chat Live Task")
-    );
+    await user.click(await screen.findByLabelText("Delete local chat Live Task"));
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(

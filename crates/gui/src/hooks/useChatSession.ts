@@ -182,6 +182,15 @@ export function useChatSession(sessionId: string) {
   const messages = useMemo(() => {
     if (!sessionMessages) return [];
     if (!streamingAssistant) return sessionMessages;
+    const last = sessionMessages[sessionMessages.length - 1];
+    if (
+      last?.kind === "assistant" &&
+      last.isPartial &&
+      !last.parentToolUseId &&
+      last.text === streamingAssistant.text
+    ) {
+      return sessionMessages;
+    }
     return [
       ...sessionMessages,
       {

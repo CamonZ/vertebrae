@@ -5,7 +5,8 @@
 
 use crate::local_chat::permissions::LocalPermissionDecision;
 use crate::local_chat::{
-    CreateLocalChatSessionInput, LocalChatHarnessCatalog, LocalChatSessionError,
+    infer_session_title, CreateLocalChatSessionInput, InferLocalChatSessionTitleInput,
+    InferLocalChatSessionTitleOutput, LocalChatHarnessCatalog, LocalChatSessionError,
     LocalChatSessionManager,
 };
 use crate::project_config::{ProjectConfig, SavedProject};
@@ -1644,6 +1645,44 @@ pub async fn close_local_chat_session(
         backend_session_id
     );
     local_chat_manager.close_session(&backend_session_id).await
+}
+
+/// Infer a concise display title for a local chat from its initial prompt.
+#[tauri::command]
+#[specta::specta]
+pub async fn infer_local_chat_session_title(
+    input: InferLocalChatSessionTitleInput,
+) -> Result<InferLocalChatSessionTitleOutput, CommandError> {
+    let harness = input.harness;
+    let prompt_count = input.initial_prompts.len();
+    let working_dir = input.working_dir.clone();
+    log::info!(
+        "infer_local_chat_session_title called: harness={:?}, prompt_count={}, working_dir={:?}",
+        harness,
+        prompt_count,
+        working_dir
+    );
+
+    match infer_session_title(input).await {
+        Ok(output) => {
+            log::info!(
+                "infer_local_chat_session_title succeeded: harness={:?}, title_present={}, confidence={:.2}, sufficient_signal={}",
+                harness,
+                output.title.as_ref().is_some_and(|title| !title.trim().is_empty()),
+                output.confidence,
+                output.sufficient_signal
+            );
+            Ok(output)
+        }
+        Err(message) => {
+            log::warn!(
+                "infer_local_chat_session_title failed: harness={:?}, error={}",
+                harness,
+                message
+            );
+            Err(CommandError { message })
+        }
+    }
 }
 
 /// Resolve a local chat permission request shown in the GUI.

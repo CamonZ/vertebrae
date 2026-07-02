@@ -132,6 +132,7 @@ fn create_builder() -> Builder {
             commands::create_local_chat_session,
             commands::send_local_chat_message,
             commands::close_local_chat_session,
+            commands::infer_local_chat_session_title,
             commands::resolve_permission_request,
             // WebSocket status command
             commands::get_websocket_status,
@@ -285,6 +286,7 @@ mod tests {
             "async createLocalChatSession(",
             "async sendLocalChatMessage(",
             "async closeLocalChatSession(",
+            "async inferLocalChatSessionTitle(",
         ] {
             assert!(
                 bindings.contains(command),
@@ -304,6 +306,8 @@ mod tests {
             "export type LocalChatHarnessKind",
             "export type LocalChatHarnessCatalog",
             "export type CreateLocalChatSessionInput",
+            "export type InferLocalChatSessionTitleInput",
+            "export type InferLocalChatSessionTitleOutput",
             "export type LocalChatSessionError",
         ] {
             assert!(

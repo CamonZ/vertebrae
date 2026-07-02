@@ -23,6 +23,14 @@ vi.mock("../bindings", () => ({
       data: "/test/project",
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: {
+        title: "Inferred Title",
+        confidence: 0.91,
+        sufficient_signal: true,
+      },
+    }),
     sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
     closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     getCurrentProject: vi.fn().mockResolvedValue({
@@ -981,6 +989,138 @@ describe("doStartSession", () => {
       SESSION_ID,
       "streaming"
     );
+  });
+
+  it("infers a title for a new automatic-label session from the first prompt", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({ label: "New Chat", harness: "codex" }),
+      SESSION_ID,
+      deps,
+      "Implement title inference"
+    );
+
+    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+      harness: "codex",
+      initial_prompts: ["Implement title inference"],
+      working_dir: "/test/project",
+    });
+    await vi.waitFor(() =>
+      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(
+        SESSION_ID,
+        {
+          title: "Inferred Title",
+          confidence: 0.91,
+          sufficientSignal: true,
+          userMessageCount: 1,
+        }
+      )
+    );
+  });
+
+  it("passes an insufficient first-message candidate without freezing a title", async () => {
+    mockedCommands.inferLocalChatSessionTitle.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        title: null,
+        confidence: 0.12,
+        sufficient_signal: false,
+      },
+    });
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({ label: "New Chat", harness: "claude" }),
+      SESSION_ID,
+      deps,
+      "Hello"
+    );
+
+    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+      harness: "claude",
+      initial_prompts: ["Hello"],
+      working_dir: "/test/project",
+    });
+    await vi.waitFor(() =>
+      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
+        title: null,
+        confidence: 0.12,
+        sufficientSignal: false,
+        userMessageCount: 1,
+      })
+    );
+  });
+
+  it("retries title inference with the first two user messages after low confidence", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(
+      makeSession({
+        label: "New Chat",
+        messages: [
+          {
+            kind: "user",
+            text: "Hello",
+            timestamp: "2026-01-01T00:00:00Z",
+          },
+        ],
+        titleStatus: "low_confidence",
+        titleConfidence: 0.12,
+        titleUserMessageCount: 1,
+      }),
+      SESSION_ID,
+      deps,
+      "Implement session title confidence"
+    );
+
+    expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
+      harness: "claude",
+      initial_prompts: ["Hello", "Implement session title confidence"],
+      working_dir: "/test/project",
+    });
+    await vi.waitFor(() =>
+      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(
+        SESSION_ID,
+        expect.objectContaining({
+          title: "Inferred Title",
+          userMessageCount: 2,
+        })
+      )
+    );
+  });
+
+  it("does not infer a title for custom-labeled sessions", async () => {
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      setBackendSessionIdRef: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionTitleCandidate: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+    };
+
+    await doStartSession(makeSession({ label: "Task Chat" }), SESSION_ID, deps, "Help");
+
+    expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
+    expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
   });
 
   it("does not add user message when not provided", async () => {
