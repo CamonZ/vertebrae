@@ -1290,6 +1290,186 @@ describe("parseSessionLogs provider dispatch", () => {
     });
   });
 
+  it("normalizes Codex rollout multi-agent records into spawn parents and child transcript rows", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-spawn",
+            name: "spawn_agent",
+            arguments: JSON.stringify({
+              agent_type: "explorer",
+              message: "Inspect traces",
+            }),
+          },
+        }),
+        "2024-01-02T08:00:00Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-spawn",
+            output: JSON.stringify({
+              agent_id: "agent-1",
+              nickname: "Avicenna",
+            }),
+          },
+        }),
+        "2024-01-02T08:00:01Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: `<subagent_notification>
+{"agent_path":"agent-1","status":{"completed":"child report"}}
+</subagent_notification>`,
+              },
+            ],
+          },
+        }),
+        "2024-01-02T08:00:02Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-close",
+            name: "close_agent",
+            arguments: JSON.stringify({ target: "agent-1" }),
+          },
+        }),
+        "2024-01-02T08:00:03Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-close",
+            output: JSON.stringify({
+              previous_status: { completed: "child report" },
+            }),
+          },
+        }),
+        "2024-01-02T08:00:04Z",
+        "codex-rollout"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs, { includeUserMessages: true });
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "assistant_message",
+    ]);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "agent:agent-1",
+      toolName: "Agent",
+      input: {
+        collab_tool: "spawnAgent",
+        agent_path: "agent-1",
+        receiver_thread_ids: ["agent-1"],
+        agent_type: "explorer",
+        agent_nickname: "Avicenna",
+        description: "Inspect traces",
+      },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "assistant_message",
+      text: "child report",
+      parentToolUseId: "agent:agent-1",
+    });
+  });
+
+  it("normalizes Codex rollout wait_agent status when no notification message is present", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-spawn",
+            name: "spawn_agent",
+            arguments: JSON.stringify({ message: "Inspect state" }),
+          },
+        }),
+        "2024-01-02T08:00:00Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-spawn",
+            output: JSON.stringify({ agent_id: "agent-2" }),
+          },
+        }),
+        "2024-01-02T08:00:01Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-wait",
+            name: "wait_agent",
+            arguments: "{}",
+          },
+        }),
+        "2024-01-02T08:00:02Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-wait",
+            output: JSON.stringify({
+              status: { "agent-2": { completed: "waited report" } },
+            }),
+          },
+        }),
+        "2024-01-02T08:00:03Z",
+        "codex-rollout"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs);
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "assistant_message",
+    ]);
+    expect(events[1]).toMatchObject({
+      kind: "assistant_message",
+      text: "waited report",
+      parentToolUseId: "agent:agent-2",
+    });
+  });
+
   it("isolates Codex turn-count state per step_execution_id so concurrent executions don't bleed into each other", () => {
     // We use top-level `error` events here as the only JSONL marker that
     // emits a `session_end` carrying the accumulated turn count.

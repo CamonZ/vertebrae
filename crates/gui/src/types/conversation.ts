@@ -416,6 +416,23 @@ function parseJsonObject(value: string): Record<string, unknown> {
   return { arguments: value };
 }
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function parseRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string") {
+    try {
+      return readRecord(JSON.parse(value) as unknown);
+    } catch {
+      return undefined;
+    }
+  }
+  return readRecord(value);
+}
+
 function shouldKeepUserMessage(text: string): boolean {
   const trimmed = text.trim();
   return (
@@ -727,6 +744,7 @@ export interface CodexRolloutRawMessage {
     content?: unknown;
     call_id?: string;
     id?: string;
+    namespace?: string;
     name?: string;
     arguments?: unknown;
     output?: unknown;
@@ -1036,10 +1054,191 @@ export function parseCodexMessage(
   return events;
 }
 
+export interface PendingMultiAgentCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface CodexRolloutParseState {
+  pendingMultiAgentCallsByCallId: Map<string, PendingMultiAgentCall>;
+  agentToolIdByAgentPath: Map<string, string>;
+  completedAgentPaths: Set<string>;
+}
+
+function newCodexRolloutParseState(): CodexRolloutParseState {
+  return {
+    pendingMultiAgentCallsByCallId: new Map(),
+    agentToolIdByAgentPath: new Map(),
+    completedAgentPaths: new Set(),
+  };
+}
+
+function agentToolId(agentPath: string): string {
+  return `agent:${agentPath}`;
+}
+
+function makeAgentSpawnEvent(
+  timestamp: string,
+  toolId: string,
+  input: Record<string, unknown>
+): ToolCallEvent {
+  return {
+    kind: "tool_call",
+    timestamp,
+    toolId,
+    toolName: "Agent",
+    displayName: "Agent",
+    icon: getToolIcon("Agent"),
+    summary: getToolSummary("Agent", input),
+    input,
+  };
+}
+
+function ensureAgentSpawnEvent(
+  state: CodexRolloutParseState,
+  timestamp: string,
+  agentPath: string,
+  overrides: Record<string, unknown> = {}
+): ToolCallEvent | undefined {
+  if (state.agentToolIdByAgentPath.has(agentPath)) return undefined;
+  const toolId = agentToolId(agentPath);
+  state.agentToolIdByAgentPath.set(agentPath, toolId);
+  return makeAgentSpawnEvent(timestamp, toolId, {
+    collab_tool: "spawnAgent",
+    agent_path: agentPath,
+    receiver_thread_ids: [agentPath],
+    description: overrides.description ?? overrides.agent_nickname ?? "Agent",
+    ...overrides,
+  });
+}
+
+function emitAgentCompletion(
+  state: CodexRolloutParseState,
+  timestamp: string,
+  agentPath: string,
+  completedText: string
+): ConversationEvent[] {
+  if (state.completedAgentPaths.has(agentPath)) return [];
+  state.completedAgentPaths.add(agentPath);
+
+  const events: ConversationEvent[] = [];
+  const spawnEvent = ensureAgentSpawnEvent(state, timestamp, agentPath);
+  if (spawnEvent) events.push(spawnEvent);
+
+  const toolId =
+    state.agentToolIdByAgentPath.get(agentPath) ?? agentToolId(agentPath);
+  events.push({
+    kind: "assistant_message",
+    timestamp,
+    text: completedText,
+    parentToolUseId: toolId,
+  });
+  return events;
+}
+
+function parseSubagentNotifications(
+  text: string
+): Array<{ agentPath: string; completedText: string }> {
+  const notifications: Array<{ agentPath: string; completedText: string }> = [];
+  const pattern =
+    /<subagent_notification>\s*([\s\S]*?)\s*<\/subagent_notification>/g;
+  for (const match of text.matchAll(pattern)) {
+    const notification = parseRecord(match[1]);
+    const agentPath = readString(notification?.agent_path);
+    const status = readRecord(notification?.status);
+    const completedText = readString(status?.completed);
+    if (agentPath && completedText) {
+      notifications.push({ agentPath, completedText });
+    }
+  }
+  return notifications;
+}
+
+function parseMultiAgentFunctionCall(
+  raw: CodexRolloutRawMessage,
+  timestamp: string,
+  state: CodexRolloutParseState
+): ConversationEvent[] | undefined {
+  const payload = raw.payload;
+  if (!payload) return undefined;
+
+  if (payload.type === "function_call") {
+    if (payload.namespace !== "multi_agent_v1") return undefined;
+    const callId = readString(payload.call_id) ?? readString(payload.id) ?? "";
+    if (!callId) return [];
+    state.pendingMultiAgentCallsByCallId.set(callId, {
+      name: readString(payload.name) ?? "tool",
+      input: parseRecord(payload.arguments) ?? {},
+    });
+    return [];
+  }
+
+  if (payload.type !== "function_call_output") return undefined;
+
+  const callId = readString(payload.call_id) ?? readString(payload.id) ?? "";
+  const pending = callId
+    ? state.pendingMultiAgentCallsByCallId.get(callId)
+    : undefined;
+  if (!pending) {
+    return payload.namespace === "multi_agent_v1" ? [] : undefined;
+  }
+  state.pendingMultiAgentCallsByCallId.delete(callId);
+
+  const output = parseRecord(payload.output) ?? {};
+  switch (pending.name) {
+    case "spawn_agent": {
+      const agentPath =
+        readString(output.agent_id) ??
+        readString(output.agent_path) ??
+        readString(output.id);
+      if (!agentPath) return [];
+      const nickname = readString(output.nickname);
+      const toolId = agentToolId(agentPath);
+      state.agentToolIdByAgentPath.set(agentPath, toolId);
+      const input: Record<string, unknown> = {
+        collab_tool: "spawnAgent",
+        agent_path: agentPath,
+        receiver_thread_ids: [agentPath],
+        agent_type: pending.input.agent_type,
+        agent_nickname: nickname,
+        description: readString(pending.input.message) ?? nickname ?? "Agent",
+      };
+      return [makeAgentSpawnEvent(timestamp, toolId, input)];
+    }
+
+    case "wait_agent": {
+      const statusByAgent = readRecord(output.status) ?? {};
+      return Object.entries(statusByAgent).flatMap(([agentPath, status]) => {
+        const completedText = readString(readRecord(status)?.completed);
+        return completedText
+          ? emitAgentCompletion(state, timestamp, agentPath, completedText)
+          : [];
+      });
+    }
+
+    case "close_agent": {
+      const agentPath =
+        readString(pending.input.target) ??
+        readString(output.agent_id) ??
+        readString(output.agent_path);
+      const completedText = readString(
+        readRecord(output.previous_status)?.completed
+      );
+      return agentPath && completedText
+        ? emitAgentCompletion(state, timestamp, agentPath, completedText)
+        : [];
+    }
+
+    default:
+      return [];
+  }
+}
+
 export function parseCodexRolloutMessage(
   raw: CodexRolloutRawMessage,
   timestamp: string,
-  options: ParseSessionLogsOptions = {}
+  options: ParseSessionLogsOptions = {},
+  state: CodexRolloutParseState = newCodexRolloutParseState()
 ): ConversationEvent[] {
   const events: ConversationEvent[] = [];
   if (raw.type !== "response_item") return events;
@@ -1050,6 +1249,14 @@ export function parseCodexRolloutMessage(
     case "message": {
       const text = contentText(payload.content).trim();
       if (!text) break;
+      const subagentEvents = parseSubagentNotifications(text).flatMap(
+        ({ agentPath, completedText }) =>
+          emitAgentCompletion(state, timestamp, agentPath, completedText)
+      );
+      if (subagentEvents.length > 0) {
+        events.push(...subagentEvents);
+        break;
+      }
       if (payload.role === "user") {
         if (options.includeUserMessages && shouldKeepUserMessage(text)) {
           events.push({ kind: "user_message", timestamp, text });
@@ -1060,6 +1267,15 @@ export function parseCodexRolloutMessage(
       break;
     }
     case "function_call": {
+      const multiAgentEvents = parseMultiAgentFunctionCall(
+        raw,
+        timestamp,
+        state
+      );
+      if (multiAgentEvents) {
+        events.push(...multiAgentEvents);
+        break;
+      }
       const toolId =
         readString(payload.call_id) ?? readString(payload.id) ?? "";
       if (!toolId) break;
@@ -1085,6 +1301,15 @@ export function parseCodexRolloutMessage(
       break;
     }
     case "function_call_output": {
+      const multiAgentEvents = parseMultiAgentFunctionCall(
+        raw,
+        timestamp,
+        state
+      );
+      if (multiAgentEvents) {
+        events.push(...multiAgentEvents);
+        break;
+      }
       const toolUseId =
         readString(payload.call_id) ?? readString(payload.id) ?? "";
       if (!toolUseId) break;
@@ -1186,6 +1411,10 @@ export function parseSessionLogs(
   // One Codex state per (step_execution_id) so concurrent executions don't
   // share turn counts. Anthropic logs ignore this map.
   const codexStateByExecution = new Map<string, CodexParseState>();
+  const codexRolloutStateByExecution = new Map<
+    string,
+    CodexRolloutParseState
+  >();
   const claudeStateByExecution = new Map<string, ClaudeParseState>();
 
   for (const log of logs) {
@@ -1216,7 +1445,13 @@ export function parseSessionLogs(
         events.push(ev);
       }
     } else if (isCodexRolloutRawMessage(raw)) {
-      for (const ev of parseCodexRolloutMessage(raw, ts, options)) {
+      const execId = log.step_execution_id ?? "";
+      let state = codexRolloutStateByExecution.get(execId);
+      if (!state) {
+        state = newCodexRolloutParseState();
+        codexRolloutStateByExecution.set(execId, state);
+      }
+      for (const ev of parseCodexRolloutMessage(raw, ts, options, state)) {
         events.push(ev);
       }
     } else {
