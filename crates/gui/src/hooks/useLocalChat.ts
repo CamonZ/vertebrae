@@ -265,8 +265,10 @@ export function handleEndEvent(
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
-  setBackendSessionId(sessionId, null);
-  setBackendSessionIdRef(null);
+  if (payload.harness !== "codex") {
+    setBackendSessionId(sessionId, null);
+    setBackendSessionIdRef(null);
+  }
   if (payload.is_error) {
     setSessionLifecycle(
       sessionId,

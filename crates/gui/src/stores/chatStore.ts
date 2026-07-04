@@ -53,8 +53,8 @@ export type ChatMessage =
       timestamp: string;
       /**
        * `tool_use` id of the spawning Task/Agent tool call when this call was
-       * made by a sub-agent; absent for main-thread calls. Drives sub-agent
-       * nesting in the rendered thread (see chatMessagesToThread).
+       * made by a sub-agent; absent for main-thread calls. Local chat keeps
+       * those child-thread work events out of the parent transcript.
        */
       parentToolUseId?: string;
     }
@@ -77,6 +77,8 @@ export type ChatMessage =
     }
   | { kind: "session_start"; model: string; timestamp: string }
   | { kind: "warning"; message: string; timestamp: string }
+  /** Harness-originated notice (e.g. a background subagent finished). */
+  | { kind: "task_notification"; message: string; timestamp: string }
   | {
       kind: "session_end";
       durationMs: number;
@@ -150,6 +152,10 @@ function normalizeStoredChatMessage(value: unknown): ChatMessage | null {
     case "warning":
       return typeof record.message === "string"
         ? { kind: "warning", message: record.message, timestamp }
+        : null;
+    case "task_notification":
+      return typeof record.message === "string"
+        ? { kind: "task_notification", message: record.message, timestamp }
         : null;
     case "error":
       return typeof record.message === "string"
@@ -243,6 +249,12 @@ function conversationEventToChatMessage(
         numTurns: event.numTurns,
         timestamp: event.timestamp,
       };
+    case "task_notification":
+      return {
+        kind: "task_notification",
+        message: event.message,
+        timestamp: event.timestamp,
+      };
     case "thinking":
       return event.text.startsWith("[error]")
         ? {
@@ -267,24 +279,35 @@ function providerJsonlLinesToChatMessages(
     .filter((message): message is ChatMessage => message !== null);
 }
 
+/**
+ * Content/identity key for de-duplicating a message across live vs hydrated
+ * copies of the SAME event. Deliberately excludes `timestamp`: live messages
+ * are stamped at receipt time (`new Date().toISOString()`), while hydrated
+ * messages carry the JSONL line's recorded time, so the two copies of one
+ * event essentially never share a timestamp. `tool_call`/`tool_result` key on
+ * `toolId` alone (globally unique per call, and stable across the live vs
+ * hydrated Codex/Claude parsing paths) rather than on `input`/`toolName`,
+ * which can differ across those paths for the same call.
+ */
 function chatMessageKey(message: ChatMessage): string {
   switch (message.kind) {
     case "user":
+      return `${message.kind}:${message.text}`;
     case "assistant":
-      return `${message.kind}:${message.timestamp}:${message.text}`;
+      return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
     case "tool_call":
-      return `${message.kind}:${message.timestamp}:${message.toolId}:${message.toolName}:${message.input}`;
     case "tool_result":
-      return `${message.kind}:${message.timestamp}:${message.toolId}:${message.result}`;
+      return `${message.kind}:${message.toolId}`;
     case "permission_request":
-      return `${message.kind}:${message.timestamp}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
+      return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
     case "session_start":
-      return `${message.kind}:${message.timestamp}:${message.model}`;
+      return `${message.kind}:${message.model}`;
     case "session_end":
-      return `${message.kind}:${message.timestamp}:${message.durationMs}:${message.numTurns}`;
+      return `${message.kind}:${message.durationMs}:${message.numTurns}`;
     case "warning":
     case "error":
-      return `${message.kind}:${message.timestamp}:${message.message}`;
+    case "task_notification":
+      return `${message.kind}:${message.message}`;
   }
 }
 
@@ -552,6 +575,15 @@ interface ChatStoreActions {
   hydrateLocalSessionIndex: () => Promise<void>;
   /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (sessionId: string) => Promise<boolean>;
+  /** Hydrate and focus a provider child thread as its own local chat session */
+  selectProviderThreadSession: (input: {
+    harness: LocalChatHarnessKind;
+    providerResumeId: string;
+    projectPath?: string | null;
+    label?: string | null;
+    title?: string | null;
+    model?: string | null;
+  }) => Promise<string | null>;
   /** Start a new local chat without reusing an existing session */
   startFreshSession: (label: string, projectPath?: string | null) => string;
   /** Delete one local persisted session and any in-memory copy */
@@ -689,6 +721,40 @@ function createLocalSession(
     createdAt: now,
     updatedAt: now,
     messageCount: 0,
+  };
+}
+
+function providerThreadSessionId(
+  harness: LocalChatHarnessKind,
+  providerResumeId: string
+): string {
+  const safeResumeId =
+    providerResumeId
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "") || "thread";
+  return `local-chat-${harness}-${safeResumeId}`;
+}
+
+function createProviderThreadSession(input: {
+  harness: LocalChatHarnessKind;
+  providerResumeId: string;
+  projectPath?: string | null;
+  label?: string | null;
+  title?: string | null;
+  model?: string | null;
+}): ChatSession {
+  const label = input.label?.trim() || "Agent";
+  const title = input.title?.trim() || label;
+  return {
+    ...createLocalSession(label, input.projectPath ?? null),
+    id: providerThreadSessionId(input.harness, input.providerResumeId),
+    title,
+    titleStatus: "manual",
+    titleConfidence: 1,
+    harness: input.harness,
+    providerResumeId: input.providerResumeId,
+    model: input.model?.trim() || undefined,
   };
 }
 
@@ -1432,6 +1498,67 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return true;
     },
 
+    selectProviderThreadSession: async (input) => {
+      const providerResumeId = input.providerResumeId.trim();
+      if (!providerResumeId) return null;
+      const projectPath = input.projectPath ?? null;
+      const runtimeSessionId = providerThreadSessionId(
+        input.harness,
+        providerResumeId
+      );
+      const matchingRuntime = get().sessions[runtimeSessionId];
+      if (matchingRuntime) {
+        hydrateProviderMessagesInPlace(matchingRuntime.id, matchingRuntime);
+        set((state) => ({
+          ...focusSessionInPaneLayout(state, matchingRuntime.id),
+          panelOpen: true,
+        }));
+        return matchingRuntime.id;
+      }
+
+      const matchingPersisted = listPersistedLocalChatSessions(
+        projectPath
+      ).find(
+        (session) =>
+          session.harness === input.harness &&
+          session.providerResumeId === providerResumeId &&
+          projectPathMatches(session.projectPath, projectPath)
+      );
+
+      const session = createProviderThreadSession({
+        ...input,
+        providerResumeId,
+        projectPath,
+      });
+      const { messages, providerJsonlPath } = await loadStoredProviderMessages({
+        ...session,
+        providerJsonlPath: matchingPersisted?.providerJsonlPath ?? null,
+        createdAt: matchingPersisted?.createdAt ?? session.createdAt,
+      });
+      const hydrated = hydrateLocalSession({
+        ...session,
+        messages,
+        providerJsonlPath:
+          providerJsonlPath ??
+          matchingPersisted?.providerJsonlPath ??
+          session.providerJsonlPath ??
+          null,
+        messageCount: Math.max(messages.length, session.messageCount ?? 0),
+      });
+      set((state) => {
+        const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
+        return {
+          sessions: nextSessions,
+          ...focusSessionInPaneLayout(
+            { ...state, sessions: nextSessions },
+            hydrated.id
+          ),
+          panelOpen: true,
+        };
+      });
+      return hydrated.id;
+    },
+
     startFreshSession: (label, projectPath) => {
       const session = createLocalSession(label, projectPath);
       persistLocalChatSession(session);
@@ -1545,7 +1672,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const messages = [...session.messages];
         const timestamp = new Date().toISOString();
         const last = messages[messages.length - 1];
-        if (last?.kind === "assistant" && last.isPartial) {
+        if (
+          last?.kind === "assistant" &&
+          last.isPartial &&
+          !last.parentToolUseId
+        ) {
+          // Only overwrite a trailing MAIN-thread partial. A trailing partial
+          // that belongs to a subagent (parentToolUseId set) is a different
+          // message — spreading `...last` onto it would stamp the subagent's
+          // parentToolUseId onto the main agent's reply, misfiling it as child
+          // content (and swallowing it from the main transcript).
           messages[messages.length - 1] = {
             ...last,
             text,

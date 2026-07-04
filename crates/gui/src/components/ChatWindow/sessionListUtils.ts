@@ -7,6 +7,7 @@ export const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 export type SpawnOutlineItem = {
   id: string;
   spawnId: string;
+  threadId?: string;
   label: string;
   detail: string;
 };
@@ -263,6 +264,7 @@ export function buildSpawnOutline(
           isSpawn,
           id: message.toolId,
           spawnId: message.toolId,
+          threadId: undefined,
           label: description || "Agent",
           detail: subagent || message.toolName,
         });
@@ -276,10 +278,11 @@ export function buildSpawnOutline(
         isSpawn,
         id: `${message.toolId}:${agent.key || index}`,
         spawnId: message.toolId,
+        threadId: agent.key || undefined,
         label:
           agent.name ||
           (agent.key ? `Agent ${shortThreadLabel(agent.key)}` : "Agent"),
-        detail: agent.role || agent.status || subagent || message.toolName,
+        detail: agent.status || agent.role || subagent || message.toolName,
       });
     });
   });
@@ -289,6 +292,7 @@ export function buildSpawnOutline(
     .map((candidate) => ({
       id: candidate.id,
       spawnId: candidate.spawnId,
+      ...(candidate.threadId ? { threadId: candidate.threadId } : {}),
       label: candidate.label,
       detail: candidate.detail,
     }));
@@ -316,6 +320,7 @@ function mergeSpawnCandidate(
     isSpawn: previous.isSpawn || candidate.isSpawn,
     id: previous.isSpawn ? previous.id : candidate.id,
     spawnId: previous.isSpawn ? previous.spawnId : candidate.spawnId,
+    threadId: candidate.threadId ?? previous.threadId,
     label: betterLabel(previous.label, candidate.label),
     detail: betterDetail(previous.detail, candidate.detail),
   });

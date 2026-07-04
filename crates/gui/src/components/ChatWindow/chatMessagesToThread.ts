@@ -2,16 +2,24 @@
  * chatMessagesToThread — adapter: chatStore `ChatMessage[]` → canonical
  * `Thread` for the unified <Thread> primitive (chat surface).
  *
- * Child-agent transcript rows carry `parentToolUseId`. The parent chat does
- * not inline those rows; it keeps the parent Agent/Task tool call as the
- * chronological marker and leaves child exploration to the mini panel.
+ * Child-agent transcript rows carry `parentToolUseId`, but the local chat view
+ * deliberately does not expand child work inline. The mini panel owns navigation
+ * into child threads; the parent chat keeps only the spawn/status rows and any
+ * explicit main-thread result rows emitted by the harness.
+ *
+ * Correlation is SESSION-wide, not per turn: tool results are indexed across
+ * all turns (a long-running call's result can arrive after the next user
+ * message).
  *
  * Grouping contract:
  *   · session_start / session_end → dropped (no row).
  *   · user                        → opens a new Turn with a UserMessage
  *                                   {role:'human', label:'You'}.
  *   · assistant / tool_call / tool_result → buffered as ConversationEvents and
- *                                   grouped (sub-agent nesting) per turn.
+ *                                   grouped per turn; child-linked events are
+ *                                   skipped on this surface.
+ *   · task_notification           → buffered as an activity ConversationEvent
+ *                                   (renders as a harness notice row).
  *   · error / warning             → a terminal ErrorMessage in its own turn.
  *   · permission_request          → SKIPPED here; ChatWindow renders the
  *                                   interactive PermissionRequestTurn as a
@@ -26,7 +34,12 @@
  */
 
 import type { ChatMessage } from "../../stores/chatStore";
-import { getToolIcon, type ConversationEvent } from "../../types/conversation";
+import {
+  getToolIcon,
+  type ConversationEvent,
+  type ToolCallEvent,
+  type ToolResultEvent,
+} from "../../types/conversation";
 import { chatTurnEventsToMessages } from "../thread/normalize";
 import type {
   AgentMessage,
@@ -57,51 +70,44 @@ export interface ChatThreadOptions {
 /** Stable thread id for the single local-chat thread. */
 export const LOCAL_CHAT_THREAD_ID = "local-chat-thread";
 
+/** One turn's worth of buffered content before grouping. */
+interface TurnDraft {
+  userText: string | null;
+  events: ConversationEvent[];
+  endsWithPartialAssistant: boolean;
+  /** Set for a standalone error/warning turn (no events). */
+  errorTitle?: string;
+}
+
 export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
   const { onToggleTool, collapsed, assistantLabel } = opts;
 
-  const turns: Turn[] = [];
-  let turnSeq = 0;
+  // ── Pass 1: bucket messages into turn drafts ──────────────────────────
+  // Correlation state is SESSION-wide, not per turn: a tool_result can land
+  // in a later turn than its tool_call (long-running commands), so keep one
+  // result index for all turns.
+  const drafts: TurnDraft[] = [];
+  const resultById = new Map<string, ToolResultEvent>();
+  const seenToolCallIds = new Set<string>();
+  const toolCallById = new Map<string, ToolCallEvent>();
 
-  // Current turn accumulator.
-  let userMsg: UserMessage | null = null;
-  let events: ConversationEvent[] = [];
-  let endsWithPartialAssistant = false;
-  const hiddenToolIds = new Set<string>();
-
-  const flushTurn = () => {
-    if (!userMsg && events.length === 0) return;
-    const turnId = `chat-turn-${turnSeq++}`;
-    const grouped = chatTurnEventsToMessages(events, {
-      collapsed,
-      onToggleTool,
-      assistantLabel,
-    });
-    stabilizeKeys(grouped, turnId);
-    if (endsWithPartialAssistant) markLastAgentStreaming(grouped);
-    const messagesOut: Message[] = userMsg ? [userMsg, ...grouped] : grouped;
-    turns.push({ id: turnId, messages: messagesOut });
-    userMsg = null;
-    events = [];
-    endsWithPartialAssistant = false;
+  let current: TurnDraft | null = null;
+  const openDraft = (): TurnDraft => {
+    if (!current) {
+      current = {
+        userText: null,
+        events: [],
+        endsWithPartialAssistant: false,
+      };
+      drafts.push(current);
+    }
+    return current;
   };
 
   for (const m of messages) {
-    if (
-      (m.kind === "assistant" ||
-        m.kind === "tool_call" ||
-        m.kind === "tool_result") &&
-      m.parentToolUseId
-    ) {
-      continue;
-    }
-    if (m.kind === "tool_result" && hiddenToolIds.has(m.toolId)) {
-      continue;
-    }
-
     switch (m.kind) {
       case "session_start":
       case "session_end":
@@ -109,71 +115,118 @@ export function chatMessagesToThread(
         continue;
 
       case "user": {
-        flushTurn();
-        userMsg = {
-          evt: `chat-turn-${turnSeq}-user`,
-          type: "user",
-          role: "human",
-          label: "You",
-          text: m.text,
-          textFormat: "markdown",
+        current = {
+          userText: m.text,
+          events: [],
+          endsWithPartialAssistant: false,
         };
+        drafts.push(current);
         continue;
       }
 
       case "assistant": {
-        events.push({
+        if (m.parentToolUseId) continue;
+        const draft = openDraft();
+        draft.events.push({
           kind: "assistant_message",
           text: m.text,
           timestamp: m.timestamp,
           parentToolUseId: m.parentToolUseId,
         });
-        endsWithPartialAssistant = m.isPartial === true;
+        draft.endsWithPartialAssistant = m.isPartial === true;
         continue;
       }
 
       case "tool_call": {
-        if (isNonSpawnAgentControlCall(m)) {
-          hiddenToolIds.add(m.toolId);
+        if (m.parentToolUseId) continue;
+        if (isNonSpawnAgentControlMessage(m)) continue;
+        const ev = toToolCallEvent(m);
+        if (seenToolCallIds.has(m.toolId)) {
+          mergeToolCallEvent(toolCallById.get(m.toolId), ev);
           continue;
         }
-        events.push(toToolCallEvent(m));
-        endsWithPartialAssistant = false;
+        seenToolCallIds.add(m.toolId);
+        toolCallById.set(m.toolId, ev);
+        const draft = openDraft();
+        draft.events.push(ev);
+        draft.endsWithPartialAssistant = false;
         continue;
       }
 
       case "tool_result": {
-        events.push(toToolResultEvent(m));
-        endsWithPartialAssistant = false;
+        if (m.parentToolUseId) continue;
+        const draft = openDraft();
+        const ev = toToolResultEvent(m);
+        draft.events.push(ev);
+        draft.endsWithPartialAssistant = false;
+        if (!resultById.has(ev.toolUseId)) resultById.set(ev.toolUseId, ev);
+        continue;
+      }
+
+      case "task_notification": {
+        // Harness notice → activity row (markLastAgentStreaming skips
+        // activity rows, so a trailing partial assistant stays streaming).
+        openDraft().events.push({
+          kind: "task_notification",
+          message: m.message,
+          timestamp: m.timestamp,
+        });
         continue;
       }
 
       case "error":
       case "warning": {
-        flushTurn();
-        const turnId = `chat-turn-${turnSeq++}`;
-        const err: ErrorMessage = {
-          evt: `${turnId}-error`,
-          type: "error",
-          title: m.message,
-        };
-        turns.push({ id: turnId, messages: [err] });
+        drafts.push({
+          userText: null,
+          events: [],
+          endsWithPartialAssistant: false,
+          errorTitle: m.message,
+        });
+        current = null;
         continue;
       }
     }
   }
-  flushTurn();
+
+  // ── Pass 2: group each turn (sharing the session-wide result index) ───
+  const turns: Turn[] = [];
+  drafts.forEach((draft, index) => {
+    const turnId = `chat-turn-${index}`;
+    if (draft.errorTitle !== undefined) {
+      const err: ErrorMessage = {
+        evt: `${turnId}-error`,
+        type: "error",
+        title: draft.errorTitle,
+      };
+      turns.push({ id: turnId, messages: [err] });
+      return;
+    }
+    const grouped = chatTurnEventsToMessages(draft.events, {
+      collapsed,
+      onToggleTool,
+      assistantLabel,
+      resultById,
+    });
+    stabilizeKeys(grouped, turnId);
+    if (draft.endsWithPartialAssistant) markLastAgentStreaming(grouped);
+    const userMsg: UserMessage | null =
+      draft.userText !== null
+        ? {
+            evt: `${turnId}-user`,
+            type: "user",
+            role: "human",
+            label: "You",
+            text: draft.userText,
+            textFormat: "markdown",
+          }
+        : null;
+    const messagesOut: Message[] = userMsg ? [userMsg, ...grouped] : grouped;
+    if (messagesOut.length > 0) {
+      turns.push({ id: turnId, messages: messagesOut });
+    }
+  });
 
   return { id: LOCAL_CHAT_THREAD_ID, turns };
-}
-
-function isNonSpawnAgentControlCall(
-  m: Extract<ChatMessage, { kind: "tool_call" }>
-): boolean {
-  if (!/^(agent|task)$/i.test(m.toolName)) return false;
-  const input = parseToolInput(m.input);
-  const collabTool = input.collab_tool ?? input.collabTool;
-  return typeof collabTool === "string" && collabTool !== "spawnAgent";
 }
 
 /**
@@ -209,24 +262,67 @@ function markLastAgentStreaming(messages: Message[]): void {
 /** Convert a `tool_call` chat message to its ConversationEvent shape. */
 function toToolCallEvent(
   m: Extract<ChatMessage, { kind: "tool_call" }>
-): ConversationEvent {
+): ToolCallEvent {
+  const input = parseToolInput(m.input);
   return {
     kind: "tool_call",
     toolId: m.toolId,
     toolName: m.toolName,
     displayName: m.toolName,
     icon: getToolIcon(m.toolName),
-    summary: "",
-    input: parseToolInput(m.input),
+    summary: toolCallSummary(input),
+    input,
     timestamp: m.timestamp,
     parentToolUseId: m.parentToolUseId,
   };
 }
 
+function mergeToolCallEvent(
+  target: ToolCallEvent | undefined,
+  incoming: ToolCallEvent
+): void {
+  if (!target) return;
+  target.input = mergeToolCallInput(target.input, incoming.input);
+  target.summary =
+    toolCallSummary(target.input) || incoming.summary || target.summary;
+}
+
+function mergeToolCallInput(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...current,
+    ...incoming,
+    agents_states: mergeRecordField(
+      current.agents_states,
+      incoming.agents_states
+    ),
+    agentsStates: mergeRecordField(current.agentsStates, incoming.agentsStates),
+  };
+}
+
+function mergeRecordField(current: unknown, incoming: unknown): unknown {
+  if (
+    current &&
+    typeof current === "object" &&
+    !Array.isArray(current) &&
+    incoming &&
+    typeof incoming === "object" &&
+    !Array.isArray(incoming)
+  ) {
+    return {
+      ...(current as Record<string, unknown>),
+      ...(incoming as Record<string, unknown>),
+    };
+  }
+  return incoming ?? current;
+}
+
 /** Convert a `tool_result` chat message to its ConversationEvent shape. */
 function toToolResultEvent(
   m: Extract<ChatMessage, { kind: "tool_result" }>
-): ConversationEvent {
+): ToolResultEvent {
   return {
     kind: "tool_result",
     toolUseId: m.toolId,
@@ -252,4 +348,21 @@ function parseToolInput(input: string): Record<string, unknown> {
     // Not JSON — fall through.
   }
   return input ? { command: input } : {};
+}
+
+function toolCallSummary(input: Record<string, unknown>): string {
+  for (const key of ["description", "prompt"] as const) {
+    const value = input[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function isNonSpawnAgentControlMessage(
+  m: Extract<ChatMessage, { kind: "tool_call" }>
+): boolean {
+  if (m.toolName !== "agent") return false;
+  const input = parseToolInput(m.input);
+  const collabTool = input.collab_tool ?? input.collabTool;
+  return typeof collabTool === "string" && collabTool !== "spawnAgent";
 }

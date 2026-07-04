@@ -1,17 +1,19 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Instant};
 use tokio_tungstenite::{connect_async, MaybeTlsStream, WebSocketStream};
 use tungstenite::Message;
@@ -115,7 +117,15 @@ impl LocalChatHarness for CodexLocalChatHarness {
             backend_session_id,
             launched.ws_url
         );
-        let mut connection = match CodexRpcConnection::connect(&launched.ws_url).await {
+        let thread_state = Arc::new(StdMutex::new(CodexThreadState::default()));
+        let connection = match CodexRpcConnection::connect(
+            &launched.ws_url,
+            backend_session_id.clone(),
+            event_sink.clone(),
+            thread_state.clone(),
+        )
+        .await
+        {
             Ok(connection) => connection,
             Err(error) => {
                 stop_process(&mut launched.process).await;
@@ -198,12 +208,12 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let session = Arc::new(CodexLocalChatSession {
             backend_session_id: backend_session_id.clone(),
             thread_id: thread.thread_id,
-            model: thread.model,
             event_sink,
-            connection: Mutex::new(connection),
+            connection,
             process: Mutex::new(launched.process),
             stats: Mutex::new(SessionStats::default()),
             permission_settings,
+            turn_lock: Mutex::new(()),
         });
 
         let mut sessions = self.sessions.write().await;
@@ -272,12 +282,12 @@ impl CodexLocalChatHarness {
 struct CodexLocalChatSession {
     backend_session_id: String,
     thread_id: String,
-    model: String,
     event_sink: LocalChatEventSink,
-    connection: Mutex<CodexRpcConnection>,
+    connection: CodexRpcConnection,
     process: Mutex<Option<Child>>,
     stats: Mutex<SessionStats>,
     permission_settings: CodexPermissionSettings,
+    turn_lock: Mutex<()>,
 }
 
 impl CodexLocalChatSession {
@@ -290,15 +300,13 @@ impl CodexLocalChatSession {
             let stats = self.stats.lock().await;
             stats.num_turns.saturating_add(1)
         };
-        let mut connection = self.connection.lock().await;
-        let outcome = match connection
+        let _turn_lock = self.turn_lock.lock().await;
+        let outcome = match self
+            .connection
             .start_turn(TurnRequest {
-                backend_session_id: &self.backend_session_id,
                 thread_id: &self.thread_id,
                 content,
-                model: &self.model,
                 num_turns,
-                event_sink: &self.event_sink,
                 permission_settings: self.permission_settings,
             })
             .await
@@ -328,9 +336,7 @@ impl CodexLocalChatSession {
     }
 
     async fn shutdown(&self) {
-        if let Ok(mut connection) = self.connection.try_lock() {
-            let _ = connection.close().await;
-        }
+        let _ = self.connection.close().await;
 
         let mut process = self.process.lock().await;
         stop_process(&mut process).await;
@@ -359,6 +365,158 @@ struct SessionStats {
     num_turns: u32,
     context_tokens: u32,
     context_window: u32,
+}
+
+#[derive(Default)]
+struct CodexThreadState {
+    child_thread_parents: HashMap<String, String>,
+    parent_child_threads: HashMap<String, HashSet<String>>,
+    parent_child_statuses: HashMap<String, HashMap<String, String>>,
+    child_turn_results: HashMap<ChildTurnKey, String>,
+    emitted_synthetic_spawn_tool_ids: HashSet<String>,
+    completed_parent_spawn_tool_ids: HashSet<String>,
+}
+
+impl CodexThreadState {
+    fn remember_child_thread_parents(&mut self, item: &Value, tool_id: &str) {
+        let child_keys = collab_agent_identity_keys(item);
+        let is_spawn_agent = item
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or("spawnAgent")
+            == "spawnAgent";
+        if is_spawn_agent {
+            let child_thread_ids = collab_receiver_thread_id_strings(item);
+            if !child_thread_ids.is_empty() {
+                self.parent_child_threads
+                    .entry(tool_id.to_string())
+                    .or_default()
+                    .extend(child_thread_ids);
+            }
+        }
+        for child_key in child_keys {
+            if is_spawn_agent {
+                self.child_thread_parents
+                    .insert(child_key, tool_id.to_string());
+            } else {
+                self.child_thread_parents
+                    .entry(child_key)
+                    .or_insert_with(|| tool_id.to_string());
+            }
+        }
+    }
+
+    fn parent_tool_use_id_for_notification(&self, params: &Value) -> Option<String> {
+        collab_agent_identity_keys(params)
+            .into_iter()
+            .find_map(|key| self.child_thread_parents.get(&key).cloned())
+    }
+
+    fn ensure_parent_for_child_notification(
+        &mut self,
+        params: &Value,
+    ) -> Option<SyntheticSpawnParent> {
+        if let Some(tool_id) = self.parent_tool_use_id_for_notification(params) {
+            return Some(SyntheticSpawnParent {
+                tool_id,
+                should_emit: false,
+            });
+        }
+
+        let keys = collab_agent_identity_keys(params);
+        let agent_key = keys.first()?.to_string();
+        let tool_id = format!("agent:{agent_key}");
+        for key in keys {
+            self.child_thread_parents
+                .entry(key)
+                .or_insert_with(|| tool_id.clone());
+        }
+        let should_emit = self
+            .emitted_synthetic_spawn_tool_ids
+            .insert(tool_id.clone());
+        Some(SyntheticSpawnParent {
+            tool_id,
+            should_emit,
+        })
+    }
+
+    fn remember_child_turn_result(&mut self, thread_id: &str, turn_id: Option<&str>, text: String) {
+        self.child_turn_results
+            .insert(ChildTurnKey::new(thread_id, turn_id), text);
+    }
+
+    fn take_child_turn_result(&mut self, thread_id: &str, turn_id: Option<&str>) -> Option<String> {
+        self.child_turn_results
+            .remove(&ChildTurnKey::new(thread_id, turn_id))
+            .or_else(|| {
+                if turn_id.is_some() {
+                    self.child_turn_results
+                        .remove(&ChildTurnKey::new(thread_id, None))
+                } else {
+                    None
+                }
+            })
+    }
+
+    fn record_child_thread_status(
+        &mut self,
+        parent_tool_use_id: &str,
+        thread_id: &str,
+        status: &str,
+    ) -> Option<bool> {
+        self.parent_child_threads
+            .entry(parent_tool_use_id.to_string())
+            .or_default()
+            .insert(thread_id.to_string());
+        self.parent_child_statuses
+            .entry(parent_tool_use_id.to_string())
+            .or_default()
+            .insert(thread_id.to_string(), status.to_string());
+        if !is_terminal_child_status(status) {
+            return None;
+        }
+        let child_threads = self.parent_child_threads.get(parent_tool_use_id)?;
+        let statuses = self.parent_child_statuses.get(parent_tool_use_id)?;
+        let all_terminal = child_threads.iter().all(|thread_id| {
+            statuses
+                .get(thread_id)
+                .is_some_and(|status| is_terminal_child_status(status))
+        });
+        if !all_terminal {
+            return None;
+        }
+        if !self
+            .completed_parent_spawn_tool_ids
+            .insert(parent_tool_use_id.to_string())
+        {
+            return None;
+        }
+        Some(
+            statuses
+                .values()
+                .any(|status| is_error_child_status(status)),
+        )
+    }
+}
+
+#[derive(Hash, Eq, PartialEq)]
+struct ChildTurnKey {
+    thread_id: String,
+    turn_id: String,
+}
+
+impl ChildTurnKey {
+    fn new(thread_id: &str, turn_id: Option<&str>) -> Self {
+        Self {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.unwrap_or_default().to_string(),
+        }
+    }
+}
+
+struct SyntheticSpawnParent {
+    tool_id: String,
+    should_emit: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -437,12 +595,9 @@ struct ThreadStart {
 }
 
 struct TurnRequest<'a> {
-    backend_session_id: &'a str,
     thread_id: &'a str,
     content: &'a str,
-    model: &'a str,
     num_turns: u32,
-    event_sink: &'a LocalChatEventSink,
     permission_settings: CodexPermissionSettings,
 }
 
@@ -452,13 +607,31 @@ struct TurnOutcome {
     error: Option<String>,
 }
 
+type CodexWsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+type CodexWsWriter = SplitSink<CodexWsStream, Message>;
+type CodexWsReader = SplitStream<CodexWsStream>;
+type PendingResponses = Arc<Mutex<HashMap<u64, PendingRpcResponse>>>;
+
+struct PendingRpcResponse {
+    method: &'static str,
+    tx: oneshot::Sender<Result<Value, String>>,
+}
+
 struct CodexRpcConnection {
-    stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    next_id: u64,
+    writer: Arc<Mutex<CodexWsWriter>>,
+    next_id: Mutex<u64>,
+    pending_responses: PendingResponses,
+    notification_handler: Arc<StdMutex<TurnNotificationHandler>>,
+    reader_task: JoinHandle<()>,
 }
 
 impl CodexRpcConnection {
-    async fn connect(ws_url: &str) -> Result<Self, String> {
+    async fn connect(
+        ws_url: &str,
+        backend_session_id: String,
+        event_sink: LocalChatEventSink,
+        thread_state: Arc<StdMutex<CodexThreadState>>,
+    ) -> Result<Self, String> {
         log::info!(
             "[Codex local chat] connecting to app-server websocket: {}",
             ws_url
@@ -466,10 +639,30 @@ impl CodexRpcConnection {
         let (stream, _) = connect_async(ws_url)
             .await
             .map_err(|err| format!("Failed to connect to Codex app-server websocket: {err}"))?;
-        Ok(Self { stream, next_id: 1 })
+        let (writer, reader) = stream.split();
+        let writer = Arc::new(Mutex::new(writer));
+        let pending_responses = Arc::new(Mutex::new(HashMap::new()));
+        let notification_handler = Arc::new(StdMutex::new(TurnNotificationHandler::new(
+            backend_session_id,
+            event_sink,
+            thread_state,
+        )));
+        let reader_task = spawn_codex_reader(
+            reader,
+            writer.clone(),
+            pending_responses.clone(),
+            notification_handler.clone(),
+        );
+        Ok(Self {
+            writer,
+            next_id: Mutex::new(1),
+            pending_responses,
+            notification_handler,
+            reader_task,
+        })
     }
 
-    async fn initialize(&mut self) -> Result<(), String> {
+    async fn initialize(&self) -> Result<(), String> {
         self.request(
             "initialize",
             json!({
@@ -482,14 +675,13 @@ impl CodexRpcConnection {
                     "experimentalApi": true,
                 },
             }),
-            None,
         )
         .await?;
         self.notify("initialized", json!({})).await
     }
 
     async fn start_or_resume_thread(
-        &mut self,
+        &self,
         request: ThreadRequest<'_>,
     ) -> Result<ThreadStart, String> {
         let (method, mut params) = if let Some(thread_id) = request.provider_resume_id {
@@ -520,7 +712,7 @@ impl CodexRpcConnection {
         }
         request.permission_settings.apply_to_params(&mut params);
 
-        let response = self.request(method, params, None).await?;
+        let response = self.request(method, params).await?;
         let thread_id = response
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -532,11 +724,15 @@ impl CodexRpcConnection {
             .or(request.model)
             .unwrap_or(CODEX_DEFAULT_MODEL_LABEL)
             .to_string();
+        self.notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .set_thread(thread_id.clone(), model.clone());
 
         Ok(ThreadStart { thread_id, model })
     }
 
-    async fn start_turn(&mut self, request: TurnRequest<'_>) -> Result<TurnOutcome, String> {
+    async fn start_turn(&self, request: TurnRequest<'_>) -> Result<TurnOutcome, String> {
         let mut params = json!({
             "threadId": request.thread_id,
             "input": [
@@ -547,59 +743,74 @@ impl CodexRpcConnection {
             ],
         });
         request.permission_settings.apply_to_params(&mut params);
-        let mut handler = TurnNotificationHandler::new(
-            request.backend_session_id,
-            request.thread_id,
-            request.model,
-            request.num_turns,
-            request.event_sink,
-        );
-        let response = self
-            .request("turn/start", params, Some(&mut handler))
-            .await?;
-        let turn_id = response
-            .pointer("/turn/id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| "turn/start response did not include turn.id".to_string())?
-            .to_string();
-        handler.set_expected_turn_id(&turn_id);
+        let (completion_tx, completion_rx) = oneshot::channel();
+        self.notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .begin_turn(request.num_turns, completion_tx);
+        let response = match self.request("turn/start", params).await {
+            Ok(response) => response,
+            Err(error) => {
+                self.notification_handler
+                    .lock()
+                    .expect("codex notification handler lock poisoned")
+                    .clear_active_turn();
+                return Err(error);
+            }
+        };
+        let turn_id = match response.pointer("/turn/id").and_then(Value::as_str) {
+            Some(turn_id) => turn_id.to_string(),
+            None => {
+                self.notification_handler
+                    .lock()
+                    .expect("codex notification handler lock poisoned")
+                    .clear_active_turn();
+                return Err("turn/start response did not include turn.id".to_string());
+            }
+        };
+        self.notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .set_expected_turn_id(&turn_id);
 
-        while !handler.is_completed() {
-            let message = self.read_message().await?;
-            self.handle_message(message, None, Some(&mut handler))
-                .await?;
-        }
-
-        Ok(handler.into_outcome())
+        completion_rx
+            .await
+            .map_err(|_| "Codex app-server turn completion channel closed".to_string())
     }
 
-    async fn request(
-        &mut self,
-        method: &'static str,
-        params: Value,
-        mut notification_handler: Option<&mut TurnNotificationHandler<'_>>,
-    ) -> Result<Value, String> {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.send_json(&json!({
+    async fn request(&self, method: &'static str, params: Value) -> Result<Value, String> {
+        let id = {
+            let mut next_id = self.next_id.lock().await;
+            let id = *next_id;
+            *next_id += 1;
+            id
+        };
+        let (tx, rx) = oneshot::channel();
+        self.pending_responses
+            .lock()
+            .await
+            .insert(id, PendingRpcResponse { method, tx });
+        if let Err(error) = self
+            .send_json(&json!({
             "id": id,
             "method": method,
             "params": params,
-        }))
-        .await?;
+            }))
+            .await
+        {
+            self.pending_responses.lock().await.remove(&id);
+            return Err(error);
+        }
         log::info!("[Codex local chat] RPC request sent: method={method}, id={id}");
 
-        loop {
-            let message = self.read_message().await?;
-            let handler = notification_handler.as_deref_mut();
-            if let Some(response) = self.handle_message(message, Some(id), handler).await? {
-                log::info!("[Codex local chat] RPC response received: method={method}, id={id}");
-                return Ok(response);
-            }
-        }
+        let response = rx
+            .await
+            .map_err(|_| format!("Codex app-server response channel closed for {method}"))??;
+        log::info!("[Codex local chat] RPC response received: method={method}, id={id}");
+        Ok(response)
     }
 
-    async fn notify(&mut self, method: &'static str, params: Value) -> Result<(), String> {
+    async fn notify(&self, method: &'static str, params: Value) -> Result<(), String> {
         self.send_json(&json!({
             "method": method,
             "params": params,
@@ -607,100 +818,199 @@ impl CodexRpcConnection {
         .await
     }
 
-    async fn close(&mut self) -> Result<(), String> {
-        self.stream
-            .close(None)
+    async fn close(&self) -> Result<(), String> {
+        self.reader_task.abort();
+        self.writer
+            .lock()
+            .await
+            .close()
             .await
             .map_err(|err| format!("Failed to close Codex app-server websocket: {err}"))
     }
 
-    async fn send_json(&mut self, value: &Value) -> Result<(), String> {
-        self.stream
-            .send(Message::Text(value.to_string()))
-            .await
-            .map_err(|err| format!("Failed to send Codex app-server request: {err}"))
+    async fn send_json(&self, value: &Value) -> Result<(), String> {
+        send_codex_json(&self.writer, value).await
     }
+}
 
-    async fn read_message(&mut self) -> Result<RpcMessage, String> {
-        while let Some(frame) = self.stream.next().await {
-            let frame =
-                frame.map_err(|err| format!("Failed to read Codex app-server response: {err}"))?;
-            match frame {
-                Message::Text(text) => {
-                    log::debug!("[Codex local chat] received websocket message: {text}");
-                    return serde_json::from_str(&text)
-                        .map_err(|err| format!("Invalid Codex app-server JSON frame: {err}"));
+fn spawn_codex_reader(
+    mut reader: CodexWsReader,
+    writer: Arc<Mutex<CodexWsWriter>>,
+    pending_responses: PendingResponses,
+    notification_handler: Arc<StdMutex<TurnNotificationHandler>>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let failure = loop {
+            let Some(frame) = reader.next().await else {
+                break "Codex app-server websocket ended".to_string();
+            };
+            let frame = match frame {
+                Ok(frame) => frame,
+                Err(error) => {
+                    break format!("Failed to read Codex app-server response: {error}");
                 }
-                Message::Binary(_) | Message::Ping(_) | Message::Pong(_) => {}
-                Message::Close(_) => return Err("Codex app-server websocket closed".to_string()),
-                Message::Frame(_) => {}
+            };
+            let Some(message) = decode_codex_websocket_frame(frame) else {
+                continue;
+            };
+            match message {
+                Ok(message) => {
+                    handle_codex_reader_message(
+                        message,
+                        &writer,
+                        &pending_responses,
+                        &notification_handler,
+                    )
+                    .await;
+                }
+                Err(error) => break error,
             }
-        }
-        Err("Codex app-server websocket ended".to_string())
-    }
+        };
+        fail_pending_codex_responses(&pending_responses, &failure).await;
+        notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .fail_active_turn(failure);
+    })
+}
 
-    async fn handle_message(
-        &mut self,
-        message: RpcMessage,
-        response_id: Option<u64>,
-        mut notification_handler: Option<&mut TurnNotificationHandler<'_>>,
-    ) -> Result<Option<Value>, String> {
-        if let (Some(expected_id), Some(message_id)) = (response_id, message.id.as_ref()) {
-            if message_id.as_u64() == Some(expected_id) {
-                if let Some(error) = message.error {
-                    log::error!(
-                        "[Codex local chat] RPC error response: id={}, code={}, message={}",
-                        expected_id,
-                        error.code,
-                        error.message
+fn decode_codex_websocket_frame(frame: Message) -> Option<Result<RpcMessage, String>> {
+    match frame {
+        Message::Text(text) => {
+            let raw_text = text.to_string();
+            log::debug!("[Codex local chat] received websocket message: {raw_text}");
+            let json: Value = match serde_json::from_str(&raw_text) {
+                Ok(json) => json,
+                Err(error) => {
+                    return Some(Err(format!("Invalid Codex app-server JSON frame: {error}")));
+                }
+            };
+            Some(
+                serde_json::from_value(json)
+                    .map_err(|error| format!("Invalid Codex app-server JSON frame: {error}")),
+            )
+        }
+        Message::Binary(_) | Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => None,
+        Message::Close(_) => Some(Err("Codex app-server websocket closed".to_string())),
+    }
+}
+
+async fn handle_codex_reader_message(
+    message: RpcMessage,
+    writer: &Arc<Mutex<CodexWsWriter>>,
+    pending_responses: &PendingResponses,
+    notification_handler: &Arc<StdMutex<TurnNotificationHandler>>,
+) {
+    if let Some(message_id) = message.id.as_ref().and_then(Value::as_u64) {
+        if message.method.is_none() {
+            let response = if let Some(error) = message.error {
+                log::error!(
+                    "[Codex local chat] RPC error response: id={}, code={}, message={}",
+                    message_id,
+                    error.code,
+                    error.message
+                );
+                Err(format!("{} ({})", error.message, error.code))
+            } else {
+                Ok(message.result.unwrap_or(Value::Null))
+            };
+            if let Some(pending) = pending_responses.lock().await.remove(&message_id) {
+                if let Ok(response_value) = &response {
+                    remember_root_thread_from_response(
+                        pending.method,
+                        response_value,
+                        notification_handler,
                     );
-                    return Err(format!("{} ({})", error.message, error.code));
                 }
-                return Ok(Some(message.result.unwrap_or(Value::Null)));
+                let _ = pending.tx.send(response);
+            } else {
+                log::debug!(
+                    "[Codex local chat] ignoring response for unknown app-server request id={message_id}"
+                );
             }
+            return;
         }
-
-        if let (Some(id), Some(method)) = (message.id.as_ref(), message.method.as_deref()) {
-            log::info!(
-                "[Codex local chat] app-server request received during turn: method={method}, id={id}"
-            );
-            if let Some(handler) = notification_handler.as_deref_mut() {
-                handler.emit_approval_warning(method);
-            }
-            self.respond_to_server_request(id.clone(), method).await?;
-            return Ok(None);
-        }
-
-        if let (Some(method), Some(params), Some(handler)) = (
-            message.method.as_deref(),
-            message.params.as_ref(),
-            notification_handler,
-        ) {
-            handler.handle(method, params);
-        }
-
-        Ok(None)
     }
 
-    async fn respond_to_server_request(&mut self, id: Value, method: &str) -> Result<(), String> {
-        if let Some(result) = fallback_server_request_result(method) {
-            return self
-                .send_json(&json!({
-                    "id": id,
-                    "result": result,
-                }))
-                .await;
-        }
+    if let (Some(id), Some(method)) = (message.id.as_ref(), message.method.as_deref()) {
+        log::info!(
+            "[Codex local chat] app-server request received asynchronously: method={method}, id={id}"
+        );
+        notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .emit_approval_warning(method);
+        respond_to_codex_server_request(writer, id.clone(), method).await;
+        return;
+    }
 
-        self.send_json(&json!({
+    if let (Some(method), Some(params)) = (message.method.as_deref(), message.params.as_ref()) {
+        notification_handler
+            .lock()
+            .expect("codex notification handler lock poisoned")
+            .handle(method, params);
+    }
+}
+
+fn remember_root_thread_from_response(
+    method: &str,
+    response: &Value,
+    notification_handler: &Arc<StdMutex<TurnNotificationHandler>>,
+) {
+    if !matches!(method, "thread/start" | "thread/resume") {
+        return;
+    }
+    let Some(thread_id) = response.pointer("/thread/id").and_then(Value::as_str) else {
+        return;
+    };
+    let model = response
+        .get("model")
+        .and_then(Value::as_str)
+        .unwrap_or(CODEX_DEFAULT_MODEL_LABEL);
+    notification_handler
+        .lock()
+        .expect("codex notification handler lock poisoned")
+        .set_thread(thread_id.to_string(), model.to_string());
+}
+
+async fn respond_to_codex_server_request(
+    writer: &Arc<Mutex<CodexWsWriter>>,
+    id: Value,
+    method: &str,
+) {
+    let response = if let Some(result) = fallback_server_request_result(method) {
+        json!({
+            "id": id,
+            "result": result,
+        })
+    } else {
+        json!({
             "id": id,
             "error": {
                 "code": -32601,
                 "message": format!("Vertebrae local chat does not handle Codex server request '{method}' yet"),
             },
-        }))
-        .await
+        })
+    };
+    if let Err(error) = send_codex_json(writer, &response).await {
+        log::warn!("[Codex local chat] failed to respond to app-server request: {error}");
     }
+}
+
+async fn fail_pending_codex_responses(pending_responses: &PendingResponses, error: &str) {
+    let pending = std::mem::take(&mut *pending_responses.lock().await);
+    for (_id, pending) in pending {
+        let _ = pending.tx.send(Err(error.to_string()));
+    }
+}
+
+async fn send_codex_json(writer: &Arc<Mutex<CodexWsWriter>>, value: &Value) -> Result<(), String> {
+    writer
+        .lock()
+        .await
+        .send(Message::Text(value.to_string()))
+        .await
+        .map_err(|err| format!("Failed to send Codex app-server request: {err}"))
 }
 
 #[derive(serde::Deserialize)]
@@ -871,6 +1181,23 @@ fn collab_receiver_thread_ids(item: &Value) -> Value {
         })
 }
 
+fn collab_receiver_thread_id_strings(item: &Value) -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Some(values) = collab_receiver_thread_ids(item).as_array() {
+        ids.extend(values.iter().filter_map(Value::as_str).filter_map(|value| {
+            let value = value.trim();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value.to_string())
+            }
+        }));
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
 fn collab_receiver_agents(item: &Value) -> Value {
     item.get("receiverAgents")
         .filter(|value| useful_json_value(value))
@@ -907,6 +1234,32 @@ fn string_values_at(item: &Value, paths: &[&str]) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn is_terminal_child_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "completed"
+            | "complete"
+            | "succeeded"
+            | "success"
+            | "done"
+            | "failed"
+            | "error"
+            | "system_error"
+            | "systemerror"
+            | "cancelled"
+            | "canceled"
+            | "timed_out"
+            | "timedout"
+    )
+}
+
+fn is_error_child_status(status: &str) -> bool {
+    !matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "completed" | "complete" | "succeeded" | "success" | "done"
+    )
 }
 
 fn string_array_at(item: &Value, paths: &[&str]) -> Vec<String> {
@@ -1025,11 +1378,45 @@ fn collab_agent_identity_keys(item: &Value) -> Vec<String> {
     keys
 }
 
+/// Derive a stable id for a `collabAgentToolCall` *spawn* (`tool ==
+/// "spawnAgent"`) from the agent identity the item already carries --
+/// `receiverThreadIds`, `agentId`/`threadId`, or the spawn result's
+/// `agent_id`/`agent_path`/`id` (see [`collab_agent_thread_id`]).
+///
+/// This mirrors the `agent:${agentPath}` convention the TypeScript rollout
+/// hydrator synthesizes for the same spawn (`agentToolId` in
+/// `conversation.ts`). Before this, the live path used the app-server item
+/// id as `tool_id`, which can never equal the hydration-synthesized id, so a
+/// single real spawn produced two irreconcilable spawn cards once a session
+/// was reloaded from its rollout file. Returns `None` when no identity is
+/// resolvable yet (e.g. `item/started` fires before `receiverThreadIds`/
+/// `result` are populated); callers should fall back to the item id in that
+/// case so the call still gets *some* stable id for the remainder of its
+/// (live-only) lifecycle.
+fn collab_agent_spawn_id(item: &Value) -> Option<String> {
+    collab_agent_thread_id(item)
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|agent_path| format!("agent:{agent_path}"))
+}
+
+fn unresolved_collab_spawn(item: &Value) -> bool {
+    item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall")
+        && item
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or("spawnAgent")
+            == "spawnAgent"
+        && collab_agent_spawn_id(item).is_none()
+}
+
 fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
     let item_type = item.get("type").and_then(Value::as_str)?;
-    let id = item.get("id").and_then(Value::as_str)?.to_string();
-    let (tool_name, input) = match item_type {
+    let item_id = item.get("id").and_then(Value::as_str)?.to_string();
+    let (id, tool_name, input) = match item_type {
         "commandExecution" => (
+            item_id,
             "Bash".to_string(),
             json!({
                 "command": item.get("command").and_then(Value::as_str).unwrap_or_default(),
@@ -1037,6 +1424,7 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
             }),
         ),
         "fileChange" => (
+            item_id,
             "apply_patch".to_string(),
             item.get("changes").cloned().unwrap_or(Value::Null),
         ),
@@ -1044,6 +1432,7 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
             let server = item.get("server").and_then(Value::as_str).unwrap_or("mcp");
             let tool = item.get("tool").and_then(Value::as_str).unwrap_or("tool");
             (
+                item_id,
                 format!("{server}.{tool}"),
                 item.get("arguments").cloned().unwrap_or(Value::Null),
             )
@@ -1055,11 +1444,16 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
                 .map(|namespace| format!("{namespace}.{tool}"))
                 .unwrap_or_else(|| tool.to_string());
             (
+                item_id,
                 tool_name,
                 item.get("arguments").cloned().unwrap_or(Value::Null),
             )
         }
-        "webSearch" => ("web_search".to_string(), Value::Object(Default::default())),
+        "webSearch" => (
+            item_id,
+            "web_search".to_string(),
+            Value::Object(Default::default()),
+        ),
         "collabAgentToolCall" => {
             let tool = item
                 .get("tool")
@@ -1070,7 +1464,17 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
             } else {
                 "agent"
             };
+            // Only the spawning call itself is reconciled with hydration;
+            // wait_agent/close_agent calls are their own tool cards (see
+            // `remember_child_thread_parents`'s `or_insert_with` for
+            // non-spawn tools) and keep the item id.
+            let id = if tool == "spawnAgent" {
+                collab_agent_spawn_id(item).unwrap_or(item_id)
+            } else {
+                item_id
+            };
             (
+                id,
                 tool_name.to_string(),
                 json!({
                     "description": item.get("prompt").and_then(Value::as_str).unwrap_or(tool),
@@ -1085,6 +1489,23 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
                 }),
             )
         }
+        // Plan/todo checklist items. Mirrors the daemon's `codex_jsonl`
+        // parser and the exec-shape TS parser (`conversation.ts`'s
+        // `todo_list` handling), which model these as `{"items":
+        // [{"text","completed"}]}` under an `item.started`/`item.updated`/
+        // `item.completed` envelope. Neither of those surfaces reasoning
+        // items either, and this harness has no dedicated "plan" event
+        // (only tool_call/tool_result), so we render the plan as a
+        // `TodoWrite` tool call: at least the checklist shows up as a tool
+        // row instead of being silently dropped. Accept both the app-server
+        // camelCase spelling used by every other item type here and the
+        // snake_case spelling documented upstream, since the exact wire
+        // casing for this item hasn't been confirmed against a live server.
+        "todoList" | "todo_list" => (
+            item_id,
+            "TodoWrite".to_string(),
+            json!({ "todos": item.get("items").cloned().unwrap_or(Value::Null) }),
+        ),
         _ => return None,
     };
     Some((
@@ -1096,14 +1517,15 @@ fn codex_tool_call(item: &Value) -> Option<(String, String, String)> {
 
 fn codex_tool_result(item: &Value) -> Option<(String, String, bool)> {
     let item_type = item.get("type").and_then(Value::as_str)?;
-    let id = item.get("id").and_then(Value::as_str)?.to_string();
-    let (result, is_error) = match item_type {
+    let item_id = item.get("id").and_then(Value::as_str)?.to_string();
+    let (id, result, is_error) = match item_type {
         "commandExecution" => {
             let status = item
                 .get("status")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             (
+                item_id,
                 item.get("aggregatedOutput")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
@@ -1117,6 +1539,7 @@ fn codex_tool_result(item: &Value) -> Option<(String, String, bool)> {
                 .and_then(Value::as_str)
                 .unwrap_or_default();
             (
+                item_id,
                 serde_json::to_string(item.get("changes").unwrap_or(&Value::Null))
                     .unwrap_or_default(),
                 matches!(status, "failed" | "declined"),
@@ -1124,9 +1547,14 @@ fn codex_tool_result(item: &Value) -> Option<(String, String, bool)> {
         }
         "mcpToolCall" => {
             if let Some(error) = item.get("error") {
-                (serde_json::to_string(error).unwrap_or_default(), true)
+                (
+                    item_id,
+                    serde_json::to_string(error).unwrap_or_default(),
+                    true,
+                )
             } else {
                 (
+                    item_id,
                     serde_json::to_string(item.get("result").unwrap_or(&Value::Null))
                         .unwrap_or_default(),
                     item.get("status").and_then(Value::as_str) == Some("failed"),
@@ -1134,70 +1562,134 @@ fn codex_tool_result(item: &Value) -> Option<(String, String, bool)> {
             }
         }
         "dynamicToolCall" => (
+            item_id,
             serde_json::to_string(item.get("contentItems").unwrap_or(&Value::Null))
                 .unwrap_or_default(),
             item.get("success").and_then(Value::as_bool) == Some(false)
                 || item.get("status").and_then(Value::as_str) == Some("failed"),
         ),
-        "webSearch" => ("Web search completed".to_string(), false),
-        "collabAgentToolCall" => (
-            item.get("status")
+        "webSearch" => (item_id, "Web search completed".to_string(), false),
+        "collabAgentToolCall" => {
+            // Must resolve to the same id `codex_tool_call` assigned to the
+            // matching spawn, or the ToolResult never reconciles with its
+            // ToolCall in the GUI (see `collab_agent_spawn_id`).
+            let tool = item
+                .get("tool")
                 .and_then(Value::as_str)
-                .unwrap_or("completed")
-                .to_string(),
-            item.get("status").and_then(Value::as_str) == Some("failed"),
-        ),
+                .unwrap_or("spawnAgent");
+            let id = if tool == "spawnAgent" {
+                collab_agent_spawn_id(item).unwrap_or(item_id)
+            } else {
+                item_id
+            };
+            (
+                id,
+                item.get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("completed")
+                    .to_string(),
+                item.get("status").and_then(Value::as_str) == Some("failed"),
+            )
+        }
+        // See the matching arm in `codex_tool_call` for why plan/todo items
+        // are mapped to a tool row rather than dropped. A todo-list update
+        // is a status snapshot, not a failure signal, so `is_error` is
+        // always `false` here.
+        "todoList" | "todo_list" => {
+            let items = item
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            let completed = items
+                .iter()
+                .filter(|entry| entry.get("completed").and_then(Value::as_bool) == Some(true))
+                .count();
+            (
+                item_id,
+                format!("{completed}/{} steps completed", items.len()),
+                false,
+            )
+        }
         _ => return None,
     };
     Some((id, result, is_error))
 }
 
-struct TurnNotificationHandler<'a> {
-    backend_session_id: &'a str,
-    thread_id: &'a str,
-    model: &'a str,
-    num_turns: u32,
-    event_sink: &'a LocalChatEventSink,
-    text: String,
-    context_tokens: u32,
-    context_window: u32,
-    completed: Option<TurnCompletion>,
-    expected_turn_id: Option<String>,
+struct TurnNotificationHandler {
+    backend_session_id: String,
+    thread_id: String,
+    model: String,
+    event_sink: LocalChatEventSink,
+    active_turn: Option<ActiveTurnState>,
     pending_notifications: Vec<(String, Value)>,
-    child_thread_parents: HashMap<String, String>,
+    thread_state: Arc<StdMutex<CodexThreadState>>,
 }
 
-impl<'a> TurnNotificationHandler<'a> {
+impl TurnNotificationHandler {
     fn new(
-        backend_session_id: &'a str,
-        thread_id: &'a str,
-        model: &'a str,
-        num_turns: u32,
-        event_sink: &'a LocalChatEventSink,
+        backend_session_id: String,
+        event_sink: LocalChatEventSink,
+        thread_state: Arc<StdMutex<CodexThreadState>>,
     ) -> Self {
         Self {
             backend_session_id,
-            thread_id,
-            model,
-            num_turns,
+            thread_id: String::new(),
+            model: CODEX_DEFAULT_MODEL_LABEL.to_string(),
             event_sink,
+            active_turn: None,
+            pending_notifications: Vec::new(),
+            thread_state,
+        }
+    }
+
+    fn set_thread(&mut self, thread_id: String, model: String) {
+        self.thread_id = thread_id;
+        self.model = model;
+    }
+
+    fn begin_turn(&mut self, num_turns: u32, completion_tx: oneshot::Sender<TurnOutcome>) {
+        self.active_turn = Some(ActiveTurnState {
+            num_turns,
             text: String::new(),
             context_tokens: 0,
             context_window: 0,
-            completed: None,
             expected_turn_id: None,
-            pending_notifications: Vec::new(),
-            child_thread_parents: HashMap::new(),
-        }
+            completion_tx: Some(completion_tx),
+        });
+        self.pending_notifications.clear();
+    }
+
+    fn clear_active_turn(&mut self) {
+        self.active_turn = None;
+        self.pending_notifications.clear();
     }
 
     fn handle(&mut self, method: &str, params: &Value) {
         let notification_thread_id = params.get("threadId").and_then(Value::as_str);
-        let parent_tool_use_id = self.parent_tool_use_id_for_notification(params);
-        if notification_thread_id != Some(self.thread_id) && parent_tool_use_id.is_none() {
-            return;
+        let mut parent_tool_use_id = self.parent_tool_use_id_for_notification(params);
+        if notification_thread_id != Some(self.thread_id.as_str()) && parent_tool_use_id.is_none() {
+            // A Codex session can contain multiple threads. If a child thread
+            // races ahead of its parent spawn item, register a minimal stable
+            // spawn parent immediately so status/result updates still have a
+            // stable Agent row. Child work itself stays in the child thread.
+            if notification_thread_id.is_some() {
+                if let Some(parent) = self.ensure_parent_for_child_notification(params) {
+                    if parent.should_emit {
+                        self.emit_synthetic_spawn_parent(params, &parent.tool_id);
+                    }
+                    parent_tool_use_id = Some(parent.tool_id);
+                } else {
+                    return;
+                }
+            } else {
+                return;
+            }
         }
-        if self.expected_turn_id.is_none()
+        if self
+            .active_turn
+            .as_ref()
+            .is_some_and(|turn| turn.expected_turn_id.is_none())
             && parent_tool_use_id.is_none()
             && is_turn_notification(method)
         {
@@ -1205,7 +1697,10 @@ impl<'a> TurnNotificationHandler<'a> {
                 .push((method.to_string(), params.clone()));
             return;
         }
-        if parent_tool_use_id.is_none() && !self.matches_expected_turn(method, params) {
+        if parent_tool_use_id.is_none()
+            && self.active_turn.is_some()
+            && !self.matches_expected_turn(method, params)
+        {
             return;
         }
 
@@ -1238,7 +1733,10 @@ impl<'a> TurnNotificationHandler<'a> {
     }
 
     fn set_expected_turn_id(&mut self, turn_id: &str) {
-        self.expected_turn_id = Some(turn_id.to_string());
+        let Some(active_turn) = self.active_turn.as_mut() else {
+            return;
+        };
+        active_turn.expected_turn_id = Some(turn_id.to_string());
         let pending_notifications = std::mem::take(&mut self.pending_notifications);
         for (method, params) in pending_notifications {
             self.handle(&method, &params);
@@ -1246,7 +1744,11 @@ impl<'a> TurnNotificationHandler<'a> {
     }
 
     fn matches_expected_turn(&self, method: &str, params: &Value) -> bool {
-        let Some(expected_turn_id) = self.expected_turn_id.as_deref() else {
+        let Some(expected_turn_id) = self
+            .active_turn
+            .as_ref()
+            .and_then(|turn| turn.expected_turn_id.as_deref())
+        else {
             return true;
         };
         let turn_id = match method {
@@ -1263,12 +1765,17 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(delta) = params.get("delta").and_then(Value::as_str) else {
             return;
         };
+        if parent_tool_use_id.is_some() {
+            return;
+        }
         if parent_tool_use_id.is_none() {
-            self.text.push_str(delta);
+            if let Some(active_turn) = self.active_turn.as_mut() {
+                active_turn.text.push_str(delta);
+            }
         }
         self.event_sink
             .emit(LocalChatEvent::Text(LocalChatTextEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 text: delta.to_string(),
                 is_partial: true,
@@ -1280,13 +1787,19 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(item) = params.get("item") else {
             return;
         };
+        if parent_tool_use_id.is_some() {
+            return;
+        }
+        if unresolved_collab_spawn(item) {
+            return;
+        }
         if let Some((tool_id, tool_name, input)) = codex_tool_call(item) {
             if item.get("type").and_then(Value::as_str) == Some("collabAgentToolCall") {
                 self.remember_child_thread_parents(item, &tool_id);
             }
             self.event_sink
                 .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
-                    backend_session_id: self.backend_session_id.to_string(),
+                    backend_session_id: self.backend_session_id.clone(),
                     harness: LocalChatHarnessKind::Codex,
                     tool_id,
                     tool_name,
@@ -1300,6 +1813,10 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(item) = params.get("item") else {
             return;
         };
+        if parent_tool_use_id.is_some() {
+            self.handle_child_item_completed(params);
+            return;
+        }
         if item.get("type").and_then(Value::as_str) == Some("agentMessage") {
             self.handle_agent_message_completed(item, parent_tool_use_id);
         }
@@ -1308,7 +1825,7 @@ impl<'a> TurnNotificationHandler<'a> {
                 self.remember_child_thread_parents(item, &tool_id);
                 self.event_sink
                     .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
-                        backend_session_id: self.backend_session_id.to_string(),
+                        backend_session_id: self.backend_session_id.clone(),
                         harness: LocalChatHarnessKind::Codex,
                         tool_id,
                         tool_name,
@@ -1320,7 +1837,7 @@ impl<'a> TurnNotificationHandler<'a> {
         if let Some((tool_id, result, is_error)) = codex_tool_result(item) {
             self.event_sink
                 .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
-                    backend_session_id: self.backend_session_id.to_string(),
+                    backend_session_id: self.backend_session_id.clone(),
                     harness: LocalChatHarnessKind::Codex,
                     tool_id,
                     result,
@@ -1328,6 +1845,29 @@ impl<'a> TurnNotificationHandler<'a> {
                     parent_tool_use_id: parent_tool_use_id.map(str::to_string),
                 }));
         }
+    }
+
+    fn handle_child_item_completed(&mut self, params: &Value) {
+        let Some(item) = params.get("item") else {
+            return;
+        };
+        if item.get("type").and_then(Value::as_str) != Some("agentMessage") {
+            return;
+        }
+        let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+            return;
+        };
+        let Some(text) = item.get("text").and_then(Value::as_str) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let turn_id = params.get("turnId").and_then(Value::as_str);
+        self.thread_state
+            .lock()
+            .expect("codex local chat thread state lock poisoned")
+            .remember_child_turn_result(thread_id, turn_id, text.to_string());
     }
 
     fn handle_agent_message_completed(&mut self, item: &Value, parent_tool_use_id: Option<&str>) {
@@ -1339,7 +1879,7 @@ impl<'a> TurnNotificationHandler<'a> {
         }
         self.event_sink
             .emit(LocalChatEvent::Text(LocalChatTextEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 text: text.to_string(),
                 is_partial: false,
@@ -1348,42 +1888,62 @@ impl<'a> TurnNotificationHandler<'a> {
     }
 
     fn remember_child_thread_parents(&mut self, item: &Value, tool_id: &str) {
-        let child_keys = collab_agent_identity_keys(item);
-        let is_spawn_agent = item
-            .get("tool")
-            .and_then(Value::as_str)
-            .unwrap_or("spawnAgent")
-            == "spawnAgent";
-        for child_key in child_keys {
-            if is_spawn_agent {
-                self.child_thread_parents
-                    .insert(child_key, tool_id.to_string());
-            } else {
-                self.child_thread_parents
-                    .entry(child_key)
-                    .or_insert_with(|| tool_id.to_string());
-            }
-        }
+        self.thread_state
+            .lock()
+            .expect("codex local chat thread state lock poisoned")
+            .remember_child_thread_parents(item, tool_id);
     }
 
     fn parent_tool_use_id_for_notification(&self, params: &Value) -> Option<String> {
-        collab_agent_identity_keys(params)
-            .into_iter()
-            .find_map(|key| self.child_thread_parents.get(&key).cloned())
+        self.thread_state
+            .lock()
+            .expect("codex local chat thread state lock poisoned")
+            .parent_tool_use_id_for_notification(params)
+    }
+
+    fn ensure_parent_for_child_notification(&self, params: &Value) -> Option<SyntheticSpawnParent> {
+        self.thread_state
+            .lock()
+            .expect("codex local chat thread state lock poisoned")
+            .ensure_parent_for_child_notification(params)
+    }
+
+    fn emit_synthetic_spawn_parent(&self, params: &Value, tool_id: &str) {
+        let thread_id = params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .unwrap_or("child-thread");
+        self.event_sink
+            .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                backend_session_id: self.backend_session_id.clone(),
+                harness: LocalChatHarnessKind::Codex,
+                tool_id: tool_id.to_string(),
+                tool_name: "Agent".to_string(),
+                input: serde_json::to_string(&json!({
+                    "collab_tool": "spawnAgent",
+                    "receiver_thread_ids": [thread_id],
+                    "description": "Agent",
+                }))
+                .unwrap_or_default(),
+                parent_tool_use_id: None,
+            }));
     }
 
     fn handle_usage(&mut self, params: &Value) {
-        self.context_tokens = value_to_u32(params.pointer("/tokenUsage/total/totalTokens"))
-            .unwrap_or(self.context_tokens);
-        self.context_window = value_to_u32(params.pointer("/tokenUsage/modelContextWindow"))
-            .unwrap_or(self.context_window);
+        let Some(active_turn) = self.active_turn.as_mut() else {
+            return;
+        };
+        active_turn.context_tokens = value_to_u32(params.pointer("/tokenUsage/total/totalTokens"))
+            .unwrap_or(active_turn.context_tokens);
+        active_turn.context_window = value_to_u32(params.pointer("/tokenUsage/modelContextWindow"))
+            .unwrap_or(active_turn.context_window);
         self.event_sink
             .emit(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
-                model: self.model.to_string(),
-                context_tokens: self.context_tokens,
-                context_window: self.context_window,
+                model: self.model.clone(),
+                context_tokens: active_turn.context_tokens,
+                context_window: active_turn.context_window,
             }));
     }
 
@@ -1391,25 +1951,58 @@ impl<'a> TurnNotificationHandler<'a> {
         let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
-        let Some(status) = params
-            .pointer("/status/type")
-            .and_then(Value::as_str)
-            .and_then(child_thread_status_label)
-        else {
+        let Some(status) = child_thread_status_from_params(params) else {
             return;
         };
         self.emit_child_agent_status(parent_tool_use_id, thread_id, status);
+        let parent_done = self
+            .thread_state
+            .lock()
+            .expect("codex local chat thread state lock poisoned")
+            .record_child_thread_status(parent_tool_use_id, thread_id, status);
+        if let Some(is_error) = parent_done {
+            self.emit_parent_agent_completion(parent_tool_use_id, status, is_error);
+        }
     }
 
     fn handle_child_turn_completed(&self, params: &Value, parent_tool_use_id: &str) {
         let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
             return;
         };
+        let turn_id = params.pointer("/turn/id").and_then(Value::as_str);
         let status = params
             .pointer("/turn/status")
             .and_then(Value::as_str)
             .unwrap_or("completed");
         self.emit_child_agent_status(parent_tool_use_id, thread_id, status);
+        let (parent_done, result) = {
+            let mut state = self
+                .thread_state
+                .lock()
+                .expect("codex local chat thread state lock poisoned");
+            (
+                state.record_child_thread_status(parent_tool_use_id, thread_id, status),
+                state.take_child_turn_result(thread_id, turn_id),
+            )
+        };
+        if let Some(is_error) = parent_done {
+            self.emit_parent_agent_completion(parent_tool_use_id, status, is_error);
+        }
+        if let Some(result) = result {
+            self.emit_child_agent_result(parent_tool_use_id, thread_id, turn_id, status, result);
+        }
+    }
+
+    fn emit_parent_agent_completion(&self, parent_tool_use_id: &str, status: &str, is_error: bool) {
+        self.event_sink
+            .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
+                backend_session_id: self.backend_session_id.clone(),
+                harness: LocalChatHarnessKind::Codex,
+                tool_id: parent_tool_use_id.to_string(),
+                result: status.to_string(),
+                is_error,
+                parent_tool_use_id: None,
+            }));
     }
 
     fn emit_child_agent_status(&self, parent_tool_use_id: &str, thread_id: &str, status: &str) {
@@ -1423,7 +2016,7 @@ impl<'a> TurnNotificationHandler<'a> {
         );
         self.event_sink
             .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 tool_id: parent_tool_use_id.to_string(),
                 tool_name: "Agent".to_string(),
@@ -1437,7 +2030,47 @@ impl<'a> TurnNotificationHandler<'a> {
             }));
     }
 
+    fn emit_child_agent_result(
+        &self,
+        parent_tool_use_id: &str,
+        thread_id: &str,
+        turn_id: Option<&str>,
+        status: &str,
+        result: String,
+    ) {
+        let tool_id = format!(
+            "{parent_tool_use_id}:result:{}",
+            turn_id.unwrap_or(thread_id)
+        );
+        self.event_sink
+            .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                backend_session_id: self.backend_session_id.clone(),
+                harness: LocalChatHarnessKind::Codex,
+                tool_id: tool_id.clone(),
+                tool_name: "Agent Result".to_string(),
+                input: serde_json::to_string(&json!({
+                    "collab_tool": "agentResult",
+                    "receiver_thread_ids": [thread_id],
+                    "parent_tool_use_id": parent_tool_use_id,
+                }))
+                .unwrap_or_default(),
+                parent_tool_use_id: None,
+            }));
+        self.event_sink
+            .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
+                backend_session_id: self.backend_session_id.clone(),
+                harness: LocalChatHarnessKind::Codex,
+                tool_id,
+                result,
+                is_error: status != "completed",
+                parent_tool_use_id: None,
+            }));
+    }
+
     fn handle_turn_completed(&mut self, params: &Value) {
+        let Some(mut active_turn) = self.active_turn.take() else {
+            return;
+        };
         let status = params
             .pointer("/turn/status")
             .and_then(Value::as_str)
@@ -1462,18 +2095,25 @@ impl<'a> TurnNotificationHandler<'a> {
 
         self.event_sink
             .emit(LocalChatEvent::End(LocalChatSessionEndEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 duration_ms,
                 cost_usd: 0.0,
-                num_turns: self.num_turns,
-                result: self.text.clone(),
+                num_turns: active_turn.num_turns,
+                result: active_turn.text.clone(),
                 is_error: error.is_some(),
-                context_tokens: self.context_tokens,
-                context_window: self.context_window,
+                context_tokens: active_turn.context_tokens,
+                context_window: active_turn.context_window,
             }));
 
-        self.completed = Some(TurnCompletion { error });
+        let outcome = TurnOutcome {
+            context_tokens: active_turn.context_tokens,
+            context_window: active_turn.context_window,
+            error,
+        };
+        if let Some(completion_tx) = active_turn.completion_tx.take() {
+            let _ = completion_tx.send(outcome);
+        }
     }
 
     fn handle_error(&mut self, params: &Value) {
@@ -1485,13 +2125,13 @@ impl<'a> TurnNotificationHandler<'a> {
             params
         );
         self.emit_error(error.clone());
-        self.completed = Some(TurnCompletion { error: Some(error) });
+        self.finish_active_turn_with_error(error);
     }
 
     fn emit_error(&self, error: String) {
         self.event_sink
             .emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 error,
             }));
@@ -1503,7 +2143,7 @@ impl<'a> TurnNotificationHandler<'a> {
         };
         self.event_sink
             .emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
-                backend_session_id: self.backend_session_id.to_string(),
+                backend_session_id: self.backend_session_id.clone(),
                 harness: LocalChatHarnessKind::Codex,
                 warning: format!(
                     "Codex requested {request_kind} approval, but Vertebrae local chat does not have a Codex approval UI yet, so the request was denied."
@@ -1511,21 +2151,33 @@ impl<'a> TurnNotificationHandler<'a> {
             }));
     }
 
-    fn is_completed(&self) -> bool {
-        self.completed.is_some()
+    fn fail_active_turn(&mut self, error: String) {
+        self.emit_error(error.clone());
+        self.finish_active_turn_with_error(error);
     }
 
-    fn into_outcome(self) -> TurnOutcome {
-        TurnOutcome {
-            context_tokens: self.context_tokens,
-            context_window: self.context_window,
-            error: self.completed.and_then(|completion| completion.error),
+    fn finish_active_turn_with_error(&mut self, error: String) {
+        let Some(mut active_turn) = self.active_turn.take() else {
+            return;
+        };
+        let outcome = TurnOutcome {
+            context_tokens: active_turn.context_tokens,
+            context_window: active_turn.context_window,
+            error: Some(error),
+        };
+        if let Some(completion_tx) = active_turn.completion_tx.take() {
+            let _ = completion_tx.send(outcome);
         }
     }
 }
 
-struct TurnCompletion {
-    error: Option<String>,
+struct ActiveTurnState {
+    num_turns: u32,
+    text: String,
+    context_tokens: u32,
+    context_window: u32,
+    expected_turn_id: Option<String>,
+    completion_tx: Option<oneshot::Sender<TurnOutcome>>,
 }
 
 fn emit_init(
@@ -1567,13 +2219,31 @@ fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Option<&str> {
 
 fn child_thread_status_label(status: &str) -> Option<&'static str> {
     match status {
-        "active" => Some("running"),
-        "idle" => Some("pendingInit"),
+        "active" | "inProgress" | "in_progress" | "running" => Some("running"),
+        "idle" | "notLoaded" | "not_loaded" => Some("pendingInit"),
+        "systemError" | "system_error" | "error" => Some("failed"),
         "failed" => Some("failed"),
         "cancelled" | "canceled" => Some("cancelled"),
         "completed" => Some("completed"),
         _ => None,
     }
+}
+
+fn child_thread_status_from_params(params: &Value) -> Option<&'static str> {
+    [
+        "/status/type",
+        "/status/status",
+        "/status",
+        "/thread/status/type",
+        "/thread/status/status",
+    ]
+    .into_iter()
+    .find_map(|path| {
+        params
+            .pointer(path)
+            .and_then(Value::as_str)
+            .and_then(child_thread_status_label)
+    })
 }
 
 fn codex_error_message(params: &Value) -> Option<String> {
@@ -1760,6 +2430,20 @@ mod tests {
     use crate::local_chat::{LocalChatEvent, LocalChatRuntime};
     use tokio::net::TcpListener;
 
+    fn test_thread_state() -> Arc<StdMutex<CodexThreadState>> {
+        Arc::new(StdMutex::new(CodexThreadState::default()))
+    }
+
+    fn test_handler(event_sink: &LocalChatEventSink) -> TurnNotificationHandler {
+        let mut handler = TurnNotificationHandler::new(
+            "backend-1".to_string(),
+            event_sink.clone(),
+            test_thread_state(),
+        );
+        handler.set_thread("parent-thread".to_string(), "gpt-5".to_string());
+        handler
+    }
+
     #[derive(Clone)]
     struct TestCodexAppServerLauncher {
         info_error: Option<String>,
@@ -1800,6 +2484,7 @@ mod tests {
         rpc_error_method: Option<&'static str>,
         server_request_method: Option<&'static str>,
         stale_completion_before_turn_response: bool,
+        child_status_after_parent_completion: bool,
         turn_response_delay: Duration,
         turn_status: &'static str,
         turn_error: Option<&'static str>,
@@ -1813,6 +2498,7 @@ mod tests {
                 rpc_error_method: None,
                 server_request_method: None,
                 stale_completion_before_turn_response: false,
+                child_status_after_parent_completion: false,
                 turn_response_delay: Duration::from_millis(0),
                 turn_status: "completed",
                 turn_error: None,
@@ -1855,7 +2541,11 @@ mod tests {
         let (tool_id, tool_name, input) = codex_tool_call(&item).expect("tool call");
         let input: Value = serde_json::from_str(&input).expect("json input");
 
-        assert_eq!(tool_id, "spawn-1");
+        // The spawn's tool_id is now derived from the agent identity
+        // (`agent:{agent_path}`), not the raw item id, so it matches what
+        // rollout hydration synthesizes for the same spawn (see
+        // `collab_agent_spawn_id`).
+        assert_eq!(tool_id, "agent:thread-pasteur");
         assert_eq!(tool_name, "Agent");
         assert_eq!(input["description"], "Inspect the implementation");
         assert_eq!(input["collab_tool"], "spawnAgent");
@@ -1903,10 +2593,117 @@ mod tests {
     }
 
     #[test]
+    fn codex_collab_tool_call_derives_spawn_id_from_result_agent_id() {
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "result": {
+                "agent_id": "019f1cae-6a6c-71f0-a082-9a2dbd0d074f",
+                "nickname": "Faraday"
+            }
+        });
+
+        let (tool_id, _tool_name, _input) = codex_tool_call(&item).expect("tool call");
+        assert_eq!(tool_id, "agent:019f1cae-6a6c-71f0-a082-9a2dbd0d074f");
+    }
+
+    #[test]
+    fn codex_collab_tool_call_falls_back_to_item_id_when_agent_identity_unresolvable() {
+        // Mirrors a bare `item/started` for `spawnAgent`, before the
+        // app-server has attached `receiverThreadIds`/`result` to the item.
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "prompt": "Inspect the implementation"
+        });
+
+        let (tool_id, _tool_name, _input) = codex_tool_call(&item).expect("tool call");
+        assert_eq!(tool_id, "spawn-1");
+    }
+
+    #[test]
+    fn codex_collab_tool_call_non_spawn_keeps_item_id() {
+        // wait_agent/close_agent are their own tool cards; they must not
+        // collide with the spawn's derived `agent:{agent_path}` id even
+        // though they carry the same agent identity.
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "wait-1",
+            "tool": "wait_agent",
+            "receiverThreadIds": ["child-thread"]
+        });
+
+        let (tool_id, tool_name, _input) = codex_tool_call(&item).expect("tool call");
+        assert_eq!(tool_id, "wait-1");
+        assert_eq!(tool_name, "agent");
+    }
+
+    #[test]
+    fn codex_collab_spawn_tool_call_and_tool_result_share_the_same_derived_id() {
+        // The same completed item feeds both `codex_tool_call` (re-emitted
+        // on item/completed) and `codex_tool_result`; if either used a
+        // different id derivation the ToolResult would never reconcile with
+        // its ToolCall in the GUI.
+        let item = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "status": "completed",
+            "receiverThreadIds": ["thread-pasteur"]
+        });
+
+        let (call_tool_id, _, _) = codex_tool_call(&item).expect("tool call");
+        let (result_tool_id, _, _) = codex_tool_result(&item).expect("tool result");
+        assert_eq!(call_tool_id, "agent:thread-pasteur");
+        assert_eq!(result_tool_id, call_tool_id);
+    }
+
+    #[test]
+    fn codex_todo_list_item_maps_to_tool_call_and_result() {
+        let item = json!({
+            "type": "todoList",
+            "id": "plan-1",
+            "items": [
+                { "text": "step a", "completed": true },
+                { "text": "step b", "completed": false }
+            ]
+        });
+
+        let (tool_id, tool_name, input) = codex_tool_call(&item).expect("tool call");
+        let input: Value = serde_json::from_str(&input).expect("json input");
+        assert_eq!(tool_id, "plan-1");
+        assert_eq!(tool_name, "TodoWrite");
+        assert_eq!(input["todos"][0]["text"], "step a");
+        assert_eq!(input["todos"][1]["completed"], false);
+
+        let (result_tool_id, result, is_error) = codex_tool_result(&item).expect("tool result");
+        assert_eq!(result_tool_id, "plan-1");
+        assert_eq!(result, "1/2 steps completed");
+        assert!(!is_error);
+    }
+
+    #[test]
+    fn codex_todo_list_item_snake_case_alias_is_also_recognized() {
+        // Defensive alias: the exact wire casing for this item hasn't been
+        // confirmed against a live app-server, so both spellings are
+        // accepted (see the comment on the `codex_tool_call` match arm).
+        let item = json!({
+            "type": "todo_list",
+            "id": "plan-2",
+            "items": []
+        });
+
+        let (tool_id, tool_name, _input) = codex_tool_call(&item).expect("tool call");
+        assert_eq!(tool_id, "plan-2");
+        assert_eq!(tool_name, "TodoWrite");
+    }
+
+    #[test]
     fn codex_wait_agent_does_not_reparent_child_thread_from_original_spawn() {
         let event_sink = LocalChatEventSink::inert_for_tests();
-        let mut handler =
-            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let mut handler = test_handler(&event_sink);
         let spawn = json!({
             "type": "collabAgentToolCall",
             "id": "spawn-1",
@@ -1925,6 +2722,9 @@ mod tests {
 
         assert_eq!(
             handler
+                .thread_state
+                .lock()
+                .expect("thread state lock")
                 .child_thread_parents
                 .get("child-thread")
                 .map(String::as_str),
@@ -1935,8 +2735,7 @@ mod tests {
     #[test]
     fn codex_child_notifications_resolve_parent_from_agent_identity_aliases() {
         let event_sink = LocalChatEventSink::inert_for_tests();
-        let mut handler =
-            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let mut handler = test_handler(&event_sink);
         let spawn = json!({
             "type": "collabAgentToolCall",
             "id": "spawn-1",
@@ -1966,10 +2765,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_child_tool_call_emits_parent_tool_use_id_from_agent_id() {
+    fn codex_child_tool_call_is_not_emitted_into_parent_transcript() {
         let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
-        let mut handler =
-            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let mut handler = test_handler(&event_sink);
         let spawn = json!({
             "type": "collabAgentToolCall",
             "id": "spawn-1",
@@ -1995,21 +2793,142 @@ mod tests {
         );
 
         let events = events.lock().expect("events lock");
-        let tool_call = events.iter().find_map(|event| match event {
-            LocalChatEvent::ToolCall(event) => Some(event),
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn codex_child_notification_arriving_before_parent_registers_gets_synthetic_parent() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler = test_handler(&event_sink);
+
+        // The child thread's own activity arrives first -- the parent
+        // collabAgentToolCall spawn hasn't registered `child_thread_parents`
+        // yet. Previously this notification was silently dropped forever.
+        handler.handle(
+            "item/started",
+            &json!({
+                "threadId": "child-thread-from-server",
+                "item": {
+                    "type": "commandExecution",
+                    "id": "tool-1",
+                    "command": "rg --files crates/core",
+                    "agentId": "agent-race"
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let synthetic_spawn = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolCall(event) if event.tool_name == "Agent" => Some(event),
             _ => None,
         });
-        assert_eq!(
-            tool_call.and_then(|event| event.parent_tool_use_id.as_deref()),
-            Some("spawn-1")
+        let synthetic_spawn = synthetic_spawn.expect("synthetic spawn parent");
+        assert_eq!(synthetic_spawn.tool_id, "agent:agent-race");
+        assert_eq!(synthetic_spawn.parent_tool_use_id, None);
+
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            LocalChatEvent::ToolCall(LocalChatToolCallEvent { tool_name, .. })
+                if tool_name == "Bash"
+        )));
+    }
+
+    #[test]
+    fn codex_child_thread_parent_mapping_survives_across_turn_handlers() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let thread_state = test_thread_state();
+        let mut first_turn = TurnNotificationHandler::new(
+            "backend-1".to_string(),
+            event_sink.clone(),
+            thread_state.clone(),
         );
+        first_turn.set_thread("parent-thread".to_string(), "gpt-5".to_string());
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-thread"]
+        });
+        first_turn.remember_child_thread_parents(&spawn, "agent:child-thread");
+        drop(first_turn);
+
+        let mut next_turn =
+            TurnNotificationHandler::new("backend-1".to_string(), event_sink.clone(), thread_state);
+        next_turn.set_thread("parent-thread".to_string(), "gpt-5".to_string());
+        next_turn.handle(
+            "item/started",
+            &json!({
+                "threadId": "child-thread",
+                "item": {
+                    "type": "commandExecution",
+                    "id": "tool-1",
+                    "command": "pwd"
+                }
+            }),
+        );
+
+        assert_eq!(
+            next_turn
+                .parent_tool_use_id_for_notification(&json!({ "threadId": "child-thread" }))
+                .as_deref(),
+            Some("agent:child-thread")
+        );
+        assert!(events.lock().expect("events lock").is_empty());
+    }
+
+    #[test]
+    fn codex_unresolved_spawn_started_waits_for_stable_completed_id() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler = test_handler(&event_sink);
+        handler.set_expected_turn_id("turn-1");
+
+        handler.handle(
+            "item/started",
+            &json!({
+                "threadId": "parent-thread",
+                "turnId": "turn-1",
+                "item": {
+                    "type": "collabAgentToolCall",
+                    "id": "spawn-1",
+                    "tool": "spawnAgent",
+                    "prompt": "Inspect the implementation"
+                }
+            }),
+        );
+        assert!(events.lock().expect("events lock").is_empty());
+
+        handler.handle(
+            "item/completed",
+            &json!({
+                "threadId": "parent-thread",
+                "turnId": "turn-1",
+                "item": {
+                    "type": "collabAgentToolCall",
+                    "id": "spawn-1",
+                    "tool": "spawnAgent",
+                    "prompt": "Inspect the implementation",
+                    "receiverThreadIds": ["child-thread"],
+                    "status": "completed"
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let agent_calls: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                LocalChatEvent::ToolCall(event) if event.tool_name == "Agent" => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(agent_calls.len(), 1);
+        assert_eq!(agent_calls[0].tool_id, "agent:child-thread");
     }
 
     #[test]
     fn codex_child_turn_completed_updates_agent_status_without_ending_parent() {
         let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
-        let mut handler =
-            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let mut handler = test_handler(&event_sink);
         let spawn = json!({
             "type": "collabAgentToolCall",
             "id": "spawn-1",
@@ -2030,7 +2949,7 @@ mod tests {
             }),
         );
 
-        assert!(handler.completed.is_none());
+        assert!(handler.active_turn.is_none());
         let events = events.lock().expect("events lock");
         assert!(!events
             .iter()
@@ -2047,13 +2966,179 @@ mod tests {
             input["agents_states"]["child-thread"]["status"],
             "completed"
         );
+        let parent_result = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolResult(event) if event.tool_id == "spawn-1" => Some(event),
+            _ => None,
+        });
+        let parent_result = parent_result.expect("parent spawn completion result");
+        assert_eq!(parent_result.result, "completed");
+        assert!(!parent_result.is_error);
+        assert_eq!(parent_result.parent_tool_use_id, None);
+    }
+
+    #[test]
+    fn codex_parent_agent_completion_waits_for_all_spawned_children() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler = test_handler(&event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-one", "child-two"]
+        });
+        handler.remember_child_thread_parents(&spawn, "spawn-1");
+
+        handler.handle(
+            "turn/completed",
+            &json!({
+                "threadId": "child-one",
+                "turn": {
+                    "id": "child-turn-one",
+                    "status": "completed"
+                }
+            }),
+        );
+        {
+            let events = events.lock().expect("events lock");
+            assert!(!events.iter().any(|event| matches!(
+                event,
+                LocalChatEvent::ToolResult(LocalChatToolResultEvent { tool_id, .. })
+                    if tool_id == "spawn-1"
+            )));
+        }
+
+        handler.handle(
+            "turn/completed",
+            &json!({
+                "threadId": "child-two",
+                "turn": {
+                    "id": "child-turn-two",
+                    "status": "completed"
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let parent_results: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                LocalChatEvent::ToolResult(event) if event.tool_id == "spawn-1" => Some(event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(parent_results.len(), 1);
+        assert_eq!(parent_results[0].result, "completed");
+        assert!(!parent_results[0].is_error);
+    }
+
+    #[test]
+    fn codex_child_thread_status_changed_updates_agent_state_from_protocol_shape() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler = test_handler(&event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-thread"]
+        });
+        handler.remember_child_thread_parents(&spawn, "agent:child-thread");
+
+        handler.handle(
+            "thread/status/changed",
+            &json!({
+                "threadId": "child-thread",
+                "status": {
+                    "type": "active",
+                    "activeFlags": []
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        let tool_call = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolCall(event) => Some(event),
+            _ => None,
+        });
+        let tool_call = tool_call.expect("status update tool call");
+        let input: Value = serde_json::from_str(&tool_call.input).expect("json input");
+        assert_eq!(tool_call.tool_id, "agent:child-thread");
+        assert_eq!(input["agents_states"]["child-thread"]["status"], "running");
+    }
+
+    #[test]
+    fn codex_child_turn_completed_emits_final_agent_result_without_child_transcript() {
+        let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+        let mut handler = test_handler(&event_sink);
+        let spawn = json!({
+            "type": "collabAgentToolCall",
+            "id": "spawn-1",
+            "tool": "spawnAgent",
+            "receiverThreadIds": ["child-thread"]
+        });
+        handler.remember_child_thread_parents(&spawn, "agent:child-thread");
+
+        handler.handle(
+            "item/agentMessage/delta",
+            &json!({
+                "threadId": "child-thread",
+                "turnId": "child-turn",
+                "itemId": "child-msg",
+                "delta": "streamed child work"
+            }),
+        );
+        handler.handle(
+            "item/completed",
+            &json!({
+                "threadId": "child-thread",
+                "turnId": "child-turn",
+                "item": {
+                    "type": "agentMessage",
+                    "id": "child-msg",
+                    "text": "Final child report"
+                }
+            }),
+        );
+        handler.handle(
+            "turn/completed",
+            &json!({
+                "threadId": "child-thread",
+                "turn": {
+                    "id": "child-turn",
+                    "status": "completed",
+                    "durationMs": 25
+                }
+            }),
+        );
+
+        let events = events.lock().expect("events lock");
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, LocalChatEvent::Text(_))));
+        let result_call = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolCall(event) if event.tool_name == "Agent Result" => Some(event),
+            _ => None,
+        });
+        let result_call = result_call.expect("agent result tool call");
+        assert_eq!(result_call.tool_id, "agent:child-thread:result:child-turn");
+        assert_eq!(result_call.parent_tool_use_id, None);
+        let result = events.iter().find_map(|event| match event {
+            LocalChatEvent::ToolResult(event)
+                if event.tool_id == "agent:child-thread:result:child-turn" =>
+            {
+                Some(event)
+            }
+            _ => None,
+        });
+        let result = result.expect("agent result tool result");
+        assert_eq!(result.result, "Final child report");
+        assert!(!result.is_error);
+        assert_eq!(result.parent_tool_use_id, None);
     }
 
     #[test]
     fn codex_agent_message_completed_emits_final_text_event() {
         let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
-        let mut handler =
-            TurnNotificationHandler::new("backend-1", "parent-thread", "gpt-5", 1, &event_sink);
+        let mut handler = test_handler(&event_sink);
         handler.set_expected_turn_id("turn-1");
 
         handler.handle(
@@ -2153,6 +3238,38 @@ mod tests {
                                 }),
                             )
                             .await;
+                            if script.child_status_after_parent_completion {
+                                sleep(Duration::from_millis(25)).await;
+                                send_json(
+                                    &mut socket,
+                                    json!({
+                                        "method": "thread/status/changed",
+                                        "params": {
+                                            "threadId": "child-thread",
+                                            "status": {
+                                                "type": "idle",
+                                            },
+                                        },
+                                    }),
+                                )
+                                .await;
+                                send_json(
+                                    &mut socket,
+                                    json!({
+                                        "method": "turn/completed",
+                                        "params": {
+                                            "threadId": "child-thread",
+                                            "turn": {
+                                                "id": "child-turn-1",
+                                                "status": "completed",
+                                                "durationMs": 5,
+                                                "error": null,
+                                            },
+                                        },
+                                    }),
+                                )
+                                .await;
+                            }
                         }
                         ("initialized", _) => {}
                         ("thread/start" | "thread/resume", Some(id)) => {
@@ -2522,6 +3639,11 @@ mod tests {
                 context_window: 200000,
             }))
         );
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            LocalChatEvent::ToolCall(LocalChatToolCallEvent { tool_id, .. })
+                if tool_id == "agent:codex-thread-1"
+        )));
     }
 
     #[tokio::test]
@@ -2674,6 +3796,51 @@ mod tests {
         assert_eq!(end_events.len(), 1);
         assert_eq!(end_events[0].duration_ms, 17);
         assert_eq!(end_events[0].result, "hello world");
+    }
+
+    #[tokio::test]
+    async fn codex_child_thread_notifications_after_parent_turn_completion_are_still_processed() {
+        let server = MockAppServer::start(MockScript {
+            child_status_after_parent_completion: true,
+            ..MockScript::default()
+        })
+        .await;
+        let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+        let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+        harness
+            .create_session(
+                create_input("backend-child-after-parent", None, None),
+                runtime,
+            )
+            .await
+            .expect("create codex session");
+        harness
+            .send_message("backend-child-after-parent", "spawn and return")
+            .await
+            .expect("send codex message");
+
+        wait_for_event(&events, |event| {
+            matches!(
+                event,
+                LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                    tool_id,
+                    tool_name,
+                    input,
+                    ..
+                }) if tool_id == "agent:child-thread"
+                    && tool_name == "Agent"
+                    && serde_json::from_str::<Value>(input)
+                        .ok()
+                        .and_then(|value| value
+                            .pointer("/agents_states/child-thread/status")
+                            .and_then(Value::as_str)
+                            .map(str::to_string))
+                        .as_deref()
+                        == Some("completed")
+            )
+        })
+        .await;
     }
 
     #[tokio::test]

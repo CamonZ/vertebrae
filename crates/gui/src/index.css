@@ -2867,6 +2867,10 @@ html.window-transparent #root {
   background: color-mix(in oklch, var(--fg) 7%, transparent);
   color: var(--fg);
 }
+.hc-panel .hc-mini-history-agent[data-active] {
+  background: color-mix(in oklch, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
 .hc-panel .hc-mini-history-agent:focus-visible {
   outline: 1px solid color-mix(in oklch, var(--accent) 62%, transparent);
   outline-offset: 1px;

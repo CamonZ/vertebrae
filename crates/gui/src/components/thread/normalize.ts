@@ -239,8 +239,37 @@ function toolMessage(
     m.em = call.summary || undefined;
   }
   // A result body upgrades the row to a bordered, collapsible card.
-  if (result && result.result) m.body = result.result;
+  const agentPrompt = isAgentSpawnCall(call) ? agentSpawnPromptBody(call) : "";
+  if (
+    result &&
+    result.result &&
+    !(agentPrompt && isStatusOnlyAgentSpawnResult(result.result))
+  ) {
+    m.body = result.result;
+  }
+  if (!m.body && status !== "pending" && agentPrompt) m.body = agentPrompt;
   return m;
+}
+
+function isAgentSpawnCall(call: ToolCallEvent): boolean {
+  const collabTool = inputStringField(call.input, ["collab_tool", "collabTool"]);
+  if (collabTool === "spawnAgent") return true;
+  const displayName = `${call.toolName} ${call.displayName}`.toLowerCase();
+  if (!displayName.includes("agent")) return false;
+  return (
+    agentIdentityKeys(call.input).length > 0 ||
+    Boolean(agentSpawnPromptBody(call))
+  );
+}
+
+function agentSpawnPromptBody(call: ToolCallEvent): string {
+  return inputStringField(call.input, ["description", "prompt", "message"]);
+}
+
+function isStatusOnlyAgentSpawnResult(result: string): boolean {
+  return /^(completed|complete|done|finished|running|pending|active|idle)$/i.test(
+    result.trim()
+  );
 }
 
 /** Build a ToolMessage from a Codex file_edit (apply_patch style). */
@@ -940,10 +969,11 @@ function spawnMessage(
       m.type === "error" ||
       (m.type === "tool" && (m.error || m.status === "err"))
   );
+  const parentStatus = spawnStatus(parentCall);
   const summary: ThreadSummary = {
     turns: turns.length,
     tools: toolCount,
-    status: hasErr ? "err" : "ok",
+    status: hasErr ? "err" : (parentStatus ?? "ok"),
   };
 
   const childThread: Thread = {
@@ -960,6 +990,64 @@ function spawnMessage(
     thread: childThread,
     evt: parentCall?.toolId || threadId,
   };
+}
+
+function spawnStatus(
+  parentCall: ToolCallEvent | undefined
+): ThreadSummary["status"] | undefined {
+  if (!parentCall) return undefined;
+  const statuses = agentStatusValues(parentCall.input);
+  if (statuses.some((status) => /^(failed|error|system_?error)$/i.test(status))) {
+    return "err";
+  }
+  if (
+    statuses.some((status) =>
+      /^(active|running|in_?progress|executing)$/i.test(status)
+    )
+  ) {
+    return "running";
+  }
+  if (
+    statuses.some((status) =>
+      /^(pending_?init|pending|idle|not_?loaded|waiting)$/i.test(status)
+    )
+  ) {
+    return "waiting";
+  }
+  return undefined;
+}
+
+function agentStatusValues(input: Record<string, unknown>): string[] {
+  const values: string[] = [];
+  const add = (value: unknown) => {
+    if (typeof value === "string" && value.trim()) values.push(value.trim());
+  };
+  const addRecordStatus = (value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    add((value as Record<string, unknown>).status);
+  };
+
+  add(input.status);
+  addRecordStatus(input.agents_states);
+  addRecordStatus(input.agentsStates);
+
+  for (const field of ["agent_statuses", "agentStatuses"] as const) {
+    const rows = input[field];
+    if (Array.isArray(rows)) rows.forEach(addRecordStatus);
+  }
+
+  for (const field of ["agents_states", "agentsStates"] as const) {
+    const states = input[field];
+    if (!states || typeof states !== "object" || Array.isArray(states)) {
+      continue;
+    }
+    Object.values(states as Record<string, unknown>).forEach((state) => {
+      add(state);
+      addRecordStatus(state);
+    });
+  }
+
+  return values;
 }
 
 function spawnLabel(parentCall: ToolCallEvent | undefined): string {
@@ -1133,6 +1221,12 @@ export interface ChatTurnOptions {
   collapsed?: Set<string>;
   /** Provider label shown on assistant prose rows. */
   assistantLabel?: string;
+  /**
+   * SESSION-wide tool_result index. A result can land in a later chat turn
+   * than its call; per-turn indexing would leave the call's card pending
+   * forever. Falls back to indexing this turn's `events` when omitted.
+   */
+  resultById?: Map<string, ToolResultEvent>;
 }
 
 /**
@@ -1151,9 +1245,12 @@ export function chatTurnEventsToMessages(
   events: ConversationEvent[],
   opts: ChatTurnOptions = {}
 ): Message[] {
-  const resultById = new Map<string, ToolResultEvent>();
-  for (const ev of events) {
-    if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
+  let resultById = opts.resultById;
+  if (!resultById) {
+    resultById = new Map<string, ToolResultEvent>();
+    for (const ev of events) {
+      if (ev.kind === "tool_result") resultById.set(ev.toolUseId, ev);
+    }
   }
   const msgs = groupBySpawn(
     events,

@@ -83,6 +83,10 @@ vi.mock("../../bindings", () => ({
       ],
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+    loadLocalChatSessionMessages: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: { lines: [], providerJsonlPath: null },
+    }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
@@ -154,6 +158,10 @@ describe("ChatWindowManager", () => {
     vi.mocked(commands.createLocalChatSession).mockResolvedValue({
       status: "ok",
       data: null,
+    });
+    vi.mocked(commands.loadLocalChatSessionMessages).mockResolvedValue({
+      status: "ok",
+      data: { lines: [], providerJsonlPath: null },
     });
     vi.mocked(commands.sendLocalChatMessage).mockResolvedValue({
       status: "ok",
@@ -359,9 +367,124 @@ describe("ChatWindowManager", () => {
     expect(miniPanel.getByLabelText("Codex harness")).toBeInTheDocument();
     expect(
       miniPanel.getByRole("button", {
-        name: "Jump to spawned agent Pasteur in Inspect Repo",
+        name: "Open spawned agent Pasteur from Inspect Repo",
       })
     ).toBeInTheDocument();
+  });
+
+  it("opens spawned agent rows as provider thread sessions", async () => {
+    const user = userEvent.setup();
+    vi.mocked(commands.loadLocalChatSessionMessages).mockResolvedValue({
+      status: "ok",
+      data: {
+        lines: [
+          JSON.stringify({
+            type: "item.completed",
+            item: {
+              type: "agent_message",
+              text: "agent transcript",
+            },
+          }),
+        ],
+        providerJsonlPath: "/tmp/agent-thread-1.jsonl",
+      },
+    });
+
+    const parent = createSession({
+      id: "parent",
+      label: "Inspect Repo",
+      harness: "codex",
+      model: "gpt-5.5",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "agent-1",
+          input: JSON.stringify({
+            description: "Inspect repo",
+            subagent_type: "analysis",
+            receiver_agents: [
+              {
+                thread_id: "agent-thread-1",
+                agent_nickname: "Pasteur",
+                agent_role: "reviewer",
+              },
+            ],
+          }),
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+      ],
+    });
+    persistLocalChatSession(parent);
+    persistLocalChatSession(
+      createSession({
+        id: "stale-child",
+        label: "Pasteur",
+        title: "Pasteur",
+        harness: "codex",
+        projectPath: "/test/project",
+        providerResumeId: "agent-thread-1",
+      })
+    );
+
+    useChatStore.setState({
+      sessions: { parent },
+      activeSessionId: "parent",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(
+      miniPanel.queryByRole("button", {
+        name: "Load local chat Pasteur into active pane",
+      })
+    ).not.toBeInTheDocument();
+    await user.click(
+      miniPanel.getByRole("button", {
+        name: "Open spawned agent Pasteur from Inspect Repo",
+      })
+    );
+
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(
+        "local-chat-codex-agent-thread-1"
+      );
+    });
+    const selected =
+      useChatStore.getState().sessions["local-chat-codex-agent-thread-1"];
+    expect(selected).toMatchObject({
+      label: "Pasteur",
+      title: "Pasteur",
+      harness: "codex",
+      providerResumeId: "agent-thread-1",
+      providerJsonlPath: "/tmp/agent-thread-1.jsonl",
+    });
+    expect(
+      miniPanel.getByRole("button", {
+        name: "Open spawned agent Pasteur from Inspect Repo",
+      })
+    ).toHaveAttribute("aria-current", "true");
+    expect(selected?.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "assistant",
+          text: "agent transcript",
+        }),
+      ])
+    );
+    expect(commands.loadLocalChatSessionMessages).toHaveBeenCalledWith({
+      harness: "codex",
+      providerResumeId: "agent-thread-1",
+      projectPath: "/test/project",
+      createdAt: expect.any(String),
+      providerJsonlPath: null,
+    });
+    expect(
+      loadPersistedLocalChatSession("local-chat-codex-agent-thread-1")
+    ).toBeNull();
   });
 
   it("updates maximized width when the viewport resizes", () => {
@@ -771,9 +894,7 @@ describe("ChatWindowManager", () => {
         )
       ).toBeInTheDocument();
       expect(miniPanel.getByText("Current Project Chat")).toBeInTheDocument();
-      expect(
-        miniPanel.queryByText("Old Project Chat")
-      ).not.toBeInTheDocument();
+      expect(miniPanel.queryByText("Old Project Chat")).not.toBeInTheDocument();
     } finally {
       warnSpy.mockRestore();
     }
@@ -1811,7 +1932,9 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     await user.click(screen.getByLabelText("Widen chat panel"));
-    await user.click(await screen.findByLabelText("Delete local chat Live Task"));
+    await user.click(
+      await screen.findByLabelText("Delete local chat Live Task")
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toHaveTextContent(

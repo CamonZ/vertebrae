@@ -53,6 +53,228 @@ describe("chatMessagesToThread", () => {
     expect(msg.text).toBe("hi there");
   });
 
+  it("merges a tool_result that arrives in a LATER turn into its call's card", () => {
+    const thread = build([
+      { kind: "user", text: "run it", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Bash",
+        toolId: "call-slow",
+        input: JSON.stringify({ command: "sleep 99" }),
+        timestamp: TS,
+      },
+      { kind: "user", text: "still there?", timestamp: TS },
+      {
+        kind: "tool_result",
+        toolId: "call-slow",
+        result: "finally done",
+        isError: false,
+        timestamp: TS,
+      },
+    ]);
+    const tool = firstTool(thread.turns[0].messages);
+    expect(tool.status).toBe("done");
+    expect(tool.body).toBe("finally done");
+    // The later turn keeps only its user message — no orphan result row.
+    const laterTurn = thread.turns[1];
+    expect(laterTurn.messages.filter((m) => m.type !== "user")).toEqual([]);
+  });
+
+  it("keeps child-agent events out of the parent chat transcript", () => {
+    const thread = build([
+      { kind: "user", text: "spawn a helper", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "spawn-1",
+        input: JSON.stringify({ description: "helper" }),
+        timestamp: TS,
+      },
+      { kind: "user", text: "next question", timestamp: TS },
+      {
+        kind: "assistant",
+        text: "child findings",
+        timestamp: TS,
+        parentToolUseId: "spawn-1",
+      },
+      { kind: "assistant", text: "main answer", timestamp: TS },
+    ]);
+    expect(thread.turns[0].messages.some((m) => m.type === "spawn")).toBe(
+      false
+    );
+    expect(
+      thread.turns[0].messages.some(
+        (m) => m.type === "tool" && m.evt === "spawn-1"
+      )
+    ).toBe(true);
+    const laterRows = thread.turns[1].messages;
+    expect(laterRows.some((m) => m.type === "spawn")).toBe(false);
+    expect(
+      laterRows.some(
+        (m) => m.type === "agent" && (m as AgentMessage).prose === "child findings"
+      )
+    ).toBe(false);
+    const mainProse = laterRows.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
+    expect(mainProse.prose).toBe("main answer");
+  });
+
+  it("keeps realtime agent state metadata on the flat agent spawn row", () => {
+    const thread = build([
+      { kind: "user", text: "spawn a helper", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent:child-thread",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          receiver_thread_ids: ["child-thread"],
+          description: "Repository: /repo\n\nTask: inspect the service crate",
+        }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent:child-thread",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          receiver_thread_ids: ["child-thread"],
+          agents_states: {
+            "child-thread": { status: "running" },
+          },
+        }),
+        timestamp: TS,
+      },
+      {
+        kind: "assistant",
+        text: "child is thinking",
+        timestamp: TS,
+        isPartial: true,
+        parentToolUseId: "agent:child-thread",
+      },
+    ]);
+
+    expect(thread.turns[0].messages.some((m) => m.type === "spawn")).toBe(
+      false
+    );
+    const tool = firstTool(thread.turns[0].messages);
+    expect(tool.evt).toBe("agent:child-thread");
+    expect(tool.name).toBe("Agent");
+    expect(tool.status).toBe("pending");
+    expect(
+      thread.turns[0].messages.filter(
+        (m) => m.type === "tool" && m.evt === "agent:child-thread"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("renders an agent final result as a later flat result tool row", () => {
+    const thread = build([
+      { kind: "user", text: "spawn a helper", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent:child-thread",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          receiver_thread_ids: ["child-thread"],
+        }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_call",
+        toolName: "Agent",
+        toolId: "agent:child-thread",
+        input: JSON.stringify({
+          collab_tool: "spawnAgent",
+          receiver_thread_ids: ["child-thread"],
+          description: "Repository: /repo\n\nTask: inspect the service crate",
+          agents_states: {
+            "child-thread": { status: "completed" },
+          },
+        }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result",
+        toolId: "agent:child-thread",
+        result: "completed",
+        isError: false,
+        timestamp: TS,
+      },
+      { kind: "user", text: "next question", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Agent Result",
+        toolId: "agent:child-thread:result:child-turn",
+        input: JSON.stringify({
+          collab_tool: "agentResult",
+          receiver_thread_ids: ["child-thread"],
+        }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result",
+        toolId: "agent:child-thread:result:child-turn",
+        result: "Final child report",
+        isError: false,
+        timestamp: TS,
+      },
+    ]);
+
+    const spawnRows = thread.turns[0].messages.filter(
+      (m) => m.type === "tool" && m.evt === "agent:child-thread"
+    ) as ToolMessage[];
+    expect(spawnRows).toHaveLength(1);
+    expect(spawnRows[0].status).toBe("done");
+    expect(spawnRows[0].body).toBe(
+      "Repository: /repo\n\nTask: inspect the service crate"
+    );
+    const laterRows = thread.turns[1].messages;
+    const resultRow = laterRows.find(
+      (m) => m.type === "tool" && m.evt === "agent:child-thread:result:child-turn"
+    ) as ToolMessage;
+    expect(resultRow).toBeDefined();
+    expect(resultRow.name).toBe("Agent Result");
+    expect(resultRow.status).toBe("done");
+    expect(resultRow.body).toBe("Final child report");
+    expect(laterRows.some((m) => m.type === "spawn")).toBe(false);
+  });
+
+  it("maps a task_notification to an activity row, not a user message", () => {
+    const thread = build([
+      { kind: "user", text: "q", timestamp: TS },
+      {
+        kind: "task_notification",
+        message: 'Agent "Explore parser" finished',
+        timestamp: TS,
+      },
+      { kind: "assistant", text: "done", timestamp: TS, isPartial: false },
+    ]);
+    expect(thread.turns).toHaveLength(1);
+    const rows = thread.turns[0].messages;
+    const activity = rows.find((m) => m.type === "activity");
+    expect(activity).toBeDefined();
+    expect(activity && "text" in activity ? activity.text : "").toBe(
+      'Agent "Explore parser" finished'
+    );
+    expect(rows.filter((m) => m.type === "user")).toHaveLength(1);
+  });
+
+  it("keeps a trailing partial assistant streaming when a task_notification follows it", () => {
+    const thread = build([
+      { kind: "user", text: "q", timestamp: TS },
+      { kind: "assistant", text: "thinking…", timestamp: TS, isPartial: true },
+      { kind: "task_notification", message: "Agent finished", timestamp: TS },
+    ]);
+    const agent = thread.turns[0].messages.find(
+      (m) => m.type === "agent"
+    ) as AgentMessage;
+    expect(agent.streaming).toBe(true);
+  });
+
   it("maps an assistant message to an agent message with a provider speaker + prose", () => {
     const thread = build(
       [
@@ -239,7 +461,7 @@ describe("chatMessagesToThread", () => {
     expect(firstTool(thread.turns[0].messages).collapsed).toBe(false);
   });
 
-  it("keeps spawned agents as parent tool rows and hides child transcript rows", () => {
+  it("drops spawned agent work rows from the parent chat transcript", () => {
     const thread = build([
       { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
       {
@@ -275,11 +497,9 @@ describe("chatMessagesToThread", () => {
     ]);
     const msgs = thread.turns[0].messages;
 
-    const spawnTool = msgs.find(
-      (m) => m.type === "tool" && m.evt === "toolu_AGENT"
-    ) as ToolMessage;
-    expect(spawnTool).toBeDefined();
-    expect(spawnTool.name).toBe("Agent");
+    expect(
+      msgs.some((m) => m.type === "tool" && m.evt === "toolu_AGENT")
+    ).toBe(true);
     expect(msgs.some((m) => m.type === "spawn")).toBe(false);
     expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_child")).toBe(
       false
@@ -289,7 +509,7 @@ describe("chatMessagesToThread", () => {
     ).toBe(false);
   });
 
-  it("suppresses non-spawn agent control calls and their results", () => {
+  it("does not redirect non-spawn agent control output into the parent transcript", () => {
     const thread = build([
       { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
       {
@@ -330,20 +550,16 @@ describe("chatMessagesToThread", () => {
     ]);
 
     const msgs = thread.turns[0].messages;
-    expect(msgs.some((m) => m.type === "tool" && m.evt === "spawn-1")).toBe(
-      true
-    );
+    expect(msgs.some((m) => m.type === "tool" && m.evt === "spawn-1")).toBe(true);
     expect(msgs.some((m) => m.evt === "wait-1")).toBe(false);
     expect(
       msgs.some(
-        (m) =>
-          (m.type === "agent" && m.prose === "waited child output") ||
-          (m.type === "tool" && m.body === "waited")
+        (m) => m.type === "agent" && m.prose === "waited child output"
       )
     ).toBe(false);
   });
 
-  it("does not inline child agent prose even when spawn metadata includes a nickname", () => {
+  it("keeps the spawn flat when child prose has a parent id and metadata includes a nickname", () => {
     const thread = build([
       { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
       {
@@ -367,15 +583,18 @@ describe("chatMessagesToThread", () => {
     ]);
 
     const msgs = thread.turns[0].messages;
+    expect(msgs.some((m) => m.type === "spawn")).toBe(false);
     expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_AGENT")).toBe(
       true
     );
     expect(
-      msgs.some((m) => m.type === "agent" && m.prose === "child analysis")
+      msgs.some(
+        (m) => m.type === "agent" && m.prose === "child analysis"
+      )
     ).toBe(false);
   });
 
-  it("keeps only the spawn marker when a child agent id is present", () => {
+  it("keeps the spawn flat when a child agent id is present", () => {
     const thread = build([
       { kind: "assistant", text: "spawning", timestamp: TS, isPartial: false },
       {
@@ -399,15 +618,18 @@ describe("chatMessagesToThread", () => {
     ]);
 
     const msgs = thread.turns[0].messages;
+    expect(msgs.some((m) => m.type === "spawn")).toBe(false);
     expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_AGENT")).toBe(
       true
     );
     expect(
-      msgs.some((m) => m.type === "agent" && m.prose === "child analysis")
+      msgs.some(
+        (m) => m.type === "agent" && m.prose === "child analysis"
+      )
     ).toBe(false);
   });
 
-  it("does not re-inject sidechain children around trailing prose", () => {
+  it("keeps the spawn marker before trailing main-thread prose without child transcript rows", () => {
     const thread = build([
       {
         kind: "assistant",
@@ -449,6 +671,7 @@ describe("chatMessagesToThread", () => {
     );
     expect(spawnIdx).toBeGreaterThanOrEqual(0);
     expect(spawnIdx).toBeLessThan(proseIdx);
+
     expect(msgs.some((m) => m.type === "spawn")).toBe(false);
     expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_child")).toBe(
       false

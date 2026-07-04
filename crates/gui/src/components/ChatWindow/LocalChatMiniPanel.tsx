@@ -10,6 +10,7 @@ import { SessionDeleteButton } from "./SessionDeleteButton";
 
 interface LocalChatMiniPanelProps {
   activeSessionId: string;
+  activeProviderThreadId?: string | null;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
@@ -17,6 +18,10 @@ interface LocalChatMiniPanelProps {
   spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
   onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void | Promise<void>;
+  onSelectAgent?: (
+    parentSessionId: string,
+    agent: SpawnOutlineItem
+  ) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
 }
 
@@ -27,6 +32,7 @@ interface LocalChatMiniPanelProps {
  */
 export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activeSessionId,
+  activeProviderThreadId,
   deletingSessionId,
   deleteError,
   projectWarning,
@@ -34,6 +40,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   spawnOutlineBySessionId,
   onStartFresh,
   onSelect,
+  onSelectAgent,
   onDelete,
 }: LocalChatMiniPanelProps) {
   const sessionItems = useMemo(
@@ -209,27 +216,46 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                         dataMiniDelete
                       />
                     </div>
-                    {spawnOutline.map((spawn) => (
-                      <button
-                        key={spawn.id}
-                        type="button"
-                        className="hc-mini-history-agent"
-                        onClick={() => {
-                          onSelect(session.id);
-                          requestAnimationFrame(() =>
-                            scrollToSpawn(session.id, spawn.spawnId)
-                          );
-                        }}
-                        title={`Jump to spawned agent ${spawn.label}`}
-                        aria-label={`Jump to spawned agent ${spawn.label} in ${title}`}
-                      >
-                        <span className="rail" aria-hidden="true" />
-                        <span className="label">{spawn.label}</span>
-                        {spawn.detail && (
-                          <span className="meta">{spawn.detail}</span>
-                        )}
-                      </button>
-                    ))}
+                    {spawnOutline.map((spawn) => {
+                      const isAgentActive =
+                        !!spawn.threadId &&
+                        spawn.threadId === activeProviderThreadId;
+                      return (
+                        <button
+                          key={spawn.id}
+                          type="button"
+                          className="hc-mini-history-agent"
+                          data-active={isAgentActive || undefined}
+                          aria-current={isAgentActive ? "true" : undefined}
+                          onClick={() => {
+                            if (spawn.threadId && onSelectAgent) {
+                              void onSelectAgent(session.id, spawn);
+                              return;
+                            }
+                            void onSelect(session.id);
+                            requestAnimationFrame(() =>
+                              scrollToSpawn(session.id, spawn.spawnId)
+                            );
+                          }}
+                          title={
+                            spawn.threadId
+                              ? `Open spawned agent ${spawn.label}`
+                              : `Jump to spawned agent ${spawn.label}`
+                          }
+                          aria-label={
+                            spawn.threadId
+                              ? `Open spawned agent ${spawn.label} from ${title}`
+                              : `Jump to spawned agent ${spawn.label} in ${title}`
+                          }
+                        >
+                          <span className="rail" aria-hidden="true" />
+                          <span className="label">{spawn.label}</span>
+                          {spawn.detail && (
+                            <span className="meta">{spawn.detail}</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </>
                 );
               }}

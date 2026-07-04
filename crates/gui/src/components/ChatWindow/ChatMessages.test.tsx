@@ -76,7 +76,7 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Hi there")).toBeInTheDocument();
   });
 
-  it("renders the agent spawn marker without inlining child-agent transcript", () => {
+  it("renders the flat agent spawn marker without child-agent transcript prose", () => {
     const messages: ChatMessage[] = [
       {
         kind: "tool_call",
@@ -93,7 +93,9 @@ describe("ChatMessages", () => {
       },
     ];
     render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
-    expect(screen.getByText("Agent")).toBeInTheDocument();
+    // The spawn row itself renders from the spawn call's description, while
+    // child-thread prose stays out of the parent transcript.
+    expect(screen.getByText("Inspect repo")).toBeInTheDocument();
     expect(screen.queryByText("child-only prose")).not.toBeInTheDocument();
   });
 

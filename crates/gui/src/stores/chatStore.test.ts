@@ -755,6 +755,82 @@ describe("chatStore", () => {
       );
     });
 
+    it("does not re-prepend hydrated messages that duplicate live content under a different timestamp", async () => {
+      // Live messages are stamped at receipt time; a hydrated copy of the
+      // SAME content carries the JSONL line's recorded time instead, so the
+      // two timestamps never match. chatMessageKey must dedupe on content/
+      // identity (not timestamp) or refocusing the pane re-prepends the
+      // whole history above the live copy.
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
+        status: "ok",
+        data: {
+          lines: [
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:00Z",
+              type: "user",
+              message: {
+                role: "user",
+                content: [{ type: "text", text: "Hello" }],
+              },
+            }),
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:05Z",
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "Hi there" }],
+              },
+            }),
+          ],
+          providerJsonlPath: null,
+        },
+      });
+      useChatStore.setState({
+        sessions: {
+          metadata: {
+            id: "metadata",
+            label: "Metadata",
+            messages: [
+              { kind: "user", text: "Hello", timestamp: "2026-01-01T00:09:00Z" },
+              {
+                kind: "assistant",
+                text: "Hi there",
+                timestamp: "2026-01-01T00:09:01Z",
+              },
+            ],
+            status: "open",
+            harness: "claude",
+            backendSessionId: null,
+            providerResumeId: "conv-1",
+            projectPath: "/repo",
+            messageCount: 2,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      useChatStore.getState().focusSession("metadata");
+
+      await waitFor(() =>
+        expect(
+          commands.loadLocalChatSessionMessages
+        ).toHaveBeenCalled()
+      );
+      // Flush the hydration microtask.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(useChatStore.getState().sessions.metadata.messages).toEqual([
+        { kind: "user", text: "Hello", timestamp: "2026-01-01T00:09:00Z" },
+        {
+          kind: "assistant",
+          text: "Hi there",
+          timestamp: "2026-01-01T00:09:01Z",
+        },
+      ]);
+    });
+
     it("focuses an already-loaded session without dropping live runtime state", async () => {
       const id = useChatStore.getState().openSession("Live Task", "/repo");
       useChatStore.getState().setBackendSessionId(id, "live-backend");
@@ -1350,6 +1426,40 @@ describe("chatStore", () => {
       ]);
       expect(session.messages).toHaveLength(1);
       expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
+    });
+
+    it("appends a fresh main-thread message instead of clobbering a trailing subagent partial", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      // A subagent's own streamed reply is still an open (partial) message
+      // when the main agent's final text arrives.
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "subagent typing...",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+        parentToolUseId: "toolu_AGENT",
+      });
+
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Main reply");
+
+      const session = useChatStore.getState().sessions[id];
+      // The subagent's partial is left untouched...
+      expect(session.messages).toHaveLength(2);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "subagent typing...",
+        isPartial: true,
+        parentToolUseId: "toolu_AGENT",
+      });
+      // ...and the main agent's reply lands as its OWN main-thread message,
+      // not stamped with the subagent's parentToolUseId.
+      expect(session.messages[1]).toMatchObject({
+        kind: "assistant",
+        text: "Main reply",
+        isPartial: false,
+      });
+      expect(session.messages[1]).not.toHaveProperty("parentToolUseId");
     });
   });
 

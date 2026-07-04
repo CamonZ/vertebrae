@@ -47,17 +47,6 @@ function buildChatRenderItems(
       return;
     }
 
-    // Child-agent transcripts are explored through the mini panel; the parent
-    // chat keeps only the Agent/Task spawn row as the chronological marker.
-    if (
-      (message.kind === "assistant" ||
-        message.kind === "tool_call" ||
-        message.kind === "tool_result") &&
-      message.parentToolUseId
-    ) {
-      return;
-    }
-
     segment.push(message);
   });
 
