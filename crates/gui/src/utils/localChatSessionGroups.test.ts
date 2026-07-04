@@ -20,7 +20,6 @@ function makeSummary(
     id,
     label: id,
     harness: "claude",
-    preview: `${id} preview`,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt,
     projectPath,

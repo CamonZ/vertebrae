@@ -15,6 +15,8 @@ import type { SessionLog } from "../bindings";
 /** Content item types in Claude messages */
 export type ClaudeContentItem =
   | { type: "text"; text: string }
+  | { type: "input_text"; text: string }
+  | { type: "output_text"; text: string }
   | {
       type: "tool_use";
       id: string;
@@ -30,7 +32,7 @@ export type ClaudeContentItem =
 
 export interface ClaudeMessageEnvelope {
   id?: string;
-  content?: ClaudeContentItem[];
+  content?: ClaudeContentItem[] | string;
   model?: string;
   role?: string;
 }
@@ -73,6 +75,12 @@ export interface ClaudeRawMessage {
    * own messages.
    */
   parent_tool_use_id?: string | null;
+  /**
+   * Set on harness-injected `user`-role lines (skill preambles, command
+   * caveats, …) that were never typed by the user; such lines must not render
+   * as user messages.
+   */
+  isMeta?: boolean;
   // System init fields
   model?: string;
   session_id?: string;
@@ -106,6 +114,12 @@ interface BaseEvent {
    * Undefined on the main agent's own events.
    */
   parentToolUseId?: string;
+}
+
+/** User prompt text from provider JSONL, emitted only for full transcript replay. */
+export interface UserMessageEvent extends BaseEvent {
+  kind: "user_message";
+  text: string;
 }
 
 /** Session start event - from 'system' type with subtype 'init' */
@@ -281,6 +295,7 @@ export interface TodoListEvent extends BaseEvent {
 
 /** Union of all conversation events */
 export type ConversationEvent =
+  | UserMessageEvent
   | SessionStartEvent
   | SessionEndEvent
   | ThinkingEvent
@@ -298,6 +313,15 @@ export type ConversationEvent =
 // ============================================================================
 // Parsing Utilities
 // ============================================================================
+
+export interface ParseSessionLogsOptions {
+  /**
+   * Include user-authored transcript messages. Traces leave this off because
+   * step prompts are already represented by StepExecution.prompt; local chat
+   * restore enables it to rebuild the complete conversation from provider JSONL.
+   */
+  includeUserMessages?: boolean;
+}
 
 /** Get a human-friendly display name for a tool */
 function getToolDisplayName(name: string): string {
@@ -332,6 +356,22 @@ function getToolSummary(name: string, input: Record<string, unknown>): string {
       const writePath = String(input.file_path || "");
       return writePath.split("/").pop() || writePath;
     }
+    case "Agent":
+      return truncate(
+        String(
+          input.description ||
+            input.prompt ||
+            input.agent_nickname ||
+            input.agent_path ||
+            "Agent"
+        ),
+        maxLen
+      );
+    case "Agent Result":
+      return truncate(
+        String(input.agent_nickname || input.agent_path || "Agent result"),
+        maxLen
+      );
     case "mcp__morph_mcp__warpgrep_codebase_search":
       return truncate(String(input.search_string || ""), maxLen);
     case "mcp__morph_mcp__edit_file": {
@@ -362,10 +402,77 @@ function readNumber(value: unknown): number | undefined {
 
 function readClaudeMessageContent(
   message: ClaudeRawMessage["message"]
-): ClaudeContentItem[] | undefined {
+): ClaudeMessageEnvelope["content"] | undefined {
   return typeof message === "object" && message !== null && "content" in message
     ? message.content
     : undefined;
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const record = item as Record<string, unknown>;
+      return (
+        readString(record.text) ??
+        readString(record.input_text) ??
+        readString(record.output_text) ??
+        ""
+      );
+    })
+    .filter((text) => text.length > 0)
+    .join("\n");
+}
+
+function parseJsonObject(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Preserve the original argument string under a stable key.
+  }
+  return { arguments: value };
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function parseRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string") {
+    try {
+      return readRecord(JSON.parse(value) as unknown);
+    } catch {
+      return undefined;
+    }
+  }
+  return readRecord(value);
+}
+
+function shouldKeepUserMessage(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.length > 0 && !trimmed.startsWith("# AGENTS.md instructions for ")
+  );
+}
+
+/**
+ * Background subagent completion notices are injected into the transcript as
+ * `user`-role lines wrapping a `<task-notification>` block — the user never
+ * typed them. Returns the human-readable notice (the `<summary>` body, falling
+ * back to `<status>`) when the text is such a block, undefined otherwise.
+ */
+function readTaskNotificationText(text: string): string | undefined {
+  if (!text.trimStart().startsWith("<task-notification>")) return undefined;
+  const tag = (name: string) =>
+    text.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1]?.trim();
+  return tag("summary") ?? tag("status") ?? "Background task notification";
 }
 
 function readNotificationMessage(raw: ClaudeRawMessage): string | undefined {
@@ -408,7 +515,8 @@ function rateLimitEvent(
  */
 export function parseClaudeMessage(
   raw: ClaudeRawMessage,
-  timestamp: string
+  timestamp: string,
+  options: ParseSessionLogsOptions = {}
 ): ConversationEvent[] {
   const events: ConversationEvent[] = [];
 
@@ -469,7 +577,7 @@ export function parseClaudeMessage(
     case "assistant":
       {
         const content = readClaudeMessageContent(raw.message);
-        if (content) {
+        if (Array.isArray(content)) {
           for (const item of content) {
             if (item.type === "text" && item.text) {
               events.push({
@@ -497,7 +605,20 @@ export function parseClaudeMessage(
     case "user":
       {
         const content = readClaudeMessageContent(raw.message);
-        if (content) {
+        if (options.includeUserMessages && raw.isMeta !== true) {
+          const text = contentText(content).trim();
+          const notification = readTaskNotificationText(text);
+          if (notification) {
+            events.push({
+              kind: "task_notification",
+              timestamp,
+              message: notification,
+            });
+          } else if (shouldKeepUserMessage(text)) {
+            events.push({ kind: "user_message", timestamp, text });
+          }
+        }
+        if (Array.isArray(content)) {
           for (const item of content) {
             if (item.type === "tool_result") {
               const toolResultContent = item.content;
@@ -657,6 +778,42 @@ export interface CodexRawMessage {
 }
 
 /**
+ * A single per-file change inside a Codex rollout `patch_apply_end`
+ * `event_msg` payload, keyed by absolute file path (see
+ * {@link CodexRolloutRawMessage.payload.changes}). Distinct from
+ * {@link FileUpdateChange} (the `exec --json` `file_change` shape): real
+ * rollout files show only `update` changes carry `unified_diff` -- `add` and
+ * `delete` changes carry the full file `content` instead, with no diff.
+ */
+interface CodexRolloutFileChange {
+  type: "add" | "delete" | "update" | string;
+  unified_diff?: string;
+  content?: string;
+}
+
+export interface CodexRolloutRawMessage {
+  type: "response_item" | "event_msg" | "session_meta" | string;
+  timestamp?: string;
+  payload?: {
+    type?: string;
+    role?: string;
+    content?: unknown;
+    call_id?: string;
+    id?: string;
+    namespace?: string;
+    name?: string;
+    arguments?: unknown;
+    output?: unknown;
+    message?: string;
+    // -- event_msg "patch_apply_end" --
+    success?: boolean;
+    changes?: Record<string, CodexRolloutFileChange>;
+    // -- event_msg "turn_aborted" --
+    reason?: string;
+  };
+}
+
+/**
  * True if a parsed JSON object looks like a Codex `exec --json` event.
  *
  * Codex events carry `type` strings prefixed with `thread.`, `turn.`, or
@@ -674,6 +831,12 @@ function isCodexRawMessage(raw: unknown): raw is CodexRawMessage {
     t.startsWith("item.") ||
     t === "error"
   );
+}
+
+function isCodexRolloutRawMessage(raw: unknown): raw is CodexRolloutRawMessage {
+  if (raw === null || typeof raw !== "object") return false;
+  const t = (raw as { type?: unknown }).type;
+  return t === "response_item" || t === "event_msg" || t === "session_meta";
 }
 
 /**
@@ -952,6 +1115,562 @@ export function parseCodexMessage(
   return events;
 }
 
+export interface PendingMultiAgentCall {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface CodexRolloutParseState {
+  pendingMultiAgentCallsByCallId: Map<string, PendingMultiAgentCall>;
+  agentToolIdByAgentPath: Map<string, string>;
+  agentSpawnEventByAgentPath: Map<string, ToolCallEvent>;
+  completedAgentPaths: Set<string>;
+  /**
+   * `session_meta.payload.id` values already turned into a `session_start`
+   * event. Real rollout files repeat the identical `session_meta` line many
+   * times over the life of a thread (e.g. resume/compaction re-stamps) --
+   * dedup by id so the timeline gets one `session_start` per thread instead
+   * of dozens of identical ones.
+   */
+  emittedSessionStartIds: Set<string>;
+}
+
+function newCodexRolloutParseState(): CodexRolloutParseState {
+  return {
+    pendingMultiAgentCallsByCallId: new Map(),
+    agentToolIdByAgentPath: new Map(),
+    agentSpawnEventByAgentPath: new Map(),
+    completedAgentPaths: new Set(),
+    emittedSessionStartIds: new Set(),
+  };
+}
+
+function agentToolId(agentPath: string): string {
+  return `agent:${agentPath}`;
+}
+
+function makeAgentSpawnEvent(
+  timestamp: string,
+  toolId: string,
+  input: Record<string, unknown>
+): ToolCallEvent {
+  return {
+    kind: "tool_call",
+    timestamp,
+    toolId,
+    toolName: "Agent",
+    displayName: "Agent",
+    icon: getToolIcon("Agent"),
+    summary: getToolSummary("Agent", input),
+    input,
+  };
+}
+
+function ensureAgentSpawnEvent(
+  state: CodexRolloutParseState,
+  timestamp: string,
+  agentPath: string,
+  overrides: Record<string, unknown> = {}
+): ToolCallEvent | undefined {
+  if (state.agentToolIdByAgentPath.has(agentPath)) return undefined;
+  const toolId = agentToolId(agentPath);
+  state.agentToolIdByAgentPath.set(agentPath, toolId);
+  const event = makeAgentSpawnEvent(timestamp, toolId, {
+    collab_tool: "spawnAgent",
+    agent_path: agentPath,
+    receiver_thread_ids: [agentPath],
+    description: overrides.description ?? overrides.agent_nickname ?? "Agent",
+    ...overrides,
+  });
+  state.agentSpawnEventByAgentPath.set(agentPath, event);
+  return event;
+}
+
+function markAgentSpawnCompleted(
+  state: CodexRolloutParseState,
+  agentPath: string
+): void {
+  const event = state.agentSpawnEventByAgentPath.get(agentPath);
+  if (!event) return;
+  const agentsStates = readRecord(event.input.agents_states) ?? {};
+  event.input = {
+    ...event.input,
+    agents_states: {
+      ...agentsStates,
+      [agentPath]: {
+        ...(readRecord(agentsStates[agentPath]) ?? {}),
+        status: "completed",
+      },
+    },
+  };
+  event.summary = getToolSummary(event.toolName, event.input);
+}
+
+function agentResultEvents(
+  timestamp: string,
+  agentPath: string,
+  parentToolId: string,
+  completedText: string
+): ConversationEvent[] {
+  const toolId = `${parentToolId}:result:${agentPath}`;
+  const input = {
+    collab_tool: "agentResult",
+    agent_path: agentPath,
+    receiver_thread_ids: [agentPath],
+    parent_tool_use_id: parentToolId,
+  };
+  return [
+    {
+      kind: "tool_call",
+      timestamp,
+      toolId,
+      toolName: "Agent Result",
+      displayName: "Agent Result",
+      icon: getToolIcon("Agent"),
+      summary: getToolSummary("Agent Result", input),
+      input,
+    },
+    {
+      kind: "tool_result",
+      timestamp,
+      toolUseId: toolId,
+      isError: false,
+      result: completedText,
+    },
+  ];
+}
+
+function emitAgentCompletion(
+  state: CodexRolloutParseState,
+  timestamp: string,
+  agentPath: string,
+  completedText: string
+): ConversationEvent[] {
+  if (state.completedAgentPaths.has(agentPath)) return [];
+  state.completedAgentPaths.add(agentPath);
+
+  const events: ConversationEvent[] = [];
+  const spawnEvent = ensureAgentSpawnEvent(state, timestamp, agentPath);
+  if (spawnEvent) events.push(spawnEvent);
+
+  const toolId =
+    state.agentToolIdByAgentPath.get(agentPath) ?? agentToolId(agentPath);
+  markAgentSpawnCompleted(state, agentPath);
+  events.push({
+    kind: "tool_result",
+    timestamp,
+    toolUseId: toolId,
+    isError: false,
+    result: "completed",
+  });
+  events.push(
+    ...agentResultEvents(timestamp, agentPath, toolId, completedText)
+  );
+  return events;
+}
+
+/**
+ * Codex injects subagent status updates into the parent transcript as
+ * `user`-role messages wrapping `<subagent_notification>` JSON blocks — the
+ * user never typed them. Returns one parsed body per block (null when a body
+ * isn't valid JSON); an empty array means the text carries no notification.
+ */
+function readSubagentNotificationBodies(
+  text: string
+): Array<Record<string, unknown> | null> {
+  const pattern =
+    /<subagent_notification>\s*([\s\S]*?)\s*<\/subagent_notification>/g;
+  return Array.from(text.matchAll(pattern), (m) => parseRecord(m[1]) ?? null);
+}
+
+/**
+ * Human-readable notice for a notification body that is NOT a nestable
+ * completion (real rollouts carry e.g. `status: "shutdown"` as a bare string
+ * alongside the `{completed: …}` object shape).
+ */
+function subagentStatusMessage(status: unknown): string {
+  if (typeof status === "string" && status) return `Subagent ${status}`;
+  const record = readRecord(status);
+  const key = record ? Object.keys(record)[0] : undefined;
+  if (record && key) {
+    const detail = readString(record[key]);
+    return detail ? `Subagent ${key}: ${detail}` : `Subagent ${key}`;
+  }
+  return "Subagent notification";
+}
+
+function subagentNotificationEvents(
+  state: CodexRolloutParseState,
+  timestamp: string,
+  bodies: Array<Record<string, unknown> | null>
+): ConversationEvent[] {
+  const events: ConversationEvent[] = [];
+  for (const body of bodies) {
+    const agentPath = readString(body?.agent_path);
+    const completedText = readString(readRecord(body?.status)?.completed);
+    if (agentPath && completedText) {
+      events.push(
+        ...emitAgentCompletion(state, timestamp, agentPath, completedText)
+      );
+    } else {
+      events.push({
+        kind: "task_notification",
+        timestamp,
+        message: subagentStatusMessage(body?.status),
+      });
+    }
+  }
+  return events;
+}
+
+function parseMultiAgentFunctionCall(
+  raw: CodexRolloutRawMessage,
+  timestamp: string,
+  state: CodexRolloutParseState
+): ConversationEvent[] | undefined {
+  const payload = raw.payload;
+  if (!payload) return undefined;
+
+  if (payload.type === "function_call") {
+    if (payload.namespace !== "multi_agent_v1") return undefined;
+    const callId = readString(payload.call_id) ?? readString(payload.id) ?? "";
+    if (!callId) return [];
+    state.pendingMultiAgentCallsByCallId.set(callId, {
+      name: readString(payload.name) ?? "tool",
+      input: parseRecord(payload.arguments) ?? {},
+    });
+    return [];
+  }
+
+  if (payload.type !== "function_call_output") return undefined;
+
+  const callId = readString(payload.call_id) ?? readString(payload.id) ?? "";
+  const pending = callId
+    ? state.pendingMultiAgentCallsByCallId.get(callId)
+    : undefined;
+  if (!pending) {
+    return payload.namespace === "multi_agent_v1" ? [] : undefined;
+  }
+  state.pendingMultiAgentCallsByCallId.delete(callId);
+
+  const output = parseRecord(payload.output) ?? {};
+  switch (pending.name) {
+    case "spawn_agent": {
+      const agentPath =
+        readString(output.agent_id) ??
+        readString(output.agent_path) ??
+        readString(output.id);
+      if (!agentPath) return [];
+      const nickname = readString(output.nickname);
+      const toolId = agentToolId(agentPath);
+      state.agentToolIdByAgentPath.set(agentPath, toolId);
+      const input: Record<string, unknown> = {
+        collab_tool: "spawnAgent",
+        agent_path: agentPath,
+        receiver_thread_ids: [agentPath],
+        agent_type: pending.input.agent_type,
+        agent_nickname: nickname,
+        description: readString(pending.input.message) ?? nickname ?? "Agent",
+      };
+      const event = makeAgentSpawnEvent(timestamp, toolId, input);
+      state.agentSpawnEventByAgentPath.set(agentPath, event);
+      return [event];
+    }
+
+    case "wait_agent": {
+      const statusByAgent = readRecord(output.status) ?? {};
+      return Object.entries(statusByAgent).flatMap(([agentPath, status]) => {
+        const completedText = readString(readRecord(status)?.completed);
+        return completedText
+          ? emitAgentCompletion(state, timestamp, agentPath, completedText)
+          : [];
+      });
+    }
+
+    case "close_agent": {
+      const agentPath =
+        readString(pending.input.target) ??
+        readString(output.agent_id) ??
+        readString(output.agent_path);
+      const completedText = readString(
+        readRecord(output.previous_status)?.completed
+      );
+      return agentPath && completedText
+        ? emitAgentCompletion(state, timestamp, agentPath, completedText)
+        : [];
+    }
+
+    default:
+      return [];
+  }
+}
+
+/**
+ * Map a Codex rollout `session_meta` line to a `session_start` event.
+ *
+ * Real rollout files (~/.codex/sessions/**\/*.jsonl) never carry a `model`
+ * field on `session_meta` -- that only appears on the separate `turn_context`
+ * line, which is outside the `response_item` | `event_msg` | `session_meta`
+ * set {@link isCodexRolloutRawMessage} accepts; widening that guard is out of
+ * scope for this fix, so `turn_context` stays unhandled. We reuse the same
+ * `"codex"` placeholder the `thread.started` (`exec --json`) case uses for
+ * the same reason: no real model string is available at this point.
+ *
+ * `payload.id` is this rollout's OWN thread id (matches the file name's
+ * UUID); `payload.session_id` is the PARENT thread id for sub-agent
+ * rollouts, so it is not a usable substitute.
+ */
+function parseCodexRolloutSessionMeta(
+  raw: CodexRolloutRawMessage,
+  timestamp: string,
+  state: CodexRolloutParseState
+): ConversationEvent[] {
+  const sessionId = readString(raw.payload?.id);
+  if (!sessionId || state.emittedSessionStartIds.has(sessionId)) return [];
+  state.emittedSessionStartIds.add(sessionId);
+  return [{ kind: "session_start", timestamp, model: "codex", sessionId }];
+}
+
+/** Build {@link FileUpdateChange}s from a `patch_apply_end` `changes` map. */
+function patchApplyChanges(
+  changes: Record<string, CodexRolloutFileChange> | undefined
+): FileUpdateChange[] {
+  if (!changes) return [];
+  return Object.entries(changes).map(([path, change]) => ({
+    path,
+    kind: change.type,
+    // Only `update` changes carry a unified diff; `add`/`delete` changes
+    // carry the full file `content` instead (verified against real
+    // rollouts). We don't synthesize a diff from raw content --
+    // FileEditBlock already renders a plain kind+path row with no
+    // expandable body when `diff` is absent, which is the right degraded
+    // display for those two kinds.
+    diff: readString(change.unified_diff),
+  }));
+}
+
+/**
+ * Map a Codex rollout `event_msg` line to conversation events.
+ *
+ * Built from inspecting real rollout files under ~/.codex/sessions/ and
+ * ~/.codex/archived_sessions/. Every subtype observed there is listed below;
+ * anything else falls through to the `default` and is dropped with a debug
+ * log, mirroring the unknown-`item.type` handling in `parseCodexMessage`.
+ */
+function parseCodexRolloutEventMsg(
+  raw: CodexRolloutRawMessage,
+  timestamp: string
+): ConversationEvent[] {
+  const payload = raw.payload;
+  if (!payload || typeof payload.type !== "string") return [];
+
+  switch (payload.type) {
+    // Confirmed via real rollouts: byte-for-byte identical to the `message`
+    // response_item (role user/assistant) emitted for the same turn in the
+    // SAME rollout file. response_item is handled below and stays the
+    // single source of truth -- skip here to avoid double emission.
+    case "agent_message":
+    case "user_message":
+      return [];
+
+    // `last_agent_message` duplicates the final `agent_message` above (and
+    // transitively the response_item `message`); the remaining fields
+    // (turn_id, timing) have no corresponding ConversationEvent.
+    case "task_complete":
+      return [];
+
+    // Turn bookkeeping only (turn_id, model_context_window, collaboration
+    // mode) -- no user-facing text to surface.
+    case "task_started":
+      return [];
+
+    // High-volume per-request token/rate-limit telemetry (nested
+    // input/output/cached/reasoning counters + rate-limit windows). Doesn't
+    // fit ThinkingHeartbeatEvent's flat estimatedTokens/estimatedTokensDelta
+    // shape (that shape is Claude-Code-specific), and inventing a new
+    // ConversationEvent kind would require updating EventGlyph/EventRenderer's
+    // switches over `event.kind` -- those live under components/, owned by a
+    // concurrent change. Skip.
+    case "token_count":
+      return [];
+
+    // Confirmed via real rollouts: same `call_id` as an existing
+    // function_call/function_call_output response_item pair, which the
+    // response_item branch below already turns into tool_call/tool_result.
+    // Skip to avoid double emission.
+    case "mcp_tool_call_end":
+      return [];
+
+    // Confirmed via real rollouts: same `call_id` as a response_item
+    // `web_search_call`. Unlike `mcp_tool_call_end` though, the payload here
+    // never carries a result/error field (only `query`/`action`) in any
+    // sample observed, so there is nothing to pair with a `tool_result` --
+    // emitting a bare `tool_call` would leave a permanently-pending entry in
+    // the timeline. Skip until Codex emits the corresponding output content.
+    case "web_search_end":
+      return [];
+
+    // Turn-level interruption; not represented anywhere else in the
+    // rollout. Mirrors the existing Codex exec-json `turn.failed` ->
+    // `thinking` "[error] ..." convention.
+    case "turn_aborted": {
+      const reason = readString(payload.reason) ?? "unknown reason";
+      return [
+        {
+          kind: "thinking",
+          timestamp,
+          text: `[error] Turn aborted: ${reason}`,
+        },
+      ];
+    }
+
+    // Per-file patch application result. Confirmed via real rollouts that
+    // this does NOT correspond to any response_item -- patches are applied
+    // via a plain `exec_command` function_call whose call_id never matches
+    // this event's call_id -- so this is the only source of structured
+    // per-file diff data in a rollout-only stream and is worth surfacing.
+    case "patch_apply_end": {
+      const changes = patchApplyChanges(payload.changes);
+      if (changes.length === 0) return [];
+      return [
+        {
+          kind: "file_edit",
+          timestamp,
+          toolId: readString(payload.call_id) ?? "",
+          status: payload.success === false ? "failed" : "completed",
+          changes,
+        },
+      ];
+    }
+
+    // Rare control-flow/telemetry events with no textual content and no
+    // existing ConversationEvent kind that fits without inventing a new one
+    // (see the `token_count` note above for why that's out of scope here):
+    // context_compacted, thread_rolled_back, entered_review_mode,
+    // exited_review_mode. Falls through to `default`.
+    default:
+      if (typeof console !== "undefined") {
+        console.debug(
+          `[codex rollout] dropping unhandled event_msg.type=${payload.type}`
+        );
+      }
+      return [];
+  }
+}
+
+export function parseCodexRolloutMessage(
+  raw: CodexRolloutRawMessage,
+  timestamp: string,
+  options: ParseSessionLogsOptions = {},
+  state: CodexRolloutParseState = newCodexRolloutParseState()
+): ConversationEvent[] {
+  if (raw.type === "session_meta") {
+    return parseCodexRolloutSessionMeta(raw, timestamp, state);
+  }
+  if (raw.type === "event_msg") {
+    return parseCodexRolloutEventMsg(raw, timestamp);
+  }
+
+  const events: ConversationEvent[] = [];
+  if (raw.type !== "response_item") return events;
+  const payload = raw.payload;
+  if (!payload || typeof payload !== "object") return events;
+
+  switch (payload.type) {
+    case "message": {
+      const text = contentText(payload.content).trim();
+      if (!text) break;
+      if (payload.role === "user") {
+        // Only user-role lines carry injected notifications; an assistant
+        // message QUOTING the tag in prose must not be swallowed. Whatever
+        // the body shape, the raw XML never renders as a user message.
+        const notificationBodies = readSubagentNotificationBodies(text);
+        if (notificationBodies.length > 0) {
+          events.push(
+            ...subagentNotificationEvents(state, timestamp, notificationBodies)
+          );
+          break;
+        }
+        if (options.includeUserMessages && shouldKeepUserMessage(text)) {
+          events.push({ kind: "user_message", timestamp, text });
+        }
+      } else if (payload.role === "assistant") {
+        events.push({ kind: "assistant_message", timestamp, text });
+      }
+      break;
+    }
+    case "function_call": {
+      const multiAgentEvents = parseMultiAgentFunctionCall(
+        raw,
+        timestamp,
+        state
+      );
+      if (multiAgentEvents) {
+        events.push(...multiAgentEvents);
+        break;
+      }
+      const toolId =
+        readString(payload.call_id) ?? readString(payload.id) ?? "";
+      if (!toolId) break;
+      const toolName = readString(payload.name) ?? "tool";
+      const input =
+        typeof payload.arguments === "string"
+          ? payload.arguments
+          : payload.arguments && typeof payload.arguments === "object"
+            ? (payload.arguments as Record<string, unknown>)
+            : {};
+      const inputObject =
+        typeof input === "string" ? parseJsonObject(input) : input;
+      // Rollout `exec_command` carries the shell line as `cmd`; present it as
+      // the shared Bash shell card (the live harness and the exec-shape
+      // parser already do), which keys on `input.command`.
+      const isExec = toolName === "exec_command";
+      const presentedName = isExec ? "Bash" : toolName;
+      const presentedInput =
+        isExec && typeof inputObject.cmd === "string"
+          ? { ...inputObject, command: inputObject.cmd }
+          : inputObject;
+      events.push({
+        kind: "tool_call",
+        timestamp,
+        toolId,
+        toolName: presentedName,
+        displayName: getToolDisplayName(presentedName),
+        icon: getToolIcon(presentedName),
+        summary: getToolSummary(presentedName, presentedInput),
+        input: presentedInput,
+      });
+      break;
+    }
+    case "function_call_output": {
+      const multiAgentEvents = parseMultiAgentFunctionCall(
+        raw,
+        timestamp,
+        state
+      );
+      if (multiAgentEvents) {
+        events.push(...multiAgentEvents);
+        break;
+      }
+      const toolUseId =
+        readString(payload.call_id) ?? readString(payload.id) ?? "";
+      if (!toolUseId) break;
+      events.push({
+        kind: "tool_result",
+        timestamp,
+        toolUseId,
+        isError: false,
+        result: codexResultToString(payload.output),
+      });
+      break;
+    }
+    default:
+      break;
+  }
+
+  return events;
+}
+
 /** Build a TodoListEvent from a Codex item, returning null if the shape is unusable. */
 function makeTodoListEvent(
   item: CodexItem,
@@ -1026,11 +1745,18 @@ function claudeSnapshotKey(
  * top-level `error` event can emit a `session_end` with the right `numTurns`.
  * Entries that fail to parse as JSON are skipped.
  */
-export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
+export function parseSessionLogs(
+  logs: SessionLog[],
+  options: ParseSessionLogsOptions = {}
+): ConversationEvent[] {
   const events: ConversationEvent[] = [];
   // One Codex state per (step_execution_id) so concurrent executions don't
   // share turn counts. Anthropic logs ignore this map.
   const codexStateByExecution = new Map<string, CodexParseState>();
+  const codexRolloutStateByExecution = new Map<
+    string,
+    CodexRolloutParseState
+  >();
   const claudeStateByExecution = new Map<string, ClaudeParseState>();
 
   for (const log of logs) {
@@ -1060,6 +1786,16 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
         }
         events.push(ev);
       }
+    } else if (isCodexRolloutRawMessage(raw)) {
+      const execId = log.step_execution_id ?? "";
+      let state = codexRolloutStateByExecution.get(execId);
+      if (!state) {
+        state = newCodexRolloutParseState();
+        codexRolloutStateByExecution.set(execId, state);
+      }
+      for (const ev of parseCodexRolloutMessage(raw, ts, options, state)) {
+        events.push(ev);
+      }
     } else {
       const execId = log.step_execution_id ?? "";
       let state = claudeStateByExecution.get(execId);
@@ -1067,7 +1803,11 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
         state = { latestSnapshotByKey: new Map() };
         claudeStateByExecution.set(execId, state);
       }
-      for (const ev of parseClaudeMessage(raw as ClaudeRawMessage, ts)) {
+      for (const ev of parseClaudeMessage(
+        raw as ClaudeRawMessage,
+        ts,
+        options
+      )) {
         const key = claudeSnapshotKey(ev, execId);
         if (key) {
           const priorIndex = state.latestSnapshotByKey.get(key);

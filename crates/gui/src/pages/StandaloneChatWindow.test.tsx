@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { commands } from "../bindings";
 import { StandaloneChatWindow } from "./StandaloneChatWindow";
 import { useChatStore } from "../stores/chatStore";
 import { stashChatSession } from "../utils/chatStash";
@@ -78,7 +79,24 @@ describe("StandaloneChatWindow", () => {
     expect(screen.getByTestId("chat-window").textContent).toBe("s-only-route");
   });
 
-  it("hydrates from durable local chat persistence when no stash exists", () => {
+  it("hydrates metadata from durable local chat persistence and messages from provider storage", async () => {
+    vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        lines: [
+          JSON.stringify({
+            timestamp: "2026-01-01T00:00:00Z",
+            type: "assistant",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "saved" }],
+            },
+          }),
+        ],
+        providerJsonlPath: "/repo/.claude/projects/repo/conv-persisted.jsonl",
+      },
+    });
+
     persistLocalChatSession({
       id: "s-persisted",
       label: "Persisted",
@@ -94,6 +112,7 @@ describe("StandaloneChatWindow", () => {
       backendSessionId: "claude-persisted",
       providerResumeId: "conv-persisted",
       projectPath: "/repo/root",
+      createdAt: "2026-01-01T00:00:00Z",
       isDetached: true,
     });
 
@@ -107,12 +126,25 @@ describe("StandaloneChatWindow", () => {
       projectPath: "/repo/root",
       isDetached: false,
     });
-    expect(seeded.messages).toEqual([
-      {
-        kind: "assistant",
-        text: "saved",
-        timestamp: "2026-01-01T00:00:00Z",
-      },
-    ]);
+    expect(seeded.messages).toEqual([]);
+    await waitFor(() => {
+      expect(useChatStore.getState().sessions["s-persisted"].messages).toEqual([
+        {
+          kind: "assistant",
+          text: "saved",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
+    });
+    expect(commands.loadLocalChatSessionMessages).toHaveBeenCalledWith({
+      harness: "claude",
+      providerResumeId: "conv-persisted",
+      projectPath: "/repo/root",
+      createdAt: "2026-01-01T00:00:00Z",
+      providerJsonlPath: null,
+    });
+    expect(
+      useChatStore.getState().sessions["s-persisted"].providerJsonlPath
+    ).toBe("/repo/.claude/projects/repo/conv-persisted.jsonl");
   });
 });

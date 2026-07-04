@@ -31,7 +31,7 @@ interface UseLocalChatHistoryResult {
   localSessionGroups: LocalChatSessionGroup[];
   /** Warning string shown when saved-project loading failed; null when ok. */
   projectGroupingWarning: string | null;
-  /** Bump to force the grouping memo to re-read localStorage after deletes. */
+  /** Bump to force the grouping memo to re-read the local chat index after deletes. */
   bumpHistoryRevision: () => void;
 }
 
@@ -52,6 +52,9 @@ export function useLocalChatHistory({
   sessionChangeToken,
 }: UseLocalChatHistoryOptions): UseLocalChatHistoryResult {
   const listLocalSessions = useChatStore((s) => s.listLocalSessions);
+  const hydrateLocalSessionIndex = useChatStore(
+    (s) => s.hydrateLocalSessionIndex
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
   const [historyRevision, setHistoryRevision] = useState(0);
   const [projectGroupingState, setProjectGroupingState] =
@@ -83,6 +86,10 @@ export function useLocalChatHistory({
     }
     return { projects: [], status: "error" as const };
   }, []);
+
+  useEffect(() => {
+    void hydrateLocalSessionIndex();
+  }, [hydrateLocalSessionIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -131,8 +138,8 @@ export function useLocalChatHistory({
       : EMPTY_SAVED_PROJECTS;
 
   const localSessionGroups = useMemo(() => {
-    // Local chat history is localStorage-backed, so persisted-only deletes need
-    // a React-side invalidation even when the in-memory session map is unchanged.
+    // Persisted-only deletes need a React-side invalidation even when the
+    // in-memory session map is unchanged.
     void historyRevision;
     const summaries = listLocalSessions(
       projectsLoadFailed ? currentProjectPath : undefined

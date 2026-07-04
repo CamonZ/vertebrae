@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../stores/chatStore";
 import {
   clearLastUsedLocalChatModelId,
+  clearPersistedLocalChatSessions,
   findPersistedLocalChatSession,
   isLocalChatSessionCleared,
   loadLastUsedLocalChatModelId,
@@ -32,7 +34,6 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     isDetached: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
-    preview: "hello",
     ...overrides,
     harness: overrides.harness ?? "claude",
   };
@@ -41,6 +42,11 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("localChatPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearPersistedLocalChatSessions();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("round-trips resumable local chat metadata", () => {
@@ -77,48 +83,19 @@ describe("localChatPersistence", () => {
       lifecycleError: null,
       streamingAssistant: null,
     });
-    expect(loaded?.messages).toEqual([
-      { kind: "user", text: "hello", timestamp: "2026-01-01T00:00:00Z" },
-    ]);
+    expect(loaded?.messages).toEqual([]);
   });
 
-  it("loads legacy scoped v1 sessions while stripping scope fields", () => {
+  it("ignores old browser localStorage session records", () => {
     localStorage.setItem(
       "local-chat-sessions:v1",
       JSON.stringify({
-        legacy: {
-          ...makeSession({ id: "legacy" }),
-          scope: "task",
-          entityId: "task-1",
-          contextSummary: "[Context]",
-        },
+        old: makeSession({ id: "old" }),
       })
     );
 
-    const loaded = loadPersistedLocalChatSession("legacy");
-    expect(loaded).toMatchObject({
-      id: "legacy",
-      label: "Task Chat",
-      providerResumeId: "conv-1",
-    });
-    expect(loaded && "scope" in loaded).toBe(false);
-    expect(loaded && "entityId" in loaded).toBe(false);
-    expect(loaded && "contextSummary" in loaded).toBe(false);
-  });
-
-  it("normalizes stale persisted permission modes to default", () => {
-    localStorage.setItem(
-      "local-chat-sessions:v1",
-      JSON.stringify({
-        "s-1": makeSession({
-          permissionMode: "delegate" as ChatSession["permissionMode"],
-        }),
-      })
-    );
-
-    expect(loadPersistedLocalChatSession("s-1")?.permissionMode).toBe(
-      "default"
-    );
+    expect(loadPersistedLocalChatSession("old")).toBeNull();
+    expect(listPersistedLocalChatSessions()).toEqual([]);
   });
 
   it("finds a persisted session by project path", () => {
@@ -175,32 +152,10 @@ describe("localChatPersistence", () => {
         messages: [],
         providerResumeId: null,
         lifecycle: "closed",
-        preview: "No messages yet",
       })
     );
 
     expect(loadPersistedLocalChatSession("s-1")).toBeNull();
-    expect(loadPersistedLocalChatSessions()).toEqual({});
-    expect(listPersistedLocalChatSessions()).toEqual([]);
-    expect(findPersistedLocalChatSession("/repo")).toBeNull();
-  });
-
-  it("hides legacy closed empty records already in local storage", () => {
-    localStorage.setItem(
-      "local-chat-sessions:v1",
-      JSON.stringify({
-        ghost: makeSession({
-          id: "ghost",
-          label: "Ghost",
-          messages: [],
-          providerResumeId: null,
-          lifecycle: "closed",
-          preview: "No messages yet",
-        }),
-      })
-    );
-
-    expect(loadPersistedLocalChatSession("ghost")).toBeNull();
     expect(loadPersistedLocalChatSessions()).toEqual({});
     expect(listPersistedLocalChatSessions()).toEqual([]);
     expect(findPersistedLocalChatSession("/repo")).toBeNull();
@@ -233,46 +188,8 @@ describe("localChatPersistence", () => {
     expect(loadPersistedLocalChatSession("s-1")).toMatchObject({
       lifecycle: "idle",
       streamingAssistant: null,
-      messages: [
-        {
-          kind: "user",
-          text: "question",
-          timestamp: "2026-01-01T00:00:00Z",
-        },
-      ],
+      messages: [],
     });
-  });
-
-  it("strips legacy persisted partial assistant messages during hydration", () => {
-    localStorage.setItem(
-      "local-chat-sessions:v1",
-      JSON.stringify({
-        "s-1": makeSession({
-          messages: [
-            {
-              kind: "assistant",
-              text: "legacy partial",
-              timestamp: "2026-01-01T00:00:00Z",
-              isPartial: true,
-            },
-            {
-              kind: "assistant",
-              text: "complete",
-              timestamp: "2026-01-01T00:00:01Z",
-              isPartial: false,
-            },
-          ],
-        }),
-      })
-    );
-
-    expect(loadPersistedLocalChatSession("s-1")?.messages).toMatchObject([
-      {
-        kind: "assistant",
-        text: "complete",
-        isPartial: false,
-      },
-    ]);
   });
 
   it("excludes closed sessions from startup hydration", () => {
@@ -359,7 +276,6 @@ describe("localChatPersistence", () => {
         titleStatus: "generated",
         titleConfidence: 0.9,
         titleUserMessageCount: 2,
-        preview: "new answer",
         createdAt: "2026-01-01T12:00:00Z",
         updatedAt: "2026-01-02T00:00:00Z",
         projectPath: "/repo",
@@ -368,7 +284,7 @@ describe("localChatPersistence", () => {
       }),
       expect.objectContaining({
         id: "older",
-        preview: "old question",
+        messageCount: 1,
       }),
     ]);
   });
@@ -393,7 +309,7 @@ describe("localChatPersistence", () => {
     ]);
   });
 
-  it("uses warning messages as local session preview text", () => {
+  it("stores message count metadata without transcript text", () => {
     persistLocalChatSession(
       makeSession({
         messages: [
@@ -403,112 +319,104 @@ describe("localChatPersistence", () => {
             timestamp: "2026-01-01T00:00:00Z",
           },
         ],
-        preview: undefined,
       })
     );
 
     expect(listPersistedLocalChatSessions()[0]).toMatchObject({
-      preview: "permission needed",
+      messageCount: 1,
+    });
+    expect(loadPersistedLocalChatSession("s-1")?.messages).toEqual([]);
+  });
+
+  it("keeps closed message-bearing sessions even when no provider id exists", () => {
+    persistLocalChatSession(
+      makeSession({
+        providerResumeId: null,
+        lifecycle: "closed",
+      })
+    );
+
+    expect(loadPersistedLocalChatSession("s-1")).toMatchObject({
+      lifecycle: "closed",
+      providerResumeId: null,
+      messageCount: 1,
+      messages: [],
     });
   });
 
-  it("scopes listed sessions by project path without treating legacy unscoped sessions as wildcards", () => {
+  it("merges existing app index entries before the first async save", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    const loadIndex = vi
+      .spyOn(freshCommands, "loadLocalChatSessionIndex")
+      .mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "existing",
+            label: "Existing",
+            title: "Existing",
+            titleStatus: "generated",
+            titleConfidence: 0.9,
+            titleUserMessageCount: 1,
+            harness: "claude",
+            model: null,
+            selectedModelId: null,
+            selectedReasoningEffort: null,
+            permissionMode: "default",
+            createdAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:00Z",
+            projectPath: "/repo",
+            providerResumeId: "conv-existing",
+            providerJsonlPath: null,
+            messageCount: 1,
+            lifecycle: "idle",
+            status: "open",
+          },
+        ],
+      });
+    const saveIndex = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+
+    persistence.persistLocalChatSession(makeSession({ id: "new" }));
+
+    await waitFor(() => expect(saveIndex).toHaveBeenCalled());
+    expect(loadIndex).toHaveBeenCalled();
+    const savedIds = saveIndex.mock.calls[0][0].sessions
+      .map((session) => session.id)
+      .sort();
+    expect(savedIds).toEqual(["existing", "new"]);
+  });
+
+  it("scopes listed sessions by project path without treating no-project sessions as wildcards", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-a", projectPath: "/repo-a" })
     );
     persistLocalChatSession(
       makeSession({ id: "repo-b", projectPath: "/repo-b" })
     );
-    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
 
     expect(listPersistedLocalChatSessions("/repo-a").map((s) => s.id)).toEqual([
       "repo-a",
     ]);
     expect(listPersistedLocalChatSessions(null).map((s) => s.id)).toEqual([
-      "legacy",
+      "no-project",
     ]);
   });
 
-  it("does not reuse a legacy persisted session for a requested project path", () => {
-    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+  it("does not reuse a no-project persisted session for a requested project path", () => {
+    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
 
     expect(findPersistedLocalChatSession("/repo-a")).toBeNull();
   });
 
   it("reuses a no-project persisted session when the requested project path is null", () => {
-    persistLocalChatSession(makeSession({ id: "legacy", projectPath: null }));
+    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
 
-    expect(findPersistedLocalChatSession(null)?.id).toBe("legacy");
+    expect(findPersistedLocalChatSession(null)?.id).toBe("no-project");
   });
 
-  it("normalizes legacy array storage into session summaries", () => {
-    localStorage.setItem(
-      "local-chat-sessions:v1",
-      JSON.stringify([
-        makeSession({
-          id: "legacy-array",
-          messages: [
-            {
-              kind: "user",
-              text: "legacy text",
-              timestamp: "2026-02-03T04:05:06Z",
-            },
-          ],
-          createdAt: undefined,
-          updatedAt: undefined,
-          preview: undefined,
-        }),
-        { id: "bad", scope: "task", messages: [] },
-      ])
-    );
-
-    expect(listPersistedLocalChatSessions()).toEqual([
-      expect.objectContaining({
-        id: "legacy-array",
-        preview: "legacy text",
-        createdAt: "2026-02-03T04:05:06Z",
-        updatedAt: "2026-02-03T04:05:06Z",
-      }),
-    ]);
-  });
-
-  it("hydrates legacy Claude ids into neutral fields", () => {
-    localStorage.setItem(
-      "local-chat-sessions:v1",
-      JSON.stringify({
-        legacy: {
-          id: "legacy",
-          label: "Legacy Claude Chat",
-          messages: [
-            {
-              kind: "user",
-              text: "resume me",
-              timestamp: "2026-01-01T00:00:00Z",
-            },
-          ],
-          status: "open",
-          claudeSessionId: "stale-backend-session",
-          claudeConversationId: "conv-legacy",
-          projectPath: "/repo",
-        },
-      })
-    );
-
-    const loaded = loadPersistedLocalChatSession("legacy");
-    expect(loaded).toMatchObject({
-      id: "legacy",
-      harness: "claude",
-      backendSessionId: null,
-      providerResumeId: "conv-legacy",
-    });
-    expect(loaded && "claudeSessionId" in loaded).toBe(false);
-    expect(loaded && "claudeConversationId" in loaded).toBe(false);
-  });
-
-  it("treats corrupt storage as an empty local session index", () => {
-    localStorage.setItem("local-chat-sessions:v1", "{not json");
-
-    expect(listPersistedLocalChatSessions()).toEqual([]);
-    expect(loadPersistedLocalChatSessions()).toEqual({});
-  });
 });

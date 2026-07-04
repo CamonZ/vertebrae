@@ -32,7 +32,6 @@ function makeSummary(
     id: "s1",
     label: "Chat",
     harness: "claude",
-    preview: "Hello",
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
     projectPath: null,
@@ -208,12 +207,14 @@ describe("buildSpawnOutline", () => {
       {
         id: "spawn-1:019f0000-0000-0000-0000-000000pasteur",
         spawnId: "spawn-1",
+        threadId: "019f0000-0000-0000-0000-000000pasteur",
         label: "Pasteur",
         detail: "reviewer",
       },
       {
         id: "spawn-1:019f0000-0000-0000-0000-000000meitner",
         spawnId: "spawn-1",
+        threadId: "019f0000-0000-0000-0000-000000meitner",
         label: "Meitner",
         detail: "tester",
       },
@@ -247,12 +248,14 @@ describe("buildSpawnOutline", () => {
       {
         id: "wait-1:thread-a",
         spawnId: "wait-1",
+        threadId: "thread-a",
         label: "Pasteur",
         detail: "completed",
       },
       {
         id: "wait-1:thread-b",
         spawnId: "wait-1",
+        threadId: "thread-b",
         label: "Meitner",
         detail: "running",
       },
@@ -287,8 +290,9 @@ describe("buildSpawnOutline", () => {
       {
         id: "spawn-1:019f1cae-6a6c-71f0-a082-9a2dbd0d074f",
         spawnId: "spawn-1",
+        threadId: "019f1cae-6a6c-71f0-a082-9a2dbd0d074f",
         label: "Agent bd0d74f",
-        detail: "explorer",
+        detail: "pending_init",
       },
     ]);
   });
@@ -314,6 +318,7 @@ describe("buildSpawnOutline", () => {
       {
         id: "spawn-1:019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
         spawnId: "spawn-1",
+        threadId: "019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
         label: "Hegel",
         detail: "reviewer",
       },
@@ -357,6 +362,7 @@ describe("buildSpawnOutline", () => {
       {
         id: "spawn-1:019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
         spawnId: "spawn-1",
+        threadId: "019f1cae-6fb7-7d83-b4c0-5f65c0bd3880",
         label: "Hegel",
         detail: "completed",
       },
@@ -400,6 +406,7 @@ describe("buildSpawnOutline", () => {
       {
         id: "spawn-1:Agent 415725e6",
         spawnId: "spawn-1",
+        threadId: "019f1cae-0000-0000-0000-0000415725e6",
         label: "Mencius",
         detail: "completed",
       },

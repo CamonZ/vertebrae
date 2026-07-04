@@ -2,9 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   parseClaudeMessage,
   parseCodexMessage,
+  parseCodexRolloutMessage,
   parseSessionLogs,
   getToolIcon,
   type ClaudeRawMessage,
+  type CodexRolloutRawMessage,
   type CodexParseState,
   type CodexRawMessage,
 } from "./conversation";
@@ -112,6 +114,93 @@ describe("parseClaudeMessage", () => {
       expect(events).toHaveLength(2);
       expect(events[0].kind).toBe("assistant_message");
       expect(events[1].kind).toBe("tool_call");
+    });
+  });
+
+  describe("user messages", () => {
+    it("can include user text for full transcript replay", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: "hello",
+        },
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([{ kind: "user_message", timestamp, text: "hello" }]);
+    });
+
+    it("skips injected AGENTS.md instruction prompts during transcript replay", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content: "# AGENTS.md instructions for /repo\nDo things",
+        },
+      };
+
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([]);
+    });
+
+    it("skips harness-injected isMeta user lines during transcript replay", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        isMeta: true,
+        message: {
+          role: "user",
+          content: "Base directory for this skill: /repo/.claude/skills/x",
+        },
+      };
+
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([]);
+    });
+
+    it("maps task-notification user lines to task_notification, not user_message", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "<task-notification>\n<task-id>abc123</task-id>\n" +
+            "<status>completed</status>\n" +
+            '<summary>Agent "Explore parser" finished</summary>\n' +
+            "<result>Long subagent report body</result>\n</task-notification>",
+        },
+      };
+
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([
+        {
+          kind: "task_notification",
+          timestamp,
+          message: 'Agent "Explore parser" finished',
+        },
+      ]);
+    });
+
+    it("falls back to <status> when a task notification has no summary", () => {
+      const raw: ClaudeRawMessage = {
+        type: "user",
+        message: {
+          role: "user",
+          content:
+            "<task-notification><task-id>abc</task-id><status>completed</status></task-notification>",
+        },
+      };
+
+      expect(
+        parseClaudeMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([
+        { kind: "task_notification", timestamp, message: "completed" },
+      ]);
     });
   });
 
@@ -1098,6 +1187,431 @@ describe("parseCodexMessage", () => {
   });
 });
 
+describe("parseCodexRolloutMessage", () => {
+  const timestamp = "2024-01-02T08:00:00Z";
+
+  it("can include user response_item messages for full transcript replay", () => {
+    const raw: CodexRolloutRawMessage = {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "hello codex" }],
+      },
+    };
+
+    expect(parseCodexRolloutMessage(raw, timestamp)).toEqual([]);
+    expect(
+      parseCodexRolloutMessage(raw, timestamp, { includeUserMessages: true })
+    ).toEqual([{ kind: "user_message", timestamp, text: "hello codex" }]);
+  });
+
+  describe("subagent_notification user messages", () => {
+    const notificationRaw = (body: string): CodexRolloutRawMessage => ({
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: `<subagent_notification>\n${body}\n</subagent_notification>`,
+          },
+        ],
+      },
+    });
+
+    it("maps a non-completion scalar status to a task_notification, never raw XML", () => {
+      const raw = notificationRaw(
+        '{"agent_path":"agent-1","status":"shutdown"}'
+      );
+      expect(
+        parseCodexRolloutMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([
+        { kind: "task_notification", timestamp, message: "Subagent shutdown" },
+      ]);
+    });
+
+    it("maps a non-completion object status to a task_notification with detail", () => {
+      const raw = notificationRaw(
+        '{"agent_path":"agent-1","status":{"failed":"crashed hard"}}'
+      );
+      expect(
+        parseCodexRolloutMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([
+        {
+          kind: "task_notification",
+          timestamp,
+          message: "Subagent failed: crashed hard",
+        },
+      ]);
+    });
+
+    it("falls back to a generic notice for an unparseable body instead of a user message", () => {
+      const raw = notificationRaw("not json at all");
+      expect(
+        parseCodexRolloutMessage(raw, timestamp, { includeUserMessages: true })
+      ).toEqual([
+        {
+          kind: "task_notification",
+          timestamp,
+          message: "Subagent notification",
+        },
+      ]);
+    });
+
+    it("leaves an assistant message QUOTING the tag untouched", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: 'The harness wraps updates in <subagent_notification>{"agent_path":"agent-1","status":{"completed":"x"}}</subagent_notification> tags.',
+            },
+          ],
+        },
+      };
+      const events = parseCodexRolloutMessage(raw, timestamp);
+      expect(events).toHaveLength(1);
+      expect(events[0].kind).toBe("assistant_message");
+    });
+  });
+
+  it("presents exec_command function calls as the Bash shell card with the command line", () => {
+    const [event] = parseCodexRolloutMessage(
+      {
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: "call-exec",
+          name: "exec_command",
+          arguments: JSON.stringify({
+            cmd: "cargo test --quiet",
+            workdir: "/repo",
+            max_output_tokens: 1024,
+          }),
+        },
+      },
+      timestamp
+    );
+    expect(event).toMatchObject({
+      kind: "tool_call",
+      toolId: "call-exec",
+      toolName: "Bash",
+      summary: "cargo test --quiet",
+    });
+    expect(
+      event.kind === "tool_call" ? event.input.command : undefined
+    ).toBe("cargo test --quiet");
+  });
+
+  it("maps assistant messages and function calls from Codex rollout JSONL", () => {
+    const events = [
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "call-1",
+            name: "exec_command",
+            arguments: '{"cmd":"pwd"}',
+          },
+        },
+        timestamp
+      ),
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-1",
+            output: "ok",
+          },
+        },
+        timestamp
+      ),
+      parseCodexRolloutMessage(
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done" }],
+          },
+        },
+        timestamp
+      ),
+    ].flat();
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "tool_result",
+      "assistant_message",
+    ]);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "call-1",
+      // exec_command presents as the shared Bash shell card.
+      toolName: "Bash",
+      input: { cmd: "pwd", command: "pwd" },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "call-1",
+      result: "ok",
+    });
+    expect(events[2]).toMatchObject({
+      kind: "assistant_message",
+      text: "done",
+    });
+  });
+
+  // Fixtures below are trimmed/sanitized from real files under
+  // ~/.codex/sessions/**/*.jsonl -- paths, prompts, and identifiers are
+  // replaced with generic placeholders.
+  describe("session_meta", () => {
+    it("maps a session_meta line to a session_start event using the thread's own id", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "session_meta",
+        payload: {
+          id: "thread-own-id",
+          // Parent thread id for sub-agent rollouts -- NOT the id we want.
+          session_id: "thread-parent-id",
+          cwd: "/repo",
+          originator: "vertebrae_local_chat",
+          cli_version: "0.142.4",
+        } as CodexRolloutRawMessage["payload"],
+      };
+
+      expect(parseCodexRolloutMessage(raw, timestamp)).toEqual([
+        {
+          kind: "session_start",
+          timestamp,
+          model: "codex",
+          sessionId: "thread-own-id",
+        },
+      ]);
+    });
+
+    it("emits session_start only once per id when state is threaded across calls (real rollouts repeat session_meta many times)", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "session_meta",
+        payload: { id: "thread-own-id" },
+      };
+      const logs: SessionLog[] = [
+        { content: JSON.stringify(raw), created_at: timestamp } as SessionLog,
+        { content: JSON.stringify(raw), created_at: timestamp } as SessionLog,
+        { content: JSON.stringify(raw), created_at: timestamp } as SessionLog,
+      ];
+
+      const events = parseSessionLogs(logs);
+      expect(events.filter((e) => e.kind === "session_start")).toHaveLength(
+        1
+      );
+    });
+  });
+
+  describe("event_msg", () => {
+    it("drops agent_message and user_message event_msg lines (duplicate the response_item message)", () => {
+      const agentMessage: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "agent_message", message: "hello from codex" },
+      };
+      const userMessage: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "user_message", message: "hello from user" },
+      };
+
+      expect(parseCodexRolloutMessage(agentMessage, timestamp)).toEqual([]);
+      expect(
+        parseCodexRolloutMessage(userMessage, timestamp, {
+          includeUserMessages: true,
+        })
+      ).toEqual([]);
+    });
+
+    it("drops task_started, task_complete, and token_count -- bookkeeping/telemetry only", () => {
+      const taskStarted: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "task_started" },
+      };
+      const taskComplete: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "task_complete", message: "final reply text" },
+      };
+      const tokenCount: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "token_count" },
+      };
+
+      expect(parseCodexRolloutMessage(taskStarted, timestamp)).toEqual([]);
+      expect(parseCodexRolloutMessage(taskComplete, timestamp)).toEqual([]);
+      expect(parseCodexRolloutMessage(tokenCount, timestamp)).toEqual([]);
+    });
+
+    it("drops mcp_tool_call_end (duplicates a function_call/function_call_output pair) and web_search_end (no result payload observed)", () => {
+      const mcpEnd: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "mcp_tool_call_end", call_id: "call-1" },
+      };
+      const webSearchEnd: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "web_search_end", call_id: "ws-1" },
+      };
+
+      expect(parseCodexRolloutMessage(mcpEnd, timestamp)).toEqual([]);
+      expect(parseCodexRolloutMessage(webSearchEnd, timestamp)).toEqual([]);
+    });
+
+    it("drops unrecognized event_msg subtypes (e.g. context_compacted) without throwing", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "context_compacted" },
+      };
+
+      expect(parseCodexRolloutMessage(raw, timestamp)).toEqual([]);
+    });
+
+    it("maps turn_aborted to a thinking event, mirroring the exec-json turn.failed convention", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: { type: "turn_aborted", reason: "interrupted" },
+      };
+
+      expect(parseCodexRolloutMessage(raw, timestamp)).toEqual([
+        {
+          kind: "thinking",
+          timestamp,
+          text: "[error] Turn aborted: interrupted",
+        },
+      ]);
+    });
+
+    it("maps patch_apply_end to a file_edit event, distinguishing update (diff) from add/delete (no diff)", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: {
+          type: "patch_apply_end",
+          call_id: "call-patch-1",
+          success: true,
+          changes: {
+            "/repo/src/updated.rs": {
+              type: "update",
+              unified_diff: "@@ -1 +1 @@\n-old\n+new",
+            },
+            "/repo/src/added.rs": {
+              type: "add",
+              content: "fn added() {}",
+            },
+            "/repo/src/removed.rs": {
+              type: "delete",
+              content: "fn removed() {}",
+            },
+          },
+        } as CodexRolloutRawMessage["payload"],
+      };
+
+      const events = parseCodexRolloutMessage(raw, timestamp);
+      expect(events).toEqual([
+        {
+          kind: "file_edit",
+          timestamp,
+          toolId: "call-patch-1",
+          status: "completed",
+          changes: [
+            {
+              path: "/repo/src/updated.rs",
+              kind: "update",
+              diff: "@@ -1 +1 @@\n-old\n+new",
+            },
+            { path: "/repo/src/added.rs", kind: "add", diff: undefined },
+            { path: "/repo/src/removed.rs", kind: "delete", diff: undefined },
+          ],
+        },
+      ]);
+    });
+
+    it("marks patch_apply_end as failed when success is false", () => {
+      const raw: CodexRolloutRawMessage = {
+        type: "event_msg",
+        payload: {
+          type: "patch_apply_end",
+          call_id: "call-patch-2",
+          success: false,
+          changes: {
+            "/repo/src/broken.rs": { type: "update", unified_diff: "@@ -1 +1 @@" },
+          },
+        } as CodexRolloutRawMessage["payload"],
+      };
+
+      const [event] = parseCodexRolloutMessage(raw, timestamp);
+      expect(event).toMatchObject({ kind: "file_edit", status: "failed" });
+    });
+  });
+
+  describe("full-rollout pipeline via parseSessionLogs (regression coverage)", () => {
+    it("routes response_item/event_msg/session_meta lines correctly without dropping meaningful content or double-emitting", () => {
+      const lines: CodexRolloutRawMessage[] = [
+        { type: "session_meta", payload: { id: "thread-1" } },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "do the thing" }],
+          },
+        },
+        // Duplicate of the response_item message above -- must be skipped.
+        {
+          type: "event_msg",
+          payload: { type: "user_message", message: "do the thing" },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "done doing it" }],
+          },
+        },
+        // Duplicate of the response_item message above -- must be skipped.
+        {
+          type: "event_msg",
+          payload: { type: "agent_message", message: "done doing it" },
+        },
+        {
+          type: "event_msg",
+          payload: {
+            type: "patch_apply_end",
+            call_id: "call-1",
+            success: true,
+            changes: {
+              "/repo/a.rs": { type: "update", unified_diff: "@@ diff @@" },
+            },
+          } as CodexRolloutRawMessage["payload"],
+        },
+      ];
+
+      const logs: SessionLog[] = lines.map(
+        (raw) =>
+          ({ content: JSON.stringify(raw), created_at: timestamp }) as SessionLog
+      );
+
+      const events = parseSessionLogs(logs, { includeUserMessages: true });
+
+      expect(events.map((e) => e.kind)).toEqual([
+        "session_start",
+        "user_message",
+        "assistant_message",
+        "file_edit",
+      ]);
+    });
+  });
+});
+
 describe("parseSessionLogs provider dispatch", () => {
   const createLog = (
     content: string,
@@ -1174,6 +1688,226 @@ describe("parseSessionLogs provider dispatch", () => {
     expect(events[2]).toMatchObject({
       kind: "assistant_message",
       text: "Hello",
+    });
+  });
+
+  it("normalizes Codex rollout multi-agent records into spawn parents and child transcript rows", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-spawn",
+            name: "spawn_agent",
+            arguments: JSON.stringify({
+              agent_type: "explorer",
+              message: "Inspect traces",
+            }),
+          },
+        }),
+        "2024-01-02T08:00:00Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-spawn",
+            output: JSON.stringify({
+              agent_id: "agent-1",
+              nickname: "Avicenna",
+            }),
+          },
+        }),
+        "2024-01-02T08:00:01Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: `<subagent_notification>
+{"agent_path":"agent-1","status":{"completed":"child report"}}
+</subagent_notification>`,
+              },
+            ],
+          },
+        }),
+        "2024-01-02T08:00:02Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-close",
+            name: "close_agent",
+            arguments: JSON.stringify({ target: "agent-1" }),
+          },
+        }),
+        "2024-01-02T08:00:03Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-close",
+            output: JSON.stringify({
+              previous_status: { completed: "child report" },
+            }),
+          },
+        }),
+        "2024-01-02T08:00:04Z",
+        "codex-rollout"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs, { includeUserMessages: true });
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "tool_result",
+      "tool_call",
+      "tool_result",
+    ]);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "agent:agent-1",
+      toolName: "Agent",
+      input: {
+        collab_tool: "spawnAgent",
+        agent_path: "agent-1",
+        receiver_thread_ids: ["agent-1"],
+        agent_type: "explorer",
+        agent_nickname: "Avicenna",
+        description: "Inspect traces",
+        agents_states: {
+          "agent-1": {
+            status: "completed",
+          },
+        },
+      },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "agent:agent-1",
+      result: "completed",
+    });
+    expect(events[2]).toMatchObject({
+      kind: "tool_call",
+      toolId: "agent:agent-1:result:agent-1",
+      toolName: "Agent Result",
+      input: {
+        collab_tool: "agentResult",
+        agent_path: "agent-1",
+        receiver_thread_ids: ["agent-1"],
+        parent_tool_use_id: "agent:agent-1",
+      },
+    });
+    expect(events[3]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "agent:agent-1:result:agent-1",
+      result: "child report",
+    });
+  });
+
+  it("normalizes Codex rollout wait_agent status when no notification message is present", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-spawn",
+            name: "spawn_agent",
+            arguments: JSON.stringify({ message: "Inspect state" }),
+          },
+        }),
+        "2024-01-02T08:00:00Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-spawn",
+            output: JSON.stringify({ agent_id: "agent-2" }),
+          },
+        }),
+        "2024-01-02T08:00:01Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            namespace: "multi_agent_v1",
+            call_id: "call-wait",
+            name: "wait_agent",
+            arguments: "{}",
+          },
+        }),
+        "2024-01-02T08:00:02Z",
+        "codex-rollout"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-wait",
+            output: JSON.stringify({
+              status: { "agent-2": { completed: "waited report" } },
+            }),
+          },
+        }),
+        "2024-01-02T08:00:03Z",
+        "codex-rollout"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs);
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "tool_call",
+      "tool_result",
+      "tool_call",
+      "tool_result",
+    ]);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      input: {
+        agents_states: {
+          "agent-2": {
+            status: "completed",
+          },
+        },
+      },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "agent:agent-2",
+      result: "completed",
+    });
+    expect(events[3]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "agent:agent-2:result:agent-2",
+      result: "waited report",
     });
   });
 

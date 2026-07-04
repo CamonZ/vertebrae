@@ -58,8 +58,9 @@ function earlyTitleUserMessages(
   pendingUserMessage?: string | null
 ): string[] {
   const userMessages = messages
-    .filter((message): message is Extract<ChatMessage, { kind: "user" }> =>
-      message.kind === "user"
+    .filter(
+      (message): message is Extract<ChatMessage, { kind: "user" }> =>
+        message.kind === "user"
     )
     .map((message) => message.text.trim())
     .filter(Boolean);
@@ -264,8 +265,10 @@ export function handleEndEvent(
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
-  setBackendSessionId(sessionId, null);
-  setBackendSessionIdRef(null);
+  if (payload.harness !== "codex") {
+    setBackendSessionId(sessionId, null);
+    setBackendSessionIdRef(null);
+  }
   if (payload.is_error) {
     setSessionLifecycle(
       sessionId,

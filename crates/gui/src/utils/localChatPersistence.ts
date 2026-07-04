@@ -5,10 +5,10 @@ import type {
   LocalChatLifecycle,
 } from "../stores/chatStore";
 import type { LocalChatHarnessKind, PermissionMode } from "../bindings";
+import { commands } from "../bindings";
 
-const STORAGE_KEY = "local-chat-sessions:v1";
 const MODEL_STORAGE_KEY = "local-chat-model:last-used:v1";
-const CLEARED_KEY_PREFIX = `${STORAGE_KEY}:cleared:`;
+const CLEARED_KEY_PREFIX = "local-chat-session-cleared:v1:";
 export const DEFAULT_LOCAL_CHAT_HARNESS: LocalChatHarnessKind = "claude";
 const VALID_LOCAL_CHAT_HARNESSES = new Set<LocalChatHarnessKind>([
   "claude",
@@ -41,6 +41,30 @@ const VALID_TITLE_STATUSES = new Set<ChatTitleStatus>([
 ]);
 const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
+type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
+  status: "open" | "closed";
+  permissionMode?: PermissionMode | null;
+};
+
+type LocalChatSessionIndexCommands = typeof commands & {
+  loadLocalChatSessionIndex?: () => Promise<{
+    status: "ok";
+    data: unknown[];
+  } | {
+    status: "error";
+    error: unknown;
+  }>;
+  saveLocalChatSessionIndex?: (input: {
+    sessions: LocalChatSessionIndexEntry[];
+  }) => Promise<{ status: "ok"; data: null } | { status: "error"; error: unknown }>;
+};
+
+let sessionIndexCache: Record<string, ChatSession> = {};
+let indexSaveInFlight = false;
+let indexSaveQueued = false;
+let sessionIndexHydrated = false;
+let sessionIndexHydratePromise: Promise<boolean> | null = null;
+
 export interface LocalChatSessionSummary {
   id: string;
   label: string;
@@ -49,7 +73,6 @@ export interface LocalChatSessionSummary {
   titleConfidence?: number | null;
   titleUserMessageCount?: number;
   harness: LocalChatHarnessKind;
-  preview: string;
   model?: string;
   selectedModelId?: string | null;
   selectedReasoningEffort?: string | null;
@@ -57,14 +80,12 @@ export interface LocalChatSessionSummary {
   updatedAt: string;
   projectPath: string | null;
   providerResumeId: string | null;
+  providerJsonlPath?: string | null;
   messageCount: number;
   lifecycle: LocalChatLifecycle;
 }
 
-type LegacyLocalChatSessionRecord = Partial<ChatSession> & {
-  claudeSessionId?: unknown;
-  claudeConversationId?: unknown;
-};
+type LocalChatSessionRecord = Partial<ChatSession>;
 
 interface NormalizeSessionOptions {
   preserveRuntimeBackendSessionId?: boolean;
@@ -82,15 +103,12 @@ function normalizeHarness(value: unknown): LocalChatHarnessKind {
 }
 
 function normalizeRuntimeBackendSessionId(
-  candidate: LegacyLocalChatSessionRecord,
+  candidate: LocalChatSessionRecord,
   options: NormalizeSessionOptions
 ): string | null {
   if (!options.preserveRuntimeBackendSessionId) return null;
   if (typeof candidate.backendSessionId === "string") {
     return candidate.backendSessionId;
-  }
-  if (typeof candidate.claudeSessionId === "string") {
-    return candidate.claudeSessionId;
   }
   return null;
 }
@@ -100,11 +118,13 @@ export function normalizeLocalChatSession(
   options: NormalizeSessionOptions = {}
 ): ChatSession | null {
   if (typeof value !== "object" || value === null) return null;
-  const candidate = value as LegacyLocalChatSessionRecord;
+  const candidate = value as LocalChatSessionRecord;
   if (typeof candidate.id !== "string") return null;
   if (typeof candidate.label !== "string") return null;
-  if (!Array.isArray(candidate.messages)) return null;
   if (candidate.status !== "open" && candidate.status !== "closed") return null;
+  const rawMessages = Array.isArray(candidate.messages)
+    ? candidate.messages
+    : [];
 
   const lifecycle =
     typeof candidate.lifecycle === "string" &&
@@ -116,7 +136,7 @@ export function normalizeLocalChatSession(
         ? "closed"
         : "idle";
 
-  const messages = durableMessages(candidate.messages);
+  const messages = durableMessages(rawMessages);
   const createdAt = normalizeTimestamp(candidate.createdAt, messages, "first");
   const updatedAt = normalizeTimestamp(
     candidate.updatedAt,
@@ -124,16 +144,20 @@ export function normalizeLocalChatSession(
     "last",
     createdAt
   );
-  const preview =
-    typeof candidate.preview === "string"
-      ? candidate.preview
-      : buildPreview(messages);
+  const messageCount =
+    typeof candidate.messageCount === "number" &&
+    Number.isFinite(candidate.messageCount)
+      ? Math.max(0, Math.floor(candidate.messageCount))
+      : messages.length;
   const providerResumeId =
     typeof candidate.providerResumeId === "string"
       ? candidate.providerResumeId
-      : typeof candidate.claudeConversationId === "string"
-        ? candidate.claudeConversationId
-        : null;
+      : null;
+  const providerJsonlPath =
+    typeof candidate.providerJsonlPath === "string" &&
+    candidate.providerJsonlPath.trim().length > 0
+      ? candidate.providerJsonlPath
+      : null;
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -167,6 +191,7 @@ export function normalizeLocalChatSession(
     harness: normalizeHarness(candidate.harness),
     backendSessionId: normalizeRuntimeBackendSessionId(candidate, options),
     providerResumeId,
+    providerJsonlPath,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
     selectedModelId:
@@ -219,7 +244,7 @@ export function normalizeLocalChatSession(
         : null,
     createdAt,
     updatedAt,
-    preview,
+    messageCount,
   };
 }
 
@@ -229,39 +254,11 @@ function durableMessages(messages: ChatMessage[]): ChatMessage[] {
   );
 }
 
-function messageText(message: ChatMessage): string | null {
-  switch (message.kind) {
-    case "user":
-    case "assistant":
-      return message.text;
-    case "error":
-    case "warning":
-      return message.message;
-    case "tool_call":
-      return `${message.toolName} ${message.input}`;
-    case "tool_result":
-      return message.result;
-    case "permission_request":
-      return message.message;
-    case "session_start":
-      return `Started ${message.model}`;
-    case "session_end":
-      return "Session ended";
-  }
-}
-
-function buildPreview(messages: ChatMessage[]): string {
-  const lastText = [...messages]
-    .reverse()
-    .map(messageText)
-    .find((text) => text && text.trim().length > 0);
-  return (lastText ?? "No messages yet").replace(/\s+/g, " ").trim();
-}
-
 export function hasDurableLocalChatContent(
-  session: Pick<ChatSession, "messages" | "providerResumeId">
+  session: Pick<ChatSession, "messages" | "providerResumeId" | "messageCount">
 ): boolean {
   return (
+    (session.messageCount ?? 0) > 0 ||
     durableMessages(session.messages).length > 0 ||
     !!session.providerResumeId?.trim()
   );
@@ -270,7 +267,7 @@ export function hasDurableLocalChatContent(
 export function isDisposableClosedLocalChatSession(
   session: Pick<
     ChatSession,
-    "messages" | "providerResumeId" | "lifecycle" | "status"
+    "messages" | "providerResumeId" | "messageCount" | "lifecycle" | "status"
   >
 ): boolean {
   return (
@@ -321,14 +318,18 @@ function serializeSession(
   session: ChatSession,
   previous?: ChatSession | null
 ): ChatSession {
-  const messages = durableMessages(session.messages);
+  const messages: ChatMessage[] = [];
+  const messageCount = Math.max(
+    durableMessages(session.messages).length,
+    session.messageCount ?? 0,
+    previous?.messageCount ?? 0
+  );
   const createdAt =
     session.createdAt ??
     previous?.createdAt ??
-    normalizeTimestamp(undefined, messages, "first", new Date().toISOString());
+    new Date().toISOString();
   const updatedAt =
-    session.updatedAt ??
-    normalizeTimestamp(undefined, messages, "last", new Date().toISOString());
+    session.updatedAt ?? previous?.updatedAt ?? createdAt;
 
   return {
     id: session.id,
@@ -344,6 +345,8 @@ function serializeSession(
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
     providerResumeId: session.providerResumeId ?? null,
+    providerJsonlPath:
+      session.providerJsonlPath ?? previous?.providerJsonlPath ?? null,
     projectPath: session.projectPath ?? null,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
@@ -356,46 +359,137 @@ function serializeSession(
     streamingAssistant: null,
     createdAt,
     updatedAt,
-    preview: buildPreview(messages),
+    messageCount,
   };
 }
 
 function readSessions(): Record<string, ChatSession> {
-  if (!canUseStorage()) return {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== "object" || parsed === null) return {};
+  return sessionIndexCache;
+}
 
-    const entries = Array.isArray(parsed)
-      ? parsed.map((session) => {
-          const normalized = normalizeLocalChatSession(session);
-          return [normalized?.id, normalized];
-        })
-      : Object.entries(parsed).map(([id, session]) => [
-          id,
-          normalizeLocalChatSession(session),
-        ]);
-
-    return Object.fromEntries(
-      entries.filter(
-        (entry): entry is [string, ChatSession] =>
-          typeof entry[0] === "string" && entry[1] !== null
-      )
-    );
-  } catch {
-    return {};
-  }
+function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
+  return {
+    id: session.id,
+    label: session.label,
+    title: session.title ?? null,
+    titleStatus:
+      session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
+    titleConfidence:
+      session.titleConfidence ?? (session.title?.trim() ? 1 : null),
+    titleUserMessageCount: session.titleUserMessageCount ?? 0,
+    harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    model: session.model,
+    selectedModelId: session.selectedModelId,
+    selectedReasoningEffort: session.selectedReasoningEffort,
+    permissionMode: session.permissionMode ?? "default",
+    createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
+    updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
+    projectPath: session.projectPath ?? null,
+    providerResumeId: session.providerResumeId ?? null,
+    providerJsonlPath: session.providerJsonlPath ?? null,
+    messageCount:
+      session.messageCount ?? durableMessages(session.messages).length,
+    lifecycle: session.lifecycle ?? "idle",
+    status: session.status,
+  };
 }
 
 function writeSessions(sessions: Record<string, ChatSession>): void {
-  if (!canUseStorage()) return;
+  sessionIndexCache = sessions;
+  scheduleIndexSave();
+}
+
+function scheduleIndexSave(): void {
+  indexSaveQueued = true;
+  void flushIndexSaveQueue();
+}
+
+async function flushIndexSaveQueue(): Promise<void> {
+  if (indexSaveInFlight) return;
+  const indexCommands = commands as LocalChatSessionIndexCommands;
+  const save = indexCommands.saveLocalChatSessionIndex;
+  if (!save) return;
+
+  indexSaveInFlight = true;
+  let blockedByHydration = false;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-  } catch {
-    // Storage can be disabled or full; local in-memory chat still works.
+    const hydrated = await hydrateSessionIndexCache();
+    if (!hydrated) {
+      indexSaveQueued = true;
+      blockedByHydration = true;
+      return;
+    }
+    while (indexSaveQueued) {
+      indexSaveQueued = false;
+      const sessions = Object.values(sessionIndexCache).map(toIndexEntry);
+      const result = await save({ sessions });
+      if (result.status === "error") {
+        console.warn("Failed to save local chat session index", result.error);
+      }
+    }
+  } catch (error) {
+    console.warn("Failed to save local chat session index", error);
+  } finally {
+    indexSaveInFlight = false;
+    if (indexSaveQueued && !blockedByHydration) {
+      void flushIndexSaveQueue();
+    }
   }
+}
+
+async function loadSessionIndexFromCommand(): Promise<Record<
+  string,
+  ChatSession
+> | null> {
+  const indexCommands = commands as LocalChatSessionIndexCommands;
+  const load = indexCommands.loadLocalChatSessionIndex;
+  if (!load) return {};
+  try {
+    const result = await load();
+    if (result.status === "ok") {
+      const entries = Array.isArray(result.data) ? result.data : [];
+      return Object.fromEntries(
+        entries
+          .map((entry) => normalizeLocalChatSession(entry))
+          .filter((session): session is ChatSession => session !== null)
+          .map((session) => [session.id, session])
+      );
+    }
+    console.warn("Failed to load local chat session index", result.error);
+    return null;
+  } catch (error) {
+    console.warn("Failed to load local chat session index", error);
+    return null;
+  }
+}
+
+async function hydrateSessionIndexCache(): Promise<boolean> {
+  if (sessionIndexHydrated) return true;
+  if (!sessionIndexHydratePromise) {
+    sessionIndexHydratePromise = loadSessionIndexFromCommand()
+      .then((loaded) => {
+        if (loaded === null) return false;
+        sessionIndexCache = {
+          ...loaded,
+          ...sessionIndexCache,
+        };
+        sessionIndexHydrated = true;
+        return true;
+      })
+      .finally(() => {
+        sessionIndexHydratePromise = null;
+      });
+  }
+  return sessionIndexHydratePromise;
+}
+
+export async function hydrateLocalChatSessionIndex(): Promise<{
+  sessions: Record<string, ChatSession>;
+}> {
+  await hydrateSessionIndexCache();
+  return {
+    sessions: sessionIndexCache,
+  };
 }
 
 export function projectPathMatches(
@@ -424,6 +518,34 @@ export function loadPersistedLocalChatSessions(): Record<string, ChatSession> {
   );
 }
 
+export function summarizeLocalChatSession(
+  session: ChatSession
+): LocalChatSessionSummary {
+  return {
+    id: session.id,
+    label: session.label,
+    title: session.title ?? null,
+    titleStatus:
+      session.titleStatus ??
+      (session.title?.trim() ? "generated" : "pending"),
+    titleConfidence:
+      session.titleConfidence ?? (session.title?.trim() ? 1 : null),
+    titleUserMessageCount: session.titleUserMessageCount ?? 0,
+    harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    model: session.model,
+    selectedModelId: session.selectedModelId,
+    selectedReasoningEffort: session.selectedReasoningEffort,
+    createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
+    updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
+    projectPath: session.projectPath ?? null,
+    providerResumeId: session.providerResumeId,
+    providerJsonlPath: session.providerJsonlPath ?? null,
+    messageCount:
+      session.messageCount ?? durableMessages(session.messages).length,
+    lifecycle: session.lifecycle ?? "idle",
+  };
+}
+
 export function listPersistedLocalChatSessions(
   projectPath?: string | null
 ): LocalChatSessionSummary[] {
@@ -434,27 +556,7 @@ export function listPersistedLocalChatSessions(
         !isDisposableClosedLocalChatSession(session) &&
         projectPathMatches(session.projectPath, projectPath)
     )
-    .map((session) => ({
-      id: session.id,
-      label: session.label,
-      title: session.title ?? null,
-      titleStatus:
-        session.titleStatus ?? (session.title?.trim() ? "generated" : "pending"),
-      titleConfidence:
-        session.titleConfidence ?? (session.title?.trim() ? 1 : null),
-      titleUserMessageCount: session.titleUserMessageCount ?? 0,
-      preview: session.preview ?? buildPreview(session.messages),
-      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
-      model: session.model,
-      selectedModelId: session.selectedModelId,
-      selectedReasoningEffort: session.selectedReasoningEffort,
-      createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
-      updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
-      projectPath: session.projectPath ?? null,
-      providerResumeId: session.providerResumeId,
-      messageCount: session.messages.length,
-      lifecycle: session.lifecycle ?? "idle",
-    }))
+    .map(summarizeLocalChatSession)
     .sort(compareLocalChatSessionRecency);
 }
 
@@ -485,7 +587,7 @@ export function findPersistedLocalChatSession(
 export function persistLocalChatSession(session: ChatSession): void {
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
-  if (isDisposableClosedLocalChatSession(serialized)) {
+  if (isDisposableClosedLocalChatSession(session)) {
     delete sessions[session.id];
     writeSessions(sessions);
     return;
@@ -502,12 +604,10 @@ export function removePersistedLocalChatSession(sessionId: string): void {
 }
 
 export function clearPersistedLocalChatSessions(): void {
-  if (!canUseStorage()) return;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing to clear.
-  }
+  sessionIndexCache = {};
+  sessionIndexHydrated = true;
+  sessionIndexHydratePromise = null;
+  scheduleIndexSave();
 }
 
 export function loadLastUsedLocalChatModelId(): string | null {
@@ -568,5 +668,4 @@ export function clearLocalChatSessionCleared(sessionId: string): void {
   }
 }
 
-export const LOCAL_CHAT_SESSIONS_STORAGE_KEY = STORAGE_KEY;
 export const LOCAL_CHAT_MODEL_STORAGE_KEY = MODEL_STORAGE_KEY;

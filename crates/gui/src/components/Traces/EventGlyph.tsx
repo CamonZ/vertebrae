@@ -97,6 +97,8 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
 
   const ev = input as ConversationEvent;
   switch (ev.kind) {
+    case "user_message":
+      return { glyph: "file-text", variant: "default", label: "user message" };
     case "session_start":
       return { glyph: "play", variant: "default", label: "session start" };
     case "session_end":

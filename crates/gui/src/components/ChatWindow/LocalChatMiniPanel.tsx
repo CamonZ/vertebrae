@@ -1,22 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { LocalChatHarnessKind } from "../../bindings";
 import type { LocalChatSessionGroup } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
-import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import { harnessDisplayName } from "./chatHelpers";
-import { buildSpawnOutline, scrollToSpawn } from "./sessionListUtils";
+import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
 
 interface LocalChatMiniPanelProps {
   activeSessionId: string;
+  activeProviderThreadId?: string | null;
   deletingSessionId: string | null;
   deleteError: string | null;
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
+  spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
   onStartFresh: () => void | Promise<void>;
-  onSelect: (sessionId: string) => void;
+  onSelect: (sessionId: string) => void | Promise<void>;
+  onSelectAgent?: (
+    parentSessionId: string,
+    agent: SpawnOutlineItem
+  ) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
 }
 
@@ -25,34 +30,23 @@ interface LocalChatMiniPanelProps {
  * Owns its own keyboard navigation (up/down/home/end/enter) over the flattened
  * session list.
  */
-export function LocalChatMiniPanel({
+export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activeSessionId,
+  activeProviderThreadId,
   deletingSessionId,
   deleteError,
   projectWarning,
   sessionGroups,
+  spawnOutlineBySessionId,
   onStartFresh,
   onSelect,
+  onSelectAgent,
   onDelete,
 }: LocalChatMiniPanelProps) {
   const sessionItems = useMemo(
     () => sessionGroups.flatMap((group) => group.sessions),
     [sessionGroups]
   );
-  const spawnOutlineBySessionId = useMemo(() => {
-    const outlines = new Map<
-      string,
-      ReturnType<typeof buildSpawnOutline>
-    >();
-    for (const session of sessionItems) {
-      const persistedSession = loadPersistedLocalChatSession(session.id);
-      outlines.set(
-        session.id,
-        persistedSession ? buildSpawnOutline(persistedSession.messages) : []
-      );
-    }
-    return outlines;
-  }, [sessionItems]);
   const sessionButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const [keyboardSessionId, setKeyboardSessionId] = useState<string | null>(
     activeSessionId
@@ -222,27 +216,46 @@ export function LocalChatMiniPanel({
                         dataMiniDelete
                       />
                     </div>
-                    {spawnOutline.map((spawn) => (
-                      <button
-                        key={spawn.id}
-                        type="button"
-                        className="hc-mini-history-agent"
-                        onClick={() => {
-                          onSelect(session.id);
-                          requestAnimationFrame(() =>
-                            scrollToSpawn(session.id, spawn.spawnId)
-                          );
-                        }}
-                        title={`Jump to spawned agent ${spawn.label}`}
-                        aria-label={`Jump to spawned agent ${spawn.label} in ${title}`}
-                      >
-                        <span className="rail" aria-hidden="true" />
-                        <span className="label">{spawn.label}</span>
-                        {spawn.detail && (
-                          <span className="meta">{spawn.detail}</span>
-                        )}
-                      </button>
-                    ))}
+                    {spawnOutline.map((spawn) => {
+                      const isAgentActive =
+                        !!spawn.threadId &&
+                        spawn.threadId === activeProviderThreadId;
+                      return (
+                        <button
+                          key={spawn.id}
+                          type="button"
+                          className="hc-mini-history-agent"
+                          data-active={isAgentActive || undefined}
+                          aria-current={isAgentActive ? "true" : undefined}
+                          onClick={() => {
+                            if (spawn.threadId && onSelectAgent) {
+                              void onSelectAgent(session.id, spawn);
+                              return;
+                            }
+                            void onSelect(session.id);
+                            requestAnimationFrame(() =>
+                              scrollToSpawn(session.id, spawn.spawnId)
+                            );
+                          }}
+                          title={
+                            spawn.threadId
+                              ? `Open spawned agent ${spawn.label}`
+                              : `Jump to spawned agent ${spawn.label}`
+                          }
+                          aria-label={
+                            spawn.threadId
+                              ? `Open spawned agent ${spawn.label} from ${title}`
+                              : `Jump to spawned agent ${spawn.label} in ${title}`
+                          }
+                        >
+                          <span className="rail" aria-hidden="true" />
+                          <span className="label">{spawn.label}</span>
+                          {spawn.detail && (
+                            <span className="meta">{spawn.detail}</span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </>
                 );
               }}
@@ -252,7 +265,7 @@ export function LocalChatMiniPanel({
       </div>
     </aside>
   );
-}
+});
 
 function miniThreadAge(updatedAt: string): string {
   const relative = formatRelative(updatedAt);
