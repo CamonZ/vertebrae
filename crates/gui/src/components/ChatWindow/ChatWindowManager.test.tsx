@@ -487,6 +487,58 @@ describe("ChatWindowManager", () => {
     ).toBeNull();
   });
 
+  it("keeps top-level provider sessions visible when their own outline references their provider thread", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      id: "real-session",
+      label: "Project Pending Items Summary",
+      title: "Project Pending Items Summary",
+      harness: "codex",
+      model: "gpt-5.5",
+      projectPath: "/test/project",
+      providerResumeId: "real-provider-thread",
+      messages: [
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "agent-1",
+          input: JSON.stringify({
+            description: "Project Pending Items Summary",
+            receiver_agents: [
+              {
+                thread_id: "real-provider-thread",
+                agent_nickname: "Project Pending Items Summary",
+                agent_role: "analysis",
+              },
+            ],
+          }),
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+      ],
+    });
+    persistLocalChatSession(session);
+
+    useChatStore.setState({
+      sessions: { [session.id]: session },
+      activeSessionId: session.id,
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
+    const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(
+      miniPanel.getByRole("button", {
+        name: "Load local chat Project Pending Items Summary into active pane",
+      })
+    ).toBeInTheDocument();
+    expect(
+      miniPanel.queryByRole("button", {
+        name: "Open spawned agent Project Pending Items Summary from Project Pending Items Summary",
+      })
+    ).not.toBeInTheDocument();
+  });
+
   it("updates maximized width when the viewport resizes", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

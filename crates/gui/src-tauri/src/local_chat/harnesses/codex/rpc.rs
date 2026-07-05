@@ -142,6 +142,14 @@ impl CodexRpcConnection {
         }
         request.permission_settings.apply_to_params(&mut params);
 
+        if let Some(thread_id) = request.provider_resume_id {
+            let provisional_model = request.model.unwrap_or(CODEX_DEFAULT_MODEL_LABEL);
+            self.notification_handler
+                .lock()
+                .expect("codex notification handler lock poisoned")
+                .set_thread(thread_id.to_string(), provisional_model.to_string());
+        }
+
         let response = self.request(method, params).await?;
         let thread_id = response
             .pointer("/thread/id")

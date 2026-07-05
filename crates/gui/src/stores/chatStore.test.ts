@@ -1,7 +1,7 @@
 import { waitFor } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { commands } from "../bindings";
-import { useChatStore } from "./chatStore";
+import { useChatStore, type ChatMessage } from "./chatStore";
 import {
   clearPersistedLocalChatSessions,
   isLocalChatSessionCleared,
@@ -620,6 +620,68 @@ describe("chatStore", () => {
       ]);
     });
 
+    it("removes self-referential provider agent rows when hydrating a persisted session", async () => {
+      const providerMessages: ChatMessage[] = [
+        {
+          kind: "user",
+          text: "restore me",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          kind: "tool_call",
+          toolName: "Agent",
+          toolId: "agent-self",
+          input: JSON.stringify({
+            description: "Main thread misclassified as agent",
+            receiver_thread_ids: ["real-provider-thread"],
+          }),
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "child text that actually belongs to the main thread",
+          parentToolUseId: "agent-self",
+          timestamp: "2026-01-01T00:00:02Z",
+        },
+        {
+          kind: "tool_result",
+          toolId: "agent-self",
+          result: "completed",
+          isError: false,
+          timestamp: "2026-01-01T00:00:03Z",
+        },
+      ];
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
+        status: "ok",
+        data: {
+          messages: providerMessages,
+          providerJsonlPath: null,
+        } as never,
+      });
+      persistLocalChatSession({
+        id: "persisted",
+        label: "Persisted Task",
+        messages: providerMessages,
+        status: "open",
+        harness: "codex",
+        backendSessionId: null,
+        providerResumeId: "real-provider-thread",
+        projectPath: "/repo",
+      });
+
+      await expect(
+        useChatStore.getState().selectPersistedSession("persisted")
+      ).resolves.toBe(true);
+
+      expect(useChatStore.getState().sessions.persisted.messages).toEqual([
+        {
+          kind: "user",
+          text: "restore me",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
+    });
+
     it("hydrates provider messages when reusing a metadata-only runtime session", async () => {
       vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
         status: "ok",
@@ -791,7 +853,11 @@ describe("chatStore", () => {
             id: "metadata",
             label: "Metadata",
             messages: [
-              { kind: "user", text: "Hello", timestamp: "2026-01-01T00:09:00Z" },
+              {
+                kind: "user",
+                text: "Hello",
+                timestamp: "2026-01-01T00:09:00Z",
+              },
               {
                 kind: "assistant",
                 text: "Hi there",
@@ -813,9 +879,7 @@ describe("chatStore", () => {
       useChatStore.getState().focusSession("metadata");
 
       await waitFor(() =>
-        expect(
-          commands.loadLocalChatSessionMessages
-        ).toHaveBeenCalled()
+        expect(commands.loadLocalChatSessionMessages).toHaveBeenCalled()
       );
       // Flush the hydration microtask.
       await Promise.resolve();
