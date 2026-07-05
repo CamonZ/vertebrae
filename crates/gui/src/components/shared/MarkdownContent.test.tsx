@@ -22,7 +22,7 @@ describe("MarkdownContent", () => {
     mermaidMock.render.mockReset();
     mermaidMock.parse.mockResolvedValue(true);
     mermaidMock.render.mockResolvedValue({
-      svg: '<svg viewBox="0 0 100 40" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
+      svg: '<svg viewBox="0 0 100 40" style="max-width: 50px;" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
     });
   });
 
@@ -186,6 +186,11 @@ describe("MarkdownContent", () => {
 
       const frame = await screen.findByTitle("Mermaid diagram");
       expect(frame).toHaveAttribute("sandbox", "");
+      expect(frame).toHaveAttribute("scrolling", "no");
+      expect(frame).not.toHaveClass("h-72");
+      expect(frame).toHaveStyle({ aspectRatio: "100 / 40" });
+      expect(frame).toHaveStyle({ maxWidth: "50px" });
+      expect(frame).not.toHaveStyle({ minHeight: "8rem" });
       expect(frame).toHaveAttribute("srcdoc", expect.stringContaining("<svg"));
       expect(frame).toHaveAttribute(
         "srcdoc",

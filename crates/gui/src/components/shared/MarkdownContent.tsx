@@ -100,12 +100,17 @@ function HighlightedCodeBlock({
 
 type DiagramRenderResult =
   | { status: "rendering" }
-  | { status: "rendered"; document: string }
+  | { status: "rendered"; document: string; frameStyle: React.CSSProperties }
   | { status: "error"; message: string };
+
+type RenderedDiagram = {
+  document: string;
+  frameStyle: React.CSSProperties;
+};
 
 type DiagramRenderer = {
   label: string;
-  render?: (source: string, elementId: string) => Promise<string>;
+  render?: (source: string, elementId: string) => Promise<RenderedDiagram>;
 };
 
 const diagramRenderers: Record<string, DiagramRenderer> = {
@@ -130,7 +135,7 @@ let mermaidInitialized = false;
 async function renderMermaidDiagram(
   source: string,
   elementId: string
-): Promise<string> {
+): Promise<RenderedDiagram> {
   const { default: mermaid } = await import("mermaid");
 
   if (!mermaidInitialized) {
@@ -154,16 +159,31 @@ async function renderMermaidDiagram(
   if (!sanitized) {
     throw new Error("Renderer returned an invalid SVG.");
   }
-  return buildSandboxedSvgDocument(sanitized);
+  return {
+    document: buildSandboxedSvgDocument(sanitized.svg),
+    frameStyle: diagramFrameStyle(sanitized.size),
+  };
 }
 
-function sanitizeSvg(svg: string): string | null {
+type SvgSize = {
+  width: number;
+  height: number;
+  maxWidth?: number;
+};
+
+type SanitizedSvg = {
+  svg: string;
+  size: SvgSize;
+};
+
+function sanitizeSvg(svg: string): SanitizedSvg | null {
   const parser = new DOMParser();
   const document = parser.parseFromString(svg, "image/svg+xml");
   if (document.querySelector("parsererror")) return null;
 
   const root = document.documentElement;
   if (root.tagName.toLowerCase() !== "svg") return null;
+  const size = svgSize(root);
 
   const blockedElements = new Set([
     "script",
@@ -193,7 +213,7 @@ function sanitizeSvg(svg: string): string | null {
   }
 
   elementsToRemove.forEach((element) => element.remove());
-  return new XMLSerializer().serializeToString(root);
+  return { svg: new XMLSerializer().serializeToString(root), size };
 }
 
 function sanitizeSvgElement(element: Element): void {
@@ -226,13 +246,60 @@ function buildSandboxedSvgDocument(svg: string): string {
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;" />
   <style>
-    html, body { margin: 0; background: transparent; }
-    body { min-width: max-content; }
-    svg { display: block; max-width: 100%; height: auto; }
+    html, body { margin: 0; background: transparent; overflow: hidden; }
+    svg { display: block; width: 100%; max-width: 100%; height: auto; }
   </style>
 </head>
 <body>${svg}</body>
 </html>`;
+}
+
+function parseSvgNumber(value: string | null): number | null {
+  if (!value) return null;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function svgMaxWidth(root: Element): number | null {
+  const style = root.getAttribute("style");
+  const match = style?.match(/(?:^|;)\s*max-width\s*:\s*([^;]+)/i);
+  return parseSvgNumber(match?.[1] ?? null);
+}
+
+function svgSize(root: Element): SvgSize {
+  const maxWidth = svgMaxWidth(root) ?? undefined;
+  const viewBox = root
+    .getAttribute("viewBox")
+    ?.trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (
+    viewBox?.length === 4 &&
+    Number.isFinite(viewBox[2]) &&
+    Number.isFinite(viewBox[3]) &&
+    viewBox[2] > 0 &&
+    viewBox[3] > 0
+  ) {
+    return { width: viewBox[2], height: viewBox[3], maxWidth };
+  }
+
+  const width = parseSvgNumber(root.getAttribute("width"));
+  const height = parseSvgNumber(root.getAttribute("height"));
+  if (width && height) return { width, height, maxWidth: maxWidth ?? width };
+
+  return { width: 16, height: 9 };
+}
+
+function diagramFrameStyle(size: SvgSize): React.CSSProperties {
+  const style: React.CSSProperties = {
+    aspectRatio: `${size.width} / ${size.height}`,
+  };
+  if (size.maxWidth) {
+    style.maxWidth = `${size.maxWidth}px`;
+  }
+  return style;
 }
 
 function diagramElementId(prefix: string, source: string): string {
@@ -275,8 +342,8 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
     setResult({ status: "rendering" });
     renderer
       .render(source, diagramElementId(`diagram-${reactId}`, source))
-      .then((document) => {
-        if (!cancelled) setResult({ status: "rendered", document });
+      .then(({ document, frameStyle }) => {
+        if (!cancelled) setResult({ status: "rendered", document, frameStyle });
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -315,9 +382,11 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
         </div>
       ) : (
         <iframe
-          className="block h-72 w-full bg-transparent"
+          className="block w-full bg-transparent"
           sandbox=""
+          scrolling="no"
           srcDoc={result.document}
+          style={result.frameStyle}
           title={`${renderer.label} diagram`}
         />
       )}
