@@ -1,11 +1,31 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MarkdownContent } from "./MarkdownContent";
+
+const mermaidMock = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  parse: vi.fn(),
+  render: vi.fn(),
+}));
+
+vi.mock("mermaid", () => ({
+  default: mermaidMock,
+}));
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
 describe("MarkdownContent", () => {
+  beforeEach(() => {
+    mermaidMock.initialize.mockClear();
+    mermaidMock.parse.mockReset();
+    mermaidMock.render.mockReset();
+    mermaidMock.parse.mockResolvedValue(true);
+    mermaidMock.render.mockResolvedValue({
+      svg: '<svg viewBox="0 0 100 40" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
+    });
+  });
+
   describe("plain text rendering", () => {
     it("renders plain text in a paragraph", () => {
       render(<MarkdownContent text="Hello world" />);
@@ -159,6 +179,57 @@ describe("MarkdownContent", () => {
       // Trailing newline should be stripped, content should be exact
       expect(codeEl!.textContent).toBe("line1\nline2\nline3");
     });
+
+    it("renders a completed Mermaid fence as a sandboxed diagram", async () => {
+      const markdown = "```mermaid\ngraph TD\n  A --> B\n```";
+      render(<MarkdownContent text={markdown} />);
+
+      const frame = await screen.findByTitle("Mermaid diagram");
+      expect(frame).toHaveAttribute("sandbox", "");
+      expect(frame).toHaveAttribute("srcdoc", expect.stringContaining("<svg"));
+      expect(frame).toHaveAttribute(
+        "srcdoc",
+        expect.not.stringContaining("<script>")
+      );
+      expect(frame).toHaveAttribute(
+        "srcdoc",
+        expect.not.stringContaining("onload")
+      );
+      expect(mermaidMock.parse).toHaveBeenCalledWith("graph TD\n  A --> B");
+      expect(mermaidMock.render).toHaveBeenCalledWith(
+        expect.stringMatching(/^diagram-/),
+        "graph TD\n  A --> B"
+      );
+      expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+    });
+
+    it("falls back to highlighted source with an error for invalid Mermaid", async () => {
+      mermaidMock.parse.mockRejectedValueOnce(new Error("Parse error"));
+      const markdown = "```mermaid\ngraph TD\n  A -- B\n```";
+      const { container } = render(<MarkdownContent text={markdown} />);
+
+      expect(
+        await screen.findByText("Unable to render Mermaid diagram: Parse error")
+      ).toBeInTheDocument();
+      expect(screen.queryByTitle("Mermaid diagram")).toBeNull();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toBe("graph TD\n  A -- B");
+    });
+
+    it("falls back to highlighted source with an error for unsupported diagram languages", async () => {
+      const markdown = "```dot\ndigraph { A -> B }\n```";
+      const { container } = render(<MarkdownContent text={markdown} />);
+
+      expect(
+        await screen.findByText("DOT diagrams are not supported yet.")
+      ).toBeInTheDocument();
+      expect(mermaidMock.parse).not.toHaveBeenCalled();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toBe("digraph { A -> B }");
+    });
   });
 
   describe("tables (GFM)", () => {
@@ -206,6 +277,24 @@ describe("MarkdownContent", () => {
       expect(codeEl).not.toBeNull();
       expect(codeEl!.textContent).toContain("def");
       expect(codeEl!.textContent).toContain("hello");
+    });
+
+    it("does not render or report errors for unclosed Mermaid fences", async () => {
+      const partial = "Here is a diagram:\n```mermaid\ngraph TD\n  A -->";
+      const { container } = render(<MarkdownContent text={partial} />);
+
+      expect(
+        container.querySelector('[data-testid="markdown-content"]')
+      ).toBeInTheDocument();
+      await waitFor(() => {
+        expect(mermaidMock.parse).not.toHaveBeenCalled();
+      });
+      expect(screen.queryByTitle("Mermaid diagram")).toBeNull();
+      expect(screen.queryByTestId("diagram-fallback")).toBeNull();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toContain("graph TD");
+      expect(codeEl!.textContent).toContain("A -->");
     });
 
     it("renders partial bold syntax without breaking", () => {

@@ -1,4 +1,10 @@
-import { memo, type ComponentPropsWithoutRef } from "react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useState,
+  type ComponentPropsWithoutRef,
+} from "react";
 import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
@@ -45,175 +51,468 @@ const codeTagStyle = {
   className: "font-mono",
 };
 
-const components = {
-  p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
-    <p
-      className="mb-2 text-base leading-relaxed text-fg antialiased last:mb-0"
-      {...props}
-    >
-      {children}
-    </p>
-  ),
-  h1: ({ children, ...props }: ComponentPropsWithoutRef<"h1">) => (
-    <h1
-      className="mb-3 mt-4 text-xl font-bold text-fg first:mt-0"
-      {...props}
-    >
-      {children}
-    </h1>
-  ),
-  h2: ({ children, ...props }: ComponentPropsWithoutRef<"h2">) => (
-    <h2
-      className="mb-2 mt-3 text-lg font-semibold text-fg first:mt-0"
-      {...props}
-    >
-      {children}
-    </h2>
-  ),
-  h3: ({ children, ...props }: ComponentPropsWithoutRef<"h3">) => (
-    <h3
-      className="mb-2 mt-3 text-base font-semibold text-fg first:mt-0"
-      {...props}
-    >
-      {children}
-    </h3>
-  ),
-  h4: ({ children, ...props }: ComponentPropsWithoutRef<"h4">) => (
-    <h4
-      className="mb-1 mt-2 text-sm font-semibold text-fg first:mt-0"
-      {...props}
-    >
-      {children}
-    </h4>
-  ),
-  ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
-    <ul
-      className="mb-2 ml-4 list-disc space-y-1 text-base text-fg"
-      {...props}
-    >
-      {children}
-    </ul>
-  ),
-  ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
-    <ol
-      className="mb-2 ml-4 list-decimal space-y-1 text-base text-fg"
-      {...props}
-    >
-      {children}
-    </ol>
-  ),
-  li: ({ children, ...props }: ComponentPropsWithoutRef<"li">) => (
-    <li className="leading-relaxed" {...props}>
-      {children}
-    </li>
-  ),
-  blockquote: ({
-    children,
-    ...props
-  }: ComponentPropsWithoutRef<"blockquote">) => (
-    <blockquote
-      className="mb-2 border-l-2 border-accent/50 pl-3 text-fg-soft italic"
-      {...props}
-    >
-      {children}
-    </blockquote>
-  ),
-  a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (
-    <a
-      className="text-accent underline decoration-accent/30 hover:decoration-accent"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    >
-      {children}
-    </a>
-  ),
-  table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
-    <div className="mb-2 overflow-x-auto">
-      <table className="w-full border-collapse text-sm" {...props}>
-        {children}
-      </table>
-    </div>
-  ),
-  thead: ({ children, ...props }: ComponentPropsWithoutRef<"thead">) => (
-    <thead className="border-b border-border" {...props}>
-      {children}
-    </thead>
-  ),
-  th: ({ children, ...props }: ComponentPropsWithoutRef<"th">) => (
-    <th
-      className="px-3 py-1.5 text-left text-xs font-medium text-fg-soft"
-      {...props}
-    >
-      {children}
-    </th>
-  ),
-  td: ({ children, ...props }: ComponentPropsWithoutRef<"td">) => (
-    <td
-      className="border-t border-border/50 px-3 py-1.5 text-fg"
-      {...props}
-    >
-      {children}
-    </td>
-  ),
-  hr: (props: ComponentPropsWithoutRef<"hr">) => (
-    <hr className="my-3 border-border" {...props} />
-  ),
-  strong: ({ children, ...props }: ComponentPropsWithoutRef<"strong">) => (
-    <strong className="font-semibold text-fg" {...props}>
-      {children}
-    </strong>
-  ),
-  em: ({ children, ...props }: ComponentPropsWithoutRef<"em">) => (
-    // Inline prose emphasis (cursive role b): Newsreader serif italic at full
-    // --fg — NOT copper. Distinct from a heading's copper accent word.
-    <em className="font-serif italic text-[var(--color-fg)]" {...props}>
-      {children}
-    </em>
-  ),
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  code: ({ inline, className, children, node, ...props }: CodeProps) => {
-    const match = /language-(\w+)/.exec(className || "");
-    const language = match?.[1] ?? "text";
-    let codeString = String(children).replace(/\n$/, "");
+interface HighlightedCodeBlockProps {
+  language: string;
+  source: string;
+  diagramError?: string;
+}
 
-    if (language === "json") {
-      codeString = prettyPrintJsonIfPossible(codeString);
-    }
+function HighlightedCodeBlock({
+  language,
+  source,
+  diagramError,
+}: HighlightedCodeBlockProps) {
+  const hasLanguage = language !== "text";
 
-    if (!inline && (match || codeString.includes("\n"))) {
-      return (
-        <div className="group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-md border border-border/50 bg-bg">
-          {match && (
-            <div className="flex items-center border-b border-border/50 px-3 py-1">
-              <span className="font-mono text-eyebrow text-fg-mute">
-                {match[1]}
-              </span>
-            </div>
+  return (
+    <div
+      className={`group relative mb-2 max-w-full min-w-0 overflow-hidden rounded-md border bg-bg ${
+        diagramError ? "border-err/50" : "border-border/50"
+      }`}
+      data-testid={diagramError ? "diagram-fallback" : undefined}
+    >
+      {(hasLanguage || diagramError) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-3 py-1">
+          {hasLanguage && (
+            <span className="font-mono text-eyebrow text-fg-mute">
+              {language}
+            </span>
           )}
-          <SyntaxHighlighter
-            style={syntaxTheme as { [key: string]: React.CSSProperties }}
-            language={language}
-            PreTag="div"
-            customStyle={codeBlockStyle}
-            codeTagProps={codeTagStyle}
-          >
-            {codeString}
-          </SyntaxHighlighter>
+          {diagramError && (
+            <span className="font-mono text-eyebrow text-err">
+              {diagramError}
+            </span>
+          )}
         </div>
-      );
+      )}
+      <SyntaxHighlighter
+        style={syntaxTheme as { [key: string]: React.CSSProperties }}
+        language={language}
+        PreTag="div"
+        customStyle={codeBlockStyle}
+        codeTagProps={codeTagStyle}
+      >
+        {source}
+      </SyntaxHighlighter>
+    </div>
+  );
+}
+
+type DiagramRenderResult =
+  | { status: "rendering" }
+  | { status: "rendered"; document: string }
+  | { status: "error"; message: string };
+
+type DiagramRenderer = {
+  label: string;
+  render?: (source: string, elementId: string) => Promise<string>;
+};
+
+const diagramRenderers: Record<string, DiagramRenderer> = {
+  mermaid: {
+    label: "Mermaid",
+    render: renderMermaidDiagram,
+  },
+  mmd: {
+    label: "Mermaid",
+    render: renderMermaidDiagram,
+  },
+  dot: { label: "DOT" },
+  graphviz: { label: "DOT" },
+  d2: { label: "D2" },
+  plantuml: { label: "PlantUML" },
+  puml: { label: "PlantUML" },
+  kroki: { label: "Kroki" },
+};
+
+let mermaidInitialized = false;
+
+async function renderMermaidDiagram(
+  source: string,
+  elementId: string
+): Promise<string> {
+  const { default: mermaid } = await import("mermaid");
+
+  if (!mermaidInitialized) {
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      deterministicIds: true,
+      deterministicIDSeed: "vertebrae-chat",
+      theme: "dark",
+      fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+      htmlLabels: false,
+      flowchart: { htmlLabels: false, useMaxWidth: true },
+      sequence: { useMaxWidth: true },
+    });
+    mermaidInitialized = true;
+  }
+
+  await mermaid.parse(source);
+  const { svg } = await mermaid.render(elementId, source);
+  const sanitized = sanitizeSvg(svg);
+  if (!sanitized) {
+    throw new Error("Renderer returned an invalid SVG.");
+  }
+  return buildSandboxedSvgDocument(sanitized);
+}
+
+function sanitizeSvg(svg: string): string | null {
+  const parser = new DOMParser();
+  const document = parser.parseFromString(svg, "image/svg+xml");
+  if (document.querySelector("parsererror")) return null;
+
+  const root = document.documentElement;
+  if (root.tagName.toLowerCase() !== "svg") return null;
+
+  const blockedElements = new Set([
+    "script",
+    "foreignobject",
+    "iframe",
+    "object",
+    "embed",
+    "audio",
+    "video",
+    "canvas",
+    "link",
+    "meta",
+  ]);
+
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  const elementsToRemove: Element[] = [];
+
+  sanitizeSvgElement(root);
+  while (walker.nextNode()) {
+    const element = walker.currentNode as Element;
+    if (blockedElements.has(element.tagName.toLowerCase())) {
+      elementsToRemove.push(element);
+      continue;
     }
 
+    sanitizeSvgElement(element);
+  }
+
+  elementsToRemove.forEach((element) => element.remove());
+  return new XMLSerializer().serializeToString(root);
+}
+
+function sanitizeSvgElement(element: Element): void {
+  for (const attribute of Array.from(element.attributes)) {
+    const name = attribute.name.toLowerCase();
+    const value = attribute.value.trim().toLowerCase();
+    const isLocalReference =
+      (name === "href" || name === "xlink:href") && value.startsWith("#");
+    const isDangerousReference =
+      (name === "href" || name === "xlink:href" || name === "src") &&
+      !isLocalReference;
+
+    if (
+      name.startsWith("on") ||
+      isDangerousReference ||
+      value.includes("javascript:") ||
+      value.includes("data:text/html") ||
+      (name === "style" &&
+        (value.includes("url(") || value.includes("expression(")))
+    ) {
+      element.removeAttribute(attribute.name);
+    }
+  }
+}
+
+function buildSandboxedSvgDocument(svg: string): string {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;" />
+  <style>
+    html, body { margin: 0; background: transparent; }
+    body { min-width: max-content; }
+    svg { display: block; max-width: 100%; height: auto; }
+  </style>
+</head>
+<body>${svg}</body>
+</html>`;
+}
+
+function diagramElementId(prefix: string, source: string): string {
+  let hash = 0;
+  for (let i = 0; i < source.length; i++) {
+    hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
+  }
+  return `${prefix}-${hash.toString(36)}`;
+}
+
+function diagramErrorMessage(label: string, error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return `Unable to render ${label} diagram: ${error.message}`;
+  }
+  return `Unable to render ${label} diagram.`;
+}
+
+interface DiagramBlockProps {
+  language: string;
+  source: string;
+  renderer: DiagramRenderer;
+}
+
+function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
+  const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const [result, setResult] = useState<DiagramRenderResult>({
+    status: "rendering",
+  });
+
+  useEffect(() => {
+    if (!renderer.render) {
+      setResult({
+        status: "error",
+        message: `${renderer.label} diagrams are not supported yet.`,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    setResult({ status: "rendering" });
+    renderer
+      .render(source, diagramElementId(`diagram-${reactId}`, source))
+      .then((document) => {
+        if (!cancelled) setResult({ status: "rendered", document });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setResult({
+            status: "error",
+            message: diagramErrorMessage(renderer.label, error),
+          });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reactId, renderer, source]);
+
+  if (result.status === "error") {
     return (
-      <code
-        className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-13 text-accent"
+      <HighlightedCodeBlock
+        language={language}
+        source={source}
+        diagramError={result.message}
+      />
+    );
+  }
+
+  return (
+    <div className="mb-2 max-w-full overflow-hidden rounded-md border border-border/50 bg-bg">
+      <div className="flex items-center border-b border-border/50 px-3 py-1">
+        <span className="font-mono text-eyebrow text-fg-mute">
+          {renderer.label}
+        </span>
+      </div>
+      {result.status === "rendering" ? (
+        <div className="px-3 py-4 font-mono text-eyebrow text-fg-mute">
+          Rendering {renderer.label} diagram...
+        </div>
+      ) : (
+        <iframe
+          className="block h-72 w-full bg-transparent"
+          sandbox=""
+          srcDoc={result.document}
+          title={`${renderer.label} diagram`}
+        />
+      )}
+    </div>
+  );
+}
+
+function normalizeCodeLanguage(className?: string): string {
+  const match = /language-(\w+)/.exec(className || "");
+  return match?.[1]?.toLowerCase() ?? "text";
+}
+
+function completedDiagramBlocks(text: string): Set<string> {
+  const completed = new Set<string>();
+  const openingFence = /(^|\n)(`{3,}|~{3,})([^\n]*)\n/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = openingFence.exec(text)) !== null) {
+    const fence = match[2];
+    const info = match[3].trim();
+    const language = info.split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (!diagramRenderers[language]) continue;
+
+    const fenceChar = fence[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const closingFence = new RegExp(
+      `(^|\\n)${fenceChar}{${fence.length},}[ \\t]*(?=\\n|$)`,
+      "g"
+    );
+    closingFence.lastIndex = openingFence.lastIndex;
+    const close = closingFence.exec(text);
+    if (!close) continue;
+
+    completed.add(text.slice(openingFence.lastIndex, close.index));
+    openingFence.lastIndex = closingFence.lastIndex;
+  }
+
+  return completed;
+}
+
+function createMarkdownComponents(completedDiagramSources: Set<string>) {
+  return {
+    p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
+      <p
+        className="mb-2 text-base leading-relaxed text-fg antialiased last:mb-0"
         {...props}
       >
         {children}
-      </code>
-    );
-  },
-};
+      </p>
+    ),
+    h1: ({ children, ...props }: ComponentPropsWithoutRef<"h1">) => (
+      <h1 className="mb-3 mt-4 text-xl font-bold text-fg first:mt-0" {...props}>
+        {children}
+      </h1>
+    ),
+    h2: ({ children, ...props }: ComponentPropsWithoutRef<"h2">) => (
+      <h2
+        className="mb-2 mt-3 text-lg font-semibold text-fg first:mt-0"
+        {...props}
+      >
+        {children}
+      </h2>
+    ),
+    h3: ({ children, ...props }: ComponentPropsWithoutRef<"h3">) => (
+      <h3
+        className="mb-2 mt-3 text-base font-semibold text-fg first:mt-0"
+        {...props}
+      >
+        {children}
+      </h3>
+    ),
+    h4: ({ children, ...props }: ComponentPropsWithoutRef<"h4">) => (
+      <h4
+        className="mb-1 mt-2 text-sm font-semibold text-fg first:mt-0"
+        {...props}
+      >
+        {children}
+      </h4>
+    ),
+    ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
+      <ul
+        className="mb-2 ml-4 list-disc space-y-1 text-base text-fg"
+        {...props}
+      >
+        {children}
+      </ul>
+    ),
+    ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
+      <ol
+        className="mb-2 ml-4 list-decimal space-y-1 text-base text-fg"
+        {...props}
+      >
+        {children}
+      </ol>
+    ),
+    li: ({ children, ...props }: ComponentPropsWithoutRef<"li">) => (
+      <li className="leading-relaxed" {...props}>
+        {children}
+      </li>
+    ),
+    blockquote: ({
+      children,
+      ...props
+    }: ComponentPropsWithoutRef<"blockquote">) => (
+      <blockquote
+        className="mb-2 border-l-2 border-accent/50 pl-3 text-fg-soft italic"
+        {...props}
+      >
+        {children}
+      </blockquote>
+    ),
+    a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (
+      <a
+        className="text-accent underline decoration-accent/30 hover:decoration-accent"
+        target="_blank"
+        rel="noopener noreferrer"
+        {...props}
+      >
+        {children}
+      </a>
+    ),
+    table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
+      <div className="mb-2 overflow-x-auto">
+        <table className="w-full border-collapse text-sm" {...props}>
+          {children}
+        </table>
+      </div>
+    ),
+    thead: ({ children, ...props }: ComponentPropsWithoutRef<"thead">) => (
+      <thead className="border-b border-border" {...props}>
+        {children}
+      </thead>
+    ),
+    th: ({ children, ...props }: ComponentPropsWithoutRef<"th">) => (
+      <th
+        className="px-3 py-1.5 text-left text-xs font-medium text-fg-soft"
+        {...props}
+      >
+        {children}
+      </th>
+    ),
+    td: ({ children, ...props }: ComponentPropsWithoutRef<"td">) => (
+      <td className="border-t border-border/50 px-3 py-1.5 text-fg" {...props}>
+        {children}
+      </td>
+    ),
+    hr: (props: ComponentPropsWithoutRef<"hr">) => (
+      <hr className="my-3 border-border" {...props} />
+    ),
+    strong: ({ children, ...props }: ComponentPropsWithoutRef<"strong">) => (
+      <strong className="font-semibold text-fg" {...props}>
+        {children}
+      </strong>
+    ),
+    em: ({ children, ...props }: ComponentPropsWithoutRef<"em">) => (
+      // Inline prose emphasis (cursive role b): Newsreader serif italic at full
+      // --fg — NOT copper. Distinct from a heading's copper accent word.
+      <em className="font-serif italic text-[var(--color-fg)]" {...props}>
+        {children}
+      </em>
+    ),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    code: ({ inline, className, children, node, ...props }: CodeProps) => {
+      const language = normalizeCodeLanguage(className);
+      let codeString = String(children).replace(/\n$/, "");
+
+      if (language === "json") {
+        codeString = prettyPrintJsonIfPossible(codeString);
+      }
+
+      if (!inline && (className || codeString.includes("\n"))) {
+        const renderer = diagramRenderers[language];
+        if (renderer && completedDiagramSources.has(codeString)) {
+          return (
+            <DiagramBlock
+              language={language}
+              source={codeString}
+              renderer={renderer}
+            />
+          );
+        }
+
+        return <HighlightedCodeBlock language={language} source={codeString} />;
+      }
+
+      return (
+        <code
+          className="rounded bg-bg/80 px-1.5 py-0.5 font-mono text-13 text-accent"
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+  };
+}
 
 /**
  * Normalize Elixir map syntax (`%{}` with `=>` or unicode `⇒` separators)
@@ -427,6 +726,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   text,
 }: MarkdownContentProps) {
   const prepared = formatInlineJsonBlocks(maybeWrapBareJson(text));
+  const completedDiagrams = completedDiagramBlocks(prepared);
+  const components = createMarkdownComponents(completedDiagrams);
   return (
     <div className="markdown-content" data-testid="markdown-content">
       <Markdown remarkPlugins={remarkPlugins} components={components}>
