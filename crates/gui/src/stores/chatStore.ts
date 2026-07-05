@@ -272,11 +272,107 @@ function providerJsonlLinesToChatMessages(
   lines: string[],
   session: ChatSession
 ): ChatMessage[] {
-  return parseSessionLogs(providerJsonlLinesToSessionLogs(lines, session), {
-    includeUserMessages: true,
-  })
+  const messages = parseSessionLogs(
+    providerJsonlLinesToSessionLogs(lines, session),
+    {
+      includeUserMessages: true,
+    }
+  )
     .map(conversationEventToChatMessage)
     .filter((message): message is ChatMessage => message !== null);
+  return sanitizeSessionMessages(messages, session.providerResumeId);
+}
+
+function stringArrayValue(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+  return typeof value === "string" ? [value] : [];
+}
+
+function toolCallReferencesThread(
+  message: Extract<ChatMessage, { kind: "tool_call" }>,
+  threadId: string
+): boolean {
+  const input = parseJsonObjectInput(message.input);
+  if (!input) return false;
+  const directThreadIds = [
+    ...stringArrayValue(input.receiver_thread_ids),
+    ...stringArrayValue(input.receiverThreadIds),
+    ...stringArrayValue(input.thread_id),
+    ...stringArrayValue(input.threadId),
+    ...stringArrayValue(input.agent_path),
+    ...stringArrayValue(input.agentPath),
+  ];
+  if (directThreadIds.includes(threadId)) return true;
+
+  const receiverAgents =
+    Array.isArray(input.receiver_agents) || Array.isArray(input.receiverAgents)
+      ? (input.receiver_agents ?? input.receiverAgents)
+      : [];
+  return Array.isArray(receiverAgents)
+    ? receiverAgents.some((agent) => {
+        if (!agent || typeof agent !== "object") return false;
+        const record = agent as Record<string, unknown>;
+        return [
+          ...stringArrayValue(record.thread_id),
+          ...stringArrayValue(record.threadId),
+          ...stringArrayValue(record.agent_path),
+          ...stringArrayValue(record.agentPath),
+        ].includes(threadId);
+      })
+    : false;
+}
+
+function isAgentSpawnToolName(toolName: string): boolean {
+  return ["agent", "task"].includes(toolName.trim().toLowerCase());
+}
+
+function isSelfProviderAgentToolCall(
+  message: ChatMessage,
+  providerResumeId: string | null | undefined
+): boolean {
+  return (
+    !!providerResumeId &&
+    message.kind === "tool_call" &&
+    !message.parentToolUseId &&
+    isAgentSpawnToolName(message.toolName) &&
+    toolCallReferencesThread(message, providerResumeId)
+  );
+}
+
+function sanitizeSessionMessages(
+  messages: ChatMessage[],
+  providerResumeId: string | null | undefined
+): ChatMessage[] {
+  if (!providerResumeId) return messages;
+  const selfAgentToolIds = new Set<string>();
+  const filtered = messages.filter((message) => {
+    if (
+      message.kind === "tool_call" &&
+      isSelfProviderAgentToolCall(message, providerResumeId)
+    ) {
+      selfAgentToolIds.add(message.toolId);
+      return false;
+    }
+    if (
+      (message.kind === "tool_result" ||
+        message.kind === "assistant" ||
+        message.kind === "tool_call") &&
+      message.parentToolUseId &&
+      selfAgentToolIds.has(message.parentToolUseId)
+    ) {
+      return false;
+    }
+    if (
+      message.kind === "tool_result" &&
+      selfAgentToolIds.has(message.toolId)
+    ) {
+      return false;
+    }
+    return true;
+  });
+  return filtered.length === messages.length ? messages : filtered;
 }
 
 /**
@@ -760,8 +856,13 @@ function createProviderThreadSession(input: {
 
 function hydrateLocalSession(session: ChatSession): ChatSession {
   const title = session.title?.trim() ? session.title : null;
+  const messages = sanitizeSessionMessages(
+    session.messages,
+    session.providerResumeId
+  );
   return {
     ...session,
+    messages,
     title,
     titleStatus: session.titleStatus ?? (title ? "generated" : "pending"),
     titleConfidence: session.titleConfidence ?? (title ? 1 : null),
@@ -772,7 +873,7 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     lifecycle: session.lifecycle ?? "idle",
     lifecycleError: null,
     streamingAssistant: null,
-    messageCount: session.messageCount ?? session.messages.length,
+    messageCount: session.messageCount ?? messages.length,
   };
 }
 
@@ -1149,7 +1250,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
           : legacyRawMessages
               .map(normalizeStoredChatMessage)
               .filter((message): message is ChatMessage => message !== null);
-      return { messages, providerJsonlPath };
+      return {
+        messages: sanitizeSessionMessages(messages, session.providerResumeId),
+        providerJsonlPath,
+      };
     } catch (error) {
       console.warn("Failed to load local chat provider transcript", error);
       return { messages: [], providerJsonlPath: null };
@@ -1160,12 +1264,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
     sessionId: string,
     session: ChatSession
   ) => {
+    if (!session.providerResumeId) return;
     void loadStoredProviderMessages(session).then(
       ({ messages, providerJsonlPath }) => {
-        if (messages.length === 0 && !providerJsonlPath) return;
+        if (messages.length === 0 && !providerJsonlPath) {
+          return;
+        }
         set((state) => {
           const current = state.sessions[sessionId];
-          if (!current) return state;
+          if (!current) {
+            return state;
+          }
           const merged = mergeHydratedMessages(messages, current.messages);
           const nextProviderJsonlPath =
             providerJsonlPath ?? current.providerJsonlPath ?? null;
@@ -1466,7 +1575,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
 
       const persisted = loadPersistedLocalChatSession(sessionId);
-      if (!persisted || persisted.status !== "open") return false;
+      if (!persisted || persisted.status !== "open") {
+        return false;
+      }
       const { messages, providerJsonlPath } =
         await loadStoredProviderMessages(persisted);
       const hydrated = hydrateLocalSession({
@@ -1603,6 +1714,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(
         sessionId,
         (session) => {
+          if (isSelfProviderAgentToolCall(message, session.providerResumeId)) {
+            return session;
+          }
           const messages = [...session.messages];
           if (message.kind === "tool_call") {
             const existingIndex = messages.findIndex(

@@ -341,10 +341,8 @@ export async function doStartSession(
   userMessage?: string,
   options: { addUserMessage?: boolean } = {}
 ) {
-  deps.setSessionLifecycle(
-    sessionId,
-    session.providerResumeId ? "resuming" : "starting"
-  );
+  const resumeId = session.providerResumeId;
+  deps.setSessionLifecycle(sessionId, resumeId ? "resuming" : "starting");
 
   const backendSessionId = `local-${sessionId}-${Date.now()}`;
   deps.setBackendSessionId(sessionId, backendSessionId);
@@ -369,7 +367,6 @@ export async function doStartSession(
       }
     }
 
-    const resumeId = session.providerResumeId;
     const modelId = resumeId ? null : (session.selectedModelId ?? null);
     const reasoningEffort = resumeId
       ? null
@@ -820,7 +817,10 @@ export function useLocalChat(sessionId: string | null) {
    */
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!session?.backendSessionId || !sessionId) return;
+      if (!sessionId) return;
+      if (!session?.backendSessionId) {
+        return;
+      }
       const lifecycle = getLocalChatLifecycle(session);
       if (
         lifecycle === "starting" ||

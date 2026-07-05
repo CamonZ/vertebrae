@@ -79,6 +79,7 @@ struct MockScript {
     rpc_error_method: Option<&'static str>,
     server_request_method: Option<&'static str>,
     stale_completion_before_turn_response: bool,
+    thread_status_before_thread_response: bool,
     child_status_after_parent_completion: bool,
     turn_response_delay: Duration,
     turn_status: &'static str,
@@ -93,6 +94,7 @@ impl Default for MockScript {
             rpc_error_method: None,
             server_request_method: None,
             stale_completion_before_turn_response: false,
+            thread_status_before_thread_response: false,
             child_status_after_parent_completion: false,
             turn_response_delay: Duration::from_millis(0),
             turn_status: "completed",
@@ -389,6 +391,77 @@ fn codex_child_tool_call_is_not_emitted_into_parent_transcript() {
 
     let events = events.lock().expect("events lock");
     assert!(events.is_empty());
+}
+
+#[test]
+fn codex_parent_thread_notifications_are_not_reclassified_as_child_agent_output() {
+    let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+    let mut handler = test_handler(&event_sink);
+    let spawn = json!({
+        "type": "collabAgentToolCall",
+        "id": "spawn-1",
+        "tool": "spawnAgent",
+        "threadId": "parent-thread",
+        "receiverThreadIds": ["child-thread"]
+    });
+    handler.remember_child_thread_parents(&spawn, "spawn-1");
+
+    let (completion_tx, _completion_rx) = tokio::sync::oneshot::channel();
+    handler.begin_turn(1, completion_tx);
+    handler.set_expected_turn_id("turn-1");
+
+    handler.handle(
+        "item/agentMessage/delta",
+        &json!({
+            "threadId": "parent-thread",
+            "turnId": "turn-1",
+            "itemId": "msg-1",
+            "delta": "streamed parent reply"
+        }),
+    );
+    handler.handle(
+        "item/completed",
+        &json!({
+            "threadId": "parent-thread",
+            "turnId": "turn-1",
+            "item": {
+                "type": "agentMessage",
+                "id": "msg-1",
+                "text": "Final parent reply"
+            }
+        }),
+    );
+    handler.handle(
+        "turn/completed",
+        &json!({
+            "threadId": "parent-thread",
+            "turn": {
+                "id": "turn-1",
+                "status": "completed",
+                "durationMs": 12
+            }
+        }),
+    );
+
+    assert!(handler.active_turn.is_none());
+    let events = events.lock().expect("events lock");
+    let text_events: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            LocalChatEvent::Text(event) => Some(event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_events.len(), 2);
+    assert_eq!(text_events[0].text, "streamed parent reply");
+    assert!(text_events[0].is_partial);
+    assert_eq!(text_events[0].parent_tool_use_id, None);
+    assert_eq!(text_events[1].text, "Final parent reply");
+    assert!(!text_events[1].is_partial);
+    assert_eq!(text_events[1].parent_tool_use_id, None);
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, LocalChatEvent::End(_))));
 }
 
 #[test]
@@ -868,6 +941,21 @@ impl MockAppServer {
                     }
                     ("initialized", _) => {}
                     ("thread/start" | "thread/resume", Some(id)) => {
+                        if script.thread_status_before_thread_response {
+                            send_json(
+                                &mut socket,
+                                json!({
+                                    "method": "thread/status/changed",
+                                    "params": {
+                                        "threadId": script.thread_id,
+                                        "status": {
+                                            "type": "pendingInit",
+                                        },
+                                    },
+                                }),
+                            )
+                            .await;
+                        }
                         send_json(
                             &mut socket,
                             json!({
@@ -1467,6 +1555,39 @@ async fn create_session_resumes_provider_thread_and_send_message_uses_same_threa
     assert_eq!(requests[3]["method"], "turn/start");
     assert_eq!(requests[3]["params"]["threadId"], "existing-thread");
     assert_eq!(requests[3]["params"]["input"][0]["text"], "next message");
+}
+
+#[tokio::test]
+async fn resume_seeds_thread_before_early_status_notification() {
+    let server = MockAppServer::start(MockScript {
+        thread_id: "existing-thread",
+        thread_status_before_thread_response: true,
+        ..MockScript::default()
+    })
+    .await;
+    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(
+            create_input("backend-resume-race", None, Some("existing-thread")),
+            runtime,
+        )
+        .await
+        .expect("resume codex session");
+
+    let events = events.lock().expect("events lock");
+    assert!(
+        !events.iter().any(|event| matches!(
+            event,
+            LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                tool_id,
+                tool_name,
+                ..
+            }) if tool_id == "agent:existing-thread" && tool_name == "Agent"
+        )),
+        "the resumed parent thread must not be synthesized as a child Agent"
+    );
 }
 
 #[tokio::test]

@@ -92,7 +92,12 @@ impl TurnNotificationHandler {
 
     pub(super) fn handle(&mut self, method: &str, params: &Value) {
         let notification_thread_id = params.get("threadId").and_then(Value::as_str);
-        let mut parent_tool_use_id = self.parent_tool_use_id_for_notification(params);
+        let is_parent_thread = notification_thread_id == Some(self.thread_id.as_str());
+        let mut parent_tool_use_id = if is_parent_thread {
+            None
+        } else {
+            self.parent_tool_use_id_for_notification(params)
+        };
         if notification_thread_id != Some(self.thread_id.as_str()) && parent_tool_use_id.is_none() {
             // A Codex session can contain multiple threads. If a child thread
             // races ahead of its parent spawn item, register a minimal stable

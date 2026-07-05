@@ -90,7 +90,10 @@ export function ChatWindowManager() {
   const spawnOutlineBySessionId = useMemo(() => {
     const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
     for (const session of sessionList) {
-      outlines.set(session.id, buildSpawnOutline(session.messages));
+      const outline = buildSpawnOutline(session.messages).filter(
+        (spawn) => spawn.threadId !== session.providerResumeId
+      );
+      outlines.set(session.id, outline);
     }
     return outlines;
     // Intentionally keyed by top-level agent tool-call inputs only; assistant
@@ -99,13 +102,16 @@ export function ChatWindowManager() {
   }, [spawnOutlineToken]);
   const childProviderThreadIds = useMemo(() => {
     const threadIds = new Set<string>();
-    for (const outline of spawnOutlineBySessionId.values()) {
+    for (const session of sessionList) {
+      const outline = spawnOutlineBySessionId.get(session.id) ?? [];
       for (const spawn of outline) {
-        if (spawn.threadId) threadIds.add(spawn.threadId);
+        if (spawn.threadId && spawn.threadId !== session.providerResumeId) {
+          threadIds.add(spawn.threadId);
+        }
       }
     }
     return threadIds;
-  }, [spawnOutlineBySessionId]);
+  }, [sessionList, spawnOutlineBySessionId]);
 
   const {
     panelRef,
