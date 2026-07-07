@@ -92,7 +92,7 @@ export function ChatHeader({
       title: "Toggle chat history",
       ariaLabel: "Toggle chat history",
       onClick: onToggleHistory!,
-      show: !!onToggleHistory,
+      show: !!onToggleHistory && !isWide,
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path

@@ -1365,6 +1365,60 @@ async fn create_session_registers_before_initial_turn_finishes() {
 }
 
 #[tokio::test]
+async fn send_message_returns_before_turn_finishes() {
+    let server = MockAppServer::start(MockScript {
+        turn_response_delay: Duration::from_millis(250),
+        ..MockScript::default()
+    })
+    .await;
+    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(create_input("backend-async-send", None, None), runtime)
+        .await
+        .expect("create codex session");
+
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        harness.send_message("backend-async-send", "slow prompt"),
+    )
+    .await
+    .expect("send_message should not wait for the turn to finish")
+    .expect("send codex message");
+
+    server.wait_for_request_count(4).await;
+    wait_for_event(&events, |event| {
+        matches!(
+            event,
+            LocalChatEvent::End(LocalChatSessionEndEvent {
+                backend_session_id,
+                ..
+            }) if backend_session_id == "backend-async-send"
+        )
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn send_message_returns_session_not_found_without_spawning_turn() {
+    let harness =
+        CodexLocalChatHarness::with_launcher_for_tests(Arc::new(TestCodexAppServerLauncher {
+            info_error: None,
+            ws_url: "ws://127.0.0.1:1".to_string(),
+        }));
+
+    let result = harness.send_message("missing-session", "hello").await;
+
+    assert_eq!(
+        result,
+        Err(LocalChatSessionError::SessionNotFound(
+            "missing-session".to_string()
+        ))
+    );
+}
+
+#[tokio::test]
 async fn permission_mode_is_forwarded_to_thread_and_turn_requests() {
     let server = MockAppServer::start(MockScript::default()).await;
     let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
@@ -1380,6 +1434,7 @@ async fn permission_mode_is_forwarded_to_thread_and_turn_requests() {
         .send_message("backend-permissions", "plan this")
         .await
         .expect("send codex message");
+    server.wait_for_request_count(4).await;
 
     let requests = server.requests();
     assert_eq!(requests[2]["method"], "thread/start");
@@ -1464,6 +1519,16 @@ async fn stale_turn_completion_before_turn_response_is_ignored() {
         .send_message("backend-stale", "current turn")
         .await
         .expect("send codex message");
+    wait_for_event(&events, |event| {
+        matches!(
+            event,
+            LocalChatEvent::End(LocalChatSessionEndEvent {
+                backend_session_id,
+                ..
+            }) if backend_session_id == "backend-stale"
+        )
+    })
+    .await;
 
     let events = events.lock().expect("events lock").clone();
     let end_events: Vec<_> = events
@@ -1547,6 +1612,7 @@ async fn create_session_resumes_provider_thread_and_send_message_uses_same_threa
         .send_message("backend-resume", "next message")
         .await
         .expect("send resumed message");
+    server.wait_for_request_count(4).await;
 
     let requests = server.requests();
     assert_eq!(requests[2]["method"], "thread/resume");
@@ -1622,7 +1688,7 @@ async fn json_rpc_errors_surface_as_start_failures() {
 }
 
 #[tokio::test]
-async fn failed_turn_emits_error_and_returns_send_failure() {
+async fn failed_turn_emits_error_and_end_after_send_returns_ok() {
     let server = MockAppServer::start(MockScript {
         turn_status: "failed",
         turn_error: Some("model failed"),
@@ -1640,12 +1706,29 @@ async fn failed_turn_emits_error_and_returns_send_failure() {
         .send_message("backend-failed-turn", "please fail")
         .await;
 
-    assert_eq!(
-        result,
-        Err(LocalChatSessionError::SendFailed(
-            "model failed".to_string()
-        ))
-    );
+    assert_eq!(result, Ok(()));
+    wait_for_event(&events, |event| {
+        matches!(
+            event,
+            LocalChatEvent::Error(LocalChatSessionErrorEvent {
+                backend_session_id,
+                error,
+                ..
+            }) if backend_session_id == "backend-failed-turn" && error == "model failed"
+        )
+    })
+    .await;
+    wait_for_event(&events, |event| {
+        matches!(
+            event,
+            LocalChatEvent::End(LocalChatSessionEndEvent {
+                backend_session_id,
+                is_error: true,
+                ..
+            }) if backend_session_id == "backend-failed-turn"
+        )
+    })
+    .await;
     let events = events.lock().expect("events lock").clone();
     assert!(
         events.contains(&LocalChatEvent::Error(LocalChatSessionErrorEvent {
@@ -1656,8 +1739,48 @@ async fn failed_turn_emits_error_and_returns_send_failure() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        LocalChatEvent::End(LocalChatSessionEndEvent { is_error: true, .. })
+        LocalChatEvent::End(LocalChatSessionEndEvent {
+            result,
+            is_error: true,
+            ..
+        }) if result == "model failed"
     )));
+}
+
+#[tokio::test]
+async fn turn_start_rpc_failure_after_send_returns_ok_surfaces_error_event() {
+    let server = MockAppServer::start(MockScript {
+        rpc_error_method: Some("turn/start"),
+        ..MockScript::default()
+    })
+    .await;
+    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(
+            create_input("backend-turn-start-error", None, None),
+            runtime,
+        )
+        .await
+        .expect("create codex session");
+    let result = harness
+        .send_message("backend-turn-start-error", "please fail")
+        .await;
+
+    assert_eq!(result, Ok(()));
+    wait_for_event(&events, |event| {
+        matches!(
+            event,
+            LocalChatEvent::Error(LocalChatSessionErrorEvent {
+                backend_session_id,
+                error,
+                ..
+            }) if backend_session_id == "backend-turn-start-error"
+                && error == "turn/start exploded (-32000)"
+        )
+    })
+    .await;
 }
 
 #[tokio::test]

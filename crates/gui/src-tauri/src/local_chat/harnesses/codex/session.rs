@@ -26,11 +26,11 @@ impl CodexLocalChatSession {
         content: &str,
         failure_surface: TurnFailureSurface,
     ) -> Result<(), LocalChatSessionError> {
+        let _turn_lock = self.turn_lock.lock().await;
         let num_turns = {
             let stats = self.stats.lock().await;
             stats.num_turns.saturating_add(1)
         };
-        let _turn_lock = self.turn_lock.lock().await;
         let outcome = match self
             .connection
             .start_turn(TurnRequest {

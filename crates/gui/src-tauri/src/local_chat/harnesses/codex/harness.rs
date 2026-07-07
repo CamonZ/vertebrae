@@ -235,7 +235,17 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let session = self.session(backend_session_id).await.ok_or_else(|| {
             LocalChatSessionError::SessionNotFound(backend_session_id.to_string())
         })?;
-        session.run_turn(content, TurnFailureSurface::Send).await
+        let content = content.to_string();
+        tokio::spawn(async move {
+            if let Err(error) = session.run_turn(&content, TurnFailureSurface::Send).await {
+                log::error!(
+                    "[Codex local chat] send turn failed for {}: {}",
+                    session.backend_session_id,
+                    error
+                );
+            }
+        });
+        Ok(())
     }
 
     async fn close_session(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {

@@ -780,16 +780,9 @@ describe("ChatWindowManager", () => {
     await user.click(screen.getByLabelText("Delete local chat Task One"));
     expect(loadPersistedLocalChatSession(first)).toBeNull();
     expect(loadPersistedLocalChatSession(second)?.id).toBe(second);
-
-    const beforeFresh = Object.keys(useChatStore.getState().sessions);
-    await user.click(
-      within(screen.getByTestId("local-chat-mini-panel")).getByLabelText(
-        "Start fresh local chat"
-      )
-    );
-    const afterFresh = Object.keys(useChatStore.getState().sessions);
-    expect(afterFresh).toHaveLength(beforeFresh.length + 1);
-    expect(useChatStore.getState().activeSessionId).not.toBe(second);
+    expect(
+      miniPanel.queryByRole("button", { name: "Start fresh local chat" })
+    ).not.toBeInTheDocument();
     expect(commands.createLocalChatSession).not.toHaveBeenCalled();
     expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
   });
@@ -811,11 +804,7 @@ describe("ChatWindowManager", () => {
     });
 
     await user.click(screen.getByLabelText("Widen chat panel"));
-    await user.click(
-      within(screen.getByTestId("local-chat-mini-panel")).getByLabelText(
-        "Start fresh local chat"
-      )
-    );
+    await user.click(screen.getByLabelText("Start fresh local chat"));
 
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).not.toBe(stale);

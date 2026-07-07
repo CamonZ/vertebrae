@@ -115,6 +115,22 @@ describe("ChatHeader", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows chat history button when not wide", () => {
+    const onToggleHistory = vi.fn();
+    renderHeader({ onToggleHistory, isWide: false });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle chat history" }));
+    expect(onToggleHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides chat history button when wide", () => {
+    renderHeader({ onToggleHistory: vi.fn(), isWide: true });
+
+    expect(
+      screen.queryByRole("button", { name: "Toggle chat history" })
+    ).not.toBeInTheDocument();
+  });
+
   it("shows widen button with 'Widen' label when not wide", () => {
     const onToggleWide = vi.fn();
     renderHeader({ onToggleWide, isWide: false });
@@ -217,6 +233,7 @@ describe("ChatHeader", () => {
   it("renders all optional buttons when all callbacks are provided", () => {
     renderHeader({
       onStartFresh: vi.fn(),
+      onToggleHistory: vi.fn(),
       onToggleWide: vi.fn(),
       onSplitPane: vi.fn(),
       onUnsplitPanes: vi.fn(),
@@ -224,8 +241,8 @@ describe("ChatHeader", () => {
       onClosePanel: vi.fn(),
     });
     const buttons = screen.getAllByRole("button");
-    // 6 optional + 2 always (clear + stop) = 8
-    expect(buttons).toHaveLength(8);
+    // 7 optional + 2 always (clear + stop) = 9
+    expect(buttons).toHaveLength(9);
   });
 
   it("applies danger class to stop generation button", () => {
