@@ -85,7 +85,7 @@ struct ContentBlock {
 #[derive(Debug, Deserialize)]
 struct ContentDelta {
     #[serde(rename = "type")]
-    delta_type: String,
+    delta_type: Option<String>,
     text: Option<String>,
 }
 
@@ -146,6 +146,8 @@ enum ClaudeContentItem {
         #[serde(default)]
         is_error: bool,
     },
+    #[serde(other)]
+    Other,
 }
 
 /// A parsed event ready for emission - separates event construction from Tauri dispatch.
@@ -217,20 +219,40 @@ pub(crate) struct SessionEndEvent {
 /// Parses each non-empty line as a `ClaudeMessage`, builds events, and passes
 /// them to the callback. Stops on read error.
 pub(crate) fn process_jsonl_lines(
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     session_id: &str,
     mut on_events: impl FnMut(Vec<EmittedEvent>),
 ) {
-    for line in reader.lines() {
-        match line {
-            Ok(line) if !line.is_empty() => {
+    let mut line_bytes = Vec::new();
+    loop {
+        line_bytes.clear();
+
+        match reader.read_until(b'\n', &mut line_bytes) {
+            Ok(0) => break,
+            Ok(_) => {
+                let decoded = String::from_utf8_lossy(&line_bytes);
+                let repaired_invalid_utf8 = matches!(decoded, std::borrow::Cow::Owned(_));
+                let line = decoded.strip_suffix('\n').unwrap_or(decoded.as_ref());
+                let line = line.strip_suffix('\r').unwrap_or(line);
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if repaired_invalid_utf8 {
+                    log::warn!(
+                        "[Claude JSONL] Repaired invalid UTF-8 in stdout line for session={}",
+                        &session_id[..8.min(session_id.len())]
+                    );
+                }
+
                 log::debug!(
                     "[Claude JSONL] session={} msg={}",
                     &session_id[..8.min(session_id.len())],
                     line
                 );
 
-                if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
+                if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(line) {
                     let events = build_events(session_id, msg);
                     if !events.is_empty() {
                         on_events(events);
@@ -243,7 +265,6 @@ pub(crate) fn process_jsonl_lines(
                 log::error!("Error reading stdout: {}", e);
                 break;
             }
-            _ => {}
         }
     }
 }
@@ -274,7 +295,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
             if let Some(event) = msg.event {
                 if event.event_type == "content_block_delta" {
                     if let Some(delta) = event.delta {
-                        if delta.delta_type == "text_delta" {
+                        if delta.delta_type.as_deref() == Some("text_delta") {
                             if let Some(text) = delta.text {
                                 events.push(EmittedEvent::Text(TextEvent {
                                     session_id: session_id.to_string(),
@@ -301,7 +322,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
         // Streaming: content_block_delta contains incremental text (direct, non-wrapped)
         "content_block_delta" => {
             if let Some(delta) = msg.delta {
-                if delta.delta_type == "text_delta" {
+                if delta.delta_type.as_deref() == Some("text_delta") {
                     if let Some(text) = delta.text {
                         events.push(EmittedEvent::Text(TextEvent {
                             session_id: session_id.to_string(),
@@ -361,7 +382,7 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
                                     parent_tool_use_id: parent_tool_use_id.clone(),
                                 }));
                             }
-                            _ => {}
+                            ClaudeContentItem::ToolResult { .. } | ClaudeContentItem::Other => {}
                         }
                     }
                 }
