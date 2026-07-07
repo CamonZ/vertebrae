@@ -345,13 +345,6 @@ export function ChatWindowManager() {
               sessionGroups={visibleLocalSessionGroups}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
               projectWarning={projectGroupingWarning}
-              onStartFresh={() => {
-                void startFreshActiveSession().then((started) => {
-                  if (started) {
-                    collapseMaximized();
-                  }
-                });
-              }}
               onSelect={(sessionId) => {
                 selectHistorySessionForActivePane(sessionId);
               }}

@@ -16,7 +16,6 @@ interface LocalChatMiniPanelProps {
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
   spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
-  onStartFresh: () => void | Promise<void>;
   onSelect: (sessionId: string) => void | Promise<void>;
   onSelectAgent?: (
     parentSessionId: string,
@@ -38,7 +37,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   projectWarning,
   sessionGroups,
   spawnOutlineBySessionId,
-  onStartFresh,
   onSelect,
   onSelectAgent,
   onDelete,
@@ -124,27 +122,6 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     >
       <div className="hc-mini-history-head">
         <span>Chats</span>
-        <button
-          type="button"
-          className="hc-ctrl"
-          onClick={() => void onStartFresh()}
-          title="Start fresh local chat from history"
-          aria-label="Start fresh local chat"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 5v14m7-7H5"
-            />
-          </svg>
-        </button>
       </div>
       <div data-testid="local-chat-history-drawer">
         {deleteError && (
