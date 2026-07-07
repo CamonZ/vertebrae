@@ -425,6 +425,7 @@ export async function doSendMessage(
       lifecycle: LocalChatLifecycle,
       errorMessage?: string | null
     ) => void;
+    markStreamingIfSending: (id: string) => void;
     setBackendSessionId?: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
   },
@@ -452,7 +453,7 @@ export async function doSendMessage(
       }
       throw new Error(message);
     }
-    deps.setSessionLifecycle(sessionId, "streaming");
+    deps.markStreamingIfSending(sessionId);
   } catch (error) {
     const message = commandErrorMessage(error);
     deps.setSessionLifecycle(sessionId, "error", message);
@@ -532,6 +533,9 @@ export function useLocalChat(sessionId: string | null) {
   const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
+  const markStreamingIfSending = useChatStore(
+    (s) => s.markStreamingIfSending
+  );
   const clearStreamingAssistant = useChatStore(
     (s) => s.clearStreamingAssistant
   );
@@ -778,6 +782,7 @@ export function useLocalChat(sessionId: string | null) {
         {
           addMessage,
           setSessionLifecycle,
+          markStreamingIfSending,
           setBackendSessionId,
           setBackendSessionIdRef: (id) => {
             backendSessionIdRef.current = id;
@@ -809,6 +814,7 @@ export function useLocalChat(sessionId: string | null) {
     addMessage,
     setBackendSessionId,
     setSessionLifecycle,
+    markStreamingIfSending,
     setSessionTitleCandidate,
   ]);
 
@@ -854,6 +860,7 @@ export function useLocalChat(sessionId: string | null) {
       await doSendMessage(session.backendSessionId, sessionId, content, {
         addMessage,
         setSessionLifecycle,
+        markStreamingIfSending,
         setBackendSessionId,
         setBackendSessionIdRef: (id) => {
           backendSessionIdRef.current = id;
@@ -865,6 +872,7 @@ export function useLocalChat(sessionId: string | null) {
       sessionId,
       addMessage,
       setSessionLifecycle,
+      markStreamingIfSending,
       setBackendSessionId,
       setSessionTitleCandidate,
     ]

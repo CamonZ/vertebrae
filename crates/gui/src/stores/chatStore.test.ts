@@ -1527,6 +1527,37 @@ describe("chatStore", () => {
     });
   });
 
+  describe("markStreamingIfSending", () => {
+    it("upgrades sending sessions to streaming without persisting transcript state", () => {
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
+      useChatStore.getState().setSessionLifecycle(id, "sending");
+
+      useChatStore.getState().markStreamingIfSending(id);
+
+      expect(useChatStore.getState().sessions[id].lifecycle).toBe("streaming");
+      expect(loadPersistedLocalChatSession(id)?.lifecycle).toBe("idle");
+    });
+
+    it("does not overwrite idle or error lifecycle resolved by events", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().setSessionLifecycle(id, "idle");
+      const idleSession = useChatStore.getState().sessions[id];
+      useChatStore.getState().markStreamingIfSending(id);
+      expect(useChatStore.getState().sessions[id]).toBe(idleSession);
+      expect(useChatStore.getState().sessions[id].lifecycle).toBe("idle");
+
+      useChatStore.getState().setSessionLifecycle(id, "error", "turn failed");
+      const errorSession = useChatStore.getState().sessions[id];
+      useChatStore.getState().markStreamingIfSending(id);
+      expect(useChatStore.getState().sessions[id]).toBe(errorSession);
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        lifecycle: "error",
+        lifecycleError: "turn failed",
+      });
+    });
+  });
+
   describe("setBackendSessionId", () => {
     it("sets the backend session ID", () => {
       const id = useChatStore.getState().openSession("T1");

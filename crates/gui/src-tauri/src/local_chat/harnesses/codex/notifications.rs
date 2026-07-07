@@ -534,6 +534,8 @@ impl TurnNotificationHandler {
             self.emit_error(error.clone());
         }
 
+        let result = error.clone().unwrap_or_else(|| active_turn.text.clone());
+
         self.event_sink
             .emit(LocalChatEvent::End(LocalChatSessionEndEvent {
                 backend_session_id: self.backend_session_id.clone(),
@@ -541,7 +543,7 @@ impl TurnNotificationHandler {
                 duration_ms,
                 cost_usd: 0.0,
                 num_turns: active_turn.num_turns,
-                result: active_turn.text.clone(),
+                result,
                 is_error: error.is_some(),
                 context_tokens: active_turn.context_tokens,
                 context_window: active_turn.context_window,

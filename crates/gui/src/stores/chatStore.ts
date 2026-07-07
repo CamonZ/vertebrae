@@ -696,6 +696,8 @@ interface ChatStoreActions {
     lifecycle: LocalChatLifecycle,
     errorMessage?: string | null
   ) => void;
+  /** Upgrade a command-send lifecycle only if it is still awaiting first output */
+  markStreamingIfSending: (sessionId: string) => void;
   /** Clear any ephemeral assistant stream overlay */
   clearStreamingAssistant: (
     sessionId: string,
@@ -1841,6 +1843,23 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ...session,
             lifecycle,
             lifecycleError: normalizedError,
+          };
+        },
+        { persist: false }
+      );
+    },
+
+    markStreamingIfSending: (sessionId) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          if (getLocalChatLifecycle(session) !== "sending") {
+            return session;
+          }
+          return {
+            ...session,
+            lifecycle: "streaming",
+            lifecycleError: null,
           };
         },
         { persist: false }

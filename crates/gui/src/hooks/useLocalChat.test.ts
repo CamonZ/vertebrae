@@ -13,7 +13,11 @@ import {
   doSendMessage,
   doCloseSession,
 } from "./useLocalChat";
-import type { ChatSession } from "../stores/chatStore";
+import {
+  getLocalChatLifecycle,
+  useChatStore,
+  type ChatSession,
+} from "../stores/chatStore";
 import { commands } from "../bindings";
 
 vi.mock("../bindings", () => ({
@@ -52,6 +56,14 @@ const mockedCommands = vi.mocked(commands);
 const SESSION_ID = "session-1";
 const CLAUDE_SESSION_ID = "claude-backend-123";
 const OTHER_SESSION_ID = "other-backend-456";
+
+function deferredCommandResult() {
+  let resolve!: (value: { status: "ok" }) => void;
+  const promise = new Promise<{ status: "ok" }>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 describe("handleInitEvent", () => {
   it("calls setProviderResumeId and setSessionModel when session matches", () => {
@@ -1320,6 +1332,7 @@ describe("doSendMessage", () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
     };
@@ -1342,8 +1355,8 @@ describe("doSendMessage", () => {
       CLAUDE_SESSION_ID,
       "Hello"
     );
-    expect(deps.setSessionLifecycle).toHaveBeenNthCalledWith(
-      2,
+    expect(deps.markStreamingIfSending).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.setSessionLifecycle).not.toHaveBeenCalledWith(
       SESSION_ID,
       "streaming"
     );
@@ -1353,6 +1366,7 @@ describe("doSendMessage", () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
@@ -1368,6 +1382,7 @@ describe("doSendMessage", () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
     };
@@ -1379,6 +1394,7 @@ describe("doSendMessage", () => {
       "error",
       "pipe closed"
     );
+    expect(deps.markStreamingIfSending).not.toHaveBeenCalled();
   });
 
   it("clears stale backend id when sendLocalChatMessage reports not found", async () => {
@@ -1389,6 +1405,7 @@ describe("doSendMessage", () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
     };
@@ -1412,6 +1429,7 @@ describe("doSendMessage", () => {
     const deps = {
       addMessage: vi.fn(),
       setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
     };
@@ -1424,6 +1442,93 @@ describe("doSendMessage", () => {
       SESSION_ID,
       "error",
       "File not found: /project/config.ts"
+    );
+  });
+
+  it("leaves lifecycle idle when End is processed before command resolve so queued follow-up can flush", async () => {
+    localStorage.clear();
+    useChatStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
+      panelOpen: false,
+      localSessionSummaries: {},
+    });
+    const sessionId = useChatStore.getState().openSession("T1");
+    useChatStore.getState().setBackendSessionId(sessionId, CLAUDE_SESSION_ID);
+    const firstSend = deferredCommandResult();
+    mockedCommands.sendLocalChatMessage
+      .mockReturnValueOnce(firstSend.promise as never)
+      .mockResolvedValueOnce({ status: "ok" } as never);
+
+    const deps = {
+      addMessage: useChatStore.getState().addMessage,
+      setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
+      markStreamingIfSending: useChatStore.getState().markStreamingIfSending,
+      setBackendSessionId: useChatStore.getState().setBackendSessionId,
+    };
+    const sendPromise = doSendMessage(
+      CLAUDE_SESSION_ID,
+      sessionId,
+      "First",
+      deps
+    );
+
+    expect(
+      getLocalChatLifecycle(useChatStore.getState().sessions[sessionId])
+    ).toBe("sending");
+
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "codex",
+        duration_ms: 1000,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 10,
+        context_window: 200000,
+      },
+      CLAUDE_SESSION_ID,
+      sessionId,
+      useChatStore.getState().setSessionLifecycle,
+      useChatStore.getState().clearStreamingAssistant,
+      useChatStore.getState().setBackendSessionId,
+      vi.fn()
+    );
+    expect(
+      getLocalChatLifecycle(useChatStore.getState().sessions[sessionId])
+    ).toBe("idle");
+
+    firstSend.resolve({ status: "ok" });
+    await sendPromise;
+    expect(
+      getLocalChatLifecycle(useChatStore.getState().sessions[sessionId])
+    ).toBe("idle");
+
+    const queuedMessages = ["Follow-up"];
+    if (
+      getLocalChatLifecycle(useChatStore.getState().sessions[sessionId]) ===
+      "idle"
+    ) {
+      const content = queuedMessages.shift();
+      if (content) {
+        await doSendMessage(
+          CLAUDE_SESSION_ID,
+          sessionId,
+          content,
+          deps,
+          { addUserMessage: false }
+        );
+      }
+    }
+
+    expect(queuedMessages).toEqual([]);
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
+      2,
+      CLAUDE_SESSION_ID,
+      "Follow-up"
     );
   });
 });
