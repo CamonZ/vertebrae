@@ -125,6 +125,57 @@ fn test_process_jsonl_lines_skips_invalid_json() {
 }
 
 #[test]
+fn test_process_jsonl_lines_continues_after_invalid_utf8_line() {
+    let mut input = Vec::new();
+    input.extend_from_slice(b"not valid json \xFF\n");
+    input.extend_from_slice(
+        br#"{"type":"result","duration_ms":321,"result":"terminal result","is_error":false}"#,
+    );
+    input.push(b'\n');
+
+    let mut all_events = Vec::new();
+    process_jsonl_lines(std::io::Cursor::new(input), "sess-1", |events| {
+        all_events.extend(events)
+    });
+
+    assert_eq!(all_events.len(), 1);
+    match &all_events[0] {
+        EmittedEvent::SessionEnd(e) => {
+            assert_eq!(e.session_id, "sess-1");
+            assert_eq!(e.duration_ms, 321);
+            assert_eq!(e.result, "terminal result");
+            assert!(!e.is_error);
+        }
+        other => panic!("Expected SessionEnd event, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_process_jsonl_lines_lossily_repairs_invalid_utf8_inside_json_string() {
+    let mut input = Vec::new();
+    input.extend_from_slice(
+        br#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"bad "#,
+    );
+    input.push(0xFF);
+    input.extend_from_slice(br#" byte"}]}}"#);
+    input.push(b'\n');
+
+    let mut all_events = Vec::new();
+    process_jsonl_lines(std::io::Cursor::new(input), "sess-1", |events| {
+        all_events.extend(events)
+    });
+
+    assert_eq!(all_events.len(), 1);
+    match &all_events[0] {
+        EmittedEvent::Text(e) => {
+            assert_eq!(e.text, format!("bad {} byte", char::REPLACEMENT_CHARACTER));
+            assert!(!e.is_partial);
+        }
+        other => panic!("Expected Text event, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_process_jsonl_lines_empty_input() {
     let mut called = false;
     process_jsonl_lines(std::io::Cursor::new(""), "sess-1", |_| called = true);
@@ -277,6 +328,10 @@ fn test_build_events_stream_event_message_delta_usage() {
             "model": "claude-sonnet-4-6-latest",
             "event": {
                 "type": "message_delta",
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_sequence": null
+                },
                 "usage": {
                     "input_tokens": 25,
                     "cache_read_input_tokens": 100,
@@ -309,6 +364,10 @@ fn test_build_events_stream_event_sidechain_message_delta_usage_is_skipped() {
             "model": "claude-haiku-4-5-20251001",
             "event": {
                 "type": "message_delta",
+                "delta": {
+                    "stop_reason": "end_turn",
+                    "stop_sequence": null
+                },
                 "usage": {
                     "input_tokens": 1,
                     "cache_read_input_tokens": 2,
@@ -387,6 +446,40 @@ fn test_build_events_assistant_text() {
     match &events[0] {
         EmittedEvent::Text(e) => {
             assert_eq!(e.text, "Hello from Claude");
+            assert!(!e.is_partial);
+        }
+        other => panic!("Expected Text event, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_build_events_assistant_ignores_thinking_content_and_emits_text() {
+    let msg = parse_msg(
+        r#"{
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "I should inspect the relevant code first.",
+                        "signature": "EqQBCgIYAhIM1Zy..."
+                    },
+                    {
+                        "type": "text",
+                        "text": "The parser keeps the final assistant text."
+                    }
+                ]
+            }
+        }"#,
+    );
+
+    let events = build_events("sess-1", msg);
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        EmittedEvent::Text(e) => {
+            assert_eq!(e.session_id, "sess-1");
+            assert_eq!(e.text, "The parser keeps the final assistant text.");
             assert!(!e.is_partial);
         }
         other => panic!("Expected Text event, got {:?}", other),
