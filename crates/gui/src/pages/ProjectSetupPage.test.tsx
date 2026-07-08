@@ -8,8 +8,11 @@ import {
   createMockTask,
   createMockWorkflow,
 } from "../test/test-utils";
-import { useTaskStore, useWorkflowStore } from "../stores";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
+import { queryClient, queryKeys } from "../query";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 
 const {
   mockGetProjects,
@@ -141,22 +144,22 @@ describe("ProjectSetupPage", () => {
     mockOpen.mockResolvedValue("/tmp/new-project");
   });
 
-  it("resets project-scoped stores after switching projects and before navigation", async () => {
+  it("resets project-scoped query cache after switching projects and before navigation", async () => {
     const oldTask = createMockTask({ id: "old-task", title: "Old task" });
-    useTaskStore.setState({ tasks: [oldTask] });
-    useWorkflowStore.setState({
-      workflows: [createMockWorkflow({ id: "old-workflow" })],
-    });
+    const oldWorkflow = createMockWorkflow({ id: "old-workflow" });
+    const generation = getProjectScopeGeneration();
+    const taskListKey = queryKeys.tasks.list(generation, null);
+    const workflowListKey = queryKeys.workflows.list(generation);
+    queryClient.setQueryData(taskListKey, [oldTask]);
+    queryClient.setQueryData(workflowListKey, [oldWorkflow]);
 
-    let taskIdsWhenNavigating: string[] | null = null;
-    let workflowIdsWhenNavigating: Array<string | null> | null = null;
+    let taskCacheClearedWhenNavigating: boolean | null = null;
+    let workflowCacheClearedWhenNavigating: boolean | null = null;
     mockNavigate.mockImplementation(() => {
-      taskIdsWhenNavigating = useTaskStore
-        .getState()
-        .tasks.map((task) => task.id);
-      workflowIdsWhenNavigating = useWorkflowStore
-        .getState()
-        .workflows.map((workflow) => workflow.id);
+      taskCacheClearedWhenNavigating =
+        queryClient.getQueryData(taskListKey) === undefined;
+      workflowCacheClearedWhenNavigating =
+        queryClient.getQueryData(workflowListKey) === undefined;
     });
 
     render(<ProjectSetupPage />);
@@ -180,8 +183,8 @@ describe("ProjectSetupPage", () => {
       expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
       expect(mockNavigate).toHaveBeenCalledWith("/");
     });
-    expect(taskIdsWhenNavigating).toEqual([]);
-    expect(workflowIdsWhenNavigating).toEqual([]);
+    expect(taskCacheClearedWhenNavigating).toBe(true);
+    expect(workflowCacheClearedWhenNavigating).toBe(true);
   });
 
   it("keeps returning users on the saved-project list and opens the wizard from Add Project", async () => {
@@ -380,7 +383,10 @@ describe("ProjectSetupPage", () => {
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("project-folder-choose"));
-    await userEvent.type(screen.getByLabelText("Sacrum API token"), "bad-token");
+    await userEvent.type(
+      screen.getByLabelText("Sacrum API token"),
+      "bad-token"
+    );
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
     expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
@@ -512,9 +518,7 @@ describe("ProjectSetupPage", () => {
       });
     });
 
-    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
-      "2"
-    );
+    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent("2");
     expect(screen.getByTestId("ignition-screen")).toHaveTextContent(
       "/tmp/new-project/.claude/skills"
     );

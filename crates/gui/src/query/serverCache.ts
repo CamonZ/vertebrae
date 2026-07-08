@@ -10,7 +10,7 @@ import {
   mergeTask,
   taskMatchesFilter,
   taskRunControlsEqual,
-} from "../stores/taskStore";
+} from "../utils/taskMerge";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { queryClient } from "./queryClient";
 import { queryKeys } from "./queryKeys";
@@ -55,14 +55,12 @@ function isRetiredFromReadyFeed(task: Task): boolean {
 function shouldAppendToReadyFeed(task: Task): boolean {
   return (
     !isRetiredFromReadyFeed(task) &&
-    (task.run_controls?.runnable === true || task.run_controls?.active_run != null)
+    (task.run_controls?.runnable === true ||
+      task.run_controls?.active_run != null)
   );
 }
 
-function upsertReadyTask(
-  task: Task,
-  generation: number
-): void {
+function upsertReadyTask(task: Task, generation: number): void {
   queryClient.setQueryData<Task[] | undefined>(
     queryKeys.tasks.ready(generation),
     (tasks) => {
@@ -107,12 +105,10 @@ export function upsertTaskInQueryCache(
   });
   for (const [key] of lists) {
     const filter = taskListFilterFromKey(key);
-    queryClient.setQueryData<Task[] | undefined>(
-      key,
-      (currentTasks) =>
-        currentTasks === undefined
-          ? undefined
-          : reconcileTaskList(currentTasks, task, filter)
+    queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
+      currentTasks === undefined
+        ? undefined
+        : reconcileTaskList(currentTasks, task, filter)
     );
   }
 }
@@ -129,9 +125,8 @@ export function removeTaskFromQueryCache(
     queryKey: queryKeys.tasks.lists(generation),
   });
   for (const [key] of lists) {
-    queryClient.setQueryData<Task[] | undefined>(
-      key,
-      (currentTasks) => currentTasks?.filter((task) => task.id !== taskId)
+    queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
+      currentTasks?.filter((task) => task.id !== taskId)
     );
   }
 
@@ -160,12 +155,10 @@ export function replaceTaskRunControlsInQueryCache(
     queryKey: queryKeys.tasks.lists(generation),
   });
   for (const [key] of lists) {
-    queryClient.setQueryData<Task[] | undefined>(
-      key,
-      (currentTasks) =>
-        currentTasks?.map((task) =>
-          task.id === taskId ? replaceControls(task) : task
-        )
+    queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
+      currentTasks?.map((task) =>
+        task.id === taskId ? replaceControls(task) : task
+      )
     );
   }
 
@@ -187,9 +180,7 @@ export function hasTaskInQueryCache(
   });
 
   if (
-    lists.some(([, tasks]) =>
-      (tasks ?? []).some((task) => task.id === taskId)
-    )
+    lists.some(([, tasks]) => (tasks ?? []).some((task) => task.id === taskId))
   ) {
     return true;
   }
@@ -239,12 +230,10 @@ export function updateTaskSectionsInQueryCache(
     queryKey: queryKeys.tasks.lists(generation),
   });
   for (const [key] of lists) {
-    queryClient.setQueryData<Task[] | undefined>(
-      key,
-      (currentTasks) =>
-        currentTasks?.map((task) =>
-          task.id === taskId ? updateSections(task) : task
-        )
+    queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
+      currentTasks?.map((task) =>
+        task.id === taskId ? updateSections(task) : task
+      )
     );
   }
 

@@ -4,8 +4,6 @@ import { useExecutionStore } from "./executionStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
 import { useTaskRunStore } from "./taskRunStore";
-import { useTaskStore } from "./taskStore";
-import { useWorkflowStore } from "./workflowStore";
 import { queryClient } from "../query/queryClient";
 
 interface ProjectScopeState {
@@ -32,14 +30,12 @@ export function useProjectScopeGeneration() {
 
 /**
  * Drop client-side state whose entity IDs are scoped to the selected Sacrum
- * project. WebSocket listeners can repopulate these stores for the active
- * project after the backend reconnects.
+ * project. Server-state queries are cleared here; realtime listeners and
+ * normal query fetches repopulate state for the active project.
  */
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.clear();
-  useTaskStore.getState().reset();
-  useWorkflowStore.getState().reset();
   useStepStore.getState().reset();
   useExecutionStore.getState().reset();
   useTaskRunStore.getState().reset();
