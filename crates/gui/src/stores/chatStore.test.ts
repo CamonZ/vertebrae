@@ -1492,6 +1492,84 @@ describe("chatStore", () => {
       expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
     });
 
+    it("keeps interim result, child-agent events, and later main answer distinct", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
+
+      useChatStore
+        .getState()
+        .updateLastAssistantMessage(id, "Agent launched and running");
+      useChatStore.getState().clearStreamingAssistant(id, true);
+      useChatStore
+        .getState()
+        .finalizeLastAssistantMessage(id, "Agent launched and running");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "Task",
+        toolId: "toolu_AGENT",
+        input: '{"description":"Investigate"}',
+        timestamp: "2024-01-02T00:00:01Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "Child ",
+        timestamp: "2024-01-02T00:00:02Z",
+        isPartial: true,
+        parentToolUseId: "toolu_AGENT",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "answer",
+        timestamp: "2024-01-02T00:00:03Z",
+        isPartial: true,
+        parentToolUseId: "toolu_AGENT",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "Child answer",
+        timestamp: "2024-01-02T00:00:04Z",
+        isPartial: false,
+        parentToolUseId: "toolu_AGENT",
+      });
+      useChatStore
+        .getState()
+        .finalizeLastAssistantMessage(id, "Final main answer");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant).toBeNull();
+      expect(session.lifecycle).toBe("idle");
+      expect(session.messages).toEqual([
+        {
+          kind: "assistant",
+          text: "Agent launched and running",
+          timestamp: "2024-01-02T00:00:00.000Z",
+          isPartial: false,
+        },
+        {
+          kind: "tool_call",
+          toolName: "Task",
+          toolId: "toolu_AGENT",
+          input: '{"description":"Investigate"}',
+          timestamp: "2024-01-02T00:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "Child answer",
+          timestamp: "2024-01-02T00:00:04Z",
+          isPartial: false,
+          parentToolUseId: "toolu_AGENT",
+        },
+        {
+          kind: "assistant",
+          text: "Final main answer",
+          timestamp: "2024-01-02T00:00:00.000Z",
+          isPartial: false,
+        },
+      ]);
+    });
+
     it("appends a fresh main-thread message instead of clobbering a trailing subagent partial", () => {
       const id = useChatStore.getState().openSession("T1");
 

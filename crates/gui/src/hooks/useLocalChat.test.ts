@@ -544,8 +544,6 @@ describe("handleEndEvent", () => {
   it("clears stream state and returns lifecycle to idle when session matches", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setBackendSessionId = vi.fn();
-    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
         backend_session_id: CLAUDE_SESSION_ID,
@@ -561,13 +559,9 @@ describe("handleEndEvent", () => {
       CLAUDE_SESSION_ID,
       SESSION_ID,
       setLifecycle,
-      clearStreaming,
-      setBackendSessionId,
-      setBackendSessionIdRef
+      clearStreaming
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
-    expect(setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
   });
 
@@ -612,8 +606,6 @@ describe("handleEndEvent", () => {
       CLAUDE_SESSION_ID,
       SESSION_ID,
       setLifecycle,
-      vi.fn(),
-      vi.fn(),
       vi.fn()
     );
 
@@ -625,8 +617,6 @@ describe("handleEndEvent", () => {
   it("sets error lifecycle when Claude reports an error result", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setBackendSessionId = vi.fn();
-    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
         backend_session_id: CLAUDE_SESSION_ID,
@@ -642,13 +632,9 @@ describe("handleEndEvent", () => {
       CLAUDE_SESSION_ID,
       SESSION_ID,
       setLifecycle,
-      clearStreaming,
-      setBackendSessionId,
-      setBackendSessionIdRef
+      clearStreaming
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
-    expect(setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
-    expect(setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(setLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
       "error",
@@ -656,11 +642,35 @@ describe("handleEndEvent", () => {
     );
   });
 
+  it("keeps the live Claude backend id across a per-turn End", () => {
+    const setLifecycle = vi.fn();
+    const clearStreaming = vi.fn();
+
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        duration_ms: 1000,
+        cost_usd: 0.01,
+        num_turns: 1,
+        result: "agent launched and running",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setLifecycle,
+      clearStreaming
+    );
+
+    expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
+    expect(setLifecycle).toHaveBeenCalledWith(SESSION_ID, "idle");
+  });
+
   it("does nothing when session does not match", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
-    const setBackendSessionId = vi.fn();
-    const setBackendSessionIdRef = vi.fn();
     handleEndEvent(
       {
         backend_session_id: OTHER_SESSION_ID,
@@ -676,22 +686,20 @@ describe("handleEndEvent", () => {
       CLAUDE_SESSION_ID,
       SESSION_ID,
       setLifecycle,
-      clearStreaming,
-      setBackendSessionId,
-      setBackendSessionIdRef
+      clearStreaming
     );
     expect(setLifecycle).not.toHaveBeenCalled();
     expect(clearStreaming).not.toHaveBeenCalled();
-    expect(setBackendSessionId).not.toHaveBeenCalled();
-    expect(setBackendSessionIdRef).not.toHaveBeenCalled();
   });
 });
 
 describe("handleErrorEvent", () => {
-  it("adds an error message when session matches", () => {
+  it("clears the dead backend id and adds an error message when session matches", () => {
     const addMsg = vi.fn();
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
+    const setBackendSessionId = vi.fn();
+    const setBackendSessionIdRef = vi.fn();
     handleErrorEvent(
       {
         backend_session_id: CLAUDE_SESSION_ID,
@@ -702,9 +710,13 @@ describe("handleErrorEvent", () => {
       SESSION_ID,
       addMsg,
       setLifecycle,
-      clearStreaming
+      clearStreaming,
+      setBackendSessionId,
+      setBackendSessionIdRef
     );
     expect(clearStreaming).toHaveBeenCalledWith(SESSION_ID, true);
+    expect(setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
+    expect(setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(setLifecycle).toHaveBeenCalledWith(
       SESSION_ID,
       "error",
@@ -723,6 +735,8 @@ describe("handleErrorEvent", () => {
     const addMsg = vi.fn();
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
+    const setBackendSessionId = vi.fn();
+    const setBackendSessionIdRef = vi.fn();
     handleErrorEvent(
       {
         backend_session_id: OTHER_SESSION_ID,
@@ -733,11 +747,15 @@ describe("handleErrorEvent", () => {
       SESSION_ID,
       addMsg,
       setLifecycle,
-      clearStreaming
+      clearStreaming,
+      setBackendSessionId,
+      setBackendSessionIdRef
     );
     expect(addMsg).not.toHaveBeenCalled();
     expect(setLifecycle).not.toHaveBeenCalled();
     expect(clearStreaming).not.toHaveBeenCalled();
+    expect(setBackendSessionId).not.toHaveBeenCalled();
+    expect(setBackendSessionIdRef).not.toHaveBeenCalled();
   });
 });
 
@@ -1445,7 +1463,7 @@ describe("doSendMessage", () => {
     );
   });
 
-  it("leaves lifecycle idle when End is processed before command resolve so queued follow-up can flush", async () => {
+  it("keeps Claude backend id when End is processed before command resolve so queued follow-up uses live stdin", async () => {
     localStorage.clear();
     useChatStore.setState({
       sessions: {},
@@ -1481,7 +1499,7 @@ describe("doSendMessage", () => {
     handleEndEvent(
       {
         backend_session_id: CLAUDE_SESSION_ID,
-        harness: "codex",
+        harness: "claude",
         duration_ms: 1000,
         cost_usd: 0,
         num_turns: 1,
@@ -1493,13 +1511,14 @@ describe("doSendMessage", () => {
       CLAUDE_SESSION_ID,
       sessionId,
       useChatStore.getState().setSessionLifecycle,
-      useChatStore.getState().clearStreamingAssistant,
-      useChatStore.getState().setBackendSessionId,
-      vi.fn()
+      useChatStore.getState().clearStreamingAssistant
     );
     expect(
       getLocalChatLifecycle(useChatStore.getState().sessions[sessionId])
     ).toBe("idle");
+    expect(useChatStore.getState().sessions[sessionId].backendSessionId).toBe(
+      CLAUDE_SESSION_ID
+    );
 
     firstSend.resolve({ status: "ok" });
     await sendPromise;
@@ -1530,6 +1549,64 @@ describe("doSendMessage", () => {
       CLAUDE_SESSION_ID,
       "Follow-up"
     );
+  });
+
+  it("resumes with provider resume id on the first send after a terminal Error clears the dead backend", async () => {
+    localStorage.clear();
+    useChatStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      paneLayout: { panes: [], activePaneId: null },
+      panelOpen: false,
+      localSessionSummaries: {},
+    });
+    const sessionId = useChatStore.getState().openSession("T1", "/repo/root");
+    useChatStore.getState().setBackendSessionId(sessionId, CLAUDE_SESSION_ID);
+    useChatStore.getState().setProviderResumeId(sessionId, "claude-conv-1");
+
+    handleErrorEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        error: "Claude session ended unexpectedly: stdout closed",
+      },
+      CLAUDE_SESSION_ID,
+      sessionId,
+      useChatStore.getState().addMessage,
+      useChatStore.getState().setSessionLifecycle,
+      useChatStore.getState().clearStreamingAssistant,
+      useChatStore.getState().setBackendSessionId,
+      vi.fn()
+    );
+
+    const erroredSession = useChatStore.getState().sessions[sessionId];
+    expect(erroredSession.backendSessionId).toBeNull();
+    expect(erroredSession.providerResumeId).toBe("claude-conv-1");
+    expect(getLocalChatLifecycle(erroredSession)).toBe("error");
+
+    await doStartSession(
+      useChatStore.getState().sessions[sessionId],
+      sessionId,
+      {
+        setBackendSessionId: useChatStore.getState().setBackendSessionId,
+        setBackendSessionIdRef: vi.fn(),
+        addMessage: useChatStore.getState().addMessage,
+        setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
+      },
+      "Retry after crash"
+    );
+
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+    expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith({
+      backend_session_id: expect.stringMatching(/^local-/),
+      harness: "claude",
+      working_dir: "/repo/root",
+      initial_prompt: "Retry after crash",
+      provider_resume_id: "claude-conv-1",
+      model_id: null,
+      reasoning_effort: null,
+      permission_mode: "default",
+    });
   });
 });
 
