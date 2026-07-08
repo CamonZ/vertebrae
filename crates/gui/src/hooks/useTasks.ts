@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
-import { mergeTask, taskMatchesFilter } from "../stores/taskStore";
+import { mergeTask, taskMatchesFilter } from "../utils/taskMerge";
 
 // Stable fallback for renders where the query has no data yet (loading or
 // error). A fresh `[]` per render changes identity every time and re-fires
@@ -77,7 +77,8 @@ export function useTasks(filter?: TaskFilterOptions) {
         const currentTask =
           currentTasksById.get(task.id) ?? currentDetailTasksById.get(task.id);
         const taskAtFetchStart =
-          tasksAtFetchStart.get(task.id) ?? detailTasksAtFetchStart.get(task.id);
+          tasksAtFetchStart.get(task.id) ??
+          detailTasksAtFetchStart.get(task.id);
         if (!currentTask || currentTask === taskAtFetchStart) return task;
         return preferCurrentTaskWhenNewer(task, currentTask);
       });

@@ -27,6 +27,11 @@ export type { LocalChatSessionGroup } from "./localChatSessionGroups";
 export { getPriorityIndicator } from "./taskPriority";
 export type { PriorityIndicator } from "./taskPriority";
 export {
+  mergeTask,
+  taskMatchesFilter,
+  taskRunControlsEqual,
+} from "./taskMerge";
+export {
   deriveHearthRunChipState,
   deriveRunStateChip,
   deriveRunControlsState,

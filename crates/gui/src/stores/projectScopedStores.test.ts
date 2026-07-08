@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { SessionLog } from "../bindings";
+import { queryClient, queryKeys } from "../query";
 import {
   createMockStep,
   createMockStepExecution,
@@ -9,19 +10,20 @@ import {
 } from "../test/test-utils";
 import { useChatStore } from "./chatStore";
 import { useExecutionStore } from "./executionStore";
-import { resetProjectScopedStores } from "./projectScopedStores";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "./projectScopedStores";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
 import { useTaskRunStore } from "./taskRunStore";
-import { useTaskStore } from "./taskStore";
-import { useWorkflowStore } from "./workflowStore";
 
 describe("resetProjectScopedStores", () => {
   beforeEach(() => {
     resetProjectScopedStores();
   });
 
-  it("clears task, workflow, execution, run, log, and local chat state from the previous project", () => {
+  it("clears query cache, execution, run, log, and local chat state from the previous project", () => {
     const task = createMockTask({ id: "task-1" });
     const workflowId = "workflow-1";
     const workflow = createMockWorkflow({ id: workflowId });
@@ -38,17 +40,18 @@ describe("resetProjectScopedStores", () => {
       content: "old project log",
       created_at: new Date().toISOString(),
     };
-    useTaskStore.setState({
-      tasks: [task],
-      selectedTaskId: task.id,
-      selectedTask: task,
-      isLoading: true,
-    });
-    useWorkflowStore.setState({
-      workflows: [workflow],
-      currentWorkflow: { workflow, tasks: [task] },
-      isLoading: true,
-    });
+    const generation = getProjectScopeGeneration();
+    const taskListKey = queryKeys.tasks.list(generation, null);
+    const taskDetailKey = queryKeys.tasks.detail(generation, task.id);
+    const workflowListKey = queryKeys.workflows.list(generation);
+    const workflowDetailKey = queryKeys.workflows.detail(
+      generation,
+      workflowId
+    );
+    queryClient.setQueryData(taskListKey, [task]);
+    queryClient.setQueryData(taskDetailKey, task);
+    queryClient.setQueryData(workflowListKey, [workflow]);
+    queryClient.setQueryData(workflowDetailKey, { workflow, tasks: [task] });
     useStepStore.setState({
       steps: [step],
       selectedStepId: step.id,
@@ -82,17 +85,10 @@ describe("resetProjectScopedStores", () => {
     });
     resetProjectScopedStores();
 
-    expect(useTaskStore.getState()).toMatchObject({
-      tasks: [],
-      selectedTaskId: null,
-      selectedTask: null,
-      isLoading: false,
-    });
-    expect(useWorkflowStore.getState()).toMatchObject({
-      workflows: [],
-      currentWorkflow: null,
-      isLoading: false,
-    });
+    expect(queryClient.getQueryData(taskListKey)).toBeUndefined();
+    expect(queryClient.getQueryData(taskDetailKey)).toBeUndefined();
+    expect(queryClient.getQueryData(workflowListKey)).toBeUndefined();
+    expect(queryClient.getQueryData(workflowDetailKey)).toBeUndefined();
     expect(useStepStore.getState()).toMatchObject({
       steps: [],
       selectedStepId: null,

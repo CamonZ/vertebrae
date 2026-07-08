@@ -1,10 +1,4 @@
 // Barrel export for all stores
-export { useTaskStore } from "./taskStore";
-export type { TaskStore } from "./taskStore";
-
-export { useWorkflowStore } from "./workflowStore";
-export type { WorkflowStore } from "./workflowStore";
-
 export { useStepStore } from "./stepStore";
 export type { StepStore } from "./stepStore";
 
@@ -27,11 +21,7 @@ export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
 export { useChatStore } from "./chatStore";
-export type {
-  ChatStore,
-  ChatSession,
-  ChatMessage,
-} from "./chatStore";
+export type { ChatStore, ChatSession, ChatMessage } from "./chatStore";
 
 export { resetProjectScopedStores } from "./projectScopedStores";
 
