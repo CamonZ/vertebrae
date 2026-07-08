@@ -21,7 +21,8 @@ use crate::local_chat::harnesses::claude::args::{
 use crate::local_chat::harnesses::claude::jsonl::{self, EmittedEvent};
 use crate::local_chat::harnesses::claude::live_jsonl::{
     encode_claude_user_jsonl_message, process_claude_stderr_lines, ClaudeLiveJsonlCommand,
-    ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
+    ClaudeLiveJsonlExitReason, ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
+    ClaudeLiveJsonlRunResult,
 };
 use crate::local_chat::permissions::PermissionBridge;
 use crate::local_chat::{
@@ -309,8 +310,8 @@ impl ClaudeSessionRuntime {
 
         let event_sink_for_stderr = event_sink.clone();
         let stderr_processor = Box::new(move |reader, session_id: String| {
-            process_claude_stderr_lines(reader, &session_id, |error_msg| {
-                Self::emit_error(&event_sink_for_stderr, &session_id, error_msg);
+            process_claude_stderr_lines(reader, &session_id, |warning| {
+                Self::emit_warning(&event_sink_for_stderr, &session_id, warning);
             });
         });
 
@@ -332,6 +333,7 @@ impl ClaudeSessionRuntime {
                     result.exit_reason,
                     result.wait_status
                 );
+                Self::emit_error_for_unexpected_runner_exit(&event_sink, &session_id, &result);
             }
             Err(ClaudeLiveJsonlProcessError::Spawn(err)) => {
                 let error = format!("Failed to spawn claude at {}: {}", claude_binary, err);
@@ -363,6 +365,24 @@ impl ClaudeSessionRuntime {
             }
             event_sink.emit(event);
         }
+    }
+
+    fn emit_error_for_unexpected_runner_exit(
+        event_sink: &LocalChatEventSink,
+        session_id: &str,
+        result: &ClaudeLiveJsonlRunResult,
+    ) {
+        let reason = match result.exit_reason {
+            ClaudeLiveJsonlExitReason::CloseCommand => return,
+            ClaudeLiveJsonlExitReason::StdoutClosed => "stdout closed",
+            ClaudeLiveJsonlExitReason::CommandChannelClosed => "command channel closed",
+        };
+        let mut error = format!("Claude session ended unexpectedly: {reason}");
+        if let Some(status) = &result.wait_status {
+            error.push_str(&format!(" (status: {status})"));
+        }
+        log::error!("{}", error);
+        Self::emit_error(event_sink, session_id, error);
     }
 
     fn local_chat_event_from_claude_emitted(event: EmittedEvent) -> LocalChatEvent {

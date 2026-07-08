@@ -257,18 +257,12 @@ export function handleEndEvent(
   clearStreamingAssistant: (
     sessionId: string,
     commitToMessages?: boolean
-  ) => void,
-  setBackendSessionId: (sessionId: string, backendId: string | null) => void,
-  setBackendSessionIdRef: (backendId: string | null) => void
+  ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
-  if (payload.harness !== "codex") {
-    setBackendSessionId(sessionId, null);
-    setBackendSessionIdRef(null);
-  }
   if (payload.is_error) {
     setSessionLifecycle(
       sessionId,
@@ -293,10 +287,14 @@ export function handleErrorEvent(
   clearStreamingAssistant: (
     sessionId: string,
     commitToMessages?: boolean
-  ) => void
+  ) => void,
+  setBackendSessionId: (sessionId: string, backendId: string | null) => void,
+  setBackendSessionIdRef: (backendId: string | null) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   clearStreamingAssistant(sessionId, true);
+  setBackendSessionId(sessionId, null);
+  setBackendSessionIdRef(null);
   setSessionLifecycle(sessionId, "error", payload.error);
   addMessage(sessionId, {
     kind: "error",
@@ -658,11 +656,7 @@ export function useLocalChat(sessionId: string | null) {
           backendSessionIdRef.current,
           sessionId,
           setSessionLifecycle,
-          clearStreamingAssistant,
-          setBackendSessionId,
-          (id) => {
-            backendSessionIdRef.current = id;
-          }
+          clearStreamingAssistant
         );
       });
       if (isCancelled) {
@@ -679,7 +673,11 @@ export function useLocalChat(sessionId: string | null) {
             sessionId,
             addMessage,
             setSessionLifecycle,
-            clearStreamingAssistant
+            clearStreamingAssistant,
+            setBackendSessionId,
+            (id) => {
+              backendSessionIdRef.current = id;
+            }
           );
         }
       );

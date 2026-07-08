@@ -2,6 +2,9 @@ use super::*;
 use crate::local_chat::harnesses::claude::jsonl::{
     InitEvent, SessionEndEvent, TextEvent, ToolCallEvent, ToolResultEvent, UsageEvent,
 };
+use crate::local_chat::harnesses::claude::live_jsonl::{
+    ClaudeLiveJsonlExitReason, ClaudeLiveJsonlRunResult,
+};
 
 #[test]
 fn maps_claude_init_to_neutral_local_chat_init() {
@@ -134,5 +137,121 @@ fn maps_claude_usage_and_end_to_neutral_payloads() {
             context_tokens: 4321,
             context_window: 200_000,
         })
+    );
+}
+
+#[test]
+fn stdout_close_without_session_end_emits_error_event() {
+    let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+    let result = ClaudeLiveJsonlRunResult {
+        exit_reason: ClaudeLiveJsonlExitReason::StdoutClosed,
+        wait_status: None,
+    };
+
+    ClaudeSessionRuntime::emit_error_for_unexpected_runner_exit(&event_sink, "backend-1", &result);
+
+    let captured_events = events
+        .lock()
+        .expect("local chat event capture lock should not be poisoned")
+        .clone();
+    assert_eq!(
+        captured_events,
+        vec![LocalChatEvent::Error(NeutralSessionErrorEvent {
+            backend_session_id: "backend-1".to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            error: "Claude session ended unexpectedly: stdout closed".to_string(),
+        })]
+    );
+    assert!(!captured_events
+        .iter()
+        .any(|event| matches!(event, LocalChatEvent::End(_))));
+}
+
+#[test]
+fn command_channel_close_without_session_end_emits_error_event() {
+    let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+    let result = ClaudeLiveJsonlRunResult {
+        exit_reason: ClaudeLiveJsonlExitReason::CommandChannelClosed,
+        wait_status: None,
+    };
+
+    ClaudeSessionRuntime::emit_error_for_unexpected_runner_exit(&event_sink, "backend-1", &result);
+
+    assert_eq!(
+        events
+            .lock()
+            .expect("local chat event capture lock should not be poisoned")
+            .as_slice(),
+        &[LocalChatEvent::Error(NeutralSessionErrorEvent {
+            backend_session_id: "backend-1".to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            error: "Claude session ended unexpectedly: command channel closed".to_string(),
+        })]
+    );
+}
+
+#[test]
+fn close_command_without_session_end_emits_no_terminal_event() {
+    let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+    let result = ClaudeLiveJsonlRunResult {
+        exit_reason: ClaudeLiveJsonlExitReason::CloseCommand,
+        wait_status: None,
+    };
+
+    ClaudeSessionRuntime::emit_error_for_unexpected_runner_exit(&event_sink, "backend-1", &result);
+
+    assert!(events
+        .lock()
+        .expect("local chat event capture lock should not be poisoned")
+        .is_empty());
+}
+
+#[test]
+fn stdout_close_after_prior_session_end_still_emits_error() {
+    let (event_sink, events) = LocalChatEventSink::capturing_for_tests();
+    ClaudeSessionRuntime::emit_jsonl_events(
+        &event_sink,
+        vec![EmittedEvent::SessionEnd(SessionEndEvent {
+            session_id: "backend-1".to_string(),
+            duration_ms: 1,
+            cost_usd: 0.0,
+            num_turns: 1,
+            result: "turn complete".to_string(),
+            is_error: false,
+            context_tokens: 0,
+            context_window: 200_000,
+        })],
+    );
+
+    let result = ClaudeLiveJsonlRunResult {
+        exit_reason: ClaudeLiveJsonlExitReason::StdoutClosed,
+        wait_status: None,
+    };
+
+    ClaudeSessionRuntime::emit_error_for_unexpected_runner_exit(&event_sink, "backend-1", &result);
+
+    assert_eq!(
+        events
+            .lock()
+            .expect("local chat event capture lock should not be poisoned")
+            .as_slice(),
+        &[
+            LocalChatEvent::End(NeutralSessionEndEvent {
+                backend_session_id: "backend-1".to_string(),
+                harness: LocalChatHarnessKind::Claude,
+                duration_ms: 1,
+                cost_usd: 0.0,
+                num_turns: 1,
+                result: "turn complete".to_string(),
+                is_error: false,
+                context_tokens: 0,
+                context_window: 200_000,
+            }),
+            LocalChatEvent::Error(NeutralSessionErrorEvent {
+                backend_session_id: "backend-1".to_string(),
+                harness: LocalChatHarnessKind::Claude,
+                error: "Claude session ended unexpectedly: stdout closed".to_string(),
+            }),
+        ]
     );
 }
