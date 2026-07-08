@@ -24,9 +24,8 @@ function handoffSession(session: ChatSession): ChatSession {
  * Tauri webviews of the same origin share `localStorage`, which makes this
  * a valid hand-off channel. Partial assistant messages are filtered out, while
  * the live streaming overlay is preserved; local-chat events are broadcast to
- * all windows, so once the pop-out's `useLocalChat` hook mounts with the
- * existing `backendSessionId`, real-time updates resume without further
- * plumbing.
+ * all windows, and the pop-out's GlobalListeners router resumes updates once
+ * the stashed `backendSessionId` seeds its local store.
  */
 export function stashChatSession(session: ChatSession): void {
   try {

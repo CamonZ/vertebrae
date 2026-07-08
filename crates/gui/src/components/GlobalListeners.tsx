@@ -8,6 +8,7 @@ import {
   useSessionLogChangeListener,
   useStepTransitionChangeListener,
 } from "../hooks";
+import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
 
 /**
  * Invisible component that activates all Zustand store listeners at the app
@@ -27,6 +28,7 @@ export function GlobalListeners() {
   useSectionChangeListener();
   useSessionLogChangeListener();
   useStepTransitionChangeListener();
+  useLocalChatEventRouter();
 
   return null;
 }

@@ -11,12 +11,7 @@ import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
-
-const { permissionRequestListeners } = vi.hoisted(() => ({
-  permissionRequestListeners: [] as Array<
-    (event: { payload: unknown }) => void
-  >,
-}));
+import { routePermissionRequestEvent } from "../../hooks/useLocalChatEventRouter";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -96,13 +91,7 @@ vi.mock("../../bindings", () => ({
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
     permissionRequestEvent: {
-      listen: vi.fn((listener) => {
-        permissionRequestListeners.push(listener);
-        return Promise.resolve(() => {
-          const index = permissionRequestListeners.indexOf(listener);
-          if (index !== -1) permissionRequestListeners.splice(index, 1);
-        });
-      }),
+      listen: vi.fn(() => Promise.resolve(() => {})),
     },
     localChatSessionEndEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
@@ -132,7 +121,6 @@ function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
 describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    permissionRequestListeners.length = 0;
     localStorage.clear();
     useChatStore.setState({
       sessions: {},
@@ -1940,17 +1928,14 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await waitFor(() => expect(permissionRequestListeners).toHaveLength(1));
     act(() => {
-      permissionRequestListeners[0]({
-        payload: {
-          request_id: "req-event",
-          session_id: "claude-abc",
-          tool_name: "Bash",
-          tool_use_id: "tool-use-1",
-          input: { command: "pwd" },
-          message: "Allow running pwd?",
-        },
+      routePermissionRequestEvent({
+        request_id: "req-event",
+        session_id: "claude-abc",
+        tool_name: "Bash",
+        tool_use_id: "tool-use-1",
+        input: { command: "pwd" },
+        message: "Allow running pwd?",
       });
     });
 
