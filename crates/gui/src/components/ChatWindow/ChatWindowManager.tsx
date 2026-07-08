@@ -49,6 +49,7 @@ export function ChatWindowManager() {
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
+  const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const localSessionSummaries = useChatStore((s) => s.localSessionSummaries);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -259,7 +260,7 @@ export function ChatWindowManager() {
             markSessionClosed,
             setSessionLifecycle,
             setBackendSessionId,
-            setBackendSessionIdRef: () => {},
+            clearQueuedMessages,
           }
         );
         setDeletingSessionId(null);
@@ -276,6 +277,7 @@ export function ChatWindowManager() {
       deleteLocalSession,
       markSessionClosed,
       setBackendSessionId,
+      clearQueuedMessages,
       setSessionLifecycle,
     ]
   );

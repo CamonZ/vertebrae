@@ -610,6 +610,8 @@ export interface ChatSession {
   lifecycleError?: string | null;
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
+  /** Runtime-only user messages queued while a local turn is still active */
+  queuedMessages?: string[];
   /** Durable local metadata for session-history ordering */
   createdAt?: string;
   /** Durable local metadata for session-history ordering */
@@ -703,6 +705,12 @@ interface ChatStoreActions {
     sessionId: string,
     commitToMessages?: boolean
   ) => void;
+  /** Queue a user message until the active local turn reaches idle */
+  enqueueQueuedMessage: (sessionId: string, content: string) => void;
+  /** Shift the next queued user message for a local session */
+  shiftQueuedMessage: (sessionId: string) => string | null;
+  /** Clear queued user messages for a local session */
+  clearQueuedMessages: (sessionId: string) => void;
   /** Set the runtime backend session ID */
   setBackendSessionId: (
     sessionId: string,
@@ -961,6 +969,26 @@ export function isLocalChatLifecycleBusy(
     lifecycle === "streaming" ||
     lifecycle === "closing"
   );
+}
+
+export function buildBackendSessionIdIndex(
+  sessions: Record<string, ChatSession>
+): Record<string, string> {
+  const index: Record<string, string> = {};
+  for (const session of Object.values(sessions)) {
+    if (session.backendSessionId) {
+      index[session.backendSessionId] = session.id;
+    }
+  }
+  return index;
+}
+
+export function findSessionIdByBackendSessionId(
+  sessions: Record<string, ChatSession>,
+  backendSessionId: string | null | undefined
+): string | null {
+  if (!backendSessionId) return null;
+  return buildBackendSessionIdIndex(sessions)[backendSessionId] ?? null;
 }
 
 function findMatchingSession(
@@ -1904,6 +1932,46 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
+    enqueueQueuedMessage: (sessionId, content) => {
+      updateSession(
+        sessionId,
+        (session) => ({
+          ...session,
+          queuedMessages: [...(session.queuedMessages ?? []), content],
+        }),
+        { persist: false }
+      );
+    },
+
+    shiftQueuedMessage: (sessionId) => {
+      let content: string | null = null;
+      updateSession(
+        sessionId,
+        (session) => {
+          const [next, ...remaining] = session.queuedMessages ?? [];
+          if (!next) return session;
+          content = next;
+          return {
+            ...session,
+            queuedMessages: remaining.length > 0 ? remaining : undefined,
+          };
+        },
+        { persist: false }
+      );
+      return content;
+    },
+
+    clearQueuedMessages: (sessionId) => {
+      updateSession(
+        sessionId,
+        (session) =>
+          session.queuedMessages?.length
+            ? { ...session, queuedMessages: undefined }
+            : session,
+        { persist: false }
+      );
+    },
+
     setBackendSessionId: (sessionId, backendSessionId) => {
       updateSession(
         sessionId,
@@ -2051,6 +2119,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         lifecycle: "closed" as const,
         lifecycleError: null,
         streamingAssistant: null,
+        queuedMessages: undefined,
       };
       if (isDisposableClosedLocalChatSession(closedSession)) {
         persistLocalChatSession(closedSession);
@@ -2101,6 +2170,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               lifecycle: "idle",
               lifecycleError: null,
               streamingAssistant: null,
+              queuedMessages: undefined,
               updatedAt: timestamp,
               messageCount: 0,
             },

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
-import { commands, events } from "../bindings";
+import { useCallback } from "react";
+import { commands } from "../bindings";
 import type {
   LocalChatSessionInitEvent,
   LocalChatSessionUsageEvent,
@@ -289,12 +289,12 @@ export function handleErrorEvent(
     commitToMessages?: boolean
   ) => void,
   setBackendSessionId: (sessionId: string, backendId: string | null) => void,
-  setBackendSessionIdRef: (backendId: string | null) => void
+  setBackendSessionIdRef?: (backendId: string | null) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   clearStreamingAssistant(sessionId, true);
   setBackendSessionId(sessionId, null);
-  setBackendSessionIdRef(null);
+  setBackendSessionIdRef?.(null);
   setSessionLifecycle(sessionId, "error", payload.error);
   addMessage(sessionId, {
     kind: "error",
@@ -324,7 +324,7 @@ export async function doStartSession(
   sessionId: string,
   deps: {
     setBackendSessionId: (id: string, backendId: string | null) => void;
-    setBackendSessionIdRef: (backendId: string | null) => void;
+    setBackendSessionIdRef?: (backendId: string | null) => void;
     addMessage: (id: string, msg: ChatMessage) => void;
     setSessionTitleCandidate?: (
       id: string,
@@ -344,7 +344,7 @@ export async function doStartSession(
 
   const backendSessionId = `local-${sessionId}-${Date.now()}`;
   deps.setBackendSessionId(sessionId, backendSessionId);
-  deps.setBackendSessionIdRef(backendSessionId);
+  deps.setBackendSessionIdRef?.(backendSessionId);
 
   try {
     const initialPrompt = userMessage || undefined;
@@ -402,7 +402,7 @@ export async function doStartSession(
   } catch (error) {
     const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
-    deps.setBackendSessionIdRef(null);
+    deps.setBackendSessionIdRef?.(null);
     deps.addMessage(sessionId, {
       kind: "error",
       message,
@@ -469,7 +469,8 @@ export async function doCloseSession(
       errorMessage?: string | null
     ) => void;
     setBackendSessionId: (id: string, backendId: string | null) => void;
-    setBackendSessionIdRef: (backendId: string | null) => void;
+    setBackendSessionIdRef?: (backendId: string | null) => void;
+    clearQueuedMessages?: (id: string) => void;
   }
 ): Promise<boolean> {
   if (sessionId) {
@@ -483,8 +484,9 @@ export async function doCloseSession(
         if (sessionId) {
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
+          deps.clearQueuedMessages?.(sessionId);
         }
-        deps.setBackendSessionIdRef(null);
+        deps.setBackendSessionIdRef?.(null);
         return true;
       }
       throw new Error(commandErrorMessage(result.error));
@@ -492,8 +494,9 @@ export async function doCloseSession(
     if (sessionId) {
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
+      deps.clearQueuedMessages?.(sessionId);
     }
-    deps.setBackendSessionIdRef(null);
+    deps.setBackendSessionIdRef?.(null);
     return true;
   } catch (error) {
     if (sessionId) {
@@ -508,7 +511,7 @@ export async function doCloseSession(
  *
  * Wraps the chatStore with local harness lifecycle:
  * - Creates/resumes local chat sessions
- * - Listens for local-chat events and routes them to the correct store session
+ * - Sends, queues, and closes local chat messages
  */
 export function useLocalChat(sessionId: string | null) {
   const session = useChatStore((s) =>
@@ -516,212 +519,17 @@ export function useLocalChat(sessionId: string | null) {
   );
 
   const addMessage = useChatStore((s) => s.addMessage);
-  const updateLastAssistantMessage = useChatStore(
-    (s) => s.updateLastAssistantMessage
-  );
-  const finalizeLastAssistantMessage = useChatStore(
-    (s) => s.finalizeLastAssistantMessage
-  );
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
-  const setProviderResumeId = useChatStore((s) => s.setProviderResumeId);
-  const setSessionModel = useChatStore((s) => s.setSessionModel);
   const setSessionTitleCandidate = useChatStore(
     (s) => s.setSessionTitleCandidate
   );
-  const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const markStreamingIfSending = useChatStore(
     (s) => s.markStreamingIfSending
   );
-  const clearStreamingAssistant = useChatStore(
-    (s) => s.clearStreamingAssistant
-  );
-
-  // Track the runtime backend session ID for event filtering.
-  const backendSessionIdRef = useRef<string | null>(null);
-  const queuedMessagesRef = useRef<string[]>([]);
-
-  // Keep ref in sync
-  useEffect(() => {
-    backendSessionIdRef.current = session?.backendSessionId ?? null;
-  }, [session?.backendSessionId]);
-
-  // Subscribe to local-chat events - filter by our backend session ID.
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const unlisteners: Array<() => void> = [];
-    let isCancelled = false;
-
-    const setup = async () => {
-      const initUn = await events.localChatSessionInitEvent.listen((event) => {
-        handleInitEvent(
-          event.payload,
-          backendSessionIdRef.current,
-          sessionId,
-          setProviderResumeId,
-          setSessionModel
-        );
-      });
-      if (isCancelled) {
-        initUn();
-        return;
-      }
-      unlisteners.push(initUn);
-
-      const usageUn = await events.localChatSessionUsageEvent.listen(
-        (event) => {
-          handleUsageEvent(
-            event.payload,
-            backendSessionIdRef.current,
-            sessionId,
-            setSessionUsage
-          );
-        }
-      );
-      if (isCancelled) {
-        usageUn();
-        return;
-      }
-      unlisteners.push(usageUn);
-
-      const textUn = await events.localChatTextEvent.listen((event) => {
-        handleTextEvent(
-          event.payload,
-          backendSessionIdRef.current,
-          sessionId,
-          updateLastAssistantMessage,
-          finalizeLastAssistantMessage,
-          addMessage
-        );
-      });
-      if (isCancelled) {
-        textUn();
-        return;
-      }
-      unlisteners.push(textUn);
-
-      const toolCallUn = await events.localChatToolCallEvent.listen((event) => {
-        handleToolCallEvent(
-          event.payload,
-          backendSessionIdRef.current,
-          sessionId,
-          addMessage
-        );
-      });
-      if (isCancelled) {
-        toolCallUn();
-        return;
-      }
-      unlisteners.push(toolCallUn);
-
-      const toolResultUn = await events.localChatToolResultEvent.listen(
-        (event) => {
-          handleToolResultEvent(
-            event.payload,
-            backendSessionIdRef.current,
-            sessionId,
-            addMessage
-          );
-        }
-      );
-      if (isCancelled) {
-        toolResultUn();
-        return;
-      }
-      unlisteners.push(toolResultUn);
-
-      if (events.permissionRequestEvent) {
-        const sacrumPermissionUn = await events.permissionRequestEvent.listen(
-          (event) => {
-            handleSacrumPermissionRequestEvent(
-              event.payload,
-              backendSessionIdRef.current,
-              sessionId,
-              addMessage
-            );
-          }
-        );
-        if (isCancelled) {
-          sacrumPermissionUn();
-          return;
-        }
-        unlisteners.push(sacrumPermissionUn);
-      }
-
-      const endUn = await events.localChatSessionEndEvent.listen((event) => {
-        handleEndEvent(
-          event.payload,
-          backendSessionIdRef.current,
-          sessionId,
-          setSessionLifecycle,
-          clearStreamingAssistant
-        );
-      });
-      if (isCancelled) {
-        endUn();
-        return;
-      }
-      unlisteners.push(endUn);
-
-      const errorUn = await events.localChatSessionErrorEvent.listen(
-        (event) => {
-          handleErrorEvent(
-            event.payload,
-            backendSessionIdRef.current,
-            sessionId,
-            addMessage,
-            setSessionLifecycle,
-            clearStreamingAssistant,
-            setBackendSessionId,
-            (id) => {
-              backendSessionIdRef.current = id;
-            }
-          );
-        }
-      );
-      if (isCancelled) {
-        errorUn();
-        return;
-      }
-      unlisteners.push(errorUn);
-
-      const warningUn = await events.localChatSessionWarningEvent.listen(
-        (event) => {
-          handleWarningEvent(
-            event.payload,
-            backendSessionIdRef.current,
-            sessionId,
-            addMessage
-          );
-        }
-      );
-      if (isCancelled) {
-        warningUn();
-        return;
-      }
-      unlisteners.push(warningUn);
-    };
-
-    setup();
-
-    return () => {
-      isCancelled = true;
-      unlisteners.forEach((fn) => fn());
-    };
-  }, [
-    sessionId,
-    addMessage,
-    updateLastAssistantMessage,
-    finalizeLastAssistantMessage,
-    setProviderResumeId,
-    setSessionModel,
-    setSessionUsage,
-    setSessionLifecycle,
-    setBackendSessionId,
-    clearStreamingAssistant,
-  ]);
+  const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
+  const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
 
   /**
    * Start the local chat session.
@@ -742,9 +550,6 @@ export function useLocalChat(sessionId: string | null) {
         sessionId,
         {
           setBackendSessionId,
-          setBackendSessionIdRef: (id) => {
-            backendSessionIdRef.current = id;
-          },
           addMessage,
           setSessionTitleCandidate,
           setSessionLifecycle,
@@ -761,60 +566,6 @@ export function useLocalChat(sessionId: string | null) {
       setSessionTitleCandidate,
     ]
   );
-
-  useEffect(() => {
-    if (!session || !sessionId) return;
-    if (queuedMessagesRef.current.length === 0) return;
-
-    const lifecycle = getLocalChatLifecycle(session);
-    if (lifecycle !== "idle") return;
-
-    const content = queuedMessagesRef.current.shift();
-    if (!content) return;
-
-    if (session.backendSessionId) {
-      void doSendMessage(
-        session.backendSessionId,
-        sessionId,
-        content,
-        {
-          addMessage,
-          setSessionLifecycle,
-          markStreamingIfSending,
-          setBackendSessionId,
-          setBackendSessionIdRef: (id) => {
-            backendSessionIdRef.current = id;
-          },
-        },
-        { addUserMessage: false }
-      );
-      return;
-    }
-
-    void doStartSession(
-      session,
-      sessionId,
-      {
-        setBackendSessionId,
-        setBackendSessionIdRef: (id) => {
-          backendSessionIdRef.current = id;
-        },
-        addMessage,
-        setSessionTitleCandidate,
-        setSessionLifecycle,
-      },
-      content,
-      { addUserMessage: false }
-    );
-  }, [
-    session,
-    sessionId,
-    addMessage,
-    setBackendSessionId,
-    setSessionLifecycle,
-    markStreamingIfSending,
-    setSessionTitleCandidate,
-  ]);
 
   /**
    * Send a message to the active local chat session.
@@ -839,7 +590,7 @@ export function useLocalChat(sessionId: string | null) {
           session.projectPath ?? null,
           setSessionTitleCandidate
         );
-        queuedMessagesRef.current.push(content);
+        enqueueQueuedMessage(sessionId, content);
         addMessage(sessionId, {
           kind: "user",
           text: content,
@@ -860,9 +611,6 @@ export function useLocalChat(sessionId: string | null) {
         setSessionLifecycle,
         markStreamingIfSending,
         setBackendSessionId,
-        setBackendSessionIdRef: (id) => {
-          backendSessionIdRef.current = id;
-        },
       });
     },
     [
@@ -873,6 +621,7 @@ export function useLocalChat(sessionId: string | null) {
       markStreamingIfSending,
       setBackendSessionId,
       setSessionTitleCandidate,
+      enqueueQueuedMessage,
     ]
   );
 
@@ -889,9 +638,7 @@ export function useLocalChat(sessionId: string | null) {
             : markSessionClosed,
         setSessionLifecycle,
         setBackendSessionId,
-        setBackendSessionIdRef: (id) => {
-          backendSessionIdRef.current = id;
-        },
+        clearQueuedMessages,
       });
     },
     [
@@ -900,6 +647,7 @@ export function useLocalChat(sessionId: string | null) {
       markSessionClosed,
       setSessionLifecycle,
       setBackendSessionId,
+      clearQueuedMessages,
     ]
   );
 
