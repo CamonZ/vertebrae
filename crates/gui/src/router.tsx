@@ -86,10 +86,12 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
 /**
  * Guard component that decides whether the first-run welcome/consent screen
  * should be shown. On mount it queries `installationStatus()` and redirects
- * to `/welcome` when any required component is missing:
+ * to `/welcome` when any required component is missing or when a managed
+ * component needs to be refreshed from the bundled GUI sidecar:
  *
- *   - the component is not installed at the symlink path we manage, AND
- *   - it is not resolvable on `$PATH`.
+ *   - the component reports `needs_refresh`, OR
+ *   - the component is not installed at the symlink path we manage and is not
+ *     resolvable on `$PATH`.
  *
  * Otherwise it renders its children. It sits ABOVE `ProjectGuard` in the tree
  * so the welcome screen comes before `/setup`.

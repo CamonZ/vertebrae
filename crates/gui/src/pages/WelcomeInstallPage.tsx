@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { commands, InstallationStatus } from "../bindings";
+import {
+  commands,
+  type ComponentStatus,
+  type InstallationStatus,
+} from "../bindings";
 
 type Phase = "loading" | "ready" | "installing" | "success" | "error";
 
 const SUCCESS_REDIRECT_DELAY_MS = 1500;
+
+function shouldInstallByDefault(component: ComponentStatus): boolean {
+  return component.needs_refresh || !component.installed_at_symlink;
+}
 
 /**
  * First-run welcome screen. Asks the user for permission to install the
@@ -50,11 +58,11 @@ export function WelcomeInstallPage() {
         if (cancelled) return;
         if (result.status === "ok") {
           setStatus(result.data);
-          // Pre-check OFF for any component that's already installed at
-          // our symlink path — the user shouldn't have to re-pick it.
-          setInstallCli(!result.data.cli.installed_at_symlink);
-          setInstallDaemon(!result.data.daemon.installed_at_symlink);
-          setInstallGate(!result.data.gate.installed_at_symlink);
+          // Pre-check OFF for current managed installs, but ON for stale
+          // managed installs so the bundled sidecar refresh runs.
+          setInstallCli(shouldInstallByDefault(result.data.cli));
+          setInstallDaemon(shouldInstallByDefault(result.data.daemon));
+          setInstallGate(shouldInstallByDefault(result.data.gate));
           setPhase("ready");
         } else {
           setError(result.error.message);
@@ -113,9 +121,9 @@ export function WelcomeInstallPage() {
     isBusy || (!installCli && !installDaemon && !installGate);
   const nothingToInstall =
     status !== null &&
-    status.cli.installed_at_symlink &&
-    status.daemon.installed_at_symlink &&
-    status.gate.installed_at_symlink;
+    [status.cli, status.daemon, status.gate].every(
+      (component) => component.installed_at_symlink && !component.needs_refresh
+    );
 
   return (
     <div
@@ -160,6 +168,7 @@ export function WelcomeInstallPage() {
               description="The vertebrae command-line tool used to manage tasks and workflows."
               targetPath={status.cli.symlink_path}
               alreadyInstalled={status.cli.installed_at_symlink}
+              needsRefresh={status.cli.needs_refresh}
               onPath={status.cli.on_path}
               checked={installCli}
               disabled={isBusy}
@@ -171,6 +180,7 @@ export function WelcomeInstallPage() {
               description="The background workflow runner that executes agents."
               targetPath={status.daemon.symlink_path}
               alreadyInstalled={status.daemon.installed_at_symlink}
+              needsRefresh={status.daemon.needs_refresh}
               onPath={status.daemon.on_path}
               checked={installDaemon}
               disabled={isBusy}
@@ -182,6 +192,7 @@ export function WelcomeInstallPage() {
               description="The local MCP permission bridge used by Claude chat."
               targetPath={status.gate.symlink_path}
               alreadyInstalled={status.gate.installed_at_symlink}
+              needsRefresh={status.gate.needs_refresh}
               onPath={status.gate.on_path}
               checked={installGate}
               disabled={isBusy}
@@ -246,6 +257,7 @@ interface ComponentRowProps {
   description: string;
   targetPath: string;
   alreadyInstalled: boolean;
+  needsRefresh: boolean;
   onPath: boolean;
   checked: boolean;
   disabled: boolean;
@@ -258,6 +270,7 @@ function ComponentRow({
   description,
   targetPath,
   alreadyInstalled,
+  needsRefresh,
   onPath,
   checked,
   disabled,
@@ -271,7 +284,7 @@ function ComponentRow({
       <input
         type="checkbox"
         checked={checked}
-        disabled={disabled || alreadyInstalled}
+        disabled={disabled || (alreadyInstalled && !needsRefresh)}
         onChange={(e) => onChange(e.target.checked)}
         className="mt-1 h-4 w-4 cursor-pointer accent-accent disabled:cursor-not-allowed"
         data-testid={`${testId}-checkbox`}
@@ -279,7 +292,15 @@ function ComponentRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium text-fg">{label}</span>
-          {alreadyInstalled && (
+          {needsRefresh && (
+            <span
+              className="rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300"
+              data-testid={`${testId}-needs-refresh`}
+            >
+              update available
+            </span>
+          )}
+          {!needsRefresh && alreadyInstalled && (
             <span
               className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-300"
               data-testid={`${testId}-already-installed`}
@@ -287,7 +308,7 @@ function ComponentRow({
               already installed
             </span>
           )}
-          {!alreadyInstalled && onPath && (
+          {!needsRefresh && !alreadyInstalled && onPath && (
             <span
               className="rounded bg-bg px-2 py-0.5 text-xs text-fg-mute"
               data-testid={`${testId}-on-path`}

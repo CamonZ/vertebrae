@@ -88,9 +88,11 @@ It:
   component's symlink target path.
 - Offers three components — **vtb CLI**, **vtb-daemon** (background workflow
   runner), and **vtb-gate** (Claude permission bridge) — each as an opt-out
-  checkbox. A component already installed at our symlink path is shown as
-  "already installed" and its checkbox is disabled; a component found elsewhere
-  on `$PATH` is tagged "found on PATH".
+  checkbox. A component already installed at our symlink path and current with
+  the bundled sidecar is shown as "already installed" and its checkbox is
+  disabled; a managed component whose staged binary differs from the bundled
+  sidecar stays checked and is tagged "update available"; a component found
+  elsewhere on `$PATH` is tagged "found on PATH".
 - **Install** calls
   `install_components(install_cli, install_daemon, install_gate)`, which stages
   the chosen sidecars and (if the daemon was selected) registers the daemon
@@ -181,21 +183,21 @@ removes `externalBin` from Tauri's build configuration unless
 ### When the welcome screen is shown
 
 `InstallationGuard` in `src/router.tsx` decides on mount. It calls
-`installation_status` and redirects to `/welcome` **only when all** of the
-following hold (first-run predicate):
+`installation_status` and redirects to `/welcome` when any required component
+is missing or when a GUI-managed staged binary needs to be refreshed from the
+bundled sidecar:
 
 ```
-!cli.installed_at_symlink &&
-!daemon.installed_at_symlink &&
-!cli.on_path &&
-!daemon.on_path
+component.needs_refresh ||
+(!component.installed_at_symlink && !component.on_path)
 ```
 
-In words: neither component is installed at the symlink path we manage and
-neither is resolvable anywhere on `$PATH`. If the status probe fails, the
-guard intentionally falls through to its children rather than blocking an
-already-working install. `InstallationGuard` sits above `ProjectGuard`, so the
-welcome screen comes before `/setup`.
+In words: PATH-only binaries still satisfy first-run checks, but existing
+installer-managed binaries are refreshed when the GUI bundle ships newer
+sidecars. If the status probe fails, the guard intentionally falls through to
+its children rather than blocking an already-working install.
+`InstallationGuard` sits above `ProjectGuard`, so the welcome screen comes
+before `/setup`.
 
 ### Install Locations
 

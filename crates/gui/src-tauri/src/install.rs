@@ -28,7 +28,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use vertebrae_installer::{
-    install_binary, install_service, service_status, symlink_path, InstallerError, ServiceStatus,
+    data_bin_dir, install_binary, install_service, service_status, symlink_path, InstallerError,
+    ServiceStatus,
 };
 
 use crate::commands::CommandError;
@@ -50,15 +51,22 @@ const GATE_BIN: &str = "vtb-gate";
 /// State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
 ///
 /// The welcome screen renders different copy depending on whether the user
-/// already has the binary available from a previous `cargo install` or
-/// package-manager install. We surface both signals so the UI can pick the
-/// right message without having to call `PATH` itself.
+/// already has the binary available from a previous `cargo install`,
+/// package-manager install, or GUI-managed install. We surface the managed
+/// refresh signal separately so PATH-only binaries keep satisfying first-run
+/// checks while stale GUI-managed installs can be rewritten from the bundled
+/// sidecars.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ComponentStatus {
     /// `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
-    /// component, or another tool did). When this is `true` the installer
-    /// can be skipped for this component.
+    /// component, or another tool did). When this is `true` and
+    /// `needs_refresh` is `false`, the installer can be skipped for this
+    /// component.
     pub installed_at_symlink: bool,
+    /// `true` if this component has an installer-managed staged binary or
+    /// managed symlink whose bytes differ from the bundled sidecar shipped
+    /// with this GUI. Unrelated PATH-only binaries never set this flag.
+    pub needs_refresh: bool,
     /// Absolute path of the symlink we manage in `~/.local/bin`.
     pub symlink_path: String,
     /// `true` if some executable named `<name>` is resolvable on `$PATH`
@@ -178,26 +186,110 @@ fn compute_status() -> Result<InstallationStatus, CommandError> {
 
 fn component_status(name: &str) -> Result<ComponentStatus, CommandError> {
     let link = symlink_path(name).map_err(installer_error)?;
+    let staged = data_bin_dir().map_err(installer_error)?.join(name);
+    let bundled_source = resolve_sidecar_path(name).ok();
+
+    Ok(component_status_from_paths(
+        &link,
+        &staged,
+        bundled_source.as_deref(),
+        is_on_path(name),
+    ))
+}
+
+fn component_status_from_paths(
+    link: &Path,
+    staged: &Path,
+    bundled_source: Option<&Path>,
+    on_path: bool,
+) -> ComponentStatus {
+    let installed_at_symlink = installed_at_symlink_path(link);
+    let needs_refresh = managed_install_needs_refresh(link, staged, bundled_source);
+
+    ComponentStatus {
+        installed_at_symlink,
+        needs_refresh,
+        symlink_path: link.to_string_lossy().into_owned(),
+        on_path,
+    }
+}
+
+fn installed_at_symlink_path(link: &Path) -> bool {
     // `symlink_metadata` so we treat a dangling symlink as "not installed"
     // — that means the staged target was removed and the symlink is junk.
-    let installed_at_symlink = fs::symlink_metadata(&link)
+    fs::symlink_metadata(link)
         .ok()
         .and_then(|m| {
             if m.file_type().is_symlink() {
-                fs::metadata(&link).ok().map(|_| true)
+                fs::metadata(link).ok().map(|_| true)
             } else if m.file_type().is_file() {
                 Some(true)
             } else {
                 None
             }
         })
-        .unwrap_or(false);
+        .unwrap_or(false)
+}
 
-    Ok(ComponentStatus {
-        installed_at_symlink,
-        symlink_path: link.to_string_lossy().into_owned(),
-        on_path: is_on_path(name),
-    })
+fn managed_install_needs_refresh(
+    link: &Path,
+    staged: &Path,
+    bundled_source: Option<&Path>,
+) -> bool {
+    let Some(source) = bundled_source else {
+        return false;
+    };
+    if !source.is_file() || !is_managed_artifact_present(link, staged) {
+        return false;
+    }
+
+    if !staged.is_file() {
+        return true;
+    }
+
+    !same_file_contents(source, staged)
+}
+
+fn is_managed_artifact_present(link: &Path, staged: &Path) -> bool {
+    match fs::symlink_metadata(link) {
+        Ok(meta) if meta.file_type().is_symlink() => symlink_points_to_staged(link, staged),
+        Ok(_) => false,
+        Err(_) => staged.is_file(),
+    }
+}
+
+fn symlink_points_to_staged(link: &Path, staged: &Path) -> bool {
+    let Ok(meta) = fs::symlink_metadata(link) else {
+        return false;
+    };
+    if !meta.file_type().is_symlink() {
+        return false;
+    }
+
+    let Ok(target) = fs::read_link(link) else {
+        return false;
+    };
+    let target = if target.is_absolute() {
+        target
+    } else {
+        link.parent().unwrap_or_else(|| Path::new("")).join(target)
+    };
+
+    paths_equivalent(&target, staged)
+}
+
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    match (fs::canonicalize(left), fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+fn same_file_contents(left: &Path, right: &Path) -> bool {
+    match (fs::read(left), fs::read(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 /// Search every directory in `$PATH` for an executable named `name`.
@@ -289,6 +381,13 @@ fn installer_error(err: InstallerError) -> CommandError {
 mod tests {
     use super::*;
 
+    fn write_file(path: &Path, body: &[u8]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create parent dir");
+        }
+        fs::write(path, body).expect("write test file");
+    }
+
     #[test]
     fn target_triple_constant_is_populated() {
         // `tauri-build` sets TAURI_ENV_TARGET_TRIPLE during this crate's
@@ -328,6 +427,150 @@ mod tests {
         assert!(
             matches!(state, ServiceState::NotLoaded),
             "ServiceStatus::NotLoaded should map to ServiceState::NotLoaded, got {state:?}"
+        );
+    }
+
+    #[test]
+    fn component_status_does_not_refresh_path_only_binary() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb");
+        let link = tempdir.path().join("links").join("vtb");
+        let staged = tempdir.path().join("data").join("vtb");
+        write_file(&source, b"bundled-v2");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), true);
+
+        assert!(
+            !status.installed_at_symlink,
+            "PATH-only binary should not be reported at the managed symlink path"
+        );
+        assert!(
+            !status.needs_refresh,
+            "PATH-only binary should not trigger managed sidecar refresh"
+        );
+        assert!(
+            status.on_path,
+            "status should preserve the PATH availability signal"
+        );
+    }
+
+    #[test]
+    fn component_status_does_not_refresh_unmanaged_file_at_symlink_path() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb");
+        let link = tempdir.path().join("links").join("vtb");
+        let staged = tempdir.path().join("data").join("vtb");
+        write_file(&source, b"bundled-v2");
+        write_file(&link, b"unrelated-user-binary");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), false);
+
+        assert!(
+            status.installed_at_symlink,
+            "regular files at the symlink path preserve existing installed semantics"
+        );
+        assert!(
+            !status.needs_refresh,
+            "unmanaged regular files at the symlink path must not be rewritten as a refresh"
+        );
+    }
+
+    #[test]
+    fn component_status_does_not_refresh_staged_binary_when_symlink_path_is_unmanaged() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb");
+        let link = tempdir.path().join("links").join("vtb");
+        let staged = tempdir.path().join("data").join("vtb");
+        write_file(&source, b"bundled-v2");
+        write_file(&staged, b"staged-v1");
+        write_file(&link, b"unrelated-user-binary");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), false);
+
+        assert!(
+            status.installed_at_symlink,
+            "regular files at the symlink path preserve existing installed semantics"
+        );
+        assert!(
+            !status.needs_refresh,
+            "stale staged bytes must not trigger refresh when the managed symlink path is occupied by an unrelated file"
+        );
+    }
+
+    #[test]
+    fn component_status_refreshes_managed_staged_binary_even_when_on_path() {
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb");
+        let link = tempdir.path().join("links").join("vtb");
+        let staged = tempdir.path().join("data").join("vtb");
+        write_file(&source, b"bundled-v2");
+        write_file(&staged, b"staged-v1");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), true);
+
+        assert!(
+            !status.installed_at_symlink,
+            "missing symlink should keep installed_at_symlink false"
+        );
+        assert!(
+            status.needs_refresh,
+            "existing managed staged binary should be refreshed from the bundled sidecar"
+        );
+        assert!(
+            status.on_path,
+            "PATH availability should be reported without suppressing managed refresh"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn component_status_refreshes_managed_symlink_when_staged_binary_differs() {
+        use std::os::unix::fs as unix_fs;
+
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb-daemon");
+        let link = tempdir.path().join("links").join("vtb-daemon");
+        let staged = tempdir.path().join("data").join("vtb-daemon");
+        write_file(&source, b"bundled-v2");
+        write_file(&staged, b"staged-v1");
+        fs::create_dir_all(link.parent().expect("link parent")).expect("create link parent");
+        unix_fs::symlink(&staged, &link).expect("create managed symlink");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), false);
+
+        assert!(
+            status.installed_at_symlink,
+            "managed symlink should be reported as installed"
+        );
+        assert!(
+            status.needs_refresh,
+            "managed symlink should request refresh when staged bytes differ from bundled sidecar"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn component_status_does_not_refresh_current_managed_symlink() {
+        use std::os::unix::fs as unix_fs;
+
+        let tempdir = tempfile::tempdir().expect("create tempdir");
+        let source = tempdir.path().join("bundle").join("vtb-gate");
+        let link = tempdir.path().join("links").join("vtb-gate");
+        let staged = tempdir.path().join("data").join("vtb-gate");
+        write_file(&source, b"bundled-v2");
+        write_file(&staged, b"bundled-v2");
+        fs::create_dir_all(link.parent().expect("link parent")).expect("create link parent");
+        unix_fs::symlink(&staged, &link).expect("create managed symlink");
+
+        let status = component_status_from_paths(&link, &staged, Some(&source), false);
+
+        assert!(
+            status.installed_at_symlink,
+            "managed symlink should be reported as installed"
+        );
+        assert!(
+            !status.needs_refresh,
+            "matching staged and bundled bytes should not request refresh"
         );
     }
 

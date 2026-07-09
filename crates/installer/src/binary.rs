@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::InstallerError;
 use crate::paths::{bin_dir, data_bin_dir, symlink_path};
@@ -38,27 +39,46 @@ pub fn install_binary(name: &str, source_path: &Path) -> Result<PathBuf, Install
     })?;
 
     let staged = data_dir.join(name);
-
-    // Copy can fail if `staged` already exists with restrictive perms; remove first.
-    if staged.exists() {
-        fs::remove_file(&staged).map_err(|e| InstallerError::Remove {
-            path: staged.clone(),
-            reason: e.to_string(),
-        })?;
-    }
-
-    fs::copy(source_path, &staged).map_err(|e| InstallerError::CopyBinary {
-        from: source_path.to_path_buf(),
-        to: staged.clone(),
-        reason: e.to_string(),
-    })?;
-
-    set_executable(&staged)?;
+    copy_binary_to_staged_path(source_path, &staged)?;
 
     let link = symlink_path(name)?;
     replace_symlink(&link, &staged)?;
 
     Ok(staged)
+}
+
+fn copy_binary_to_staged_path(source_path: &Path, staged: &Path) -> Result<(), InstallerError> {
+    let temp = temp_sibling_path(staged, "copy");
+    remove_stale_temp_file(&temp)?;
+
+    let copy_result =
+        fs::copy(source_path, &temp)
+            .map(|_| ())
+            .map_err(|e| InstallerError::CopyBinary {
+                from: source_path.to_path_buf(),
+                to: staged.to_path_buf(),
+                reason: e.to_string(),
+            });
+    if let Err(err) = copy_result {
+        let _ = fs::remove_file(&temp);
+        return Err(err);
+    }
+
+    if let Err(err) = set_executable(&temp) {
+        let _ = fs::remove_file(&temp);
+        return Err(err);
+    }
+
+    if let Err(err) = fs::rename(&temp, staged) {
+        let _ = fs::remove_file(&temp);
+        return Err(InstallerError::CopyBinary {
+            from: source_path.to_path_buf(),
+            to: staged.to_path_buf(),
+            reason: format!("failed to replace staged binary: {err}"),
+        });
+    }
+
+    Ok(())
 }
 
 /// Remove the symlink in `bin_dir` and the staged binary in `data_bin_dir`.
@@ -107,21 +127,59 @@ fn set_executable(_path: &Path) -> Result<(), InstallerError> {
     Ok(())
 }
 
+fn temp_sibling_path(final_path: &Path, purpose: &str) -> PathBuf {
+    let parent = final_path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = final_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("binary");
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    parent.join(format!(
+        ".{file_name}.{purpose}.{}.{}.tmp",
+        std::process::id(),
+        nanos
+    ))
+}
+
+fn remove_stale_temp_file(path: &Path) -> Result<(), InstallerError> {
+    if fs::symlink_metadata(path).is_ok() {
+        fs::remove_file(path).map_err(|e| InstallerError::Remove {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn replace_symlink(link: &Path, target: &Path) -> Result<(), InstallerError> {
     use std::os::unix::fs as unix_fs;
 
-    if fs::symlink_metadata(link).is_ok() {
-        fs::remove_file(link).map_err(|e| InstallerError::Remove {
-            path: link.to_path_buf(),
-            reason: e.to_string(),
-        })?;
+    let temp = temp_sibling_path(link, "symlink");
+    remove_stale_temp_file(&temp)?;
+
+    if let Err(err) = unix_fs::symlink(target, &temp) {
+        let _ = fs::remove_file(&temp);
+        return Err(InstallerError::Symlink {
+            link: link.to_path_buf(),
+            target: target.to_path_buf(),
+            reason: err.to_string(),
+        });
     }
-    unix_fs::symlink(target, link).map_err(|e| InstallerError::Symlink {
-        link: link.to_path_buf(),
-        target: target.to_path_buf(),
-        reason: e.to_string(),
-    })
+
+    if let Err(err) = fs::rename(&temp, link) {
+        let _ = fs::remove_file(&temp);
+        return Err(InstallerError::Symlink {
+            link: link.to_path_buf(),
+            target: target.to_path_buf(),
+            reason: err.to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(not(unix))]
@@ -225,6 +283,42 @@ mod tests {
             fs::read(&staged).unwrap(),
             b"v2-new-bytes",
             "second install should overwrite the staged binary"
+        );
+
+        let link = symlink_path("vtb-daemon").unwrap();
+        assert_eq!(
+            fs::read_link(&link).expect("managed symlink should exist after refresh"),
+            staged,
+            "refresh install should keep the managed symlink pointed at the staged binary"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn install_binary_preserves_existing_install_when_refresh_copy_fails() {
+        let _home = HomeGuard::new();
+        let src_dir = tempfile::tempdir().unwrap();
+        let src_v1 = write_dummy_binary(src_dir.path(), "vtb-daemon", b"v1");
+        let staged = install_binary("vtb-daemon", &src_v1).expect("first install");
+        let link = symlink_path("vtb-daemon").unwrap();
+
+        let bad_source_dir = tempfile::tempdir().unwrap();
+        let err = install_binary("vtb-daemon", bad_source_dir.path())
+            .expect_err("directory source should fail to copy");
+        assert!(
+            matches!(err, InstallerError::CopyBinary { .. }),
+            "expected CopyBinary error, got {err:?}"
+        );
+
+        assert_eq!(
+            fs::read(&staged).expect("existing staged binary should remain readable"),
+            b"v1",
+            "failed refresh must preserve the previous staged binary"
+        );
+        assert_eq!(
+            fs::read_link(&link).expect("managed symlink should still exist"),
+            staged,
+            "failed refresh must preserve the previous managed symlink"
         );
     }
 

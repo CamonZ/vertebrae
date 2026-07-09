@@ -155,16 +155,19 @@ describe("Router Acceptance Tests", () => {
         data: {
           cli: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb",
             on_path: true,
           },
           daemon: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb-daemon",
             on_path: true,
           },
           gate: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb-gate",
             on_path: true,
           },
@@ -673,9 +676,18 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("InstallationGuard required binary predicate", () => {
-    type Comp = { installed_at_symlink: boolean; on_path: boolean };
-    const comp = (installed: boolean, onPath: boolean): Comp => ({
+    type Comp = {
+      installed_at_symlink: boolean;
+      needs_refresh: boolean;
+      on_path: boolean;
+    };
+    const comp = (
+      installed: boolean,
+      onPath: boolean,
+      needsRefresh = false
+    ): Comp => ({
       installed_at_symlink: installed,
+      needs_refresh: needsRefresh,
       on_path: onPath,
     });
 
@@ -717,6 +729,16 @@ describe("Router Acceptance Tests", () => {
           gate: comp(true, false),
         })
       ).toBe(true);
+    });
+
+    it("returns false when a managed component needs refresh", () => {
+      expect(
+        hasAllRequiredBinaries({
+          cli: comp(true, true, true),
+          daemon: comp(true, true),
+          gate: comp(false, true),
+        })
+      ).toBe(false);
     });
   });
 });
