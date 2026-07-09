@@ -194,6 +194,11 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
+            // Bring managed binary installs up to date with the sidecars
+            // bundled in this build. Off the main thread so disk I/O never
+            // delays window creation.
+            tauri::async_runtime::spawn_blocking(install::refresh_stale_managed_binaries);
+
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
             let current_slug = project_config.get_current_project();

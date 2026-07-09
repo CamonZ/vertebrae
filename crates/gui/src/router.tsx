@@ -91,6 +91,9 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
  *   - the component is not installed at the symlink path we manage, AND
  *   - it is not resolvable on `$PATH`.
  *
+ * Stale GUI-managed installs are NOT routed here — the backend silently
+ * refreshes them from the bundled sidecars at launch.
+ *
  * Otherwise it renders its children. It sits ABOVE `ProjectGuard` in the tree
  * so the welcome screen comes before `/setup`.
  *

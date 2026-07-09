@@ -39,16 +39,19 @@ function makeStatus(overrides?: Partial<InstallationStatus>): InstallationStatus
   return {
     cli: {
       installed_at_symlink: false,
+      needs_refresh: false,
       symlink_path: "/home/user/.local/bin/vtb",
       on_path: false,
     },
     daemon: {
       installed_at_symlink: false,
+      needs_refresh: false,
       symlink_path: "/home/user/.local/bin/vtb-daemon",
       on_path: false,
     },
     gate: {
       installed_at_symlink: false,
+      needs_refresh: false,
       symlink_path: "/home/user/.local/bin/vtb-gate",
       on_path: false,
     },
@@ -111,6 +114,7 @@ describe("WelcomeInstallPage", () => {
       data: makeStatus({
         cli: {
           installed_at_symlink: true,
+          needs_refresh: false,
           symlink_path: "/home/user/.local/bin/vtb",
           on_path: true,
         },
@@ -131,6 +135,33 @@ describe("WelcomeInstallPage", () => {
     // Other components, untouched, stay checked.
     expect(screen.getByTestId("welcome-daemon-checkbox")).toBeChecked();
     expect(screen.getByTestId("welcome-gate-checkbox")).toBeChecked();
+  });
+
+  it("pre-checks and enables a managed component that needs refresh", async () => {
+    mockInstallationStatus.mockResolvedValue({
+      status: "ok",
+      data: makeStatus({
+        cli: {
+          installed_at_symlink: true,
+          needs_refresh: true,
+          symlink_path: "/home/user/.local/bin/vtb",
+          on_path: true,
+        },
+      }),
+    });
+
+    render(<WelcomeInstallPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("welcome-cli-checkbox")).toBeInTheDocument();
+    });
+    const cliCheckbox = screen.getByTestId("welcome-cli-checkbox");
+    expect(cliCheckbox).toBeChecked();
+    expect(cliCheckbox).not.toBeDisabled();
+    expect(screen.getByTestId("welcome-cli-needs-refresh")).toHaveTextContent(
+      "update available"
+    );
+    expect(screen.queryByTestId("welcome-cli-already-installed")).toBeNull();
   });
 
   it("calls installComponents with the selected checkbox state and proceeds to /setup", async () => {

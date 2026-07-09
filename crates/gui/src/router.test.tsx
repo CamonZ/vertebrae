@@ -155,16 +155,19 @@ describe("Router Acceptance Tests", () => {
         data: {
           cli: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb",
             on_path: true,
           },
           daemon: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb-daemon",
             on_path: true,
           },
           gate: {
             installed_at_symlink: true,
+            needs_refresh: false,
             symlink_path: "/home/user/.local/bin/vtb-gate",
             on_path: true,
           },
@@ -715,6 +718,23 @@ describe("Router Acceptance Tests", () => {
           cli: comp(true, false),
           daemon: comp(true, false),
           gate: comp(true, false),
+        })
+      ).toBe(true);
+    });
+
+    it("ignores managed refresh state — stale installs are refreshed silently, not gated", () => {
+      // Full ComponentStatus shape: the predicate must not gate on needs_refresh.
+      const staleCli = {
+        installed_at_symlink: true,
+        needs_refresh: true,
+        symlink_path: "/home/user/.local/bin/vtb",
+        on_path: true,
+      };
+      expect(
+        hasAllRequiredBinaries({
+          cli: staleCli,
+          daemon: comp(true, true),
+          gate: comp(false, true),
         })
       ).toBe(true);
     });

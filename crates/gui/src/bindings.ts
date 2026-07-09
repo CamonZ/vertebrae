@@ -1071,17 +1071,26 @@ export type CommandError = { message: string }
  * State of a single component (one of `vtb`, `vtb-daemon`, `vtb-gate`) on this machine.
  * 
  * The welcome screen renders different copy depending on whether the user
- * already has the binary available from a previous `cargo install` or
- * package-manager install. We surface both signals so the UI can pick the
- * right message without having to call `PATH` itself.
+ * already has the binary available from a previous `cargo install`,
+ * package-manager install, or GUI-managed install. We surface the managed
+ * refresh signal separately so PATH-only binaries keep satisfying first-run
+ * checks while stale GUI-managed installs can be rewritten from the bundled
+ * sidecars.
  */
 export type ComponentStatus = { 
 /**
  * `true` if `<bin_dir>/<name>` exists (i.e. we previously staged this
- * component, or another tool did). When this is `true` the installer
- * can be skipped for this component.
+ * component, or another tool did). When this is `true` and
+ * `needs_refresh` is `false`, the installer can be skipped for this
+ * component.
  */
 installed_at_symlink: boolean; 
+/**
+ * `true` if this component has an installer-managed staged binary or
+ * managed symlink whose bytes differ from the bundled sidecar shipped
+ * with this GUI. Unrelated PATH-only binaries never set this flag.
+ */
+needs_refresh: boolean;
 /**
  * Absolute path of the symlink we manage in `~/.local/bin`.
  */
