@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor } from "@testing-library/react";
 import {
   render,
   createMockTask,
@@ -8,12 +8,21 @@ import {
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
-import type { Task, TaskRunControls } from "../../bindings";
+import type {
+  StepExecution,
+  Task,
+  TaskRunControls,
+  TaskRunTrace,
+} from "../../bindings";
 import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../../stores/projectScopedStores";
-import { queryClient, queryKeys } from "../../query";
+import {
+  queryClient,
+  queryKeys,
+  upsertStepExecutionInQueryCache,
+} from "../../query";
 
 const mockTaskOverrides = vi.hoisted(() => ({
   current: {} as Partial<Task>,
@@ -114,20 +123,6 @@ vi.mock("../../hooks/useTask", () => ({
   },
 }));
 
-const mockTaskExecutionsOverrides = vi.hoisted(() => ({
-  current: [] as unknown[],
-}));
-
-// Mock the useTaskExecutions hook
-vi.mock("../../hooks/useTaskExecutions", () => ({
-  useTaskExecutions: () => ({
-    executions: mockTaskExecutionsOverrides.current,
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
-
 // Mock the commands and events
 vi.mock("../../bindings", () => ({
   commands: {
@@ -138,6 +133,16 @@ vi.mock("../../bindings", () => ({
     stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
     listTasks: vi.fn(async () => ({ status: "ok", data: [] })),
+    getTaskRunTrace: vi.fn(async () => ({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-empty",
+        task_runs: [],
+        step_executions: [],
+        session_logs: [],
+      },
+    })),
+    getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
     toggleChecklistItemDone: vi.fn(),
     // Relation levels/titles are looked up from the store in tests; this stub
     // just keeps the fallback fetch from throwing when a relation isn't seeded.
@@ -183,12 +188,23 @@ function seedTaskList(tasks: Task[]) {
   );
 }
 
+function seedRunTrace(runId: string, executions: StepExecution[]) {
+  queryClient.setQueryData<TaskRunTrace>(
+    queryKeys.executions.byRun(getProjectScopeGeneration(), runId),
+    {
+      root_task_run_id: runId,
+      task_runs: [],
+      step_executions: executions,
+      session_logs: [],
+    }
+  );
+}
+
 describe("TaskDetailPanel - Restructured Layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProjectScopedStores();
     mockTaskOverrides.current = {};
-    mockTaskExecutionsOverrides.current = [];
     usePanelFocusStore.getState().reset();
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
@@ -1007,7 +1023,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         step_type: string | null;
         prompt: string | null;
       }> = {}
-    ) {
+    ): StepExecution {
       return {
         id: execId,
         task_id: mockTaskData.id,
@@ -1034,12 +1050,12 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     }
 
     it("renders the gate with run id, execution id, and step when waiting on human_input", () => {
-      mockTaskExecutionsOverrides.current = [
+      seedRunTrace("run-wait-1", [
         execFor("run-wait-1", "exec-wait-1", {
           step_name: "approval",
           prompt: "Approve change?",
         }),
-      ];
+      ]);
       renderWithTaskOverrides({ run_controls: waitingControls() });
 
       const gate = screen.getByTestId("human-input-gate");
@@ -1061,17 +1077,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("offers Stop only when run_controls.stoppable is true", () => {
-      mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-1", "exec-wait-1"),
-      ];
+      seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
       renderWithTaskOverrides({ run_controls: waitingControls() });
       expect(screen.getByTestId("human-input-gate-stop")).toBeInTheDocument();
     });
 
     it("hides Stop when run_controls.stoppable is false", () => {
-      mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-2", "exec-wait-2"),
-      ];
+      seedRunTrace("run-wait-2", [execFor("run-wait-2", "exec-wait-2")]);
       renderWithTaskOverrides({ run_controls: notStoppableWaitingControls() });
       expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
       expect(
@@ -1080,9 +1092,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("does not expose any submit / approve / bypass action", () => {
-      mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-1", "exec-wait-1"),
-      ];
+      seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
       renderWithTaskOverrides({ run_controls: waitingControls() });
       const gate = screen.getByTestId("human-input-gate");
       expect(
@@ -1096,31 +1106,29 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("does not render the gate for wait_children waiting runs with custom step names", () => {
-      mockTaskExecutionsOverrides.current = [
+      seedRunTrace("run-wait-1", [
         execFor("run-wait-1", "exec-wait-1", {
           step_name: "wait",
           step_type: "wait_children",
         }),
-      ];
+      ]);
       renderWithTaskOverrides({ run_controls: waitingControls() });
       expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
     });
 
     it("renders the gate for human_input even when the display step name is wait_children", () => {
-      mockTaskExecutionsOverrides.current = [
+      seedRunTrace("run-wait-1", [
         execFor("run-wait-1", "exec-wait-1", {
           step_name: "wait_children",
           step_type: "human_input",
         }),
-      ];
+      ]);
       renderWithTaskOverrides({ run_controls: waitingControls() });
       expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
     });
 
     it("renders the review banner when a human_input wait is active", () => {
-      mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-1", "exec-wait-1"),
-      ];
+      seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
       renderWithTaskOverrides({
         step_name: "pending_review",
         step_type: "human_input",
@@ -1132,8 +1140,45 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
+    it("updates the human_input gate from live execution query changes without remount", async () => {
+      seedRunTrace("run-wait-1", []);
+      renderWithTaskOverrides({
+        step_name: "pending_review",
+        step_type: "human_input",
+        run_controls: waitingControls(),
+      });
+
+      expect(screen.getByTestId("human-input-gate")).toHaveAttribute(
+        "data-execution-id",
+        ""
+      );
+
+      act(() => {
+        upsertStepExecutionInQueryCache(
+          execFor("run-wait-1", "exec-wait-1", {
+            step_name: "approval",
+            prompt: "Approve change?",
+          }),
+          {
+            taskId: mockTaskData.id,
+            taskRunId: "run-wait-1",
+            generation: getProjectScopeGeneration(),
+          }
+        );
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("human-input-gate")).toHaveAttribute(
+          "data-execution-id",
+          "exec-wait-1"
+        );
+      });
+      expect(
+        screen.getByRole("region", { name: "Review gate" })
+      ).toBeInTheDocument();
+    });
+
     it("does not render the review banner solely from a pending_review step label", () => {
-      mockTaskExecutionsOverrides.current = [];
       renderWithTaskOverrides({
         step_name: "pending_review",
         step_type: "execute",
@@ -1147,15 +1192,12 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("does not render the gate when there is no active run", () => {
-      mockTaskExecutionsOverrides.current = [];
       renderWithTaskOverrides({ run_controls: null });
       expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
     });
 
     it("invokes stopRun with the active TaskRun id when Stop is clicked", () => {
-      mockTaskExecutionsOverrides.current = [
-        execFor("run-wait-1", "exec-wait-1"),
-      ];
+      seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
       vi.mocked(eventsModule.commands.stopRun).mockResolvedValue({
         status: "ok",
         data: null,

@@ -6,7 +6,8 @@ import {
   type StepExecutionStatus,
   type StepExecutionChangeType,
 } from "../bindings";
-import { useExecutionStore, useToastStore } from "../stores";
+import { upsertStepExecutionInQueryCache } from "../query";
+import { useToastStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -38,8 +39,8 @@ interface UseStepExecutionChangeListenerOptions {
 
 /**
  * Hook that listens to StepExecutionChangedEvent from Tauri and applies entity data
- * directly to the execution store. No REST refetch is needed since WS payloads
- * carry the full entity.
+ * directly to the execution query cache. No REST refetch is needed when WS
+ * payloads carry the full entity.
  *
  * @param options - Configuration options for the listener
  */
@@ -47,7 +48,6 @@ export function useStepExecutionChangeListener(
   options: UseStepExecutionChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const upsertExecution = useExecutionStore((state) => state.upsertExecution);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
 
@@ -55,8 +55,15 @@ export function useStepExecutionChangeListener(
     (event: { payload: StepExecutionChangedEvent }) => {
       if (projectScopeGeneration !== getProjectScopeGeneration()) return;
 
-      const { execution_id, task_id, step_name, status, change_type, execution } =
-        event.payload;
+      const {
+        execution_id,
+        task_id,
+        task_run_id,
+        step_name,
+        status,
+        change_type,
+        execution,
+      } = event.payload;
 
       console.debug(
         `[StepExecutionChangeListener] Execution ${execution_id.slice(0, 6)} ${change_type}: ${status}`
@@ -74,7 +81,11 @@ export function useStepExecutionChangeListener(
       );
 
       if (execution) {
-        upsertExecution(execution);
+        upsertStepExecutionInQueryCache(execution, {
+          taskId: task_id,
+          taskRunId: task_run_id || execution.task_run_id,
+          generation: projectScopeGeneration,
+        });
         return;
       }
 
@@ -85,12 +96,16 @@ export function useStepExecutionChangeListener(
           if (projectScopeGeneration !== getProjectScopeGeneration()) return;
           if (result.status !== "ok") return;
           for (const fetchedExecution of result.data) {
-            upsertExecution(fetchedExecution);
+            upsertStepExecutionInQueryCache(fetchedExecution, {
+              taskId: task_id,
+              taskRunId: fetchedExecution.task_run_id ?? null,
+              generation: projectScopeGeneration,
+            });
           }
         })
         .catch(() => {});
     },
-    [addToast, upsertExecution, projectScopeGeneration]
+    [addToast, projectScopeGeneration]
   );
 
   useEffect(() => {

@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { useChatStore } from "./chatStore";
-import { useExecutionStore } from "./executionStore";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
 import { useTaskRunStore } from "./taskRunStore";
@@ -37,7 +36,6 @@ export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.clear();
   useStepStore.getState().reset();
-  useExecutionStore.getState().reset();
   useTaskRunStore.getState().reset();
   useSessionLogStore.getState().reset();
   useChatStore.getState().reset();

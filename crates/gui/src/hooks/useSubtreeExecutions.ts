@@ -1,10 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { commands, type StepExecution } from "../bindings";
-import { useExecutionStore } from "../stores";
-import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../stores/projectScopedStores";
+import { useCallback, useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import type { StepExecution } from "../bindings";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useSessionLogStore } from "../stores/sessionLogStore";
 import { useTasks } from "./useTasks";
 import {
@@ -12,6 +9,7 @@ import {
   getDescendantTaskIds,
   type ExecutionRollups,
 } from "../utils";
+import { errorMessage, taskExecutionsQueryOptions } from "../query";
 
 export interface UseSubtreeExecutionsResult {
   executions: StepExecution[];
@@ -24,99 +22,46 @@ export interface UseSubtreeExecutionsResult {
 }
 
 // Live updates flow in via the app-wide `useStepExecutionChangeListener`,
-// which calls `upsertExecution` and writes through to the bucket cache —
-// this hook re-renders by subscribing to that bucket and filtering reads
-// to the subtree, rather than registering a second listener that would
-// race with the global one.
+// which writes through to the same by-task query keys used here.
 export function useSubtreeExecutions(
   rootTaskId: string | null | undefined
 ): UseSubtreeExecutionsResult {
   const { tasks } = useTasks();
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const subtreeTaskIds = useMemo(() => {
     if (!rootTaskId) return [];
     return getDescendantTaskIds(rootTaskId, tasks);
   }, [rootTaskId, tasks]);
 
-  const subtreeSetRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    subtreeSetRef.current = new Set(subtreeTaskIds);
-  }, [subtreeTaskIds]);
+  const subtreeSet = useMemo(() => new Set(subtreeTaskIds), [subtreeTaskIds]);
 
   const isInSubtree = useCallback(
     (taskId: string | null | undefined): boolean =>
-      !!taskId && subtreeSetRef.current.has(taskId),
-    []
+      !!taskId && subtreeSet.has(taskId),
+    [subtreeSet]
   );
 
-  const setExecutionsForTask = useExecutionStore(
-    (state) => state.setExecutionsForTask
-  );
-  const executionsByTaskId = useExecutionStore(
-    (state) => state.executionsByTaskId
-  );
+  const executionQueries = useQueries({
+    queries: subtreeTaskIds.map((taskId) =>
+      taskExecutionsQueryOptions(projectScopeGeneration, taskId)
+    ),
+    combine: (results) => ({
+      executions: results.flatMap((query) => query.data ?? []),
+      firstError: results.find((query) => query.error)?.error,
+      isLoading: results.some((query) => query.isLoading),
+      refetch: () => {
+        void Promise.all(results.map((query) => query.refetch()));
+      },
+    }),
+  });
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const fetchSeqRef = useRef(0);
-
-  const fetchAll = useCallback(async () => {
-    if (subtreeTaskIds.length === 0) {
-      setError(null);
-      return;
-    }
-    const seq = ++fetchSeqRef.current;
-    const projectScopeGeneration = getProjectScopeGeneration();
-    setIsLoading(true);
-    setError(null);
-    try {
-      const results = await Promise.all(
-        subtreeTaskIds.map((id) =>
-          commands.getTaskExecutions(id).then((r) => ({ id, r }))
-        )
-      );
-      if (
-        seq !== fetchSeqRef.current ||
-        !isCurrentProjectScopeGeneration(projectScopeGeneration)
-      ) {
-        return;
-      }
-      let firstError: string | null = null;
-      for (const { id, r } of results) {
-        if (r.status === "ok") {
-          setExecutionsForTask(id, r.data);
-        } else if (!firstError) {
-          firstError = r.error.message;
-        }
-      }
-      if (firstError) setError(firstError);
-    } catch (e) {
-      if (
-        seq === fetchSeqRef.current &&
-        isCurrentProjectScopeGeneration(projectScopeGeneration)
-      ) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      if (seq === fetchSeqRef.current) {
-        setIsLoading(false);
-      }
-    }
-  }, [subtreeTaskIds, setExecutionsForTask]);
-
-  useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
-
-  const executions = useMemo(() => {
-    if (subtreeTaskIds.length === 0) return [];
-    const merged: StepExecution[] = [];
-    for (const taskId of subtreeTaskIds) {
-      const bucket = executionsByTaskId[taskId];
-      if (bucket) merged.push(...bucket);
-    }
-    return merged;
-  }, [subtreeTaskIds, executionsByTaskId]);
+  const executions = executionQueries.executions;
+  const firstError = executionQueries.firstError;
+  const isLoading = executionQueries.isLoading;
+  const refetch = useCallback(() => {
+    executionQueries.refetch();
+  }, [executionQueries]);
 
   const logsByExecutionId = useSessionLogStore(
     (state) => state.logsByExecutionId
@@ -131,8 +76,8 @@ export function useSubtreeExecutions(
     executions,
     rollups,
     isLoading,
-    error,
-    refetch: fetchAll,
+    error: firstError ? errorMessage(firstError) : null,
+    refetch,
     subtreeTaskIds,
     isInSubtree,
   };

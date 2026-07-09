@@ -2,10 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
-import { useExecutionStore } from "../stores/executionStore";
 import { createMockTask, createMockTaskRun } from "../test/test-utils";
-import type { TaskRun, TaskRunStatus } from "../bindings";
-import { queryClient } from "../query/queryClient";
+import type { StepExecution, TaskRun, TaskRunStatus } from "../bindings";
+import { queryClient, queryKeys } from "../query";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 
 const mockListTasks = vi.fn();
 const mockGetTaskExecutions = vi.fn();
@@ -49,10 +52,17 @@ function withActiveRun(
 describe("useOperationsData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useExecutionStore.setState({ executions: [] });
+    resetProjectScopedStores();
     mockListTasks.mockResolvedValue({ status: "ok", data: [] });
     mockGetTaskExecutions.mockResolvedValue({ status: "ok", data: [] });
   });
+
+  function seedTaskExecutions(taskId: string, executions: StepExecution[]) {
+    queryClient.setQueryData(
+      queryKeys.executions.byTask(getProjectScopeGeneration(), taskId),
+      executions
+    );
+  }
 
   it("derives a failed_run attention item from run_controls.active_run with status=failed", async () => {
     const failedTask = createMockTask({
@@ -98,16 +108,18 @@ describe("useOperationsData", () => {
     });
 
     act(() => {
-      useExecutionStore.getState().upsertExecution({
-        id: "exec-failed",
-        task_id: "t-stale",
-        task_run_id: null,
-        workflow_id: "wf-1",
-        step_name: "build",
-        started_at: "2025-01-01T00:00:00Z",
-        completed_at: "2025-01-01T00:01:00Z",
-        status: "failed",
-      });
+      seedTaskExecutions("t-stale", [
+        {
+          id: "exec-failed",
+          task_id: "t-stale",
+          task_run_id: "run-t-stale",
+          workflow_id: "wf-1",
+          step_name: "build",
+          started_at: "2025-01-01T00:00:00Z",
+          completed_at: "2025-01-01T00:01:00Z",
+          status: "failed",
+        },
+      ]);
     });
 
     expect(
@@ -181,19 +193,173 @@ describe("useOperationsData", () => {
     });
 
     act(() => {
-      useExecutionStore.getState().upsertExecution({
-        id: "exec-running",
-        task_id: "t-idle",
-        task_run_id: null,
-        workflow_id: "wf-1",
-        step_name: "in_progress",
-        started_at: "2025-01-01T00:00:00Z",
-        completed_at: null,
-        status: "in_progress",
-      });
+      seedTaskExecutions("t-idle", [
+        {
+          id: "exec-running",
+          task_id: "t-idle",
+          task_run_id: null,
+          workflow_id: "wf-1",
+          step_name: "in_progress",
+          started_at: "2025-01-01T00:00:00Z",
+          completed_at: null,
+          status: "in_progress",
+        },
+      ]);
     });
 
     expect(result.current.liveItems).toHaveLength(0);
+  });
+
+  it("derives recently completed items from by-task execution queries", async () => {
+    const completedTask = createMockTask({
+      id: "t-completed",
+      title: "Completed Task",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-completed", "completed"),
+    });
+    const execution: StepExecution = {
+      id: "exec-completed",
+      task_id: "t-completed",
+      task_run_id: "run-t-completed",
+      workflow_id: "wf-1",
+      step_name: "implement",
+      started_at: "2025-01-01T00:00:00Z",
+      completed_at: "2025-01-01T00:01:00Z",
+      status: "completed",
+    };
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [completedTask],
+    });
+    mockGetTaskExecutions.mockResolvedValue({
+      status: "ok",
+      data: [execution],
+    });
+
+    const { result } = renderOperationsDataHook();
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetTaskExecutions).toHaveBeenCalledWith("t-completed");
+    expect(result.current.completedItems).toEqual([
+      { task: completedTask, execution },
+    ]);
+  });
+
+  it("keeps recently completed items from previously observed execution queries", async () => {
+    const completedTask = createMockTask({
+      id: "t-completed",
+      title: "Completed Task",
+      workflow_id: "wf-1",
+      run_controls: null,
+    });
+    const execution: StepExecution = {
+      id: "exec-completed",
+      task_id: "t-completed",
+      task_run_id: "run-t-completed",
+      workflow_id: "wf-1",
+      step_name: "implement",
+      started_at: "2025-01-01T00:00:00Z",
+      completed_at: "2025-01-01T00:01:00Z",
+      status: "completed",
+    };
+
+    seedTaskExecutions("t-completed", [execution]);
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [completedTask],
+    });
+    mockGetTaskExecutions.mockResolvedValue({
+      status: "ok",
+      data: [execution],
+    });
+
+    const { result } = renderOperationsDataHook();
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetTaskExecutions).not.toHaveBeenCalled();
+    expect(result.current.completedItems).toEqual([
+      { task: completedTask, execution },
+    ]);
+  });
+
+  it("refetches remembered completed executions after the query cache entry is removed", async () => {
+    const activeTask = createMockTask({
+      id: "t-completed",
+      title: "Completed Task",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-completed", "completed"),
+    });
+    const idleTask = createMockTask({
+      ...activeTask,
+      run_controls: null,
+    });
+    const execution: StepExecution = {
+      id: "exec-completed",
+      task_id: "t-completed",
+      task_run_id: "run-t-completed",
+      workflow_id: "wf-1",
+      step_name: "implement",
+      started_at: "2025-01-01T00:00:00Z",
+      completed_at: "2025-01-01T00:01:00Z",
+      status: "completed",
+    };
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [activeTask],
+    });
+    mockGetTaskExecutions.mockResolvedValue({
+      status: "ok",
+      data: [execution],
+    });
+
+    const firstRender = renderOperationsDataHook();
+
+    await waitFor(() => {
+      expect(firstRender.result.current.isLoading).toBe(false);
+    });
+    expect(firstRender.result.current.completedItems).toEqual([
+      { task: activeTask, execution },
+    ]);
+
+    firstRender.unmount();
+    queryClient.removeQueries({
+      queryKey: queryKeys.tasks.lists(getProjectScopeGeneration()),
+    });
+    queryClient.removeQueries({
+      queryKey: queryKeys.executions.byTask(
+        getProjectScopeGeneration(),
+        "t-completed"
+      ),
+      exact: true,
+    });
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [idleTask],
+    });
+    mockGetTaskExecutions.mockClear();
+    mockGetTaskExecutions.mockResolvedValue({
+      status: "ok",
+      data: [execution],
+    });
+
+    const secondRender = renderOperationsDataHook();
+
+    await waitFor(() => {
+      expect(secondRender.result.current.isLoading).toBe(false);
+    });
+
+    expect(mockGetTaskExecutions).toHaveBeenCalledWith("t-completed");
+    expect(secondRender.result.current.completedItems).toEqual([
+      { task: idleTask, execution },
+    ]);
   });
 
   it("includes a task in readyTasks when run_controls.runnable is true and no active run", async () => {

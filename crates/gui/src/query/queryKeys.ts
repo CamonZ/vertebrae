@@ -26,4 +26,12 @@ export const queryKeys = {
     detail: (generation: number, id: string) =>
       [...queryKeys.workflows.details(generation), id] as const,
   },
+  executions: {
+    all: (generation: number) =>
+      [...queryKeys.project(generation), "executions"] as const,
+    byTask: (generation: number, taskId: string) =>
+      [...queryKeys.executions.all(generation), "byTask", taskId] as const,
+    byRun: (generation: number, runId: string) =>
+      [...queryKeys.executions.all(generation), "byRun", runId] as const,
+  },
 };

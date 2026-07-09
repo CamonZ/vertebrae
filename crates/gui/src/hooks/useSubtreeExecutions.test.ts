@@ -13,14 +13,17 @@ vi.mock("../bindings", () => ({
 }));
 
 import { useSubtreeExecutions } from "./useSubtreeExecutions";
-import { useExecutionStore } from "../stores/executionStore";
 import { createMockTask } from "../test/test-utils";
 import type { StepExecution, Task } from "../bindings";
 import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
-import { queryClient, queryKeys } from "../query";
+import {
+  queryClient,
+  queryKeys,
+  upsertStepExecutionInQueryCache,
+} from "../query";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(QueryClientProvider, { client: queryClient }, children);
@@ -42,7 +45,6 @@ describe("useSubtreeExecutions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProjectScopedStores();
-    useExecutionStore.setState({ executions: [], executionsByTaskId: {} });
   });
 
   function seedTree() {
@@ -132,7 +134,7 @@ describe("useSubtreeExecutions", () => {
     expect(maxConcurrent).toBe(4);
   });
 
-  it("recomputes rollups when a global upsertExecution writes a subtree task", async () => {
+  it("recomputes rollups when a server-cache upsert writes a subtree task", async () => {
     seedTree();
     mockGetTaskExecutions.mockImplementation((taskId: string) =>
       Promise.resolve({
@@ -161,7 +163,7 @@ describe("useSubtreeExecutions", () => {
     expect(result.current.rollups.totalCost).toBeCloseTo(0.4, 10);
 
     act(() => {
-      useExecutionStore.getState().upsertExecution(
+      upsertStepExecutionInQueryCache(
         exec({
           id: "new-exec",
           task_id: "task-1",
@@ -171,7 +173,12 @@ describe("useSubtreeExecutions", () => {
           input_tokens: 100,
           output_tokens: 200,
           duration_ms: 5000,
-        })
+        }),
+        {
+          taskId: "task-1",
+          taskRunId: "run-task-1",
+          generation: getProjectScopeGeneration(),
+        }
       );
     });
 
@@ -193,11 +200,10 @@ describe("useSubtreeExecutions", () => {
     expect(result.current.executions).toHaveLength(0);
 
     act(() => {
-      useExecutionStore
-        .getState()
-        .upsertExecution(
-          exec({ id: "stray", task_id: "unrelated", cost: "99" })
-        );
+      queryClient.setQueryData(
+        queryKeys.executions.byTask(getProjectScopeGeneration(), "unrelated"),
+        [exec({ id: "stray", task_id: "unrelated", cost: "99" })]
+      );
     });
 
     expect(result.current.executions).toHaveLength(0);

@@ -82,7 +82,7 @@ async initializeProject(path: string, name: string | null) : Promise<Result<Init
 },
 /**
  * Add a project to the saved list
- * 
+ *
  * Takes a directory path, derives a slug from the folder name,
  * creates the project in Sacrum API if needed, and registers in global config.
  */
@@ -96,7 +96,7 @@ async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
 },
 /**
  * Remove a project from the saved list
- * 
+ *
  * Removes the project from config.toml by slug. If the removed project
  * is the currently selected project, clears the selection and services.
  */
@@ -614,7 +614,10 @@ async getTaskRuns(taskId: string) : Promise<Result<TaskRun[], CommandError>> {
 }
 },
 /**
- * Get the recursive trace tree for a root TaskRun.
+ * Get the trace for a single TaskRun.
+ *
+ * `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
+ * id and returns that run's scoped trace.
  */
 async getTaskRunTrace(rootTaskRunId: string) : Promise<Result<TaskRunTrace, CommandError>> {
     try {
@@ -1544,7 +1547,7 @@ export type StepExecutionChangeType = "Created" | "StatusChanged"
  * Emitted when a step execution is created or its status changes.
  * For create/update events, `execution` carries the full deserialized entity.
  */
-export type StepExecutionChangedEvent = { execution_id: string; task_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType; execution: StepExecution | null }
+export type StepExecutionChangedEvent = { execution_id: string; task_id: string; task_run_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType; execution: StepExecution | null }
 /**
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
@@ -1780,7 +1783,7 @@ outcome_context: JsonValue | null;
  */
 parent_task_run_id: string | null; 
 /**
- * Root TaskRun ID for recursive traces
+ * Ancestor TaskRun ID recorded by Sacrum, when this run belongs to a run tree
  */
 root_task_run_id: string | null; 
 /**
@@ -1827,7 +1830,7 @@ export type TaskRunStatus = "queued" | "executing" | "waiting" | "stopping" | "s
  */
 export type TaskRunStepChangedEvent = { task_run_id: string; task_id: string; from_step_id: string | null; to_step_id: string | null; status: TaskRunStatus; level: TaskLevel }
 /**
- * Trace tree rooted at a TaskRun.
+ * Trace data scoped to a single TaskRun.
  */
 export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; step_executions?: StepExecution[]; session_logs?: SessionLog[] }
 /**
