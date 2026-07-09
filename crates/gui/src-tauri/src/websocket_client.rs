@@ -1295,6 +1295,20 @@ impl SacrumSocket {
             .unwrap_or("")
             .to_string();
 
+        let normalized = normalize_step_execution_payload(payload);
+        let execution = try_deserialize::<types::StepExecution>(&normalized, "StepExecution");
+
+        let task_run_id = payload
+            .get("task_run_id")
+            .and_then(|v| v.as_str())
+            .or_else(|| {
+                execution
+                    .as_ref()
+                    .and_then(|execution| execution.task_run_id.as_deref())
+            })
+            .unwrap_or("")
+            .to_string();
+
         let workflow_id = payload
             .get("workflow_id")
             .and_then(|v| v.as_str())
@@ -1320,12 +1334,10 @@ impl SacrumSocket {
             _ => StepExecutionChangeType::Created,
         };
 
-        let normalized = normalize_step_execution_payload(payload);
-        let execution = try_deserialize::<types::StepExecution>(&normalized, "StepExecution");
-
         let event = StepExecutionChangedEvent {
             execution_id,
             task_id,
+            task_run_id,
             workflow_id,
             step_name,
             status,

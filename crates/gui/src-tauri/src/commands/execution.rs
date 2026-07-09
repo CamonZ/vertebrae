@@ -137,7 +137,10 @@ pub async fn get_task_runs(
     Ok(runs.into_iter().map(Into::into).collect())
 }
 
-/// Get the recursive trace tree for a root TaskRun.
+/// Get the trace for a single TaskRun.
+///
+/// `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
+/// id and returns that run's scoped trace.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_task_run_trace(
@@ -145,7 +148,7 @@ pub async fn get_task_run_trace(
     root_task_run_id: String,
 ) -> Result<TaskRunTrace, CommandError> {
     log::info!(
-        "get_task_run_trace called for root task run: {}",
+        "get_task_run_trace called for task run: {}",
         root_task_run_id
     );
     let service_guard = state.services.read().await;

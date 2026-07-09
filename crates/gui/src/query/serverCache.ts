@@ -1,7 +1,9 @@
 import type {
   Section,
+  StepExecution,
   Task,
   TaskFilterOptions,
+  TaskRunTrace,
   TaskRunControls,
   Workflow,
   WorkflowWithTasks,
@@ -18,6 +20,12 @@ import { queryKeys } from "./queryKeys";
 type TaskListKey = ReturnType<typeof queryKeys.tasks.list>;
 type WorkflowDetailKey = ReturnType<typeof queryKeys.workflows.detail>;
 const TASK_LIST_KEY_LENGTH = queryKeys.tasks.list(0, null).length;
+
+interface UpsertStepExecutionOptions {
+  taskId?: string | null;
+  taskRunId?: string | null;
+  generation?: number;
+}
 
 function taskListFilterFromKey(
   key: readonly unknown[]
@@ -88,6 +96,114 @@ function mapReadyTasks(
     queryKeys.tasks.ready(generation),
     (tasks) => tasks?.map(mapTask)
   );
+}
+
+function queryEntryExists(queryKey: readonly unknown[]): boolean {
+  return Boolean(queryClient.getQueryCache().find({ queryKey, exact: true }));
+}
+
+function setExistingQueryData<T>(
+  queryKey: readonly unknown[],
+  updater: (value: T | undefined) => T | undefined
+): void {
+  if (!queryEntryExists(queryKey)) return;
+  queryClient.setQueryData<T | undefined>(queryKey, updater);
+}
+
+export function upsertStepExecutionInList(
+  executions: readonly StepExecution[],
+  execution: StepExecution
+): StepExecution[] {
+  const executionId = execution.id;
+  if (!executionId) return [...executions, execution];
+
+  const index = executions.findIndex((item) => item.id === executionId);
+  if (index === -1) return [...executions, execution];
+
+  const next = executions.slice();
+  next[index] = execution;
+  return next;
+}
+
+export function mergeFetchedStepExecutions(
+  fetchedExecutions: readonly StepExecution[],
+  currentExecutions: readonly StepExecution[] | undefined,
+  executionsAtFetchStart: readonly StepExecution[] | undefined
+): StepExecution[] {
+  const currentById = new Map(
+    (currentExecutions ?? [])
+      .filter((execution) => execution.id)
+      .map((execution) => [execution.id!, execution])
+  );
+  const atFetchStartById = new Map(
+    (executionsAtFetchStart ?? [])
+      .filter((execution) => execution.id)
+      .map((execution) => [execution.id!, execution])
+  );
+  const fetchedIds = new Set<string>();
+
+  const merged = fetchedExecutions.map((execution) => {
+    if (!execution.id) return execution;
+    fetchedIds.add(execution.id);
+    const current = currentById.get(execution.id);
+    const atFetchStart = atFetchStartById.get(execution.id);
+    return current && current !== atFetchStart ? current : execution;
+  });
+
+  for (const execution of currentExecutions ?? []) {
+    if (!execution.id) continue;
+    if (fetchedIds.has(execution.id)) continue;
+    if (execution === atFetchStartById.get(execution.id)) continue;
+    merged.push(execution);
+  }
+
+  return merged;
+}
+
+export function mergeFetchedTaskRunTrace(
+  fetchedTrace: TaskRunTrace,
+  currentTrace: TaskRunTrace | undefined,
+  traceAtFetchStart: TaskRunTrace | undefined
+): TaskRunTrace {
+  return {
+    ...fetchedTrace,
+    step_executions: mergeFetchedStepExecutions(
+      fetchedTrace.step_executions ?? [],
+      currentTrace?.step_executions,
+      traceAtFetchStart?.step_executions
+    ),
+  };
+}
+
+export function upsertStepExecutionInQueryCache(
+  execution: StepExecution,
+  options: UpsertStepExecutionOptions = {}
+) {
+  const generation = options.generation ?? getProjectScopeGeneration();
+  const taskId = options.taskId ?? execution.task_id ?? null;
+  const taskRunId = options.taskRunId ?? execution.task_run_id ?? null;
+
+  if (taskId) {
+    setExistingQueryData<StepExecution[]>(
+      queryKeys.executions.byTask(generation, taskId),
+      (executions) => upsertStepExecutionInList(executions ?? [], execution)
+    );
+  }
+
+  if (taskRunId) {
+    setExistingQueryData<TaskRunTrace>(
+      queryKeys.executions.byRun(generation, taskRunId),
+      (trace) => ({
+        root_task_run_id: trace?.root_task_run_id ?? taskRunId,
+        task_runs: trace?.task_runs ?? [],
+        step_executions: upsertStepExecutionInList(
+          trace?.step_executions ?? [],
+          execution
+        ),
+        session_logs: [],
+      })
+    );
+  }
 }
 
 export function upsertTaskInQueryCache(

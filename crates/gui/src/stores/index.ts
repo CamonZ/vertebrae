@@ -2,9 +2,6 @@
 export { useStepStore } from "./stepStore";
 export type { StepStore } from "./stepStore";
 
-export { useExecutionStore } from "./executionStore";
-export type { ExecutionStore } from "./executionStore";
-
 export { useTaskRunStore } from "./taskRunStore";
 export type { TaskRunStore } from "./taskRunStore";
 

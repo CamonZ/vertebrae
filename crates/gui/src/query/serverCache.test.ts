@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   Section,
+  TaskRunTrace,
   TaskFilterOptions,
   WorkflowWithTasks,
 } from "../bindings";
 import {
+  createMockStepExecution,
   createMockTask,
   createMockTaskRun,
   createMockTaskRunControls,
@@ -17,6 +19,7 @@ import {
   removeWorkflowFromQueryCache,
   replaceTaskRunControlsInQueryCache,
   updateTaskSectionsInQueryCache,
+  upsertStepExecutionInQueryCache,
   upsertTaskInQueryCache,
   upsertWorkflowInQueryCache,
 } from "./serverCache";
@@ -41,6 +44,91 @@ describe("server cache helpers", () => {
     ...ticketFilter,
     levels: ["epic"],
   };
+
+  it("upserts step executions into existing by-task and by-run entries", () => {
+    const generation = 22;
+    const original = createMockStepExecution({
+      id: "exec-1",
+      task_id: "task-1",
+      task_run_id: "run-1",
+      status: "in_progress",
+    });
+    const updated = createMockStepExecution({
+      ...original,
+      status: "completed",
+      completed_at: "2026-01-01T00:10:00.000Z",
+    });
+    const otherGenerationExecution = createMockStepExecution({
+      id: "exec-other",
+      task_id: "task-1",
+      task_run_id: "run-1",
+    });
+    const trace: TaskRunTrace = {
+      root_task_run_id: "run-1",
+      task_runs: [],
+      step_executions: [original],
+      session_logs: [],
+    };
+
+    queryClient.setQueryData(
+      queryKeys.executions.byTask(generation, "task-1"),
+      [original]
+    );
+    queryClient.setQueryData(
+      queryKeys.executions.byRun(generation, "run-1"),
+      trace
+    );
+    queryClient.setQueryData(
+      queryKeys.executions.byTask(generation + 1, "task-1"),
+      [otherGenerationExecution]
+    );
+
+    upsertStepExecutionInQueryCache(updated, {
+      taskId: "task-1",
+      taskRunId: "run-1",
+      generation,
+    });
+
+    expect(
+      queryClient.getQueryData(
+        queryKeys.executions.byTask(generation, "task-1")
+      )
+    ).toEqual([updated]);
+    expect(
+      queryClient.getQueryData<TaskRunTrace>(
+        queryKeys.executions.byRun(generation, "run-1")
+      )
+    ).toEqual({ ...trace, step_executions: [updated] });
+    expect(
+      queryClient.getQueryData(
+        queryKeys.executions.byTask(generation + 1, "task-1")
+      )
+    ).toEqual([otherGenerationExecution]);
+  });
+
+  it("does not create absent execution query entries from live upserts", () => {
+    const generation = 23;
+    const execution = createMockStepExecution({
+      id: "exec-1",
+      task_id: "task-1",
+      task_run_id: "run-1",
+    });
+
+    upsertStepExecutionInQueryCache(execution, {
+      taskId: "task-1",
+      taskRunId: "run-1",
+      generation,
+    });
+
+    expect(
+      queryClient.getQueryData(
+        queryKeys.executions.byTask(generation, "task-1")
+      )
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.executions.byRun(generation, "run-1"))
+    ).toBeUndefined();
+  });
 
   it("upserts tasks into matching lists and detail cache", () => {
     const generation = 12;
@@ -82,9 +170,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, epicFilter))
     ).toEqual([taskOutsideFilter]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([taskOutsideFilter]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [taskOutsideFilter]
+    );
   });
 
   it("merges existing tasks without duplicating the first list entry", () => {
@@ -105,18 +193,16 @@ describe("server cache helpers", () => {
     queryClient.setQueryData(queryKeys.tasks.list(generation, ticketFilter), [
       existingTask,
     ]);
-    queryClient.setQueryData(queryKeys.tasks.ready(generation), [
-      existingTask,
-    ]);
+    queryClient.setQueryData(queryKeys.tasks.ready(generation), [existingTask]);
 
     upsertTaskInQueryCache(update, generation);
 
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, ticketFilter))
     ).toEqual([{ ...existingTask, ...update, tags: [] }]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([{ ...existingTask, ...update, tags: [] }]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [{ ...existingTask, ...update, tags: [] }]
+    );
   });
 
   it("merges detail cache entries without wiping omitted hydrated fields", () => {
@@ -160,7 +246,9 @@ describe("server cache helpers", () => {
     upsertTaskInQueryCache(update, generation);
 
     expect(
-      queryClient.getQueryData(queryKeys.tasks.detail(generation, existingTask.id))
+      queryClient.getQueryData(
+        queryKeys.tasks.detail(generation, existingTask.id)
+      )
     ).toEqual({
       ...existingTask,
       ...update,
@@ -186,9 +274,9 @@ describe("server cache helpers", () => {
 
     upsertTaskInQueryCache(task, generation);
 
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([otherTask, task]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [otherTask, task]
+    );
   });
 
   it("leaves loading list queries undefined during cache patches", () => {
@@ -251,9 +339,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([otherTask]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([otherTask]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [otherTask]
+    );
   });
 
   it("replaces task run controls in detail and list caches", () => {
@@ -282,9 +370,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([{ ...task, run_controls: runControls }, otherTask]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [{ ...task, run_controls: runControls }, otherTask]
+    );
   });
 
   it("updates task sections in detail and list caches", () => {
@@ -330,9 +418,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([{ ...task, sections: [updatedSection] }, otherTask]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([{ ...task, sections: [updatedSection] }, otherTask]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [{ ...task, sections: [updatedSection] }, otherTask]
+    );
 
     updateTaskSectionsInQueryCache(
       task.id,
@@ -347,9 +435,9 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.tasks.list(generation, null))
     ).toEqual([{ ...task, sections: [] }, otherTask]);
-    expect(
-      queryClient.getQueryData(queryKeys.tasks.ready(generation))
-    ).toEqual([{ ...task, sections: [] }, otherTask]);
+    expect(queryClient.getQueryData(queryKeys.tasks.ready(generation))).toEqual(
+      [{ ...task, sections: [] }, otherTask]
+    );
   });
 
   it("upserts workflows into list cache and existing matching detail caches", () => {

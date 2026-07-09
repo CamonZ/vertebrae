@@ -25,12 +25,7 @@ describe("queryKeys", () => {
       "list",
       filter,
     ]);
-    expect(queryKeys.tasks.ready(3)).toEqual([
-      "project",
-      3,
-      "tasks",
-      "ready",
-    ]);
+    expect(queryKeys.tasks.ready(3)).toEqual(["project", 3, "tasks", "ready"]);
     expect(queryKeys.tasks.details(3)).toEqual([
       "project",
       3,
@@ -66,6 +61,24 @@ describe("queryKeys", () => {
       "workflows",
       "detail",
       "workflow-1",
+    ]);
+  });
+
+  it("builds project-scoped execution keys", () => {
+    expect(queryKeys.executions.all(5)).toEqual(["project", 5, "executions"]);
+    expect(queryKeys.executions.byTask(5, "task-1")).toEqual([
+      "project",
+      5,
+      "executions",
+      "byTask",
+      "task-1",
+    ]);
+    expect(queryKeys.executions.byRun(5, "run-1")).toEqual([
+      "project",
+      5,
+      "executions",
+      "byRun",
+      "run-1",
     ]);
   });
 });

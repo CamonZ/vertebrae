@@ -154,6 +154,7 @@ pub struct TaskRunStepChangedEvent {
 pub struct StepExecutionChangedEvent {
     pub execution_id: String,
     pub task_id: String,
+    pub task_run_id: String,
     pub workflow_id: String,
     pub step_name: String,
     pub status: StepExecutionStatus,

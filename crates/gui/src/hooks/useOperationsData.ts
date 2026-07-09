@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef } from "react";
-import { commands, type Task, type TaskFilterOptions } from "../bindings";
-import { useExecutionStore } from "../stores";
-import {
-  getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
-} from "../stores/projectScopedStores";
+import { useCallback, useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
+import type { Task, TaskFilterOptions } from "../bindings";
+import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useTasks } from "./useTasks";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
 import { deriveActiveTaskRuns, isActiveRunStatus } from "../utils/runState";
+import {
+  errorMessage,
+  queryClient,
+  queryKeys,
+  taskExecutionsQueryOptions,
+} from "../query";
 
 const ALL_TASKS_FILTER: TaskFilterOptions = {
   step_names: null,
@@ -32,65 +35,89 @@ interface OperationsData {
   refetch: () => void;
 }
 
+const observedExecutionTaskIdsByGeneration = new Map<number, Set<string>>();
+
+function observedExecutionTaskIds(generation: number): Set<string> {
+  for (const existingGeneration of observedExecutionTaskIdsByGeneration.keys()) {
+    if (existingGeneration !== generation) {
+      observedExecutionTaskIdsByGeneration.delete(existingGeneration);
+    }
+  }
+
+  const existing = observedExecutionTaskIdsByGeneration.get(generation);
+  if (existing) return existing;
+  const created = new Set<string>();
+  observedExecutionTaskIdsByGeneration.set(generation, created);
+  return created;
+}
+
+function hasTaskExecutionsQuery(generation: number, taskId: string): boolean {
+  return Boolean(
+    queryClient.getQueryCache().find({
+      queryKey: queryKeys.executions.byTask(generation, taskId),
+      exact: true,
+    })
+  );
+}
+
 /**
  * Hook that aggregates data for the Operations dashboard.
  *
  * Uses TanStack Query for task server state:
  * - useTasks() fetches the task list
- * - GlobalListeners keeps query task data and ExecutionStore live via WebSocket
- * - Executions for active tasks are seeded on mount
+ * - GlobalListeners keeps task and execution query data live via WebSocket
+ * - Executions for active or previously observed runs are read from by-task queries
  * - Sections are derived from query task data
  */
 export function useOperationsData(): OperationsData {
-  const { tasks, isLoading, error, refetch } = useTasks(ALL_TASKS_FILTER);
-  const executions = useExecutionStore((s) => s.executions);
-  const upsertExecution = useExecutionStore((s) => s.upsertExecution);
+  const {
+    tasks,
+    isLoading: tasksLoading,
+    error: tasksError,
+    refetch: refetchTasks,
+  } = useTasks(ALL_TASKS_FILTER);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
-  const activeTaskIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const t of tasks) {
-      if (isActiveRunStatus(t.run_controls?.active_run?.status ?? null)) {
-        ids.push(t.id);
+  const executionTaskIds = useMemo(() => {
+    const observedTaskIds = observedExecutionTaskIds(projectScopeGeneration);
+    const taskIds: string[] = [];
+
+    for (const task of tasks) {
+      if (
+        task.run_controls?.active_run != null ||
+        hasTaskExecutionsQuery(projectScopeGeneration, task.id)
+      ) {
+        observedTaskIds.add(task.id);
+      }
+
+      if (observedTaskIds.has(task.id)) {
+        taskIds.push(task.id);
       }
     }
-    return ids;
-  }, [tasks]);
 
-  const seededTaskIdsRef = useRef<Set<string>>(new Set());
+    return taskIds;
+  }, [projectScopeGeneration, tasks]);
 
-  useEffect(() => {
-    const newlyActive = activeTaskIds.filter(
-      (id) => !seededTaskIdsRef.current.has(id)
-    );
-    if (newlyActive.length === 0) return;
+  const executionQueries = useQueries({
+    queries: executionTaskIds.map((taskId) =>
+      taskExecutionsQueryOptions(projectScopeGeneration, taskId)
+    ),
+    combine: (results) => ({
+      executions: results.flatMap((query) => query.data ?? []),
+      firstError: results.find((query) => query.error)?.error,
+      isLoading: results.some((query) => query.isLoading),
+      refetch: () => {
+        void Promise.all(results.map((query) => query.refetch()));
+      },
+    }),
+  });
 
-    let cancelled = false;
-    const projectScopeGeneration = getProjectScopeGeneration();
-    for (const id of newlyActive) seededTaskIdsRef.current.add(id);
+  const executions = executionQueries.executions;
 
-    (async () => {
-      const results = await Promise.all(
-        newlyActive.map((id) =>
-          commands
-            .getTaskExecutions(id)
-            .then((r) => (r.status === "ok" ? r.data : []))
-        )
-      );
-      if (
-        cancelled ||
-        !isCurrentProjectScopeGeneration(projectScopeGeneration)
-      ) {
-        return;
-      }
-      for (const list of results) {
-        for (const exec of list) upsertExecution(exec);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTaskIds, upsertExecution]);
+  const refetch = useCallback(() => {
+    refetchTasks();
+    executionQueries.refetch();
+  }, [executionQueries, refetchTasks]);
 
   // Build a task lookup map for joining executions to tasks
   const taskMap = useMemo(() => {
@@ -137,6 +164,8 @@ export function useOperationsData(): OperationsData {
       .filter((item): item is CompletedItem => item != null);
   }, [executions, taskMap]);
 
+  const firstExecutionError = executionQueries.firstError;
+
   const readyTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
       if (t.archived) return false;
@@ -169,8 +198,10 @@ export function useOperationsData(): OperationsData {
     liveItems,
     completedItems,
     readyTasks,
-    isLoading,
-    error,
+    isLoading: tasksLoading || executionQueries.isLoading,
+    error:
+      tasksError ??
+      (firstExecutionError ? errorMessage(firstExecutionError) : null),
     refetch,
   };
 }

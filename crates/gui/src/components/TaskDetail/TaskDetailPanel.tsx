@@ -3,7 +3,7 @@ import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTasks } from "../../hooks/useTasks";
-import { useTaskExecutions } from "../../hooks/useTaskExecutions";
+import { useRunTrace } from "../../hooks/useRunTrace";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
@@ -151,8 +151,12 @@ export function TaskDetailPanel({
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
-  const { executions: taskExecutions } = useTaskExecutions(taskId);
   const { tasks: allTasks } = useTasks();
+  const activeRun = taskData?.run_controls?.active_run ?? null;
+  const { stepExecutions: activeRunExecutions } = useRunTrace(
+    taskId,
+    activeRun?.id
+  );
   const {
     isDeleteDialogOpen,
     openDeleteDialog,
@@ -254,14 +258,10 @@ export function TaskDetailPanel({
     [taskData?.sections]
   );
 
-  const activeRun = taskData?.run_controls?.active_run ?? null;
   const humanInputGate = useMemo(() => {
     if (!activeRun) return null;
-    const runExecs = taskExecutions.filter(
-      (e) => e.task_run_id === activeRun.id
-    );
-    return resolveHumanInputGate(activeRun, runExecs);
-  }, [activeRun, taskExecutions]);
+    return resolveHumanInputGate(activeRun, activeRunExecutions);
+  }, [activeRun, activeRunExecutions]);
 
   const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refetchRef = useRef(refetch);

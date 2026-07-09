@@ -9,7 +9,6 @@ import {
   createMockWorkflow,
 } from "../test/test-utils";
 import { useChatStore } from "./chatStore";
-import { useExecutionStore } from "./executionStore";
 import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
@@ -23,7 +22,7 @@ describe("resetProjectScopedStores", () => {
     resetProjectScopedStores();
   });
 
-  it("clears query cache, execution, run, log, and local chat state from the previous project", () => {
+  it("clears query cache, run, log, and local chat state from the previous project", () => {
     const task = createMockTask({ id: "task-1" });
     const workflowId = "workflow-1";
     const workflow = createMockWorkflow({ id: workflowId });
@@ -43,6 +42,10 @@ describe("resetProjectScopedStores", () => {
     const generation = getProjectScopeGeneration();
     const taskListKey = queryKeys.tasks.list(generation, null);
     const taskDetailKey = queryKeys.tasks.detail(generation, task.id);
+    const executionsByTaskKey = queryKeys.executions.byTask(
+      generation,
+      task.id
+    );
     const workflowListKey = queryKeys.workflows.list(generation);
     const workflowDetailKey = queryKeys.workflows.detail(
       generation,
@@ -50,16 +53,13 @@ describe("resetProjectScopedStores", () => {
     );
     queryClient.setQueryData(taskListKey, [task]);
     queryClient.setQueryData(taskDetailKey, task);
+    queryClient.setQueryData(executionsByTaskKey, [execution]);
     queryClient.setQueryData(workflowListKey, [workflow]);
     queryClient.setQueryData(workflowDetailKey, { workflow, tasks: [task] });
     useStepStore.setState({
       steps: [step],
       selectedStepId: step.id,
       selectedStep: step,
-    });
-    useExecutionStore.setState({
-      executions: [execution],
-      executionsByTaskId: { [task.id]: [execution] },
     });
     useTaskRunStore.setState({
       taskRuns: [taskRun],
@@ -87,16 +87,13 @@ describe("resetProjectScopedStores", () => {
 
     expect(queryClient.getQueryData(taskListKey)).toBeUndefined();
     expect(queryClient.getQueryData(taskDetailKey)).toBeUndefined();
+    expect(queryClient.getQueryData(executionsByTaskKey)).toBeUndefined();
     expect(queryClient.getQueryData(workflowListKey)).toBeUndefined();
     expect(queryClient.getQueryData(workflowDetailKey)).toBeUndefined();
     expect(useStepStore.getState()).toMatchObject({
       steps: [],
       selectedStepId: null,
       selectedStep: null,
-    });
-    expect(useExecutionStore.getState()).toMatchObject({
-      executions: [],
-      executionsByTaskId: {},
     });
     expect(useTaskRunStore.getState()).toMatchObject({
       taskRuns: [],

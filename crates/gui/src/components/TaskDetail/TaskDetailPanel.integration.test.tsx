@@ -99,16 +99,6 @@ vi.mock("../../hooks/useTask", () => ({
   },
 }));
 
-// Mock useTaskExecutions hook
-vi.mock("../../hooks/useTaskExecutions", () => ({
-  useTaskExecutions: () => ({
-    executions: [],
-    isLoading: false,
-    error: null,
-    refetch: vi.fn(),
-  }),
-}));
-
 // Mock commands and events
 vi.mock("../../bindings", () => ({
   commands: {
@@ -159,6 +149,16 @@ vi.mock("../../bindings", () => ({
     orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     stopOrchestrator: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     listTasks: vi.fn().mockResolvedValue({ status: "ok", data: [] }),
+    getTaskRunTrace: vi.fn(async () => ({
+      status: "ok",
+      data: {
+        root_task_run_id: "run-empty",
+        task_runs: [],
+        step_executions: [],
+        session_logs: [],
+      },
+    })),
+    getExecutionLogs: vi.fn(async () => ({ status: "ok", data: [] })),
   },
   events: {
     taskChangedEvent: {

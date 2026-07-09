@@ -766,7 +766,7 @@ pub struct TaskRun {
     pub outcome_context: Option<serde_json::Value>,
     /// Parent TaskRun ID for child workflow runs
     pub parent_task_run_id: Option<String>,
-    /// Root TaskRun ID for recursive traces
+    /// Ancestor TaskRun ID recorded by Sacrum, when this run belongs to a run tree
     pub root_task_run_id: Option<String>,
     /// Step execution that triggered this child run
     pub triggered_by_step_execution_id: Option<String>,
@@ -823,7 +823,7 @@ impl From<vertebrae_core::TaskRunControls> for TaskRunControls {
     }
 }
 
-/// Trace tree rooted at a TaskRun.
+/// Trace data scoped to a single TaskRun.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TaskRunTrace {
     pub root_task_run_id: String,

@@ -1065,42 +1065,9 @@ impl ExecutionService for MockExecutionService {
 
     async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {
         let s = self.state.lock().unwrap();
-        match s.task_runs.get(root_task_run_id) {
-            Some(run)
-                if run.parent_task_run_id.is_none()
-                    && run
-                        .root_task_run_id
-                        .as_deref()
-                        .is_none_or(|id| id == root_task_run_id) => {}
-            Some(_) => {
-                return Err(ServiceError::validation_failed(format!(
-                    "task run trace must be requested by root TaskRun ID: {}",
-                    root_task_run_id
-                )));
-            }
-            None => {
-                return Err(ServiceError::validation_failed(format!(
-                    "task run not found: {}",
-                    root_task_run_id
-                )));
-            }
-        }
-        let runs: Vec<TaskRun> = s
-            .task_runs
-            .values()
-            .filter(|run| {
-                run.id == root_task_run_id
-                    || run.root_task_run_id.as_deref() == Some(root_task_run_id)
-            })
-            .cloned()
-            .collect();
-        if runs.is_empty() {
-            return Err(ServiceError::validation_failed(format!(
-                "task run not found: {}",
-                root_task_run_id
-            )));
-        }
-        let run_ids: HashSet<&str> = runs.iter().map(|run| run.id.as_str()).collect();
+        let run = s.task_runs.get(root_task_run_id).cloned().ok_or_else(|| {
+            ServiceError::validation_failed(format!("task run not found: {}", root_task_run_id))
+        })?;
         let step_executions: Vec<StepExecution> = s
             .executions
             .values()
@@ -1108,7 +1075,7 @@ impl ExecutionService for MockExecutionService {
                 execution
                     .task_run_id
                     .as_ref()
-                    .is_some_and(|id| run_ids.contains(id.as_str()))
+                    .is_some_and(|id| id == root_task_run_id)
             })
             .cloned()
             .collect();
@@ -1126,7 +1093,7 @@ impl ExecutionService for MockExecutionService {
 
         Ok(TaskRunTrace {
             root_task_run_id: root_task_run_id.to_string(),
-            task_runs: runs,
+            task_runs: vec![run],
             step_executions,
             session_logs,
         })
