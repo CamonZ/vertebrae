@@ -676,18 +676,9 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("InstallationGuard required binary predicate", () => {
-    type Comp = {
-      installed_at_symlink: boolean;
-      needs_refresh: boolean;
-      on_path: boolean;
-    };
-    const comp = (
-      installed: boolean,
-      onPath: boolean,
-      needsRefresh = false
-    ): Comp => ({
+    type Comp = { installed_at_symlink: boolean; on_path: boolean };
+    const comp = (installed: boolean, onPath: boolean): Comp => ({
       installed_at_symlink: installed,
-      needs_refresh: needsRefresh,
       on_path: onPath,
     });
 
@@ -731,14 +722,21 @@ describe("Router Acceptance Tests", () => {
       ).toBe(true);
     });
 
-    it("returns false when a managed component needs refresh", () => {
+    it("ignores managed refresh state — stale installs are refreshed silently, not gated", () => {
+      // Full ComponentStatus shape: the predicate must not gate on needs_refresh.
+      const staleCli = {
+        installed_at_symlink: true,
+        needs_refresh: true,
+        symlink_path: "/home/user/.local/bin/vtb",
+        on_path: true,
+      };
       expect(
         hasAllRequiredBinaries({
-          cli: comp(true, true, true),
+          cli: staleCli,
           daemon: comp(true, true),
           gate: comp(false, true),
         })
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 });

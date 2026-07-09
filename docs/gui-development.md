@@ -184,20 +184,33 @@ removes `externalBin` from Tauri's build configuration unless
 
 `InstallationGuard` in `src/router.tsx` decides on mount. It calls
 `installation_status` and redirects to `/welcome` when any required component
-is missing or when a GUI-managed staged binary needs to be refreshed from the
-bundled sidecar:
+is missing:
 
 ```
-component.needs_refresh ||
-(!component.installed_at_symlink && !component.on_path)
+!component.installed_at_symlink && !component.on_path
 ```
 
-In words: PATH-only binaries still satisfy first-run checks, but existing
-installer-managed binaries are refreshed when the GUI bundle ships newer
-sidecars. If the status probe fails, the guard intentionally falls through to
-its children rather than blocking an already-working install.
-`InstallationGuard` sits above `ProjectGuard`, so the welcome screen comes
-before `/setup`.
+In words: a component is missing only when it is neither installed at the
+symlink path we manage nor resolvable anywhere on `$PATH`. If the status probe
+fails, the guard intentionally falls through to its children rather than
+blocking an already-working install. `InstallationGuard` sits above
+`ProjectGuard`, so the welcome screen comes before `/setup`.
+
+### Silent refresh of managed installs
+
+Stale GUI-managed binaries never route through the welcome screen. At startup
+(release builds only), `refresh_stale_managed_binaries` in
+`src-tauri/src/install.rs` compares each managed staged binary against the
+bundled sidecar and silently rewrites it when the bytes differ, keeping the
+managed symlink pointed at the staged path. If the daemon binary was
+refreshed and its service is registered, the service is reloaded so the
+running daemon picks up the new bytes.
+
+Only installer-managed artifacts are touched: PATH-only installs and
+unrelated files at the symlink path are never rewritten, and missing
+components remain a welcome-screen consent decision. Failures are logged and
+never block startup. Debug builds skip the refresh entirely — in dev the
+"sidecars" next to the executable are just sibling `target/debug` binaries.
 
 ### Install Locations
 

@@ -168,6 +168,84 @@ pub async fn install_components(
 }
 
 // ---------------------------------------------------------------------------
+// Launch-time refresh
+// ---------------------------------------------------------------------------
+
+/// Silently bring installer-managed binaries up to date with the sidecars
+/// bundled in this GUI build. Called once at app startup so shipping a new
+/// GUI refreshes its managed `vtb`, `vtb-daemon`, and `vtb-gate` installs
+/// without routing the user back through the welcome screen.
+///
+/// Only binaries Vertebrae manages (staged in the installer data dir, or the
+/// managed symlink pointing at it) are touched — PATH-only installs and
+/// unrelated files at the symlink path are left alone, and *missing*
+/// components remain a welcome-screen consent decision. Failures are logged,
+/// never fatal: a broken refresh must not block an otherwise working app.
+pub fn refresh_stale_managed_binaries() {
+    if cfg!(debug_assertions) {
+        // Dev builds resolve "sidecars" to sibling binaries in `target/debug`,
+        // so a silent refresh would overwrite a real install with debug
+        // builds. Only packaged release bundles refresh managed installs.
+        log::info!("[install] skipping managed binary refresh in debug build");
+        return;
+    }
+
+    for name in [CLI_BIN, DAEMON_BIN, GATE_BIN] {
+        let bundled_source = resolve_sidecar_path(name).ok();
+        match refresh_component_if_stale(name, bundled_source.as_deref()) {
+            Ok(Some(staged)) => {
+                log::info!("[install] refreshed managed binary '{name}' from bundled sidecar");
+                if name == DAEMON_BIN {
+                    restart_daemon_service_if_registered(&staged);
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                log::warn!(
+                    "[install] failed to refresh managed binary '{name}': {}",
+                    err.message
+                );
+            }
+        }
+    }
+}
+
+/// Rewrite the managed install of `name` from `bundled_source` if its staged
+/// bytes are stale. Returns the staged path when a refresh happened, `None`
+/// when the component is current, unmanaged, or has no bundled source.
+fn refresh_component_if_stale(
+    name: &str,
+    bundled_source: Option<&Path>,
+) -> Result<Option<PathBuf>, CommandError> {
+    let link = symlink_path(name).map_err(installer_error)?;
+    let staged = data_bin_dir().map_err(installer_error)?.join(name);
+    if !managed_install_needs_refresh(&link, &staged, bundled_source) {
+        return Ok(None);
+    }
+    // `managed_install_needs_refresh` is only true with a bundled source.
+    let source = bundled_source.expect("refresh requires a bundled source");
+    let staged = install_binary(name, source).map_err(installer_error)?;
+    Ok(Some(staged))
+}
+
+/// After refreshing the daemon binary, reload the OS service so the running
+/// daemon picks up the new bytes. Skipped when the service was never
+/// registered (the user runs the daemon some other way, or not at all).
+fn restart_daemon_service_if_registered(staged: &Path) {
+    match service_status() {
+        Ok(ServiceStatus::NotLoaded) => {}
+        Ok(_) => {
+            if let Err(err) = install_service(staged) {
+                log::warn!("[install] failed to restart daemon service after refresh: {err}");
+            }
+        }
+        Err(err) => {
+            log::warn!("[install] could not query daemon service status after refresh: {err}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -388,6 +466,38 @@ mod tests {
         fs::write(path, body).expect("write test file");
     }
 
+    /// Stand up an isolated HOME so refresh tests exercise the real installer
+    /// path computation without touching the user's actual install.
+    #[cfg(unix)]
+    struct HomeGuard {
+        _tempdir: tempfile::TempDir,
+        prev_home: Option<std::ffi::OsString>,
+    }
+
+    #[cfg(unix)]
+    impl HomeGuard {
+        fn new() -> Self {
+            let tempdir = tempfile::tempdir().expect("create tempdir");
+            let prev_home = std::env::var_os("HOME");
+            // SAFETY: tests mutating HOME run serially via `serial_test`.
+            unsafe { std::env::set_var("HOME", tempdir.path()) };
+            Self {
+                _tempdir: tempdir,
+                prev_home,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.prev_home {
+                Some(v) => unsafe { std::env::set_var("HOME", v) },
+                None => unsafe { std::env::remove_var("HOME") },
+            }
+        }
+    }
+
     #[test]
     fn target_triple_constant_is_populated() {
         // `tauri-build` sets TAURI_ENV_TARGET_TRIPLE during this crate's
@@ -545,6 +655,97 @@ mod tests {
         assert!(
             status.needs_refresh,
             "managed symlink should request refresh when staged bytes differ from bundled sidecar"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial(home)]
+    fn refresh_component_if_stale_rewrites_stale_managed_install() {
+        let _home = HomeGuard::new();
+        let source_dir = tempfile::tempdir().expect("create source dir");
+        let v1 = source_dir.path().join("v1").join("vtb");
+        let v2 = source_dir.path().join("v2").join("vtb");
+        write_file(&v1, b"bundled-v1");
+        write_file(&v2, b"bundled-v2");
+        let staged = install_binary("vtb", &v1).expect("initial managed install");
+
+        let refreshed = refresh_component_if_stale("vtb", Some(&v2)).expect("refresh succeeds");
+
+        assert_eq!(
+            refreshed.as_deref(),
+            Some(staged.as_path()),
+            "stale managed install should be refreshed and report the staged path"
+        );
+        assert_eq!(
+            fs::read(&staged).expect("staged binary readable"),
+            b"bundled-v2",
+            "refresh should rewrite the staged binary from the bundled sidecar"
+        );
+        let link = symlink_path("vtb").expect("symlink path");
+        assert_eq!(
+            fs::read_link(&link).expect("managed symlink exists"),
+            staged,
+            "refresh should keep the managed symlink pointed at the staged binary"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial(home)]
+    fn refresh_component_if_stale_skips_current_and_missing_installs() {
+        let _home = HomeGuard::new();
+        let source_dir = tempfile::tempdir().expect("create source dir");
+        let source = source_dir.path().join("vtb");
+        write_file(&source, b"bundled-v1");
+
+        assert_eq!(
+            refresh_component_if_stale("vtb", Some(&source)).expect("no-op refresh succeeds"),
+            None,
+            "missing components are a welcome-screen decision, not a silent install"
+        );
+
+        install_binary("vtb", &source).expect("managed install");
+        assert_eq!(
+            refresh_component_if_stale("vtb", Some(&source)).expect("no-op refresh succeeds"),
+            None,
+            "an up-to-date managed install should not be rewritten"
+        );
+        assert_eq!(
+            refresh_component_if_stale("vtb", None).expect("no-op refresh succeeds"),
+            None,
+            "without a bundled sidecar there is nothing to refresh from"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial(home)]
+    fn refresh_component_if_stale_leaves_unmanaged_file_at_symlink_path_alone() {
+        let _home = HomeGuard::new();
+        let source_dir = tempfile::tempdir().expect("create source dir");
+        let source = source_dir.path().join("vtb");
+        write_file(&source, b"bundled-v2");
+        let staged = data_bin_dir().expect("data bin dir").join("vtb");
+        write_file(&staged, b"staged-v1");
+        let link = symlink_path("vtb").expect("symlink path");
+        write_file(&link, b"unrelated-user-binary");
+
+        let refreshed = refresh_component_if_stale("vtb", Some(&source)).expect("refresh checks");
+
+        assert_eq!(
+            refreshed, None,
+            "an unrelated file at the symlink path must opt the component out of refresh"
+        );
+        assert_eq!(
+            fs::read(&link).expect("user file readable"),
+            b"unrelated-user-binary",
+            "silent refresh must never touch files Vertebrae does not manage"
+        );
+        assert_eq!(
+            fs::read(&staged).expect("staged file readable"),
+            b"staged-v1",
+            "staged bytes stay untouched when the symlink path is unmanaged"
         );
     }
 
