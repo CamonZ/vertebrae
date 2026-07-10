@@ -4,7 +4,10 @@ import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTasks } from "../../hooks/useTasks";
 import { useRunTrace } from "../../hooks/useRunTrace";
-import { useTaskRuns, useTaskRunsForTasks } from "../../hooks/useTaskRuns";
+import {
+  useActiveTaskRun,
+  useActiveTaskRunsForTasks,
+} from "../../hooks/useTaskRuns";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
@@ -153,7 +156,7 @@ export function TaskDetailPanel({
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { tasks: allTasks } = useTasks();
-  const { activeRun } = useTaskRuns(taskId);
+  const activeRun = useActiveTaskRun(taskId);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
     taskId,
     activeRun?.id
@@ -173,7 +176,7 @@ export function TaskDetailPanel({
     if (!taskId || allTasks.length === 0) return [];
     return allTasks.filter((t) => t.parent_id === taskId);
   }, [taskId, allTasks]);
-  const { activeRunsByTaskId: childActiveRuns } = useTaskRunsForTasks(
+  const { activeRunsByTaskId: childActiveRuns } = useActiveTaskRunsForTasks(
     children.map((child) => child.id)
   );
 

@@ -4,7 +4,10 @@ import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockTaskRun } from "../test/test-utils";
 import { queryClient } from "../query";
-import { resetProjectScopedStores } from "../stores/projectScopedStores";
+import {
+  getProjectScopeGeneration,
+  resetProjectScopedStores,
+} from "../stores/projectScopedStores";
 
 const mockGetTaskRuns = vi.hoisted(() => vi.fn());
 
@@ -12,7 +15,11 @@ vi.mock("../bindings", () => ({
   commands: { getTaskRuns: (...args: unknown[]) => mockGetTaskRuns(...args) },
 }));
 
-import { selectActiveTaskRun, useTaskRuns } from "./useTaskRuns";
+import {
+  selectActiveTaskRun,
+  useActiveTaskRunsForTasks,
+  useTaskRuns,
+} from "./useTaskRuns";
 
 function QueryWrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client: queryClient }, children);
@@ -56,5 +63,67 @@ describe("useTaskRuns", () => {
 
     await waitFor(() => expect(result.current.activeRun).toEqual(taskRun));
     expect(mockGetTaskRuns).toHaveBeenCalledWith("task-live");
+  });
+
+  it("reads bulk-hydrated active runs without fetching task history", () => {
+    const taskRun = createMockTaskRun({
+      id: "run-bulk",
+      task_id: "task-bulk",
+      status: "executing",
+    });
+    queryClient.setQueryData(
+      [
+        "project",
+        getProjectScopeGeneration(),
+        "taskRuns",
+        "byTask",
+        "task-bulk",
+      ],
+      [taskRun]
+    );
+
+    const { result } = renderHook(
+      () => useActiveTaskRunsForTasks(["task-bulk"]),
+      { wrapper: QueryWrapper }
+    );
+
+    expect(result.current.activeRunsByTaskId.get("task-bulk")).toEqual(
+      taskRun
+    );
+    expect(mockGetTaskRuns).not.toHaveBeenCalled();
+  });
+
+  it("upgrades an active snapshot to complete history for traces", async () => {
+    const activeRun = createMockTaskRun({
+      id: "run-active",
+      task_id: "task-trace",
+      status: "executing",
+    });
+    const completedRun = createMockTaskRun({
+      id: "run-completed",
+      task_id: "task-trace",
+      status: "completed",
+    });
+    queryClient.setQueryData(
+      [
+        "project",
+        getProjectScopeGeneration(),
+        "taskRuns",
+        "byTask",
+        "task-trace",
+      ],
+      [activeRun]
+    );
+    mockGetTaskRuns.mockResolvedValue({
+      status: "ok",
+      data: [activeRun, completedRun],
+    });
+
+    const { result } = renderHook(() => useTaskRuns("task-trace"), {
+      wrapper: QueryWrapper,
+    });
+
+    await waitFor(() => expect(result.current.runs).toHaveLength(2));
+    expect(mockGetTaskRuns).toHaveBeenCalledWith("task-trace");
   });
 });

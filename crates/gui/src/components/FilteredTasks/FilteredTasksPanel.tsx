@@ -4,7 +4,7 @@ import { commands } from "../../bindings";
 import { TaskTreeView, ExpandCollapseAllButton } from "../TaskList";
 import { buildTreeFromTasks, collectExpandableIds } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
-import { useTaskRunsForTasks } from "../../hooks/useTaskRuns";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { ResizablePanel } from "../ResizablePanel";
 import type { TaskTreeNode } from "../../types/ui";
 import { isActiveRunStatus } from "../../utils/runState";
@@ -158,7 +158,9 @@ export function FilteredTasksPanel({
 }: FilteredTasksPanelProps) {
   const [search, setSearch] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const { activeRunsByTaskId } = useTaskRunsForTasks(tasks.map((task) => task.id));
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   // Use expanded nodes hook to preserve tree collapse state
   const expandedNodes = useExpandedNodes();

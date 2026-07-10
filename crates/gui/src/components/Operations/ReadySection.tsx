@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
 import { deriveRunControlsState } from "../../utils/runState";
-import { useTaskRunsForTasks } from "../../hooks/useTaskRuns";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { Count } from "../atoms";
 import { StepBadge } from "../molecules/StepBadge";
 
@@ -16,7 +16,9 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
     () => new Set()
   );
   const pendingTaskIdsRef = useRef<Set<string>>(new Set());
-  const { activeRunsByTaskId } = useTaskRunsForTasks(tasks.map((task) => task.id));
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   const setTaskPending = useCallback((taskId: string, pending: boolean) => {
     const next = new Set(pendingTaskIdsRef.current);

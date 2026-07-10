@@ -76,7 +76,7 @@ describe("useOperationsData", () => {
     );
   }
 
-  it("derives a failed_run attention item from the latest query run", async () => {
+  it("does not fetch terminal history solely to derive attention items", async () => {
     const failedTask = createMockTask({
       id: "t-fail",
       title: "Failed Task",
@@ -99,10 +99,7 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.attentionItems).toHaveLength(1);
-    expect(result.current.attentionItems[0].kind).toBe("failed_run");
-    expect(result.current.attentionItems[0].task.id).toBe("t-fail");
-    expect(result.current.attentionItems[0].taskRun?.status).toBe("failed");
+    expect(result.current.attentionItems).toEqual([]);
   });
 
   // Testing criterion 2 of ticket 55e35cdc: a failed StepExecution inside an
@@ -547,7 +544,7 @@ describe("useOperationsData", () => {
     );
   });
 
-  it("includes a task whose blocker has a completed run", async () => {
+  it("does not fetch a blocker's terminal history to decide readiness", async () => {
     const blocker = createMockTask({
       id: "t-blocker",
       title: "Blocker",
@@ -586,7 +583,9 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.readyTasks.map((t) => t.id)).toContain("t-blocked");
+    expect(result.current.readyTasks.map((t) => t.id)).not.toContain(
+      "t-blocked"
+    );
   });
 
   it("includes a task whose blocker has completed_at even without a completed run", async () => {

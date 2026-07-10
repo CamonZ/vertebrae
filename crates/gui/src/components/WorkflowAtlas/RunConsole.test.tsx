@@ -26,7 +26,7 @@ vi.mock("./hooks/useRunConsoleTasks", () => ({
 }));
 
 vi.mock("../../hooks/useTaskRuns", () => ({
-  useTaskRunsForTasks: () => ({
+  useActiveTaskRunsForTasks: () => ({
     activeRunsByTaskId: new Map(
       mockTasks()
         .flatMap((task) =>

@@ -1,7 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
-import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
+import {
+  errorMessage,
+  hydrateActiveTaskRunsFromTasks,
+  queryClient,
+  queryKeys,
+  unwrapCommand,
+} from "../query";
 import { mergeTask, taskMatchesFilter } from "../utils/taskMerge";
 
 // Stable fallback for renders where the query has no data yet (loading or
@@ -97,11 +103,13 @@ export function useTasks(filter?: TaskFilterOptions) {
           taskMatchesFilter(task, activeFilter)
       );
 
-      return [
+      const reconciledTasks = [
         ...reconciledFetchedTasks,
         ...upsertedDuringFetch,
         ...detailUpsertsDuringFetch,
       ];
+      hydrateActiveTaskRunsFromTasks(reconciledTasks, projectScopeGeneration);
+      return reconciledTasks;
     },
   });
 

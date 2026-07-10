@@ -9,7 +9,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
-import { useTaskRunsForTasks } from "../hooks/useTaskRuns";
+import { useActiveTaskRunsForTasks } from "../hooks/useTaskRuns";
 import {
   buildTreeFromTasks,
   collectExpandableIds,
@@ -224,7 +224,9 @@ export function TasksPage() {
   }, [searchParams]);
 
   const { tasks, isLoading, error } = useTasks(filters);
-  const { activeRunsByTaskId } = useTaskRunsForTasks(tasks.map((task) => task.id));
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
   const scopedTasks = useMemo(
     () => deriveScopedTasks(tasks, scope, activeRunsByTaskId),
     [activeRunsByTaskId, tasks, scope]

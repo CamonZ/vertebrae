@@ -3,7 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import type { Task, TaskFilterOptions } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useTasks } from "./useTasks";
-import { useTaskRunsForTasks } from "./useTaskRuns";
+import { useActiveTaskRunsForTasks } from "./useTaskRuns";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
@@ -77,7 +77,7 @@ export function useOperationsData(): OperationsData {
     error: tasksError,
     refetch: refetchTasks,
   } = useTasks(ALL_TASKS_FILTER);
-  const { activeRunsByTaskId, latestRunsByTaskId } = useTaskRunsForTasks(
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
     tasks.map((task) => task.id)
   );
   const projectScopeGeneration = useProjectScopeGeneration();
@@ -136,14 +136,14 @@ export function useOperationsData(): OperationsData {
     const items: AttentionItem[] = [];
 
     for (const task of tasks) {
-      const failedRun = latestRunsByTaskId.get(task.id);
+      const failedRun = activeRunsByTaskId.get(task.id);
       if (failedRun && failedRun.status === "failed") {
         items.push({ kind: "failed_run", task, taskRun: failedRun });
       }
     }
 
     return items;
-  }, [latestRunsByTaskId, tasks]);
+  }, [activeRunsByTaskId, tasks]);
 
   // Excludes "stopping" — that transition is signalled via the run chip/Stop
   // button, not the Live tile.
@@ -191,14 +191,14 @@ export function useOperationsData(): OperationsData {
         return deps.every((depId) => {
           const dep = taskMap.get(depId);
           if (!dep) return false;
-          const depRunStatus = latestRunsByTaskId.get(dep.id)?.status ?? null;
+          const depRunStatus = activeRunsByTaskId.get(dep.id)?.status ?? null;
           if (depRunStatus === "completed") return true;
           return Boolean(dep.completed_at);
         });
       }
       return true;
     });
-  }, [activeRunsByTaskId, latestRunsByTaskId, tasks, taskMap]);
+  }, [activeRunsByTaskId, tasks, taskMap]);
 
   return {
     attentionItems,

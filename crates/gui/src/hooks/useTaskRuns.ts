@@ -20,14 +20,7 @@ export interface UseTaskRunsResult {
   refetch: () => void;
 }
 export interface UseTaskRunsForTasksResult {
-  runs: TaskRun[];
-  runsByTaskId: ReadonlyMap<string, TaskRun[]>;
   activeRunsByTaskId: ReadonlyMap<string, TaskRun>;
-  /** Most recent terminal run when the task is not currently active. */
-  latestRunsByTaskId: ReadonlyMap<string, TaskRun>;
-  isLoading: boolean;
-  error: string | null;
-  refetch: () => void;
 }
 
 export function sortRunsNewestFirst(runs: readonly TaskRun[]): TaskRun[] {
@@ -59,6 +52,10 @@ export function useTaskRuns(
         taskId ?? "__vertebrae_no_task_selected__"
       ),
       enabled: Boolean(taskId),
+      // Task-list hydration contains only the active-run snapshot. The traces
+      // surface is the sole history consumer, so it always upgrades that
+      // snapshot to complete task history when mounted.
+      refetchOnMount: "always",
     },
     queryClient
   );
@@ -96,7 +93,7 @@ export function useTaskRuns(
   };
 }
 
-export function useTaskRunsForTasks(
+export function useActiveTaskRunsForTasks(
   taskIds: readonly string[]
 ): UseTaskRunsForTasksResult {
   const generation = useProjectScopeGeneration();
@@ -108,60 +105,32 @@ export function useTaskRunsForTasks(
   const result = useQueries(
     {
       queries: stableTaskIds.map((taskId) =>
-        taskRunsQueryOptions(generation, taskId)
+        ({ ...taskRunsQueryOptions(generation, taskId), enabled: false })
       ),
       combine: (queries) => ({
         queries,
-        isLoading: queries.some((query) => query.isLoading),
-        error: queries.find((query) => query.error)?.error,
       }),
     },
     queryClient
   );
-  const runsByTaskId = useMemo(
-    () =>
-      new Map(
-        stableTaskIds.map((taskId, index) => [
-          taskId,
-          sortRunsNewestFirst(result.queries[index]?.data ?? []),
-        ])
-      ),
-    [result.queries, stableTaskIds]
-  );
-  const runs = useMemo(
-    () => sortRunsNewestFirst([...runsByTaskId.values()].flat()),
-    [runsByTaskId]
-  );
   const activeRunsByTaskId = useMemo(
     () =>
       new Map(
-        [...runsByTaskId].flatMap(([taskId, taskRuns]) => {
-          const active = selectActiveTaskRun(taskRuns);
+        stableTaskIds.flatMap((taskId, index) => {
+          const active = selectActiveTaskRun(result.queries[index]?.data);
           return active ? [[taskId, active] as [string, TaskRun]] : [];
         })
       ),
-    [runsByTaskId]
-  );
-  const latestRunsByTaskId = useMemo(
-    () =>
-      new Map(
-        [...runsByTaskId].flatMap(([taskId, taskRuns]) => {
-          if (selectActiveTaskRun(taskRuns)) return [];
-          const latest = taskRuns[0];
-          return latest ? [[taskId, latest] as [string, TaskRun]] : [];
-        })
-      ),
-    [runsByTaskId]
+    [result.queries, stableTaskIds]
   );
   return {
-    runs,
-    runsByTaskId,
     activeRunsByTaskId,
-    isLoading: result.isLoading,
-    latestRunsByTaskId,
-    error: result.error ? errorMessage(result.error) : null,
-    refetch: () => {
-      void Promise.all(result.queries.map((query) => query.refetch()));
-    },
   };
+}
+
+export function useActiveTaskRun(taskId: string | null | undefined) {
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    taskId ? [taskId] : []
+  );
+  return taskId ? (activeRunsByTaskId.get(taskId) ?? null) : null;
 }

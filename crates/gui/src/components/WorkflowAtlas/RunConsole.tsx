@@ -32,7 +32,7 @@ import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
 import { TaskDetailPanel } from "../TaskDetail";
 import { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
-import { useTaskRunsForTasks } from "../../hooks/useTaskRuns";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { kindClass } from "./inspector/selection";
 import {
   miniPipeline,
@@ -184,7 +184,9 @@ export interface RunConsoleProps {
  */
 export function RunConsole({ summary }: RunConsoleProps) {
   const { tasks } = useRunConsoleTasks();
-  const { activeRunsByTaskId } = useTaskRunsForTasks(tasks.map((task) => task.id));
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<ConsoleTab>("ready");

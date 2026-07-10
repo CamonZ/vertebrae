@@ -1,7 +1,7 @@
 import type { KeyboardEvent } from "react";
 import type { Task } from "../../bindings";
 import { deriveHearthRunChipState } from "../../utils/runState";
-import { useTaskRuns } from "../../hooks/useTaskRuns";
+import { useActiveTaskRun } from "../../hooks/useTaskRuns";
 import {
   hearthStepKind,
   hearthStepStyle,
@@ -21,7 +21,7 @@ export function KanbanCard({
 }: KanbanCardProps) {
   const stepKind = hearthStepKind(task.step_type);
   const stepStyle = hearthStepStyle(stepKind);
-  const { activeRun } = useTaskRuns(task.id);
+  const activeRun = useActiveTaskRun(task.id);
   const runStatus = activeRun?.status ?? null;
   const runChip = deriveHearthRunChipState(runStatus, {
     includeTerminal: isSelected,

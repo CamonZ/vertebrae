@@ -18,7 +18,7 @@ vi.mock("../bindings", () => ({
 
 import { useTasks } from "./useTasks";
 import type { Task, TaskFilterOptions } from "../bindings";
-import { createMockTask } from "../test/test-utils";
+import { createMockTask, createMockTaskRun } from "../test/test-utils";
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(QueryClientProvider, { client: queryClient }, children);
@@ -41,6 +41,34 @@ describe("useTasks", () => {
     expect(result.current.tasks).toHaveLength(1);
     expect(result.current.tasks[0].id).toBe("t-1");
     expect(result.current.tasks[0].title).toBe("Query Task");
+  });
+
+  it("hydrates an active run from the bulk task response without fetching history", async () => {
+    const activeRun = createMockTaskRun({
+      id: "run-active",
+      task_id: "t-active",
+      status: "executing",
+    });
+    const task = createMockTask({
+      id: "t-active",
+      run_controls: {
+        runnable: false,
+        stoppable: true,
+        disabled_reason_code: "active_run",
+        disabled_reason: "A TaskRun is already active",
+        active_run: activeRun,
+      },
+    });
+    mockListTasks.mockResolvedValue({ status: "ok", data: [task] });
+
+    const { result } = renderHook(() => useTasks(), { wrapper });
+
+    await waitFor(() => expect(result.current.tasks).toHaveLength(1));
+    expect(
+      queryClient.getQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), "t-active")
+      )
+    ).toEqual([activeRun]);
   });
 
   it("reflects query cache mutations (e.g. from WebSocket upserts)", async () => {

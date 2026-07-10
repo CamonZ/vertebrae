@@ -328,7 +328,7 @@ describe("TaskTreeNode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows ⊘ marks for terminal runs: muted for stopped, error-toned for failed", () => {
+  it("does not treat terminal history as active task-list state", () => {
     renderTree([
       node(
         withActiveRun(
@@ -346,18 +346,9 @@ describe("TaskTreeNode", () => {
       ),
     ]);
 
-    const marks = screen.getAllByTestId("task-tree-node-cancel-mark");
-    expect(marks).toHaveLength(2);
-    const stopped = marks.find(
-      (m) => m.getAttribute("data-run-status") === "stopped"
-    );
-    const failed = marks.find(
-      (m) => m.getAttribute("data-run-status") === "failed"
-    );
-    expect(stopped).toBeDefined();
-    expect(stopped).not.toHaveClass("failed");
-    expect(failed).toHaveClass("failed");
-    expect(failed).toHaveAttribute("aria-label", "Failed");
+    expect(
+      screen.queryByTestId("task-tree-node-cancel-mark")
+    ).not.toBeInTheDocument();
   });
 
   it("marks the selected row with aria-selected and a selected data flag", () => {
