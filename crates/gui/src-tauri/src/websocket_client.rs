@@ -4,6 +4,7 @@
 //! and subscribes to real-time task/workflow change events.
 
 use futures::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
+use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{async_runtime::JoinHandle as ActorJoinHandle, Emitter, Runtime};
@@ -19,8 +20,9 @@ use crate::events::{
     SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
     StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
     StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskRunChangeType,
-    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType,
-    WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
+    TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent, TaskStepChangedEvent,
+    WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -1388,14 +1390,31 @@ impl SacrumSocket {
             _ => TaskRunChangeType::Updated,
         };
 
-        let task_run = try_deserialize::<types::TaskRun>(payload, "TaskRun");
+        // Deserialize the flat channel row once. `run_controls` remains raw
+        // until the valid TaskRun has been retained, so a malformed controls
+        // object cannot erase a live run update.
+        #[derive(Deserialize)]
+        struct FlatTaskRunPayload {
+            #[serde(flatten)]
+            task_run: types::TaskRun,
+            run_controls: serde_json::Value,
+        }
+
         let run_controls_value = payload
             .get("run_controls")
             .ok_or("Missing run_controls in task run payload")?;
+        let flat_payload = serde_json::from_value::<FlatTaskRunPayload>(payload.clone())
+            .map_err(|e| format!("Failed to parse TaskRun payload: {e}"))?;
         let run_controls = if run_controls_value.is_null() {
-            None
+            TaskRunControlsPayload::Deleted
         } else {
-            try_deserialize::<types::TaskRunControls>(run_controls_value, "TaskRunControls")
+            match serde_json::from_value::<types::TaskRunControls>(flat_payload.run_controls) {
+                Ok(controls) => TaskRunControlsPayload::Present(Box::new(controls)),
+                Err(error) => {
+                    log::warn!("[WebSocket] Malformed TaskRunControls payload: {error}");
+                    TaskRunControlsPayload::Malformed
+                }
+            }
         };
 
         Ok(TaskRunChangedEvent {
@@ -1403,7 +1422,7 @@ impl SacrumSocket {
             task_id,
             status,
             change_type,
-            task_run,
+            task_run: Some(flat_payload.task_run),
             run_controls,
         })
     }
@@ -2202,9 +2221,9 @@ mod tests {
         assert_eq!(task_run.latest_step_execution_id.as_deref(), Some("exec-1"));
         assert_eq!(task_run.status, types::TaskRunStatus::Executing);
 
-        let controls = event
-            .run_controls
-            .expect("run_controls should be copied from the channel payload");
+        let TaskRunControlsPayload::Present(controls) = event.run_controls else {
+            panic!("run_controls should be copied from the channel payload");
+        };
         assert!(!controls.runnable);
         assert!(controls.stoppable);
         assert_eq!(controls.disabled_reason_code.as_deref(), Some("active_run"));
@@ -2235,7 +2254,30 @@ mod tests {
         assert_eq!(event.status, types::TaskRunStatus::Completed);
         assert!(matches!(event.change_type, TaskRunChangeType::Created));
         assert!(event.task_run.is_some());
-        assert!(event.run_controls.is_none());
+        assert!(matches!(
+            event.run_controls,
+            TaskRunControlsPayload::Deleted
+        ));
+    }
+
+    #[test]
+    fn task_run_ws_payload_marks_malformed_controls_without_dropping_the_run() {
+        let payload = serde_json::json!({
+            "id": "run-ws-malformed-controls",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "executing",
+            "run_controls": { "runnable": "not-a-boolean" }
+        });
+
+        let event = SacrumSocket::task_run_changed_event_from_payload("task_run_updated", &payload)
+            .expect("a valid TaskRun must survive malformed controls");
+
+        assert!(event.task_run.is_some());
+        assert!(matches!(
+            event.run_controls,
+            TaskRunControlsPayload::Malformed
+        ));
     }
 
     #[test]
@@ -3636,10 +3678,10 @@ mod tests {
         assert!(matches!(event.change_type, TaskRunChangeType::Updated));
         assert_eq!(event.status, types::TaskRunStatus::Executing);
         assert_eq!(
-            event
-                .run_controls
-                .and_then(|controls| controls.active_run)
-                .map(|run| run.id),
+            match event.run_controls {
+                TaskRunControlsPayload::Present(controls) => controls.active_run.map(|run| run.id),
+                _ => None,
+            },
             Some("run-ws-1".to_string())
         );
     }

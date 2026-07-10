@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
 import { deriveRunControlsState } from "../../utils/runState";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { Count } from "../atoms";
 import { StepBadge } from "../molecules/StepBadge";
 
@@ -15,6 +16,9 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
     () => new Set()
   );
   const pendingTaskIdsRef = useRef<Set<string>>(new Set());
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   const setTaskPending = useCallback((taskId: string, pending: boolean) => {
     const next = new Set(pendingTaskIdsRef.current);
@@ -31,6 +35,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
     async (task: Task) => {
       const runControls = deriveRunControlsState(task.run_controls ?? null, {
         hasWorkflow: Boolean(task.workflow_id),
+        activeRun: activeRunsByTaskId.get(task.id) ?? null,
       });
       if (
         !task.current_step_id ||
@@ -51,7 +56,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
         setTaskPending(task.id, false);
       }
     },
-    [onTaskStarted, setTaskPending]
+    [activeRunsByTaskId, onTaskStarted, setTaskPending]
   );
 
   if (tasks.length === 0) return null;
@@ -72,7 +77,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
           const isPending = pendingTaskIds.has(task.id);
           const runControls = deriveRunControlsState(
             task.run_controls ?? null,
-            { hasWorkflow: Boolean(task.workflow_id) }
+            { hasWorkflow: Boolean(task.workflow_id), activeRun: activeRunsByTaskId.get(task.id) ?? null }
           );
           const startDisabled = runControls.runDisabled || isPending;
           const shortId = task.id.slice(0, 8);
@@ -99,7 +104,7 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                           stepName={task.step_name}
                           stepType={task.step_type}
                           runStatus={
-                            task.run_controls?.active_run?.status ?? null
+                            activeRunsByTaskId.get(task.id)?.status ?? null
                           }
                         />
                       )}

@@ -4,7 +4,11 @@ export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";
 export type { UseSubtreeExecutionsResult } from "./useSubtreeExecutions";
-export { useTaskRuns, useTaskRunsForTasks } from "./useTaskRuns";
+export {
+  useActiveTaskRun,
+  useActiveTaskRunsForTasks,
+  useTaskRuns,
+} from "./useTaskRuns";
 export type {
   ResolvedTaskRun,
   UseTaskRunsForTasksResult,

@@ -43,21 +43,23 @@ export function isActiveRunStatus(
  * finished with a `completed` status. The workflow step name is display-only.
  */
 export function isTaskDone(
-  task: Pick<Task, "completed_at" | "run_controls">
+  task: Pick<Task, "completed_at">,
+  activeRun: TaskRun | null | undefined
 ): boolean {
-  const status = task.run_controls?.active_run?.status ?? null;
+  const status = activeRun?.status ?? null;
   return Boolean(task.completed_at) || status === "completed";
 }
 
 export function deriveActiveTaskRuns(
   tasks: Task[],
+  activeRunsByTaskId: ReadonlyMap<string, TaskRun>,
   options: { includeStopping?: boolean; sortNewestFirst?: boolean } = {}
 ): ActiveTaskRun[] {
   const { includeStopping = true, sortNewestFirst = false } = options;
   const items: ActiveTaskRun[] = [];
 
   for (const task of tasks) {
-    const taskRun = task.run_controls?.active_run;
+    const taskRun = activeRunsByTaskId.get(task.id);
     if (!taskRun || !isActiveRunStatus(taskRun.status)) continue;
     if (!includeStopping && taskRun.status === "stopping") continue;
     items.push({ task, taskRun });
@@ -187,9 +189,10 @@ export function deriveHearthRunChipState(
 }
 
 export function hearthBreakdownVariantForTask(
-  task: Pick<Task, "completed_at" | "run_controls">
+  task: Pick<Task, "completed_at">,
+  activeRun: TaskRun | null | undefined
 ): HearthStateBreakdownVariant {
-  const status = task.run_controls?.active_run?.status ?? null;
+  const status = activeRun?.status ?? null;
   if (task.completed_at || status === "completed") return "done";
   if (status === "executing") return "running";
   if (status === "waiting") return "waiting";
@@ -197,11 +200,11 @@ export function hearthBreakdownVariantForTask(
 }
 
 export function deriveHearthStateBreakdown<
-  T extends Pick<Task, "completed_at" | "run_controls">,
->(tasks: T[]): HearthStateBreakdown {
+  T extends Pick<Task, "id" | "completed_at">,
+>(tasks: T[], activeRunsByTaskId: ReadonlyMap<string, TaskRun>): HearthStateBreakdown {
   return tasks.reduce<HearthStateBreakdown>(
     (counts, task) => {
-      counts[hearthBreakdownVariantForTask(task)] += 1;
+      counts[hearthBreakdownVariantForTask(task, activeRunsByTaskId.get(task.id))] += 1;
       return counts;
     },
     { ...EMPTY_HEARTH_STATE_BREAKDOWN }
@@ -228,13 +231,9 @@ export function hasHearthStateBreakdown(
  * currently selected -- callers can opt in with `includeTerminal`.
  */
 export function deriveRunStateChip(
-  task: Pick<Task, "run_controls">,
+  activeRun: TaskRun | null | undefined,
   options: { includeTerminal?: boolean } = {}
 ): RunStateChip | null {
-  const controls = task.run_controls;
-  if (!controls) return null;
-
-  const activeRun = controls.active_run;
   if (!activeRun) return null;
 
   const status = activeRun.status;
@@ -361,10 +360,10 @@ export function getRunChipStyles(chip: RunStateChip): RunChipStyles {
  */
 export function deriveRunControlsState(
   controls: TaskRunControls | null | undefined,
-  options: { hasWorkflow?: boolean } = {}
+  options: { hasWorkflow?: boolean; activeRun?: TaskRun | null } = {}
 ): RunControlsState {
   const hasWorkflow = options.hasWorkflow ?? true;
-  const activeRun = controls?.active_run ?? null;
+  const activeRun = options.activeRun ?? null;
   const runStatus = activeRun?.status ?? null;
   const hasActiveRun = isActiveRunStatus(runStatus);
   const runnable = controls?.runnable === true;

@@ -15,7 +15,6 @@ import {
 } from "./projectScopedStores";
 import { useSessionLogStore } from "./sessionLogStore";
 import { useStepStore } from "./stepStore";
-import { useTaskRunStore } from "./taskRunStore";
 
 describe("resetProjectScopedStores", () => {
   beforeEach(() => {
@@ -61,10 +60,7 @@ describe("resetProjectScopedStores", () => {
       selectedStepId: step.id,
       selectedStep: step,
     });
-    useTaskRunStore.setState({
-      taskRuns: [taskRun],
-      taskRunsByTaskId: { [task.id]: [taskRun] },
-    });
+    queryClient.setQueryData(queryKeys.taskRuns.byTask(generation, task.id), [taskRun]);
     useSessionLogStore.setState({
       logsByExecutionId: { [execution.id ?? "execution-1"]: [sessionLog] },
     });
@@ -95,10 +91,7 @@ describe("resetProjectScopedStores", () => {
       selectedStepId: null,
       selectedStep: null,
     });
-    expect(useTaskRunStore.getState()).toMatchObject({
-      taskRuns: [],
-      taskRunsByTaskId: {},
-    });
+    expect(queryClient.getQueryData(queryKeys.taskRuns.byTask(generation, task.id))).toBeUndefined();
     expect(useSessionLogStore.getState().logsByExecutionId).toEqual({});
     expect(useChatStore.getState()).toMatchObject({
       sessions: {},

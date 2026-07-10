@@ -5,6 +5,8 @@ import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeView } from "./TaskTreeView";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
+import { queryClient, queryKeys } from "../../query";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
 function createTask(overrides?: Partial<Task>): Task {
   return {
@@ -40,6 +42,17 @@ function node(task: Task, children: TaskTreeNodeType[] = []): TaskTreeNodeType {
 }
 
 function renderTree(hierarchy: TaskTreeNodeType[]) {
+  const seed = (entry: TaskTreeNodeType) => {
+    const activeRun = entry.task.run_controls?.active_run;
+    if (activeRun) {
+      queryClient.setQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), entry.task.id),
+        [activeRun]
+      );
+    }
+    entry.children.forEach(seed);
+  };
+  hierarchy.forEach(seed);
   return render(
     <TaskTreeView hierarchy={hierarchy} isLoading={false} error={null} />
   );
@@ -315,7 +328,7 @@ describe("TaskTreeNode", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows ⊘ marks for terminal runs: muted for stopped, error-toned for failed", () => {
+  it("does not treat terminal history as active task-list state", () => {
     renderTree([
       node(
         withActiveRun(
@@ -333,18 +346,9 @@ describe("TaskTreeNode", () => {
       ),
     ]);
 
-    const marks = screen.getAllByTestId("task-tree-node-cancel-mark");
-    expect(marks).toHaveLength(2);
-    const stopped = marks.find(
-      (m) => m.getAttribute("data-run-status") === "stopped"
-    );
-    const failed = marks.find(
-      (m) => m.getAttribute("data-run-status") === "failed"
-    );
-    expect(stopped).toBeDefined();
-    expect(stopped).not.toHaveClass("failed");
-    expect(failed).toHaveClass("failed");
-    expect(failed).toHaveAttribute("aria-label", "Failed");
+    expect(
+      screen.queryByTestId("task-tree-node-cancel-mark")
+    ).not.toBeInTheDocument();
   });
 
   it("marks the selected row with aria-selected and a selected data flag", () => {

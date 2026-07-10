@@ -1,13 +1,15 @@
 import { useEffect, useCallback } from "react";
 import { events, type TaskRunChangedEvent } from "../bindings";
-import { useTaskRunStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import {
   hasTaskInQueryCache,
+  removeTaskFromQueryCache,
+  removeTaskRunsFromQueryCache,
   replaceTaskRunControlsInQueryCache,
+  upsertTaskRunInQueryCache,
 } from "../query";
 import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
@@ -18,14 +20,13 @@ interface UseTaskRunChangeListenerOptions {
 
 /**
  * Applies TaskRun websocket payloads directly to GUI state. The server-provided
- * run_controls payload is the source of truth for task row controls in the
- * TanStack Query cache.
+ * TaskRun queries are the authority for active-run state. The controls payload
+ * only refreshes server-derived eligibility metadata.
  */
 export function useTaskRunChangeListener(
   options: UseTaskRunChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const upsertTaskRun = useTaskRunStore((state) => state.upsertTaskRun);
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask = useRefreshTaskForRealtimeChange(
     "TaskRunChangeListener"
@@ -38,23 +39,27 @@ export function useTaskRunChangeListener(
       const { task_id, task_run, run_controls } = event.payload;
 
       if (task_run) {
-        upsertTaskRun(task_run);
+        upsertTaskRunInQueryCache(task_run, projectScopeGeneration);
+      }
+
+      if (run_controls.kind === "deleted") {
+        removeTaskRunsFromQueryCache(task_id, projectScopeGeneration);
+        removeTaskFromQueryCache(task_id, projectScopeGeneration);
+        return;
       }
 
       const taskWasCached = hasTaskInQueryCache(
         task_id,
         projectScopeGeneration
       );
-      replaceTaskRunControlsInQueryCache(
-        task_id,
-        run_controls,
-        projectScopeGeneration
-      );
-      if (!taskWasCached) {
+      if (run_controls.kind === "present") {
+        replaceTaskRunControlsInQueryCache(task_id, run_controls.controls, projectScopeGeneration);
+      }
+      if (!taskWasCached || run_controls.kind === "malformed") {
         void fetchAndReconcileTask(task_id);
       }
     },
-    [fetchAndReconcileTask, upsertTaskRun, projectScopeGeneration]
+    [fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {

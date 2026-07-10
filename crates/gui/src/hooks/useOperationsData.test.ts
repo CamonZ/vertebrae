@@ -12,11 +12,13 @@ import {
 
 const mockListTasks = vi.fn();
 const mockGetTaskExecutions = vi.fn();
+const mockGetTaskRuns = vi.fn();
 
 vi.mock("../bindings", () => ({
   commands: {
     listTasks: (...args: unknown[]) => mockListTasks(...args),
     getTaskExecutions: (...args: unknown[]) => mockGetTaskExecutions(...args),
+    getTaskRuns: (...args: unknown[]) => mockGetTaskRuns(...args),
   },
 }));
 
@@ -30,22 +32,16 @@ function renderOperationsDataHook() {
   return renderHook(() => useOperationsData(), { wrapper: QueryWrapper });
 }
 
-function withActiveRun(
-  taskId: string,
+function runControls(
   status: TaskRunStatus,
   overrides: { runnable?: boolean; stoppable?: boolean } = {}
 ) {
-  const activeRun: TaskRun = createMockTaskRun({
-    id: `run-${taskId}`,
-    task_id: taskId,
-    status,
-  });
   return {
     runnable: overrides.runnable ?? false,
     stoppable: overrides.stoppable ?? status === "executing",
     disabled_reason_code: null,
     disabled_reason: null,
-    active_run: activeRun,
+    active_run: null,
   };
 }
 
@@ -55,6 +51,15 @@ describe("useOperationsData", () => {
     resetProjectScopedStores();
     mockListTasks.mockResolvedValue({ status: "ok", data: [] });
     mockGetTaskExecutions.mockResolvedValue({ status: "ok", data: [] });
+    mockGetTaskRuns.mockImplementation((taskId: string) =>
+      Promise.resolve({
+        status: "ok",
+        data:
+          queryClient.getQueryData<TaskRun[]>(
+            queryKeys.taskRuns.byTask(getProjectScopeGeneration(), taskId)
+          ) ?? [],
+      })
+    );
   });
 
   function seedTaskExecutions(taskId: string, executions: StepExecution[]) {
@@ -64,13 +69,27 @@ describe("useOperationsData", () => {
     );
   }
 
-  it("derives a failed_run attention item from run_controls.active_run with status=failed", async () => {
+  function seedTaskRuns(taskId: string, runs: TaskRun[]) {
+    queryClient.setQueryData(
+      queryKeys.taskRuns.byTask(getProjectScopeGeneration(), taskId),
+      runs
+    );
+  }
+
+  it("does not fetch terminal history solely to derive attention items", async () => {
     const failedTask = createMockTask({
       id: "t-fail",
       title: "Failed Task",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-fail", "failed"),
+      run_controls: runControls("failed"),
     });
+    seedTaskRuns("t-fail", [
+      createMockTaskRun({
+        id: "run-t-fail",
+        task_id: "t-fail",
+        status: "failed",
+      }),
+    ]);
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [failedTask] });
 
@@ -80,10 +99,7 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.attentionItems).toHaveLength(1);
-    expect(result.current.attentionItems[0].kind).toBe("failed_run");
-    expect(result.current.attentionItems[0].task.id).toBe("t-fail");
-    expect(result.current.attentionItems[0].taskRun?.status).toBe("failed");
+    expect(result.current.attentionItems).toEqual([]);
   });
 
   // Testing criterion 2 of ticket 55e35cdc: a failed StepExecution inside an
@@ -93,8 +109,15 @@ describe("useOperationsData", () => {
       id: "t-stale",
       title: "Stale failed exec",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-stale", "executing"),
+      run_controls: runControls("executing"),
     });
+    seedTaskRuns("t-stale", [
+      createMockTaskRun({
+        id: "run-t-stale",
+        task_id: "t-stale",
+        status: "executing",
+      }),
+    ]);
 
     mockListTasks.mockResolvedValue({
       status: "ok",
@@ -129,31 +152,59 @@ describe("useOperationsData", () => {
 
   // Testing criterion 1 of ticket 55e35cdc: a waiting TaskRun must show up
   // under live operations alongside queued/executing runs.
-  it("derives live items from tasks whose active_run is queued/executing/waiting", async () => {
+  it("derives live items from query runs that are queued/executing/waiting", async () => {
     const queuedTask = createMockTask({
       id: "t-queued",
       title: "Queued",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-queued", "queued"),
+      run_controls: runControls("queued"),
     });
     const executingTask = createMockTask({
       id: "t-exec",
       title: "Executing",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-exec", "executing"),
+      run_controls: runControls("executing"),
     });
     const waitingTask = createMockTask({
       id: "t-wait",
       title: "Waiting",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-wait", "waiting"),
+      run_controls: runControls("waiting"),
     });
     const stoppingTask = createMockTask({
       id: "t-stop",
       title: "Stopping",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-stop", "stopping", { stoppable: false }),
+      run_controls: runControls("stopping", { stoppable: false }),
     });
+    seedTaskRuns("t-queued", [
+      createMockTaskRun({
+        id: "run-t-queued",
+        task_id: "t-queued",
+        status: "queued",
+      }),
+    ]);
+    seedTaskRuns("t-exec", [
+      createMockTaskRun({
+        id: "run-t-exec",
+        task_id: "t-exec",
+        status: "executing",
+      }),
+    ]);
+    seedTaskRuns("t-wait", [
+      createMockTaskRun({
+        id: "run-t-wait",
+        task_id: "t-wait",
+        status: "waiting",
+      }),
+    ]);
+    seedTaskRuns("t-stop", [
+      createMockTaskRun({
+        id: "run-t-stop",
+        task_id: "t-stop",
+        status: "stopping",
+      }),
+    ]);
 
     mockListTasks.mockResolvedValue({
       status: "ok",
@@ -215,8 +266,15 @@ describe("useOperationsData", () => {
       id: "t-completed",
       title: "Completed Task",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-completed", "completed"),
+      run_controls: runControls("executing"),
     });
+    seedTaskRuns("t-completed", [
+      createMockTaskRun({
+        id: "run-t-completed",
+        task_id: "t-completed",
+        status: "executing",
+      }),
+    ]);
     const execution: StepExecution = {
       id: "exec-completed",
       task_id: "t-completed",
@@ -294,12 +352,19 @@ describe("useOperationsData", () => {
       id: "t-completed",
       title: "Completed Task",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-completed", "completed"),
+      run_controls: runControls("executing"),
     });
     const idleTask = createMockTask({
       ...activeTask,
       run_controls: null,
     });
+    seedTaskRuns("t-completed", [
+      createMockTaskRun({
+        id: "run-t-completed",
+        task_id: "t-completed",
+        status: "executing",
+      }),
+    ]);
     const execution: StepExecution = {
       id: "exec-completed",
       task_id: "t-completed",
@@ -419,8 +484,15 @@ describe("useOperationsData", () => {
       title: "Running",
       workflow_id: "wf-1",
       started_at: null,
-      run_controls: withActiveRun("t-running", "executing"),
+      run_controls: runControls("executing"),
     });
+    seedTaskRuns("t-running", [
+      createMockTaskRun({
+        id: "run-t-running",
+        task_id: "t-running",
+        status: "executing",
+      }),
+    ]);
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [running] });
 
@@ -472,12 +544,12 @@ describe("useOperationsData", () => {
     );
   });
 
-  it("includes a task whose blocker has a completed run", async () => {
+  it("does not fetch a blocker's terminal history to decide readiness", async () => {
     const blocker = createMockTask({
       id: "t-blocker",
       title: "Blocker",
       workflow_id: "wf-1",
-      run_controls: withActiveRun("t-blocker", "completed"),
+      run_controls: runControls("completed"),
     });
     const blocked = createMockTask({
       id: "t-blocked",
@@ -492,6 +564,13 @@ describe("useOperationsData", () => {
       },
       dependency_ids: ["t-blocker"],
     });
+    seedTaskRuns("t-blocker", [
+      createMockTaskRun({
+        id: "run-t-blocker",
+        task_id: "t-blocker",
+        status: "completed",
+      }),
+    ]);
 
     mockListTasks.mockResolvedValue({
       status: "ok",
@@ -504,7 +583,9 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.readyTasks.map((t) => t.id)).toContain("t-blocked");
+    expect(result.current.readyTasks.map((t) => t.id)).not.toContain(
+      "t-blocked"
+    );
   });
 
   it("includes a task whose blocker has completed_at even without a completed run", async () => {

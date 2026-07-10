@@ -136,7 +136,7 @@ describe("splitRunConsole", () => {
       queued,
       running,
       waiting,
-    ]);
+    ], new Map([[running.id, running.run_controls!.active_run!], [waiting.id, waiting.run_controls!.active_run!]]));
 
     expect(run.map((r) => r.task.id).sort()).toEqual([
       "running-1",
@@ -147,7 +147,7 @@ describe("splitRunConsole", () => {
 
   it("drops tasks with no workflow from Ready", () => {
     const noWorkflow = makeTask({ id: "no-wf", workflow_id: null });
-    const { running, ready } = splitRunConsole([noWorkflow]);
+    const { running, ready } = splitRunConsole([noWorkflow], new Map());
     expect(running).toHaveLength(0);
     expect(ready).toHaveLength(0);
   });
@@ -157,7 +157,7 @@ describe("splitRunConsole", () => {
       makeTask({ id: "running-1" }),
       makeRun("executing", { started_at: "2024-06-01T12:00:00Z" })
     );
-    const { running: rows } = splitRunConsole([running]);
+    const { running: rows } = splitRunConsole([running], new Map([[running.id, running.run_controls!.active_run!]]));
     expect(rows[0]?.startedAt).toBe("2024-06-01T12:00:00Z");
   });
 
@@ -166,7 +166,7 @@ describe("splitRunConsole", () => {
       makeTask({ id: "stopping-1" }),
       makeRun("stopping")
     );
-    const { running, ready } = splitRunConsole([stopping]);
+    const { running, ready } = splitRunConsole([stopping], new Map([[stopping.id, stopping.run_controls!.active_run!]]));
     expect(running.map((r) => r.task.id)).toEqual(["stopping-1"]);
     expect(ready).toHaveLength(0);
   });

@@ -17,6 +17,7 @@ import { queryKeys } from "./queryKeys";
 import {
   removeTaskFromQueryCache,
   removeWorkflowFromQueryCache,
+  mergeFetchedTaskRuns,
   replaceTaskRunControlsInQueryCache,
   updateTaskSectionsInQueryCache,
   upsertStepExecutionInQueryCache,
@@ -27,6 +28,20 @@ import {
 describe("server cache helpers", () => {
   beforeEach(() => {
     queryClient.clear();
+  });
+
+  it("keeps a websocket TaskRun update received while a fetch was in flight", () => {
+    const stale = createMockTaskRun({ id: "run-1", status: "queued" });
+    const websocketUpdate = createMockTaskRun({ id: "run-1", status: "executing" });
+
+    expect(mergeFetchedTaskRuns([stale], [websocketUpdate], [stale])).toEqual([
+      websocketUpdate,
+    ]);
+  });
+
+  it("retains a websocket-created TaskRun absent from an older fetch", () => {
+    const current = createMockTaskRun({ id: "run-new", status: "executing" });
+    expect(mergeFetchedTaskRuns([], [current], [])).toEqual([current]);
   });
 
   const ticketFilter: TaskFilterOptions = {

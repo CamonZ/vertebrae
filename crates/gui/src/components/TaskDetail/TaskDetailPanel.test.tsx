@@ -11,6 +11,7 @@ import * as eventsModule from "../../bindings";
 import type {
   StepExecution,
   Task,
+  TaskRun,
   TaskRunControls,
   TaskRunTrace,
 } from "../../bindings";
@@ -166,18 +167,26 @@ const mockTaskData = createMockTask({
   code_refs: [],
 });
 
-function activeRunControls(taskId = mockTaskData.id): TaskRunControls {
+function activeRunControls(): TaskRunControls {
   return {
     runnable: false,
     stoppable: true,
     disabled_reason_code: "active_run",
     disabled_reason: "A TaskRun is already active",
-    active_run: createMockTaskRun({ id: "run-123", task_id: taskId }),
+    active_run: null,
   };
 }
 
-function renderWithTaskOverrides(overrides: Partial<Task>) {
+function activeRun(taskId = mockTaskData.id, overrides: Partial<TaskRun> = {}) {
+  return createMockTaskRun({ id: "run-123", task_id: taskId, ...overrides });
+}
+
+function renderWithTaskOverrides(
+  overrides: Partial<Task>,
+  taskRun: TaskRun | null = null
+) {
   mockTaskOverrides.current = overrides;
+  if (taskRun) seedTaskRuns(taskRun.task_id, [taskRun]);
   return render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 }
 
@@ -197,6 +206,13 @@ function seedRunTrace(runId: string, executions: StepExecution[]) {
       step_executions: executions,
       session_logs: [],
     }
+  );
+}
+
+function seedTaskRuns(taskId: string, runs: TaskRun[]) {
+  queryClient.setQueryData(
+    queryKeys.taskRuns.byTask(getProjectScopeGeneration(), taskId),
+    runs
   );
 }
 
@@ -704,17 +720,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       };
     }
 
-    function stoppingControls(taskId = mockTaskData.id): TaskRunControls {
+    function stoppingControls(): TaskRunControls {
       return {
         runnable: false,
         stoppable: false,
         disabled_reason_code: "stopping",
         disabled_reason: "Stop already requested",
-        active_run: createMockTaskRun({
-          id: "run-stopping",
-          task_id: taskId,
-          status: "stopping",
-        }),
+        active_run: null,
       };
     }
 
@@ -743,7 +755,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("hides Run when an active run is present", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+      renderWithTaskOverrides(
+        { run_controls: activeRunControls() },
+        activeRun()
+      );
 
       expect(
         screen.queryByTestId("task-detail-run-button")
@@ -757,7 +772,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("shows Stop and enables it for executing+stoppable runs", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+      renderWithTaskOverrides(
+        { run_controls: activeRunControls() },
+        activeRun()
+      );
 
       const stop = screen.getByTestId("task-detail-stop-button");
       expect(stop).toBeInTheDocument();
@@ -769,13 +787,15 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       "shows Stop enabled for %s active runs when stoppable",
       (status) => {
         const controls = activeRunControls();
-        renderWithTaskOverrides({
-          run_controls: {
-            ...controls,
-            stoppable: true,
-            active_run: { ...controls.active_run!, status },
+        renderWithTaskOverrides(
+          {
+            run_controls: {
+              ...controls,
+              stoppable: true,
+            },
           },
-        });
+          activeRun(mockTaskData.id, { status })
+        );
 
         const stop = screen.getByTestId("task-detail-stop-button");
         expect(stop).toBeInTheDocument();
@@ -794,12 +814,15 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("hides Stop when the server marks a running task not stoppable", () => {
       const controls = activeRunControls();
-      renderWithTaskOverrides({
-        run_controls: {
-          ...controls,
-          stoppable: false,
+      renderWithTaskOverrides(
+        {
+          run_controls: {
+            ...controls,
+            stoppable: false,
+          },
         },
-      });
+        activeRun()
+      );
 
       // Running but not stoppable still surfaces Stop (so the operator sees
       // the in-flight state) but the button must be disabled.
@@ -809,7 +832,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("hides Run and disables Stop while the run is stopping, and labels Stop as 'Cancel orchestration'", () => {
-      renderWithTaskOverrides({ run_controls: stoppingControls() });
+      renderWithTaskOverrides(
+        { run_controls: stoppingControls() },
+        activeRun(mockTaskData.id, { id: "run-stopping", status: "stopping" })
+      );
 
       expect(
         screen.queryByTestId("task-detail-run-button")
@@ -827,7 +853,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         data: null,
       });
 
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+      renderWithTaskOverrides(
+        { run_controls: activeRunControls() },
+        activeRun()
+      );
 
       const stopBtn = screen.getByTestId("task-detail-stop-button");
       fireEvent.click(stopBtn);
@@ -845,7 +874,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         error: { message: "no orchestrator running" } as never,
       });
 
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+      renderWithTaskOverrides(
+        { run_controls: activeRunControls() },
+        activeRun()
+      );
 
       const stopBtn = screen.getByTestId("task-detail-stop-button");
       fireEvent.click(stopBtn);
@@ -866,7 +898,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders the Hearth detail hero with the active run state", () => {
-      renderWithTaskOverrides({ run_controls: activeRunControls() });
+      renderWithTaskOverrides(
+        { run_controls: activeRunControls() },
+        activeRun()
+      );
 
       const hero = screen.getByTestId("task-detail-hero");
       expect(hero).toHaveAttribute("data-hero-state", "executing");
@@ -985,18 +1020,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Waiting human_input gate", () => {
-    function waitingControls(taskId = mockTaskData.id): TaskRunControls {
+    function waitingControls(): TaskRunControls {
       return {
         runnable: false,
         stoppable: true,
         disabled_reason_code: "active_run",
         disabled_reason: "Run is parked on human_input",
-        active_run: createMockTaskRun({
-          id: "run-wait-1",
-          task_id: taskId,
-          status: "waiting",
-          latest_step_execution_id: "exec-wait-1",
-        }),
+        active_run: null,
       };
     }
 
@@ -1006,13 +1036,19 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         stoppable: false,
         disabled_reason_code: "active_run",
         disabled_reason: "Run is parked",
-        active_run: createMockTaskRun({
-          id: "run-wait-2",
-          task_id: mockTaskData.id,
-          status: "waiting",
-          latest_step_execution_id: "exec-wait-2",
-        }),
+        active_run: null,
       };
+    }
+
+    function waitingRun(
+      id = "run-wait-1",
+      latestStepExecutionId = "exec-wait-1"
+    ) {
+      return activeRun(mockTaskData.id, {
+        id,
+        status: "waiting",
+        latest_step_execution_id: latestStepExecutionId,
+      });
     }
 
     function execFor(
@@ -1056,7 +1092,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           prompt: "Approve change?",
         }),
       ]);
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
 
       const gate = screen.getByTestId("human-input-gate");
       expect(gate).toHaveAttribute("data-run-id", "run-wait-1");
@@ -1078,13 +1117,19 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("offers Stop only when run_controls.stoppable is true", () => {
       seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
       expect(screen.getByTestId("human-input-gate-stop")).toBeInTheDocument();
     });
 
     it("hides Stop when run_controls.stoppable is false", () => {
       seedRunTrace("run-wait-2", [execFor("run-wait-2", "exec-wait-2")]);
-      renderWithTaskOverrides({ run_controls: notStoppableWaitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: notStoppableWaitingControls() },
+        waitingRun("run-wait-2", "exec-wait-2")
+      );
       expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
       expect(
         screen.queryByTestId("human-input-gate-stop")
@@ -1093,7 +1138,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("does not expose any submit / approve / bypass action", () => {
       seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
       const gate = screen.getByTestId("human-input-gate");
       expect(
         gate.querySelector('[data-testid="human-input-gate-submit"]')
@@ -1112,7 +1160,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           step_type: "wait_children",
         }),
       ]);
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
       expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
     });
 
@@ -1123,17 +1174,23 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           step_type: "human_input",
         }),
       ]);
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
       expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
     });
 
     it("renders the review banner when a human_input wait is active", () => {
       seedRunTrace("run-wait-1", [execFor("run-wait-1", "exec-wait-1")]);
-      renderWithTaskOverrides({
-        step_name: "pending_review",
-        step_type: "human_input",
-        run_controls: waitingControls(),
-      });
+      renderWithTaskOverrides(
+        {
+          step_name: "pending_review",
+          step_type: "human_input",
+          run_controls: waitingControls(),
+        },
+        waitingRun()
+      );
 
       expect(
         screen.getByRole("region", { name: "Review gate" })
@@ -1142,11 +1199,14 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("updates the human_input gate from live execution query changes without remount", async () => {
       seedRunTrace("run-wait-1", []);
-      renderWithTaskOverrides({
-        step_name: "pending_review",
-        step_type: "human_input",
-        run_controls: waitingControls(),
-      });
+      renderWithTaskOverrides(
+        {
+          step_name: "pending_review",
+          step_type: "human_input",
+          run_controls: waitingControls(),
+        },
+        waitingRun()
+      );
 
       expect(screen.getByTestId("human-input-gate")).toHaveAttribute(
         "data-execution-id",
@@ -1202,7 +1262,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         status: "ok",
         data: null,
       });
-      renderWithTaskOverrides({ run_controls: waitingControls() });
+      renderWithTaskOverrides(
+        { run_controls: waitingControls() },
+        waitingRun()
+      );
 
       fireEvent.click(screen.getByTestId("human-input-gate-stop"));
       expect(eventsModule.commands.stopRun).toHaveBeenCalledWith({

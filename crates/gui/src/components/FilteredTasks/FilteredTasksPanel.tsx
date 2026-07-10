@@ -4,6 +4,7 @@ import { commands } from "../../bindings";
 import { TaskTreeView, ExpandCollapseAllButton } from "../TaskList";
 import { buildTreeFromTasks, collectExpandableIds } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { ResizablePanel } from "../ResizablePanel";
 import type { TaskTreeNode } from "../../types/ui";
 import { isActiveRunStatus } from "../../utils/runState";
@@ -157,6 +158,9 @@ export function FilteredTasksPanel({
 }: FilteredTasksPanelProps) {
   const [search, setSearch] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   // Use expanded nodes hook to preserve tree collapse state
   const expandedNodes = useExpandedNodes();
@@ -202,7 +206,7 @@ export function FilteredTasksPanel({
   }
 
   const activeCount = tasks.filter((t) =>
-    isActiveRunStatus(t.run_controls?.active_run?.status ?? null)
+    isActiveRunStatus(activeRunsByTaskId.get(t.id)?.status ?? null)
   ).length;
 
   const totalTasks = hierarchy.reduce(

@@ -32,6 +32,7 @@ import { CloseIcon, IconButton, PlayIcon, StopIcon } from "../panels";
 import { Glyph, IdChip } from "../shared/HearthPrimitives";
 import { TaskDetailPanel } from "../TaskDetail";
 import { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
+import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { kindClass } from "./inspector/selection";
 import {
   miniPipeline,
@@ -183,6 +184,9 @@ export interface RunConsoleProps {
  */
 export function RunConsole({ summary }: RunConsoleProps) {
   const { tasks } = useRunConsoleTasks();
+  const { activeRunsByTaskId } = useActiveTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
 
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<ConsoleTab>("ready");
@@ -247,7 +251,10 @@ export function RunConsole({ summary }: RunConsoleProps) {
     };
   }, [isResizing]);
 
-  const { running, ready } = useMemo(() => splitRunConsole(tasks), [tasks]);
+  const { running, ready } = useMemo(
+    () => splitRunConsole(tasks, activeRunsByTaskId),
+    [activeRunsByTaskId, tasks]
+  );
 
   const q = query.trim().toLowerCase();
   const matches = useCallback(
