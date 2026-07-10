@@ -8,6 +8,8 @@ import {
   createMockTaskRunControls,
 } from "../../test/test-utils";
 import { KanbanCard } from "./KanbanCard";
+import { queryClient, queryKeys } from "../../query";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
 describe("KanbanCard", () => {
   describe("basic rendering", () => {
@@ -19,10 +21,10 @@ describe("KanbanCard", () => {
     });
 
     it("renders the 8-digit short task ID", () => {
-      const task = createMockTask({
+    const task = createMockTask({
         id: "860cde1b-9093-42ff-a19d-7453f3b7891b",
-      });
-      render(<KanbanCard task={task} />);
+    });
+    render(<KanbanCard task={task} />);
 
       expect(screen.getByTestId("kanban-card-id")).toHaveTextContent(
         "860cde1b"
@@ -162,6 +164,10 @@ describe("KanbanCard", () => {
         title: "Running task",
         run_controls: createMockTaskRunControls(activeRun),
       });
+      queryClient.setQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), task.id),
+        [activeRun]
+      );
       render(<KanbanCard task={task} />);
 
       const card = screen.getByRole("button", { name: /Task: Running task/i });

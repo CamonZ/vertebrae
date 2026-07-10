@@ -48,9 +48,19 @@ pub enum TaskChangeType {
     StatusChanged,
 }
 
+/// Distinguishes a live controls payload from a deleted task and a malformed
+/// controls payload. `Option<TaskRunControls>` cannot represent that contract:
+/// both a JSON null and a failed deserialization otherwise become `None`.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(tag = "kind", content = "controls", rename_all = "snake_case")]
+pub enum TaskRunControlsPayload {
+    Present(Box<types::TaskRunControls>),
+    Deleted,
+    Malformed,
+}
+
 /// Event payload for TaskRun changes.
-/// Emitted when a TaskRun is created or updated. `run_controls` is copied
-/// directly from the channel payload so the frontend does not recompute it.
+/// Emitted when a TaskRun is created or updated.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TaskRunChangedEvent {
     pub task_run_id: String,
@@ -58,7 +68,7 @@ pub struct TaskRunChangedEvent {
     pub status: types::TaskRunStatus,
     pub change_type: TaskRunChangeType,
     pub task_run: Option<types::TaskRun>,
-    pub run_controls: Option<types::TaskRunControls>,
+    pub run_controls: TaskRunControlsPayload,
 }
 
 /// The type of change that occurred on a TaskRun.

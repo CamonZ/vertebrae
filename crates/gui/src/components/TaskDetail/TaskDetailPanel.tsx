@@ -4,6 +4,7 @@ import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTasks } from "../../hooks/useTasks";
 import { useRunTrace } from "../../hooks/useRunTrace";
+import { useTaskRuns, useTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { useDeleteTask } from "../../hooks/useDeleteTask";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { Spinner } from "../Spinner";
@@ -152,7 +153,7 @@ export function TaskDetailPanel({
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const { tasks: allTasks } = useTasks();
-  const activeRun = taskData?.run_controls?.active_run ?? null;
+  const { activeRun } = useTaskRuns(taskId);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
     taskId,
     activeRun?.id
@@ -172,6 +173,9 @@ export function TaskDetailPanel({
     if (!taskId || allTasks.length === 0) return [];
     return allTasks.filter((t) => t.parent_id === taskId);
   }, [taskId, allTasks]);
+  const { activeRunsByTaskId: childActiveRuns } = useTaskRunsForTasks(
+    children.map((child) => child.id)
+  );
 
   const childrenIds = useMemo(() => children.map((t) => t.id), [children]);
 
@@ -468,7 +472,7 @@ export function TaskDetailPanel({
     setIsStoppingWorkflow(true);
     setWorkflowError(null);
     try {
-      const activeRunId = taskData.run_controls?.active_run?.id || null;
+      const activeRunId = activeRun?.id || null;
       const result = await commands.stopRun({
         task_run_id: activeRunId,
         task_id: activeRunId ? null : taskData.id,
@@ -483,7 +487,7 @@ export function TaskDetailPanel({
     } finally {
       setIsStoppingWorkflow(false);
     }
-  }, [taskData?.id, taskData?.run_controls?.active_run?.id]);
+  }, [activeRun?.id, taskData?.id]);
 
   if (!taskId) {
     return null;
@@ -494,11 +498,11 @@ export function TaskDetailPanel({
     : null;
   const runControlsState = deriveRunControlsState(
     taskData?.run_controls ?? null,
-    { hasWorkflow: Boolean(taskData?.workflow_id) }
+    { hasWorkflow: Boolean(taskData?.workflow_id), activeRun }
   );
   const heroStatus = activeRun?.status ?? null;
   const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
-  const childBreakdown = deriveHearthStateBreakdown(children);
+  const childBreakdown = deriveHearthStateBreakdown(children, childActiveRuns);
   const hasChildBreakdown = hasHearthStateBreakdown(childBreakdown);
   const runWorkflowDisabled = isRunningWorkflow || runControlsState.runDisabled;
   const shouldShowStopWorkflow = runControlsState.showStop;
@@ -808,7 +812,7 @@ export function TaskDetailPanel({
                   {children.slice(0, 18).map((childTask) => (
                     <span key={childTask.id} title={childTask.title}>
                       <StepDot
-                        variant={hearthBreakdownVariantForTask(childTask)}
+                        variant={hearthBreakdownVariantForTask(childTask, childActiveRuns.get(childTask.id))}
                       />
                     </span>
                   ))}

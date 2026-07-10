@@ -9,6 +9,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
+import { useTaskRunsForTasks } from "../hooks/useTaskRuns";
 import {
   buildTreeFromTasks,
   collectExpandableIds,
@@ -80,8 +81,8 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   step_id: null,
 };
 
-function matchesScope(task: Task, scope: TaskScope): boolean {
-  const status = task.run_controls?.active_run?.status ?? null;
+function matchesScope(task: Task, scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): boolean {
+  const status = activeRuns.get(task.id)?.status ?? null;
 
   switch (scope) {
     case "active":
@@ -100,20 +101,20 @@ function matchesScope(task: Task, scope: TaskScope): boolean {
     case "queued":
       return status === "queued";
     case "done":
-      return isTaskDone(task);
+      return isTaskDone(task, activeRuns.get(task.id));
     default:
       return true;
   }
 }
 
-function deriveScopedTasks(tasks: Task[], scope: TaskScope): Task[] {
+function deriveScopedTasks(tasks: Task[], scope: TaskScope, activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>): Task[] {
   if (scope === "all") return tasks;
 
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const include = new Set<string>();
 
   for (const task of tasks) {
-    if (!matchesScope(task, scope)) continue;
+    if (!matchesScope(task, scope, activeRuns)) continue;
     include.add(task.id);
 
     let parentId = task.parent_id;
@@ -128,11 +129,11 @@ function deriveScopedTasks(tasks: Task[], scope: TaskScope): Task[] {
   return tasks.filter((task) => include.has(task.id));
 }
 
-function scopeCounts(tasks: Task[]) {
+function scopeCounts(tasks: Task[], activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>) {
   return tasks.reduce(
     (counts, task) => {
       COUNTED_TASK_SCOPE_CHIPS.forEach(({ key, countKey }) => {
-        if (matchesScope(task, key)) counts[countKey] += 1;
+        if (matchesScope(task, key, activeRuns)) counts[countKey] += 1;
       });
       return counts;
     },
@@ -223,11 +224,12 @@ export function TasksPage() {
   }, [searchParams]);
 
   const { tasks, isLoading, error } = useTasks(filters);
+  const { activeRunsByTaskId } = useTaskRunsForTasks(tasks.map((task) => task.id));
   const scopedTasks = useMemo(
-    () => deriveScopedTasks(tasks, scope),
-    [tasks, scope]
+    () => deriveScopedTasks(tasks, scope, activeRunsByTaskId),
+    [activeRunsByTaskId, tasks, scope]
   );
-  const counts = useMemo(() => scopeCounts(tasks), [tasks]);
+  const counts = useMemo(() => scopeCounts(tasks, activeRunsByTaskId), [activeRunsByTaskId, tasks]);
 
   const hierarchy = useMemo(
     () => buildTreeFromTasks(scopedTasks),

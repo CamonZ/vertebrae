@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event";
 import { FilteredTasksPanel } from "./FilteredTasksPanel";
 import type { Task, Step } from "../../bindings";
 import { commands } from "../../bindings";
+import { queryClient, queryKeys } from "../../query";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
 // Mock the commands module
 vi.mock("../../bindings", async () => {
@@ -123,7 +125,7 @@ describe("FilteredTasksPanel", () => {
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("displays active task count derived from run_controls.active_run, not step_name", () => {
+    it("displays active task count derived from query runs, not step_name", () => {
       const step = createStep();
       const activeRun = {
         id: "run-1",
@@ -146,7 +148,7 @@ describe("FilteredTasksPanel", () => {
       const tasks = [
         // step_name is in_progress but no active TaskRun -- must NOT count.
         createTask({ id: "task-1", step_name: "in_progress" }),
-        // No step_name signal but the daemon has an active run -- must count.
+        // No step_name signal but the query has an active run -- must count.
         createTask({
           id: "task-2",
           step_name: "todo",
@@ -155,11 +157,15 @@ describe("FilteredTasksPanel", () => {
             stoppable: true,
             disabled_reason_code: null,
             disabled_reason: null,
-            active_run: { ...activeRun, task_id: "task-2" },
+            active_run: null,
           },
         }),
         createTask({ id: "task-3", step_name: "todo" }),
       ];
+      queryClient.setQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), "task-2"),
+        [{ ...activeRun, task_id: "task-2" }]
+      );
       render(
         <FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />
       );

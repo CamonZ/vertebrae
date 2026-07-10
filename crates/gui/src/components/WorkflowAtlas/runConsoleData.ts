@@ -8,8 +8,7 @@
 
    Ported from docs/design/run-console.jsx (currentStep / Pipe / fmtElapsed).
    ────────────────────────────────────────────────────────────────── */
-import type { PipelineSummary, Task } from "../../bindings";
-import { deriveActiveTaskRuns } from "../../utils/runState";
+import type { PipelineSummary, Task, TaskRun } from "../../bindings";
 import { kindFor } from "./adapter/buildAtlasModel";
 import type { Kind } from "./layout/types";
 
@@ -45,13 +44,10 @@ export interface PipelineSegment {
  * app. Ready = tasks that have a workflow but no active run — the launchable
  * head. Tasks without a workflow are not launchable and are dropped from both.
  */
-export function splitRunConsole(tasks: Task[]): RunConsoleSplit {
-  const activeByTaskId = new Map(
-    deriveActiveTaskRuns(tasks, { sortNewestFirst: true }).map((a) => [
-      a.task.id,
-      a.taskRun,
-    ]),
-  );
+export function splitRunConsole(
+  tasks: Task[],
+  activeByTaskId: ReadonlyMap<string, TaskRun>
+): RunConsoleSplit {
 
   const running: RunConsoleRow[] = [];
   const ready: RunConsoleRow[] = [];

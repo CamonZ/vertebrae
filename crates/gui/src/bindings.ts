@@ -154,7 +154,7 @@ async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
 },
 /**
  * List tasks with optional filters
- * 
+ *
  * Returns a list of task summaries matching the filter criteria.
  */
 async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
@@ -167,7 +167,7 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], Comma
 },
 /**
  * List tasks that are ready to be worked on.
- * 
+ *
  * Mirrors `vtb ready`: the backend `list_ready` query returns tasks that are
  * not completed and have no incomplete blockers; archived tasks are filtered
  * out here, exactly as the CLI does.
@@ -1804,14 +1804,19 @@ updated_at: string | null }
 export type TaskRunChangeType = "Created" | "Updated"
 /**
  * Event payload for TaskRun changes.
- * Emitted when a TaskRun is created or updated. `run_controls` is copied
- * directly from the channel payload so the frontend does not recompute it.
+ * Emitted when a TaskRun is created or updated.
  */
-export type TaskRunChangedEvent = { task_run_id: string; task_id: string; status: TaskRunStatus; change_type: TaskRunChangeType; task_run: TaskRun | null; run_controls: TaskRunControls | null }
+export type TaskRunChangedEvent = { task_run_id: string; task_id: string; status: TaskRunStatus; change_type: TaskRunChangeType; task_run: TaskRun | null; run_controls: TaskRunControlsPayload }
 /**
  * Server-derived controls for Run/Stop task actions.
  */
 export type TaskRunControls = { runnable?: boolean; stoppable?: boolean; disabled_reason_code: string | null; disabled_reason: string | null; active_run: TaskRun | null }
+/**
+ * Distinguishes a live controls payload from a deleted task and a malformed
+ * controls payload. `Option<TaskRunControls>` cannot represent that contract:
+ * both a JSON null and a failed deserialization otherwise become `None`.
+ */
+export type TaskRunControlsPayload = { kind: "present"; controls: TaskRunControls } | { kind: "deleted" } | { kind: "malformed" }
 /**
  * Durable lifecycle status for a task workflow run.
  */

@@ -3,6 +3,7 @@ import type {
   StepExecution,
   Task,
   TaskFilterOptions,
+  TaskRun,
   TaskRunTrace,
   TaskRunControls,
   Workflow,
@@ -63,8 +64,7 @@ function isRetiredFromReadyFeed(task: Task): boolean {
 function shouldAppendToReadyFeed(task: Task): boolean {
   return (
     !isRetiredFromReadyFeed(task) &&
-    (task.run_controls?.runnable === true ||
-      task.run_controls?.active_run != null)
+    task.run_controls?.runnable === true
   );
 }
 
@@ -158,6 +158,58 @@ export function mergeFetchedStepExecutions(
   }
 
   return merged;
+}
+
+/**
+ * Merge a TaskRun fetch without allowing a websocket update received during
+ * that fetch to be replaced by its older response.
+ */
+export function mergeFetchedTaskRuns(
+  fetchedRuns: readonly TaskRun[],
+  currentRuns: readonly TaskRun[] | undefined,
+  runsAtFetchStart: readonly TaskRun[] | undefined
+): TaskRun[] {
+  const currentById = new Map((currentRuns ?? []).map((run) => [run.id, run]));
+  const atFetchStartById = new Map(
+    (runsAtFetchStart ?? []).map((run) => [run.id, run])
+  );
+  const fetchedIds = new Set<string>();
+
+  const merged = fetchedRuns.map((run) => {
+    fetchedIds.add(run.id);
+    const current = currentById.get(run.id);
+    return current && current !== atFetchStartById.get(run.id) ? current : run;
+  });
+
+  for (const run of currentRuns ?? []) {
+    if (!fetchedIds.has(run.id) && run !== atFetchStartById.get(run.id)) {
+      merged.push(run);
+    }
+  }
+  return merged;
+}
+
+export function upsertTaskRunInQueryCache(
+  taskRun: TaskRun,
+  generation = getProjectScopeGeneration()
+) {
+  const key = queryKeys.taskRuns.byTask(generation, taskRun.task_id);
+  queryClient.setQueryData<TaskRun[]>(key, (runs = []) => {
+    const index = runs.findIndex((run) => run.id === taskRun.id);
+    if (index === -1) return [...runs, taskRun];
+    const next = runs.slice();
+    next[index] = taskRun;
+    return next;
+  });
+}
+
+export function removeTaskRunsFromQueryCache(
+  taskId: string,
+  generation = getProjectScopeGeneration()
+) {
+  queryClient.removeQueries({
+    queryKey: queryKeys.taskRuns.byTask(generation, taskId),
+  });
 }
 
 export function mergeFetchedTaskRunTrace(

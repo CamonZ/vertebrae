@@ -34,4 +34,10 @@ export const queryKeys = {
     byRun: (generation: number, runId: string) =>
       [...queryKeys.executions.all(generation), "byRun", runId] as const,
   },
+  taskRuns: {
+    all: (generation: number) =>
+      [...queryKeys.project(generation), "taskRuns"] as const,
+    byTask: (generation: number, taskId: string) =>
+      [...queryKeys.taskRuns.all(generation), "byTask", taskId] as const,
+  },
 };

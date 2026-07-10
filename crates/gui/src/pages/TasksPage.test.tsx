@@ -12,6 +12,20 @@ import {
 import { TasksPage } from "./TasksPage";
 import { useShellStore } from "../stores/shellStore";
 import type { Task, TaskFilterOptions } from "../bindings";
+import { queryClient, queryKeys } from "../query";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
+
+function seedTaskRuns(tasks: Task[]) {
+  for (const task of tasks) {
+    const activeRun = task.run_controls?.active_run;
+    if (activeRun) {
+      queryClient.setQueryData(
+        queryKeys.taskRuns.byTask(getProjectScopeGeneration(), task.id),
+        [activeRun]
+      );
+    }
+  }
+}
 
 /**
  * The visible page title and activity readouts (the "N running" pulse and the
@@ -85,6 +99,7 @@ describe("TasksPage", () => {
       title: "Idle Task",
     });
     mockTasks = [parent, activeChild, idleTask];
+    seedTaskRuns(mockTasks);
 
     render(<TasksPageWithHeader />);
     await user.click(screen.getByRole("button", { name: /active1/i }));
@@ -105,7 +120,7 @@ describe("TasksPage", () => {
         ),
       }),
     ];
-
+    seedTaskRuns(mockTasks);
     render(<TasksPageWithHeader />);
     await waitFor(() => expect(lastFilters?.workflow_id).toBe("workflow-123"));
     await user.click(screen.getByRole("button", { name: /queued1/i }));
@@ -141,6 +156,7 @@ describe("TasksPage", () => {
         title: "First visible task",
       }),
     ];
+    seedTaskRuns(mockTasks);
 
     render(<TasksPageWithHeader />);
 
@@ -168,6 +184,7 @@ describe("TasksPage", () => {
         title: "Standardize GUI entity ID primitives",
       }),
     ];
+    seedTaskRuns(mockTasks);
 
     render(<TasksPageWithHeader />);
     fireEvent.click(screen.getAllByRole("treeitem")[0]);
@@ -212,6 +229,7 @@ describe("TasksPage", () => {
         ),
       }),
     ];
+    seedTaskRuns(mockTasks);
 
     render(<TasksPageWithHeader />);
 

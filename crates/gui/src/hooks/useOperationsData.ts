@@ -3,6 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import type { Task, TaskFilterOptions } from "../bindings";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useTasks } from "./useTasks";
+import { useTaskRunsForTasks } from "./useTaskRuns";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
@@ -76,6 +77,9 @@ export function useOperationsData(): OperationsData {
     error: tasksError,
     refetch: refetchTasks,
   } = useTasks(ALL_TASKS_FILTER);
+  const { activeRunsByTaskId, latestRunsByTaskId } = useTaskRunsForTasks(
+    tasks.map((task) => task.id)
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const executionTaskIds = useMemo(() => {
@@ -84,7 +88,7 @@ export function useOperationsData(): OperationsData {
 
     for (const task of tasks) {
       if (
-        task.run_controls?.active_run != null ||
+        activeRunsByTaskId.has(task.id) ||
         hasTaskExecutionsQuery(projectScopeGeneration, task.id)
       ) {
         observedTaskIds.add(task.id);
@@ -96,7 +100,7 @@ export function useOperationsData(): OperationsData {
     }
 
     return taskIds;
-  }, [projectScopeGeneration, tasks]);
+  }, [activeRunsByTaskId, projectScopeGeneration, tasks]);
 
   const executionQueries = useQueries({
     queries: executionTaskIds.map((taskId) =>
@@ -132,20 +136,23 @@ export function useOperationsData(): OperationsData {
     const items: AttentionItem[] = [];
 
     for (const task of tasks) {
-      const failedRun = task.run_controls?.active_run;
+      const failedRun = latestRunsByTaskId.get(task.id);
       if (failedRun && failedRun.status === "failed") {
         items.push({ kind: "failed_run", task, taskRun: failedRun });
       }
     }
 
     return items;
-  }, [tasks]);
+  }, [latestRunsByTaskId, tasks]);
 
   // Excludes "stopping" — that transition is signalled via the run chip/Stop
   // button, not the Live tile.
   const liveItems = useMemo<LiveItem[]>(
-    () => deriveActiveTaskRuns(tasks, { includeStopping: false }),
-    [tasks]
+    () =>
+      deriveActiveTaskRuns(tasks, activeRunsByTaskId, {
+        includeStopping: false,
+      }),
+    [activeRunsByTaskId, tasks]
   );
 
   const completedItems = useMemo<CompletedItem[]>(() => {
@@ -169,7 +176,7 @@ export function useOperationsData(): OperationsData {
   const readyTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
       if (t.archived) return false;
-      if (isActiveRunStatus(t.run_controls?.active_run?.status ?? null)) {
+      if (isActiveRunStatus(activeRunsByTaskId.get(t.id)?.status ?? null)) {
         return false;
       }
       const controls = t.run_controls;
@@ -184,14 +191,14 @@ export function useOperationsData(): OperationsData {
         return deps.every((depId) => {
           const dep = taskMap.get(depId);
           if (!dep) return false;
-          const depRunStatus = dep.run_controls?.active_run?.status ?? null;
+          const depRunStatus = latestRunsByTaskId.get(dep.id)?.status ?? null;
           if (depRunStatus === "completed") return true;
           return Boolean(dep.completed_at);
         });
       }
       return true;
     });
-  }, [tasks, taskMap]);
+  }, [activeRunsByTaskId, latestRunsByTaskId, tasks, taskMap]);
 
   return {
     attentionItems,

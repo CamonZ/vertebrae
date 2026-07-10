@@ -3,6 +3,7 @@ import type { Task, TaskRunStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
+import { useTaskRunsForTasks } from "../../hooks/useTaskRuns";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
@@ -182,6 +183,10 @@ export function TaskTreeNode({
   summaryExpanded,
 }: TaskTreeNodeProps) {
   const task = node.task;
+  const { activeRunsByTaskId, runsByTaskId } = useTaskRunsForTasks([
+    task.id,
+    ...node.children.map((child) => child.task.id),
+  ]);
   const hasChildren = node.children.length > 0;
   const isSelected = selectedTaskId === task.id;
   const isExpanded = expandedNodes
@@ -207,13 +212,15 @@ export function TaskTreeNode({
   }, [expandedNodes, task.id]);
 
   const priority = getPriorityIndicator(task.priority);
-  const runChip = deriveRunStateChip(task);
-  const activeRunStatus = task.run_controls?.active_run?.status ?? null;
+  const activeRun = activeRunsByTaskId.get(task.id) ?? null;
+  const displayRun = activeRun ?? runsByTaskId.get(task.id)?.[0] ?? null;
+  const runChip = deriveRunStateChip(activeRun);
+  const activeRunStatus = displayRun?.status ?? null;
   const tags = task.tags ?? [];
   const childLine = task.level === "task" ? null : childSummary(node);
   const breakdown = useMemo(
-    () => deriveHearthStateBreakdown(node.children.map((child) => child.task)),
-    [node.children]
+    () => deriveHearthStateBreakdown(node.children.map((child) => child.task), activeRunsByTaskId),
+    [activeRunsByTaskId, node.children]
   );
   const hasBreakdown = hasHearthStateBreakdown(breakdown);
 

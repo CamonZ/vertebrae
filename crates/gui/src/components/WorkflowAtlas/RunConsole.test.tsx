@@ -25,6 +25,19 @@ vi.mock("./hooks/useRunConsoleTasks", () => ({
   }),
 }));
 
+vi.mock("../../hooks/useTaskRuns", () => ({
+  useTaskRunsForTasks: () => ({
+    activeRunsByTaskId: new Map(
+      mockTasks()
+        .flatMap((task) =>
+          task.run_controls?.active_run
+            ? [[task.id, task.run_controls.active_run] as const]
+            : []
+        )
+    ),
+  }),
+}));
+
 vi.mock("../TaskDetail", () => ({
   TaskDetailPanel: ({ taskId }: { taskId: string | null }) => (
     <div data-testid="task-detail-panel">{taskId}</div>
