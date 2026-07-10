@@ -17,6 +17,7 @@ export type {
 export { useRunTrace } from "./useRunTrace";
 export type { UseRunTraceResult } from "./useRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
+export { useTaskLocation } from "./useTaskLocation";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
@@ -27,6 +28,7 @@ export { useStepExecutionChangeListener } from "./useStepExecutionChangeListener
 export { useSectionChangeListener } from "./useSectionChangeListener";
 export { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 export { useStepTransitionChangeListener } from "./useStepTransitionChangeListener";
+export { useWorkflowTransitionChangeListener } from "./useWorkflowTransitionChangeListener";
 export { useTheme } from "./useTheme";
 export { useDensity } from "./useDensity";
 export { useExpandedNodes } from "./useExpandedNodes";
@@ -43,7 +45,4 @@ export { useLocalChat, useOpenChat } from "./useLocalChat";
 export { usePipelineSummary } from "./usePipelineSummary";
 export { useWebSocketStatus } from "./useWebSocketStatus";
 export { useShellHeader } from "./useShellHeader";
-export {
-  useCurrentProject,
-  projectAvatarBucket,
-} from "./useCurrentProject";
+export { useCurrentProject, projectAvatarBucket } from "./useCurrentProject";

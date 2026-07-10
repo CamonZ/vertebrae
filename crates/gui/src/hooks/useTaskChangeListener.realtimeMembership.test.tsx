@@ -142,13 +142,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    const updated = {
-      ...original,
-      current_step_id: "step-review",
-      step_name: "pending_review",
-    };
     seedTaskList([original]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: updated });
 
     renderHook(() => useTaskChangeListener());
 
@@ -165,14 +159,14 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
 
     await waitFor(() => {
-      expect(cachedTasks()[0].step_name).toBe("pending_review");
+      expect(cachedTasks()[0].current_step_id).toBe("step-review");
     });
     expect(cachedTasks()[0]).toMatchObject({
       id: "task-step",
       workflow_id: "workflow-1",
       workflow_name: "Workflow",
       current_step_id: "step-review",
-      step_name: "pending_review",
+      step_name: "todo",
     });
   });
 
@@ -191,13 +185,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    const updatedChild = {
-      ...child,
-      current_step_id: "step-review",
-      step_name: "review",
-    };
     seedTaskList([parent, child]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: updatedChild });
 
     renderHook(() => useTaskChangeListener());
 
@@ -215,9 +203,9 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
 
     await waitFor(() => {
-      expect(cachedTasks().find((task) => task.id === "child")?.step_name).toBe(
-        "review"
-      );
+      expect(
+        cachedTasks().find((task) => task.id === "child")?.current_step_id
+      ).toBe("step-review");
     });
 
     const flat = cachedTasks();
@@ -358,7 +346,7 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
   });
 
-  it("hydrates task changed events when payload task data is missing labels", async () => {
+  it("does not refetch task changed events merely because location labels are missing", async () => {
     const partial = createMockTask({
       id: "needs-hydration",
       workflow_id: "workflow-1",
@@ -366,13 +354,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       current_step_id: "step-review",
       step_name: null,
     });
-    const hydrated = {
-      ...partial,
-      workflow_name: "Implementation",
-      step_name: "review",
-    };
     seedTaskList([]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
 
     renderHook(() => useTaskChangeListener());
     await waitFor(() => {
@@ -389,17 +371,16 @@ describe("useTaskChangeListener realtime list membership", () => {
       archived: false,
     });
 
-    await waitFor(() => {
-      expect(mockGetTask).toHaveBeenCalledWith("needs-hydration");
-    });
+    await waitFor(() => expect(cachedTasks()).toHaveLength(1));
     expect(cachedTasks()[0]).toMatchObject({
       id: "needs-hydration",
-      workflow_name: "Implementation",
-      step_name: "review",
+      workflow_name: null,
+      step_name: null,
     });
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
-  it("hydrates task changed events when payload task data is missing step_type", async () => {
+  it("does not refetch task changed events merely because step type is missing", async () => {
     const partial = createMockTask({
       id: "needs-step-type-hydration",
       workflow_id: "workflow-1",
@@ -408,12 +389,7 @@ describe("useTaskChangeListener realtime list membership", () => {
       step_name: "review",
       step_type: null,
     });
-    const hydrated = {
-      ...partial,
-      step_type: "evaluate" as const,
-    };
     seedTaskList([]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
 
     renderHook(() => useTaskChangeListener());
     await waitFor(() => {
@@ -430,17 +406,16 @@ describe("useTaskChangeListener realtime list membership", () => {
       archived: false,
     });
 
-    await waitFor(() => {
-      expect(mockGetTask).toHaveBeenCalledWith("needs-step-type-hydration");
-    });
+    await waitFor(() => expect(cachedTasks()).toHaveLength(1));
     expect(cachedTasks()[0]).toMatchObject({
       id: "needs-step-type-hydration",
       step_name: "review",
-      step_type: "evaluate",
+      step_type: null,
     });
+    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
-  it("reuses a cached step_type for the same current step instead of hydrating every event", async () => {
+  it("does not copy a cached embedded step_type into a new task projection", async () => {
     const cached = createMockTask({
       id: "cached-step-type",
       title: "Cached projection",
@@ -476,8 +451,9 @@ describe("useTaskChangeListener realtime list membership", () => {
       id: "cached-step-type",
       title: "Updated projection",
       current_step_id: "step-review",
-      step_type: "evaluate",
+      step_type: null,
     });
+    expect(cachedTasks()[0].step_type).toBeNull();
   });
 
   it("hydrates routable task payloads when empty arrays would clear cached data", async () => {

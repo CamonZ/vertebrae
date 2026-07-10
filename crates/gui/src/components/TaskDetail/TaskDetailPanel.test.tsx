@@ -3,6 +3,8 @@ import { act, screen, fireEvent, waitFor } from "@testing-library/react";
 import {
   render,
   createMockTask,
+  createMockStep,
+  createMockWorkflow,
   createMockTaskRun,
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
@@ -186,8 +188,37 @@ function renderWithTaskOverrides(
   taskRun: TaskRun | null = null
 ) {
   mockTaskOverrides.current = overrides;
+  const canonicalTask = createMockTask({
+    workflow_id: "wf-1",
+    current_step_id: "step-1",
+    step_name: "in_progress",
+    step_type: "execute",
+    ...overrides,
+  });
+  seedTaskLocation(canonicalTask);
   if (taskRun) seedTaskRuns(taskRun.task_id, [taskRun]);
   return render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+}
+
+function seedTaskLocation(task: Task) {
+  const generation = getProjectScopeGeneration();
+  const workflowId = task.workflow_id ?? "wf-1";
+  const stepId = task.current_step_id ?? "step-1";
+  queryClient.setQueryData(
+    queryKeys.steps.byId(generation, stepId),
+    createMockStep({
+      id: stepId,
+      workflow_id: workflowId,
+      name: task.step_name ?? "in_progress",
+      step_type: task.step_type ?? "execute",
+    })
+  );
+  queryClient.setQueryData(queryKeys.workflows.list(generation), [
+    createMockWorkflow({
+      id: workflowId,
+      name: task.workflow_name ?? "Implementation",
+    }),
+  ]);
 }
 
 function seedTaskList(tasks: Task[]) {
@@ -224,6 +255,15 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     usePanelFocusStore.getState().reset();
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
+    );
+    seedTaskLocation(
+      createMockTask({
+        workflow_id: "wf-1",
+        current_step_id: "step-1",
+        step_name: "in_progress",
+        step_type: "execute",
+        workflow_name: "Implementation",
+      })
     );
   });
 
@@ -928,6 +968,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       id: "child-001",
       title: "First child task",
       level: "task",
+      workflow_id: "wf-1",
+      current_step_id: "child-step-1",
       parent_id: mockTaskData.id,
       step_name: "in_progress",
       workflow_name: "Implementation",
@@ -937,6 +979,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       id: "child-002",
       title: "Second child task",
       level: "ticket",
+      workflow_id: "wf-1",
+      current_step_id: "child-step-2",
       parent_id: mockTaskData.id,
       step_name: "todo",
       workflow_name: "Backlog",
@@ -955,6 +999,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
     it("displays each child with its id badge, title, and step name", () => {
       seedTaskList([childTask1, childTask2]);
+      seedTaskLocation(childTask1);
+      seedTaskLocation(childTask2);
 
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 

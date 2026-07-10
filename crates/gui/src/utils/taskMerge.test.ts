@@ -169,9 +169,12 @@ describe("taskMerge helpers", () => {
       expect(taskMatchesFilter(task, taskFilter({ step_id: "step-2" }))).toBe(
         false
       );
+      // Local reconciliation cannot use the denormalized Task.step_name. The
+      // server applies this compatibility filter; cache reconciliation passes
+      // a canonical TaskLocation when it has one.
       expect(
         taskMatchesFilter(task, taskFilter({ step_names: ["review"] }))
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 

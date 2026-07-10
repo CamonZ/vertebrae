@@ -78,13 +78,7 @@ describe("TasksPage realtime task membership", () => {
       current_step_id: "step-todo",
       step_name: "todo",
     });
-    const updated = {
-      ...original,
-      current_step_id: "step-review",
-      step_name: "pending_review",
-    };
     mockListTasks.mockResolvedValue({ status: "ok", data: [original] });
-    mockGetTask.mockResolvedValue({ status: "ok", data: updated });
 
     render(<TasksPageWithRealtime />);
 
@@ -114,8 +108,8 @@ describe("TasksPage realtime task membership", () => {
           .getQueryData<
             Task[]
           >(queryKeys.tasks.list(getProjectScopeGeneration(), INITIAL_FILTERS))
-          ?.find((t) => t.id === "task-realtime-step")?.step_name
-      ).toBe("pending_review");
+          ?.find((t) => t.id === "task-realtime-step")?.current_step_id
+      ).toBe("step-review");
     });
     expect(mockListTasks).toHaveBeenCalledTimes(1);
   });

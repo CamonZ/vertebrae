@@ -44,6 +44,7 @@ import { SearchInput } from "../molecules/SearchInput";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { FloatingDetailPanel } from "../panels/FloatingDetailPanel";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
+import { useWorkflowSelectionStore } from "../../stores";
 import { WorkflowInspector } from "./inspector/WorkflowInspector";
 import { StepInspector } from "./inspector/StepInspector";
 import type { AtlasSelection } from "./inspector/selection";
@@ -115,10 +116,37 @@ export function WorkflowAtlas() {
   // workflow hover-trace, which lights a hub's whole connected set.
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [morphing, setMorphing] = useState(false);
-  // Inspector selection: null = closed. Clicking a box → workflow mode; a step
-  // node → step mode. The inspector's clickable transitions update this in place
-  // so the panel walks the topology without unmounting.
-  const [sel, setSel] = useState<AtlasSelection | null>(null);
+  // Inspector selection is UI-only Zustand state. Durable Workflow and Step
+  // records remain in TanStack Query; closing the panel never clears them.
+  const {
+    selectedWorkflowId,
+    selectedStepId,
+    selectWorkflow,
+    selectStep,
+    clearSelection,
+  } = useWorkflowSelectionStore();
+  const sel = useMemo<AtlasSelection | null>(
+    () =>
+      selectedWorkflowId
+        ? selectedStepId
+          ? {
+              type: "step",
+              workflowId: selectedWorkflowId,
+              stepId: selectedStepId,
+            }
+          : { type: "workflow", workflowId: selectedWorkflowId }
+        : null,
+    [selectedStepId, selectedWorkflowId]
+  );
+  const setSel = (selection: AtlasSelection | null) => {
+    if (!selection) {
+      clearSelection();
+    } else if (selection.type === "workflow") {
+      selectWorkflow(selection.workflowId);
+    } else {
+      selectStep(selection.workflowId, selection.stepId);
+    }
+  };
 
   const isGraph = view === "graph";
 

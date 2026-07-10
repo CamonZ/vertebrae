@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   PipelineStep,
@@ -8,6 +9,7 @@ import type {
   TaskRunStatus,
 } from "../../bindings";
 import { RunConsole } from "./RunConsole";
+import { queryClient } from "../../query";
 
 /* ── mocks ─────────────────────────────────────────────────────────
    The task feed and the heavyweight TaskDetailPanel are stubbed so the test
@@ -28,12 +30,11 @@ vi.mock("./hooks/useRunConsoleTasks", () => ({
 vi.mock("../../hooks/useTaskRuns", () => ({
   useActiveTaskRunsForTasks: () => ({
     activeRunsByTaskId: new Map(
-      mockTasks()
-        .flatMap((task) =>
-          task.run_controls?.active_run
-            ? [[task.id, task.run_controls.active_run] as const]
-            : []
-        )
+      mockTasks().flatMap((task) =>
+        task.run_controls?.active_run
+          ? [[task.id, task.run_controls.active_run] as const]
+          : []
+      )
     ),
   }),
 }));
@@ -149,6 +150,14 @@ function openConsole() {
   fireEvent.click(screen.getByTestId("run-console-fab"));
 }
 
+function renderConsole() {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <RunConsole summary={SUMMARY} />
+    </QueryClientProvider>
+  );
+}
+
 afterEach(() => {
   vi.clearAllMocks();
   mockTasks.mockReturnValue([]);
@@ -159,7 +168,7 @@ afterEach(() => {
 describe("RunConsole", () => {
   it("splits tasks into Ready / Running tabs from the feed", () => {
     mockTasks.mockReturnValue([READY, RUNNING]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
 
     const console_ = screen.getByTestId("run-console");
@@ -182,7 +191,7 @@ describe("RunConsole", () => {
 
   it("Run fires runWorkflow with the task id", () => {
     mockTasks.mockReturnValue([READY]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
 
     fireEvent.click(screen.getByRole("button", { name: "Run task" }));
@@ -192,7 +201,7 @@ describe("RunConsole", () => {
 
   it("Stop fires stopRun with the task id", () => {
     mockTasks.mockReturnValue([RUNNING]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
 
     // Jump to the Running tab where the Stop control lives.
@@ -209,7 +218,7 @@ describe("RunConsole", () => {
 
   it("Run all fires runWorkflow for the ready head", () => {
     mockTasks.mockReturnValue([READY, RUNNING]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
 
     fireEvent.click(screen.getByRole("button", { name: "Run all" }));
@@ -218,7 +227,7 @@ describe("RunConsole", () => {
 
   it("opens the task detail panel on row click", () => {
     mockTasks.mockReturnValue([READY]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
 
     fireEvent.click(screen.getByText("Ready task"));
@@ -229,7 +238,7 @@ describe("RunConsole", () => {
 
   it("collapses on Escape via the shared glass-panel focus stack", () => {
     mockTasks.mockReturnValue([READY]);
-    render(<RunConsole summary={SUMMARY} />);
+    renderConsole();
     openConsole();
     expect(screen.getByTestId("run-console")).toBeInTheDocument();
 

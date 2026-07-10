@@ -5,7 +5,8 @@ import {
   type StepChangedEvent,
   type StepChangeType,
 } from "../bindings";
-import { useStepStore, useToastStore } from "../stores";
+import { useToastStore } from "../stores";
+import { removeStepFromQueryCache, upsertStepInQueryCache } from "../query";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -41,7 +42,7 @@ interface UseStepChangeListenerOptions {
 
 /**
  * Hook that listens to StepChangedEvent from Tauri and applies entity data
- * directly to the step store. No REST refetch is needed since WS payloads
+ * directly to the generation-scoped query cache. No REST refetch is needed since WS payloads
  * carry the full entity.
  *
  * Optional callbacks allow callers to also update local derived state
@@ -53,8 +54,6 @@ export function useStepChangeListener(
   options: UseStepChangeListenerOptions = {}
 ) {
   const { enabled = true, onCreated, onUpdated, onDeleted } = options;
-  const upsertStep = useStepStore((state) => state.upsertStep);
-  const removeStep = useStepStore((state) => state.removeStep);
   const addToast = useToastStore((state) => state.addToast);
   const projectScopeGeneration = useProjectScopeGeneration();
 
@@ -77,10 +76,10 @@ export function useStepChangeListener(
       addToast(getStepChangeMessage(change_type, step_id), toastType);
 
       if (change_type === "Deleted") {
-        removeStep(step_id);
+        removeStepFromQueryCache(step_id, projectScopeGeneration);
         onDeleted?.(step_id);
       } else if (step) {
-        upsertStep(step);
+        upsertStepInQueryCache(step, projectScopeGeneration);
         if (change_type === "Created") {
           onCreated?.(step);
         } else {
@@ -88,15 +87,7 @@ export function useStepChangeListener(
         }
       }
     },
-    [
-      addToast,
-      upsertStep,
-      removeStep,
-      onCreated,
-      onUpdated,
-      onDeleted,
-      projectScopeGeneration,
-    ]
+    [addToast, onCreated, onUpdated, onDeleted, projectScopeGeneration]
   );
 
   useEffect(() => {

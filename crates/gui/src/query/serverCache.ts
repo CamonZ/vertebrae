@@ -1,5 +1,6 @@
 import type {
   Section,
+  Step,
   StepExecution,
   Task,
   TaskFilterOptions,
@@ -7,6 +8,7 @@ import type {
   TaskRunTrace,
   TaskRunControls,
   Workflow,
+  WorkflowTransition,
   WorkflowWithTasks,
 } from "../bindings";
 import {
@@ -14,6 +16,7 @@ import {
   taskMatchesFilter,
   taskRunControlsEqual,
 } from "../utils/taskMerge";
+import { resolveTaskLocation } from "../utils/taskLocation";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { queryClient } from "./queryClient";
 import { queryKeys } from "./queryKeys";
@@ -40,13 +43,16 @@ function taskListFilterFromKey(
 function reconcileTaskList(
   tasks: readonly Task[] | undefined,
   task: Task,
-  filter: TaskFilterOptions | null
+  filter: TaskFilterOptions | null,
+  generation: number
 ): Task[] | undefined {
   const current = tasks ?? [];
   const index = current.findIndex((item) => item.id === task.id);
   const mergedTask = index >= 0 ? mergeTask(current[index], task) : task;
 
-  if (!taskMatchesFilter(mergedTask, filter)) {
+  const location = cachedTaskLocation(mergedTask, generation);
+
+  if (!taskMatchesFilter(mergedTask, filter, location)) {
     return current.filter((item) => item.id !== task.id);
   }
 
@@ -57,15 +63,28 @@ function reconcileTaskList(
   return next;
 }
 
+function cachedTaskLocation(task: Task, generation: number) {
+  const step = task.current_step_id
+    ? queryClient.getQueryData<Step>(
+        queryKeys.steps.byId(generation, task.current_step_id)
+      )
+    : undefined;
+  const workflowId = task.workflow_id ?? step?.workflow_id;
+  const workflow = workflowId
+    ? queryClient
+        .getQueryData<Workflow[]>(queryKeys.workflows.list(generation))
+        ?.find((candidate) => candidate.id === workflowId)
+    : undefined;
+
+  return resolveTaskLocation(task, step, workflow);
+}
+
 function isRetiredFromReadyFeed(task: Task): boolean {
   return task.archived === true || Boolean(task.completed_at);
 }
 
 function shouldAppendToReadyFeed(task: Task): boolean {
-  return (
-    !isRetiredFromReadyFeed(task) &&
-    task.run_controls?.runnable === true
-  );
+  return !isRetiredFromReadyFeed(task) && task.run_controls?.runnable === true;
 }
 
 function upsertReadyTask(task: Task, generation: number): void {
@@ -276,9 +295,43 @@ export function upsertTaskInQueryCache(
     queryClient.setQueryData<Task[] | undefined>(key, (currentTasks) =>
       currentTasks === undefined
         ? undefined
-        : reconcileTaskList(currentTasks, task, filter)
+        : reconcileTaskList(currentTasks, task, filter, generation)
     );
   }
+}
+
+/** Update only persisted task location IDs after a movement event. */
+export function updateTaskLocationInQueryCache(
+  taskId: string,
+  currentStepId: string | null,
+  workflowId: string | null | undefined,
+  generation = getProjectScopeGeneration()
+) {
+  const update = (task: Task): Task => ({
+    ...task,
+    current_step_id: currentStepId,
+    ...(workflowId !== undefined ? { workflow_id: workflowId } : {}),
+  });
+
+  queryClient.setQueryData<Task | undefined>(
+    queryKeys.tasks.detail(generation, taskId),
+    (task) => (task ? update(task) : task)
+  );
+  for (const [key] of queryClient.getQueriesData<Task[]>({
+    queryKey: queryKeys.tasks.lists(generation),
+  })) {
+    const filter = taskListFilterFromKey(key);
+    queryClient.setQueryData<Task[] | undefined>(key, (tasks) => {
+      const existing = tasks?.find((task) => task.id === taskId);
+      return existing
+        ? reconcileTaskList(tasks, update(existing), filter, generation)
+        : tasks;
+    });
+  }
+  queryClient.setQueryData<Task[] | undefined>(
+    queryKeys.tasks.ready(generation),
+    (tasks) => tasks?.map((task) => (task.id === taskId ? update(task) : task))
+  );
 }
 
 export function removeTaskFromQueryCache(
@@ -434,6 +487,54 @@ export function upsertWorkflowInQueryCache(
     if (detailKey[4] !== workflow.id || !value) continue;
     queryClient.setQueryData(key, { ...value, workflow });
   }
+}
+
+export function upsertStepInQueryCache(
+  step: Step,
+  generation = getProjectScopeGeneration()
+) {
+  if (!step.id) return;
+  queryClient.setQueryData<Step | null>(
+    queryKeys.steps.byId(generation, step.id),
+    (existing) => (existing ? { ...existing, ...step } : step)
+  );
+}
+
+export function removeStepFromQueryCache(
+  stepId: string,
+  generation = getProjectScopeGeneration()
+) {
+  queryClient.removeQueries({
+    queryKey: queryKeys.steps.byId(generation, stepId),
+    exact: true,
+  });
+}
+
+export function upsertWorkflowTransitionInQueryCache(
+  transition: WorkflowTransition,
+  generation = getProjectScopeGeneration()
+) {
+  queryClient.setQueryData<WorkflowTransition[]>(
+    queryKeys.workflowTransitions.list(generation),
+    (transitions = []) => {
+      const index = transitions.findIndex((item) => item.id === transition.id);
+      if (index < 0) return [...transitions, transition];
+      const next = transitions.slice();
+      next[index] = transition;
+      return next;
+    }
+  );
+}
+
+export function removeWorkflowTransitionFromQueryCache(
+  transitionId: string,
+  generation = getProjectScopeGeneration()
+) {
+  queryClient.setQueryData<WorkflowTransition[]>(
+    queryKeys.workflowTransitions.list(generation),
+    (transitions) =>
+      transitions?.filter((transition) => transition.id !== transitionId)
+  );
 }
 
 export function removeWorkflowFromQueryCache(
