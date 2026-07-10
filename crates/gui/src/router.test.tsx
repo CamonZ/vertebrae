@@ -642,9 +642,6 @@ describe("Router Acceptance Tests", () => {
 
       // None of the known pages should render
       expect(
-        screen.queryByRole("heading", { name: "Operations" })
-      ).not.toBeInTheDocument();
-      expect(
         screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();
       expect(screen.queryByTestId("workflow-atlas")).not.toBeInTheDocument();
@@ -662,9 +659,6 @@ describe("Router Acceptance Tests", () => {
         </TestWrapper>
       );
 
-      expect(
-        screen.queryByRole("heading", { name: "Operations" })
-      ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("heading", { name: "Board" })
       ).not.toBeInTheDocument();

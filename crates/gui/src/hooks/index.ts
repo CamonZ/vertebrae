@@ -31,7 +31,6 @@ export { useTheme } from "./useTheme";
 export { useDensity } from "./useDensity";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
-export { useOperationsData } from "./useOperationsData";
 export type {
   LayoutNode,
   LayoutEdge,

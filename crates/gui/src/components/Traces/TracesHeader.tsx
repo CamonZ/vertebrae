@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { TaskLevel } from "../../bindings";
 import { formatTokenCount, type ExecutionRollups } from "../../utils";
-import { formatDurationMs } from "../Operations/formatDuration";
+import { formatDurationMs } from "../../utils/formatDuration";
 
 /** Temporarily hide the pop-out/detach control on side panels. Flip back to
  * `true` to restore the Detach button (the onDetach plumbing is left intact). */

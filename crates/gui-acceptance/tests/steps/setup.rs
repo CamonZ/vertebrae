@@ -194,7 +194,7 @@ pub async fn before_scenario(
         .await
         .expect("failed to click project row");
 
-    // Wait for redirect away from /setup (the app navigates to / -> /operations)
+    // Wait for redirect away from /setup (the app navigates to / -> /tasks)
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
     world.screenshot(&client, "after-setup-select").await;
 

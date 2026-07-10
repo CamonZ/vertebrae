@@ -370,8 +370,7 @@ async fn main() {
             })
         })
         .filter_run("tests/features", |feature, _rule, scenario| {
-            // `@skip` features/scenarios are excluded from the run (e.g. the
-            // Operations-view realtime tests while that page is hidden).
+            // `@skip` features/scenarios are excluded from the run.
             !is_skipped(feature, scenario)
         })
         .await;

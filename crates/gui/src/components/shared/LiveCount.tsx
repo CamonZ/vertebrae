@@ -12,8 +12,8 @@ interface LiveCountProps {
  * (prototype `.app-topbar .activity .live`). Accent-colored text with a small
  * glowing pulse dot — no filled pill background.
  *
- * Shared so Board/Operations topbars can reuse the same live-execution
- * vocabulary. Returns null when `running` is zero.
+ * Shared so topbars can reuse the same live-execution vocabulary. Returns
+ * null when `running` is zero.
  */
 export function LiveCount({ running, className = "" }: LiveCountProps) {
   if (running <= 0) return null;

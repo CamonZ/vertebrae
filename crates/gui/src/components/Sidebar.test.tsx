@@ -58,7 +58,7 @@ describe("Sidebar Traces nav", () => {
 
   it("renders the primary nav in design-rail order with 14px icons", () => {
     render(
-      <MemoryRouter initialEntries={["/operations"]}>
+      <MemoryRouter initialEntries={["/tasks"]}>
         <Sidebar />
       </MemoryRouter>
     );
@@ -86,7 +86,7 @@ describe("Sidebar Traces nav", () => {
 
   it("renders a Traces nav link pointing at /traces", () => {
     render(
-      <MemoryRouter initialEntries={["/operations"]}>
+      <MemoryRouter initialEntries={["/tasks"]}>
         <Sidebar />
       </MemoryRouter>
     );
@@ -98,7 +98,7 @@ describe("Sidebar Traces nav", () => {
   it("clicking the Traces nav navigates to /traces", async () => {
     const user = userEvent.setup();
     render(
-      <MemoryRouter initialEntries={["/operations"]}>
+      <MemoryRouter initialEntries={["/tasks"]}>
         <Sidebar />
         <Routes>
           <Route path="*" element={<LocationDisplay />} />
@@ -144,7 +144,7 @@ describe("Sidebar project switcher", () => {
 
   function renderSidebar() {
     render(
-      <MemoryRouter initialEntries={["/operations"]}>
+      <MemoryRouter initialEntries={["/tasks"]}>
         <Sidebar />
         <Routes>
           <Route path="*" element={<LocationDisplay />} />
@@ -211,7 +211,7 @@ describe("Sidebar project switcher", () => {
     });
     expect(mockSetCurrentProject).not.toHaveBeenCalled();
     expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
-    expect(screen.getByTestId("loc")).toHaveTextContent("/operations");
+    expect(screen.getByTestId("loc")).toHaveTextContent("/tasks");
   });
 
   it("clicking the + button opens the directory picker and adds a project", async () => {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { RunStateChip } from "../../utils/runState";
 import { formatStepName } from "../../utils/formatStepName";
-import { formatDuration } from "../Operations/formatDuration";
+import { formatDuration } from "../../utils/formatDuration";
 import { Spinner } from "../Spinner";
 
 interface RunStateBadgeProps {

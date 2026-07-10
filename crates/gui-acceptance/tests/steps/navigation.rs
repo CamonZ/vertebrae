@@ -37,11 +37,6 @@ async fn gui_on_pipeline_view(world: &mut GuiWorld) {
     navigate_to(world, "/design", "nav-pipeline").await;
 }
 
-#[given("the GUI is on the operations view")]
-async fn gui_on_operations_view(world: &mut GuiWorld) {
-    navigate_to(world, "/operations", "nav-operations").await;
-}
-
 #[then(expr = "the GUI shows {string}")]
 async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
     let wd = world
