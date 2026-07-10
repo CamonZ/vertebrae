@@ -1,4 +1,5 @@
 import type { Task, TaskFilterOptions, TaskRunControls } from "../bindings";
+import type { TaskLocation } from "./taskLocation";
 
 function normalizeText(value: string | null | undefined): string {
   return value?.trim().toLocaleLowerCase() ?? "";
@@ -6,7 +7,8 @@ function normalizeText(value: string | null | undefined): string {
 
 export function taskMatchesFilter(
   task: Task,
-  filter: TaskFilterOptions | null
+  filter: TaskFilterOptions | null,
+  location?: TaskLocation
 ): boolean {
   if (task.archived) return false;
   if (!filter) return true;
@@ -37,9 +39,14 @@ export function taskMatchesFilter(
     return false;
   if (filter.step_id && task.current_step_id !== filter.step_id) return false;
 
+  // `step_names` is a server-side compatibility filter. Do not use the
+  // denormalized Task.step_name for local membership reconciliation; canonical
+  // task-location rendering resolves current_step_id through query caches.
   if (
     filter.step_names?.length &&
-    (!task.step_name || !filter.step_names.includes(task.step_name))
+    location &&
+    location.status !== "unavailable" &&
+    (!location.stepName || !filter.step_names.includes(location.stepName))
   ) {
     return false;
   }

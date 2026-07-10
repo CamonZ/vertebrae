@@ -48,3 +48,9 @@ export type {
 } from "./runState";
 export { resolveHumanInputGate } from "./humanInputGate";
 export type { HumanInputGateContext } from "./humanInputGate";
+export {
+  resolveTaskLocation,
+  taskLocationStepLabel,
+  taskLocationWorkflowLabel,
+} from "./taskLocation";
+export type { TaskLocation, TaskLocationStatus } from "./taskLocation";

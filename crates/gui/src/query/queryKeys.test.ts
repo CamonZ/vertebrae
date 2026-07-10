@@ -81,4 +81,20 @@ describe("queryKeys", () => {
       "run-1",
     ]);
   });
+
+  it("builds project-scoped step and workflow transition keys", () => {
+    expect(queryKeys.steps.byId(4, "step-1")).toEqual([
+      "project",
+      4,
+      "steps",
+      "byId",
+      "step-1",
+    ]);
+    expect(queryKeys.workflowTransitions.list(4)).toEqual([
+      "project",
+      4,
+      "workflowTransitions",
+      "list",
+    ]);
+  });
 });

@@ -33,6 +33,8 @@ import { Glyph, IdChip } from "../shared/HearthPrimitives";
 import { TaskDetailPanel } from "../TaskDetail";
 import { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
 import { useActiveTaskRunsForTasks } from "../../hooks/useTaskRuns";
+import { useTaskLocation } from "../../hooks/useTaskLocation";
+import { taskLocationWorkflowLabel } from "../../utils/taskLocation";
 import { kindClass } from "./inspector/selection";
 import {
   miniPipeline,
@@ -99,13 +101,14 @@ function Row({
   onSelect,
 }: RowProps) {
   const { task } = row;
+  const location = useTaskLocation(task);
   const isRunning = tab === "running";
   // The row's workflow steps as state-coloured segments for the mini-pipeline
   // strip. Only an actually-running task animates its current step (Ready rows
   // stay static).
   const segments = useMemo(
     () => miniPipeline(task, summary, isRunning),
-    [task, summary, isRunning],
+    [task, summary, isRunning]
   );
   const runtime = runtimeSince(row.startedAt, now);
 
@@ -128,8 +131,10 @@ function Row({
             runtime ? (
               <span className="rc-meta">{runtime}</span>
             ) : null
-          ) : task.workflow_name ? (
-            <span className="rc-meta">{task.workflow_name}</span>
+          ) : location.status !== "unassigned" ? (
+            <span className="rc-meta">
+              {taskLocationWorkflowLabel(location)}
+            </span>
           ) : null}
         </div>
         <div className="rc-title">{task.title}</div>
@@ -235,7 +240,7 @@ export function RunConsole({ summary }: RunConsoleProps) {
     const onMove = (event: MouseEvent) => {
       const leftEdge = panelRef.current?.getBoundingClientRect().left ?? 0;
       setPanelWidth(
-        Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, event.clientX - leftEdge)),
+        Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, event.clientX - leftEdge))
       );
     };
     const onUp = () => setIsResizing(false);
@@ -267,12 +272,12 @@ export function RunConsole({ summary }: RunConsoleProps) {
         (t.tags ?? []).some((g) => g.toLowerCase().includes(q))
       );
     },
-    [q],
+    [q]
   );
 
   const runningRows = useMemo(
     () => running.filter(matches),
-    [running, matches],
+    [running, matches]
   );
   const readyRows = useMemo(() => ready.filter(matches), [ready, matches]);
   const list = tab === "running" ? runningRows : readyRows;

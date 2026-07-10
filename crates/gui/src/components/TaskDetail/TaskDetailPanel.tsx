@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
+import { useTaskLocation } from "../../hooks/useTaskLocation";
 import { useTasks } from "../../hooks/useTasks";
 import { useRunTrace } from "../../hooks/useRunTrace";
 import {
@@ -48,6 +49,10 @@ import {
   StateBreakdown,
   StepDot,
 } from "../shared/HearthPrimitives";
+import {
+  taskLocationStepLabel,
+  taskLocationWorkflowLabel,
+} from "../../utils/taskLocation";
 
 /** Canonical uppercase mono eyebrow used for every collapsible section header.
  * Muted (not accent), matching the reference `.acc-hd .name` (var(--fg-mute)) —
@@ -57,6 +62,19 @@ function SectionLabel({ children }: { children: string }) {
     <Text variant="eyebrow" color="tertiary">
       {children}
     </Text>
+  );
+}
+
+function TaskLocationBadge({ task }: { task: Task }) {
+  const location = useTaskLocation(task);
+  return (
+    <StatusBadge
+      state={{
+        kind: "workflow",
+        workflow: taskLocationWorkflowLabel(location),
+        step: taskLocationStepLabel(location),
+      }}
+    />
   );
 }
 
@@ -155,6 +173,7 @@ export function TaskDetailPanel({
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
+  const taskLocation = useTaskLocation(taskData);
   const { tasks: allTasks } = useTasks();
   const activeRun = useActiveTaskRun(taskId);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
@@ -789,8 +808,11 @@ export function TaskDetailPanel({
                 )
               }
               step={{
-                kind: taskData.step_type,
-                label: formatStepName(taskData.step_name, "Unassigned"),
+                kind: taskLocation.stepType,
+                label: formatStepName(
+                  taskLocationStepLabel(taskLocation),
+                  "Unavailable"
+                ),
               }}
               finished={
                 taskData.completed_at
@@ -815,7 +837,10 @@ export function TaskDetailPanel({
                   {children.slice(0, 18).map((childTask) => (
                     <span key={childTask.id} title={childTask.title}>
                       <StepDot
-                        variant={hearthBreakdownVariantForTask(childTask, childActiveRuns.get(childTask.id))}
+                        variant={hearthBreakdownVariantForTask(
+                          childTask,
+                          childActiveRuns.get(childTask.id)
+                        )}
                       />
                     </span>
                   ))}
@@ -959,17 +984,9 @@ export function TaskDetailPanel({
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
                       {child.title}
                     </span>
-                    {(child.workflow_name || child.step_name) && (
-                      <span className="flex-shrink-0">
-                        <StatusBadge
-                          state={{
-                            kind: "workflow",
-                            workflow: child.workflow_name ?? "",
-                            step: child.step_name ?? "",
-                          }}
-                        />
-                      </span>
-                    )}
+                    <span className="flex-shrink-0">
+                      <TaskLocationBadge task={child} />
+                    </span>
                   </button>
                 ))}
               </div>

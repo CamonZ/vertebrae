@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useChatStore } from "./chatStore";
 import { useSessionLogStore } from "./sessionLogStore";
-import { useStepStore } from "./stepStore";
+import { useWorkflowSelectionStore } from "./workflowSelectionStore";
 import { queryClient } from "../query/queryClient";
 
 interface ProjectScopeState {
@@ -34,7 +34,7 @@ export function useProjectScopeGeneration() {
 export function resetProjectScopedStores() {
   useProjectScopeStore.getState().bumpGeneration();
   queryClient.clear();
-  useStepStore.getState().reset();
+  useWorkflowSelectionStore.getState().reset();
   useSessionLogStore.getState().reset();
   useChatStore.getState().reset();
 }

@@ -6,6 +6,8 @@ import {
   createMockTask,
   createMockTaskRun,
   createMockTaskRunControls,
+  createMockStep,
+  createMockWorkflow,
 } from "../../test/test-utils";
 import { KanbanCard } from "./KanbanCard";
 import { queryClient, queryKeys } from "../../query";
@@ -21,10 +23,10 @@ describe("KanbanCard", () => {
     });
 
     it("renders the 8-digit short task ID", () => {
-    const task = createMockTask({
+      const task = createMockTask({
         id: "860cde1b-9093-42ff-a19d-7453f3b7891b",
-    });
-    render(<KanbanCard task={task} />);
+      });
+      render(<KanbanCard task={task} />);
 
       expect(screen.getByTestId("kanban-card-id")).toHaveTextContent(
         "860cde1b"
@@ -177,10 +179,19 @@ describe("KanbanCard", () => {
     it("derives board kind from step_type rather than step or workflow names", () => {
       const task = createMockTask({
         title: "Typed step task",
+        current_step_id: "step-typed",
         step_name: "implement",
         workflow_name: "Execute workflow",
         step_type: "evaluate",
       });
+      queryClient.setQueryData(
+        queryKeys.steps.byId(getProjectScopeGeneration(), "step-typed"),
+        createMockStep({ id: "step-typed", step_type: "evaluate" })
+      );
+      queryClient.setQueryData(
+        queryKeys.workflows.list(getProjectScopeGeneration()),
+        [createMockWorkflow({ id: "workflow-1" })]
+      );
       render(<KanbanCard task={task} />);
 
       expect(

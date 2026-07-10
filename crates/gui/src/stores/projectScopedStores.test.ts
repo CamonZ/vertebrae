@@ -14,7 +14,7 @@ import {
   resetProjectScopedStores,
 } from "./projectScopedStores";
 import { useSessionLogStore } from "./sessionLogStore";
-import { useStepStore } from "./stepStore";
+import { useWorkflowSelectionStore } from "./workflowSelectionStore";
 
 describe("resetProjectScopedStores", () => {
   beforeEach(() => {
@@ -55,12 +55,14 @@ describe("resetProjectScopedStores", () => {
     queryClient.setQueryData(executionsByTaskKey, [execution]);
     queryClient.setQueryData(workflowListKey, [workflow]);
     queryClient.setQueryData(workflowDetailKey, { workflow, tasks: [task] });
-    useStepStore.setState({
-      steps: [step],
+    queryClient.setQueryData(queryKeys.steps.byId(generation, step.id!), step);
+    useWorkflowSelectionStore.setState({
       selectedStepId: step.id,
-      selectedStep: step,
+      selectedWorkflowId: workflowId,
     });
-    queryClient.setQueryData(queryKeys.taskRuns.byTask(generation, task.id), [taskRun]);
+    queryClient.setQueryData(queryKeys.taskRuns.byTask(generation, task.id), [
+      taskRun,
+    ]);
     useSessionLogStore.setState({
       logsByExecutionId: { [execution.id ?? "execution-1"]: [sessionLog] },
     });
@@ -86,12 +88,16 @@ describe("resetProjectScopedStores", () => {
     expect(queryClient.getQueryData(executionsByTaskKey)).toBeUndefined();
     expect(queryClient.getQueryData(workflowListKey)).toBeUndefined();
     expect(queryClient.getQueryData(workflowDetailKey)).toBeUndefined();
-    expect(useStepStore.getState()).toMatchObject({
-      steps: [],
+    expect(
+      queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
+    ).toBeUndefined();
+    expect(useWorkflowSelectionStore.getState()).toMatchObject({
       selectedStepId: null,
-      selectedStep: null,
+      selectedWorkflowId: null,
     });
-    expect(queryClient.getQueryData(queryKeys.taskRuns.byTask(generation, task.id))).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.taskRuns.byTask(generation, task.id))
+    ).toBeUndefined();
     expect(useSessionLogStore.getState().logsByExecutionId).toEqual({});
     expect(useChatStore.getState()).toMatchObject({
       sessions: {},

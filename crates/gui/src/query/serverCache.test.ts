@@ -1,12 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   Section,
+  Step,
   TaskRunTrace,
   TaskFilterOptions,
   WorkflowWithTasks,
+  WorkflowTransition,
 } from "../bindings";
 import {
   createMockStepExecution,
+  createMockStep,
   createMockTask,
   createMockTaskRun,
   createMockTaskRunControls,
@@ -16,13 +19,18 @@ import { queryClient } from "./queryClient";
 import { queryKeys } from "./queryKeys";
 import {
   removeTaskFromQueryCache,
+  removeStepFromQueryCache,
+  removeWorkflowTransitionFromQueryCache,
   removeWorkflowFromQueryCache,
   mergeFetchedTaskRuns,
   replaceTaskRunControlsInQueryCache,
   updateTaskSectionsInQueryCache,
+  updateTaskLocationInQueryCache,
   upsertStepExecutionInQueryCache,
+  upsertStepInQueryCache,
   upsertTaskInQueryCache,
   upsertWorkflowInQueryCache,
+  upsertWorkflowTransitionInQueryCache,
 } from "./serverCache";
 
 describe("server cache helpers", () => {
@@ -32,7 +40,10 @@ describe("server cache helpers", () => {
 
   it("keeps a websocket TaskRun update received while a fetch was in flight", () => {
     const stale = createMockTaskRun({ id: "run-1", status: "queued" });
-    const websocketUpdate = createMockTaskRun({ id: "run-1", status: "executing" });
+    const websocketUpdate = createMockTaskRun({
+      id: "run-1",
+      status: "executing",
+    });
 
     expect(mergeFetchedTaskRuns([stale], [websocketUpdate], [stale])).toEqual([
       websocketUpdate,
@@ -549,5 +560,115 @@ describe("server cache helpers", () => {
     expect(
       queryClient.getQueryData(queryKeys.workflows.list(generation))
     ).toEqual([otherWorkflow]);
+  });
+
+  it("scopes Step and WorkflowTransition cache writes by generation", () => {
+    const generation = 31;
+    const step = {
+      ...createMockStep({ id: "step-1", workflow_id: "workflow-1" }),
+      name: "Canonical step",
+    } as Step;
+    const transition: WorkflowTransition = {
+      id: "transition-1",
+      from_workflow_id: "workflow-1",
+      from_workflow_name: "Workflow 1",
+      to_workflow_id: "workflow-2",
+      to_workflow_name: "Workflow 2",
+      label: "continue",
+      target_step_id: null,
+    };
+
+    upsertStepInQueryCache(step, generation);
+    upsertWorkflowTransitionInQueryCache(transition, generation);
+
+    expect(
+      queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
+    ).toEqual(step);
+    expect(
+      queryClient.getQueryData(queryKeys.steps.byId(generation + 1, step.id!))
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.workflowTransitions.list(generation))
+    ).toEqual([transition]);
+    expect(
+      queryClient.getQueryData(
+        queryKeys.workflowTransitions.list(generation + 1)
+      )
+    ).toBeUndefined();
+
+    removeStepFromQueryCache(step.id!, generation);
+    removeWorkflowTransitionFromQueryCache(transition.id!, generation);
+    expect(
+      queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.workflowTransitions.list(generation))
+    ).toEqual([]);
+  });
+
+  it("reconciles filtered task lists after a canonical location update", () => {
+    const generation = 6;
+    const filter: TaskFilterOptions = {
+      step_names: ["review"],
+      levels: null,
+      tags: null,
+      root_only: null,
+      children_of: null,
+      search: null,
+      workflow_id: null,
+      step_id: null,
+    };
+    const task = createMockTask({
+      id: "task-1",
+      workflow_id: "workflow-1",
+      current_step_id: "step-todo",
+      step_name: "todo",
+    });
+    queryClient.setQueryData(queryKeys.tasks.list(generation, filter), [task]);
+    queryClient.setQueryData(queryKeys.workflows.list(generation), [
+      createMockWorkflow({ id: "workflow-1", name: "Implementation" }),
+    ]);
+    queryClient.setQueryData(
+      queryKeys.steps.byId(generation, "step-review"),
+      createMockStep({
+        id: "step-review",
+        workflow_id: "workflow-1",
+        name: "review",
+      })
+    );
+
+    updateTaskLocationInQueryCache(
+      task.id,
+      "step-review",
+      "workflow-1",
+      generation
+    );
+
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, filter))
+    ).toEqual([
+      expect.objectContaining({
+        id: task.id,
+        current_step_id: "step-review",
+      }),
+    ]);
+
+    queryClient.setQueryData(
+      queryKeys.steps.byId(generation, "step-done"),
+      createMockStep({
+        id: "step-done",
+        workflow_id: "workflow-1",
+        name: "done",
+      })
+    );
+    updateTaskLocationInQueryCache(
+      task.id,
+      "step-done",
+      "workflow-1",
+      generation
+    );
+    expect(
+      queryClient.getQueryData(queryKeys.tasks.list(generation, filter))
+    ).toEqual([]);
   });
 });

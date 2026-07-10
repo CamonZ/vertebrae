@@ -7,6 +7,7 @@ import {
   useSectionChangeListener,
   useSessionLogChangeListener,
   useStepTransitionChangeListener,
+  useWorkflowTransitionChangeListener,
 } from "../hooks";
 import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
 
@@ -28,6 +29,7 @@ export function GlobalListeners() {
   useSectionChangeListener();
   useSessionLogChangeListener();
   useStepTransitionChangeListener();
+  useWorkflowTransitionChangeListener();
   useLocalChatEventRouter();
 
   return null;
