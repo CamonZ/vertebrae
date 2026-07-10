@@ -3,6 +3,7 @@ import { formatDuration } from "./formatDuration";
 
 describe("formatDuration", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -50,6 +51,5 @@ describe("formatDuration", () => {
     vi.setSystemTime(new Date("2025-01-01T12:01:30Z"));
     const started = "2025-01-01T12:00:00Z";
     expect(formatDuration(started, null)).toBe("1m 30s");
-    vi.useRealTimers();
   });
 });

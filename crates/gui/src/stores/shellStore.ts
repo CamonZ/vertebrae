@@ -9,13 +9,6 @@ interface ShellState {
   /** Optional right-side header content (live counter, filter chips, etc.). */
   headerActions: ReactNode | null;
   setHeaderActions: (actions: ReactNode | null) => void;
-
-  /**
-   * Number of items currently demanding the user's attention (failed runs,
-   * pending reviews, etc.). Drives the dot on the Operations sidebar icon.
-   */
-  needsAttentionCount: number;
-  setNeedsAttentionCount: (count: number) => void;
 }
 
 /**
@@ -29,7 +22,4 @@ export const useShellStore = create<ShellState>((set) => ({
 
   headerActions: null,
   setHeaderActions: (headerActions) => set({ headerActions }),
-
-  needsAttentionCount: 0,
-  setNeedsAttentionCount: (needsAttentionCount) => set({ needsAttentionCount }),
 }));

@@ -186,7 +186,7 @@ const appRoutes: RouteObject[] = [
     children: [
       {
         index: true,
-        // Operations is hidden for now (needs more work); land on tasks.
+        // The default view is the Tasks page.
         element: <Navigate to="/tasks" replace />,
       },
       {

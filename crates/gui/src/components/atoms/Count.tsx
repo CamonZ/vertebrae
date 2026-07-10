@@ -8,8 +8,8 @@ interface CountProps extends HTMLAttributes<HTMLSpanElement> {
  * Canonical Hearth count numeral: Newsreader serif italic in copper
  * (var(--color-accent)), faint (var(--color-fg-faint)) when zero. The single
  * voice for every "count attached to a grouping" — kanban column totals,
- * operations section counts, pipeline tab counts, task child counts — so they
- * read identically across surfaces.
+ * pipeline tab counts, task child counts — so they read identically across
+ * surfaces.
  *
  * Font-size is intentionally inherited; pass a `text-*` class to size it for
  * the context (e.g. `text-[16px]` on a kanban header, `text-2xs` in a dense
