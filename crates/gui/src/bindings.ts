@@ -1683,9 +1683,10 @@ export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
  * `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
  * the Sacrum CDC payload so the reducer can act on `Deleted` events (which
  * carry a before-image tombstone, not a full Task) without keeping a local
- * task-position cache.
+ * task-position cache. `previous` carries the sparse before-image bucket
+ * identity published for `Updated` events.
  */
-export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null; current_step_id: string | null; workflow_id: string | null; level: TaskLevel | null; archived: boolean | null }
+export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null; current_step_id: string | null; workflow_id: string | null; level: TaskLevel | null; archived: boolean | null; previous?: TaskPreviousBucketIdentity | null }
 /**
  * Filter options for listing tasks
  */
@@ -1726,6 +1727,10 @@ step_id: string | null }
  * Task hierarchy level - mirrors db::Level
  */
 export type TaskLevel = "epic" | "ticket" | "task"
+/**
+ * Sparse before-image values for fields that can change a task's Atlas bucket.
+ */
+export type TaskPreviousBucketIdentity = { archived?: boolean | null; level?: TaskLevel | null; current_step_id?: string | null; workflow_id?: string | null }
 /**
  * Task priority - mirrors db::Priority
  */

@@ -19,9 +19,9 @@ use crate::events::{
     PermissionRequestEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
     SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
     StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
-    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskRunChangeType,
-    TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent, TaskStepChangedEvent,
-    WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskPreviousBucketIdentity,
+    TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
     WorkflowTransitionChangedEvent,
 };
 use crate::types;
@@ -980,6 +980,21 @@ impl SacrumSocket {
             .get("level")
             .and_then(|v| serde_json::from_value::<types::TaskLevel>(v.clone()).ok());
         let archived = payload.get("archived").and_then(|v| v.as_bool());
+        let previous = payload
+            .get("previous")
+            .and_then(|value| value.as_object())
+            .map(|previous| TaskPreviousBucketIdentity {
+                archived: previous.get("archived").and_then(|value| value.as_bool()),
+                level: previous
+                    .get("level")
+                    .map(|value| serde_json::from_value::<types::TaskLevel>(value.clone()).ok()),
+                current_step_id: previous
+                    .get("current_step_id")
+                    .map(|value| value.as_str().map(ToString::to_string)),
+                workflow_id: previous
+                    .get("workflow_id")
+                    .map(|value| value.as_str().map(ToString::to_string)),
+            });
 
         let event = TaskChangedEvent {
             task_id,
@@ -989,6 +1004,7 @@ impl SacrumSocket {
             workflow_id,
             level,
             archived,
+            previous,
         };
 
         Self::trace_event(&format!(
@@ -3191,6 +3207,37 @@ mod tests {
         let payload = serde_json::json!({"id": "task456", "title": "Updated"});
         let result = SacrumSocket::handle_task_event("task_updated", &payload, handle);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_task_event_updated_preserves_sparse_previous_bucket_identity() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("task-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+        let payload = serde_json::json!({
+            "id": "task456",
+            "title": "Updated",
+            "previous": {
+                "archived": false,
+                "level": null,
+                "current_step_id": null
+            }
+        });
+
+        SacrumSocket::handle_task_event("task_updated", &payload, handle).unwrap();
+
+        let emitted: serde_json::Value = serde_json::from_str(
+            &rx.recv_timeout(StdDuration::from_secs(1))
+                .expect("task event should be emitted"),
+        )
+        .unwrap();
+        assert_eq!(emitted["previous"]["archived"], false);
+        assert!(emitted["previous"]["level"].is_null());
+        assert!(emitted["previous"]["current_step_id"].is_null());
+        assert!(emitted["previous"].get("workflow_id").is_none());
     }
 
     #[test]

@@ -38,6 +38,8 @@ export const queryKeys = {
     list: (generation: number) =>
       [...queryKeys.workflowTransitions.all(generation), "list"] as const,
   },
+  pipelineSummary: (generation: number) =>
+    [...queryKeys.project(generation), "pipelineSummary"] as const,
   executions: {
     all: (generation: number) =>
       [...queryKeys.project(generation), "executions"] as const,

@@ -9,6 +9,7 @@ import type {
   TaskRunStatus,
   Workflow,
 } from "../bindings";
+import { createMockTask } from "../test/test-utils";
 import {
   applyStepCreated,
   applyStepDeleted,
@@ -99,6 +100,29 @@ function deletedEvent(
   };
 }
 
+function updatedEvent(
+  overrides: Partial<TaskChangedEvent> = {},
+): TaskChangedEvent {
+  const task = createMockTask({
+    id: "t-1",
+    current_step_id: "s1",
+    workflow_id: "wf-1",
+    level: "ticket",
+    archived: false,
+  });
+  return {
+    task_id: task.id!,
+    change_type: "Updated",
+    task,
+    current_step_id: task.current_step_id,
+    workflow_id: task.workflow_id,
+    level: task.level,
+    archived: task.archived ?? null,
+    previous: {},
+    ...overrides,
+  };
+}
+
 describe("applyTaskCreated", () => {
   it("bumps the destination bucket by +1", () => {
     const summary = makeSummary([
@@ -159,16 +183,83 @@ describe("applyTaskCreated", () => {
 });
 
 describe("applyTaskUpdated", () => {
-  it("is a no-op (moves and archive flips are not the reducer's concern)", () => {
+  it("removes an archived task from its previous bucket", () => {
     const summary = makeSummary([
       makeWorkflow("wf-1", [
-        makeStep("s1", "wf-1", "todo", 0, { epic: 0, ticket: 5, task: 0 }),
+        makeStep("s1", "wf-1", "todo", 0, { epic: 0, ticket: 2, task: 0 }),
+      ]),
+    ]);
+    const event = updatedEvent({
+      task: createMockTask({
+        id: "t-1",
+        current_step_id: "s1",
+        workflow_id: "wf-1",
+        level: "ticket",
+        archived: true,
+      }),
+      archived: true,
+      previous: { archived: false },
+    });
+
+    const next = applyTaskUpdated(summary, event);
+
+    expect(findStep(next, "s1").task_counts.ticket).toBe(1);
+  });
+
+  it("restores an unarchived task to its current bucket", () => {
+    const summary = makeSummary([
+      makeWorkflow("wf-1", [makeStep("s1", "wf-1", "todo", 0)]),
+    ]);
+    const event = updatedEvent({ previous: { archived: true } });
+
+    const next = applyTaskUpdated(summary, event);
+
+    expect(findStep(next, "s1").task_counts.ticket).toBe(1);
+  });
+
+  it("moves counts between levels without a refetch", () => {
+    const summary = makeSummary([
+      makeWorkflow("wf-1", [
+        makeStep("s1", "wf-1", "todo", 0, { epic: 0, ticket: 1, task: 0 }),
+      ]),
+    ]);
+    const event = updatedEvent({
+      task: createMockTask({
+        id: "t-1",
+        current_step_id: "s1",
+        workflow_id: "wf-1",
+        level: "task",
+        archived: false,
+      }),
+      level: "task",
+      previous: { level: "ticket" },
+    });
+
+    const next = applyTaskUpdated(summary, event);
+
+    expect(findStep(next, "s1").task_counts.ticket).toBe(0);
+    expect(findStep(next, "s1").task_counts.task).toBe(1);
+  });
+
+  it("adds a task whose previous level was explicitly null", () => {
+    const summary = makeSummary([
+      makeWorkflow("wf-1", [makeStep("s1", "wf-1", "todo", 0)]),
+    ]);
+    const event = updatedEvent({ previous: { level: null } });
+
+    const next = applyTaskUpdated(summary, event);
+
+    expect(findStep(next, "s1").task_counts.ticket).toBe(1);
+  });
+
+  it("no-ops for a non-bucket update", () => {
+    const summary = makeSummary([
+      makeWorkflow("wf-1", [
+        makeStep("s1", "wf-1", "todo", 0, { epic: 0, ticket: 1, task: 0 }),
       ]),
     ]);
 
-    const next = applyTaskUpdated(summary);
-
-    expect(next).toBe(summary);
+    expect(applyTaskUpdated(summary, updatedEvent())).toBe(summary);
   });
 });
 
