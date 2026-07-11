@@ -5,13 +5,9 @@ import {
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import {
-  hasTaskInQueryCache,
-  removeTaskFromQueryCache,
-  removeTaskRunsFromQueryCache,
   replaceTaskRunControlsInQueryCache,
   upsertTaskRunInQueryCache,
 } from "../query";
-import { useRefreshTaskForRealtimeChange } from "./useRefreshTaskForRealtimeChange";
 
 interface UseTaskRunChangeListenerOptions {
   /** Whether the listener is enabled (default: true) */
@@ -28,9 +24,6 @@ export function useTaskRunChangeListener(
 ) {
   const { enabled = true } = options;
   const projectScopeGeneration = useProjectScopeGeneration();
-  const fetchAndReconcileTask = useRefreshTaskForRealtimeChange(
-    "TaskRunChangeListener"
-  );
 
   const handleTaskRunChanged = useCallback(
     (event: { payload: TaskRunChangedEvent }) => {
@@ -42,24 +35,19 @@ export function useTaskRunChangeListener(
         upsertTaskRunInQueryCache(task_run, projectScopeGeneration);
       }
 
-      if (run_controls.kind === "deleted") {
-        removeTaskRunsFromQueryCache(task_id, projectScopeGeneration);
-        removeTaskFromQueryCache(task_id, projectScopeGeneration);
-        return;
-      }
-
-      const taskWasCached = hasTaskInQueryCache(
-        task_id,
-        projectScopeGeneration
-      );
       if (run_controls.kind === "present") {
-        replaceTaskRunControlsInQueryCache(task_id, run_controls.controls, projectScopeGeneration);
-      }
-      if (!taskWasCached || run_controls.kind === "malformed") {
-        void fetchAndReconcileTask(task_id);
+        replaceTaskRunControlsInQueryCache(
+          task_id,
+          run_controls.controls,
+          projectScopeGeneration
+        );
+      } else {
+        console.error(
+          `[TaskRunChangeListener] Missing valid run_controls projection for ${task_id}`
+        );
       }
     },
-    [fetchAndReconcileTask, projectScopeGeneration]
+    [projectScopeGeneration]
   );
 
   useEffect(() => {

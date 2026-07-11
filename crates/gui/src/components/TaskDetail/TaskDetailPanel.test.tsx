@@ -794,6 +794,59 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
+    it("seeds the returned TaskRun when Run starts from the GUI", async () => {
+      const taskRun = activeRun(mockTaskData.id, { status: "executing" });
+      vi.mocked(eventsModule.commands.runWorkflow).mockResolvedValue({
+        status: "ok",
+        data: taskRun,
+      });
+
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      fireEvent.click(screen.getByTestId("task-detail-run-button"));
+
+      expect(eventsModule.commands.runWorkflow).toHaveBeenCalledWith(
+        mockTaskData.id
+      );
+      expect(
+        await screen.findByTestId("task-detail-stop-button")
+      ).toBeInTheDocument();
+      expect(
+        queryClient.getQueryData(
+          queryKeys.taskRuns.byTask(
+            getProjectScopeGeneration(),
+            mockTaskData.id
+          )
+        )
+      ).toEqual([taskRun]);
+    });
+
+    it("shows an enabled Stop while the GUI start command is pending", async () => {
+      type RunWorkflowResult = Awaited<
+        ReturnType<typeof eventsModule.commands.runWorkflow>
+      >;
+      vi.mocked(eventsModule.commands.runWorkflow).mockReturnValue(
+        new Promise<RunWorkflowResult>(() => {})
+      );
+      vi.mocked(eventsModule.commands.stopRun).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      fireEvent.click(screen.getByTestId("task-detail-run-button"));
+
+      const stop = await screen.findByTestId("task-detail-stop-button");
+      expect(stop).not.toBeDisabled();
+
+      fireEvent.click(stop);
+      expect(eventsModule.commands.stopRun).toHaveBeenCalledWith({
+        task_run_id: null,
+        task_id: mockTaskData.id,
+      });
+    });
+
     it("hides Run when an active run is present", () => {
       renderWithTaskOverrides(
         { run_controls: activeRunControls() },
