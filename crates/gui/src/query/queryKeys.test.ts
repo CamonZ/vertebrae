@@ -96,5 +96,10 @@ describe("queryKeys", () => {
       "workflowTransitions",
       "list",
     ]);
+    expect(queryKeys.pipelineSummary(4)).toEqual([
+      "project",
+      4,
+      "pipelineSummary",
+    ]);
   });
 });

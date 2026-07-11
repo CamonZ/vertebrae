@@ -77,15 +77,37 @@ export function applyTaskCreated(
 }
 
 /**
- * `task_updated`: no-op for bucket counts.
- *
- * Step-to-step movement is the exclusive job of `task_step_changed` (manual)
- * and `task_run_step_changed` (orchestrator). Archive flips are rare enough
- * that we accept transient drift until the next refetch — Sacrum sends only
- * the after-image on update, so we can't detect the flip from the event alone.
+ * Apply archive and level changes from Sacrum's sparse before-image bucket
+ * identity. Dedicated step-change events remain the sole owners of step
+ * movement so the entity projection and semantic delta cannot double-count.
  */
-export function applyTaskUpdated(summary: PipelineSummary): PipelineSummary {
-  return summary;
+export function applyTaskUpdated(
+  summary: PipelineSummary,
+  event: TaskChangedEvent,
+): PipelineSummary {
+  const { task, previous } = event;
+  if (!task || !previous) return summary;
+
+  const stepId = task.current_step_id;
+  const beforeLevel =
+    previous.level === undefined ? task.level : previous.level;
+  const beforeArchived = previous.archived ?? task.archived ?? false;
+  const afterLevel = task.level;
+  const afterArchived = task.archived ?? false;
+
+  if (beforeLevel === afterLevel && beforeArchived === afterArchived) {
+    return summary;
+  }
+
+  let current = summary;
+  if (stepId && beforeLevel && !beforeArchived) {
+    current =
+      applyStepDelta(current, stepId, beforeLevel, -1, 0) ?? current;
+  }
+  if (stepId && afterLevel && !afterArchived) {
+    current = applyStepDelta(current, stepId, afterLevel, +1, 0) ?? current;
+  }
+  return current;
 }
 
 /**

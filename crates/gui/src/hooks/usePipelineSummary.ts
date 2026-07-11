@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   commands,
   events,
@@ -6,9 +7,10 @@ import {
   type PipelineWorkflow,
   type PipelineStep,
 } from "../bindings";
+import { errorMessage, queryClient, queryKeys, unwrapCommand } from "../query";
 import {
   getProjectScopeGeneration,
-  isCurrentProjectScopeGeneration,
+  useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 import { useWebSocketStatus } from "./useWebSocketStatus";
 import {
@@ -30,172 +32,150 @@ import {
 } from "./pipelineSummaryReducer";
 
 export function usePipelineSummary() {
-  const [summary, setSummary] = useState<PipelineSummary | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const summaryRef = useRef<PipelineSummary | null>(null);
-  const isFetchInFlightRef = useRef(false);
-  const hasPendingFetchRef = useRef(false);
+  const projectScopeGeneration = useProjectScopeGeneration();
+  const eventEpochRef = useRef(0);
+  const queryKey = useMemo(
+    () => queryKeys.pipelineSummary(projectScopeGeneration),
+    [projectScopeGeneration]
+  );
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      while (true) {
+        const eventEpoch = eventEpochRef.current;
+        const summary = await unwrapCommand(commands.getPipelineSummary());
+        if (
+          projectScopeGeneration !== getProjectScopeGeneration() ||
+          eventEpoch === eventEpochRef.current
+        ) {
+          return summary;
+        }
+      }
+    },
+  });
+  const refetch = query.refetch;
 
   const wsStatus = useWebSocketStatus();
   const prevWsStatus = useRef(wsStatus);
 
-  const commitSummary = useCallback((next: PipelineSummary) => {
-    if (next === summaryRef.current) return;
-    summaryRef.current = next;
-    setSummary(next);
-  }, []);
-
-  const loadSummary = useCallback(async () => {
-    const projectScopeGeneration = getProjectScopeGeneration();
-
-    try {
-      const result = await commands.getPipelineSummary();
-      if (!isCurrentProjectScopeGeneration(projectScopeGeneration)) return;
-
-      if (result.status === "ok") {
-        commitSummary(result.data);
-        setError(null);
-      } else {
-        setError(result.error.message);
-      }
-    } catch (e) {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      if (isCurrentProjectScopeGeneration(projectScopeGeneration)) {
-        setIsLoading(false);
-      }
-    }
-  }, [commitSummary]);
-
-  const fetchSummary = useCallback(async () => {
-    if (isFetchInFlightRef.current) {
-      hasPendingFetchRef.current = true;
-      return;
-    }
-
-    isFetchInFlightRef.current = true;
-    try {
-      do {
-        hasPendingFetchRef.current = false;
-        await loadSummary();
-      } while (hasPendingFetchRef.current);
-    } finally {
-      isFetchInFlightRef.current = false;
-    }
-  }, [loadSummary]);
-
-  useEffect(() => {
-    void fetchSummary();
-  }, [fetchSummary]);
-
-  // Always refetch on (re)connect, regardless of whether prior data exists.
-  // A disconnect window may have dropped events; resuming with stale buckets
-  // and applying deltas on top would compound drift.
+  // Always refetch on (re)connect. A disconnect window may have dropped
+  // deltas, so applying new events to the old buckets would compound drift.
   useEffect(() => {
     const wasDown =
       prevWsStatus.current === "reconnecting" ||
       prevWsStatus.current === "disconnected";
     if (wsStatus === "connected" && wasDown) {
-      void fetchSummary();
+      void refetch();
     }
     prevWsStatus.current = wsStatus;
-  }, [wsStatus, fetchSummary]);
+  }, [wsStatus, refetch]);
 
   useEffect(() => {
     let cancelled = false;
+    const isStale = () =>
+      cancelled || projectScopeGeneration !== getProjectScopeGeneration();
+    const applyToCache = (
+      reducer: (summary: PipelineSummary) => PipelineSummary
+    ) => {
+      if (isStale()) return;
+      queryClient.setQueryData<PipelineSummary>(queryKey, (summary) =>
+        summary ? reducer(summary) : summary
+      );
+      eventEpochRef.current += 1;
+    };
+    const invalidateSummary = () => {
+      if (isStale()) return;
+      eventEpochRef.current += 1;
+      void queryClient.invalidateQueries({ queryKey, exact: true });
+    };
     const unlistenPromises = [
       events.taskChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
         const { change_type, task } = event.payload;
         if (change_type === "Created" && task) {
-          commitSummary(applyTaskCreated(summaryRef.current, task));
+          applyToCache((summary) => applyTaskCreated(summary, task));
           return;
         }
         if (change_type === "Updated") {
-          commitSummary(applyTaskUpdated(summaryRef.current));
+          const { previous } = event.payload;
+          if (!task || !previous) return;
+          const changesSummaryBucket =
+            previous.archived !== undefined ||
+            previous.level !== undefined;
+          if (!changesSummaryBucket) return;
+          if (previous.current_step_id !== undefined) {
+            invalidateSummary();
+            return;
+          }
+          applyToCache((summary) => applyTaskUpdated(summary, event.payload));
           return;
         }
         if (change_type === "Deleted") {
-          commitSummary(applyTaskDeleted(summaryRef.current, event.payload));
+          applyToCache((summary) => applyTaskDeleted(summary, event.payload));
         }
       }),
       events.taskStepChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
-        commitSummary(applyTaskStepChanged(summaryRef.current, event.payload));
+        applyToCache((summary) => applyTaskStepChanged(summary, event.payload));
       }),
       events.taskRunStepChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
-        commitSummary(
-          applyTaskRunStepChanged(summaryRef.current, event.payload),
+        applyToCache((summary) =>
+          applyTaskRunStepChanged(summary, event.payload)
         );
       }),
       events.stepChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
         const { change_type, step, step_id, workflow_id } = event.payload;
         if ((change_type === "Created" || change_type === "Updated") && step) {
           const apply =
             change_type === "Created" ? applyStepCreated : applyStepUpdated;
-          commitSummary(apply(summaryRef.current, step));
+          applyToCache((summary) => apply(summary, step));
           return;
         }
         if (change_type === "Deleted") {
-          commitSummary(
-            applyStepDeleted(summaryRef.current, step_id, workflow_id),
+          applyToCache((summary) =>
+            applyStepDeleted(summary, step_id, workflow_id)
           );
         }
       }),
       events.stepTransitionChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
         const { change_type } = event.payload;
         if (change_type === "Created") {
-          commitSummary(
-            applyStepTransitionCreated(summaryRef.current, event.payload),
+          applyToCache((summary) =>
+            applyStepTransitionCreated(summary, event.payload)
           );
           return;
         }
         if (change_type === "Deleted") {
-          commitSummary(
-            applyStepTransitionDeleted(summaryRef.current, event.payload),
+          applyToCache((summary) =>
+            applyStepTransitionDeleted(summary, event.payload)
           );
         }
       }),
       events.workflowChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
         const { change_type, workflow, workflow_id } = event.payload;
         if (change_type === "Created" && workflow) {
-          commitSummary(applyWorkflowCreated(summaryRef.current, workflow));
+          applyToCache((summary) => applyWorkflowCreated(summary, workflow));
           return;
         }
         if (change_type === "Updated" && workflow) {
-          commitSummary(applyWorkflowUpdated(summaryRef.current, workflow));
+          applyToCache((summary) => applyWorkflowUpdated(summary, workflow));
           return;
         }
         if (change_type === "Deleted") {
-          commitSummary(applyWorkflowDeleted(summaryRef.current, workflow_id));
+          applyToCache((summary) =>
+            applyWorkflowDeleted(summary, workflow_id)
+          );
         }
       }),
       events.workflowTransitionChangedEvent.listen((event) => {
-        if (cancelled || !summaryRef.current) return;
         const { change_type } = event.payload;
         if (change_type === "Created") {
-          commitSummary(
-            applyWorkflowTransitionCreated(
-              summaryRef.current,
-              event.payload,
-            ),
+          applyToCache((summary) =>
+            applyWorkflowTransitionCreated(summary, event.payload)
           );
           return;
         }
         if (change_type === "Deleted") {
-          commitSummary(
-            applyWorkflowTransitionDeleted(
-              summaryRef.current,
-              event.payload,
-            ),
+          applyToCache((summary) =>
+            applyWorkflowTransitionDeleted(summary, event.payload)
           );
         }
       }),
@@ -207,13 +187,15 @@ export function usePipelineSummary() {
         void promise.then((unlisten) => unlisten()).catch(() => {});
       });
     };
-  }, [commitSummary, fetchSummary]);
+  }, [projectScopeGeneration, queryKey]);
 
   return {
-    summary,
-    isLoading,
-    error,
-    refetch: fetchSummary,
+    summary: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void refetch();
+    },
   };
 }
 

@@ -1,6 +1,10 @@
 import { useEffect, useCallback } from "react";
 import { events, type StepTransitionChangedEvent, type StepTransitionChangeType } from "../bindings";
 import { useToastStore } from "../stores";
+import {
+  getProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 
 /** Get toast message for step transition change type */
 function getTransitionChangeMessage(changeType: StepTransitionChangeType, transitionId: string): string {
@@ -33,9 +37,12 @@ export function useStepTransitionChangeListener(
 ) {
   const { onStepTransitionChange, enabled = true } = options;
   const addToast = useToastStore((state) => state.addToast);
+  const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepTransitionChanged = useCallback(
     (event: { payload: StepTransitionChangedEvent }) => {
+      if (projectScopeGeneration !== getProjectScopeGeneration()) return;
+
       const { transition_id, change_type } = event.payload;
 
       console.debug(
@@ -49,7 +56,7 @@ export function useStepTransitionChangeListener(
         onStepTransitionChange(event.payload);
       }
     },
-    [addToast, onStepTransitionChange]
+    [addToast, onStepTransitionChange, projectScopeGeneration]
   );
 
   useEffect(() => {

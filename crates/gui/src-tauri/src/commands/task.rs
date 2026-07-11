@@ -315,6 +315,7 @@ pub async fn update_task(
             workflow_id: None,
             level: None,
             archived: None,
+            previous: None,
         },
     );
 

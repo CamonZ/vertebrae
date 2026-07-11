@@ -27,7 +27,8 @@ pub enum ProjectInitProgressKind {
 /// `current_step_id`, `workflow_id`, `level`, and `archived` are hoisted from
 /// the Sacrum CDC payload so the reducer can act on `Deleted` events (which
 /// carry a before-image tombstone, not a full Task) without keeping a local
-/// task-position cache.
+/// task-position cache. `previous` carries the sparse before-image bucket
+/// identity published for `Updated` events.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TaskChangedEvent {
     pub task_id: String,
@@ -37,6 +38,21 @@ pub struct TaskChangedEvent {
     pub workflow_id: Option<String>,
     pub level: Option<types::TaskLevel>,
     pub archived: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous: Option<TaskPreviousBucketIdentity>,
+}
+
+/// Sparse before-image values for fields that can change a task's Atlas bucket.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct TaskPreviousBucketIdentity {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<Option<types::TaskLevel>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step_id: Option<Option<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<Option<String>>,
 }
 
 /// The type of change that occurred on a task.
