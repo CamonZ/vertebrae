@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMockTask,
   createMockTaskRun,
@@ -29,10 +29,7 @@ const { mockEvents, emitTaskRunChanged, resetListeners } = vi.hoisted(() => {
   };
 });
 
-const mockGetTask = vi.hoisted(() => vi.fn());
-
 vi.mock("../bindings", () => ({
-  commands: { getTask: (...args: unknown[]) => mockGetTask(...args) },
   events: mockEvents,
 }));
 
@@ -56,8 +53,13 @@ function cachedRuns(taskId: string): TaskRun[] | undefined {
 describe("useTaskRunChangeListener", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(console, "error").mockImplementation(() => {});
     queryClient.clear();
     resetListeners();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   async function mountListener() {
@@ -87,10 +89,9 @@ describe("useTaskRunChangeListener", () => {
 
     expect(cachedRuns(task.id)).toEqual([taskRun]);
     expect(cachedTask(task.id)?.run_controls).toEqual(controls);
-    expect(mockGetTask).not.toHaveBeenCalled();
   });
 
-  it("keeps cached controls, preserves the run, and refetches on malformed controls", async () => {
+  it("keeps cached controls and preserves the run when controls are malformed", async () => {
     const previousRun = createMockTaskRun({ id: "run-old", task_id: "task-1" });
     const task = createMockTask({
       id: "task-1",
@@ -102,7 +103,6 @@ describe("useTaskRunChangeListener", () => {
       status: "executing",
     });
     upsertTaskInQueryCache(task);
-    mockGetTask.mockResolvedValue({ status: "ok", data: task });
     await mountListener();
 
     act(() => {
@@ -116,15 +116,14 @@ describe("useTaskRunChangeListener", () => {
       });
     });
 
-    await act(async () => {
-      await Promise.resolve();
-    });
     expect(cachedRuns(task.id)).toEqual([taskRun]);
     expect(cachedTask(task.id)?.run_controls).toEqual(task.run_controls);
-    expect(mockGetTask).toHaveBeenCalledWith(task.id);
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("Missing valid run_controls projection")
+    );
   });
 
-  it("removes task and task-run cache entries for a deleted payload", async () => {
+  it("does not erase task state when the controls projection is missing", async () => {
     const task = createMockTask({ id: "task-deleted" });
     const taskRun = createMockTaskRun({ id: "run-deleted", task_id: task.id });
     upsertTaskInQueryCache(task);
@@ -145,7 +144,7 @@ describe("useTaskRunChangeListener", () => {
       });
     });
 
-    expect(cachedTask(task.id)).toBeUndefined();
-    expect(cachedRuns(task.id)).toBeUndefined();
+    expect(cachedTask(task.id)).toEqual(task);
+    expect(cachedRuns(task.id)).toEqual([taskRun]);
   });
 });

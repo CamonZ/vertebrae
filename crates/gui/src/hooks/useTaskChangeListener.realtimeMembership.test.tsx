@@ -456,74 +456,21 @@ describe("useTaskChangeListener realtime list membership", () => {
     expect(cachedTasks()[0].step_type).toBeNull();
   });
 
-  it("hydrates routable task payloads when empty arrays would clear cached data", async () => {
-    const existing = createMockTask({
-      id: "lean-empty-arrays",
-      workflow_id: "workflow-1",
-      workflow_name: "Implementation",
-      current_step_id: "step-review",
-      step_name: "review",
-      tags: ["old-tag"],
-      sections: [
-        {
-          type: "goal",
-          content: "Old goal",
-          order: 1,
-          done: null,
-          done_at: null,
-        },
-      ],
-    });
-    const leanPayload = {
-      ...existing,
-      title: "Lean payload",
-      tags: [],
-      sections: [],
+  it("upserts server-complete task controls without refetching", async () => {
+    const runnableControls = {
+      runnable: true,
+      stoppable: false,
+      disabled_reason_code: null,
+      disabled_reason: null,
+      active_run: null,
     };
-    const hydrated = {
-      ...leanPayload,
-      title: "Hydrated payload",
-    };
-    seedTaskList([existing]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
-
-    renderHook(() => useTaskChangeListener());
-    await waitFor(() => {
-      expect(taskChangedListen).toHaveBeenCalledTimes(1);
-    });
-
-    emitTaskChanged({
-      task_id: "lean-empty-arrays",
-      change_type: "Updated",
-      task: leanPayload,
-      current_step_id: "step-review",
+    const task = createMockTask({
+      id: "task-with-controls",
       workflow_id: "workflow-1",
-      level: "ticket",
-      archived: false,
-    });
-
-    await waitFor(() => {
-      expect(mockGetTask).toHaveBeenCalledWith("lean-empty-arrays");
-    });
-    await waitFor(() => {
-      expect(cachedTasks()[0]).toMatchObject({
-        title: "Hydrated payload",
-        tags: [],
-        sections: [],
-      });
-    });
-  });
-
-  it("hydrates task changed events when payload task data is absent", async () => {
-    const hydrated = createMockTask({
-      id: "missing-task",
-      workflow_id: "workflow-1",
-      workflow_name: "Implementation",
       current_step_id: "step-review",
-      step_name: "review",
+      run_controls: runnableControls,
     });
     seedTaskList([]);
-    mockGetTask.mockResolvedValue({ status: "ok", data: hydrated });
 
     renderHook(() => useTaskChangeListener());
     await waitFor(() => {
@@ -531,22 +478,19 @@ describe("useTaskChangeListener realtime list membership", () => {
     });
 
     emitTaskChanged({
-      task_id: "missing-task",
-      change_type: "Updated",
-      task: null,
-      current_step_id: "step-review",
-      workflow_id: "workflow-1",
-      level: "ticket",
+      task_id: task.id,
+      change_type: "Created",
+      task,
+      current_step_id: task.current_step_id,
+      workflow_id: task.workflow_id,
+      level: task.level,
       archived: false,
     });
 
-    await waitFor(() => {
-      expect(mockGetTask).toHaveBeenCalledWith("missing-task");
-    });
+    expect(mockGetTask).not.toHaveBeenCalled();
     expect(cachedTasks()[0]).toMatchObject({
-      id: "missing-task",
-      workflow_name: "Implementation",
-      step_name: "review",
+      id: task.id,
+      run_controls: runnableControls,
     });
   });
 });

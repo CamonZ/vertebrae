@@ -23,6 +23,7 @@ import {
   deriveHearthStateBreakdown,
   hasHearthStateBreakdown,
   hearthBreakdownVariantForTask,
+  isActiveRunStatus,
   runStatusLabel,
 } from "../../utils/runState";
 import { formatStepName } from "../../utils/formatStepName";
@@ -53,6 +54,7 @@ import {
   taskLocationStepLabel,
   taskLocationWorkflowLabel,
 } from "../../utils/taskLocation";
+import { upsertTaskRunInQueryCache } from "../../query";
 
 /** Canonical uppercase mono eyebrow used for every collapsible section header.
  * Muted (not accent), matching the reference `.acc-hd .name` (var(--fg-mute)) —
@@ -169,6 +171,7 @@ export function TaskDetailPanel({
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
+  const [isWorkflowRunRequested, setIsWorkflowRunRequested] = useState(false);
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
@@ -176,6 +179,15 @@ export function TaskDetailPanel({
   const taskLocation = useTaskLocation(taskData);
   const { tasks: allTasks } = useTasks();
   const activeRun = useActiveTaskRun(taskId);
+  useEffect(() => {
+    if (!isWorkflowRunRequested || !activeRun) return;
+    if (!isActiveRunStatus(activeRun.status)) {
+      setIsWorkflowRunRequested(false);
+    }
+  }, [activeRun, isWorkflowRunRequested]);
+  useEffect(() => {
+    setIsWorkflowRunRequested(false);
+  }, [taskId]);
   const { stepExecutions: activeRunExecutions } = useRunTrace(
     taskId,
     activeRun?.id
@@ -474,13 +486,20 @@ export function TaskDetailPanel({
   const handleRunWorkflow = useCallback(async () => {
     if (!taskData?.id) return;
     setIsRunningWorkflow(true);
+    setIsWorkflowRunRequested(true);
     setWorkflowError(null);
     try {
       const result = await commands.runWorkflow(taskData.id);
       if (result.status === "error") {
         setWorkflowError(result.error.message);
+        setIsWorkflowRunRequested(false);
+      } else {
+        // Seed the authoritative mutation result while the realtime event
+        // updates the task's server-derived run_controls projection.
+        upsertTaskRunInQueryCache(result.data);
       }
     } catch (err) {
+      setIsWorkflowRunRequested(false);
       setWorkflowError(
         err instanceof Error ? err.message : "Failed to start workflow"
       );
@@ -501,6 +520,8 @@ export function TaskDetailPanel({
       });
       if (result.status === "error") {
         setWorkflowError(result.error.message);
+      } else {
+        setIsWorkflowRunRequested(false);
       }
     } catch (err) {
       setWorkflowError(
@@ -520,16 +541,21 @@ export function TaskDetailPanel({
     : null;
   const runControlsState = deriveRunControlsState(
     taskData?.run_controls ?? null,
-    { hasWorkflow: Boolean(taskData?.workflow_id), activeRun }
+    { hasWorkflow: Boolean(taskLocation.workflowId), activeRun }
   );
   const heroStatus = activeRun?.status ?? null;
   const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
   const childBreakdown = deriveHearthStateBreakdown(children, childActiveRuns);
   const hasChildBreakdown = hasHearthStateBreakdown(childBreakdown);
-  const runWorkflowDisabled = isRunningWorkflow || runControlsState.runDisabled;
-  const shouldShowStopWorkflow = runControlsState.showStop;
+  const runWorkflowDisabled =
+    isRunningWorkflow || isWorkflowRunRequested || runControlsState.runDisabled;
+  const shouldShowStopWorkflow =
+    isWorkflowRunRequested || runControlsState.showStop;
   const stopWorkflowDisabled =
-    isStoppingWorkflow || runControlsState.stopDisabled;
+    isStoppingWorkflow ||
+    (runControlsState.stopDisabled &&
+      !isRunningWorkflow &&
+      !isWorkflowRunRequested);
   const isPendingReview = humanInputGate !== null;
 
   const deleteConfirmation =
@@ -566,24 +592,26 @@ export function TaskDetailPanel({
 
   const headerControls = taskData ? (
     <>
-      {taskData.workflow_id && !runControlsState.hasActiveRun && (
-        <IconButton
-          testId="task-detail-run-button"
-          onClick={handleRunWorkflow}
-          disabled={runWorkflowDisabled}
-          ariaLabel="Run entire workflow"
-          title="Run the entire workflow for this task"
-        >
-          {isRunningWorkflow ? (
-            <Spinner className="h-3.5 w-3.5" />
-          ) : (
-            <PlayIcon />
-          )}
-          <span className="sr-only">
-            {isRunningWorkflow ? "Running..." : "Run Workflow"}
-          </span>
-        </IconButton>
-      )}
+      {taskLocation.workflowId &&
+        !runControlsState.hasActiveRun &&
+        !isWorkflowRunRequested && (
+          <IconButton
+            testId="task-detail-run-button"
+            onClick={handleRunWorkflow}
+            disabled={runWorkflowDisabled}
+            ariaLabel="Run entire workflow"
+            title="Run the entire workflow for this task"
+          >
+            {isRunningWorkflow ? (
+              <Spinner className="h-3.5 w-3.5" />
+            ) : (
+              <PlayIcon />
+            )}
+            <span className="sr-only">
+              {isRunningWorkflow ? "Running..." : "Run Workflow"}
+            </span>
+          </IconButton>
+        )}
       {shouldShowStopWorkflow && (
         <IconButton
           testId="task-detail-stop-button"
