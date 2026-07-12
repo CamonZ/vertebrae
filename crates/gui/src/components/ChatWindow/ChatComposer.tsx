@@ -6,7 +6,10 @@ import type {
   PermissionMode,
 } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
-import { harnessDisplayName } from "./chatHelpers";
+import {
+  LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
+  LOCAL_CHAT_UNAVAILABLE_MESSAGE,
+} from "./chatHelpers";
 
 type PermissionModeOption = {
   value: PermissionMode;
@@ -41,6 +44,7 @@ function useHarnessPickerState(
   isActive: boolean,
   lockedHarness: boolean,
   hasResume: boolean,
+  hasAvailableHarness: boolean,
   supportedModelIds: Set<string>,
   reasoningEfforts: LocalChatHarnessInfo["reasoning_efforts"],
   supportedReasoningEffortIds: Set<string>
@@ -79,9 +83,12 @@ function useHarnessPickerState(
       ? "Default effort"
       : "Provider default";
 
-  const unavailableReason = !visibleHarness.available
-    ? (visibleHarness.unavailable_reason ??
-      `${visibleHarness.label} is unavailable`)
+  const unavailableMessage = !visibleHarness.available
+    ? lockedHarness
+      ? LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE
+      : !hasAvailableHarness
+        ? LOCAL_CHAT_UNAVAILABLE_MESSAGE
+        : null
     : null;
 
   return {
@@ -91,7 +98,7 @@ function useHarnessPickerState(
     modelDefaultLabel,
     effortPickerDisabled,
     effortDefaultLabel,
-    unavailableReason,
+    unavailableMessage,
   };
 }
 
@@ -102,10 +109,7 @@ interface ChatComposerProps {
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   harnessCatalog: LocalChatHarnessCatalog | null;
   visibleHarness: LocalChatHarnessInfo | null;
-  providerOptions: Array<{
-    info: LocalChatHarnessInfo;
-    disabled: boolean;
-  }>;
+  providerOptions: Array<{ info: LocalChatHarnessInfo }>;
   supportedModelIds: Set<string>;
   reasoningEfforts?: LocalChatHarnessInfo["reasoning_efforts"];
   supportedReasoningEffortIds: Set<string>;
@@ -113,6 +117,7 @@ interface ChatComposerProps {
   isActive: boolean;
   lockedHarness: boolean;
   hasResume: boolean;
+  hasAvailableHarness: boolean;
   canUseComposer: boolean;
   canSendMessage: boolean;
   shouldStartOrResume: boolean;
@@ -146,6 +151,7 @@ export function ChatComposer({
   isActive,
   lockedHarness,
   hasResume,
+  hasAvailableHarness,
   canUseComposer,
   canSendMessage,
   shouldStartOrResume,
@@ -170,6 +176,7 @@ export function ChatComposer({
     isActive,
     lockedHarness,
     hasResume,
+    hasAvailableHarness,
     supportedModelIds,
     availableReasoningEfforts,
     supportedReasoningEffortIds
@@ -212,17 +219,9 @@ export function ChatComposer({
                     onChange={onHarnessChange}
                     disabled={isBusy || isActive || lockedHarness}
                   >
-                    {providerOptions.map(({ info, disabled }) => (
-                      <option
-                        key={info.harness}
-                        value={info.harness}
-                        disabled={disabled}
-                      >
-                        {info.available
-                          ? info.label
-                          : `${info.label}: ${
-                              info.unavailable_reason ?? "Unavailable"
-                            }`}
+                    {providerOptions.map(({ info }) => (
+                      <option key={info.harness} value={info.harness}>
+                        {info.label}
                       </option>
                     ))}
                   </select>
@@ -301,13 +300,12 @@ export function ChatComposer({
                     </select>
                   </label>
                 )}
-                {picker.unavailableReason && (
+                {picker.unavailableMessage && (
                   <span
                     className="hc-provider-unavailable"
                     data-testid="local-chat-provider-unavailable"
                   >
-                    {harnessDisplayName(visibleHarness.harness)} unavailable:{" "}
-                    {picker.unavailableReason}
+                    {picker.unavailableMessage}
                   </span>
                 )}
               </div>

@@ -139,11 +139,24 @@ fn create_input(
 }
 
 #[test]
-fn default_manager_catalog_includes_codex_backend_harness_but_keeps_claude_default() {
-    let manager = LocalChatSessionManager::new();
+fn catalog_defaults_to_the_first_available_harness_and_retains_diagnostics() {
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(
+            MockHarness::new(LocalChatHarnessKind::Claude).unavailable("Claude Code CLI not found"),
+        ),
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Codex)),
+    ]);
     let catalog = manager.catalog();
 
-    assert_eq!(catalog.default_harness, LocalChatHarnessKind::Claude);
+    assert_eq!(catalog.default_harness, LocalChatHarnessKind::Codex);
+    assert_eq!(
+        catalog
+            .harnesses
+            .iter()
+            .find(|info| info.harness == LocalChatHarnessKind::Claude)
+            .and_then(|info| info.unavailable_reason.as_deref()),
+        Some("Claude Code CLI not found")
+    );
     assert!(catalog
         .harnesses
         .iter()
@@ -152,6 +165,34 @@ fn default_manager_catalog_includes_codex_backend_harness_but_keeps_claude_defau
         .harnesses
         .iter()
         .any(|info| info.harness == LocalChatHarnessKind::Codex));
+}
+
+#[test]
+fn catalog_uses_claude_when_it_is_the_only_available_harness() {
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Claude)),
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Codex).unavailable("Codex CLI not found")),
+    ]);
+
+    assert_eq!(
+        manager.catalog().default_harness,
+        LocalChatHarnessKind::Claude
+    );
+}
+
+#[test]
+fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(
+            MockHarness::new(LocalChatHarnessKind::Claude).unavailable("Claude Code CLI not found"),
+        ),
+        Arc::new(MockHarness::new(LocalChatHarnessKind::Codex).unavailable("Codex CLI not found")),
+    ]);
+
+    assert_eq!(
+        manager.catalog().default_harness,
+        LocalChatHarnessKind::Claude
+    );
 }
 
 #[tokio::test]

@@ -101,6 +101,7 @@ export function ChatWindow({
         isActive={chat.isActive}
         lockedHarness={chat.lockedHarness}
         hasResume={chat.hasResume}
+        hasAvailableHarness={chat.hasAvailableHarness}
         canUseComposer={chat.canUseComposer}
         canSendMessage={chat.canSendMessage}
         shouldStartOrResume={chat.shouldStartOrResume}

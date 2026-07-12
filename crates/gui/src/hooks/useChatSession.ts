@@ -21,7 +21,6 @@ import {
   harnessDisplayName,
   lifecycleLabel,
   isSessionHarnessLocked,
-  isHarnessSelectable,
 } from "../components/ChatWindow/chatHelpers";
 
 // ---------------------------------------------------------------------------
@@ -72,25 +71,74 @@ export function useChatSession(sessionId: string) {
   // --- Derived harness state ---
   const selectedHarness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
   const lockedHarness = session ? isSessionHarnessLocked(session) : false;
-  const visibleHarness = useMemo(() => {
+  const selectedHarnessInfo = useMemo(
+    () =>
+      harnessCatalog?.harnesses.find(
+        (item) => item.harness === selectedHarness
+      ) ?? null,
+    [harnessCatalog, selectedHarness]
+  );
+  const availableHarnesses = useMemo(
+    () => harnessCatalog?.harnesses.filter((info) => info.available) ?? [],
+    [harnessCatalog]
+  );
+  const fallbackHarness = useMemo(() => {
     if (!harnessCatalog) return null;
     return (
       harnessCatalog.harnesses.find(
-        (item) => item.harness === selectedHarness
+        (item) =>
+          item.harness === harnessCatalog.default_harness && item.available
       ) ??
+      availableHarnesses[0] ??
+      null
+    );
+  }, [availableHarnesses, harnessCatalog]);
+  const visibleHarness = useMemo(() => {
+    if (!harnessCatalog) return null;
+    if (lockedHarness || selectedHarnessInfo?.available) {
+      return selectedHarnessInfo;
+    }
+
+    return (
+      fallbackHarness ??
+      selectedHarnessInfo ??
       harnessCatalog.harnesses.find(
         (item) => item.harness === harnessCatalog.default_harness
       ) ??
       null
     );
-  }, [harnessCatalog, selectedHarness]);
+  }, [fallbackHarness, harnessCatalog, lockedHarness, selectedHarnessInfo]);
+
+  // A saved/default provider is only a preference until a session is started.
+  // Keep locked sessions on their original provider so an unavailable harness
+  // cannot be silently replaced during resume.
+  useEffect(() => {
+    if (!session || !harnessCatalog || lockedHarness) return;
+    if (
+      selectedHarnessInfo?.available ||
+      !fallbackHarness ||
+      fallbackHarness.harness === selectedHarness
+    ) {
+      return;
+    }
+    setSessionHarness(sessionId, fallbackHarness.harness);
+  }, [
+    fallbackHarness,
+    harnessCatalog,
+    lockedHarness,
+    selectedHarness,
+    selectedHarnessInfo,
+    session,
+    sessionId,
+    setSessionHarness,
+  ]);
+
   const providerOptions = useMemo(() => {
     if (!harnessCatalog) return [];
-    return harnessCatalog.harnesses.map((info) => ({
-      info,
-      disabled: !isHarnessSelectable(info, selectedHarness, lockedHarness),
-    }));
-  }, [harnessCatalog, lockedHarness, selectedHarness]);
+    return harnessCatalog.harnesses
+      .filter((info) => info.available)
+      .map((info) => ({ info }));
+  }, [harnessCatalog]);
 
   const supportedModelIds = useMemo(
     () => new Set((visibleHarness?.models ?? []).map((model) => model.id)),
@@ -121,13 +169,16 @@ export function useChatSession(sessionId: string) {
     !!session?.backendSessionId &&
     (lifecycle === "sending" || lifecycle === "streaming");
   const hasResume = !!session?.providerResumeId;
-  const selectedHarnessAvailable = visibleHarness?.available !== false;
-  const canUseComposer = selectedHarnessAvailable && (!isBusy || canQueueMessage);
+  const selectedHarnessAvailable =
+    !harnessCatalog || selectedHarnessInfo?.available === true;
+  const canUseComposer =
+    selectedHarnessAvailable && (!isBusy || canQueueMessage);
   const canSendMessage = (isActive || canQueueMessage) && canUseComposer;
   const shouldStartOrResume = !isActive && canUseComposer;
   const hasSession = !!session;
   const hasConversation = !!session?.providerResumeId;
   const messageCount = session?.messages.length ?? 0;
+  const hasAvailableHarness = !harnessCatalog || fallbackHarness !== null;
 
   // --- Persistence / sync effects ---
   useEffect(() => {
@@ -361,6 +412,7 @@ export function useChatSession(sessionId: string) {
     harnessCatalog,
     visibleHarness,
     providerOptions,
+    hasAvailableHarness,
     supportedModelIds,
     reasoningEfforts,
     supportedReasoningEffortIds,

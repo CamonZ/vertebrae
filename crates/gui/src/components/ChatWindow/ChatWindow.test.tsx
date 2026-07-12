@@ -391,7 +391,7 @@ describe("ChatWindow", () => {
     ).toBeUndefined();
   });
 
-  it("renders unavailable Codex from the harness catalog as disabled with a reason", async () => {
+  it("omits unavailable Codex from the provider picker", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
       default_harness: "claude",
       harnesses: [
@@ -438,12 +438,83 @@ describe("ChatWindow", () => {
       "local-chat-provider-picker"
     );
     expect(providerPicker).toHaveValue("claude");
-    const codexOption = Array.from(
-      (providerPicker as HTMLSelectElement).options
-    ).find((option) => option.value === "codex");
-    expect(codexOption).toBeDefined();
-    expect(codexOption).toBeDisabled();
-    expect(codexOption).toHaveTextContent("Codex: Codex CLI not found");
+    expect(
+      Array.from((providerPicker as HTMLSelectElement).options).map(
+        (option) => option.value
+      )
+    ).toEqual(["claude"]);
+  });
+
+  it("falls back to Codex when Claude is unavailable before starting", async () => {
+    const user = userEvent.setup();
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "codex",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: false,
+          unavailable_reason: "Claude CLI not found",
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "default",
+          default_reasoning_effort: "medium",
+          reasoning_efforts: [{ id: "medium", label: "Medium" }],
+          supports_resume: true,
+          models: [
+            {
+              id: "default",
+              label: "Default",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
+        },
+      ],
+    });
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const providerPicker = await screen.findByTestId(
+      "local-chat-provider-picker"
+    );
+    await waitFor(() => {
+      expect(useChatStore.getState().sessions["test-session"].harness).toBe(
+        "codex"
+      );
+    });
+    expect(providerPicker).toHaveValue("codex");
+    expect(
+      Array.from((providerPicker as HTMLSelectElement).options).map(
+        (option) => option.value
+      )
+    ).toEqual(["codex"]);
+
+    await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
+    await user.click(screen.getByTitle("Start session"));
+
+    await waitFor(() => {
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness: "codex",
+          initial_prompt: "Start Codex",
+        })
+      );
+    });
   });
 
   it("selects Codex provider models from the catalog and starts with neutral commands", async () => {
@@ -596,9 +667,12 @@ describe("ChatWindow", () => {
     ]);
   });
 
-  it("shows unavailable reason when viewing an unavailable Codex session", async () => {
+  it("keeps a locked session on an unavailable Codex harness", async () => {
     const user = userEvent.setup();
-    const session = createSession({ harness: "codex" });
+    const session = createSession({
+      harness: "codex",
+      providerResumeId: "codex-resume-1",
+    });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
@@ -609,12 +683,72 @@ describe("ChatWindow", () => {
 
     expect(
       await screen.findByTestId("local-chat-provider-unavailable")
-    ).toHaveTextContent("Codex unavailable: Codex app-server is not installed");
+    ).toHaveTextContent("This chat session's harness is no longer available.");
+    expect(
+      Array.from(
+        (screen.getByTestId("local-chat-provider-picker") as HTMLSelectElement)
+          .options
+      ).map((option) => option.value)
+    ).toEqual(["claude"]);
+    expect(useChatStore.getState().sessions["test-session"].harness).toBe(
+      "codex"
+    );
     expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
     expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
 
     await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
 
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+  });
+
+  it("blocks local chat and shows the neither-installed message", async () => {
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      default_harness: "claude",
+      harnesses: [
+        {
+          harness: "claude",
+          label: "Claude",
+          available: false,
+          unavailable_reason: "Claude CLI not found",
+          default_model_id: "sonnet",
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
+        },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: false,
+          unavailable_reason: "Codex CLI not found",
+          default_model_id: null,
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: true,
+          models: [],
+        },
+      ],
+    });
+    const session = createSession();
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    const providerPicker = await screen.findByTestId(
+      "local-chat-provider-picker"
+    );
+    expect((providerPicker as HTMLSelectElement).options).toHaveLength(0);
+    expect(
+      await screen.findByTestId("local-chat-provider-unavailable")
+    ).toHaveTextContent(
+      "Local chat unavailable because neither Claude nor Codex was found."
+    );
+    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTitle("Start session")).toBeDisabled();
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
   });
 
