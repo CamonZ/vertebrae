@@ -95,6 +95,7 @@ export function ChatWindow({
         visibleHarness={chat.visibleHarness}
         providerOptions={chat.providerOptions}
         supportedModelIds={chat.supportedModelIds}
+        reasoningEfforts={chat.reasoningEfforts}
         supportedReasoningEffortIds={chat.supportedReasoningEffortIds}
         isBusy={chat.isBusy}
         isActive={chat.isActive}

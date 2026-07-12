@@ -19,6 +19,8 @@ pub enum LocalChatHarnessKind {
 pub struct LocalChatModelOption {
     pub id: String,
     pub label: String,
+    #[serde(default)]
+    pub supported_reasoning_effort_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]

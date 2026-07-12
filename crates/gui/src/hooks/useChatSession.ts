@@ -96,15 +96,23 @@ export function useChatSession(sessionId: string) {
     () => new Set((visibleHarness?.models ?? []).map((model) => model.id)),
     [visibleHarness]
   );
-  const supportedReasoningEffortIds = useMemo(
-    () =>
-      new Set(
-        (visibleHarness?.reasoning_efforts ?? []).map((effort) => effort.id)
-      ),
-    [visibleHarness]
-  );
   const selectedModelId = session?.selectedModelId;
   const selectedReasoningEffort = session?.selectedReasoningEffort;
+  const reasoningEfforts = useMemo(() => {
+    const efforts = visibleHarness?.reasoning_efforts ?? [];
+    const selectedModel = visibleHarness?.models.find(
+      (model) => model.id === selectedModelId
+    );
+    const supportedEffortIds = selectedModel?.supported_reasoning_effort_ids;
+    if (!supportedEffortIds) return efforts;
+
+    const supportedEfforts = new Set(supportedEffortIds);
+    return efforts.filter((effort) => supportedEfforts.has(effort.id));
+  }, [selectedModelId, visibleHarness]);
+  const supportedReasoningEffortIds = useMemo(
+    () => new Set(reasoningEfforts.map((effort) => effort.id)),
+    [reasoningEfforts]
+  );
 
   // --- Lifecycle derived flags ---
   const lifecycle = getLocalChatLifecycle(session);
@@ -354,6 +362,7 @@ export function useChatSession(sessionId: string) {
     visibleHarness,
     providerOptions,
     supportedModelIds,
+    reasoningEfforts,
     supportedReasoningEffortIds,
     selectedModelId,
     selectedReasoningEffort,

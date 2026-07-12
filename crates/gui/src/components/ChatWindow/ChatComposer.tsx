@@ -8,10 +8,12 @@ import type {
 import type { ChatSession } from "../../stores/chatStore";
 import { harnessDisplayName } from "./chatHelpers";
 
-const PERMISSION_MODE_OPTIONS: Array<{
+type PermissionModeOption = {
   value: PermissionMode;
   label: string;
-}> = [
+};
+
+const CLAUDE_PERMISSION_MODE_OPTIONS: PermissionModeOption[] = [
   { value: "default", label: "Ask before edits" },
   { value: "accept_edits", label: "Edit automatically" },
   { value: "plan", label: "Plan mode" },
@@ -19,6 +21,18 @@ const PERMISSION_MODE_OPTIONS: Array<{
   { value: "dont_ask", label: "Don't ask" },
   { value: "bypass_permissions", label: "Bypass permissions" },
 ];
+
+const CODEX_PERMISSION_MODE_OPTIONS: PermissionModeOption[] = [
+  { value: "default", label: "Ask for approval" },
+  { value: "auto", label: "Approve for me" },
+  { value: "bypass_permissions", label: "Full access" },
+];
+
+function permissionModeOptions(harness: ChatSession["harness"]) {
+  return harness === "codex"
+    ? CODEX_PERMISSION_MODE_OPTIONS
+    : CLAUDE_PERMISSION_MODE_OPTIONS;
+}
 
 function useHarnessPickerState(
   visibleHarness: LocalChatHarnessInfo | null,
@@ -28,12 +42,14 @@ function useHarnessPickerState(
   lockedHarness: boolean,
   hasResume: boolean,
   supportedModelIds: Set<string>,
+  reasoningEfforts: LocalChatHarnessInfo["reasoning_efforts"],
   supportedReasoningEffortIds: Set<string>
 ) {
   if (!visibleHarness) return null;
 
   const selectedModelUnsupported =
-    !!session.selectedModelId && !supportedModelIds.has(session.selectedModelId);
+    !!session.selectedModelId &&
+    !supportedModelIds.has(session.selectedModelId);
   const selectedReasoningEffortUnsupported =
     !!session.selectedReasoningEffort &&
     !supportedReasoningEffortIds.has(session.selectedReasoningEffort);
@@ -56,7 +72,7 @@ function useHarnessPickerState(
     lockedHarness ||
     hasResume ||
     !visibleHarness.available ||
-    (visibleHarness.reasoning_efforts ?? []).length === 0;
+    reasoningEfforts.length === 0;
   const effortDefaultLabel = hasResume
     ? "Original effort"
     : visibleHarness.default_reasoning_effort
@@ -91,6 +107,7 @@ interface ChatComposerProps {
     disabled: boolean;
   }>;
   supportedModelIds: Set<string>;
+  reasoningEfforts?: LocalChatHarnessInfo["reasoning_efforts"];
   supportedReasoningEffortIds: Set<string>;
   isBusy: boolean;
   isActive: boolean;
@@ -108,7 +125,9 @@ interface ChatComposerProps {
   onStartSession: () => void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onModelChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  onReasoningEffortChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onReasoningEffortChange: (
+    event: React.ChangeEvent<HTMLSelectElement>
+  ) => void;
   onPermissionModeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
 }
 
@@ -121,6 +140,7 @@ export function ChatComposer({
   visibleHarness,
   providerOptions,
   supportedModelIds,
+  reasoningEfforts,
   supportedReasoningEffortIds,
   isBusy,
   isActive,
@@ -141,6 +161,8 @@ export function ChatComposer({
   onReasoningEffortChange,
   onPermissionModeChange,
 }: ChatComposerProps) {
+  const availableReasoningEfforts =
+    reasoningEfforts ?? visibleHarness?.reasoning_efforts ?? [];
   const picker = useHarnessPickerState(
     visibleHarness,
     session,
@@ -149,6 +171,7 @@ export function ChatComposer({
     lockedHarness,
     hasResume,
     supportedModelIds,
+    availableReasoningEfforts,
     supportedReasoningEffortIds
   );
 
@@ -214,7 +237,7 @@ export function ChatComposer({
                   onChange={onPermissionModeChange}
                   disabled={isBusy || isActive}
                 >
-                  {PERMISSION_MODE_OPTIONS.map((mode) => (
+                  {permissionModeOptions(session.harness).map((mode) => (
                     <option key={mode.value} value={mode.value}>
                       {mode.label}
                     </option>
@@ -251,7 +274,7 @@ export function ChatComposer({
                     ))}
                   </select>
                 </label>
-                {(visibleHarness.reasoning_efforts ?? []).length > 0 && (
+                {availableReasoningEfforts.length > 0 && (
                   <label className="hc-effort-picker">
                     <span>Effort</span>
                     <select
@@ -267,17 +290,14 @@ export function ChatComposer({
                           Unsupported: {session.selectedReasoningEffort}
                         </option>
                       )}
-                      {(visibleHarness.reasoning_efforts ?? []).map(
-                        (effort) => (
-                          <option key={effort.id} value={effort.id}>
-                            {effort.label}
-                            {effort.id ===
-                            visibleHarness.default_reasoning_effort
-                              ? " (default)"
-                              : ""}
-                          </option>
-                        )
-                      )}
+                      {availableReasoningEfforts.map((effort) => (
+                        <option key={effort.id} value={effort.id}>
+                          {effort.label}
+                          {effort.id === visibleHarness.default_reasoning_effort
+                            ? " (default)"
+                            : ""}
+                        </option>
+                      ))}
                     </select>
                   </label>
                 )}

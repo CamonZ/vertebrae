@@ -35,8 +35,8 @@ const CLAUDE_INFO: LocalChatHarnessInfo = {
   reasoning_efforts: [],
   supports_resume: true,
   models: [
-    { id: "sonnet", label: "Sonnet" },
-    { id: "opus", label: "Opus" },
+    { id: "sonnet", label: "Sonnet", supported_reasoning_effort_ids: null },
+    { id: "opus", label: "Opus", supported_reasoning_effort_ids: null },
   ],
 };
 
@@ -187,14 +187,45 @@ describe("ChatComposer", () => {
 
   // --- Permission mode picker ---
 
-  it("renders the permission mode picker with all options", () => {
+  it("renders the Claude permission mode picker with all supported options", () => {
     render(<ChatComposer {...defaultProps()} />);
-    const picker = screen.getByTestId("local-chat-permission-mode-picker");
+    const picker = screen.getByTestId(
+      "local-chat-permission-mode-picker"
+    ) as HTMLSelectElement;
     expect(picker).toBeInTheDocument();
-    expect(screen.getByText("Ask before edits")).toBeInTheDocument();
-    expect(screen.getByText("Edit automatically")).toBeInTheDocument();
-    expect(screen.getByText("Plan mode")).toBeInTheDocument();
-    expect(screen.getByText("Bypass permissions")).toBeInTheDocument();
+    expect(Array.from(picker.options).map((option) => option.value)).toEqual([
+      "default",
+      "accept_edits",
+      "plan",
+      "auto",
+      "dont_ask",
+      "bypass_permissions",
+    ]);
+  });
+
+  it("renders only Codex permission profiles for Codex sessions", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          session: createSession({ harness: "codex" }),
+          visibleHarness: {
+            ...CODEX_INFO,
+            available: true,
+            unavailable_reason: null,
+          },
+        })}
+      />
+    );
+    const picker = screen.getByTestId(
+      "local-chat-permission-mode-picker"
+    ) as HTMLSelectElement;
+    expect(
+      Array.from(picker.options).map((option) => [option.text, option.value])
+    ).toEqual([
+      ["Ask for approval", "default"],
+      ["Approve for me", "auto"],
+      ["Full access", "bypass_permissions"],
+    ]);
   });
 
   it("fires onPermissionModeChange when changed", () => {
@@ -333,6 +364,48 @@ describe("ChatComposer", () => {
     // Low is the default so it gets the suffix
     expect(optionTexts).toContain("Low (default)");
     expect(optionTexts).toContain("High");
+  });
+
+  it("renders only the selected model's supported effort options", () => {
+    const harnessWithModelSpecificEfforts: LocalChatHarnessInfo = {
+      ...CODEX_INFO,
+      available: true,
+      reasoning_efforts: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+      ],
+      models: [
+        {
+          id: "model-with-limited-effort",
+          label: "Limited model",
+          supported_reasoning_effort_ids: ["low", "high"],
+        },
+      ],
+    };
+    render(
+      <ChatComposer
+        {...defaultProps({
+          session: createSession({
+            harness: "codex",
+            selectedModelId: "model-with-limited-effort",
+          }),
+          visibleHarness: harnessWithModelSpecificEfforts,
+          reasoningEfforts: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High" },
+          ],
+          supportedReasoningEffortIds: new Set(["low", "high"]),
+        })}
+      />
+    );
+
+    const picker = screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement;
+    expect(Array.from(picker.options).map((option) => option.value)).toEqual([
+      "",
+      "low",
+      "high",
+    ]);
   });
 
   it("disables effort picker when harness is locked", () => {
