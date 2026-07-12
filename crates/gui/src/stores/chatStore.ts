@@ -864,12 +864,24 @@ function createProviderThreadSession(input: {
   };
 }
 
+const CODEX_PERMISSION_MODES = new Set<PermissionMode>([
+  "default",
+  "auto",
+  "bypass_permissions",
+]);
+
 function hydrateLocalSession(session: ChatSession): ChatSession {
   const title = session.title?.trim() ? session.title : null;
   const messages = sanitizeSessionMessages(
     session.messages,
     session.providerResumeId
   );
+  const harness = session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
+  const permissionMode =
+    harness === "codex" &&
+    !CODEX_PERMISSION_MODES.has(session.permissionMode ?? "default")
+      ? "default"
+      : (session.permissionMode ?? "default");
   return {
     ...session,
     messages,
@@ -878,7 +890,8 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     titleConfidence: session.titleConfidence ?? (title ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     isDetached: false,
-    harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+    harness,
+    permissionMode,
     backendSessionId: null,
     lifecycle: session.lifecycle ?? "idle",
     lifecycleError: null,
@@ -1400,6 +1413,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...persisted,
           projectPath: persisted.projectPath ?? projectPath,
         });
+        if (hydrated.permissionMode !== persisted.permissionMode) {
+          persistLocalChatSession(hydrated);
+        }
         set((state) => {
           const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
           return {
@@ -1617,8 +1633,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           providerJsonlPath ?? persisted.providerJsonlPath ?? null,
       });
       if (
-        providerJsonlPath &&
-        providerJsonlPath !== persisted.providerJsonlPath
+        (providerJsonlPath &&
+          providerJsonlPath !== persisted.providerJsonlPath) ||
+        hydrated.permissionMode !== persisted.permissionMode
       ) {
         persistLocalChatSession(hydrated);
       }
@@ -2044,6 +2061,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return {
           ...session,
           harness,
+          permissionMode: "default",
           selectedModelId: undefined,
           selectedReasoningEffort: undefined,
           model: undefined,

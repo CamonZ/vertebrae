@@ -51,6 +51,7 @@ pub(crate) fn claude_local_chat_harness_info() -> LocalChatHarnessInfo {
             .map(|model| LocalChatModelOption {
                 id: model.id,
                 label: model.label,
+                supported_reasoning_effort_ids: None,
             })
             .collect(),
         default_reasoning_effort: None,
@@ -116,18 +117,22 @@ mod tests {
                 LocalChatModelOption {
                     id: "sonnet".to_string(),
                     label: "Sonnet".to_string(),
+                    supported_reasoning_effort_ids: None,
                 },
                 LocalChatModelOption {
                     id: "opus".to_string(),
                     label: "Opus".to_string(),
+                    supported_reasoning_effort_ids: None,
                 },
                 LocalChatModelOption {
                     id: "haiku".to_string(),
                     label: "Haiku".to_string(),
+                    supported_reasoning_effort_ids: None,
                 },
                 LocalChatModelOption {
                     id: "fable".to_string(),
                     label: "Fable".to_string(),
+                    supported_reasoning_effort_ids: None,
                 },
             ]
         );

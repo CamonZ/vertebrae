@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Command as ProcessCommand, Stdio};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -13,13 +14,15 @@ use crate::helpers::find_codex_binary;
 use crate::local_chat::{LocalChatHarnessInfo, LocalChatHarnessKind};
 
 use super::models::{
-    codex_model_options, codex_reasoning_effort_options, CODEX_DEFAULT_MODEL_ID,
-    CODEX_DEFAULT_REASONING_EFFORT,
+    codex_model_options, codex_reasoning_effort_options, parse_codex_model_catalog,
+    CodexModelCatalog, CODEX_DEFAULT_MODEL_ID, CODEX_DEFAULT_REASONING_EFFORT,
 };
 
 const APP_SERVER_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const APP_SERVER_READY_POLL: Duration = Duration::from_millis(50);
 const APP_SERVER_LAUNCH_ATTEMPTS: usize = 3;
+
+static CODEX_MODEL_CATALOG: OnceLock<Result<CodexModelCatalog, String>> = OnceLock::new();
 
 #[async_trait]
 pub(super) trait CodexAppServerLauncher: Send + Sync {
@@ -38,16 +41,19 @@ pub(super) struct ProcessCodexAppServerLauncher;
 #[async_trait]
 impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
     fn info(&self) -> LocalChatHarnessInfo {
-        let availability = find_codex_binary();
+        let (available, unavailable_reason, catalog) = match find_codex_binary() {
+            Ok(binary) => (true, None, codex_model_catalog(&binary).ok()),
+            Err(error) => (false, Some(error), None),
+        };
         LocalChatHarnessInfo {
             harness: LocalChatHarnessKind::Codex,
             label: "Codex".to_string(),
-            available: availability.is_ok(),
-            unavailable_reason: availability.err(),
+            available,
+            unavailable_reason,
             default_model_id: Some(CODEX_DEFAULT_MODEL_ID.to_string()),
-            models: codex_model_options(),
+            models: codex_model_options(catalog),
             default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.to_string()),
-            reasoning_efforts: codex_reasoning_effort_options(),
+            reasoning_efforts: codex_reasoning_effort_options(catalog),
             supports_resume: true,
         }
     }
@@ -78,6 +84,34 @@ impl CodexAppServerLauncher for ProcessCodexAppServerLauncher {
             "Failed to start Codex app-server after all launch attempts".to_string()
         }))
     }
+}
+
+fn codex_model_catalog(binary: &PathBuf) -> Result<&'static CodexModelCatalog, String> {
+    CODEX_MODEL_CATALOG
+        .get_or_init(|| load_codex_model_catalog(binary))
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+fn load_codex_model_catalog(binary: &PathBuf) -> Result<CodexModelCatalog, String> {
+    load_catalog_output(|| {
+        let output = ProcessCommand::new(binary)
+            .args(["debug", "models", "--bundled"])
+            .output()
+            .map_err(|error| format!("Failed to run Codex model catalog: {error}"))?;
+        if !output.status.success() {
+            return Err(format!("Codex model catalog exited with {}", output.status));
+        }
+        String::from_utf8(output.stdout)
+            .map_err(|error| format!("Codex model catalog was not UTF-8: {error}"))
+    })
+}
+
+pub(super) fn load_catalog_output(
+    command: impl FnOnce() -> Result<String, String>,
+) -> Result<CodexModelCatalog, String> {
+    let output = command()?;
+    parse_codex_model_catalog(&output)
 }
 
 fn reserve_local_ws_url() -> Result<(String, SocketAddr), String> {

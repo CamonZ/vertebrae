@@ -21,8 +21,8 @@ use crate::types::PermissionMode;
 
 use super::launcher::ready_probe;
 use super::models::{
-    codex_model_options, codex_reasoning_effort_options, CODEX_DEFAULT_MODEL_ID,
-    CODEX_DEFAULT_REASONING_EFFORT,
+    codex_model_options, codex_reasoning_effort_options, parse_codex_model_catalog,
+    CODEX_DEFAULT_MODEL_ID, CODEX_DEFAULT_REASONING_EFFORT,
 };
 
 fn test_thread_state() -> Arc<StdMutex<CodexThreadState>> {
@@ -54,9 +54,9 @@ impl CodexAppServerLauncher for TestCodexAppServerLauncher {
             available: self.info_error.is_none(),
             unavailable_reason: self.info_error.clone(),
             default_model_id: Some(CODEX_DEFAULT_MODEL_ID.to_string()),
-            models: codex_model_options(),
+            models: codex_model_options(None),
             default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.to_string()),
-            reasoning_efforts: codex_reasoning_effort_options(),
+            reasoning_efforts: codex_reasoning_effort_options(None),
             supports_resume: true,
         }
     }
@@ -1206,12 +1206,102 @@ fn codex_harness_info_reports_default_model_metadata() {
     assert_eq!(info.default_model_id, Some("default".to_string()));
     assert!(info.models.iter().any(|model| model.id == "gpt-5.5"));
     assert!(info.models.iter().any(|model| model.id == "gpt-5.4"));
-    assert_eq!(info.default_reasoning_effort, Some("medium".to_string()));
+    assert_eq!(info.default_reasoning_effort, Some("default".to_string()));
     assert!(info
         .reasoning_efforts
         .iter()
         .any(|effort| effort.id == "xhigh"));
     assert!(info.supports_resume);
+}
+
+#[test]
+fn codex_catalog_options_keep_default_and_order_visible_models_by_priority() {
+    let catalog = parse_codex_model_catalog(
+        r#"{
+            "models": [
+                {
+                    "slug": "later-model",
+                    "display_name": "Later model",
+                    "visibility": "list",
+                    "priority": 20,
+                    "supported_reasoning_levels": [
+                        {"effort": "high"},
+                        {"effort": "medium"}
+                    ]
+                },
+                {
+                    "slug": "first-model",
+                    "display_name": "First model",
+                    "visibility": "list",
+                    "priority": 1,
+                    "supported_reasoning_levels": [
+                        {"effort": "medium"},
+                        {"effort": "max"},
+                        {"effort": "ultra"}
+                    ]
+                },
+                {
+                    "slug": "hidden-model",
+                    "display_name": "Hidden model",
+                    "visibility": "hidden",
+                    "priority": 0,
+                    "supported_reasoning_levels": [{"effort": "low"}]
+                }
+            ]
+        }"#,
+    )
+    .expect("valid Codex catalog");
+
+    let models = codex_model_options(Some(&catalog));
+    assert_eq!(
+        models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["default", "first-model", "later-model"]
+    );
+    assert_eq!(
+        models
+            .iter()
+            .find(|model| model.id == "first-model")
+            .and_then(|model| model.supported_reasoning_effort_ids.as_ref())
+            .map(|efforts| efforts.iter().map(String::as_str).collect::<Vec<_>>()),
+        Some(vec!["medium", "max", "ultra"])
+    );
+    assert_eq!(
+        models
+            .iter()
+            .find(|model| model.id == "later-model")
+            .and_then(|model| model.supported_reasoning_effort_ids.as_ref())
+            .map(|efforts| efforts.iter().map(String::as_str).collect::<Vec<_>>()),
+        Some(vec!["high", "medium"])
+    );
+
+    let efforts = codex_reasoning_effort_options(Some(&catalog));
+    assert_eq!(
+        efforts
+            .iter()
+            .map(|effort| effort.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["medium", "max", "ultra", "high"]
+    );
+}
+
+#[test]
+fn malformed_or_failed_codex_catalog_uses_static_picker_fallback() {
+    assert!(parse_codex_model_catalog("not JSON").is_err());
+    assert!(super::launcher::load_catalog_output(|| Err("Codex failed".to_string())).is_err());
+
+    assert!(codex_model_options(None)
+        .iter()
+        .any(|model| model.id == "gpt-5.5"));
+    assert_eq!(
+        codex_reasoning_effort_options(None)
+            .iter()
+            .map(|effort| effort.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["low", "medium", "high", "xhigh"]
+    );
 }
 
 #[test]
@@ -1452,7 +1542,7 @@ async fn selected_model_and_reasoning_effort_are_forwarded_to_thread_start() {
     let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
     let mut input = create_input("backend-model-effort", None, None);
     input.model_id = Some("gpt-5.5".to_string());
-    input.reasoning_effort = Some("high".to_string());
+    input.reasoning_effort = Some("medium".to_string());
 
     harness
         .create_session(input, runtime)
@@ -1462,7 +1552,24 @@ async fn selected_model_and_reasoning_effort_are_forwarded_to_thread_start() {
     let requests = server.requests();
     assert_eq!(requests[2]["method"], "thread/start");
     assert_eq!(requests[2]["params"]["model"], "gpt-5.5");
-    assert_eq!(requests[2]["params"]["effort"], "high");
+    assert_eq!(requests[2]["params"]["effort"], "medium");
+}
+
+#[tokio::test]
+async fn default_model_and_effort_omit_app_server_overrides() {
+    let server = MockAppServer::start(MockScript::default()).await;
+    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let (runtime, _events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(create_input("backend-default-options", None, None), runtime)
+        .await
+        .expect("create codex session");
+
+    let requests = server.requests();
+    assert_eq!(requests[2]["method"], "thread/start");
+    assert!(requests[2]["params"].get("model").is_none());
+    assert!(requests[2]["params"].get("effort").is_none());
 }
 
 #[tokio::test]

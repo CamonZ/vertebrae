@@ -231,6 +231,7 @@ describe("chatStore", () => {
 
       useChatStore.getState().setSessionSelectedModel(id, "sonnet");
       useChatStore.getState().setSessionReasoningEffort(id, "high");
+      useChatStore.getState().setSessionPermissionMode(id, "plan");
       useChatStore.getState().setSessionModel(id, "claude-sonnet");
       useChatStore.getState().setSessionTokenUsage(id, { used: 10, max: 100 });
       useChatStore.getState().setSessionHarness(id, "codex");
@@ -239,6 +240,7 @@ describe("chatStore", () => {
         harness: "codex",
         selectedModelId: undefined,
         selectedReasoningEffort: undefined,
+        permissionMode: "default",
         model: undefined,
         tokenUsage: undefined,
       });
@@ -618,6 +620,34 @@ describe("chatStore", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toEqual([
         "persisted",
       ]);
+    });
+
+    it("normalizes legacy Claude-only permission modes in persisted Codex sessions", async () => {
+      persistLocalChatSession({
+        id: "legacy-codex-permission",
+        label: "Legacy Codex permission",
+        messages: [],
+        status: "open",
+        harness: "codex",
+        backendSessionId: null,
+        providerResumeId: null,
+        permissionMode: "plan",
+        projectPath: "/repo",
+      });
+
+      await expect(
+        useChatStore
+          .getState()
+          .selectPersistedSession("legacy-codex-permission")
+      ).resolves.toBe(true);
+
+      expect(
+        useChatStore.getState().sessions["legacy-codex-permission"]
+          .permissionMode
+      ).toBe("default");
+      expect(
+        loadPersistedLocalChatSession("legacy-codex-permission")?.permissionMode
+      ).toBe("default");
     });
 
     it("removes self-referential provider agent rows when hydrating a persisted session", async () => {

@@ -48,3 +48,33 @@ impl CodexPermissionSettings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn params_for(permission_mode: PermissionMode) -> Value {
+        let mut params = json!({});
+        CodexPermissionSettings::from_permission_mode(Some(&permission_mode))
+            .apply_to_params(&mut params);
+        params
+    }
+
+    #[test]
+    fn visible_codex_permission_profiles_keep_their_app_server_mappings() {
+        assert_eq!(
+            params_for(PermissionMode::Default),
+            json!({ "approvalPolicy": "on-request", "permissions": ":read-only" })
+        );
+        assert_eq!(
+            params_for(PermissionMode::Auto),
+            json!({ "approvalPolicy": "on-failure", "permissions": ":workspace" })
+        );
+        assert_eq!(
+            params_for(PermissionMode::BypassPermissions),
+            json!({ "approvalPolicy": "never", "permissions": ":danger-full-access" })
+        );
+    }
+}

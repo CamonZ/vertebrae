@@ -394,7 +394,7 @@ impl PermissionMode {
             PermissionMode::AcceptEdits => "acceptEdits",
             PermissionMode::Auto => "auto",
             PermissionMode::BypassPermissions => "bypassPermissions",
-            PermissionMode::Default => "default",
+            PermissionMode::Default => "manual",
             PermissionMode::DontAsk => "dontAsk",
             PermissionMode::Plan => "plan",
         }

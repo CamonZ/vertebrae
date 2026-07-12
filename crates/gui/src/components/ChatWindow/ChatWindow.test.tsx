@@ -404,7 +404,13 @@ describe("ChatWindow", () => {
           default_reasoning_effort: null,
           reasoning_efforts: [],
           supports_resume: true,
-          models: [{ id: "sonnet", label: "Sonnet" }],
+          models: [
+            {
+              id: "sonnet",
+              label: "Sonnet",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
         },
         {
           harness: "codex",
@@ -454,7 +460,13 @@ describe("ChatWindow", () => {
           default_reasoning_effort: null,
           reasoning_efforts: [],
           supports_resume: true,
-          models: [{ id: "sonnet", label: "Sonnet" }],
+          models: [
+            {
+              id: "sonnet",
+              label: "Sonnet",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
         },
         {
           harness: "codex",
@@ -470,8 +482,16 @@ describe("ChatWindow", () => {
           ],
           supports_resume: true,
           models: [
-            { id: "catalog-codex-default", label: "Catalog Default" },
-            { id: "catalog-codex-alt", label: "Catalog Alt" },
+            {
+              id: "catalog-codex-default",
+              label: "Catalog Default",
+              supported_reasoning_effort_ids: null,
+            },
+            {
+              id: "catalog-codex-alt",
+              label: "Catalog Alt",
+              supported_reasoning_effort_ids: ["medium"],
+            },
           ],
         },
       ],
@@ -495,12 +515,28 @@ describe("ChatWindow", () => {
       );
     });
     await user.selectOptions(
+      await screen.findByTestId("local-chat-effort-picker"),
+      "high"
+    );
+    await user.selectOptions(
       await screen.findByTestId("local-chat-model-picker"),
       "catalog-codex-alt"
     );
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().sessions["test-session"].selectedReasoningEffort
+      ).toBeNull();
+    });
+    expect(
+      Array.from(
+        (screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement)
+          .options,
+        (option) => option.value
+      )
+    ).toEqual(["", "medium"]);
     await user.selectOptions(
-      await screen.findByTestId("local-chat-effort-picker"),
-      "high"
+      screen.getByTestId("local-chat-effort-picker"),
+      "medium"
     );
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
@@ -513,7 +549,7 @@ describe("ChatWindow", () => {
         initial_prompt: "Start",
         provider_resume_id: null,
         model_id: "catalog-codex-alt",
-        reasoning_effort: "high",
+        reasoning_effort: "medium",
         permission_mode: "default",
       });
     });
@@ -596,7 +632,13 @@ describe("ChatWindow", () => {
           default_reasoning_effort: null,
           reasoning_efforts: [],
           supports_resume: true,
-          models: [{ id: "sonnet", label: "Sonnet" }],
+          models: [
+            {
+              id: "sonnet",
+              label: "Sonnet",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
         },
         {
           harness: "codex",
@@ -607,7 +649,13 @@ describe("ChatWindow", () => {
           default_reasoning_effort: "medium",
           reasoning_efforts: [{ id: "medium", label: "Medium" }],
           supports_resume: true,
-          models: [{ id: "catalog-codex-default", label: "Catalog Default" }],
+          models: [
+            {
+              id: "catalog-codex-default",
+              label: "Catalog Default",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
         },
       ],
     });
@@ -857,7 +905,13 @@ describe("ChatWindow", () => {
           default_reasoning_effort: null,
           reasoning_efforts: [],
           supports_resume: true,
-          models: [{ id: "sonnet", label: "Sonnet" }],
+          models: [
+            {
+              id: "sonnet",
+              label: "Sonnet",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
         },
         {
           harness: "codex",

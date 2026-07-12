@@ -192,7 +192,7 @@ fn build_claude_args_maps_all_permission_modes() {
         (PermissionMode::AcceptEdits, "acceptEdits"),
         (PermissionMode::Auto, "auto"),
         (PermissionMode::BypassPermissions, "bypassPermissions"),
-        (PermissionMode::Default, "default"),
+        (PermissionMode::Default, "manual"),
         (PermissionMode::DontAsk, "dontAsk"),
         (PermissionMode::Plan, "plan"),
     ] {
