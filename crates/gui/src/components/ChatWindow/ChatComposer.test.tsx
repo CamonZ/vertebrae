@@ -7,9 +7,7 @@ import type {
   LocalChatHarnessInfo,
 } from "../../bindings";
 
-function createSession(
-  overrides: Partial<ChatSession> = {}
-): ChatSession {
+function createSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
     id: "test-session",
     label: "Test Chat",
@@ -65,16 +63,14 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     inputRef: { current: null },
     harnessCatalog: CATALOG,
     visibleHarness: CLAUDE_INFO,
-    providerOptions: [
-      { info: CLAUDE_INFO, disabled: false },
-      { info: CODEX_INFO, disabled: true },
-    ],
+    providerOptions: [{ info: CLAUDE_INFO }],
     supportedModelIds: new Set(["sonnet", "opus"]),
     supportedReasoningEffortIds: new Set<string>(),
     isBusy: false,
     isActive: false,
     lockedHarness: false,
     hasResume: false,
+    hasAvailableHarness: true,
     canUseComposer: true,
     canSendMessage: false,
     shouldStartOrResume: true,
@@ -144,13 +140,15 @@ describe("ChatComposer", () => {
 
   // --- Provider picker ---
 
-  it("renders the provider picker with available and unavailable harnesses", () => {
+  it("renders only available harnesses in the provider picker", () => {
     render(<ChatComposer {...defaultProps()} />);
     const picker = screen.getByTestId("local-chat-provider-picker");
     expect(picker).toBeInTheDocument();
-    // Claude is available, Codex is not
-    expect(screen.getByText("Claude")).toBeInTheDocument();
-    expect(screen.getByText("Codex: Not installed")).toBeInTheDocument();
+    expect(
+      Array.from((picker as HTMLSelectElement).options).map(
+        (option) => option.textContent
+      )
+    ).toEqual(["Claude"]);
   });
 
   it("fires onHarnessChange when provider is changed", () => {
@@ -232,10 +230,9 @@ describe("ChatComposer", () => {
     const onPermissionModeChange = vi.fn();
     render(<ChatComposer {...defaultProps({ onPermissionModeChange })} />);
 
-    fireEvent.change(
-      screen.getByTestId("local-chat-permission-mode-picker"),
-      { target: { value: "plan" } }
-    );
+    fireEvent.change(screen.getByTestId("local-chat-permission-mode-picker"), {
+      target: { value: "plan" },
+    });
     expect(onPermissionModeChange).toHaveBeenCalledOnce();
   });
 
@@ -250,7 +247,9 @@ describe("ChatComposer", () => {
 
   it("renders the model picker with model options", () => {
     render(<ChatComposer {...defaultProps()} />);
-    const picker = screen.getByTestId("local-chat-model-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
     expect(picker).toBeInTheDocument();
     const optionTexts = Array.from(picker.options).map((o) => o.textContent);
     // sonnet is the default so it gets the suffix
@@ -260,7 +259,9 @@ describe("ChatComposer", () => {
 
   it("marks the default model with (default)", () => {
     render(<ChatComposer {...defaultProps()} />);
-    const picker = screen.getByTestId("local-chat-model-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
     const optionTexts = Array.from(picker.options).map((o) => o.textContent);
     expect(optionTexts).toContain("Sonnet (default)");
   });
@@ -292,7 +293,9 @@ describe("ChatComposer", () => {
 
   it("shows 'Default model' label when harness has a default model and not resuming", () => {
     render(<ChatComposer {...defaultProps()} />);
-    const picker = screen.getByTestId("local-chat-model-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
     expect(picker.options[0].textContent).toBe("Default model");
   });
 
@@ -304,7 +307,9 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const picker = screen.getByTestId("local-chat-model-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
     expect(picker.options[0].textContent).toBe("Original model");
   });
 
@@ -316,9 +321,7 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    expect(
-      screen.getByText("Unsupported: unknown-model")
-    ).toBeInTheDocument();
+    expect(screen.getByText("Unsupported: unknown-model")).toBeInTheDocument();
   });
 
   it("does not render model picker when visibleHarness is null", () => {
@@ -358,7 +361,9 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const picker = screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-effort-picker"
+    ) as HTMLSelectElement;
     expect(picker).toBeInTheDocument();
     const optionTexts = Array.from(picker.options).map((o) => o.textContent);
     // Low is the default so it gets the suffix
@@ -400,7 +405,9 @@ describe("ChatComposer", () => {
       />
     );
 
-    const picker = screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-effort-picker"
+    ) as HTMLSelectElement;
     expect(Array.from(picker.options).map((option) => option.value)).toEqual([
       "",
       "low",
@@ -423,43 +430,6 @@ describe("ChatComposer", () => {
       />
     );
     expect(screen.getByTestId("local-chat-effort-picker")).toBeDisabled();
-  });
-
-  // --- Unavailable reason ---
-
-  it("shows unavailable reason when harness is not available", () => {
-    render(
-      <ChatComposer
-        {...defaultProps({
-          visibleHarness: CODEX_INFO,
-          providerOptions: [
-            { info: CLAUDE_INFO, disabled: true },
-            { info: CODEX_INFO, disabled: false },
-          ],
-        })}
-      />
-    );
-    expect(
-      screen.getByTestId("local-chat-provider-unavailable")
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Codex unavailable: Not installed/)
-    ).toBeInTheDocument();
-  });
-
-  it("uses harness label as fallback when unavailable_reason is null", () => {
-    const harnessNoReason: LocalChatHarnessInfo = {
-      ...CODEX_INFO,
-      unavailable_reason: null,
-    };
-    render(
-      <ChatComposer
-        {...defaultProps({ visibleHarness: harnessNoReason })}
-      />
-    );
-    expect(
-      screen.getByText(/Codex unavailable: Codex is unavailable/)
-    ).toBeInTheDocument();
   });
 
   // --- Composer input ---
@@ -557,11 +527,57 @@ describe("ChatComposer", () => {
       <ChatComposer
         {...defaultProps({
           visibleHarness: CODEX_INFO,
-          providerOptions: [{ info: CODEX_INFO, disabled: false }],
+          providerOptions: [{ info: CODEX_INFO }],
         })}
       />
     );
     expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+  });
+
+  it("shows the neither-installed message and disables the composer", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: CODEX_INFO,
+          providerOptions: [],
+          hasAvailableHarness: false,
+          canUseComposer: false,
+          shouldStartOrResume: false,
+        })}
+      />
+    );
+
+    expect(
+      screen.getByTestId("local-chat-provider-unavailable")
+    ).toHaveTextContent(
+      "Local chat unavailable because neither Claude nor Codex was found."
+    );
+    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+  });
+
+  it("keeps a locked unavailable harness from being resumed or replaced", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          session: createSession({
+            harness: "codex",
+            providerResumeId: "codex-resume-1",
+          }),
+          visibleHarness: CODEX_INFO,
+          providerOptions: [{ info: CLAUDE_INFO }],
+          lockedHarness: true,
+          hasResume: true,
+          canUseComposer: false,
+          shouldStartOrResume: false,
+        })}
+      />
+    );
+
+    expect(
+      screen.getByTestId("local-chat-provider-unavailable")
+    ).toHaveTextContent("This chat session's harness is no longer available.");
+    expect(screen.getByTestId("local-chat-provider-picker")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
   });
 
   it("disables effort picker when resuming", () => {
@@ -587,11 +603,11 @@ describe("ChatComposer", () => {
       default_model_id: null,
     };
     render(
-      <ChatComposer
-        {...defaultProps({ visibleHarness: noDefaultHarness })}
-      />
+      <ChatComposer {...defaultProps({ visibleHarness: noDefaultHarness })} />
     );
-    const picker = screen.getByTestId("local-chat-model-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
     expect(picker.options[0].textContent).toBe("CLI default");
   });
 
@@ -609,7 +625,9 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const picker = screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-effort-picker"
+    ) as HTMLSelectElement;
     expect(picker.options[0].textContent).toBe("Provider default");
   });
 
@@ -629,7 +647,9 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const picker = screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement;
+    const picker = screen.getByTestId(
+      "local-chat-effort-picker"
+    ) as HTMLSelectElement;
     expect(picker.options[0].textContent).toBe("Original effort");
   });
 

@@ -4,6 +4,11 @@ import type {
 } from "../../bindings";
 import type { LocalChatLifecycle } from "../../stores/chatStore";
 
+export const LOCAL_CHAT_UNAVAILABLE_MESSAGE =
+  "Local chat unavailable because neither Claude nor Codex was found.";
+export const LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE =
+  "This chat session's harness is no longer available.";
+
 export function harnessDisplayName(harness: LocalChatHarnessKind): string {
   switch (harness) {
     case "claude":

@@ -55,14 +55,12 @@ impl LocalChatSessionManager {
             .map(|harness| harness.info())
             .collect();
         harnesses.sort_by_key(|info| info.harness);
-        let default_harness = if self.harnesses.contains_key(&LocalChatHarnessKind::Claude) {
-            LocalChatHarnessKind::Claude
-        } else {
-            harnesses
-                .first()
-                .map(|info| info.harness)
-                .unwrap_or(LocalChatHarnessKind::Claude)
-        };
+        let default_harness = harnesses
+            .iter()
+            .find(|info| info.available)
+            .map(|info| info.harness)
+            .or_else(|| harnesses.first().map(|info| info.harness))
+            .unwrap_or(LocalChatHarnessKind::Claude);
 
         LocalChatHarnessCatalog {
             default_harness,

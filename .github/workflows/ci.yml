@@ -33,6 +33,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: crates/gui/package-lock.json
+
+      - name: Install GUI dependencies
+        run: npm ci
+        working-directory: crates/gui
+
+      - name: Run React tests
+        run: npm test
+        working-directory: crates/gui
 
       - name: Check formatting
         run: cargo fmt --check

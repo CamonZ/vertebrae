@@ -80,6 +80,23 @@ vi.mock("../../bindings", () => ({
             { id: "fable", label: "Fable" },
           ],
         },
+        {
+          harness: "codex",
+          label: "Codex",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: "gpt-5.5",
+          default_reasoning_effort: "medium",
+          reasoning_efforts: [{ id: "medium", label: "Medium" }],
+          supports_resume: true,
+          models: [
+            {
+              id: "gpt-5.5",
+              label: "GPT-5.5",
+              supported_reasoning_effort_ids: null,
+            },
+          ],
+        },
       ],
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
@@ -946,24 +963,41 @@ describe("ChatWindowManager", () => {
       configurable: true,
       value: 1200,
     });
-    const user = userEvent.setup();
-    const first = useChatStore
-      .getState()
-      .openSession("Task One", "/test/project");
-    useChatStore.getState().addMessage(first, {
-      kind: "user",
-      text: "first saved question",
-      timestamp: "2026-01-01T00:00:00Z",
+    const first = createSession({
+      id: "task-one",
+      label: "Task One",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "user",
+          text: "first saved question",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ],
     });
-    const second = useChatStore
-      .getState()
-      .startFreshSession("Task Two", "/test/project");
-    useChatStore.getState().addMessage(second, {
-      kind: "assistant",
-      text: "second saved answer",
-      timestamp: "2026-01-02T00:00:00Z",
+    const second = createSession({
+      id: "task-two",
+      label: "Task Two",
+      projectPath: "/test/project",
+      messages: [
+        {
+          kind: "assistant",
+          text: "second saved answer",
+          timestamp: "2026-01-02T00:00:00Z",
+        },
+      ],
     });
-    useChatStore.getState().focusSession(first);
+    persistLocalChatSession(first);
+    persistLocalChatSession(second);
+    useChatStore.setState({
+      sessions: { [first.id]: first, [second.id]: second },
+      activeSessionId: first.id,
+      paneLayout: {
+        panes: [{ id: "pane-one", sessionId: first.id }],
+        activePaneId: "pane-one",
+      },
+      panelOpen: true,
+    });
 
     render(<ChatWindowManager />);
 
@@ -978,11 +1012,13 @@ describe("ChatWindowManager", () => {
     });
     expect(screen.getByText("Task Two")).toBeInTheDocument();
 
-    await user.click(
+    fireEvent.click(
       screen.getByLabelText("Load local chat Task Two into active pane")
     );
 
-    expect(useChatStore.getState().activeSessionId).toBe(second);
+    await waitFor(() => {
+      expect(useChatStore.getState().activeSessionId).toBe(second.id);
+    });
     expect(screen.getByText("second saved answer")).toBeInTheDocument();
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
   });

@@ -5,6 +5,7 @@ pub(crate) mod jsonl;
 pub(crate) mod live_jsonl;
 pub(crate) mod session;
 
+use crate::helpers::find_claude_binary;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
     LocalChatModelOption, LocalChatRuntime, LocalChatSessionError,
@@ -38,12 +39,22 @@ impl Default for ClaudeLocalChatHarness {
 }
 
 pub(crate) fn claude_local_chat_harness_info() -> LocalChatHarnessInfo {
+    claude_local_chat_harness_info_from_resolution(find_claude_binary().map(|_| ()))
+}
+
+fn claude_local_chat_harness_info_from_resolution(
+    resolution: Result<(), String>,
+) -> LocalChatHarnessInfo {
     let catalog = supported_claude_model_catalog();
+    let (available, unavailable_reason) = match resolution {
+        Ok(()) => (true, None),
+        Err(error) => (false, Some(error)),
+    };
     LocalChatHarnessInfo {
         harness: LocalChatHarnessKind::Claude,
         label: "Claude".to_string(),
-        available: true,
-        unavailable_reason: None,
+        available,
+        unavailable_reason,
         default_model_id: Some(catalog.default_model_id),
         models: catalog
             .models
@@ -103,7 +114,7 @@ mod tests {
 
     #[test]
     fn neutral_claude_catalog_matches_supported_claude_models() {
-        let info = claude_local_chat_harness_info();
+        let info = claude_local_chat_harness_info_from_resolution(Ok(()));
 
         assert_eq!(info.harness, LocalChatHarnessKind::Claude);
         assert_eq!(info.label, "Claude");
@@ -160,6 +171,20 @@ mod tests {
                 ],
             }
         );
+    }
+
+    #[test]
+    fn neutral_claude_catalog_retains_cli_resolution_error() {
+        let info = claude_local_chat_harness_info_from_resolution(Err(
+            "Claude Code CLI not found".to_string()
+        ));
+
+        assert!(!info.available);
+        assert_eq!(
+            info.unavailable_reason,
+            Some("Claude Code CLI not found".to_string())
+        );
+        assert_eq!(info.default_model_id, Some("sonnet".to_string()));
     }
 
     #[test]
