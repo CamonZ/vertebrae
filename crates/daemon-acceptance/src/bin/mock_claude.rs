@@ -48,6 +48,11 @@ fn main() -> ExitCode {
         }
 
         ExitCode::from(envelope.exit_code as u8)
+    } else if has_arg_value(&args, "--output-format", "json") {
+        println!(
+            "{{\"title\":\"Local Chat Acceptance\",\"confidence\":0.93,\"sufficient_signal\":true}}"
+        );
+        ExitCode::from(0)
     } else if prompt.is_none() && uses_stdin_stream_json(&args) {
         run_stdin_stream_json()
     } else {
