@@ -239,6 +239,17 @@ fn parse_title_from_text(text: &str) -> Result<InferLocalChatSessionTitleOutput,
     }
 
     if let Ok(value) = serde_json::from_str::<Value>(text) {
+        if let Some(values) = value.as_array() {
+            // Claude can emit a JSON array containing system/control records
+            // alongside the actual result. Only title-bearing records are
+            // candidates; walk from the end to prefer the final user-facing
+            // response and ignore control messages.
+            for candidate in values.iter().rev() {
+                if let Ok(title) = title_from_value(candidate) {
+                    return Ok(title);
+                }
+            }
+        }
         match title_from_value(&value) {
             Ok(title) => return Ok(title),
             Err(error) if is_structured_title_envelope(&value) => return Err(error),
@@ -447,6 +458,21 @@ mod tests {
             InferLocalChatSessionTitleOutput {
                 title: Some("Claude Title Inference".to_string()),
                 confidence: 0.88,
+                sufficient_signal: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_claude_result_from_array_with_control_records() {
+        assert_eq!(
+            parse_title_from_text(
+                r#"[{"type":"system","subtype":"init"},{"type":"control_request","request_id":"abc"},{"type":"result","is_error":false,"structured_output":{"title":"Fix Claude Session Names","confidence":0.93,"sufficient_signal":true}}]"#
+            )
+            .unwrap(),
+            InferLocalChatSessionTitleOutput {
+                title: Some("Fix Claude Session Names".to_string()),
+                confidence: 0.93,
                 sufficient_signal: true,
             }
         );
