@@ -26,3 +26,11 @@ Feature: Local project chat lifecycle
     Then the GUI should show "local-chat-acceptance reply" within 5 seconds
     And I click on the active local chat row with title "Delete local chat New Chat"
     Then the GUI should not show "local-chat-acceptance reply" within 5 seconds
+
+  Scenario: Project chat displays its inferred title
+    Given the GUI is showing the task list
+    When I click on the element with test id "local-chat-launcher"
+    Then the GUI should show "New Chat" within 5 seconds
+    When I type "Review the latest pull request" into the element with test id "local-chat-composer"
+    And I press the "Enter" key
+    Then the GUI should show "Local Chat Acceptance" within 10 seconds

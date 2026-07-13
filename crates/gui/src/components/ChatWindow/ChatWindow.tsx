@@ -60,7 +60,7 @@ export function ChatWindow({
   return (
     <div className="flex h-full flex-col">
       <ChatHeader
-        label={chat.session.label}
+        label={chat.session.title?.trim() || chat.session.label}
         lifecycle={chat.lifecycle}
         isActive={chat.isActive}
         isClosing={chat.lifecycle === "closing"}

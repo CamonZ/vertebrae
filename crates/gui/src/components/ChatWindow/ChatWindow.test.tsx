@@ -150,6 +150,24 @@ describe("ChatWindow", () => {
     expect(screen.queryByText("this task")).not.toBeInTheDocument();
   });
 
+  it("renders the inferred session title in the header", () => {
+    const session = createSession({
+      label: "New Chat",
+      title: "Simple PR Review",
+      titleStatus: "generated",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByText("Simple PR Review")).toBeInTheDocument();
+    expect(screen.queryByText("New Chat")).not.toBeInTheDocument();
+  });
+
   it("does not render old entity copy", () => {
     const session = createSession({
       label: "Deploy Pipeline",
