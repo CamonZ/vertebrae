@@ -112,6 +112,7 @@ export function chatMessagesToThread(
       case "session_start":
       case "session_end":
       case "permission_request":
+      case "user_question":
         continue;
 
       case "user": {

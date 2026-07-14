@@ -538,6 +538,44 @@ describe("handleSacrumPermissionRequestEvent", () => {
     );
     expect(addMsg).not.toHaveBeenCalled();
   });
+
+  it("creates a structured user question instead of a generic permission", () => {
+    const addMsg = vi.fn();
+    const questions = [
+      {
+        question: "Pick one",
+        header: "Choice",
+        options: [{ label: "A", description: "First" }],
+        multi_select: false,
+      },
+    ];
+    handleSacrumPermissionRequestEvent(
+      {
+        request_id: "request-ask",
+        session_id: CLAUDE_SESSION_ID,
+        tool_name: "AskUserQuestion",
+        tool_use_id: "tool-ask",
+        input: { questions },
+        message: null,
+        questions,
+        input_error: null,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      addMsg
+    );
+    expect(addMsg).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "user_question",
+        requestId: "request-ask",
+        toolUseId: "tool-ask",
+        questions,
+        originalQuestions: questions,
+        status: "pending",
+      })
+    );
+  });
 });
 
 describe("handleEndEvent", () => {

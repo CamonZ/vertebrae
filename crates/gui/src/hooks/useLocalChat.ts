@@ -235,6 +235,30 @@ export function handleSacrumPermissionRequestEvent(
   addMessage: (sessionId: string, msg: ChatMessage) => void
 ) {
   if (payload.session_id !== backendSessionId) return;
+  if (payload.tool_name === "AskUserQuestion") {
+    const originalQuestions =
+      payload.input &&
+      typeof payload.input === "object" &&
+      !Array.isArray(payload.input) &&
+      "questions" in payload.input
+        ? (payload.input.questions ?? [])
+        : [];
+    addMessage(sessionId, {
+      kind: "user_question",
+      requestId: payload.request_id,
+      toolUseId: payload.tool_use_id,
+      questions: payload.questions ?? [],
+      originalQuestions,
+      inputError:
+        payload.input_error ??
+        (payload.questions
+          ? undefined
+          : "AskUserQuestion payload could not be parsed"),
+      status: "pending",
+      timestamp: new Date().toISOString(),
+    });
+    return;
+  }
   addMessage(sessionId, {
     kind: "permission_request",
     requestId: payload.request_id,
@@ -471,6 +495,7 @@ export async function doCloseSession(
     setBackendSessionId: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
     clearQueuedMessages?: (id: string) => void;
+    markPendingUserQuestionsUnavailable?: (id: string) => void;
   }
 ): Promise<boolean> {
   if (sessionId) {
@@ -485,6 +510,7 @@ export async function doCloseSession(
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
           deps.clearQueuedMessages?.(sessionId);
+          deps.markPendingUserQuestionsUnavailable?.(sessionId);
         }
         deps.setBackendSessionIdRef?.(null);
         return true;
@@ -495,6 +521,7 @@ export async function doCloseSession(
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
+      deps.markPendingUserQuestionsUnavailable?.(sessionId);
     }
     deps.setBackendSessionIdRef?.(null);
     return true;
@@ -530,6 +557,9 @@ export function useLocalChat(sessionId: string | null) {
   );
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
+  const markPendingUserQuestionsUnavailable = useChatStore(
+    (s) => s.markPendingUserQuestionsUnavailable
+  );
 
   /**
    * Start the local chat session.
@@ -639,6 +669,7 @@ export function useLocalChat(sessionId: string | null) {
         setSessionLifecycle,
         setBackendSessionId,
         clearQueuedMessages,
+        markPendingUserQuestionsUnavailable,
       });
     },
     [
@@ -648,6 +679,7 @@ export function useLocalChat(sessionId: string | null) {
       setSessionLifecycle,
       setBackendSessionId,
       clearQueuedMessages,
+      markPendingUserQuestionsUnavailable,
     ]
   );
 

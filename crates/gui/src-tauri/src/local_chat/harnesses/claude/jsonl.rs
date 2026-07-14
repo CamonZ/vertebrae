@@ -374,6 +374,13 @@ fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
                                 }));
                             }
                             ClaudeContentItem::ToolUse { id, name, input } => {
+                                // AskUserQuestion is transported authoritatively by vtb-gate's
+                                // permission socket because that path carries the request id
+                                // needed to answer it. Rendering this stream-json copy would
+                                // create a duplicate, non-actionable tool row.
+                                if name == crate::local_chat::permissions::ASK_USER_QUESTION_TOOL {
+                                    continue;
+                                }
                                 events.push(EmittedEvent::ToolCall(ToolCallEvent {
                                     session_id: session_id.to_string(),
                                     tool_id: id,

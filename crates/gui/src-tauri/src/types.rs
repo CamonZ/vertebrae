@@ -1047,6 +1047,21 @@ pub struct ResolvePermissionRequestInput {
     pub updated_input: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolvePermissionRequestErrorKind {
+    Unavailable,
+    NotFound,
+    Invalid,
+    Internal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type, PartialEq, Eq)]
+pub struct ResolvePermissionRequestError {
+    pub kind: ResolvePermissionRequestErrorKind,
+    pub message: String,
+}
+
 // ============================================================================
 // Pipeline Types
 // ============================================================================

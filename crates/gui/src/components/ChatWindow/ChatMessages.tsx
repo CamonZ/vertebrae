@@ -4,6 +4,8 @@ import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { chatMessagesToThread } from "./chatMessagesToThread";
 import { PermissionRequestTurn } from "./PermissionRequestTurn";
+import { UserQuestionTurn } from "./UserQuestionTurn";
+import { useChatStore } from "../../stores/chatStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
@@ -14,6 +16,11 @@ type ChatRenderItem =
       kind: "permission";
       key: string;
       message: Extract<ChatMessage, { kind: "permission_request" }>;
+    }
+  | {
+      kind: "user_question";
+      key: string;
+      message: Extract<ChatMessage, { kind: "user_question" }>;
     };
 
 function buildChatRenderItems(
@@ -46,6 +53,15 @@ function buildChatRenderItems(
       });
       return;
     }
+    if (message.kind === "user_question") {
+      flushSegment();
+      items.push({
+        kind: "user_question",
+        key: message.requestId,
+        message,
+      });
+      return;
+    }
 
     segment.push(message);
   });
@@ -73,6 +89,12 @@ export function ChatMessages({
   isWaiting,
   streamingAssistant,
 }: ChatMessagesProps) {
+  const resolveUserQuestion = useChatStore(
+    (state) => state.resolveUserQuestion
+  );
+  const markUserQuestionUnavailable = useChatStore(
+    (state) => state.markUserQuestionUnavailable
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
 
@@ -157,8 +179,20 @@ export function ChatMessages({
                 }
               }}
             />
-          ) : (
+          ) : item.kind === "permission" ? (
             <PermissionRequestTurn key={item.key} message={item.message} />
+          ) : (
+            <UserQuestionTurn
+              key={item.key}
+              message={item.message}
+              sessionAvailable={isActive}
+              onResolved={(requestId) =>
+                resolveUserQuestion(sessionId, requestId)
+              }
+              onUnavailable={(requestId) =>
+                markUserQuestionUnavailable(sessionId, requestId)
+              }
+            />
           )
         )}
         {isWaiting && <ThinkingIndicator />}

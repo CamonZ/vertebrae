@@ -140,6 +140,7 @@ export function routeLocalChatSessionEndEvent(
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
   const store = useChatStore.getState();
+  store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
     payload.backend_session_id,
@@ -157,6 +158,7 @@ export function routeLocalChatSessionErrorEvent(
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
   const store = useChatStore.getState();
+  store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
     payload.backend_session_id,

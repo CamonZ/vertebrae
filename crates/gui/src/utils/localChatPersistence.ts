@@ -136,7 +136,13 @@ export function normalizeLocalChatSession(
         ? "closed"
         : "idle";
 
-  const messages = durableMessages(rawMessages);
+  const messages = durableMessages(rawMessages).map((message) =>
+    !options.preserveRuntimeBackendSessionId &&
+    message.kind === "user_question" &&
+    message.status === "pending"
+      ? { ...message, status: "unavailable" as const }
+      : message
+  );
   const createdAt = normalizeTimestamp(candidate.createdAt, messages, "first");
   const updatedAt = normalizeTimestamp(
     candidate.updatedAt,

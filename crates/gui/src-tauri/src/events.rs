@@ -289,6 +289,20 @@ pub enum SectionChangeType {
     Deleted,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+pub struct UserQuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+pub struct UserQuestion {
+    pub question: String,
+    pub header: String,
+    pub options: Vec<UserQuestionOption>,
+    pub multi_select: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct PermissionRequestEvent {
     pub request_id: String,
@@ -297,4 +311,8 @@ pub struct PermissionRequestEvent {
     pub tool_use_id: String,
     pub input: serde_json::Value,
     pub message: Option<String>,
+    #[serde(default)]
+    pub questions: Option<Vec<UserQuestion>>,
+    #[serde(default)]
+    pub input_error: Option<String>,
 }

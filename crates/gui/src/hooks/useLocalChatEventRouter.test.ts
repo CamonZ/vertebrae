@@ -311,6 +311,45 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(local.lifecycle).toBe("streaming");
   });
 
+  it("routes an AskUserQuestion permission into the owning session store", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    const questions = [
+      {
+        question: "Proceed?",
+        header: "Confirm",
+        options: [{ label: "Yes", description: "Continue" }],
+        multi_select: false,
+      },
+    ];
+
+    expect(
+      routePermissionRequestEvent({
+        request_id: "request-ask",
+        session_id: "backend-local",
+        tool_name: "AskUserQuestion",
+        tool_use_id: "tool-ask",
+        input: { questions },
+        message: null,
+        questions,
+        input_error: null,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.messages).toEqual([
+      expect.objectContaining({
+        kind: "user_question",
+        requestId: "request-ask",
+        originalQuestions: questions,
+        status: "pending",
+      }),
+    ]);
+  });
+
   it("routes hidden-session unexpected-death errors to error lifecycle", () => {
     resetChatStore({
       hidden: makeSession({

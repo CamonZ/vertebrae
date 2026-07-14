@@ -847,6 +847,128 @@ describe("chatStore", () => {
       );
     });
 
+    it("never reintroduces AskUserQuestion tool rows during provider hydration", async () => {
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
+        status: "ok",
+        data: {
+          lines: [
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:00Z",
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "Before question" }],
+              },
+            }),
+            // Deliberately put the result before its call to prove suppression
+            // does not depend on transcript ordering.
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:01Z",
+              type: "user",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: "ask-tool-1",
+                    content: "answered",
+                  },
+                ],
+              },
+            }),
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:02Z",
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "ask-tool-1",
+                    name: "AskUserQuestion",
+                    input: { questions: [] },
+                  },
+                ],
+              },
+            }),
+            JSON.stringify({
+              timestamp: "2026-01-01T00:00:03Z",
+              type: "assistant",
+              message: {
+                role: "assistant",
+                content: [{ type: "text", text: "After question" }],
+              },
+            }),
+          ],
+          providerJsonlPath: null,
+        },
+      });
+      const questions = [
+        {
+          question: "Proceed?",
+          header: "Confirm",
+          options: [{ label: "Yes", description: "Continue" }],
+          multi_select: false,
+        },
+      ];
+      useChatStore.setState({
+        sessions: {
+          metadata: {
+            id: "metadata",
+            label: "Metadata",
+            messages: [
+              {
+                kind: "user_question",
+                requestId: "request-1",
+                toolUseId: "ask-tool-1",
+                questions,
+                originalQuestions: questions,
+                status: "pending",
+                timestamp: "2026-01-01T00:00:04Z",
+              },
+            ],
+            status: "open",
+            harness: "claude",
+            backendSessionId: "backend-1",
+            providerResumeId: "conv-1",
+            projectPath: "/repo",
+            messageCount: 3,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      useChatStore.getState().focusSession("metadata");
+
+      await waitFor(() =>
+        expect(useChatStore.getState().sessions.metadata.messages).toEqual([
+          expect.objectContaining({
+            kind: "assistant",
+            text: "Before question",
+          }),
+          expect.objectContaining({
+            kind: "assistant",
+            text: "After question",
+          }),
+          expect.objectContaining({
+            kind: "user_question",
+            toolUseId: "ask-tool-1",
+          }),
+        ])
+      );
+      expect(
+        useChatStore
+          .getState()
+          .sessions.metadata.messages.some(
+            (message) =>
+              (message.kind === "tool_call" ||
+                message.kind === "tool_result") &&
+              message.toolId === "ask-tool-1"
+          )
+      ).toBe(false);
+    });
+
     it("does not re-prepend hydrated messages that duplicate live content under a different timestamp", async () => {
       // Live messages are stamped at receipt time; a hydrated copy of the
       // SAME content carries the JSONL line's recorded time instead, so the
@@ -2054,6 +2176,65 @@ describe("chatStore", () => {
       useChatStore.getState().clearMessages("non-existent");
       expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
+    });
+  });
+
+  describe("structured user questions", () => {
+    it("replaces a matching generic AskUserQuestion row and tracks resolution", () => {
+      const id = useChatStore.getState().openSession("Question");
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_call",
+        toolName: "AskUserQuestion",
+        toolId: "tool-1",
+        input: "{}",
+        timestamp: "2026-07-14T00:00:00Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "user_question",
+        requestId: "req-1",
+        toolUseId: "tool-1",
+        questions: [],
+        originalQuestions: [],
+        inputError: "invalid",
+        status: "pending",
+        timestamp: "2026-07-14T00:00:01Z",
+      });
+
+      expect(useChatStore.getState().sessions[id].messages).toEqual([
+        expect.objectContaining({ kind: "user_question", requestId: "req-1" }),
+      ]);
+
+      useChatStore.getState().addMessage(id, {
+        kind: "tool_result",
+        toolId: "tool-1",
+        result: "answer received",
+        isError: false,
+        timestamp: "2026-07-14T00:00:02Z",
+      });
+      expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
+
+      useChatStore.getState().resolveUserQuestion(id, "req-1");
+      expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+        kind: "user_question",
+        status: "resolved",
+      });
+    });
+
+    it("marks pending cards unavailable when the backend exits", () => {
+      const id = useChatStore.getState().openSession("Question");
+      useChatStore.getState().addMessage(id, {
+        kind: "user_question",
+        requestId: "req-1",
+        toolUseId: "tool-1",
+        questions: [],
+        originalQuestions: [],
+        status: "pending",
+        timestamp: "2026-07-14T00:00:00Z",
+      });
+      useChatStore.getState().markPendingUserQuestionsUnavailable(id);
+      expect(useChatStore.getState().sessions[id].messages[0]).toMatchObject({
+        status: "unavailable",
+      });
     });
   });
 

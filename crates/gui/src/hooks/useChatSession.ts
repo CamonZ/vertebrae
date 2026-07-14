@@ -165,6 +165,11 @@ export function useChatSession(sessionId: string) {
   // --- Lifecycle derived flags ---
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
+  const hasPendingUserQuestion =
+    session?.messages.some(
+      (message) =>
+        message.kind === "user_question" && message.status === "pending"
+    ) ?? false;
   const canQueueMessage =
     !!session?.backendSessionId &&
     (lifecycle === "sending" || lifecycle === "streaming");
@@ -172,7 +177,9 @@ export function useChatSession(sessionId: string) {
   const selectedHarnessAvailable =
     !harnessCatalog || selectedHarnessInfo?.available === true;
   const canUseComposer =
-    selectedHarnessAvailable && (!isBusy || canQueueMessage);
+    !hasPendingUserQuestion &&
+    selectedHarnessAvailable &&
+    (!isBusy || canQueueMessage);
   const canSendMessage = (isActive || canQueueMessage) && canUseComposer;
   const shouldStartOrResume = !isActive && canUseComposer;
   const hasSession = !!session;
@@ -365,9 +372,11 @@ export function useChatSession(sessionId: string) {
           : hasResume || lifecycle === "closed" || lifecycle === "error"
             ? "Resume session"
             : "Start session";
-  const composerPlaceholder = canQueueMessage
-    ? "Type a message to queue..."
-    : isBusy
+  const composerPlaceholder = hasPendingUserQuestion
+    ? "Answer Claude's question above to continue..."
+    : canQueueMessage
+      ? "Type a message to queue..."
+      : isBusy
       ? `${lifecycleLabel(lifecycle)}...`
       : canSendMessage
         ? "Type a message..."
@@ -407,6 +416,7 @@ export function useChatSession(sessionId: string) {
     canStopGeneration,
     hasStreamingOverlay,
     isWaiting,
+    hasPendingUserQuestion,
 
     // harness catalog
     harnessCatalog,
