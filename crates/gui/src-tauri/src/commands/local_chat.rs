@@ -428,13 +428,21 @@ pub async fn load_local_chat_session_messages(
 pub async fn resolve_permission_request(
     local_chat_manager: State<'_, LocalChatSessionManager>,
     input: ResolvePermissionRequestInput,
-) -> Result<serde_json::Value, CommandError> {
+) -> Result<serde_json::Value, ResolvePermissionRequestError> {
+    resolve_permission_request_inner(&local_chat_manager, input)
+}
+
+pub(crate) fn resolve_permission_request_inner(
+    local_chat_manager: &LocalChatSessionManager,
+    input: ResolvePermissionRequestInput,
+) -> Result<serde_json::Value, ResolvePermissionRequestError> {
     let (behavior, message, updated_input) = match input.behavior {
         PermissionDecisionBehavior::Allow => {
             let updated_input = match input.updated_input {
                 Some(value @ serde_json::Value::Object(_)) => Some(value),
                 Some(_) => {
-                    return Err(CommandError {
+                    return Err(ResolvePermissionRequestError {
+                        kind: ResolvePermissionRequestErrorKind::Invalid,
                         message:
                             "Allowed permission requests require updated_input to be a JSON object."
                                 .to_string(),
@@ -464,12 +472,74 @@ pub async fn resolve_permission_request(
                 updated_input,
             },
         )
-        .map_err(|err| CommandError { message: err })
+        .map_err(permission_resolution_error)
+}
+
+fn permission_resolution_error(error: PermissionBridgeError) -> ResolvePermissionRequestError {
+    match error {
+        PermissionBridgeError::NotFound(request_id) => ResolvePermissionRequestError {
+            kind: ResolvePermissionRequestErrorKind::NotFound,
+            message: format!("Permission request not found or already resolved: {request_id}"),
+        },
+        PermissionBridgeError::Unavailable => ResolvePermissionRequestError {
+            kind: ResolvePermissionRequestErrorKind::Unavailable,
+            message: "Permission request connection is no longer available".to_string(),
+        },
+        PermissionBridgeError::Invalid(message) => ResolvePermissionRequestError {
+            kind: ResolvePermissionRequestErrorKind::Invalid,
+            message,
+        },
+        PermissionBridgeError::Internal(message) => ResolvePermissionRequestError {
+            kind: ResolvePermissionRequestErrorKind::Internal,
+            message,
+        },
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn permission_resolution_errors_have_stable_kinds() {
+        for (error, expected_kind) in [
+            (
+                PermissionBridgeError::NotFound("request-1".to_string()),
+                ResolvePermissionRequestErrorKind::NotFound,
+            ),
+            (
+                PermissionBridgeError::Unavailable,
+                ResolvePermissionRequestErrorKind::Unavailable,
+            ),
+            (
+                PermissionBridgeError::Invalid("bad input".to_string()),
+                ResolvePermissionRequestErrorKind::Invalid,
+            ),
+            (
+                PermissionBridgeError::Internal("lock failed".to_string()),
+                ResolvePermissionRequestErrorKind::Internal,
+            ),
+        ] {
+            assert_eq!(permission_resolution_error(error).kind, expected_kind);
+        }
+    }
+
+    #[test]
+    fn permission_command_rejects_non_object_updated_input_as_invalid() {
+        let manager = LocalChatSessionManager::with_harnesses_for_tests(Vec::new());
+        let error = resolve_permission_request_inner(
+            &manager,
+            ResolvePermissionRequestInput {
+                request_id: "request-1".to_string(),
+                behavior: PermissionDecisionBehavior::Allow,
+                message: None,
+                updated_input: Some(json!([])),
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind, ResolvePermissionRequestErrorKind::Invalid);
+    }
 
     #[test]
     fn finds_codex_jsonl_by_thread_id_suffix() {

@@ -117,7 +117,7 @@ describe("PermissionRequestTurn", () => {
   it("shows error message when approval fails", async () => {
     mockedCommands.resolvePermissionRequest.mockResolvedValue({
       status: "error",
-      error: { message: "Backend rejected" },
+      error: { kind: "internal", message: "Backend rejected" },
     });
     render(<PermissionRequestTurn message={createPermissionMessage()} />);
 
@@ -126,6 +126,22 @@ describe("PermissionRequestTurn", () => {
     await waitFor(() => {
       expect(screen.getByText("Backend rejected")).toBeInTheDocument();
     });
+  });
+
+  it("marks missing permission requests unavailable instead of retryable", async () => {
+    mockedCommands.resolvePermissionRequest.mockResolvedValue({
+      status: "error",
+      error: { kind: "not_found", message: "Already resolved" },
+    });
+    render(<PermissionRequestTurn message={createPermissionMessage()} />);
+
+    fireEvent.click(screen.getByText("Approve"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Approve")).toBeDisabled();
+    expect(screen.getByText("Deny")).toBeDisabled();
   });
 
   it("shows error when updated input is invalid JSON", async () => {

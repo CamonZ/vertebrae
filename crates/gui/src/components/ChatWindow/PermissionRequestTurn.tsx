@@ -16,7 +16,12 @@ export function PermissionRequestTurn({
 }) {
   const [updatedInput, setUpdatedInput] = useState(message.input ?? "");
   const [status, setStatus] = useState<
-    "pending" | "allowing" | "denying" | "resolved" | "error"
+    | "pending"
+    | "allowing"
+    | "denying"
+    | "resolved"
+    | "unavailable"
+    | "error"
   >(message.requestId ? "pending" : "resolved");
   const [error, setError] = useState<string | null>(null);
 
@@ -53,13 +58,21 @@ export function PermissionRequestTurn({
     if (result.status === "ok") {
       setStatus("resolved");
     } else {
-      setStatus("error");
+      setStatus(
+        result.error.kind === "unavailable" ||
+          result.error.kind === "not_found"
+          ? "unavailable"
+          : "error"
+      );
       setError(result.error.message);
     }
   };
 
   const disabled =
-    status === "allowing" || status === "denying" || status === "resolved";
+    status === "allowing" ||
+    status === "denying" ||
+    status === "resolved" ||
+    status === "unavailable";
 
   return (
     <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
@@ -105,6 +118,11 @@ export function PermissionRequestTurn({
           {status === "resolved" && (
             <span className="self-center text-xs text-[var(--color-fg-mute)]">
               Resolved
+            </span>
+          )}
+          {status === "unavailable" && (
+            <span className="self-center text-xs text-[var(--color-fg-mute)]">
+              Unavailable
             </span>
           )}
         </div>

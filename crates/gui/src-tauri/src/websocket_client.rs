@@ -1743,6 +1743,8 @@ impl SacrumSocket {
             tool_use_id,
             input,
             message,
+            questions: None,
+            input_error: None,
         };
 
         log::debug!("[WebSocket] Emitting PermissionRequestEvent: {:?}", event);

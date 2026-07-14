@@ -28,9 +28,11 @@ import {
 } from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
+  JsonValue,
   LocalChatHarnessKind,
   PermissionMode,
   SessionLog,
+  UserQuestion,
 } from "../bindings";
 
 /**
@@ -73,6 +75,16 @@ export type ChatMessage =
       toolName: string;
       message: string;
       input?: string;
+      timestamp: string;
+    }
+  | {
+      kind: "user_question";
+      requestId: string;
+      toolUseId: string;
+      questions: UserQuestion[];
+      originalQuestions: JsonValue;
+      inputError?: string;
+      status: "pending" | "resolved" | "unavailable";
       timestamp: string;
     }
   | { kind: "session_start"; model: string; timestamp: string }
@@ -345,10 +357,28 @@ function sanitizeSessionMessages(
   messages: ChatMessage[],
   providerResumeId: string | null | undefined
 ): ChatMessage[] {
-  if (!providerResumeId) return messages;
+  const askUserQuestionToolIds = new Set(
+    messages
+      .filter(
+        (message): message is Extract<
+          ChatMessage,
+          { kind: "tool_call" }
+        > =>
+          message.kind === "tool_call" &&
+          message.toolName === "AskUserQuestion"
+      )
+      .map((message) => message.toolId)
+  );
   const selfAgentToolIds = new Set<string>();
   const filtered = messages.filter((message) => {
     if (
+      (message.kind === "tool_call" || message.kind === "tool_result") &&
+      askUserQuestionToolIds.has(message.toolId)
+    ) {
+      return false;
+    }
+    if (
+      providerResumeId &&
       message.kind === "tool_call" &&
       isSelfProviderAgentToolCall(message, providerResumeId)
     ) {
@@ -396,6 +426,8 @@ function chatMessageKey(message: ChatMessage): string {
       return `${message.kind}:${message.toolId}`;
     case "permission_request":
       return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
+    case "user_question":
+      return `${message.kind}:${message.requestId}:${message.toolUseId}`;
     case "session_start":
       return `${message.kind}:${message.model}`;
     case "session_end":
@@ -688,6 +720,12 @@ interface ChatStoreActions {
   deleteLocalSession: (sessionId: string) => void;
   /** Add a message to a session */
   addMessage: (sessionId: string, message: ChatMessage) => void;
+  /** Mark a structured user question as answered. */
+  resolveUserQuestion: (sessionId: string, requestId: string) => void;
+  /** Mark one question unavailable when its permission connection is gone. */
+  markUserQuestionUnavailable: (sessionId: string, requestId: string) => void;
+  /** Disable unresolved question cards after their backend session exits. */
+  markPendingUserQuestionsUnavailable: (sessionId: string) => void;
   /** Update the last assistant message (for streaming) */
   updateLastAssistantMessage: (sessionId: string, text: string) => void;
   /** Finalize the last partial assistant message */
@@ -1764,7 +1802,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (isSelfProviderAgentToolCall(message, session.providerResumeId)) {
             return session;
           }
-          const messages = [...session.messages];
+          if (
+            (message.kind === "tool_call" || message.kind === "tool_result") &&
+            session.messages.some(
+              (existing) =>
+                existing.kind === "user_question" &&
+                existing.toolUseId === message.toolId
+            )
+          ) {
+            return session;
+          }
+          let messages = [...session.messages];
+          if (message.kind === "user_question") {
+            messages = messages.filter(
+              (existing) =>
+                !(
+                  existing.kind === "tool_call" &&
+                  existing.toolId === message.toolUseId &&
+                  existing.toolName === "AskUserQuestion"
+                )
+            );
+          }
           if (message.kind === "tool_call") {
             const existingIndex = messages.findIndex(
               (existing) =>
@@ -1806,6 +1864,41 @@ export const useChatStore = create<ChatStore>((set, get) => {
         },
         { persist: message.kind === "user" }
       );
+    },
+
+    resolveUserQuestion: (sessionId, requestId) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.kind === "user_question" &&
+          message.requestId === requestId
+            ? { ...message, status: "resolved" as const }
+            : message
+        ),
+      }));
+    },
+
+    markUserQuestionUnavailable: (sessionId, requestId) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.kind === "user_question" &&
+          message.requestId === requestId
+            ? { ...message, status: "unavailable" as const }
+            : message
+        ),
+      }));
+    },
+
+    markPendingUserQuestionsUnavailable: (sessionId) => {
+      updateSession(sessionId, (session) => ({
+        ...session,
+        messages: session.messages.map((message) =>
+          message.kind === "user_question" && message.status === "pending"
+            ? { ...message, status: "unavailable" as const }
+            : message
+        ),
+      }));
     },
 
     updateLastAssistantMessage: (sessionId, text) => {

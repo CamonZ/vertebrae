@@ -251,6 +251,25 @@ fn test_build_events_system_non_init() {
 }
 
 #[test]
+fn test_build_events_suppresses_ask_user_question_tool_call() {
+    let msg = parse_msg(
+        r#"{
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "id": "ask-1",
+                    "name": "AskUserQuestion",
+                    "input": {"questions": []}
+                }]
+            }
+        }"#,
+    );
+
+    assert!(build_events("sess-1", msg).is_empty());
+}
+
+#[test]
 fn test_build_events_system_no_subtype() {
     let msg = parse_msg(r#"{"type": "system"}"#);
     let events = build_events("sess-1", msg);

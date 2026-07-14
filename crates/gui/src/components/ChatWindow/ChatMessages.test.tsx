@@ -116,6 +116,35 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Permission required")).toBeInTheDocument();
   });
 
+  it("renders a structured user question exactly once", () => {
+    const questions = [
+      {
+        question: "Choose a target",
+        header: "Target",
+        options: [{ label: "Web", description: "Browser app" }],
+        multi_select: false,
+      },
+    ];
+    const messages: ChatMessage[] = [
+      {
+        kind: "user_question",
+        requestId: "req-1",
+        toolUseId: "tool-1",
+        questions,
+        originalQuestions: questions,
+        status: "pending",
+        timestamp: "2026-07-14T00:00:00Z",
+      },
+    ];
+    render(
+      <ChatMessages
+        {...defaultProps({ messages, isEmpty: false, isActive: true })}
+      />
+    );
+    expect(screen.getAllByText("Choose a target")).toHaveLength(1);
+    expect(screen.getAllByText("Web")).toHaveLength(1);
+  });
+
   // --- Thinking indicator ---
 
   it("shows ThinkingIndicator when isWaiting is true", () => {

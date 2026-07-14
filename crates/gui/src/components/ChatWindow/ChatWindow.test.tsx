@@ -1246,6 +1246,53 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("retires a pending user question and enables the composer when stopped", async () => {
+    const questions = [
+      {
+        question: "Proceed?",
+        header: "Confirm",
+        options: [{ label: "Yes", description: "Continue" }],
+        multi_select: false,
+      },
+    ];
+    const session = createSession({
+      backendSessionId: "claude-question",
+      providerResumeId: "claude-conversation",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user_question",
+          requestId: "req-stop",
+          toolUseId: "tool-stop",
+          questions,
+          originalQuestions: questions,
+          status: "pending",
+          timestamp: "2026-07-14T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+
+    await waitFor(() => {
+      expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
+        "claude-question"
+      );
+      expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
+      expect(
+        useChatStore.getState().sessions["test-session"].messages[0]
+      ).toMatchObject({ kind: "user_question", status: "unavailable" });
+    });
+  });
+
   it("keeps messages when backend close fails during clear", async () => {
     mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
       status: "error",
@@ -1932,6 +1979,46 @@ describe("ChatWindow", () => {
       screen.getByPlaceholderText("Type a message to queue...")
     ).toBeEnabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
+  });
+
+  it("disables ordinary composer sends while a user question is pending", () => {
+    const questions = [
+      {
+        question: "Proceed?",
+        header: "Confirm",
+        options: [{ label: "Yes", description: "Continue" }],
+        multi_select: false,
+      },
+    ];
+    const session = createSession({
+      backendSessionId: "claude-abc",
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user_question",
+          requestId: "req-1",
+          toolUseId: "tool-1",
+          questions,
+          originalQuestions: questions,
+          status: "pending",
+          timestamp: "2026-07-14T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(
+      screen.getByPlaceholderText(
+        "Answer Claude's question above to continue..."
+      )
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Submit answers" })).toBeDisabled();
   });
 
   it("keeps chat errors in the transcript and allows retry text after an error", async () => {

@@ -5,7 +5,9 @@ use tokio::sync::RwLock;
 
 use crate::local_chat::harnesses::claude::ClaudeLocalChatHarness;
 use crate::local_chat::harnesses::codex::CodexLocalChatHarness;
-use crate::local_chat::permissions::{LocalPermissionDecision, PermissionBridge};
+use crate::local_chat::permissions::{
+    LocalPermissionDecision, PermissionBridge, PermissionBridgeError,
+};
 use crate::local_chat::{
     CreateLocalChatSessionInput, LocalChatHarness, LocalChatHarnessCatalog, LocalChatHarnessKind,
     LocalChatRuntime, LocalChatSessionError,
@@ -31,6 +33,11 @@ impl LocalChatSessionManager {
     #[cfg(test)]
     pub(crate) fn with_harnesses_for_tests(harnesses: Vec<Arc<dyn LocalChatHarness>>) -> Self {
         Self::with_harnesses_and_permission_bridge(harnesses, PermissionBridge::new())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_permission_bridge_for_tests(permission_bridge: PermissionBridge) -> Self {
+        Self::with_harnesses_and_permission_bridge(Vec::new(), permission_bridge)
     }
 
     fn with_harnesses_and_permission_bridge(
@@ -154,11 +161,11 @@ impl LocalChatSessionManager {
     }
 
     /// Resolve a permission request through the neutral permission bridge.
-    pub fn resolve_permission_request(
+    pub(crate) fn resolve_permission_request(
         &self,
         request_id: &str,
         decision: LocalPermissionDecision,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, PermissionBridgeError> {
         self.permission_bridge
             .resolve_permission_request(request_id, decision)
     }

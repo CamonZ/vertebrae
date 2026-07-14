@@ -11,6 +11,7 @@ import {
   loadPersistedLocalChatSession,
   loadPersistedLocalChatSessions,
   markLocalChatSessionCleared,
+  normalizeLocalChatSession,
   persistLastUsedLocalChatModelId,
   persistLocalChatSession,
   removePersistedLocalChatSession,
@@ -190,6 +191,29 @@ describe("localChatPersistence", () => {
       streamingAssistant: null,
       messages: [],
     });
+  });
+
+  it("retires pending user questions when restoring without a live backend", () => {
+    const pendingQuestion = {
+      kind: "user_question" as const,
+      requestId: "req-1",
+      toolUseId: "tool-1",
+      questions: [],
+      originalQuestions: [],
+      status: "pending" as const,
+      timestamp: "2026-01-01T00:00:01Z",
+    };
+
+    expect(
+      normalizeLocalChatSession(
+        makeSession({ messages: [pendingQuestion] })
+      )?.messages[0]
+    ).toMatchObject({ kind: "user_question", status: "unavailable" });
+    expect(
+      normalizeLocalChatSession(makeSession({ messages: [pendingQuestion] }), {
+        preserveRuntimeBackendSessionId: true,
+      })?.messages[0]
+    ).toMatchObject({ kind: "user_question", status: "pending" });
   });
 
   it("excludes closed sessions from startup hydration", () => {

@@ -3,7 +3,7 @@
 //! Shared command state and errors live here; responsibility-specific command
 //! implementations live in the sibling modules re-exported below.
 
-use crate::local_chat::permissions::LocalPermissionDecision;
+use crate::local_chat::permissions::{LocalPermissionDecision, PermissionBridgeError};
 use crate::local_chat::{
     infer_session_title, CreateLocalChatSessionInput, InferLocalChatSessionTitleInput,
     InferLocalChatSessionTitleOutput, LocalChatHarnessCatalog, LocalChatSessionError,
@@ -11,9 +11,10 @@ use crate::local_chat::{
 };
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestInput,
-    SacrumConfigStatus, Section, SessionLog, Step, StepExecution, StopRunRequest, Task,
-    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
+    InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestError,
+    ResolvePermissionRequestErrorKind, ResolvePermissionRequestInput, SacrumConfigStatus, Section,
+    SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun,
+    TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

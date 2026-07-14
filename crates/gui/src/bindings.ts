@@ -845,7 +845,7 @@ async loadLocalChatSessionMessages(input: LoadLocalChatSessionMessagesInput) : P
 /**
  * Resolve a local chat permission request shown in the GUI.
  */
-async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, CommandError>> {
+async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, ResolvePermissionRequestError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("resolve_permission_request", { input }) };
 } catch (e) {
@@ -1176,7 +1176,7 @@ export type PermissionDecisionBehavior = "allow" | "deny"
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "auto" | "bypass_permissions" | "default" | "dont_ask" | "plan"
-export type PermissionRequestEvent = { request_id: string; session_id: string | null; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null }
+export type PermissionRequestEvent = { request_id: string; session_id: string | null; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null; questions?: UserQuestion[] | null; input_error?: string | null }
 /**
  * Workflow step entry in the pipeline summary payload, including the
  * resolver-computed `pipeline_counts`/`active_count` aggregates and the
@@ -1231,6 +1231,8 @@ export type PipelineWorkflowTransition = { id: string; from_workflow_id: string;
  */
 export type ProjectInitProgressEvent = { project_slug: string; kind: ProjectInitProgressKind; files_copied: number; relative_path: string | null; target_path: string | null }
 export type ProjectInitProgressKind = "SkillFileInstalled" | "Completed"
+export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
+export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
 /**
  * Current Sacrum settings state for GUI onboarding.
@@ -1903,6 +1905,8 @@ worktree: string | null }
  * Only fields that are Some will be updated.
  */
 export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; order: number | null; is_default: boolean | null; is_final: boolean | null; kanban_column: string | null }
+export type UserQuestion = { question: string; header: string; options: UserQuestionOption[]; multi_select: boolean }
+export type UserQuestionOption = { label: string; description: string }
 /**
  * Workflow - mirrors db::Workflow
  */
