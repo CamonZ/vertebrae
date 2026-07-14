@@ -143,11 +143,10 @@ pub(crate) async fn initialize_project_inner<R: tauri::Runtime>(
         },
     )?;
 
-    let app_skills_dir = vertebrae_installer::data_dir()
-        .map_err(|e| CommandError {
-            message: format!("Failed to resolve application data directory: {}", e),
-        })?
-        .join("skills");
+    let app_skills_dir =
+        vertebrae_installer::provision_installed_skills_dir().map_err(|e| CommandError {
+            message: format!("Failed to provision installed skills directory: {}", e),
+        })?;
     let mut progress_files_copied = 0_u32;
     let progress_slug = project_slug.clone();
     let skill_install = vertebrae_skills_assets::link_embedded_skills_for_project_with_progress(
@@ -951,9 +950,9 @@ mod tests {
         assert!(result.skills_target.contains(".claude/skills"));
         assert!(result.skills_target.contains(".agents/skills"));
 
-        let staged_skill = vertebrae_installer::data_dir()
+        let staged_skill = vertebrae_installer::installed_skills_dir()
             .unwrap()
-            .join("skills/vtb-add/SKILL.md");
+            .join("vtb-add/SKILL.md");
         assert!(staged_skill.exists());
         for link in [
             project_path.join(".claude/skills/vtb-add/SKILL.md"),
@@ -1024,9 +1023,9 @@ mod tests {
 
         assert_eq!(result.skills_copied, 0);
         assert!(result.skills_target.contains("no existing .claude/skills"));
-        assert!(vertebrae_installer::data_dir()
+        assert!(vertebrae_installer::installed_skills_dir()
             .unwrap()
-            .join("skills/vtb-add/SKILL.md")
+            .join("vtb-add/SKILL.md")
             .exists());
         assert!(!project_path.join(".claude").exists());
         assert!(!project_path.join(".agents").exists());
