@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::io::BufRead;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -23,6 +24,9 @@ use crate::local_chat::harnesses::claude::live_jsonl::{
     encode_claude_user_jsonl_message, process_claude_stderr_lines, ClaudeLiveJsonlCommand,
     ClaudeLiveJsonlExitReason, ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
     ClaudeLiveJsonlRunResult,
+};
+use crate::local_chat::harnesses::claude::plugin_dir::{
+    resolve_claude_plugin_dir, ClaudePluginDirResolution,
 };
 use crate::local_chat::permissions::PermissionBridge;
 use crate::local_chat::{
@@ -74,6 +78,40 @@ fn resolve_working_dir<R: tauri::Runtime>(
         .filter(|dir| !dir.trim().is_empty())
         .or_else(|| current_project_path(app_handle))
         .filter(|dir| !dir.trim().is_empty())
+}
+
+fn configure_claude_process(
+    claude_binary: &Path,
+    args: &[String],
+    working_dir: &Path,
+    augmented_path: &str,
+    session_id: &str,
+) -> Command {
+    let mut command = Command::new(claude_binary);
+    command.args(args);
+    command.current_dir(working_dir);
+    command.env("PATH", augmented_path);
+    command.env("VTB_CLAUDE_SESSION_ID", session_id);
+    command.stdin(Stdio::piped());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command
+}
+
+fn report_plugin_dir_resolution(
+    event_sink: &LocalChatEventSink,
+    session_id: &str,
+    resolution: &ClaudePluginDirResolution,
+) {
+    if let Some(warning) = &resolution.warning {
+        log::warn!("{}", warning);
+        ClaudeSessionRuntime::emit_warning(event_sink, session_id, warning.clone());
+    } else if let Some(plugin_root) = &resolution.plugin_root {
+        log::info!(
+            "Loading Vertebrae-installed Claude skills from plugin root: {}",
+            plugin_root.display()
+        );
+    }
 }
 
 // ============================================================================
@@ -208,7 +246,7 @@ impl ClaudeSessionRuntime {
         }
 
         let claude_binary = match find_claude_binary() {
-            Ok(path) => path.to_string_lossy().to_string(),
+            Ok(path) => path,
             Err(e) => {
                 log::error!("Failed to find Claude Code CLI: {}", e);
                 Self::emit_init(&event_sink, &session_id, None, String::new(), vec![]);
@@ -222,10 +260,14 @@ impl ClaudeSessionRuntime {
             Some(&working_dir),
             resume_session_id,
             resolved_model.model_id,
-            claude_binary
+            claude_binary.display()
         );
 
-        let mut cmd = Command::new(&claude_binary);
+        let augmented_path = build_augmented_path();
+        let plugin_dir =
+            resolve_claude_plugin_dir(&claude_binary, Path::new(&working_dir), &augmented_path);
+        report_plugin_dir_resolution(&event_sink, &session_id, &plugin_dir);
+
         let vtb_gate_binary = match find_vtb_gate_binary() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(e) => {
@@ -252,13 +294,12 @@ impl ClaudeSessionRuntime {
             resume_session_id.as_deref(),
             resolved_model.model_id.as_deref(),
             permission_mode,
+            plugin_dir.plugin_root.as_deref(),
         );
-        cmd.args(&args);
 
-        let path = std::path::Path::new(&working_dir);
+        let path = Path::new(&working_dir);
         if path.exists() && path.is_dir() {
             log::info!("Setting working directory to: {}", working_dir);
-            cmd.current_dir(&working_dir);
         } else {
             let error = format!(
                 "Working directory does not exist or is not a directory: {}",
@@ -269,13 +310,12 @@ impl ClaudeSessionRuntime {
             return;
         }
 
-        let augmented_path = build_augmented_path();
         log::info!(
             "Setting augmented PATH for Claude subprocess: {}",
             augmented_path
         );
-        cmd.env("PATH", &augmented_path);
-        cmd.env("VTB_CLAUDE_SESSION_ID", &session_id);
+        let mut cmd =
+            configure_claude_process(&claude_binary, &args, path, &augmented_path, &session_id);
         #[cfg(unix)]
         let _permission_socket_guard =
             match permission_bridge.start_socket(&session_id, app_handle.clone()) {
@@ -296,10 +336,6 @@ impl ClaudeSessionRuntime {
             };
         #[cfg(not(unix))]
         log::warn!("VTB_GATE_SOCKET permission transport is unavailable on this platform");
-
-        cmd.stdin(Stdio::piped());
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
 
         let event_sink_for_reader = event_sink.clone();
         let stdout_processor = Box::new(move |reader, session_id: String| {
@@ -336,7 +372,11 @@ impl ClaudeSessionRuntime {
                 Self::emit_error_for_unexpected_runner_exit(&event_sink, &session_id, &result);
             }
             Err(ClaudeLiveJsonlProcessError::Spawn(err)) => {
-                let error = format!("Failed to spawn claude at {}: {}", claude_binary, err);
+                let error = format!(
+                    "Failed to spawn claude at {}: {}",
+                    claude_binary.display(),
+                    err
+                );
                 log::error!("{}", error);
                 Self::emit_error(&event_sink, &session_id, error);
                 return;
@@ -543,3 +583,5 @@ mod local_chat_event_mapping_tests;
 mod manager_session_registry_tests;
 #[cfg(test)]
 mod path_utilities_tests;
+#[cfg(test)]
+mod process_configuration_tests;

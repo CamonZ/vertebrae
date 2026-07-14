@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::path::Path;
 
 use crate::types::PermissionMode;
 
@@ -124,6 +125,7 @@ pub(crate) fn build_claude_args(
     resume_session_id: Option<&str>,
     model_id: Option<&str>,
     permission_mode: Option<PermissionMode>,
+    plugin_root: Option<&Path>,
 ) -> Vec<String> {
     let mut args = vec![
         "--output-format".to_string(),
@@ -137,6 +139,11 @@ pub(crate) fn build_claude_args(
         "--permission-prompt-tool".to_string(),
         "mcp__vtb-gate__permission_prompt".to_string(),
     ];
+
+    if let Some(plugin_root) = plugin_root {
+        args.push("--plugin-dir".to_string());
+        args.push(plugin_root.to_string_lossy().into_owned());
+    }
 
     if let Some(model_id) = model_id {
         args.push("--model".to_string());
