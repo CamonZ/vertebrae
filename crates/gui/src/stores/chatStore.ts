@@ -2188,11 +2188,21 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setSessionPermissionMode: (sessionId, permissionMode) => {
-      updateSession(sessionId, (session) =>
-        session.permissionMode === permissionMode
-          ? session
-          : { ...session, permissionMode }
-      );
+      updateSession(sessionId, (session) => {
+        if (session.permissionMode === permissionMode) {
+          return session;
+        }
+        console.info("[Local chat] permission mode changed", {
+          sessionId,
+          previousPermissionMode: session.permissionMode ?? null,
+          nextPermissionMode: permissionMode ?? null,
+          backendSessionId: session.backendSessionId,
+          providerResumeId: session.providerResumeId,
+          harness: session.harness,
+          lifecycle: session.lifecycle ?? null,
+        });
+        return { ...session, permissionMode };
+      });
     },
 
     setSessionTokenUsage: (sessionId, usage) => {

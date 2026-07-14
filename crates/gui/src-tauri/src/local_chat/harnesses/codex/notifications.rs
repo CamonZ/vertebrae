@@ -37,6 +37,21 @@ pub(super) fn is_turn_notification(method: &str) -> bool {
     )
 }
 
+fn non_empty_string(value: &str) -> Option<&str> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn notification_turn_id(params: &Value) -> Option<&str> {
+    params
+        .get("turnId")
+        .and_then(Value::as_str)
+        .or_else(|| params.pointer("/turn/id").and_then(Value::as_str))
+}
+
 pub(super) struct TurnNotificationHandler {
     backend_session_id: String,
     thread_id: String,
@@ -65,6 +80,13 @@ impl TurnNotificationHandler {
     }
 
     pub(super) fn set_thread(&mut self, thread_id: String, model: String) {
+        log::info!(
+            "[Codex local chat] notification parent thread set: backend_session_id={}, previous_thread_id={:?}, next_thread_id={}, model={}",
+            self.backend_session_id,
+            non_empty_string(&self.thread_id),
+            thread_id,
+            model
+        );
         self.thread_id = thread_id;
         self.model = model;
     }
@@ -104,15 +126,43 @@ impl TurnNotificationHandler {
             // spawn parent immediately so status/result updates still have a
             // stable Agent row. Child work itself stays in the child thread.
             if notification_thread_id.is_some() {
+                log::info!(
+                    "[Codex local chat] notification thread is unknown; creating synthetic Agent parent: backend_session_id={}, method={}, known_parent_thread_id={:?}, notification_thread_id={:?}, active_expected_turn_id={:?}, item_type={:?}, item_id={:?}, turn_id={:?}",
+                    self.backend_session_id,
+                    method,
+                    non_empty_string(&self.thread_id),
+                    notification_thread_id,
+                    self.active_turn
+                        .as_ref()
+                        .and_then(|turn| turn.expected_turn_id.as_deref()),
+                    params.pointer("/item/type").and_then(Value::as_str),
+                    params.pointer("/item/id").and_then(Value::as_str),
+                    notification_turn_id(params)
+                );
                 if let Some(parent) = self.ensure_parent_for_child_notification(params) {
                     if parent.should_emit {
                         self.emit_synthetic_spawn_parent(params, &parent.tool_id);
                     }
                     parent_tool_use_id = Some(parent.tool_id);
                 } else {
+                    log::debug!(
+                        "[Codex local chat] dropping notification with unknown thread and no synthetic parent: backend_session_id={}, method={}, known_parent_thread_id={:?}, notification_thread_id={:?}",
+                        self.backend_session_id,
+                        method,
+                        non_empty_string(&self.thread_id),
+                        notification_thread_id
+                    );
                     return;
                 }
             } else {
+                log::debug!(
+                    "[Codex local chat] dropping notification without thread id: backend_session_id={}, method={}, known_parent_thread_id={:?}, item_type={:?}, item_id={:?}",
+                    self.backend_session_id,
+                    method,
+                    non_empty_string(&self.thread_id),
+                    params.pointer("/item/type").and_then(Value::as_str),
+                    params.pointer("/item/id").and_then(Value::as_str)
+                );
                 return;
             }
         }
@@ -131,6 +181,17 @@ impl TurnNotificationHandler {
             && self.active_turn.is_some()
             && !self.matches_expected_turn(method, params)
         {
+            log::debug!(
+                "[Codex local chat] dropping notification for non-current turn: backend_session_id={}, method={}, known_parent_thread_id={:?}, notification_thread_id={:?}, active_expected_turn_id={:?}, notification_turn_id={:?}",
+                self.backend_session_id,
+                method,
+                non_empty_string(&self.thread_id),
+                notification_thread_id,
+                self.active_turn
+                    .as_ref()
+                    .and_then(|turn| turn.expected_turn_id.as_deref()),
+                notification_turn_id(params)
+            );
             return;
         }
 

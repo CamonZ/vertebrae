@@ -136,6 +136,13 @@ export function handleInitEvent(
   setSessionModel: (sessionId: string, model: string) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
+  console.info("[Local chat] init event accepted", {
+    sessionId,
+    backendSessionId,
+    harness: payload.harness,
+    providerResumeId: payload.provider_resume_id ?? null,
+    model: payload.model ?? null,
+  });
   if (payload.provider_resume_id) {
     setProviderResumeId(sessionId, payload.provider_resume_id);
   }
@@ -284,6 +291,16 @@ export function handleEndEvent(
   ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
+  console.info("[Local chat] end event accepted", {
+    sessionId,
+    backendSessionId,
+    harness: payload.harness,
+    isError: payload.is_error,
+    keepsBackendSession: payload.harness === "codex",
+    numTurns: payload.num_turns,
+    contextTokens: payload.context_tokens,
+    contextWindow: payload.context_window,
+  });
   // Session-end modelUsage is a session summary, not the per-turn request
   // input-context value that drives the badge.
   clearStreamingAssistant(sessionId, true);
@@ -394,6 +411,17 @@ export async function doStartSession(
       ? null
       : (session.selectedReasoningEffort ?? null);
     const permissionMode = session.permissionMode ?? "default";
+    console.info("[Local chat] create/resume session requested", {
+      sessionId,
+      backendSessionId,
+      harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+      providerResumeId: resumeId ?? null,
+      permissionMode,
+      selectedModelId: modelId,
+      selectedReasoningEffort: reasoningEffort,
+      hasInitialPrompt: !!initialPrompt,
+      workingDir,
+    });
 
     const titleUserMessages = earlyTitleUserMessages(
       session.messages,
@@ -463,6 +491,11 @@ export async function doSendMessage(
   }
 
   try {
+    console.info("[Local chat] send message requested", {
+      sessionId,
+      backendSessionId,
+      contentLength: content.length,
+    });
     const result = await commands.sendLocalChatMessage(
       backendSessionId,
       content

@@ -141,6 +141,15 @@ impl CodexRpcConnection {
             params["effort"] = json!(reasoning_effort);
         }
         request.permission_settings.apply_to_params(&mut params);
+        log::info!(
+            "[Codex local chat] provider thread RPC prepared: method={}, resume={:?}, cwd={:?}, model={:?}, effort={:?}, permission_settings={:?}",
+            method,
+            request.provider_resume_id,
+            request.working_dir,
+            request.model,
+            request.reasoning_effort,
+            request.permission_settings
+        );
 
         if let Some(thread_id) = request.provider_resume_id {
             let provisional_model = request.model.unwrap_or(CODEX_DEFAULT_MODEL_LABEL);
@@ -166,6 +175,13 @@ impl CodexRpcConnection {
             .lock()
             .expect("codex notification handler lock poisoned")
             .set_thread(thread_id.clone(), model.clone());
+        log::info!(
+            "[Codex local chat] provider thread RPC completed: method={}, requested_resume={:?}, resolved_thread_id={}, model={}",
+            method,
+            request.provider_resume_id,
+            thread_id,
+            model
+        );
 
         Ok(ThreadStart { thread_id, model })
     }
@@ -181,6 +197,13 @@ impl CodexRpcConnection {
             ],
         });
         request.permission_settings.apply_to_params(&mut params);
+        log::info!(
+            "[Codex local chat] turn RPC prepared: thread_id={}, num_turns={}, permission_settings={:?}, content_len={}",
+            request.thread_id,
+            request.num_turns,
+            request.permission_settings,
+            request.content.len()
+        );
         let (completion_tx, completion_rx) = oneshot::channel();
         self.notification_handler
             .lock()

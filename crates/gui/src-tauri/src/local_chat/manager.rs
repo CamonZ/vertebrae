@@ -127,9 +127,20 @@ impl LocalChatSessionManager {
         content: &str,
     ) -> Result<(), LocalChatSessionError> {
         let harness_kind = self.registry_harness(backend_session_id).await?;
+        log::info!(
+            "[Local chat] routing send: backend_session_id={}, harness={:?}, content_len={}",
+            backend_session_id,
+            harness_kind,
+            content.len()
+        );
         let harness = self.harness(harness_kind)?;
         let result = harness.send_message(backend_session_id, content).await;
         if matches!(result, Err(LocalChatSessionError::SessionNotFound(_))) {
+            log::warn!(
+                "[Local chat] harness reported missing session during send: backend_session_id={}, harness={:?}",
+                backend_session_id,
+                harness_kind
+            );
             self.remove_registry_entry(backend_session_id, harness_kind)
                 .await;
         }
@@ -189,7 +200,13 @@ impl LocalChatSessionManager {
             .await
             .get(backend_session_id)
             .copied()
-            .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.to_string()))
+            .ok_or_else(|| {
+                log::warn!(
+                    "[Local chat] registry has no session for backend_session_id={}",
+                    backend_session_id
+                );
+                LocalChatSessionError::SessionNotFound(backend_session_id.to_string())
+            })
     }
 
     async fn remove_registry_entry(

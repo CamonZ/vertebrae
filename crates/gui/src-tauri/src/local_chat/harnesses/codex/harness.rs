@@ -144,11 +144,12 @@ impl LocalChatHarness for CodexLocalChatHarness {
             CodexPermissionSettings::from_permission_mode(input.permission_mode.as_ref());
         let initial_prompt = input.initial_prompt.clone();
         log::info!(
-            "[Codex local chat] starting provider thread for {}: resume={:?}, model_override={:?}, effort={:?}",
+            "[Codex local chat] starting provider thread for {}: resume={:?}, model_override={:?}, effort={:?}, permission_settings={:?}",
             backend_session_id,
             input.provider_resume_id,
             model_override,
-            reasoning_effort
+            reasoning_effort,
+            permission_settings
         );
         let thread = match connection
             .start_or_resume_thread(ThreadRequest {

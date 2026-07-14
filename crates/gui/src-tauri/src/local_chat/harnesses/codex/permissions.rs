@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 
 use crate::types::PermissionMode;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(super) struct CodexPermissionSettings {
     approval_policy: Option<&'static str>,
     permissions: Option<&'static str>,

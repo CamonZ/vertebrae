@@ -31,6 +31,14 @@ impl CodexLocalChatSession {
             let stats = self.stats.lock().await;
             stats.num_turns.saturating_add(1)
         };
+        log::info!(
+            "[Codex local chat] starting turn: backend_session_id={}, thread_id={}, num_turns={}, permission_settings={:?}, content_len={}",
+            self.backend_session_id,
+            self.thread_id,
+            num_turns,
+            self.permission_settings,
+            content.len()
+        );
         let outcome = match self
             .connection
             .start_turn(TurnRequest {
@@ -57,6 +65,15 @@ impl CodexLocalChatSession {
         stats.num_turns = stats.num_turns.saturating_add(1);
         stats.context_tokens = outcome.context_tokens;
         stats.context_window = outcome.context_window;
+        log::info!(
+            "[Codex local chat] turn finished: backend_session_id={}, thread_id={}, stored_num_turns={}, context_tokens={}, context_window={}, is_error={}",
+            self.backend_session_id,
+            self.thread_id,
+            stats.num_turns,
+            stats.context_tokens,
+            stats.context_window,
+            outcome.error.is_some()
+        );
 
         if let Some(error) = outcome.error {
             Err(failure_surface.error(error))
