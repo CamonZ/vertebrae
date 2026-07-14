@@ -218,6 +218,7 @@ never block startup. Debug builds skip the refresh entirely — in dev the
 |------|-------|-------|
 | Data dir (shared root) | `~/Library/Application Support/Vertebrae` | `~/.local/share/vertebrae` |
 | Staged binaries | `<data dir>/bin` | `<data dir>/bin` |
+| Installed skills root | `~/Library/Application Support/Vertebrae/skills` | `~/.local/share/vertebrae/skills` |
 | GUI app state | `<data dir>/app-state.json` | `<data dir>/app-state.json` |
 | User symlinks | `~/.local/bin` | `~/.local/bin` |
 | Daemon service file | `~/Library/LaunchAgents/com.vertebrae.daemon.plist` | `~/.config/systemd/user/vertebrae-daemon.service` |
@@ -228,6 +229,16 @@ never block startup. Debug builds skip the refresh entirely — in dev the
 project). The project registry itself lives in the shared
 `~/.config/vertebrae/config.toml`. All client data dirs are derived from
 `vertebrae_installer::data_dir()`.
+
+Vertebrae-installed skills use the provider-neutral
+`vertebrae_installer::installed_skills_dir()` contract. Each bundle is stored
+as `<installed skills root>/<name>/SKILL.md`. The installer owns idempotent
+creation of the root through `provision_installed_skills_dir()` and preserves
+existing contents; the skills-assets layer owns files below it. Provider
+integrations append this absolute root to their normal discovery and must not
+create `.claude`, `.agents`, or `.codex` directories or change the active
+project to expose it. On Linux this is application data under `.local/share`,
+not configuration under `.config`.
 
 ### Uninstalling
 
