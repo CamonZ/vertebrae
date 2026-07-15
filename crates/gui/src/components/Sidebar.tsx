@@ -81,11 +81,13 @@ function ProjectAvatar({
   path,
   onClick,
   buttonRef,
+  disabled = false,
 }: {
   name: string;
   path: string;
   onClick: () => void;
   buttonRef?: React.Ref<HTMLButtonElement>;
+  disabled?: boolean;
 }) {
   const bucket = projectAvatarBucket(name);
   const palette = [
@@ -104,6 +106,7 @@ function ProjectAvatar({
         ref={buttonRef}
         type="button"
         onClick={onClick}
+        disabled={disabled}
         aria-label={`Switch project · ${name}`}
         data-testid="sidebar-project-avatar"
         className={[
@@ -117,6 +120,7 @@ function ProjectAvatar({
           "font-serif text-base italic leading-none text-white",
           "[transform:translateX(-0.5px)]",
           "ring-0 transition-shadow duration-[var(--t-fast)] hover:ring-2 hover:ring-[var(--color-accent-wash)]",
+          "disabled:cursor-wait disabled:opacity-60",
           palette[bucket],
         ].join(" ")}
       >
@@ -141,6 +145,8 @@ function ProjectPopover({
   anchorRef,
   onClose,
   onSwitched,
+  isAddingProject,
+  setIsAddingProject,
 }: {
   current: string | null;
   /** Anchor (the project avatar) — clicks on it are ignored so it can toggle. */
@@ -148,9 +154,12 @@ function ProjectPopover({
   onClose: () => void;
   /** Called after the active project changed, so the host can refresh + close. */
   onSwitched: () => void;
+  isAddingProject: boolean;
+  setIsAddingProject: (isAdding: boolean) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [projects, setProjects] = useState<ProjectListEntry[]>([]);
+  const [addProjectError, setAddProjectError] = useState<string | null>(null);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -188,6 +197,8 @@ function ProjectPopover({
 
   const handleSelect = useCallback(
     async (entry: ProjectListEntry) => {
+      if (isAddingProject) return;
+
       // Selecting the active project is a no-op — just close.
       if (entry.slug === current) {
         onClose();
@@ -203,10 +214,14 @@ function ProjectPopover({
         // Swallow — leave the popover open so the user can retry.
       }
     },
-    [current, onClose, onSwitched]
+    [current, isAddingProject, onClose, onSwitched]
   );
 
   const handleAddProject = useCallback(async () => {
+    if (isAddingProject) return;
+
+    setIsAddingProject(true);
+    setAddProjectError(null);
     try {
       const selected = await open({
         directory: true,
@@ -214,16 +229,22 @@ function ProjectPopover({
         title: "Select Project Directory",
       });
       if (selected && typeof selected === "string") {
-        const result = await commands.addProject(selected);
+        const result = await commands.initializeProject(selected, null);
         if (result.status === "ok") {
           await loadProjects();
           resetProjectScopedStores();
+        } else {
+          setAddProjectError(result.error.message);
         }
       }
-    } catch {
-      // Swallow — leave the popover open so the user can retry.
+    } catch (error) {
+      setAddProjectError(
+        error instanceof Error ? error.message : "Failed to add project"
+      );
+    } finally {
+      setIsAddingProject(false);
     }
-  }, [loadProjects]);
+  }, [isAddingProject, loadProjects, setIsAddingProject]);
 
   return (
     <div
@@ -249,12 +270,14 @@ function ProjectPopover({
               key={p.path}
               type="button"
               onClick={() => handleSelect(p)}
+              disabled={isAddingProject}
               aria-current={isActive ? "true" : undefined}
               data-testid={`sidebar-project-entry-${p.slug}`}
               className={[
                 "flex w-full items-center justify-between gap-2 px-3 py-2",
                 "text-left text-sm text-[var(--color-fg)]",
                 isActive ? "cursor-default" : "hover:bg-[var(--color-bg-2)]",
+                "disabled:cursor-wait disabled:opacity-60",
               ].join(" ")}
             >
               <span className="min-w-0 truncate font-sans">{p.slug}</span>
@@ -274,9 +297,10 @@ function ProjectPopover({
       <button
         type="button"
         onClick={handleAddProject}
+        disabled={isAddingProject}
         aria-label="Add a project"
         data-testid="sidebar-add-project"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)] disabled:cursor-wait disabled:opacity-60"
       >
         <span
           aria-hidden
@@ -286,6 +310,11 @@ function ProjectPopover({
         </span>
         Add project…
       </button>
+      {addProjectError && (
+        <p role="alert" className="px-3 pb-2 text-xs text-[var(--color-err)]">
+          {addProjectError}
+        </p>
+      )}
     </div>
   );
 }
@@ -412,6 +441,7 @@ export function Sidebar() {
   const project = useCurrentProject();
   const navigate = useNavigate();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [isAddingProject, setIsAddingProject] = useState(false);
   const avatarRef = useRef<HTMLButtonElement | null>(null);
 
   function handleSwitched() {
@@ -442,6 +472,7 @@ export function Sidebar() {
             path={project.path ?? project.name}
             onClick={() => setSwitcherOpen((v) => !v)}
             buttonRef={avatarRef}
+            disabled={isAddingProject}
           />
         ) : (
           <button
@@ -457,8 +488,12 @@ export function Sidebar() {
           <ProjectPopover
             current={project.name}
             anchorRef={avatarRef}
-            onClose={() => setSwitcherOpen(false)}
+            onClose={() => {
+              if (!isAddingProject) setSwitcherOpen(false);
+            }}
             onSwitched={handleSwitched}
+            isAddingProject={isAddingProject}
+            setIsAddingProject={setIsAddingProject}
           />
         )}
       </div>

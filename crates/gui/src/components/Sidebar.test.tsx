@@ -7,14 +7,14 @@ import { Sidebar } from "./Sidebar";
 const mockGetCurrentProject = vi.fn();
 const mockGetProjects = vi.fn();
 const mockSetCurrentProject = vi.fn();
-const mockAddProject = vi.fn();
+const mockInitializeProject = vi.fn();
 
 vi.mock("../bindings", () => ({
   commands: {
     getCurrentProject: (...args: unknown[]) => mockGetCurrentProject(...args),
     getProjects: (...args: unknown[]) => mockGetProjects(...args),
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
-    addProject: (...args: unknown[]) => mockAddProject(...args),
+    initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
   },
 }));
 
@@ -50,9 +50,17 @@ describe("Sidebar Traces nav", () => {
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
-    mockAddProject.mockResolvedValue({
+    mockInitializeProject.mockResolvedValue({
       status: "ok",
-      data: { slug: "new", project_id: "id", path: "/new" },
+      data: {
+        slug: "new",
+        project_id: "id",
+        project_name: "new",
+        path: "/new",
+        project_created: true,
+        skills_copied: 1,
+        skills_target: "/installed/skills",
+      },
     });
   });
 
@@ -130,9 +138,17 @@ describe("Sidebar project switcher", () => {
       ],
     });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
-    mockAddProject.mockResolvedValue({
+    mockInitializeProject.mockResolvedValue({
       status: "ok",
-      data: { slug: "new", project_id: "id", path: "/new" },
+      data: {
+        slug: "new",
+        project_id: "id",
+        project_name: "new",
+        path: "/new",
+        project_created: true,
+        skills_copied: 1,
+        skills_target: "/installed/skills",
+      },
     });
   });
 
@@ -214,7 +230,7 @@ describe("Sidebar project switcher", () => {
     expect(screen.getByTestId("loc")).toHaveTextContent("/tasks");
   });
 
-  it("clicking the + button opens the directory picker and adds a project", async () => {
+  it("initializes a selected project before reloading and resetting project state", async () => {
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
     renderSidebar();
@@ -229,9 +245,101 @@ describe("Sidebar project switcher", () => {
       expect.objectContaining({ directory: true, multiple: false })
     );
     await waitFor(() => {
-      expect(mockAddProject).toHaveBeenCalledWith("/Users/dev/code/gamma");
+      expect(mockInitializeProject).toHaveBeenCalledWith(
+        "/Users/dev/code/gamma",
+        null
+      );
     });
+    expect(mockGetProjects).toHaveBeenCalledTimes(2);
     expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
+    expect(mockInitializeProject.mock.invocationCallOrder[0]).toBeLessThan(
+      mockGetProjects.mock.invocationCallOrder[1]
+    );
+    expect(mockGetProjects.mock.invocationCallOrder[1]).toBeLessThan(
+      mockResetProjectScopedStores.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("shows initialization errors without reloading or resetting and allows retry", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
+    mockInitializeProject
+      .mockResolvedValueOnce({
+        status: "error",
+        error: { message: "Failed to install embedded skills: link denied" },
+      })
+      .mockResolvedValueOnce({
+        status: "ok",
+        data: {
+          slug: "gamma",
+          project_id: "id",
+          project_name: "gamma",
+          path: "/Users/dev/code/gamma",
+          project_created: false,
+          skills_copied: 1,
+          skills_target: "/installed/skills",
+        },
+      });
+    renderSidebar();
+    await openSwitcher(user);
+
+    const addButton = await screen.findByTestId("sidebar-add-project");
+    await user.click(addButton);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Failed to install embedded skills: link denied"
+    );
+    expect(mockGetProjects).toHaveBeenCalledTimes(1);
+    expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
+
+    await user.click(addButton);
+
+    await waitFor(() => {
+      expect(mockInitializeProject).toHaveBeenCalledTimes(2);
+      expect(mockGetProjects).toHaveBeenCalledTimes(2);
+      expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("prevents concurrent project initialization", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
+    let resolveInitialization!: (value: unknown) => void;
+    mockInitializeProject.mockReturnValue(
+      new Promise((resolve) => {
+        resolveInitialization = resolve;
+      })
+    );
+    renderSidebar();
+    await openSwitcher(user);
+
+    const addButton = await screen.findByTestId("sidebar-add-project");
+    await user.click(addButton);
+
+    await waitFor(() => {
+      expect(mockInitializeProject).toHaveBeenCalledTimes(1);
+      expect(addButton).toBeDisabled();
+    });
+    expect(screen.getByTestId("sidebar-project-avatar")).toBeDisabled();
+    expect(screen.getByTestId("sidebar-project-entry-beta")).toBeDisabled();
+    await user.click(addButton);
+    expect(mockOpenDialog).toHaveBeenCalledTimes(1);
+    expect(mockInitializeProject).toHaveBeenCalledTimes(1);
+
+    resolveInitialization({
+      status: "ok",
+      data: {
+        slug: "gamma",
+        project_id: "id",
+        project_name: "gamma",
+        path: "/Users/dev/code/gamma",
+        project_created: true,
+        skills_copied: 1,
+        skills_target: "/installed/skills",
+      },
+    });
+    await waitFor(() => expect(addButton).not.toBeDisabled());
   });
 
   it("clicking the avatar while the switcher is open closes it (toggle)", async () => {
