@@ -26,6 +26,7 @@
 //! idempotent.
 
 mod binary;
+mod claude_plugin_dir;
 mod error;
 mod paths;
 mod service;
@@ -36,6 +37,7 @@ pub mod linux;
 pub mod macos;
 
 pub use binary::{install_binary, uninstall_binary};
+pub use claude_plugin_dir::{ClaudePluginDirResolution, resolve_claude_plugin_dir};
 pub use error::InstallerError;
 pub use paths::{
     bin_dir, data_bin_dir, data_dir, installed_skills_dir, log_dir, provision_installed_skills_dir,

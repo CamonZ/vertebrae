@@ -25,9 +25,6 @@ use crate::local_chat::harnesses::claude::live_jsonl::{
     ClaudeLiveJsonlExitReason, ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
     ClaudeLiveJsonlRunResult,
 };
-use crate::local_chat::harnesses::claude::plugin_dir::{
-    resolve_claude_plugin_dir, ClaudePluginDirResolution,
-};
 use crate::local_chat::permissions::PermissionBridge;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
@@ -39,6 +36,7 @@ use crate::local_chat::{
     LocalChatTextEvent as NeutralTextEvent, LocalChatToolCallEvent as NeutralToolCallEvent,
     LocalChatToolResultEvent as NeutralToolResultEvent,
 };
+use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
 
 /// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
 fn truncate_utf8(s: &str, max_bytes: usize) -> &str {

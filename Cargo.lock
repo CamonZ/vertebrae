@@ -1962,7 +1962,6 @@ dependencies = [
  "futures",
  "log",
  "portable-pty",
- "semver",
  "serde",
  "serde_json",
  "serial_test",
@@ -6433,6 +6432,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vertebrae-core",
+ "vertebrae-installer",
  "vertebrae-sacrum-client",
 ]
 
@@ -6441,6 +6441,7 @@ name = "vertebrae-installer"
 version = "0.1.0"
 dependencies = [
  "dirs",
+ "semver",
  "serial_test",
  "tempfile",
  "thiserror 2.0.18",

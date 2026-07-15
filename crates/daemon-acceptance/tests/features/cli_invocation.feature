@@ -12,6 +12,7 @@ Feature: Daemon translates step config into Claude CLI invocation
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the mock argv contains "--model" followed by "claude-opus-4-5"
+    And the mock argv contains the managed manifestless skill plugin root exactly once
 
   Scenario: permission_mode plan is passed through and not overridden
     Given a configured daemon test environment

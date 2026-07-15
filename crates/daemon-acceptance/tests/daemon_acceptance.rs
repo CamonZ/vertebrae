@@ -52,6 +52,7 @@ pub struct DaemonWorld {
     pub vtb_daemon_binary: PathBuf,
     pub daemon: Option<Child>,
     pub capture_dir: PathBuf,
+    pub managed_plugin_root: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for DaemonWorld {
@@ -115,6 +116,7 @@ impl DaemonWorld {
                 "/tmp/daemon-acc-cap-{}",
                 uuid::Uuid::new_v4().simple()
             )),
+            managed_plugin_root: None,
         }
     }
 
@@ -148,6 +150,16 @@ impl DaemonWorld {
             self.sacrum_url, self.sacrum_token, project_id, project_path,
         );
         std::fs::write(cfg_dir.join("config.toml"), cfg).expect("write config.toml");
+
+        // The daemon acceptance container is Linux, where the installer-owned
+        // manifestless Claude plugin root is `$HOME/.local/share/vertebrae`.
+        let managed_plugin_root = home.join(".local/share/vertebrae");
+        let installed_skill = managed_plugin_root.join("skills/acceptance-proof/SKILL.md");
+        std::fs::create_dir_all(installed_skill.parent().expect("skill has parent"))
+            .expect("create installed skill directory");
+        std::fs::write(&installed_skill, "# Acceptance proof\n")
+            .expect("write installed manifestless skill");
+        self.managed_plugin_root = Some(managed_plugin_root);
 
         let log_path = PathBuf::from(format!("/tmp/daemon-acc-{project_id}.log"));
         let log_stderr = std::fs::File::create(&log_path).expect("create daemon debug log");

@@ -12,6 +12,7 @@ path = "src/lib.rs"
 [dependencies]
 thiserror = "2"
 dirs = "6"
+semver = "1"
 
 [dev-dependencies]
 tempfile = "3"
