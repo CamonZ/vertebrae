@@ -105,7 +105,7 @@ fn resolve_requested_claude_model_omits_unsupported_model_on_resume_with_exact_w
 
 #[test]
 fn build_claude_args_without_model_matches_existing_defaults() {
-    let args = build_claude_args("{\"mcpServers\":{}}", None, None, None);
+    let args = build_claude_args("{\"mcpServers\":{}}", None, None, None, None);
 
     assert_eq!(
         args,
@@ -126,11 +126,13 @@ fn build_claude_args_without_model_matches_existing_defaults() {
 
 #[test]
 fn build_claude_args_preserves_full_argv_shape() {
+    let plugin_root = vertebrae_installer::data_dir().expect("resolve absolute app-data root");
     let args = build_claude_args(
         "{\"mcpServers\":{\"vtb-gate\":{\"command\":\"/bin/vtb-gate\"}}}",
         Some("conv-123"),
         Some("haiku"),
         Some(PermissionMode::BypassPermissions),
+        Some(&plugin_root),
     );
 
     assert_eq!(
@@ -146,6 +148,8 @@ fn build_claude_args_preserves_full_argv_shape() {
             "{\"mcpServers\":{\"vtb-gate\":{\"command\":\"/bin/vtb-gate\"}}}".to_string(),
             "--permission-prompt-tool".to_string(),
             "mcp__vtb-gate__permission_prompt".to_string(),
+            "--plugin-dir".to_string(),
+            plugin_root.to_string_lossy().into_owned(),
             "--model".to_string(),
             "haiku".to_string(),
             "--permission-mode".to_string(),
@@ -164,6 +168,7 @@ fn build_claude_args_omits_model_on_resume_fallback() {
         Some("conv-123"),
         resolved.model_id.as_deref(),
         Some(PermissionMode::Auto),
+        None,
     );
 
     assert_eq!(
@@ -196,7 +201,7 @@ fn build_claude_args_maps_all_permission_modes() {
         (PermissionMode::DontAsk, "dontAsk"),
         (PermissionMode::Plan, "plan"),
     ] {
-        let args = build_claude_args("{}", None, None, Some(permission_mode));
+        let args = build_claude_args("{}", None, None, Some(permission_mode), None);
         let permission_idx = args
             .iter()
             .position(|arg| arg == "--permission-mode")
@@ -207,4 +212,32 @@ fn build_claude_args_maps_all_permission_modes() {
             Some(expected)
         );
     }
+}
+
+#[test]
+fn build_claude_args_includes_exactly_one_absolute_app_data_plugin_root() {
+    let plugin_root = vertebrae_installer::data_dir().expect("resolve app-data root");
+    assert!(plugin_root.is_absolute());
+
+    let args = build_claude_args(
+        "{\"mcpServers\":{}}",
+        Some("conv-123"),
+        Some("sonnet"),
+        Some(PermissionMode::Plan),
+        Some(&plugin_root),
+    );
+    let plugin_indexes: Vec<_> = args
+        .iter()
+        .enumerate()
+        .filter_map(|(index, arg)| (arg == "--plugin-dir").then_some(index))
+        .collect();
+
+    assert_eq!(plugin_indexes.len(), 1);
+    assert_eq!(
+        args.get(plugin_indexes[0] + 1).map(String::as_str),
+        Some(plugin_root.to_string_lossy().as_ref())
+    );
+    assert!(args.iter().any(|arg| arg == "--mcp-config"));
+    assert!(args.iter().any(|arg| arg == "--permission-mode"));
+    assert!(args.iter().any(|arg| arg == "--resume=conv-123"));
 }

@@ -3,6 +3,7 @@ use async_trait::async_trait;
 pub(crate) mod args;
 pub(crate) mod jsonl;
 pub(crate) mod live_jsonl;
+mod plugin_dir;
 pub(crate) mod session;
 
 use crate::helpers::find_claude_binary;
