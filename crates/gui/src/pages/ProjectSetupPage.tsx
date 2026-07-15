@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   commands,
@@ -11,6 +11,7 @@ import {
 import { open } from "@tauri-apps/plugin-dialog";
 import { resetProjectScopedStores } from "../stores";
 import { FirstRunShell, type FirstRunPhase } from "../components";
+import { useSkillFileStates } from "../hooks/useSkillFileStates";
 
 const SETUP_PHASES: FirstRunPhase[] = [
   { kind: "Phase 01", name: "Project" },
@@ -19,7 +20,6 @@ const SETUP_PHASES: FirstRunPhase[] = [
 ];
 
 type SetupView = "saved" | "project" | "skills" | "ignition";
-type FileState = "idle" | "queued" | "linking" | "linked";
 
 interface ProjectDraft {
   path: string;
@@ -43,7 +43,6 @@ function isLikelyTokenError(message: string): boolean {
 
 export function ProjectSetupPage() {
   const navigate = useNavigate();
-  const writeTimers = useRef<number[]>([]);
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +61,13 @@ export function ProjectSetupPage() {
   const [embeddedSkills, setEmbeddedSkills] = useState<string[]>([]);
   const [isLoadingSkills, setIsLoadingSkills] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
-  const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
+  const {
+    fileStates,
+    queueFiles,
+    markFileLinking,
+    markAllLinked,
+    resetFileStates,
+  } = useSkillFileStates();
   const [initializeResult, setInitializeResult] =
     useState<InitializeProjectResult | null>(null);
 
@@ -117,13 +122,6 @@ export function ProjectSetupPage() {
     loadSkills();
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      writeTimers.current.forEach((timer) => window.clearTimeout(timer));
-      writeTimers.current = [];
     };
   }, []);
 
@@ -212,25 +210,9 @@ export function ProjectSetupPage() {
     [embeddedSkills]
   );
 
-  const markFileLinking = useCallback((relativePath: string) => {
-    setFileStates((current) => ({
-      ...current,
-      [relativePath]: "linking",
-    }));
-    const timer = window.setTimeout(() => {
-      setFileStates((current) => ({
-        ...current,
-        [relativePath]: "linked",
-      }));
-    }, 250);
-    writeTimers.current.push(timer);
-  }, []);
-
   const markAllFilesLinked = useCallback(() => {
-    setFileStates(
-      Object.fromEntries(skillFilePaths.map((path) => [path, "linked"]))
-    );
-  }, [skillFilePaths]);
+    markAllLinked(skillFilePaths);
+  }, [markAllLinked, skillFilePaths]);
 
   const handleProjectContinue = async () => {
     const trimmedName = projectName.trim();
@@ -268,7 +250,7 @@ export function ProjectSetupPage() {
       }
 
       setProjectDraft({ path: selectedPath, name: trimmedName });
-      setFileStates({});
+      resetFileStates();
       setSetupView("skills");
     } catch (e) {
       setFormError(`Failed to save project settings: ${e}`);
@@ -293,17 +275,12 @@ export function ProjectSetupPage() {
 
       const expectedSlug = slugResult.data;
       setInitializeResult(null);
-      setFileStates(
-        Object.fromEntries(skillFilePaths.map((path) => [path, "queued"]))
-      );
+      queueFiles(skillFilePaths);
 
       unlisten = await events.projectInitProgressEvent.listen((event) => {
         const payload = event.payload as ProjectInitProgressEvent;
         if (payload.project_slug !== expectedSlug) return;
-        if (
-          payload.kind === "SkillFileInstalled" &&
-          payload.relative_path
-        ) {
+        if (payload.kind === "SkillFileInstalled" && payload.relative_path) {
           markFileLinking(payload.relative_path);
         }
         if (payload.kind === "Completed" && payload.files_copied > 0) {
@@ -326,7 +303,7 @@ export function ProjectSetupPage() {
               : current
           );
           setSacrumToken("");
-          setFileStates({});
+          resetFileStates();
           setSetupView("project");
           setFormError(
             "Sacrum rejected the API token. Enter a valid token and try again."
@@ -501,8 +478,8 @@ export function ProjectSetupPage() {
         setupView === "ignition"
           ? "Initialized"
           : setupView === "skills"
-          ? "Phase 02 · Skills & Docs"
-          : "Phase 01 · Project"
+            ? "Phase 02 · Skills & Docs"
+            : "Phase 01 · Project"
       }
       title={title}
       lede={lede}
@@ -694,7 +671,9 @@ export function ProjectSetupPage() {
               </div>
               <div className="fr-tree" data-testid="skills-file-tree">
                 <div className="fr-tr">
-                  <span className="nm dir">.claude/skills/ or .agents/skills/</span>
+                  <span className="nm dir">
+                    .claude/skills/ or .agents/skills/
+                  </span>
                   <span className="ds">existing project skill roots</span>
                 </div>
                 {skillFilePaths.map((path) => {
