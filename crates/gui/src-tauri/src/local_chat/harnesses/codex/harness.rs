@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
@@ -7,13 +8,13 @@ use tokio::sync::{Mutex, RwLock};
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarness,
     LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError,
-    LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
+    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionWarningEvent,
 };
 
 use super::launcher::{CodexAppServerLauncher, ProcessCodexAppServerLauncher};
 use super::models::{requested_model_override, requested_reasoning_effort};
 use super::permissions::CodexPermissionSettings;
-use super::rpc::{CodexRpcConnection, ThreadRequest};
+use super::rpc::{CodexRpcConnection, ExtraSkillRootsError, ThreadRequest};
 use super::session::{stop_process, CodexLocalChatSession, SessionStats, TurnFailureSurface};
 use super::thread_state::CodexThreadState;
 
@@ -21,6 +22,7 @@ use super::thread_state::CodexThreadState;
 pub(crate) struct CodexLocalChatHarness {
     sessions: Arc<RwLock<HashMap<String, Arc<CodexLocalChatSession>>>>,
     launcher: Arc<dyn CodexAppServerLauncher>,
+    installed_skills_root_override: Option<PathBuf>,
 }
 
 impl CodexLocalChatHarness {
@@ -28,15 +30,41 @@ impl CodexLocalChatHarness {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             launcher: Arc::new(ProcessCodexAppServerLauncher),
+            installed_skills_root_override: None,
         }
     }
 
     #[cfg(test)]
     pub(super) fn with_launcher_for_tests(launcher: Arc<dyn CodexAppServerLauncher>) -> Self {
+        Self::with_launcher_and_skills_root_for_tests(launcher, std::env::temp_dir())
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_launcher_and_skills_root_for_tests(
+        launcher: Arc<dyn CodexAppServerLauncher>,
+        installed_skills_root: PathBuf,
+    ) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             launcher,
+            installed_skills_root_override: Some(installed_skills_root),
         }
+    }
+
+    fn installed_skills_root(&self) -> Result<PathBuf, String> {
+        let root = match &self.installed_skills_root_override {
+            Some(root) => root.clone(),
+            None => vertebrae_installer::installed_skills_dir().map_err(|error| {
+                format!("Failed to resolve the installed skills directory: {error}")
+            })?,
+        };
+        if !root.is_dir() {
+            return Err(format!(
+                "Installed skills directory invariant violated; directory does not exist: {}",
+                root.display()
+            ));
+        }
+        Ok(root)
     }
 }
 
@@ -80,6 +108,18 @@ impl LocalChatHarness for CodexLocalChatHarness {
         }
 
         let event_sink = runtime.event_sink();
+        let installed_skills_root = match self.installed_skills_root() {
+            Ok(root) => root,
+            Err(error) => {
+                log::error!(
+                    "[Codex local chat] installed skills invariant failed for {}: {}",
+                    backend_session_id,
+                    error
+                );
+                emit_start_error(&event_sink, &backend_session_id, error.clone());
+                return Err(LocalChatSessionError::StartFailed(error));
+            }
+        };
         let mut launched = match self.launcher.launch().await {
             Ok(launched) => launched,
             Err(err) => {
@@ -137,6 +177,37 @@ impl LocalChatHarness for CodexLocalChatHarness {
             "[Codex local chat] initialized app-server for {}",
             backend_session_id
         );
+
+        match connection
+            .set_extra_skill_roots(std::slice::from_ref(&installed_skills_root))
+            .await
+        {
+            Ok(()) => log::info!(
+                "[Codex local chat] registered installed skills root for {}: {}",
+                backend_session_id,
+                installed_skills_root.display()
+            ),
+            Err(error) => {
+                let warning = match error {
+                    ExtraSkillRootsError::InvalidRoot(error) => format!(
+                        "Vertebrae's installed skills root is invalid and was not sent to the Codex App Server ({}): {}. Continuing with Codex native skills only.",
+                        installed_skills_root.display(),
+                        error
+                    ),
+                    ExtraSkillRootsError::Rejected(error) => format!(
+                        "Codex App Server did not accept Vertebrae's installed skills root ({}): {}. Continuing with Codex native skills only.",
+                        installed_skills_root.display(),
+                        error
+                    ),
+                };
+                log::warn!(
+                    "[Codex local chat] skills registration compatibility warning for {}: {}",
+                    backend_session_id,
+                    warning
+                );
+                emit_warning(&event_sink, &backend_session_id, warning);
+            }
+        }
 
         let model_override = requested_model_override(input.model_id.as_deref());
         let reasoning_effort = requested_reasoning_effort(input.reasoning_effort.as_deref());
@@ -290,5 +361,13 @@ fn emit_start_error(event_sink: &LocalChatEventSink, backend_session_id: &str, e
         backend_session_id: backend_session_id.to_string(),
         harness: LocalChatHarnessKind::Codex,
         error,
+    }));
+}
+
+fn emit_warning(event_sink: &LocalChatEventSink, backend_session_id: &str, warning: String) {
+    event_sink.emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
+        backend_session_id: backend_session_id.to_string(),
+        harness: LocalChatHarnessKind::Codex,
+        warning,
     }));
 }
