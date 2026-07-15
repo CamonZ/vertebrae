@@ -39,6 +39,26 @@ pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
 /// killed by a signal on Unix, where `ExitStatus::code()` returns `None`).
 pub const PROCESS_EXIT_CODE_UNKNOWN: i32 = -1;
 
+fn merge_managed_plugin_root(agent_config: &mut AgentConfig, plugin_root: &Path) {
+    let mut managed_root_seen = false;
+    agent_config.plugin_dirs.retain(|configured| {
+        if Path::new(configured) != plugin_root {
+            return true;
+        }
+        if managed_root_seen {
+            return false;
+        }
+        managed_root_seen = true;
+        true
+    });
+
+    if !managed_root_seen {
+        agent_config
+            .plugin_dirs
+            .push(plugin_root.to_string_lossy().into_owned());
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StepConfig {
     pub prompt: String,
@@ -146,6 +166,8 @@ impl std::fmt::Debug for StepExecutorMessage {
 
 /// Build the `claude` invocation. When `settings_path` is `Some`, emits
 /// `--settings <path>` before `agent_config` flags so CLI overrides win.
+/// Compatibility probing is intentionally handled by provider resolution so
+/// this public builder is deterministic and independent of host state.
 ///
 /// Returns an error when the Anthropic provider binary wasn't resolved at
 /// daemon startup -- the daemon stays up for other workflows, but this step
@@ -153,6 +175,14 @@ impl std::fmt::Debug for StepExecutorMessage {
 pub fn build_claude_command_with_settings(
     config: &StepExecutorConfig,
     settings_path: Option<&Path>,
+) -> Result<Command, ProviderResolutionError> {
+    build_claude_command_with_settings_and_managed_root(config, settings_path, None)
+}
+
+pub(crate) fn build_claude_command_with_settings_and_managed_root(
+    config: &StepExecutorConfig,
+    settings_path: Option<&Path>,
+    managed_plugin_root: Option<&Path>,
 ) -> Result<Command, ProviderResolutionError> {
     let binary = config
         .provider_binaries
@@ -196,6 +226,10 @@ pub fn build_claude_command_with_settings(
     // Daemon runs autonomously -- default to bypass permissions.
     if agent_config.permission_mode.is_none() {
         agent_config = agent_config.with_permission_mode(PermissionMode::BypassPermissions);
+    }
+
+    if let Some(plugin_root) = managed_plugin_root {
+        merge_managed_plugin_root(&mut agent_config, plugin_root);
     }
 
     let cli_args = agent_config.to_claude_cli_args();

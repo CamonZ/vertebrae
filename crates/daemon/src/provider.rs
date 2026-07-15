@@ -14,7 +14,7 @@ use vertebrae_core::model_catalog::{
 use vertebrae_core::models::AgentConfig;
 
 use crate::actors::step_executor::{
-    StepExecutorConfig, build_claude_command_with_settings, log_built_argv,
+    StepExecutorConfig, build_claude_command_with_settings_and_managed_root, log_built_argv,
 };
 use crate::settings_synthesis::{SELF_TRANSITION_DENY_TOOLS, SyntheticSettings};
 
@@ -153,10 +153,25 @@ pub fn resolve_provider_command(
     let (command, parser_kind) = match provider {
         Provider::Anthropic => {
             let settings_path = settings_bundle.map(|b| b.settings_path());
-            (
-                build_claude_command_with_settings(config, settings_path.as_deref())?,
-                ParserKind::StreamJson,
-            )
+            let command = if let Some(binary) = config.provider_binaries.get(Provider::Anthropic) {
+                let resolution = vertebrae_installer::resolve_claude_plugin_dir(
+                    binary,
+                    config.working_dir(),
+                    &config.shell_path,
+                );
+                build_anthropic_command_from_resolution(
+                    config,
+                    settings_path.as_deref(),
+                    resolution,
+                )?
+            } else {
+                build_claude_command_with_settings_and_managed_root(
+                    config,
+                    settings_path.as_deref(),
+                    None,
+                )?
+            };
+            (command, ParserKind::StreamJson)
         }
         Provider::Openai => (
             build_codex_command(config, settings_bundle, reasoning_effort.as_deref())?,
@@ -169,6 +184,38 @@ pub fn resolve_provider_command(
         command,
         parser_kind,
     })
+}
+
+fn build_anthropic_command_from_resolution(
+    config: &StepExecutorConfig,
+    settings_path: Option<&std::path::Path>,
+    resolution: vertebrae_installer::ClaudePluginDirResolution,
+) -> Result<Command, ProviderResolutionError> {
+    let vertebrae_installer::ClaudePluginDirResolution {
+        plugin_root,
+        warning,
+    } = resolution;
+
+    if let Some(warning) = warning {
+        let binary = config
+            .provider_binaries
+            .get(Provider::Anthropic)
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unresolved>".to_string());
+        tracing::warn!(
+            execution_id = %config.execution_id,
+            task_id = %config.task_id,
+            claude_binary = %binary,
+            "{}",
+            warning,
+        );
+    }
+
+    build_claude_command_with_settings_and_managed_root(
+        config,
+        settings_path,
+        plugin_root.as_deref(),
+    )
 }
 
 /// Build the Codex `exec --json` invocation for OpenAI provider steps. Emits
@@ -291,13 +338,15 @@ fn codex_prefix_rule_from_claude_deny_tool(deny_tool: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     use vertebrae_core::execution_service::ExecutionService;
     use vertebrae_core::models::AgentConfig;
     use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SacrumExecutionService};
 
+    use crate::actors::step_executor::build_claude_command_with_settings;
     use crate::actors::step_executor::{DEFAULT_MODEL, StepConfig, StepExecutorConfig};
     use crate::helpers::ProviderBinaries;
 
@@ -369,6 +418,124 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect()
+    }
+
+    #[derive(Clone)]
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("capture lock")
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn compatible_anthropic_resolution_merges_managed_root_exactly_once() {
+        let managed_root = PathBuf::from("/absolute/vertebrae-data");
+        let config = make_config(
+            AgentConfig::new()
+                .with_provider(Provider::Anthropic)
+                .with_plugin_dirs(vec![
+                    "/configured/plugin".to_string(),
+                    managed_root.to_string_lossy().into_owned(),
+                    managed_root.to_string_lossy().into_owned(),
+                ]),
+            "p",
+            "/usr/local/bin/claude",
+        );
+
+        let command = build_anthropic_command_from_resolution(
+            &config,
+            None,
+            vertebrae_installer::ClaudePluginDirResolution {
+                plugin_root: Some(managed_root.clone()),
+                warning: None,
+            },
+        )
+        .expect("compatible resolution builds command");
+        let argv = argv_strings(&command);
+        let managed_root = managed_root.to_string_lossy();
+
+        assert_eq!(
+            argv.windows(2)
+                .filter(|pair| pair[0] == "--plugin-dir" && pair[1] == managed_root)
+                .count(),
+            1,
+            "managed root should be emitted once: {argv:?}"
+        );
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--plugin-dir", "/configured/plugin"])
+        );
+    }
+
+    #[test]
+    fn incompatible_anthropic_resolution_warns_and_preserves_native_command() {
+        let configured = ["/configured/one", "/configured/two"];
+        let config = make_config(
+            AgentConfig::new()
+                .with_provider(Provider::Anthropic)
+                .with_plugin_dirs(configured.iter().map(ToString::to_string).collect()),
+            "continue normally",
+            "/usr/local/bin/claude",
+        );
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let writer = CapturedWriter(Arc::clone(&captured));
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+
+        let command = tracing::subscriber::with_default(subscriber, || {
+            build_anthropic_command_from_resolution(
+                &config,
+                None,
+                vertebrae_installer::ClaudePluginDirResolution {
+                    plugin_root: None,
+                    warning: Some("shared Claude compatibility warning".to_string()),
+                },
+            )
+        })
+        .expect("incompatible resolution continues without managed root");
+        let argv = argv_strings(&command);
+
+        for plugin_dir in configured {
+            assert!(
+                argv.windows(2)
+                    .any(|pair| pair == ["--plugin-dir", plugin_dir]),
+                "configured plugin directory must be preserved: {argv:?}"
+            );
+        }
+        assert_eq!(
+            argv.iter().filter(|arg| *arg == "--plugin-dir").count(),
+            configured.len(),
+            "no managed plugin root should be injected: {argv:?}"
+        );
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["-p", "continue normally"])
+        );
+        assert!(
+            argv.windows(2)
+                .any(|pair| pair == ["--output-format", "stream-json"])
+        );
+        let logs = String::from_utf8(captured.lock().expect("capture lock").clone())
+            .expect("captured tracing is UTF-8");
+        assert!(
+            logs.contains("shared Claude compatibility warning"),
+            "{logs}"
+        );
+        assert!(logs.contains("exec-prov"), "{logs}");
+        assert!(logs.contains("/usr/local/bin/claude"), "{logs}");
     }
 
     #[test]

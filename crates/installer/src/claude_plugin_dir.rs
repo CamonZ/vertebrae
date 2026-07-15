@@ -1,3 +1,10 @@
+//! Claude Code compatibility resolution for Vertebrae-installed skills.
+//!
+//! Claude discovers the provider-neutral `data_dir()/skills` bundle when its
+//! parent app-data root is supplied through `--plugin-dir`. Both GUI local chat
+//! and daemon one-shot execution use this resolver so path validation, version
+//! gating, and fallback guidance cannot drift.
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -7,24 +14,42 @@ use semver::Version;
 
 const CLAUDE_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 const VERSION_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const MINIMUM_CLAUDE_VERSION: Version = Version::new(2, 0, 25);
 
+/// Result of checking whether Vertebrae's managed skill bundle can be exposed
+/// to a particular Claude Code process.
 #[derive(Debug, PartialEq, Eq)]
-pub(super) struct ClaudePluginDirResolution {
-    pub(super) plugin_root: Option<PathBuf>,
-    pub(super) warning: Option<String>,
+pub struct ClaudePluginDirResolution {
+    /// Absolute app-data root to pass as `--plugin-dir`, when compatible.
+    pub plugin_root: Option<PathBuf>,
+    /// Compatibility warning explaining why injection was skipped.
+    pub warning: Option<String>,
 }
 
-pub(super) fn resolve_claude_plugin_dir(
+/// Resolve the installer-owned Claude plugin root for a specific binary.
+///
+/// The version probe runs the same resolved binary with `--version`, inherits
+/// the caller-provided PATH, and is bounded so a broken CLI cannot stall GUI
+/// session startup or daemon step execution.
+pub fn resolve_claude_plugin_dir(
     claude_binary: &Path,
     working_dir: &Path,
     augmented_path: &str,
 ) -> ClaudePluginDirResolution {
-    let data_root = vertebrae_installer::data_dir().map_err(|error| error.to_string());
-    let installed_skills =
-        vertebrae_installer::installed_skills_dir().map_err(|error| error.to_string());
+    let data_root = crate::data_dir().map_err(|error| error.to_string());
+    let installed_skills = crate::installed_skills_dir().map_err(|error| error.to_string());
+    let installed_skills_is_dir = installed_skills
+        .as_ref()
+        .is_ok_and(|installed_skills| installed_skills.is_dir());
     let version_output = query_claude_version(claude_binary, augmented_path);
 
-    resolve_claude_plugin_dir_from_checks(data_root, installed_skills, version_output, working_dir)
+    resolve_claude_plugin_dir_from_checks(
+        data_root,
+        installed_skills,
+        installed_skills_is_dir,
+        version_output,
+        working_dir,
+    )
 }
 
 fn query_claude_version(claude_binary: &Path, augmented_path: &str) -> Result<String, String> {
@@ -108,6 +133,7 @@ fn query_claude_version_with_timeout(
 fn resolve_claude_plugin_dir_from_checks(
     data_root: Result<PathBuf, String>,
     installed_skills: Result<PathBuf, String>,
+    installed_skills_is_dir: bool,
     version_output: Result<String, String>,
     working_dir: &Path,
 ) -> ClaudePluginDirResolution {
@@ -156,6 +182,17 @@ fn resolve_claude_plugin_dir_from_checks(
         );
     }
 
+    if !installed_skills_is_dir {
+        return skipped_resolution(
+            format!(
+                "the installed-skills path is missing or is not a directory: {}",
+                installed_skills.display()
+            ),
+            Some(&installed_skills),
+            working_dir,
+        );
+    }
+
     let version_output = match version_output {
         Ok(output) => output,
         Err(error) => {
@@ -173,9 +210,11 @@ fn resolve_claude_plugin_dir_from_checks(
         );
     };
 
-    if version < Version::new(2, 0, 25) {
+    if version < MINIMUM_CLAUDE_VERSION {
         return skipped_resolution(
-            format!("Claude Code {version} is older than the minimum supported version 2.0.25"),
+            format!(
+                "Claude Code {version} is older than the minimum supported version {MINIMUM_CLAUDE_VERSION}"
+            ),
             Some(&installed_skills),
             working_dir,
         );
@@ -200,7 +239,7 @@ fn skipped_resolution(
     ClaudePluginDirResolution {
         plugin_root: None,
         warning: Some(format!(
-            "Vertebrae skipped automatic installed-skill loading because {reason}. Update Claude Code to version 2.0.25 or newer. This session will continue with Claude's native project and user skills. As an optional fallback, manually copy the skill folders from {source}/ into {}/.",
+            "Vertebrae skipped automatic installed-skill loading because {reason}. Update Claude Code to version {MINIMUM_CLAUDE_VERSION} or newer. This session will continue with Claude's native project and user skills. As an optional fallback, manually copy the skill folders from {source}/ into {}/.",
             destination.display()
         )),
     }
@@ -235,6 +274,17 @@ mod tests {
         (data_root, installed_skills, working_dir)
     }
 
+    fn resolve_with_version(version: Result<String, String>) -> ClaudePluginDirResolution {
+        let (data_root, installed_skills, working_dir) = paths();
+        resolve_claude_plugin_dir_from_checks(
+            Ok(data_root),
+            Ok(installed_skills),
+            true,
+            version,
+            &working_dir,
+        )
+    }
+
     #[test]
     fn parses_supported_claude_code_version_shapes() {
         for (output, expected) in [
@@ -261,13 +311,8 @@ mod tests {
 
     #[test]
     fn supported_version_uses_manifestless_app_data_root() {
-        let (data_root, installed_skills, working_dir) = paths();
-        let resolution = resolve_claude_plugin_dir_from_checks(
-            Ok(data_root.clone()),
-            Ok(installed_skills.clone()),
-            Ok("Claude Code 2.0.25".to_string()),
-            &working_dir,
-        );
+        let (data_root, installed_skills, _) = paths();
+        let resolution = resolve_with_version(Ok("Claude Code 2.0.25".to_string()));
 
         assert_eq!(resolution.plugin_root, Some(data_root));
         assert_eq!(resolution.warning, None);
@@ -279,33 +324,21 @@ mod tests {
 
     #[test]
     fn newer_major_version_is_supported() {
-        let (data_root, installed_skills, working_dir) = paths();
-        let resolution = resolve_claude_plugin_dir_from_checks(
-            Ok(data_root.clone()),
-            Ok(installed_skills),
-            Ok("3.0.0 (Claude Code)".to_string()),
-            &working_dir,
-        );
-
-        assert_eq!(resolution.plugin_root, Some(data_root));
+        let resolution = resolve_with_version(Ok("3.0.0 (Claude Code)".to_string()));
+        assert_eq!(resolution.plugin_root, Some(paths().0));
         assert_eq!(resolution.warning, None);
     }
 
     #[test]
     fn prerelease_of_minimum_version_is_not_supported() {
-        let (data_root, installed_skills, working_dir) = paths();
-        let resolution = resolve_claude_plugin_dir_from_checks(
-            Ok(data_root),
-            Ok(installed_skills),
-            Ok("2.0.25-beta.1 (Claude Code)".to_string()),
-            &working_dir,
-        );
-
+        let resolution = resolve_with_version(Ok("2.0.25-beta.1 (Claude Code)".to_string()));
         assert_eq!(resolution.plugin_root, None);
-        assert!(resolution
-            .warning
-            .expect("minimum prerelease should warn")
-            .contains("older than the minimum supported version 2.0.25"));
+        assert!(
+            resolution
+                .warning
+                .expect("minimum prerelease should warn")
+                .contains("older than the minimum supported version 2.0.25")
+        );
     }
 
     #[test]
@@ -317,14 +350,7 @@ mod tests {
         ];
 
         for version in cases {
-            let (data_root, installed_skills, working_dir) = paths();
-            let resolution = resolve_claude_plugin_dir_from_checks(
-                Ok(data_root),
-                Ok(installed_skills),
-                version,
-                &working_dir,
-            );
-
+            let resolution = resolve_with_version(version);
             assert_eq!(resolution.plugin_root, None);
             let warning = resolution.warning.expect("skip should warn");
             assert!(warning.contains("Update Claude Code to version 2.0.25 or newer"));
@@ -335,35 +361,46 @@ mod tests {
     }
 
     #[test]
-    fn path_resolution_failures_and_mismatches_skip_injection() {
+    fn path_resolution_failures_mismatches_and_missing_directories_skip_injection() {
         let (_, _, working_dir) = paths();
         let cases = [
-            (Err("no home".to_string()), Err("no home".to_string())),
+            (
+                Err("no home".to_string()),
+                Err("no home".to_string()),
+                false,
+            ),
             (
                 Ok(PathBuf::from("relative/data")),
                 Ok(PathBuf::from("relative/data/skills")),
+                true,
             ),
             (
                 Ok(PathBuf::from("/absolute/data")),
                 Err("skills unavailable".to_string()),
+                false,
             ),
             (
                 Ok(PathBuf::from("/absolute/data")),
                 Ok(PathBuf::from("/somewhere/else/skills")),
+                true,
+            ),
+            (
+                Ok(PathBuf::from("/absolute/data")),
+                Ok(PathBuf::from("/absolute/data/skills")),
+                false,
             ),
         ];
 
-        for (data_root, installed_skills) in cases {
+        for (data_root, installed_skills, installed_skills_is_dir) in cases {
             let resolution = resolve_claude_plugin_dir_from_checks(
                 data_root,
                 installed_skills,
-                Ok("2.0.25".to_string()),
+                installed_skills_is_dir,
+                Ok("2.0.25 (Claude Code)".to_string()),
                 &working_dir,
             );
-
             assert_eq!(resolution.plugin_root, None);
             let warning = resolution.warning.expect("skip should warn");
-            assert!(warning.contains("<data_dir>/skills/"));
             assert!(warning.contains("/absolute/project/.claude/skills/"));
         }
     }

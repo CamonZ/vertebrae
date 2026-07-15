@@ -103,6 +103,30 @@ pub async fn argv_contains_pair(world: &mut DaemonWorld, first: String, second: 
     );
 }
 
+#[then("the mock argv contains the managed manifestless skill plugin root exactly once")]
+pub async fn argv_contains_managed_plugin_root_once(world: &mut DaemonWorld) {
+    let argv = world.captured_argv();
+    let managed_root = world
+        .managed_plugin_root
+        .as_ref()
+        .expect("configured daemon environment should record managed plugin root");
+    let managed_root = managed_root.to_string_lossy();
+    let matches = argv
+        .windows(2)
+        .filter(|pair| pair[0] == "--plugin-dir" && pair[1] == managed_root)
+        .count();
+    assert_eq!(
+        matches, 1,
+        "managed plugin root should appear once: {argv:?}"
+    );
+    assert!(
+        std::path::Path::new(managed_root.as_ref())
+            .join("skills/acceptance-proof/SKILL.md")
+            .is_file(),
+        "manifestless installed skill should exist below managed plugin root"
+    );
+}
+
 #[then(expr = "the Codex mock argv contains model {string} and reasoning effort {string}")]
 pub async fn codex_argv_contains_model_and_reasoning_effort(
     world: &mut DaemonWorld,

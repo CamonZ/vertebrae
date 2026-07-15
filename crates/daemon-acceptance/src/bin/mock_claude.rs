@@ -29,6 +29,11 @@ fn main() -> ExitCode {
         capture_invocation(Path::new(&dir), &args);
     }
 
+    if args.get(1).is_some_and(|arg| arg == "--version") {
+        println!("2.0.25 (Claude Code)");
+        return ExitCode::from(0);
+    }
+
     let prompt = extract_prompt(&args);
     // Empty-prompt fallback sends `-p "Execute step"` — not an envelope. Skip
     // streaming and sleeping in that case; capture alone is enough.
