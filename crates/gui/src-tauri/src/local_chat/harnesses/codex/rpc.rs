@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use futures::stream::{SplitSink, SplitStream};
@@ -28,6 +29,14 @@ pub(super) struct ThreadRequest<'a> {
 pub(super) struct ThreadStart {
     pub(super) thread_id: String,
     pub(super) model: String,
+}
+
+/// Distinguishes roots rejected by local validation (never sent to the App
+/// Server) from roots the App Server itself refused.
+#[derive(Debug)]
+pub(super) enum ExtraSkillRootsError {
+    InvalidRoot(String),
+    Rejected(String),
 }
 
 pub(super) struct TurnRequest<'a> {
@@ -108,6 +117,48 @@ impl CodexRpcConnection {
         )
         .await?;
         self.notify("initialized", json!({})).await
+    }
+
+    pub(super) async fn set_extra_skill_roots(
+        &self,
+        roots: &[PathBuf],
+    ) -> Result<(), ExtraSkillRootsError> {
+        if roots.is_empty() {
+            return Err(ExtraSkillRootsError::InvalidRoot(
+                "Codex extra skill roots must contain at least one directory".to_string(),
+            ));
+        }
+
+        let mut serialized_roots = Vec::with_capacity(roots.len());
+        for root in roots {
+            if !root.is_absolute() {
+                return Err(ExtraSkillRootsError::InvalidRoot(format!(
+                    "Codex extra skill root is not absolute: {}",
+                    root.display()
+                )));
+            }
+            if !root.is_dir() {
+                return Err(ExtraSkillRootsError::InvalidRoot(format!(
+                    "Codex extra skill root is not a directory: {}",
+                    root.display()
+                )));
+            }
+            let root = root.to_str().ok_or_else(|| {
+                ExtraSkillRootsError::InvalidRoot(format!(
+                    "Codex extra skill root is not valid UTF-8: {}",
+                    root.display()
+                ))
+            })?;
+            serialized_roots.push(root);
+        }
+
+        self.request(
+            "skills/extraRoots/set",
+            json!({ "extraRoots": serialized_roots }),
+        )
+        .await
+        .map(|_| ())
+        .map_err(ExtraSkillRootsError::Rejected)
     }
 
     pub(super) async fn start_or_resume_thread(

@@ -24,6 +24,7 @@ use super::models::{
     codex_model_options, codex_reasoning_effort_options, parse_codex_model_catalog,
     CODEX_DEFAULT_MODEL_ID, CODEX_DEFAULT_REASONING_EFFORT,
 };
+use super::rpc::{CodexRpcConnection, ExtraSkillRootsError};
 
 fn test_thread_state() -> Arc<StdMutex<CodexThreadState>> {
     Arc::new(StdMutex::new(CodexThreadState::default()))
@@ -940,6 +941,9 @@ impl MockAppServer {
                         }
                     }
                     ("initialized", _) => {}
+                    ("skills/extraRoots/set", Some(id)) => {
+                        send_json(&mut socket, json!({ "id": id, "result": {} })).await;
+                    }
                     ("thread/start" | "thread/resume", Some(id)) => {
                         if script.thread_status_before_thread_response {
                             send_json(
@@ -1336,9 +1340,65 @@ fn codex_error_message_reads_common_error_payload_shapes() {
 }
 
 #[tokio::test]
+async fn extra_skill_roots_rpc_preserves_multiple_root_order_and_rejects_invalid_roots() {
+    let server = MockAppServer::start(MockScript::default()).await;
+    let event_sink = LocalChatEventSink::inert_for_tests();
+    let connection = CodexRpcConnection::connect(
+        &server.ws_url,
+        "backend-rpc-roots".to_string(),
+        event_sink,
+        test_thread_state(),
+    )
+    .await
+    .expect("connect to mock app-server");
+    connection
+        .initialize()
+        .await
+        .expect("initialize connection");
+
+    let first = tempfile::tempdir().expect("first skill root");
+    let second = tempfile::tempdir().expect("second skill root");
+    let roots = vec![first.path().to_path_buf(), second.path().to_path_buf()];
+    connection
+        .set_extra_skill_roots(&roots)
+        .await
+        .expect("set extra roots");
+    server.wait_for_request_count(3).await;
+
+    let requests = server.requests();
+    assert_eq!(requests[2]["method"], "skills/extraRoots/set");
+    assert_eq!(requests[2]["params"], json!({ "extraRoots": roots }));
+
+    let request_count = requests.len();
+    let relative_error = connection
+        .set_extra_skill_roots(&[std::path::PathBuf::from("relative/skills")])
+        .await
+        .expect_err("relative roots must be rejected locally");
+    assert!(matches!(
+        &relative_error,
+        ExtraSkillRootsError::InvalidRoot(message) if message.contains("not absolute")
+    ));
+    let missing_parent = tempfile::tempdir().expect("missing skill root parent");
+    let missing_error = connection
+        .set_extra_skill_roots(&[missing_parent.path().join("missing-skills-root")])
+        .await
+        .expect_err("missing roots must be rejected locally");
+    assert!(matches!(
+        &missing_error,
+        ExtraSkillRootsError::InvalidRoot(message) if message.contains("not a directory")
+    ));
+    assert_eq!(server.requests().len(), request_count);
+}
+
+#[tokio::test]
 async fn create_session_initializes_starts_thread_and_emits_initial_turn_events() {
     let server = MockAppServer::start(MockScript::default()).await;
-    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let installed_skills_dir = tempfile::tempdir().expect("installed skills root");
+    let installed_skills_root = installed_skills_dir.path().to_path_buf();
+    let harness = CodexLocalChatHarness::with_launcher_and_skills_root_for_tests(
+        server.launcher(),
+        installed_skills_root.clone(),
+    );
     let (runtime, events) = LocalChatRuntime::capturing_for_tests();
 
     harness
@@ -1350,7 +1410,7 @@ async fn create_session_initializes_starts_thread_and_emits_initial_turn_events(
         .expect("create codex session");
 
     assert!(harness.has_session("backend-1").await);
-    server.wait_for_request_count(4).await;
+    server.wait_for_request_count(5).await;
     wait_for_event(&events, |event| {
         matches!(
             event,
@@ -1365,13 +1425,18 @@ async fn create_session_initializes_starts_thread_and_emits_initial_turn_events(
     let requests = server.requests();
     assert_eq!(requests[0]["method"], "initialize");
     assert_eq!(requests[1]["method"], "initialized");
-    assert_eq!(requests[2]["method"], "thread/start");
-    assert_eq!(requests[2]["params"]["cwd"], "/tmp/project");
-    assert!(requests[2]["params"].get("model").is_none());
-    assert!(requests[2]["params"].get("effort").is_none());
-    assert_eq!(requests[3]["method"], "turn/start");
-    assert_eq!(requests[3]["params"]["threadId"], "codex-thread-1");
-    assert_eq!(requests[3]["params"]["input"][0]["text"], "first prompt");
+    assert_eq!(requests[2]["method"], "skills/extraRoots/set");
+    assert_eq!(
+        requests[2]["params"],
+        json!({ "extraRoots": [installed_skills_root] })
+    );
+    assert_eq!(requests[3]["method"], "thread/start");
+    assert_eq!(requests[3]["params"]["cwd"], "/tmp/project");
+    assert!(requests[3]["params"].get("model").is_none());
+    assert!(requests[3]["params"].get("effort").is_none());
+    assert_eq!(requests[4]["method"], "turn/start");
+    assert_eq!(requests[4]["params"]["threadId"], "codex-thread-1");
+    assert_eq!(requests[4]["params"]["input"][0]["text"], "first prompt");
 
     let events = events.lock().expect("events lock").clone();
     assert!(
@@ -1417,6 +1482,114 @@ async fn create_session_initializes_starts_thread_and_emits_initial_turn_events(
         LocalChatEvent::ToolCall(LocalChatToolCallEvent { tool_id, .. })
             if tool_id == "agent:codex-thread-1"
     )));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request["method"] == "skills/extraRoots/set")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn rejected_extra_roots_rpc_warns_and_continues_with_native_skills() {
+    let server = MockAppServer::start(MockScript {
+        rpc_error_method: Some("skills/extraRoots/set"),
+        ..MockScript::default()
+    })
+    .await;
+    let harness = CodexLocalChatHarness::with_launcher_for_tests(server.launcher());
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(create_input("backend-skills-rejected", None, None), runtime)
+        .await
+        .expect("skills incompatibility must not prevent session creation");
+
+    assert!(harness.has_session("backend-skills-rejected").await);
+    let requests = server.requests();
+    assert_eq!(requests[2]["method"], "skills/extraRoots/set");
+    assert_eq!(requests[3]["method"], "thread/start");
+    let events = events.lock().expect("events lock");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        LocalChatEvent::Warning(LocalChatSessionWarningEvent {
+            backend_session_id,
+            warning,
+            ..
+        }) if backend_session_id == "backend-skills-rejected"
+            && warning.contains("did not accept")
+            && warning.contains("native skills only")
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        LocalChatEvent::Init(LocalChatSessionInitEvent { backend_session_id, .. })
+            if backend_session_id == "backend-skills-rejected"
+    )));
+}
+
+#[tokio::test]
+async fn relative_extra_root_warns_without_claiming_registration() {
+    let server = MockAppServer::start(MockScript::default()).await;
+    let harness = CodexLocalChatHarness::with_launcher_and_skills_root_for_tests(
+        server.launcher(),
+        std::path::PathBuf::from("."),
+    );
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    harness
+        .create_session(create_input("backend-relative-skills", None, None), runtime)
+        .await
+        .expect("invalid extra root must fall back to native skills");
+
+    let requests = server.requests();
+    assert!(!requests
+        .iter()
+        .any(|request| request["method"] == "skills/extraRoots/set"));
+    assert_eq!(requests[2]["method"], "thread/start");
+    assert!(events.lock().expect("events lock").iter().any(|event| {
+        matches!(
+            event,
+            LocalChatEvent::Warning(LocalChatSessionWarningEvent { warning, .. })
+                if warning.contains("not absolute")
+                    && warning.contains("was not sent to the Codex App Server")
+                    && warning.contains("native skills only")
+        )
+    }));
+}
+
+#[tokio::test]
+async fn missing_installed_skills_directory_is_an_invariant_failure() {
+    let server = MockAppServer::start(MockScript::default()).await;
+    let parent = tempfile::tempdir().expect("temporary parent");
+    let missing_root = parent.path().join("missing-skills");
+    let harness = CodexLocalChatHarness::with_launcher_and_skills_root_for_tests(
+        server.launcher(),
+        missing_root.clone(),
+    );
+    let (runtime, events) = LocalChatRuntime::capturing_for_tests();
+
+    let result = harness
+        .create_session(create_input("backend-skills-missing", None, None), runtime)
+        .await;
+
+    let expected = format!(
+        "Installed skills directory invariant violated; directory does not exist: {}",
+        missing_root.display()
+    );
+    assert_eq!(
+        result,
+        Err(LocalChatSessionError::StartFailed(expected.clone()))
+    );
+    assert!(server.requests().is_empty());
+    assert!(events
+        .lock()
+        .expect("events lock")
+        .contains(&LocalChatEvent::Error(LocalChatSessionErrorEvent {
+            backend_session_id: "backend-skills-missing".to_string(),
+            harness: LocalChatHarnessKind::Codex,
+            error: expected,
+        })));
 }
 
 #[tokio::test]
@@ -1441,7 +1614,7 @@ async fn create_session_registers_before_initial_turn_finishes() {
     .expect("create codex session");
 
     assert!(harness.has_session("backend-async-start").await);
-    server.wait_for_request_count(4).await;
+    server.wait_for_request_count(5).await;
     wait_for_event(&events, |event| {
         matches!(
             event,
@@ -1477,7 +1650,7 @@ async fn send_message_returns_before_turn_finishes() {
     .expect("send_message should not wait for the turn to finish")
     .expect("send codex message");
 
-    server.wait_for_request_count(4).await;
+    server.wait_for_request_count(5).await;
     wait_for_event(&events, |event| {
         matches!(
             event,
@@ -1524,15 +1697,15 @@ async fn permission_mode_is_forwarded_to_thread_and_turn_requests() {
         .send_message("backend-permissions", "plan this")
         .await
         .expect("send codex message");
-    server.wait_for_request_count(4).await;
+    server.wait_for_request_count(5).await;
 
     let requests = server.requests();
-    assert_eq!(requests[2]["method"], "thread/start");
-    assert_eq!(requests[2]["params"]["approvalPolicy"], "never");
-    assert_eq!(requests[2]["params"]["permissions"], ":read-only");
-    assert_eq!(requests[3]["method"], "turn/start");
+    assert_eq!(requests[3]["method"], "thread/start");
     assert_eq!(requests[3]["params"]["approvalPolicy"], "never");
     assert_eq!(requests[3]["params"]["permissions"], ":read-only");
+    assert_eq!(requests[4]["method"], "turn/start");
+    assert_eq!(requests[4]["params"]["approvalPolicy"], "never");
+    assert_eq!(requests[4]["params"]["permissions"], ":read-only");
 }
 
 #[tokio::test]
@@ -1550,9 +1723,9 @@ async fn selected_model_and_reasoning_effort_are_forwarded_to_thread_start() {
         .expect("create codex session");
 
     let requests = server.requests();
-    assert_eq!(requests[2]["method"], "thread/start");
-    assert_eq!(requests[2]["params"]["model"], "gpt-5.5");
-    assert_eq!(requests[2]["params"]["effort"], "medium");
+    assert_eq!(requests[3]["method"], "thread/start");
+    assert_eq!(requests[3]["params"]["model"], "gpt-5.5");
+    assert_eq!(requests[3]["params"]["effort"], "medium");
 }
 
 #[tokio::test]
@@ -1567,9 +1740,9 @@ async fn default_model_and_effort_omit_app_server_overrides() {
         .expect("create codex session");
 
     let requests = server.requests();
-    assert_eq!(requests[2]["method"], "thread/start");
-    assert!(requests[2]["params"].get("model").is_none());
-    assert!(requests[2]["params"].get("effort").is_none());
+    assert_eq!(requests[3]["method"], "thread/start");
+    assert!(requests[3]["params"].get("model").is_none());
+    assert!(requests[3]["params"].get("effort").is_none());
 }
 
 #[tokio::test]
@@ -1591,7 +1764,7 @@ async fn server_approval_requests_are_denied_with_warning() {
         .await
         .expect("send codex message");
 
-    server.wait_for_request_count(5).await;
+    server.wait_for_request_count(6).await;
     let requests = server.requests();
     assert!(requests.iter().any(|request| {
         request.get("id") == Some(&json!(1000))
@@ -1719,15 +1892,16 @@ async fn create_session_resumes_provider_thread_and_send_message_uses_same_threa
         .send_message("backend-resume", "next message")
         .await
         .expect("send resumed message");
-    server.wait_for_request_count(4).await;
+    server.wait_for_request_count(5).await;
 
     let requests = server.requests();
-    assert_eq!(requests[2]["method"], "thread/resume");
-    assert_eq!(requests[2]["params"]["threadId"], "existing-thread");
-    assert_eq!(requests[2]["params"]["excludeTurns"], true);
-    assert_eq!(requests[3]["method"], "turn/start");
+    assert_eq!(requests[2]["method"], "skills/extraRoots/set");
+    assert_eq!(requests[3]["method"], "thread/resume");
     assert_eq!(requests[3]["params"]["threadId"], "existing-thread");
-    assert_eq!(requests[3]["params"]["input"][0]["text"], "next message");
+    assert_eq!(requests[3]["params"]["excludeTurns"], true);
+    assert_eq!(requests[4]["method"], "turn/start");
+    assert_eq!(requests[4]["params"]["threadId"], "existing-thread");
+    assert_eq!(requests[4]["params"]["input"][0]["text"], "next message");
 }
 
 #[tokio::test]
