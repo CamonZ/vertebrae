@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Provider-neutral runtime and event contracts for AI harnesses"
 license = "Apache-2.0"
+readme = "README.md"
 
 [dependencies]
 async-trait = "0.1"
