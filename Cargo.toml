@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/core", "crates/sacrum-client", "crates/installer", "crates/skills-assets", "crates/cli", "crates/gui/src-tauri", "crates/daemon", "crates/vtb-gate", "crates/acceptance", "crates/gui-acceptance", "crates/daemon-acceptance"]
-default-members = ["crates/core", "crates/sacrum-client", "crates/installer", "crates/skills-assets", "crates/cli", "crates/daemon", "crates/vtb-gate"]
+members = ["crates/core", "crates/harness-core", "crates/sacrum-client", "crates/installer", "crates/skills-assets", "crates/cli", "crates/gui/src-tauri", "crates/daemon", "crates/vtb-gate", "crates/acceptance", "crates/gui-acceptance", "crates/daemon-acceptance"]
+default-members = ["crates/core", "crates/harness-core", "crates/sacrum-client", "crates/installer", "crates/skills-assets", "crates/cli", "crates/daemon", "crates/vtb-gate"]
 resolver = "2"
 
 # Development profile - optimize for fast compilation
