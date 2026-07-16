@@ -10,6 +10,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Tooltip } from "./atoms/Tooltip";
 import { Icon } from "./atoms/Icon";
 import { ThemeToggle } from "./ThemeToggle";
+import { AddProjectDialog, useAddProjectFlow } from "./AddProjectDialog";
 import {
   useWebSocketStatus,
   type WebSocketStatus,
@@ -141,6 +142,8 @@ function ProjectPopover({
   anchorRef,
   onClose,
   onSwitched,
+  onAddProject,
+  onAddProjectFailed,
 }: {
   current: string | null;
   /** Anchor (the project avatar) — clicks on it are ignored so it can toggle. */
@@ -148,8 +151,13 @@ function ProjectPopover({
   onClose: () => void;
   /** Called after the active project changed, so the host can refresh + close. */
   onSwitched: () => void;
+  /** Called with the picked directory so the host can run initialization. */
+  onAddProject: (path: string) => void;
+  /** Called when the directory picker itself fails. */
+  onAddProjectFailed: (message: string) => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const pickerBusy = useRef(false);
   const [projects, setProjects] = useState<ProjectListEntry[]>([]);
 
   useEffect(() => {
@@ -207,6 +215,9 @@ function ProjectPopover({
   );
 
   const handleAddProject = useCallback(async () => {
+    if (pickerBusy.current) return;
+
+    pickerBusy.current = true;
     try {
       const selected = await open({
         directory: true,
@@ -214,16 +225,16 @@ function ProjectPopover({
         title: "Select Project Directory",
       });
       if (selected && typeof selected === "string") {
-        const result = await commands.addProject(selected);
-        if (result.status === "ok") {
-          await loadProjects();
-          resetProjectScopedStores();
-        }
+        onAddProject(selected);
       }
-    } catch {
-      // Swallow — leave the popover open so the user can retry.
+    } catch (error) {
+      onAddProjectFailed(
+        error instanceof Error ? error.message : "Failed to add project"
+      );
+    } finally {
+      pickerBusy.current = false;
     }
-  }, [loadProjects]);
+  }, [onAddProject, onAddProjectFailed]);
 
   return (
     <div
@@ -413,6 +424,7 @@ export function Sidebar() {
   const navigate = useNavigate();
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const avatarRef = useRef<HTMLButtonElement | null>(null);
+  const addFlow = useAddProjectFlow(resetProjectScopedStores);
 
   function handleSwitched() {
     setSwitcherOpen(false);
@@ -459,8 +471,23 @@ export function Sidebar() {
             anchorRef={avatarRef}
             onClose={() => setSwitcherOpen(false)}
             onSwitched={handleSwitched}
+            onAddProject={(path) => {
+              setSwitcherOpen(false);
+              void addFlow.start(path);
+            }}
+            onAddProjectFailed={(message) => {
+              setSwitcherOpen(false);
+              addFlow.fail(message);
+            }}
           />
         )}
+        <AddProjectDialog
+          phase={addFlow.phase}
+          skillFilePaths={addFlow.skillFilePaths}
+          fileStates={addFlow.fileStates}
+          onRetry={addFlow.retry}
+          onClose={addFlow.close}
+        />
       </div>
       {/* Thin 20px rule between the project monogram and the nav icons —
           the design rail's `.app-rail hr` (1px, --color-line, 20px wide). */}
