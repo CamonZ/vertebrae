@@ -6727,6 +6727,7 @@ dependencies = [
 name = "vertebrae-daemon"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "futures",
  "jsonschema",
  "ractor",
@@ -6740,6 +6741,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vertebrae-core",
+ "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
 ]

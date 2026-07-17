@@ -5,6 +5,7 @@ pub mod helpers;
 pub mod output_validator;
 pub mod phoenix;
 pub mod provider;
+pub mod session_log_event_sink;
 pub mod settings_synthesis;
 pub mod stream_json;
 
@@ -20,3 +21,4 @@ pub use provider::{
     ParserKind, ProviderResolutionError, ResolvedProviderCommand, resolve_provider,
     resolve_provider_command,
 };
+pub use session_log_event_sink::SessionLogEventSink;
