@@ -426,6 +426,20 @@ function completedDiagramBlocks(text: string): Set<string> {
   return completed;
 }
 
+function isAbsoluteHttpUrl(href: string | undefined): href is string {
+  if (!href || !/^https?:\/\//i.test(href)) return false;
+
+  try {
+    const url = new URL(href);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname.length > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 function createMarkdownComponents(completedDiagramSources: Set<string>) {
   return {
     p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
@@ -497,16 +511,21 @@ function createMarkdownComponents(completedDiagramSources: Set<string>) {
         {children}
       </blockquote>
     ),
-    a: ({ children, ...props }: ComponentPropsWithoutRef<"a">) => (
-      <a
-        className="text-accent underline decoration-accent/30 hover:decoration-accent"
-        target="_blank"
-        rel="noopener noreferrer"
-        {...props}
-      >
-        {children}
-      </a>
-    ),
+    a: ({ children, href, ...props }: ComponentPropsWithoutRef<"a">) => {
+      const canOpenExternally = isAbsoluteHttpUrl(href);
+
+      return (
+        <a
+          className="text-accent underline decoration-accent/30 hover:decoration-accent"
+          {...props}
+          href={canOpenExternally ? href : undefined}
+          target={canOpenExternally ? "_blank" : undefined}
+          rel={canOpenExternally ? "noopener noreferrer" : undefined}
+        >
+          {children}
+        </a>
+      );
+    },
     table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
       <div className="mb-2 overflow-x-auto">
         <table className="w-full border-collapse text-sm" {...props}>
