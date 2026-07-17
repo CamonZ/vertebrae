@@ -9,6 +9,12 @@ use crate::{
     ProviderResumeId, RunId, SessionId, StreamId, TurnId,
 };
 
+/// Portable, per-request behavior shared by provider adapters.
+///
+/// Provider-specific process paths, launch arguments, endpoints, credentials,
+/// protocol clients, and permission plumbing belong in adapter constructor
+/// configuration. They must not be tunneled through this type or its
+/// `environment` field.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RequestConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,6 +114,7 @@ pub struct TurnOutcome {
     pub result_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<Value>,
+    /// Informational terminal usage. Aggregate only `UsageEvent` payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +128,7 @@ pub struct RunOutcome {
     pub result_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<Value>,
+    /// Informational terminal usage. Aggregate only `UsageEvent` payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

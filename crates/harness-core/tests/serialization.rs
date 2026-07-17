@@ -2,10 +2,62 @@ mod common;
 
 use std::collections::BTreeSet;
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use serde_json::json;
 use vertebrae_harness_core::*;
 
 use common::{event, outcome};
+
+/// Exact pre-change V1 wire reader shape: it has neither thread/run
+/// correlation fields nor knowledge of the additive `turn_input` event type.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct LegacyEventCorrelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    item_id: Option<ItemId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parent_tool_call_id: Option<ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_resume_id: Option<ProviderResumeId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct LegacyWireEventV1 {
+    version: u8,
+    event_id: EventId,
+    stream_id: StreamId,
+    sequence: u64,
+    #[serde(default)]
+    correlation: LegacyEventCorrelation,
+    timestamp: DateTime<Utc>,
+    semantics: UpdateSemantics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_sequence: Option<u64>,
+    #[serde(rename = "type")]
+    event_type: String,
+    data: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum LegacyPayloadV1 {
+    Unknown { event_type: String, data: Value },
+}
+
+impl LegacyWireEventV1 {
+    fn payload(&self) -> LegacyPayloadV1 {
+        LegacyPayloadV1::Unknown {
+            event_type: self.event_type.clone(),
+            data: self.data.clone(),
+        }
+    }
+}
 
 fn control_request() -> ControlRequestEnvelope {
     ControlRequestEnvelope {
@@ -51,8 +103,26 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             model: Some("model".into()),
             provider_resume_id: Some(ProviderResumeId::from("resume")),
         }),
+        HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {
+            thread_id: ThreadId::from("thread-s"),
+            parent_thread_id: None,
+            kind: ThreadKind::Root,
+            caused_by_tool_call_id: None,
+            provider_thread_ref: Some(ProviderThreadRef::from("opaque://root/transcript")),
+            agent_metadata: Some(AgentMetadata {
+                name: Some("primary".into()),
+                role: Some("implementer".into()),
+                model: Some("model".into()),
+            }),
+        }),
         HarnessEventPayloadV1::TurnStarted(TurnStarted {
             input_summary: Some("hello".into()),
+        }),
+        HarnessEventPayloadV1::TurnInput(TurnInput {
+            thread_id: ThreadId::from("thread-s"),
+            run_id: None,
+            content: "hello\nwithout truncation".into(),
+            provenance: TurnInputProvenance::Human,
         }),
         HarnessEventPayloadV1::Text(TextEvent { text: "hi".into() }),
         HarnessEventPayloadV1::Reasoning(ReasoningEvent {
@@ -131,6 +201,92 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             original
         );
     }
+}
+
+#[test]
+fn turn_input_is_lossless_and_preserves_authorship_and_run_thread_correlation() {
+    for (index, provenance) in [
+        TurnInputProvenance::Human,
+        TurnInputProvenance::Agent,
+        TurnInputProvenance::System,
+        TurnInputProvenance::Provider,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let content = format!("line one\nline two 🦴 {{\"source\":{index}}}");
+        let mut original = event(
+            &format!("input-{index}"),
+            "run-stream",
+            index as u64 + 1,
+            UpdateSemantics::Snapshot,
+            HarnessEventPayloadV1::TurnInput(TurnInput {
+                thread_id: ThreadId::from("logical-thread"),
+                run_id: Some(RunId::from("run-1")),
+                content: content.clone(),
+                provenance,
+            }),
+        );
+        original.correlation.run_id = Some(RunId::from("run-1"));
+        original.correlation.thread_id = Some(ThreadId::from("logical-thread"));
+
+        let json = serde_json::to_value(&original).unwrap();
+        assert_eq!(json["type"], "turn_input");
+        assert_eq!(json["data"]["content"], content);
+        assert_eq!(json["correlation"]["run_id"], "run-1");
+        assert_eq!(json["correlation"]["thread_id"], "logical-thread");
+        assert_eq!(
+            serde_json::from_value::<HarnessEventV1>(json).unwrap(),
+            original
+        );
+    }
+}
+
+#[test]
+fn legacy_v1_unknown_round_trip_preserves_turn_input_canonical_identity_in_data() {
+    let mut original = event(
+        "legacy-input",
+        "legacy-stream",
+        1,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::TurnInput(TurnInput {
+            thread_id: ThreadId::from("durable-thread"),
+            run_id: Some(RunId::from("durable-run")),
+            content: "preserve me exactly".into(),
+            provenance: TurnInputProvenance::Agent,
+        }),
+    );
+    original.correlation.session_id = Some(SessionId::from("legacy-session"));
+    original.correlation.thread_id = Some(ThreadId::from("durable-thread"));
+    original.correlation.run_id = Some(RunId::from("durable-run"));
+
+    let legacy: LegacyWireEventV1 =
+        serde_json::from_value(serde_json::to_value(original).unwrap()).unwrap();
+    assert_eq!(
+        legacy.payload(),
+        LegacyPayloadV1::Unknown {
+            event_type: "turn_input".into(),
+            data: json!({
+                "thread_id": "durable-thread",
+                "run_id": "durable-run",
+                "content": "preserve me exactly",
+                "provenance": "agent",
+            }),
+        }
+    );
+
+    let round_tripped = serde_json::to_value(legacy).unwrap();
+    assert_eq!(round_tripped["correlation"]["session_id"], "legacy-session");
+    assert!(round_tripped["correlation"].get("thread_id").is_none());
+    assert!(round_tripped["correlation"].get("run_id").is_none());
+
+    let restored: HarnessEventV1 = serde_json::from_value(round_tripped).unwrap();
+    let HarnessEventPayloadV1::TurnInput(input) = restored.payload else {
+        panic!("legacy unknown event should decode after upgrading the reader");
+    };
+    assert_eq!(input.thread_id, ThreadId::from("durable-thread"));
+    assert_eq!(input.run_id, Some(RunId::from("durable-run")));
+    assert_eq!(input.content, "preserve me exactly");
 }
 
 #[test]

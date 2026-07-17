@@ -34,7 +34,9 @@ pub fn event(
         sequence,
         correlation: EventCorrelation {
             session_id: Some(SessionId::from(format!("session-{stream}"))),
+            thread_id: Some(ThreadId::from(format!("thread-{stream}"))),
             turn_id: Some(TurnId::from(format!("turn-{stream}"))),
+            run_id: None,
             item_id: Some(ItemId::from(format!("item-{sequence}"))),
             tool_call_id: None,
             parent_tool_call_id: Some(ToolCallId::from("parent")),

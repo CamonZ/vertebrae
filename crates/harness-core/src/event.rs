@@ -48,19 +48,27 @@ macro_rules! string_id {
 string_id!(EventId);
 string_id!(StreamId);
 string_id!(SessionId);
+string_id!(ThreadId);
 string_id!(TurnId);
 string_id!(RunId);
 string_id!(ItemId);
 string_id!(ToolCallId);
 string_id!(ControlRequestId);
 string_id!(ProviderResumeId);
+string_id!(ProviderThreadRef);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventCorrelation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
+    /// Stable logical thread identity, independent of the delivery stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
+    /// One-shot run identity. Every event produced by `run_once` carries this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub item_id: Option<ItemId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -111,6 +119,66 @@ pub struct SessionStarted {
 pub struct TurnStarted {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_summary: Option<String>,
+}
+
+/// Authorship of exact input supplied to a turn or one-shot run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnInputProvenance {
+    Human,
+    Agent,
+    System,
+    Provider,
+}
+
+/// Lossless provider-neutral input. Unlike `TurnStarted::input_summary`, this
+/// contains the complete content and is safe to use for durable replay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnInput {
+    /// Durable canonical thread identity. The correlation copy is routing
+    /// metadata and, when present, must agree with this value.
+    pub thread_id: ThreadId,
+    /// Durable canonical one-shot run identity. `None` denotes an interactive
+    /// turn. The correlation copy, when present, must agree with this value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<RunId>,
+    pub content: String,
+    pub provenance: TurnInputProvenance,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadKind {
+    Root,
+    Subagent,
+}
+
+/// Optional descriptive metadata for an agent-backed thread.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// Declares stable logical thread identity and lineage independently of the
+/// stream that happens to deliver the thread's events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadDeclared {
+    pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_thread_id: Option<ThreadId>,
+    pub kind: ThreadKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caused_by_tool_call_id: Option<ToolCallId>,
+    /// Opaque provider-owned loading handle. It is not a session resume id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_thread_ref: Option<ProviderThreadRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_metadata: Option<AgentMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +246,8 @@ pub struct FileChangeEvent {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageEvent {
-    /// Additive usage for one turn. Reducers sum this field.
+    /// Additive usage for one turn. Reducers sum only this field into lifetime
+    /// totals; usage repeated on terminal outcomes is informational.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_delta: Option<TurnUsage>,
     /// Cumulative session/context usage. Reducers replace this field.
@@ -197,7 +266,9 @@ pub struct DiagnosticEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum HarnessEventPayloadV1 {
     SessionStarted(SessionStarted),
+    ThreadDeclared(ThreadDeclared),
     TurnStarted(TurnStarted),
+    TurnInput(TurnInput),
     Text(TextEvent),
     Reasoning(ReasoningEvent),
     Plan(PlanEvent),
@@ -223,7 +294,9 @@ impl HarnessEventPayloadV1 {
     pub fn event_type(&self) -> &str {
         match self {
             Self::SessionStarted(_) => "session_started",
+            Self::ThreadDeclared(_) => "thread_declared",
             Self::TurnStarted(_) => "turn_started",
+            Self::TurnInput(_) => "turn_input",
             Self::Text(_) => "text",
             Self::Reasoning(_) => "reasoning",
             Self::Plan(_) => "plan",
@@ -245,7 +318,9 @@ impl HarnessEventPayloadV1 {
     fn to_data(&self) -> Result<Value, serde_json::Error> {
         match self {
             Self::SessionStarted(value) => serde_json::to_value(value),
+            Self::ThreadDeclared(value) => serde_json::to_value(value),
             Self::TurnStarted(value) => serde_json::to_value(value),
+            Self::TurnInput(value) => serde_json::to_value(value),
             Self::Text(value) => serde_json::to_value(value),
             Self::Reasoning(value) => serde_json::to_value(value),
             Self::Plan(value) => serde_json::to_value(value),
@@ -273,7 +348,9 @@ impl HarnessEventPayloadV1 {
 
         match event_type.as_str() {
             "session_started" => decode!(SessionStarted, SessionStarted),
+            "thread_declared" => decode!(ThreadDeclared, ThreadDeclared),
             "turn_started" => decode!(TurnStarted, TurnStarted),
+            "turn_input" => decode!(TurnInput, TurnInput),
             "text" => decode!(Text, TextEvent),
             "reasoning" => decode!(Reasoning, ReasoningEvent),
             "plan" => decode!(Plan, PlanEvent),
