@@ -127,13 +127,32 @@ describe("MarkdownContent", () => {
   });
 
   describe("links", () => {
-    it("renders links with target=_blank and rel attributes", () => {
-      render(<MarkdownContent text="Visit [Example](https://example.com)" />);
-      const link = screen.getByText("Example");
+    it.each([
+      ["HTTPS", "https://example.com/path?q=value"],
+      ["HTTP", "http://example.com/path"],
+    ])("renders absolute %s links for external opening", (label, href) => {
+      render(<MarkdownContent text={`Visit [${label}](${href})`} />);
+      const link = screen.getByText(label);
       expect(link.tagName).toBe("A");
-      expect(link).toHaveAttribute("href", "https://example.com");
+      expect(link).toHaveAttribute("href", href);
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it.each([
+      ["relative", "/tasks/123"],
+      ["file", "file:///tmp/private.txt"],
+      ["mailto", "mailto:user@example.com"],
+      ["tel", "tel:+123456789"],
+      ["custom protocol", "vertebrae://task/123"],
+      ["javascript", "javascript:alert(1)"],
+    ])("renders %s links without an actionable href", (label, href) => {
+      render(<MarkdownContent text={`Visit [${label}](${href})`} />);
+      const link = screen.getByText(label);
+      expect(link.tagName).toBe("A");
+      expect(link).not.toHaveAttribute("href");
+      expect(link).not.toHaveAttribute("target");
+      expect(link).not.toHaveAttribute("rel");
     });
   });
 
