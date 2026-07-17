@@ -4,15 +4,9 @@ import { useChatPanelLayout } from "./useChatPanelLayout";
 
 const WIDTH_STORAGE_KEY = "chat-window-manager-width";
 
-function renderPanelHook(
-  overrides: { panelOpen?: boolean; unsplitPanes?: () => void } = {}
-) {
+function renderPanelHook(overrides: { unsplitPanes?: () => void } = {}) {
   const unsplitPanes = overrides.unsplitPanes ?? vi.fn();
-  return renderHook(
-    ({ panelOpen }) =>
-      useChatPanelLayout({ unsplitPanes, panelOpen }),
-    { initialProps: { panelOpen: overrides.panelOpen ?? true } }
-  );
+  return renderHook(() => useChatPanelLayout({ unsplitPanes }));
 }
 
 describe("useChatPanelLayout", () => {
@@ -134,6 +128,23 @@ describe("useChatPanelLayout", () => {
       act(() => result.current.startResizeDrag());
       expect(result.current.isResizing).toBe(true);
     });
+
+    it("widens leftward from the fixed right edge", () => {
+      const { result } = renderPanelHook();
+      Object.defineProperty(result.current.panelRef, "current", {
+        configurable: true,
+        value: {
+          getBoundingClientRect: () => ({ right: 1000 }),
+        },
+      });
+
+      act(() => result.current.startResizeDrag());
+      act(() =>
+        document.dispatchEvent(new MouseEvent("mousemove", { clientX: 500 }))
+      );
+
+      expect(result.current.panelWidth).toBe(500);
+    });
   });
 
   describe("collapseMaximized", () => {
@@ -157,31 +168,25 @@ describe("useChatPanelLayout", () => {
     });
   });
 
-  describe("panel close while maximized", () => {
-    it("collapses maximize when panelOpen turns false", () => {
-      const unsplitPanes = vi.fn();
-      const { result, rerender } = renderPanelHook({
-        panelOpen: true,
-        unsplitPanes,
-      });
-      const widthBefore = result.current.panelWidth;
-      act(() => result.current.toggleMaximized());
-      expect(result.current.isMaximized).toBe(true);
-
-      rerender({ panelOpen: false });
-
-      expect(result.current.isMaximized).toBe(false);
-      expect(result.current.panelWidth).toBe(widthBefore);
-    });
-  });
-
   describe("maximize width clamping", () => {
     it("computeMaximizedWidth respects the MIN_PANEL_WIDTH floor", () => {
       const { result } = renderPanelHook();
-      // With no DOM rect, leftEdge defaults to DEFAULT_PANEL_LEFT_INSET (60).
-      // Width = window.innerWidth - 60 - 16, clamped to >= MIN_PANEL_WIDTH (320).
-      const expected = Math.max(320, window.innerWidth - 60 - 16);
+      // JSDOM has no painted rect, so the right edge falls back to the 12px
+      // application inset. Wide chat preserves 60px at the left edge.
+      const expected = Math.max(320, window.innerWidth - 12 - 60);
       expect(result.current.computeMaximizedWidth()).toBe(expected);
+    });
+
+    it("uses the painted right edge when available", () => {
+      const { result } = renderPanelHook();
+      Object.defineProperty(result.current.panelRef, "current", {
+        configurable: true,
+        value: {
+          getBoundingClientRect: () => ({ right: 1100 }),
+        },
+      });
+
+      expect(result.current.computeMaximizedWidth()).toBe(1040);
     });
   });
 

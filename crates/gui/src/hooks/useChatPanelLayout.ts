@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SIDE_PANEL_INSET_PX } from "../stores/panelLayoutStore";
 
 /** Floating chat-panel width: persistence key and clamp bounds (px). Mirrors
  * the task-detail panel's horizontal resize (TaskDetailPanel.tsx). */
@@ -7,15 +8,13 @@ export const MIN_PANEL_WIDTH = 320;
 export const MAX_PANEL_WIDTH = 760;
 export const DEFAULT_PANEL_WIDTH = 384;
 export const DEFAULT_PANEL_LEFT_INSET = 60;
-export const MAXIMIZED_RIGHT_INSET = 16;
+export const DEFAULT_PANEL_RIGHT_INSET = SIDE_PANEL_INSET_PX;
 /** Keyboard resize step (px) for the drag handle. */
 export const RESIZE_STEP = 16;
 
 interface UseChatPanelLayoutOptions {
   /** When the panel closes while maximized, the split panes should be unsplit. */
   unsplitPanes: () => void;
-  /** Whether the panel is currently open. Closing collapses maximize state. */
-  panelOpen: boolean;
 }
 
 interface UseChatPanelLayoutResult {
@@ -37,21 +36,17 @@ interface UseChatPanelLayoutResult {
 
 /**
  * Panel width / maximize / resize-drag state machine for the floating chat
- * panel. The panel is left-anchored, so a drag on its right edge widens it as
- * the cursor moves right. We measure the panel's fixed left edge from the DOM
+ * panel. The panel is right-anchored, so a drag on its left edge widens it as
+ * the cursor moves left. We measure the panel's fixed right edge from the DOM
  * rather than assuming the inset value.
  */
 export function useChatPanelLayout({
   unsplitPanes,
-  panelOpen,
 }: UseChatPanelLayoutOptions): UseChatPanelLayoutResult {
   const panelRef = useRef<HTMLDivElement>(null);
   const [panelWidth, setPanelWidth] = useState<number>(() => {
     if (typeof window === "undefined") return DEFAULT_PANEL_WIDTH;
-    const stored = parseInt(
-      localStorage.getItem(WIDTH_STORAGE_KEY) ?? "",
-      10
-    );
+    const stored = parseInt(localStorage.getItem(WIDTH_STORAGE_KEY) ?? "", 10);
     return Number.isNaN(stored)
       ? DEFAULT_PANEL_WIDTH
       : Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, stored));
@@ -67,22 +62,14 @@ export function useChatPanelLayout({
     }
   }, [isMaximized, panelWidth]);
 
-  useEffect(() => {
-    if (panelOpen || !isMaximized) return;
-    unsplitPanes();
-    setPanelWidth(restoredPanelWidth);
-    setIsMaximized(false);
-  }, [isMaximized, panelOpen, restoredPanelWidth, unsplitPanes]);
-
   const computeMaximizedWidth = useCallback(() => {
     if (typeof window === "undefined") return MAX_PANEL_WIDTH;
-    const leftEdge =
-      panelRef.current?.getBoundingClientRect().left ??
-      DEFAULT_PANEL_LEFT_INSET;
-    return Math.max(
-      MIN_PANEL_WIDTH,
-      window.innerWidth - leftEdge - MAXIMIZED_RIGHT_INSET
-    );
+    const measuredRightEdge = panelRef.current?.getBoundingClientRect().right;
+    const rightEdge =
+      measuredRightEdge && measuredRightEdge > 0
+        ? measuredRightEdge
+        : window.innerWidth - DEFAULT_PANEL_RIGHT_INSET;
+    return Math.max(MIN_PANEL_WIDTH, rightEdge - DEFAULT_PANEL_LEFT_INSET);
   }, []);
 
   const toggleMaximized = useCallback(() => {
@@ -120,8 +107,12 @@ export function useChatPanelLayout({
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (event: MouseEvent) => {
-      const leftEdge = panelRef.current?.getBoundingClientRect().left ?? 0;
-      resizePanel(event.clientX - leftEdge);
+      const measuredRightEdge = panelRef.current?.getBoundingClientRect().right;
+      const rightEdge =
+        measuredRightEdge && measuredRightEdge > 0
+          ? measuredRightEdge
+          : window.innerWidth - DEFAULT_PANEL_RIGHT_INSET;
+      resizePanel(rightEdge - event.clientX);
     };
     const onUp = () => setIsResizing(false);
     document.addEventListener("mousemove", onMove);
@@ -145,7 +136,7 @@ export function useChatPanelLayout({
     return () => window.removeEventListener("resize", updateMaximizedWidth);
   }, [computeMaximizedWidth, isMaximized]);
 
-  /** Restore the pre-maximize width and unsplit. Used by close handler. */
+  /** Restore the pre-maximize width and unsplit after wide chat is dismissed. */
   const collapseMaximized = useCallback(() => {
     if (isMaximized) {
       unsplitPanes();

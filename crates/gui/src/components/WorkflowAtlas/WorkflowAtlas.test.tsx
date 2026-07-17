@@ -1,5 +1,13 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "../../test/test-utils";
+import { invoke } from "@tauri-apps/api/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   PipelineStep,
   PipelineSummary,
@@ -8,6 +16,7 @@ import type {
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { layoutFull } from "./layout/layoutFull";
 import type { AtlasModel, FullLayout } from "./layout/types";
+import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
 /* ── mocks ─────────────────────────────────────────────────────────
@@ -30,13 +39,18 @@ vi.mock("../../hooks/usePipelineSummary", () => ({
 
 const layoutFullMock = vi.mocked(layoutFull);
 
+beforeEach(() => {
+  usePanelLayoutStore.getState().reset();
+  vi.mocked(invoke).mockResolvedValue(null);
+});
+
 /* ── fixtures ──────────────────────────────────────────────────── */
 
 function makeStep(
   id: string,
   workflowId: string,
   order: number,
-  overrides: Partial<PipelineStep> = {},
+  overrides: Partial<PipelineStep> = {}
 ): PipelineStep {
   return {
     id,
@@ -57,7 +71,7 @@ function makeStep(
 function makeWorkflow(
   id: string,
   steps: PipelineStep[],
-  overrides: Partial<PipelineWorkflow> = {},
+  overrides: Partial<PipelineWorkflow> = {}
 ): PipelineWorkflow {
   return {
     id,
@@ -86,7 +100,7 @@ const FIXTURE: PipelineSummary = {
         }),
         makeStep("s3", "wf-build", 2, { name: "Ship", is_final: true }),
       ],
-      { name: "Build", description: "Build pipeline", kanban_column: "Dev" },
+      { name: "Build", description: "Build pipeline", kanban_column: "Dev" }
     ),
     makeWorkflow(
       "wf-review",
@@ -101,7 +115,7 @@ const FIXTURE: PipelineSummary = {
             pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 2 },
           }),
         ],
-      },
+      }
     ),
   ],
 };
@@ -158,7 +172,10 @@ describe("layoutKey", () => {
         ...w,
         workflow_steps: w.workflow_steps.map((s) => ({
           ...s,
-          pipeline_counts: { ...s.pipeline_counts, active: s.pipeline_counts.active + 5 },
+          pipeline_counts: {
+            ...s.pipeline_counts,
+            active: s.pipeline_counts.active + 5,
+          },
         })),
       })),
     };
@@ -174,10 +191,10 @@ describe("layoutKey", () => {
           ? {
               ...w,
               workflow_steps: w.workflow_steps.map((s) =>
-                s.id === "s2" ? { ...s, step_type: "route" } : s,
+                s.id === "s2" ? { ...s, step_type: "route" } : s
               ),
             }
-          : w,
+          : w
       ),
     };
     const b = buildAtlasModel(retyped);
@@ -187,7 +204,11 @@ describe("layoutKey", () => {
 
 describe("WorkflowAtlas", () => {
   it("shows the loading state before the layout resolves", () => {
-    mockSummary.mockReturnValue({ summary: null, isLoading: true, error: null });
+    mockSummary.mockReturnValue({
+      summary: null,
+      isLoading: true,
+      error: null,
+    });
     layoutFullMock.mockReturnValue(new Promise(() => {}));
     render(<WorkflowAtlas />);
     expect(screen.getByText(/laying out workflow graph/i)).toBeInTheDocument();
@@ -200,7 +221,9 @@ describe("WorkflowAtlas", () => {
       error: null,
     });
     render(<WorkflowAtlas />);
-    expect(await screen.findByText(/no workflows to graph/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/no workflows to graph/i)
+    ).toBeInTheDocument();
   });
 
   it("renders the graph from a fixture summary", async () => {
@@ -216,11 +239,11 @@ describe("WorkflowAtlas", () => {
     // workflow boxes — query the graph face (both faces are mounted for the
     // P6 morph; the map face is just hidden in graph view)
     await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument(),
+      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
-    const graphNames = Array.from(
-      document.querySelectorAll(".ag-wf-name"),
-    ).map((n) => n.textContent);
+    const graphNames = Array.from(document.querySelectorAll(".ag-wf-name")).map(
+      (n) => n.textContent
+    );
     expect(graphNames).toContain("Build");
     expect(graphNames).toContain("Review");
 
@@ -237,6 +260,37 @@ describe("WorkflowAtlas", () => {
     expect(screen.getByPlaceholderText(/find a workflow/i)).toBeInTheDocument();
   });
 
+  it("keeps workflow and step inspectors to the left of normal chat", async () => {
+    usePanelLayoutStore.getState().setChatLayout({
+      isPresent: true,
+      renderedWidth: 432,
+      isMaximized: false,
+    });
+    mockSummary.mockReturnValue({
+      summary: FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+    await waitFor(() =>
+      expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-node-Build"));
+    expect(await screen.findByText(/Workflow Details/)).toBeInTheDocument();
+    const inspector = screen.getByTestId("workflow-atlas-inspector");
+    expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
+    expect(inspector.style.getPropertyValue("--detail-panel-chat-offset")).toBe(
+      "calc(432px + var(--s-3))"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Step Execute" }));
+    expect(await screen.findByText("Step Configuration")).toBeInTheDocument();
+    expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
+  });
+
   it("does not re-run the ELK layout when only pipeline_counts change", async () => {
     mockSummary.mockReturnValue({
       summary: FIXTURE,
@@ -247,7 +301,7 @@ describe("WorkflowAtlas", () => {
 
     const { rerender } = render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument(),
+      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
     expect(layoutFullMock).toHaveBeenCalledTimes(1);
 
@@ -285,7 +339,7 @@ describe("WorkflowAtlas — MAP view", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     // condensed cards render synchronously once the map is active
     await waitFor(() =>
-      expect(document.querySelector(".al-name")).toBeInTheDocument(),
+      expect(document.querySelector(".al-name")).toBeInTheDocument()
     );
     return utils;
   }
@@ -293,7 +347,7 @@ describe("WorkflowAtlas — MAP view", () => {
   /** The travelling card wrapper for a workflow, found via its map-face name. */
   function mapCard(name: string): HTMLElement {
     const names = Array.from(
-      document.querySelectorAll<HTMLElement>(".al-name"),
+      document.querySelectorAll<HTMLElement>(".al-name")
     );
     const el = names.find((n) => n.textContent === name);
     if (!el) throw new Error(`no map card for "${name}"`);
@@ -305,16 +359,18 @@ describe("WorkflowAtlas — MAP view", () => {
     expect(mapCard("Build")).toBeInTheDocument();
     expect(mapCard("Review")).toBeInTheDocument();
     // phase-column headers from kanban_column
-    const headers = Array.from(
-      document.querySelectorAll(".al-stagehd"),
-    ).map((h) => h.textContent ?? "");
+    const headers = Array.from(document.querySelectorAll(".al-stagehd")).map(
+      (h) => h.textContent ?? ""
+    );
     expect(headers.some((t) => t.includes("Dev"))).toBe(true);
     expect(headers.some((t) => t.includes("QA"))).toBe(true);
   });
 
   it("renders step strips as ribbons", async () => {
     await renderMap();
-    expect(screen.getAllByTestId("step-strip-ribbon").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("step-strip-ribbon").length).toBeGreaterThan(
+      0
+    );
   });
 
   it("dims non-matching cards when searching", async () => {
@@ -398,10 +454,10 @@ describe("WorkflowAtlas — morph (P6)", () => {
 
     render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument(),
+      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
     const before = Array.from(
-      document.querySelectorAll<HTMLElement>(".uv-wf"),
+      document.querySelectorAll<HTMLElement>(".uv-wf")
     ).find((el) => el.querySelector(".ag-wf-name")?.textContent === "Build")!;
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
@@ -416,8 +472,9 @@ describe("WorkflowAtlas — morph (P6)", () => {
 describe("WorkflowAtlas — hover-trace (P7)", () => {
   /** The travelling box wrapper for a workflow, found via its graph-face name. */
   function graphBox(name: string): HTMLElement {
-    const el = Array.from(document.querySelectorAll<HTMLElement>(".ag-wf-name"))
-      .find((n) => n.textContent === name)!;
+    const el = Array.from(
+      document.querySelectorAll<HTMLElement>(".ag-wf-name")
+    ).find((n) => n.textContent === name)!;
     return el.closest(".uv-wf") as HTMLElement;
   }
 
@@ -431,7 +488,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
     render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument(),
+      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
 
     const build = graphBox("Build");
@@ -464,14 +521,14 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
     render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelector(".ag-step")).toBeInTheDocument(),
+      expect(document.querySelector(".ag-step")).toBeInTheDocument()
     );
 
     const build = graphBox("Build");
     const review = graphBox("Review");
     // The "Execute" step node of wf-build (paints in the layer above the box).
     const stepName = Array.from(
-      document.querySelectorAll<HTMLElement>(".ag-step-name"),
+      document.querySelectorAll<HTMLElement>(".ag-step-name")
     ).find((n) => n.textContent === "Execute")!;
     const stepNode = stepName.closest(".ag-step") as HTMLElement;
 
@@ -486,9 +543,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     // leaving the node clears both the trace and the node emphasis
     fireEvent.mouseLeave(stepNode);
     expect(build.className).not.toContain("lit");
-    expect(
-      document.querySelector(".ag-step.s-hover"),
-    ).not.toBeInTheDocument();
+    expect(document.querySelector(".ag-step.s-hover")).not.toBeInTheDocument();
   });
 
   it("lights the matching canvas edge while an inspector transition row is hovered", async () => {
@@ -525,7 +580,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
 
     render(<WorkflowAtlas />);
     await waitFor(() =>
-      expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument(),
+      expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
     );
     const loopEdge = document.querySelector(".gedge.k-loop")!;
     expect(loopEdge.getAttribute("class")).not.toContain("lit");
@@ -571,7 +626,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     mockSummary.mockReturnValue({ summary, isLoading: false, error: null });
 
     const cross = buildAtlasModel(summary).edges.find(
-      (e) => e.kind === "cross",
+      (e) => e.kind === "cross"
     )!;
     layoutFullMock.mockImplementation(async (m) => {
       const base = stubLayout(m);
@@ -599,8 +654,8 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     // handoff path for the same workflow pair).
     await waitFor(() =>
       expect(
-        document.querySelector(".ag-edges .gedge.k-handoff"),
-      ).toBeInTheDocument(),
+        document.querySelector(".ag-edges .gedge.k-handoff")
+      ).toBeInTheDocument()
     );
     const edge = document.querySelector(".ag-edges .gedge.k-handoff")!;
 
@@ -642,7 +697,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     mockSummary.mockReturnValue({ summary, isLoading: false, error: null });
 
     const cross = buildAtlasModel(summary).edges.find(
-      (e) => e.kind === "cross",
+      (e) => e.kind === "cross"
     )!;
     layoutFullMock.mockImplementation(async (m) => {
       const base = stubLayout(m);
@@ -668,8 +723,8 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     render(<WorkflowAtlas />);
     await waitFor(() =>
       expect(
-        document.querySelector(".ag-edges .gedge.k-handoff"),
-      ).toBeInTheDocument(),
+        document.querySelector(".ag-edges .gedge.k-handoff")
+      ).toBeInTheDocument()
     );
     const edge = document.querySelector(".ag-edges .gedge.k-handoff")!;
 
