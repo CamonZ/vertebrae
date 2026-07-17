@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
@@ -8,6 +14,7 @@ import { useChatPanelLayout } from "../../hooks/useChatPanelLayout";
 import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
+import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { ChatPaneList } from "./ChatPaneList";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
@@ -24,7 +31,7 @@ const EXIT_MS = 180;
 
 /**
  * ChatWindowManager manages multiple chat session tabs in a floating-glass side
- * panel anchored bottom-left (design reference `.hc-panel`, opened by the
+ * panel anchored on the right (design reference `.hc-panel`, opened by the
  * FloatingChatLauncher pill). Renders the active session's ChatWindow, which
  * owns the single header band (title + status) and the composer.
  */
@@ -123,7 +130,7 @@ export function ChatWindowManager() {
     resizePanel,
     startResizeDrag,
     collapseMaximized,
-  } = useChatPanelLayout({ unsplitPanes, panelOpen });
+  } = useChatPanelLayout({ unsplitPanes });
 
   const {
     loadCurrentProjectPath,
@@ -162,15 +169,16 @@ export function ChatWindowManager() {
   });
 
   const open = panelOpen && sessionList.length > 0;
+  const setChatLayout = usePanelLayoutStore((s) => s.setChatLayout);
+  const clearChatLayout = usePanelLayoutStore((s) => s.clearChatLayout);
 
   useEffect(() => {
     if (!open) setShortcutsOpen(false);
   }, [open]);
 
   const closeChatPanel = useCallback(() => {
-    collapseMaximized();
     togglePanel();
-  }, [collapseMaximized, togglePanel]);
+  }, [togglePanel]);
 
   const startFreshActiveSession = useCallback(async () => {
     if (!activeSession) return false;
@@ -314,6 +322,25 @@ export function ChatWindowManager() {
     open,
     EXIT_MS
   );
+
+  // Publish before paint so every page-local FloatingDetailPanel follows the
+  // chat width without a visible frame at the old right inset. `mounted` stays
+  // true through exit, keeping adjacent panels stable until chat is gone.
+  useLayoutEffect(() => {
+    setChatLayout({
+      isPresent: mounted,
+      renderedWidth: mounted ? renderedPanelWidth : 0,
+      isMaximized: mounted && isMaximized,
+    });
+  }, [isMaximized, mounted, renderedPanelWidth, setChatLayout]);
+
+  useEffect(() => () => clearChatLayout(), [clearChatLayout]);
+
+  // Wide state is restored only after the exit surface disappears. Collapsing
+  // earlier would shrink the chat and move an adjacent panel during drill-out.
+  useEffect(() => {
+    if (!mounted) collapseMaximized();
+  }, [collapseMaximized, mounted]);
 
   if (!mounted) {
     return null;

@@ -21,8 +21,8 @@ async function loadCurrentProjectPath(): Promise<string | null> {
 
 /**
  * Floating launcher pill for the project chat, adapted from the design
- * reference (docs/design/lib/lib-chat.jsx `.hc-launch`). Floats bottom-left,
- * clear of the nav rail, and is shown only while the chat panel is closed —
+ * reference (docs/design/lib/lib-chat.jsx `.hc-launch`). Floats bottom-right
+ * at the same edge as chat, and is shown only while the panel is closed —
  * clicking it (or double-tapping Alt) opens the claude-binary project chat
  * (chatStore) in the floating-glass panel (ChatWindowManager).
  *
@@ -94,7 +94,7 @@ export function FloatingChatLauncher() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [toggleChat]);
 
-  // While the panel is open it owns the bottom-left anchor; hide the pill.
+  // While the panel is open it owns the bottom-right anchor; hide the pill.
   if (panelOpen) return null;
 
   return (

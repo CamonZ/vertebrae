@@ -3,9 +3,15 @@ import {
   useRef,
   useState,
   type AnimationEventHandler,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
+import {
+  SIDE_PANEL_GAP_PX,
+  SIDE_PANEL_INSET_PX,
+  usePanelLayoutStore,
+} from "../../stores/panelLayoutStore";
 
 interface FloatingDetailPanelProps {
   /** Stable id for the shared glass-panel focus stack (single Escape closes the focused panel). */
@@ -86,12 +92,36 @@ export function FloatingDetailPanel({
       : Math.min(maxWidth, Math.max(minWidth, stored));
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? Number.POSITIVE_INFINITY : window.innerWidth
+  );
+  const chatLayout = usePanelLayoutStore((s) => s.chat);
+  const availableAdjacentWidth =
+    viewportWidth -
+    chatLayout.renderedWidth -
+    SIDE_PANEL_GAP_PX -
+    SIDE_PANEL_INSET_PX * 2;
+  const isChatAdjacent =
+    chatLayout.isPresent &&
+    !chatLayout.isMaximized &&
+    availableAdjacentWidth >= minWidth;
+  const chatOffset = isChatAdjacent
+    ? `calc(${chatLayout.renderedWidth}px + var(--s-3))`
+    : "0px";
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       localStorage.setItem(widthStorageKey, String(panelWidth));
     }
   }, [panelWidth, widthStorageKey]);
+
+  useEffect(() => {
+    if (standalone || typeof window === "undefined") return;
+    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, [standalone]);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -142,10 +172,16 @@ export function FloatingDetailPanel({
     <div
       ref={panelRef}
       className={`${className} detail detail-float${closing ? " is-closing" : ""}`.trim()}
-      style={{ width: `${panelWidth}px` }}
+      style={
+        {
+          width: `${panelWidth}px`,
+          "--detail-panel-chat-offset": chatOffset,
+        } as CSSProperties
+      }
       data-testid={testId}
       data-focused={isFocused || undefined}
       data-closing={closing || undefined}
+      data-chat-adjacent={isChatAdjacent || undefined}
       onAnimationEnd={onExitAnimationEnd}
       {...focusProps}
     >

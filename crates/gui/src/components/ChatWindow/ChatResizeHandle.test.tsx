@@ -57,23 +57,7 @@ describe("ChatResizeHandle", () => {
     expect(startResizeDrag).toHaveBeenCalledTimes(1);
   });
 
-  it("increases width on ArrowRight keydown", () => {
-    const resizePanel = vi.fn();
-    render(
-      <ChatResizeHandle
-        renderedPanelWidth={400}
-        isResizing={false}
-        startResizeDrag={vi.fn()}
-        resizePanel={resizePanel}
-      />
-    );
-    fireEvent.keyDown(screen.getByTestId("chat-resize-handle"), {
-      key: "ArrowRight",
-    });
-    expect(resizePanel).toHaveBeenCalledWith(416);
-  });
-
-  it("decreases width on ArrowLeft keydown", () => {
+  it("increases width on ArrowLeft keydown", () => {
     const resizePanel = vi.fn();
     render(
       <ChatResizeHandle
@@ -85,6 +69,22 @@ describe("ChatResizeHandle", () => {
     );
     fireEvent.keyDown(screen.getByTestId("chat-resize-handle"), {
       key: "ArrowLeft",
+    });
+    expect(resizePanel).toHaveBeenCalledWith(416);
+  });
+
+  it("decreases width on ArrowRight keydown", () => {
+    const resizePanel = vi.fn();
+    render(
+      <ChatResizeHandle
+        renderedPanelWidth={400}
+        isResizing={false}
+        startResizeDrag={vi.fn()}
+        resizePanel={resizePanel}
+      />
+    );
+    fireEvent.keyDown(screen.getByTestId("chat-resize-handle"), {
+      key: "ArrowRight",
     });
     expect(resizePanel).toHaveBeenCalledWith(384);
   });

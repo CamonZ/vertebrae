@@ -11,7 +11,7 @@ interface ChatResizeHandleProps {
   resizePanel: (nextWidth: number) => void;
 }
 
-/** Right-edge drag handle for horizontal panel resize. */
+/** Left-edge drag handle for a right-anchored panel. */
 export function ChatResizeHandle({
   renderedPanelWidth,
   isResizing,
@@ -35,9 +35,9 @@ export function ChatResizeHandle({
         startResizeDrag();
       }}
       onKeyDown={(event) => {
-        if (event.key === "ArrowRight") {
+        if (event.key === "ArrowLeft") {
           resizePanel(renderedPanelWidth + RESIZE_STEP);
-        } else if (event.key === "ArrowLeft") {
+        } else if (event.key === "ArrowRight") {
           resizePanel(renderedPanelWidth - RESIZE_STEP);
         }
       }}

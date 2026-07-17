@@ -37,6 +37,7 @@ vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
+import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import type { ChatSession } from "../../stores/chatStore";
 import {
   clearPersistedLocalChatSessions,
@@ -196,6 +197,7 @@ describe("ChatWindowManager", () => {
       localSessionSummaries: {},
     });
     usePanelFocusStore.getState().reset();
+    usePanelLayoutStore.getState().reset();
   });
 
   it("does not render when panel is closed", () => {
@@ -238,6 +240,11 @@ describe("ChatWindowManager", () => {
     // The session label is the header title; tabs were removed.
     expect(screen.getByText("New Chat")).toBeInTheDocument();
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
+    expect(usePanelLayoutStore.getState().chat).toEqual({
+      isPresent: true,
+      renderedWidth: 384,
+      isMaximized: false,
+    });
   });
 
   it("toggles maximized width with Cmd+\\ and restores the prior normal width", () => {
@@ -263,7 +270,12 @@ describe("ChatWindowManager", () => {
 
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
     expect(panel).toHaveAttribute("data-maximized", "true");
-    expect(panel).toHaveStyle({ width: "1184px" });
+    expect(panel).toHaveStyle({ width: "1128px" });
+    expect(usePanelLayoutStore.getState().chat).toEqual({
+      isPresent: true,
+      renderedWidth: 1128,
+      isMaximized: true,
+    });
     expect(localStorage.getItem("chat-window-manager-width")).toBe("384");
 
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
@@ -572,7 +584,7 @@ describe("ChatWindowManager", () => {
 
     const panel = screen.getByTestId("chat-window-manager");
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
-    expect(panel).toHaveStyle({ width: "1184px" });
+    expect(panel).toHaveStyle({ width: "1128px" });
 
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -580,7 +592,7 @@ describe("ChatWindowManager", () => {
     });
     fireEvent.resize(window);
 
-    expect(panel).toHaveStyle({ width: "884px" });
+    expect(panel).toHaveStyle({ width: "828px" });
   });
 
   it("ignores Cmd+\\ when the chat panel is closed or has no sessions", () => {
@@ -634,7 +646,7 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(textarea, { key: "\\", metaKey: true });
 
     expect(panel).toHaveAttribute("data-maximized", "true");
-    expect(panel).toHaveStyle({ width: "1184px" });
+    expect(panel).toHaveStyle({ width: "1128px" });
   });
 
   it("manual keyboard resize exits maximized mode and stores the restored width", () => {
@@ -2063,6 +2075,42 @@ describe("ChatWindowManager", () => {
     // The exit animation finishing on the panel root unmounts it.
     fireEvent.animationEnd(panel);
     expect(screen.queryByTestId("chat-window-manager")).not.toBeInTheDocument();
+    expect(usePanelLayoutStore.getState().chat.isPresent).toBe(false);
+  });
+
+  it("keeps wide geometry published until the exit animation completes", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1200,
+    });
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    const panel = screen.getByTestId("chat-window-manager");
+
+    act(() => useChatStore.setState({ panelOpen: false }));
+
+    expect(panel).toHaveAttribute("data-maximized", "true");
+    expect(panel).toHaveStyle({ width: "1128px" });
+    expect(usePanelLayoutStore.getState().chat).toEqual({
+      isPresent: true,
+      renderedWidth: 1128,
+      isMaximized: true,
+    });
+
+    fireEvent.animationEnd(panel);
+
+    expect(usePanelLayoutStore.getState().chat).toEqual({
+      isPresent: false,
+      renderedWidth: 0,
+      isMaximized: false,
+    });
   });
 
   // --- Detach / reattach ---
