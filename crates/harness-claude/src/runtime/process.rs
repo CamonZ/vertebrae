@@ -9,6 +9,11 @@ use vertebrae_harness_core::HarnessError;
 
 use crate::ClaudeCommandSpec;
 
+/// Bounds in-memory provider output while the runtime is busy handling an
+/// event sink or a control response. Reader tasks naturally apply backpressure
+/// to the child process once this queue is full.
+const OUTPUT_CHANNEL_CAPACITY: usize = 256;
+
 pub(super) enum ProcessOutput {
     Stdout(String),
     Stderr(String),
@@ -46,25 +51,30 @@ pub(super) fn spawn_process(
 pub(super) fn spawn_output_readers(
     stdout: tokio::process::ChildStdout,
     stderr: tokio::process::ChildStderr,
-) -> mpsc::UnboundedReceiver<ProcessOutput> {
-    let (sender, receiver) = mpsc::unbounded_channel();
+) -> mpsc::Receiver<ProcessOutput> {
+    let (sender, receiver) = mpsc::channel(OUTPUT_CHANNEL_CAPACITY);
     let stdout_sender = sender.clone();
     tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
-                    if stdout_sender.send(ProcessOutput::Stdout(line)).is_err() {
+                    if stdout_sender
+                        .send(ProcessOutput::Stdout(line))
+                        .await
+                        .is_err()
+                    {
                         return;
                     }
                 }
                 Ok(None) => {
-                    let _ = stdout_sender.send(ProcessOutput::StdoutClosed);
+                    let _ = stdout_sender.send(ProcessOutput::StdoutClosed).await;
                     return;
                 }
                 Err(error) => {
-                    let _ =
-                        stdout_sender.send(ProcessOutput::ReadError(format!("stdout: {error}")));
+                    let _ = stdout_sender
+                        .send(ProcessOutput::ReadError(format!("stdout: {error}")))
+                        .await;
                     return;
                 }
             }
@@ -75,16 +85,18 @@ pub(super) fn spawn_output_readers(
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
-                    if sender.send(ProcessOutput::Stderr(line)).is_err() {
+                    if sender.send(ProcessOutput::Stderr(line)).await.is_err() {
                         return;
                     }
                 }
                 Ok(None) => {
-                    let _ = sender.send(ProcessOutput::StderrClosed);
+                    let _ = sender.send(ProcessOutput::StderrClosed).await;
                     return;
                 }
                 Err(error) => {
-                    let _ = sender.send(ProcessOutput::ReadError(format!("stderr: {error}")));
+                    let _ = sender
+                        .send(ProcessOutput::ReadError(format!("stderr: {error}")))
+                        .await;
                     return;
                 }
             }
@@ -126,4 +138,39 @@ pub(super) async fn reap(
         .await
         .ok()
         .and_then(Result::ok)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn output_readers_apply_backpressure_at_capacity() {
+        let mut child = Command::new("sh")
+            .args([
+                "-c",
+                "i=0; while [ $i -lt 300 ]; do printf '%s\\n' line; i=$((i + 1)); done",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let output = spawn_output_readers(stdout, stderr);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while output.len() < OUTPUT_CHANNEL_CAPACITY {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("reader should fill its bounded queue");
+        assert_eq!(output.len(), OUTPUT_CHANNEL_CAPACITY);
+
+        drop(output);
+        let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+    }
 }
