@@ -440,6 +440,10 @@ while IFS= read -r line; do
       printf '%s\n' '{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}'
       printf '%s\n' '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}'
       ;;
+    *clear*)
+      printf '%s\n' '{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"}}'
+      printf '%s\n' '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Cleared </local-command-stdout>"}}'
+      ;;
   esac
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"skill handled"}]}}'
   printf '%s\n' '{"type":"result","subtype":"success","result":"skill handled"}'
@@ -460,7 +464,11 @@ done
         .await
         .unwrap();
 
-    for (turn_id, content) in [("compact-turn", "/compact"), ("follow-up", "run skill")] {
+    for (turn_id, content) in [
+        ("compact-turn", "/compact"),
+        ("clear-turn", "/clear"),
+        ("follow-up", "run skill"),
+    ] {
         let turn = session
             .send(SendTurnRequest {
                 turn_id: TurnId::from(turn_id),

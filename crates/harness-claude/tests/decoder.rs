@@ -99,6 +99,20 @@ fn slash_commands_and_compact_summaries_are_silent_user_records() {
         .unwrap();
     assert!(command_output.is_empty());
 
+    let clear_command = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>\n<command-message>clear</command-message>\n<command-args></command-args>"}}"#,
+        )
+        .unwrap();
+    assert!(clear_command.is_empty());
+
+    let clear_output = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Cleared </local-command-stdout>"}}"#,
+        )
+        .unwrap();
+    assert!(clear_output.is_empty());
+
     let tool_result = decoder
         .decode_line(
             r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]}}"#,
