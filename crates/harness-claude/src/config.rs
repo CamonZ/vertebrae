@@ -89,7 +89,8 @@ pub struct ClaudeProviderConfig {
     pub permission_prompt_tool: Option<String>,
     pub mcp_config: Option<Value>,
     pub cleanup_timeout: Duration,
-    /// Maximum time `start_session` waits for Claude's canonical init record.
+    /// Maximum time a persistent session waits for Claude's canonical init
+    /// record after its first turn is written.
     pub initialization_timeout: Duration,
     /// Grace allowed for a one-shot process to exit after its terminal result.
     pub terminal_exit_timeout: Duration,

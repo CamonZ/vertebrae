@@ -87,13 +87,10 @@ enum SessionCommand {
 
 struct PendingTurn {
     id: TurnId,
+    content: String,
+    input_emitted: bool,
+    response: Option<oneshot::Sender<Result<(), String>>>,
     outcome_tx: watch::Sender<OutcomeState<TurnOutcome>>,
-}
-
-#[derive(Debug)]
-struct CanonicalSessionIdentity {
-    session_id: SessionId,
-    provider_resume_id: ProviderResumeId,
 }
 
 struct PendingControl {
@@ -183,9 +180,14 @@ impl HarnessRuntime for ClaudeRuntime {
         })?;
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (close_tx, close_rx) = watch::channel(OutcomeState::Pending);
-        let (init_tx, init_rx) = oneshot::channel();
         let context = ClaudeDecodeContext {
-            session_id: Some(request.session_id.clone()),
+            // A newly created Claude session has no provider conversation id
+            // until the first input causes Claude to emit system/init. A
+            // resumed session can safely send its known provider id.
+            session_id: request
+                .resume_id
+                .as_ref()
+                .map(|resume_id| SessionId::new(resume_id.as_str())),
             root_thread_id: ThreadId::new(request.session_id.as_str()),
             root_stream_id: request.stream_id,
             turn_id: None,
@@ -202,34 +204,20 @@ impl HarnessRuntime for ClaudeRuntime {
             stderr,
             command_rx,
             close_tx,
-            init_tx,
             context,
             event_sink,
             control_sink,
             cleanup_timeout,
+            initialization_timeout,
             root_locator_resolver,
         ));
-        let identity = match tokio::time::timeout(initialization_timeout, init_rx).await {
-            Ok(Ok(Ok(identity))) => identity,
-            Ok(Ok(Err(error))) => return Err(HarnessError::Operation(error)),
-            Ok(Err(_)) => {
-                return Err(HarnessError::Operation(
-                    "Claude session ended before canonical initialization".into(),
-                ));
-            }
-            Err(_) => {
-                let (response, _receiver) = oneshot::channel();
-                let _ = command_tx.send(SessionCommand::Close { response });
-                let _ = tokio::time::timeout(cleanup_timeout, await_state(close_rx.clone())).await;
-                return Err(HarnessError::Operation(format!(
-                    "Claude session initialization timed out after {} ms",
-                    initialization_timeout.as_millis()
-                )));
-            }
-        };
         Ok(Arc::new(ClaudeSessionHandle {
-            session_id: identity.session_id,
-            provider_resume_id: Some(identity.provider_resume_id),
+            // Claude Code emits its canonical system/init record only after
+            // the first stream-json user message. The authoritative provider
+            // identity arrives through SessionStarted; these request values
+            // keep the handle usable while that first turn is in flight.
+            session_id: request.session_id,
+            provider_resume_id: request.resume_id,
             command_tx,
             close_rx,
         }))
@@ -477,11 +465,11 @@ async fn run_persistent_process_v2(
     stderr: tokio::process::ChildStderr,
     mut commands: mpsc::UnboundedReceiver<SessionCommand>,
     close_tx: watch::Sender<OutcomeState<SessionCloseOutcome>>,
-    init_tx: oneshot::Sender<Result<CanonicalSessionIdentity, String>>,
     context: ClaudeDecodeContext,
     event_sink: Arc<dyn EventSink>,
     control_sink: Arc<dyn ControlSink>,
     cleanup_timeout: std::time::Duration,
+    initialization_timeout: std::time::Duration,
     root_locator_resolver: Option<Arc<dyn ClaudeRootLocatorResolver>>,
 ) {
     let stream_id = context.root_stream_id.clone();
@@ -490,7 +478,9 @@ async fn run_persistent_process_v2(
         ClaudeStreamDecoder::with_root_locator_resolver(context, root_locator_resolver);
     let mut output = spawn_output_readers(stdout, stderr);
     let mut pending_turn: Option<PendingTurn> = None;
-    let mut init_tx = Some(init_tx);
+    let mut initialization_timer = Box::pin(tokio::time::sleep(initialization_timeout));
+    let mut initialization_timer_armed = false;
+    let mut initialized = false;
     let (control_tx, mut control_rx) = mpsc::unbounded_channel::<ControlCompletion>();
     let mut controls = HashMap::new();
     let mut close_response = None;
@@ -504,16 +494,45 @@ async fn run_persistent_process_v2(
 
     'process: loop {
         tokio::select! {
+            _ = &mut initialization_timer, if initialization_timer_armed && !initialized => {
+                close_status = SessionCloseStatus::Failed;
+                close_error = Some(format!(
+                    "Claude session initialization timed out after {} ms",
+                    initialization_timeout.as_millis()
+                ));
+                break 'process;
+            }
             command = commands.recv() => match command {
                 Some(SessionCommand::Send { request, outcome_tx, response }) => {
                     if pending_turn.is_some() {
                         let _ = response.send(Err("Claude accepts only one active turn per session".into()));
                         continue;
                     }
-                    match begin_persistent_turn(&mut stdin, request, outcome_tx, &mut decoder, &sequenced).await {
-                        Ok(turn) => { pending_turn = Some(turn); let _ = response.send(Ok(())); }
+                    match begin_persistent_turn(
+                        &mut stdin,
+                        request,
+                        outcome_tx,
+                        response,
+                        &mut decoder,
+                        &sequenced,
+                    )
+                    .await
+                    {
+                        Ok(turn) => {
+                            if !initialized {
+                                initialization_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                                initialization_timer_armed = true;
+                            }
+                            let initialized_before_send = turn.input_emitted;
+                            pending_turn = Some(turn);
+                            if initialized_before_send
+                                && let Some(turn) = pending_turn.as_mut()
+                                && let Some(response) = turn.response.take()
+                            {
+                                let _ = response.send(Ok(()));
+                            }
+                        }
                         Err(error) => {
-                            let _ = response.send(Err(error.clone()));
                             close_status = SessionCloseStatus::Failed;
                             close_error = Some(error);
                             break 'process;
@@ -527,6 +546,12 @@ async fn run_persistent_process_v2(
                     }
                     let outcome = TurnOutcome { status: CompletionStatus::Interrupted, result_text: None, structured_output: None, usage: None, metrics: vertebrae_harness_core::OutcomeMetrics::default(), error: None };
                     if let Some(turn) = pending_turn.take() {
+                        if let Some(response) = turn.response {
+                            let _ = response.send(Err(
+                                "Claude turn was interrupted before canonical initialization"
+                                    .into(),
+                            ));
+                        }
                         let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome.clone()));
                     }
                     let context = decoder.context().clone();
@@ -624,6 +649,24 @@ async fn run_persistent_process_v2(
                                 close_error = Some(error.to_string());
                                 break 'process;
                             }
+                            if saw_root_declaration {
+                                initialized = true;
+                                initialization_timer_armed = false;
+                                if let Some(turn) = pending_turn.as_mut()
+                                    && !turn.input_emitted
+                                    && let Err(error) = emit_pending_turn_input(turn, &decoder, &sequenced).await
+                                {
+                                    close_status = SessionCloseStatus::Failed;
+                                    close_error = Some(error);
+                                    break 'process;
+                                }
+                                if let Some(turn) = pending_turn.as_mut()
+                                    && turn.input_emitted
+                                    && let Some(response) = turn.response.take()
+                                {
+                                    let _ = response.send(Ok(()));
+                                }
+                            }
                             if let Some(outcome) = terminal
                                 && let Some(turn) = pending_turn.take()
                             {
@@ -644,13 +687,6 @@ async fn run_persistent_process_v2(
                                     break 'process;
                                 }
                             }
-                        }
-                        if saw_root_declaration
-                            && let Some(sender) = init_tx.take()
-                        {
-                            let context = decoder.context();
-                            let identity = context.session_id.clone().zip(context.provider_resume_id.clone()).map(|(session_id, provider_resume_id)| CanonicalSessionIdentity { session_id, provider_resume_id });
-                            let _ = sender.send(identity.ok_or_else(|| "Claude init did not contain a canonical conversation id".into()));
                         }
                     }
                     Err(error) => {
@@ -704,7 +740,25 @@ async fn run_persistent_process_v2(
             "event sink failed while settling Claude controls: {error}"
         ));
     }
-    if let Some(turn) = pending_turn.take() {
+    if let Some(mut turn) = pending_turn.take() {
+        let was_initialized = initialized;
+        if was_initialized
+            && !turn.input_emitted
+            && let Err(error) = emit_pending_turn_input(&mut turn, &decoder, &sequenced).await
+        {
+            close_status = SessionCloseStatus::Failed;
+            close_error = Some(error);
+        }
+        if let Some(response) = turn.response.take() {
+            let error = close_error
+                .clone()
+                .unwrap_or_else(|| "Claude session ended before canonical initialization".into());
+            let _ = response.send(if was_initialized && turn.input_emitted {
+                Ok(())
+            } else {
+                Err(error)
+            });
+        }
         let error = close_error
             .clone()
             .unwrap_or_else(|| "Claude session closed during active turn".into());
@@ -753,11 +807,6 @@ async fn run_persistent_process_v2(
     {
         close_status = SessionCloseStatus::Failed;
         close_error = Some(format!("Claude exited with status {status}"));
-    }
-    if let Some(sender) = init_tx.take() {
-        let _ = sender.send(Err(close_error
-            .clone()
-            .unwrap_or_else(|| "Claude session ended before init".into())));
     }
     let outcome = SessionCloseOutcome {
         status: close_status,
@@ -1331,24 +1380,56 @@ async fn begin_persistent_turn(
     stdin: &mut ChildStdin,
     request: SendTurnRequest,
     outcome_tx: watch::Sender<OutcomeState<TurnOutcome>>,
+    response: oneshot::Sender<Result<(), String>>,
     decoder: &mut ClaudeStreamDecoder,
     sink: &SequencedEventSink,
 ) -> Result<PendingTurn, String> {
     if request.output_schema.is_some() {
-        return Err("per-turn output schemas require a new Claude process".into());
+        let error = "per-turn output schemas require a new Claude process".to_string();
+        let _ = response.send(Err(error.clone()));
+        return Err(error);
     }
     let context = decoder.context().clone();
     let encoded = encode_user_message(context.session_id.as_ref(), &request.content);
     if let Err(error) = write_line(stdin, &encoded).await {
         let error = format!("failed to write Claude stdin: {error}");
         let _ = outcome_tx.send(OutcomeState::Failed(error.clone()));
+        let _ = response.send(Err(error.clone()));
         return Err(error);
     }
     decoder.context_mut().turn_id = Some(request.turn_id.clone());
+    let mut pending = PendingTurn {
+        id: request.turn_id,
+        content: request.content,
+        input_emitted: false,
+        response: Some(response),
+        outcome_tx,
+    };
+    if decoder.root_declared()
+        && let Err(error) = emit_pending_turn_input(&mut pending, decoder, sink).await
+    {
+        let _ = pending.outcome_tx.send(OutcomeState::Failed(error.clone()));
+        if let Some(response) = pending.response.take() {
+            let _ = response.send(Err(error.clone()));
+        }
+        return Err(error);
+    }
+    Ok(pending)
+}
+
+async fn emit_pending_turn_input(
+    turn: &mut PendingTurn,
+    decoder: &ClaudeStreamDecoder,
+    sink: &SequencedEventSink,
+) -> Result<(), String> {
+    if turn.input_emitted {
+        return Ok(());
+    }
+    let context = decoder.context().clone();
     let mut event_correlation = correlation(
         context.session_id,
         &context.root_thread_id,
-        Some(request.turn_id.clone()),
+        Some(turn.id.clone()),
         None,
     );
     event_correlation.provider_resume_id = context.provider_resume_id;
@@ -1357,7 +1438,7 @@ async fn begin_persistent_turn(
         context.root_stream_id.clone(),
         event_correlation.clone(),
         HarnessEventPayloadV1::TurnStarted(TurnStarted {
-            input_summary: summary(&request.content),
+            input_summary: summary(&turn.content),
         }),
     )
     .await
@@ -1369,21 +1450,17 @@ async fn begin_persistent_turn(
             HarnessEventPayloadV1::TurnInput(TurnInput {
                 thread_id: context.root_thread_id,
                 run_id: None,
-                content: request.content,
+                content: turn.content.clone(),
                 provenance: TurnInputProvenance::Human,
             }),
         )
         .await
         .is_err()
     {
-        let error = "event sink failed while starting Claude turn".to_string();
-        let _ = outcome_tx.send(OutcomeState::Failed(error.clone()));
-        return Err(error);
+        return Err("event sink failed while starting Claude turn".into());
     }
-    Ok(PendingTurn {
-        id: request.turn_id,
-        outcome_tx,
-    })
+    turn.input_emitted = true;
+    Ok(())
 }
 
 async fn emit_run_input(

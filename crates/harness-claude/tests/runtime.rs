@@ -317,16 +317,20 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
 }
 
 #[tokio::test]
-async fn persistent_session_waits_for_canonical_init_and_supports_multiple_turns() {
+async fn persistent_session_initializes_on_first_turn_and_supports_multiple_turns() {
     let temp = TempDir::new().unwrap();
     let capture = temp.path().join("stdin.jsonl");
     let executable = script(
         &temp,
         "persistent",
         r#"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"conversation-session","model":"sonnet","transcript_path":"opaque://session.jsonl"}'
+initialized=0
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$CAPTURE"
+  if [ "$initialized" -eq 0 ]; then
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"conversation-session","model":"sonnet","transcript_path":"opaque://session.jsonl"}'
+    initialized=1
+  fi
   printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"answer"}]}}'
   printf '%s\n' '{"type":"result","subtype":"success","result":"answer","usage":{"input_tokens":2,"output_tokens":1}}'
 done
@@ -354,11 +358,8 @@ done
         )
         .await
         .unwrap();
-    assert_eq!(session.session_id().as_str(), "conversation-session");
-    assert_eq!(
-        session.provider_resume_id().unwrap().as_str(),
-        "conversation-session"
-    );
+    assert_eq!(session.session_id().as_str(), "requested-session");
+    assert!(session.provider_resume_id().is_none());
 
     for (id, content) in [("turn-1", "first\nexact"), ("turn-2", "second exact")] {
         let turn = session
@@ -387,11 +388,25 @@ done
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(inputs.len(), 2);
-    assert_eq!(inputs[0]["session_id"], "conversation-session");
+    assert!(inputs[0]["session_id"].is_null());
     assert_eq!(inputs[0]["message"]["content"], "first\nexact");
     assert_eq!(inputs[1]["message"]["content"], "second exact");
 
     let events = sink.0.lock().unwrap();
+    let init = events
+        .iter()
+        .position(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionStarted(_)))
+        .unwrap();
+    let turn_started = events
+        .iter()
+        .position(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnStarted(_)))
+        .unwrap();
+    let turn_input = events
+        .iter()
+        .position(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnInput(_)))
+        .unwrap();
+    assert!(init < turn_started && turn_started < turn_input);
+
     let turn_inputs = events
         .iter()
         .filter_map(|event| match &event.payload {
@@ -812,11 +827,18 @@ while IFS= read -r _; do :; done
         )
         .await
         .unwrap();
-    assert_eq!(session.session_id().as_str(), "resume-canonical");
+    assert_eq!(session.session_id().as_str(), "placeholder");
     assert_eq!(
         session.provider_resume_id().unwrap().as_str(),
         "resume-canonical"
     );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !capture.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     let launch = fs::read_to_string(capture).unwrap();
     let canonical_cwd = fs::canonicalize(&cwd).unwrap();
     assert!(
@@ -846,7 +868,7 @@ async fn initialization_timeout_fails_and_reaps_instead_of_hanging() {
         ..ClaudeProviderConfig::default()
     });
     let started = Instant::now();
-    let result = runtime
+    let session = runtime
         .start_session(
             StartSessionRequest {
                 session_id: SessionId::from("placeholder"),
@@ -857,9 +879,17 @@ async fn initialization_timeout_fails_and_reaps_instead_of_hanging() {
             Arc::new(CollectSink::default()),
             Arc::new(ResolvingControls::default()),
         )
+        .await
+        .unwrap();
+    let result = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("timeout-turn"),
+            content: "hello".into(),
+            output_schema: None,
+        })
         .await;
     let error = match result {
-        Ok(_) => panic!("session initialization should time out"),
+        Ok(_) => panic!("first turn should fail when Claude never initializes"),
         Err(error) => error,
     };
     assert!(error.to_string().contains("timed out"));
