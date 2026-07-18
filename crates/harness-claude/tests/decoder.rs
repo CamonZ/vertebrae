@@ -69,6 +69,49 @@ fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
 }
 
 #[test]
+fn slash_commands_and_compact_summaries_are_silent_user_records() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("skill-command-run"),
+        StreamId::from("skill-command-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"skill-command-session"}"#)
+        .unwrap();
+
+    let compact_summary = decoder
+        .decode_line(
+            r#"{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context.\n\nContinue the conversation from where it left off."}}"#,
+        )
+        .unwrap();
+    assert!(compact_summary.is_empty());
+
+    let command = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"role":"user","content":"<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>"}}"#,
+        )
+        .unwrap();
+    assert!(command.is_empty());
+
+    let command_output = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}"#,
+        )
+        .unwrap();
+    assert!(command_output.is_empty());
+
+    let tool_result = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"ok"}]}}"#,
+        )
+        .unwrap();
+    assert!(
+        tool_result
+            .iter()
+            .any(|draft| matches!(draft.payload, HarnessEventPayloadV1::ToolOutput(_)))
+    );
+}
+
+#[test]
 fn root_child_and_grandchild_are_separate_canonical_streams() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run-1"),

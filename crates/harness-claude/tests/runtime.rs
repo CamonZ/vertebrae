@@ -422,6 +422,67 @@ done
 }
 
 #[tokio::test]
+async fn persistent_session_survives_compact_skill_records() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "persistent-compact",
+        r#"#!/bin/sh
+initialized=0
+while IFS= read -r line; do
+  if [ "$initialized" -eq 0 ]; then
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"compact-session"}'
+    initialized=1
+  fi
+  case "$line" in
+    *compact*)
+      printf '%s\n' '{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}'
+      printf '%s\n' '{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}'
+      printf '%s\n' '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}'
+      ;;
+  esac
+  printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"skill handled"}]}}'
+  printf '%s\n' '{"type":"result","subtype":"success","result":"skill handled"}'
+done
+"#,
+    );
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("requested-compact-session"),
+                stream_id: StreamId::from("compact-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+
+    for (turn_id, content) in [("compact-turn", "/compact"), ("follow-up", "run skill")] {
+        let turn = session
+            .send(SendTurnRequest {
+                turn_id: TurnId::from(turn_id),
+                content: content.into(),
+                output_schema: None,
+            })
+            .await
+            .unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), turn.await_outcome())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(outcome.status, CompletionStatus::Completed);
+        assert_eq!(outcome.result_text.as_deref(), Some("skill handled"));
+    }
+    assert_eq!(
+        session.close().await.unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
+    );
+}
+
+#[tokio::test]
 async fn cancellation_and_nonzero_exit_settle_once() {
     let temp = TempDir::new().unwrap();
     let slow = script(

@@ -854,11 +854,20 @@ impl ClaudeStreamDecoder {
         }
         let content = message
             .get("content")
-            .ok_or_else(|| ClaudeDecodeError::Malformed("message has no content".into()))?
-            .as_array()
-            .ok_or_else(|| {
-                ClaudeDecodeError::Malformed("message content is not an array".into())
-            })?;
+            .ok_or_else(|| ClaudeDecodeError::Malformed("message has no content".into()))?;
+        let Some(content) = content.as_array() else {
+            // Claude echoes slash commands, local command output, and compact
+            // summaries as user records whose message content is a string.
+            // Those records are provider protocol, not neutral live events;
+            // only array content can contain tool results that we need to
+            // project for the user stream.
+            if !assistant && content.is_string() {
+                return Ok(());
+            }
+            return Err(ClaudeDecodeError::Malformed(
+                "message content is not an array".into(),
+            ));
+        };
         for (index, item) in content.iter().enumerate() {
             let item = item.as_object().ok_or_else(|| {
                 ClaudeDecodeError::Malformed(format!(
