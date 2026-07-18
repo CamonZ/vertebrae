@@ -494,7 +494,10 @@ async fn run_persistent_process_v2(
     let (control_tx, mut control_rx) = mpsc::unbounded_channel::<ControlCompletion>();
     let mut controls = HashMap::new();
     let mut close_response = None;
-    let mut stop_source = ResolutionSource::Cancelled;
+    // Unexpected process/runtime failures settle controls as fallbacks. Only an
+    // explicit consumer stop is cancellation; keeping those cases distinct is
+    // part of the cross-surface lifecycle contract.
+    let mut stop_source = ResolutionSource::Fallback;
     let mut requested_stop = false;
     let mut close_status = SessionCloseStatus::ProcessLost;
     let mut close_error = Some("Claude stdout closed unexpectedly".to_string());
@@ -543,10 +546,12 @@ async fn run_persistent_process_v2(
                     close_response = Some(response);
                     close_status = SessionCloseStatus::Closed;
                     close_error = None;
+                    stop_source = ResolutionSource::Cancelled;
                     requested_stop = true;
                     break 'process;
                 }
                 None => {
+                    stop_source = ResolutionSource::Cancelled;
                     requested_stop = true;
                     break 'process;
                 }
@@ -581,6 +586,22 @@ async fn run_persistent_process_v2(
                         }
                     }
                     Err(error) => {
+                        let resolution = ControlResolution {
+                            request_id: pending_control.request.request_id.clone(),
+                            source: ResolutionSource::Fallback,
+                            decision: None,
+                            message: Some(format!("Claude control request failed: {error}")),
+                        };
+                        if emit_control_resolution(&sequenced, &pending_control, resolution)
+                            .await
+                            .is_err()
+                        {
+                            close_error = Some(
+                                "event sink failed while reporting Claude control failure".into(),
+                            );
+                            close_status = SessionCloseStatus::Failed;
+                            break 'process;
+                        }
                         close_status = SessionCloseStatus::Failed;
                         close_error = Some(format!("Claude control request failed: {error}"));
                         break 'process;
@@ -687,7 +708,39 @@ async fn run_persistent_process_v2(
         let error = close_error
             .clone()
             .unwrap_or_else(|| "Claude session closed during active turn".into());
-        let _ = turn.outcome_tx.send(OutcomeState::Failed(error));
+        let outcome = TurnOutcome {
+            status: if stop_source == ResolutionSource::Cancelled {
+                CompletionStatus::Cancelled
+            } else {
+                CompletionStatus::Failed
+            },
+            result_text: None,
+            structured_output: None,
+            usage: None,
+            metrics: vertebrae_harness_core::OutcomeMetrics::default(),
+            error: (stop_source != ResolutionSource::Cancelled).then_some(error),
+        };
+        let context = decoder.context().clone();
+        let emitted = emit_runtime_event(
+            &sequenced,
+            stream_id.clone(),
+            correlation(
+                context.session_id,
+                &context.root_thread_id,
+                Some(turn.id),
+                None,
+            ),
+            HarnessEventPayloadV1::TurnFinished(outcome.clone()),
+        )
+        .await
+        .is_ok();
+        if emitted {
+            let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome));
+        } else {
+            let _ = turn.outcome_tx.send(OutcomeState::Failed(
+                "event sink failed while finishing Claude turn".into(),
+            ));
+        }
     }
     let (status, forced) = if requested_stop {
         (reap(&mut child, cleanup_timeout).await, true)
@@ -780,7 +833,20 @@ async fn run_one_shot_process_v2(
                             Err(error) => { failure = Some(error); break 'process; }
                         }
                     }
-                    Err(error) => { failure = Some(format!("Claude control request failed: {error}")); break 'process; }
+                    Err(error) => {
+                        let resolution = ControlResolution {
+                            request_id: pending_control.request.request_id.clone(),
+                            source: ResolutionSource::Fallback,
+                            decision: None,
+                            message: Some(format!("Claude control request failed: {error}")),
+                        };
+                        if emit_control_resolution(&sequenced, &pending_control, resolution).await.is_err() {
+                            failure = Some("event sink failed while reporting Claude control failure".into());
+                        } else {
+                            failure = Some(format!("Claude control request failed: {error}"));
+                        }
+                        break 'process;
+                    }
                 }
             }
             message = output.recv() => match message {

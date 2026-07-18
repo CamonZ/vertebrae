@@ -709,12 +709,14 @@ exit 9
         })
         .await
     {
-        Ok(turn) => assert!(
-            tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
+        Ok(turn) => {
+            let outcome = tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
                 .await
                 .unwrap()
-                .is_err()
-        ),
+                .unwrap();
+            assert_eq!(outcome.status, CompletionStatus::Failed);
+            assert!(outcome.error.as_deref().unwrap().contains("stdout"));
+        }
         Err(error) => assert!(error.to_string().contains("Claude")),
     }
     let close = session.close().await.unwrap();
