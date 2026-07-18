@@ -146,6 +146,16 @@ impl EventSink for FailWarningsSink {
     }
 }
 
+fn assert_timeout_resolution(sink: &CollectSink, request_id: &str) {
+    assert!(sink.0.lock().unwrap().iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::ControlResolved(resolution)
+            if resolution.request_id.as_str() == request_id
+                && resolution.source == ResolutionSource::Timeout
+                && resolution.decision == Some(ControlDecision::Deny)
+    )));
+}
+
 #[tokio::test]
 async fn one_shot_emits_ordered_events_and_returns_structured_outcome() {
     let temp = TempDir::new().unwrap();
@@ -637,6 +647,111 @@ printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'
             .unwrap_err()
             .to_string()
             .contains("event sink")
+    );
+}
+
+#[tokio::test]
+async fn control_request_timeouts_deny_and_reply_for_one_shot_and_persistent_runs() {
+    let temp = TempDir::new().unwrap();
+    let one_shot_response = temp.path().join("one-shot-timeout-response.jsonl");
+    let one_shot = script(
+        &temp,
+        "one-shot-control-timeout",
+        &format!(
+            r#"#!/bin/sh
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"timeout-run"}}'
+printf '%s\n' '{{"type":"control_request","request_id":"timeout-one-shot","timeout_ms":10,"request":{{"subtype":"can_use_tool","tool_name":"Bash","input":{{"command":"pwd"}}}}}}'
+IFS= read -r response
+printf '%s\n' "$response" > '{}'
+printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'
+"#,
+            one_shot_response.display()
+        ),
+    );
+    let one_shot_sink = Arc::new(CollectSink::default());
+    let run = runtime(one_shot)
+        .run_once(
+            RunRequest {
+                run_id: RunId::from("timeout-one-shot-run"),
+                stream_id: StreamId::from("timeout-one-shot-stream"),
+                prompt: "go".into(),
+                config: RequestConfig::default(),
+            },
+            one_shot_sink.clone(),
+            Arc::new(NeverControls),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), run.await_outcome())
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        CompletionStatus::Completed
+    );
+    assert_timeout_resolution(&one_shot_sink, "timeout-one-shot");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            fs::read_to_string(one_shot_response).unwrap().trim()
+        )
+        .unwrap()["response"]["response"]["behavior"],
+        "deny"
+    );
+
+    let persistent_response = temp.path().join("persistent-timeout-response.jsonl");
+    let persistent = script(
+        &temp,
+        "persistent-control-timeout",
+        &format!(
+            r#"#!/bin/sh
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"timeout-session"}}'
+IFS= read -r _
+printf '%s\n' '{{"type":"control_request","request_id":"timeout-persistent","timeout_ms":10,"request":{{"subtype":"can_use_tool","tool_name":"Bash","input":{{"command":"pwd"}}}}}}'
+IFS= read -r response
+printf '%s\n' "$response" > '{}'
+printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'
+"#,
+            persistent_response.display()
+        ),
+    );
+    let persistent_sink = Arc::new(CollectSink::default());
+    let session = runtime(persistent)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("timeout-session-request"),
+                stream_id: StreamId::from("timeout-session-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            persistent_sink.clone(),
+            Arc::new(NeverControls),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("timeout-session-turn"),
+            content: "go".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
+            .await
+            .unwrap()
+            .unwrap()
+            .status,
+        CompletionStatus::Completed
+    );
+    assert_timeout_resolution(&persistent_sink, "timeout-persistent");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            fs::read_to_string(persistent_response).unwrap().trim()
+        )
+        .unwrap()["response"]["response"]["behavior"],
+        "deny"
     );
 }
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::sync::mpsc;
 use vertebrae_harness_core::{
@@ -22,6 +22,20 @@ pub(super) struct PendingControl {
 pub(super) struct ControlCompletion {
     pub(super) request_id: ControlRequestId,
     pub(super) result: Result<ControlResolution, HarnessError>,
+}
+
+fn timeout_resolution(request: &ControlRequestEnvelope, timeout_ms: u64) -> ControlResolution {
+    ControlResolution {
+        request_id: request.request_id.clone(),
+        source: ResolutionSource::Timeout,
+        decision: request
+            .automatic_resolution
+            .clone()
+            .or(Some(ControlDecision::Deny)),
+        message: Some(format!(
+            "Claude control request timed out after {timeout_ms} ms"
+        )),
+    }
 }
 
 pub(super) async fn dispatch_provider_draft(
@@ -80,9 +94,24 @@ pub(super) async fn dispatch_provider_draft(
         }
         let request_id = request.request_id.clone();
         let task_request = request.clone();
+        let timeout_request = request.clone();
+        let timeout_ms = request.timeout_ms;
         let completion_tx = completion_tx.clone();
         let task = tokio::spawn(async move {
-            let result = control_sink.request(task_request).await;
+            let result = match timeout_ms {
+                Some(timeout_ms) => {
+                    match tokio::time::timeout(
+                        Duration::from_millis(timeout_ms),
+                        control_sink.request(task_request),
+                    )
+                    .await
+                    {
+                        Ok(result) => result,
+                        Err(_) => Ok(timeout_resolution(&timeout_request, timeout_ms)),
+                    }
+                }
+                None => control_sink.request(task_request).await,
+            };
             let _ = completion_tx.send(ControlCompletion { request_id, result });
         });
         controls.insert(
