@@ -6,11 +6,11 @@ use vertebrae_harness_core::{
     ThreadId, ThreadKind, ToolCallId, UpdateSemantics,
 };
 
+use super::drafts::{agent_metadata, provider_thread_ref, string};
 use super::{
     BufferedAgentRecord, BufferedRootRecord, ClaudeDecodeError, ClaudeStreamDecoder,
     MAX_PENDING_AGENT_RECORDS, MAX_PENDING_ROOT_RECORDS,
 };
-use super::{agent_metadata, provider_thread_ref, string};
 
 impl ClaudeStreamDecoder {
     pub(super) fn should_buffer_root(
