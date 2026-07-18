@@ -1,14 +1,13 @@
 use std::{
     collections::{BTreeSet, HashMap},
-    process::Stdio,
     sync::Arc,
 };
 
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, Command},
+    io::AsyncWriteExt,
+    process::{Child, ChildStdin},
     sync::{mpsc, oneshot, watch},
 };
 use vertebrae_harness_core::{
@@ -17,14 +16,20 @@ use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime, ModelCapability,
     ProviderResumeId, QuestionCapabilities, ResolutionSource, RunHandle, RunId, RunOutcome,
     RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome, SessionCloseStatus,
-    SessionHandle, SessionId, StartSessionRequest, StreamId, ThreadId, TurnHandle, TurnId,
-    TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted, UpdateSemantics,
+    SessionHandle, SessionId, StartSessionRequest, StreamId, ThreadId, TurnId, TurnInput,
+    TurnInputProvenance, TurnOutcome, TurnStarted, UpdateSemantics,
 };
 
 use crate::{
-    ClaudeCommandSpec, ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig,
-    ClaudeRootLocatorResolver, ClaudeStreamDecoder, DEFAULT_CLAUDE_MODELS,
+    ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, ClaudeRootLocatorResolver,
+    ClaudeStreamDecoder, DEFAULT_CLAUDE_MODELS,
 };
+
+mod handles;
+mod process;
+
+use handles::{ClaudeRunHandle, ClaudeSessionHandle, OutcomeState};
+use process::{ProcessOutput, reap, spawn_output_readers, spawn_process, wait_then_reap};
 
 #[derive(Clone)]
 pub struct ClaudeRuntime {
@@ -41,33 +46,6 @@ impl ClaudeRuntime {
     pub fn config(&self) -> &ClaudeProviderConfig {
         &self.config
     }
-}
-
-#[derive(Debug, Clone, Default)]
-enum OutcomeState<T> {
-    #[default]
-    Pending,
-    Ready(T),
-    Failed(String),
-}
-
-struct ClaudeTurnHandle {
-    turn_id: TurnId,
-    command_tx: mpsc::UnboundedSender<SessionCommand>,
-    outcome_rx: watch::Receiver<OutcomeState<TurnOutcome>>,
-}
-
-struct ClaudeSessionHandle {
-    session_id: SessionId,
-    provider_resume_id: Option<ProviderResumeId>,
-    command_tx: mpsc::UnboundedSender<SessionCommand>,
-    close_rx: watch::Receiver<OutcomeState<SessionCloseOutcome>>,
-}
-
-struct ClaudeRunHandle {
-    run_id: RunId,
-    cancel_tx: mpsc::UnboundedSender<()>,
-    outcome_rx: watch::Receiver<OutcomeState<RunOutcome>>,
 }
 
 enum SessionCommand {
@@ -104,14 +82,6 @@ struct PendingControl {
 struct ControlCompletion {
     request_id: ControlRequestId,
     result: Result<ControlResolution, HarnessError>,
-}
-
-enum ProcessOutput {
-    Stdout(String),
-    Stderr(String),
-    StdoutClosed,
-    StderrClosed,
-    ReadError(String),
 }
 
 #[async_trait]
@@ -272,189 +242,6 @@ impl HarnessRuntime for ClaudeRuntime {
             outcome_rx,
         }))
     }
-}
-
-#[async_trait]
-impl TurnHandle for ClaudeTurnHandle {
-    fn turn_id(&self) -> &TurnId {
-        &self.turn_id
-    }
-
-    async fn interrupt(&self) -> Result<(), HarnessError> {
-        let (response, receiver) = oneshot::channel();
-        self.command_tx
-            .send(SessionCommand::Interrupt {
-                turn_id: self.turn_id.clone(),
-                response,
-            })
-            .map_err(|_| {
-                HarnessError::Operation("Claude session process is no longer running".into())
-            })?;
-        receiver
-            .await
-            .map_err(|_| HarnessError::Operation("Claude interrupt response was dropped".into()))?
-            .map_err(HarnessError::Operation)
-    }
-
-    async fn await_outcome(&self) -> Result<TurnOutcome, HarnessError> {
-        await_state(self.outcome_rx.clone()).await
-    }
-}
-
-#[async_trait]
-impl SessionHandle for ClaudeSessionHandle {
-    fn session_id(&self) -> &SessionId {
-        &self.session_id
-    }
-
-    fn provider_resume_id(&self) -> Option<&ProviderResumeId> {
-        self.provider_resume_id.as_ref()
-    }
-
-    async fn send(&self, request: SendTurnRequest) -> Result<Arc<dyn TurnHandle>, HarnessError> {
-        let (outcome_tx, outcome_rx) = watch::channel(OutcomeState::Pending);
-        let (response, receiver) = oneshot::channel();
-        let turn_id = request.turn_id.clone();
-        self.command_tx
-            .send(SessionCommand::Send {
-                request,
-                outcome_tx,
-                response,
-            })
-            .map_err(|_| {
-                HarnessError::Operation("Claude session process is no longer running".into())
-            })?;
-        receiver
-            .await
-            .map_err(|_| HarnessError::Operation("Claude send response was dropped".into()))?
-            .map_err(HarnessError::Operation)?;
-        Ok(Arc::new(ClaudeTurnHandle {
-            turn_id,
-            command_tx: self.command_tx.clone(),
-            outcome_rx,
-        }))
-    }
-
-    async fn close(&self) -> Result<SessionCloseOutcome, HarnessError> {
-        if let OutcomeState::Ready(outcome) = self.close_rx.borrow().clone() {
-            return Ok(outcome);
-        }
-        let (response, receiver) = oneshot::channel();
-        if self
-            .command_tx
-            .send(SessionCommand::Close { response })
-            .is_ok()
-            && let Ok(result) = receiver.await
-        {
-            return result.map_err(HarnessError::Operation);
-        }
-        await_state(self.close_rx.clone()).await
-    }
-}
-
-#[async_trait]
-impl RunHandle for ClaudeRunHandle {
-    fn run_id(&self) -> &RunId {
-        &self.run_id
-    }
-
-    async fn cancel(&self) -> Result<(), HarnessError> {
-        self.cancel_tx
-            .send(())
-            .map_err(|_| HarnessError::Operation("Claude run is no longer running".into()))
-    }
-
-    async fn await_outcome(&self) -> Result<RunOutcome, HarnessError> {
-        await_state(self.outcome_rx.clone()).await
-    }
-}
-
-async fn await_state<T: Clone>(
-    mut receiver: watch::Receiver<OutcomeState<T>>,
-) -> Result<T, HarnessError> {
-    loop {
-        let state = receiver.borrow().clone();
-        match state {
-            OutcomeState::Pending => receiver.changed().await.map_err(|_| {
-                HarnessError::Operation("Claude operation ended without an outcome".into())
-            })?,
-            OutcomeState::Ready(value) => return Ok(value),
-            OutcomeState::Failed(error) => return Err(HarnessError::Operation(error)),
-        }
-    }
-}
-
-fn spawn_process(spec: &ClaudeCommandSpec, piped_stdin: bool) -> Result<Child, HarnessError> {
-    let mut command = Command::new(&spec.program);
-    command.args(&spec.args);
-    if let Some(directory) = &spec.current_dir {
-        command.current_dir(directory);
-    }
-    command.envs(&spec.environment);
-    command
-        .stdin(if piped_stdin {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command.spawn().map_err(|error| {
-        HarnessError::Operation(format!(
-            "failed to spawn Claude at {}: {error}",
-            spec.program.display()
-        ))
-    })
-}
-
-fn spawn_output_readers(
-    stdout: tokio::process::ChildStdout,
-    stderr: tokio::process::ChildStderr,
-) -> mpsc::UnboundedReceiver<ProcessOutput> {
-    let (sender, receiver) = mpsc::unbounded_channel();
-    let stdout_sender = sender.clone();
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stdout).lines();
-        loop {
-            match lines.next_line().await {
-                Ok(Some(line)) => {
-                    if stdout_sender.send(ProcessOutput::Stdout(line)).is_err() {
-                        return;
-                    }
-                }
-                Ok(None) => {
-                    let _ = stdout_sender.send(ProcessOutput::StdoutClosed);
-                    return;
-                }
-                Err(error) => {
-                    let _ =
-                        stdout_sender.send(ProcessOutput::ReadError(format!("stdout: {error}")));
-                    return;
-                }
-            }
-        }
-    });
-    tokio::spawn(async move {
-        let mut lines = BufReader::new(stderr).lines();
-        loop {
-            match lines.next_line().await {
-                Ok(Some(line)) => {
-                    if sender.send(ProcessOutput::Stderr(line)).is_err() {
-                        return;
-                    }
-                }
-                Ok(None) => {
-                    let _ = sender.send(ProcessOutput::StderrClosed);
-                    return;
-                }
-                Err(error) => {
-                    let _ = sender.send(ProcessOutput::ReadError(format!("stderr: {error}")));
-                    return;
-                }
-            }
-        }
-    });
-    receiver
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1355,27 +1142,6 @@ fn canonical_diagnostic_correlation(
     }
 }
 
-async fn wait_then_reap(
-    child: &mut Child,
-    grace: std::time::Duration,
-) -> (Option<std::process::ExitStatus>, bool) {
-    match tokio::time::timeout(grace, child.wait()).await {
-        Ok(Ok(status)) => (Some(status), false),
-        Ok(Err(_)) => (None, false),
-        Err(_) => {
-            let _ = child.start_kill();
-            let status = tokio::time::timeout(
-                grace.max(std::time::Duration::from_millis(250)),
-                child.wait(),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok);
-            (status, true)
-        }
-    }
-}
-
 async fn begin_persistent_turn(
     stdin: &mut ChildStdin,
     request: SendTurnRequest,
@@ -1574,20 +1340,6 @@ async fn write_line(stdin: &mut ChildStdin, line: &str) -> std::io::Result<()> {
     stdin.write_all(line.as_bytes()).await?;
     stdin.write_all(b"\n").await?;
     stdin.flush().await
-}
-
-async fn reap(
-    child: &mut Child,
-    cleanup_timeout: std::time::Duration,
-) -> Option<std::process::ExitStatus> {
-    if let Ok(Some(status)) = child.try_wait() {
-        return Some(status);
-    }
-    let _ = child.start_kill();
-    tokio::time::timeout(cleanup_timeout, child.wait())
-        .await
-        .ok()
-        .and_then(Result::ok)
 }
 
 use serde_json::Value;
