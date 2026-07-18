@@ -981,10 +981,13 @@ async fn resumed_session_handle_and_captured_launch_use_canonical_identity_and_e
         "resume",
         &format!(
             r#"#!/bin/sh
-{{ printf 'cwd=%s\n' "$PWD"; printf 'compat=%s\n' "$COMPAT"; printf 'arg=%s\n' "$@"; }} > '{}'
+{{ printf 'cwd=%s\n' "$PWD"; printf 'compat=%s\n' "$COMPAT"; printf 'arg=%s\n' "$@"; }} > '{}.tmp'
+mv '{}.tmp' '{}'
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"resume-canonical","model":"sonnet"}}'
 while IFS= read -r _; do :; done
 "#,
+            capture.display(),
+            capture.display(),
             capture.display()
         ),
     );
