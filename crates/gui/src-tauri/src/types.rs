@@ -1015,6 +1015,9 @@ pub struct SessionLog {
     /// The log content
     #[serde(default)]
     pub content: String,
+    /// Producer format used to select the compatible frontend parser.
+    #[serde(default)]
+    pub format: Option<String>,
     /// When this log was created (ISO 8601 string)
     #[serde(alias = "inserted_at", default)]
     pub created_at: String,
@@ -1027,6 +1030,7 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
             logical_key: log.logical_key,
             step_execution_id: log.step_execution_id,
             content: log.content,
+            format: log.format,
             created_at: log.created_at.to_rfc3339(),
         }
     }
@@ -2031,10 +2035,11 @@ mod tests {
 
     #[test]
     fn session_log_from_core() {
-        let core = vertebrae_core::SessionLog::new("exec1", "log content");
+        let core = vertebrae_core::SessionLog::new("exec1", "log content").with_format("harness");
         let gui = SessionLog::from(core);
         assert_eq!(gui.step_execution_id, "exec1");
         assert_eq!(gui.content, "log content");
+        assert_eq!(gui.format.as_deref(), Some("harness"));
         assert!(!gui.created_at.is_empty());
     }
 
