@@ -252,6 +252,37 @@ impl PermissionBridge {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_harness_control_count_for_session(&self, session_id: &str) -> usize {
+        self.pending_harness_controls
+            .lock()
+            .map(|pending| {
+                pending
+                    .values()
+                    .filter(|pending| pending.session_id == session_id)
+                    .count()
+            })
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn queue_harness_control_for_tests(
+        &self,
+        session_id: &str,
+        request: ControlRequestEnvelope,
+    ) -> tokio::sync::oneshot::Receiver<LocalPermissionDecision> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.pending_harness_controls.lock().unwrap().insert(
+            request.request_id.to_string(),
+            PendingHarnessControl {
+                session_id: session_id.to_string(),
+                request,
+                response_tx,
+            },
+        );
+        response_rx
+    }
+
     pub(crate) async fn request_harness_control(
         &self,
         backend_session_id: &str,

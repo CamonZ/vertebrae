@@ -39,10 +39,275 @@ type RuntimeFactory =
 const DEFAULT_CLAUDE_CONTEXT_WINDOW: u32 = 200_000;
 
 struct ActiveSession {
+    generation: u64,
     handle: Arc<dyn SessionHandle>,
     active_turn: Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
+    permission_bridge: crate::local_chat::permissions::PermissionBridge,
     #[cfg(unix)]
     _permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
+}
+
+/// A backend id is reserved before any asynchronous session startup. Keeping
+/// the reservation and active entry under one lock prevents concurrent create
+/// requests from both launching a Claude process. The monotonically increasing
+/// generation also lets stale lifecycle events leave a replacement untouched.
+#[derive(Default)]
+struct SessionRegistry {
+    active: HashMap<String, ActiveSession>,
+    starting: HashMap<String, u64>,
+    closing: HashMap<String, u64>,
+    next_generation: u64,
+}
+
+enum TerminalSession {
+    Starting,
+    Active(ActiveSession),
+    Closing,
+}
+
+impl SessionRegistry {
+    fn reserve(&mut self, backend_session_id: &str) -> Result<u64, LocalChatSessionError> {
+        if self.active.contains_key(backend_session_id)
+            || self.starting.contains_key(backend_session_id)
+            || self.closing.contains_key(backend_session_id)
+        {
+            return Err(LocalChatSessionError::SessionExists(
+                backend_session_id.to_string(),
+            ));
+        }
+        self.next_generation = self.next_generation.wrapping_add(1);
+        let generation = self.next_generation;
+        self.starting
+            .insert(backend_session_id.to_string(), generation);
+        Ok(generation)
+    }
+
+    fn release_reservation(&mut self, backend_session_id: &str, generation: u64) {
+        if self.starting.get(backend_session_id) == Some(&generation) {
+            self.starting.remove(backend_session_id);
+        }
+    }
+
+    fn activate(
+        &mut self,
+        backend_session_id: String,
+        generation: u64,
+        session: ActiveSession,
+    ) -> bool {
+        if self.starting.get(&backend_session_id) != Some(&generation) {
+            return false;
+        }
+        self.starting.remove(&backend_session_id);
+        self.active.insert(backend_session_id, session);
+        true
+    }
+
+    fn is_starting_generation(&self, backend_session_id: &str, generation: u64) -> bool {
+        self.starting.get(backend_session_id) == Some(&generation)
+    }
+
+    fn begin_terminal_close(
+        &mut self,
+        backend_session_id: &str,
+        generation: u64,
+    ) -> Option<TerminalSession> {
+        if self.starting.get(backend_session_id) == Some(&generation) {
+            self.starting.remove(backend_session_id);
+            self.closing
+                .insert(backend_session_id.to_string(), generation);
+            return Some(TerminalSession::Starting);
+        }
+        if let Some(session) = self.active.remove(backend_session_id) {
+            if session.generation == generation {
+                self.closing
+                    .insert(backend_session_id.to_string(), generation);
+                return Some(TerminalSession::Active(session));
+            }
+            self.active.insert(backend_session_id.to_string(), session);
+        }
+        (self.closing.get(backend_session_id) == Some(&generation))
+            .then_some(TerminalSession::Closing)
+    }
+
+    fn begin_close(&mut self, backend_session_id: &str) -> Option<ActiveSession> {
+        let session = self.active.remove(backend_session_id)?;
+        self.closing
+            .insert(backend_session_id.to_string(), session.generation);
+        Some(session)
+    }
+
+    fn finish_close(&mut self, backend_session_id: &str, generation: u64) {
+        if self.closing.get(backend_session_id) == Some(&generation) {
+            self.closing.remove(backend_session_id);
+        }
+    }
+
+    fn abandon_reservation(&mut self, backend_session_id: &str, generation: u64) {
+        self.release_reservation(backend_session_id, generation);
+        self.finish_close(backend_session_id, generation);
+    }
+}
+
+/// Removes a startup reservation if the create future is cancelled before it
+/// can either activate the session or report a normal startup error.
+struct SessionReservation {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    backend_session_id: String,
+    generation: u64,
+    active: bool,
+}
+
+impl SessionReservation {
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    async fn release(mut self) {
+        self.sessions
+            .write()
+            .await
+            .release_reservation(&self.backend_session_id, self.generation);
+        self.active = false;
+    }
+
+    async fn abandon(mut self) {
+        self.sessions
+            .write()
+            .await
+            .abandon_reservation(&self.backend_session_id, self.generation);
+        self.active = false;
+    }
+
+    fn disarm(mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for SessionReservation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let sessions = self.sessions.clone();
+        let backend_session_id = self.backend_session_id.clone();
+        let generation = self.generation;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                sessions
+                    .write()
+                    .await
+                    .abandon_reservation(&backend_session_id, generation);
+            });
+        }
+    }
+}
+
+/// Owns a successfully started handle until the registry activates it. This
+/// closes and retires a process if its startup future is cancelled in the
+/// narrow window before activation.
+struct StartedSession {
+    handle: Arc<dyn SessionHandle>,
+    reservation: Option<SessionReservation>,
+    #[cfg(unix)]
+    permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
+}
+
+impl StartedSession {
+    fn handle(&self) -> Arc<dyn SessionHandle> {
+        self.handle.clone()
+    }
+
+    #[cfg(unix)]
+    fn take_permission_socket(
+        &mut self,
+    ) -> Option<crate::local_chat::permissions::PermissionSocketGuard> {
+        self.permission_socket.take()
+    }
+
+    fn disarm(mut self) {
+        if let Some(reservation) = self.reservation.take() {
+            reservation.disarm();
+        }
+    }
+
+    async fn shutdown(mut self) {
+        let _ = self.handle.close().await;
+        #[cfg(unix)]
+        drop(self.permission_socket.take());
+        if let Some(reservation) = self.reservation.take() {
+            reservation.abandon().await;
+        }
+    }
+}
+
+impl Drop for StartedSession {
+    fn drop(&mut self) {
+        let Some(reservation) = self.reservation.take() else {
+            return;
+        };
+        let sessions = reservation.sessions.clone();
+        let backend_session_id = reservation.backend_session_id.clone();
+        let generation = reservation.generation;
+        let handle = self.handle.clone();
+        #[cfg(unix)]
+        let permission_socket = self.permission_socket.take();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            reservation.disarm();
+            runtime.spawn(async move {
+                let _ = handle.close().await;
+                #[cfg(unix)]
+                drop(permission_socket);
+                sessions
+                    .write()
+                    .await
+                    .abandon_reservation(&backend_session_id, generation);
+            });
+        }
+    }
+}
+
+/// Keeps an explicit close reservation alive until its active session—and
+/// therefore its deterministic permission socket—has been dropped.
+struct ClosingSession {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    backend_session_id: String,
+    generation: u64,
+    session: Option<ActiveSession>,
+}
+
+impl ClosingSession {
+    fn session(&self) -> &ActiveSession {
+        self.session.as_ref().expect("closing session is present")
+    }
+
+    async fn finish(mut self) {
+        drop(self.session.take());
+        self.sessions
+            .write()
+            .await
+            .finish_close(&self.backend_session_id, self.generation);
+    }
+}
+
+impl Drop for ClosingSession {
+    fn drop(&mut self) {
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let sessions = self.sessions.clone();
+        let backend_session_id = self.backend_session_id.clone();
+        let generation = self.generation;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = session.handle.close().await;
+                drop(session);
+                sessions
+                    .write()
+                    .await
+                    .finish_close(&backend_session_id, generation);
+            });
+        }
+    }
 }
 
 #[derive(Default)]
@@ -56,8 +321,9 @@ struct CompatibilityState {
 #[derive(Clone)]
 struct ClaudeGuiEventSink {
     backend_session_id: String,
+    generation: u64,
     event_sink: LocalChatEventSink,
-    sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
+    sessions: Arc<RwLock<SessionRegistry>>,
     state: Arc<Mutex<CompatibilityState>>,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
     closed: Arc<AtomicBool>,
@@ -67,14 +333,16 @@ struct ClaudeGuiEventSink {
 impl ClaudeGuiEventSink {
     fn new(
         backend_session_id: String,
+        generation: u64,
         event_sink: LocalChatEventSink,
-        sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
+        sessions: Arc<RwLock<SessionRegistry>>,
         initial_model: Option<String>,
         permission_bridge: crate::local_chat::permissions::PermissionBridge,
         lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {
         Self {
             backend_session_id,
+            generation,
             event_sink,
             sessions,
             state: Arc::new(Mutex::new(CompatibilityState {
@@ -266,11 +534,44 @@ impl EventSink for ClaudeGuiEventSink {
             HarnessEventPayloadV1::SessionClosed(outcome) => {
                 let _lifecycle = self.lifecycle_gate.lock().await;
                 self.closed.store(true, Ordering::Release);
-                self.sessions.write().await.remove(&self.backend_session_id);
-                self.permission_bridge.fail_pending_permissions_for_session(
-                    &self.backend_session_id,
-                    "Claude session ended before the permission request was resolved",
-                );
+                let terminal_session = self
+                    .sessions
+                    .write()
+                    .await
+                    .begin_terminal_close(&self.backend_session_id, self.generation);
+                match terminal_session {
+                    Some(TerminalSession::Active(session)) => {
+                        // Do not release the ID or its permission socket until
+                        // the matching generation's controls are denied. That
+                        // prevents a same-ID replacement from being cleaned up
+                        // by this terminal event while the bridge mutex waits.
+                        session
+                            .permission_bridge
+                            .fail_pending_permissions_for_session(
+                                &self.backend_session_id,
+                                "Claude session ended before the permission request was resolved",
+                            );
+                        drop(session);
+                        self.sessions
+                            .write()
+                            .await
+                            .finish_close(&self.backend_session_id, self.generation);
+                    }
+                    Some(TerminalSession::Starting) => {
+                        self.permission_bridge.fail_pending_permissions_for_session(
+                            &self.backend_session_id,
+                            "Claude session ended before the permission request was resolved",
+                        );
+                    }
+                    Some(TerminalSession::Closing) => {}
+                    None => {
+                        // A previous generation can finish after a replacement
+                        // has been registered. Its terminal event must not
+                        // alter the replacement's registry, controls, or
+                        // visible status.
+                        return Ok(());
+                    }
+                }
                 match outcome.status {
                     SessionCloseStatus::Closed => {}
                     SessionCloseStatus::ProcessLost => self.emit_error(
@@ -322,7 +623,7 @@ impl ControlSink for ClaudeGuiControlSink {
 /// GUI adapter that owns backend-session routing and provider-neutral handles.
 #[derive(Clone)]
 pub(crate) struct ClaudeSessionRuntime {
-    sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
+    sessions: Arc<RwLock<SessionRegistry>>,
     runtime_factory: Arc<RuntimeFactory>,
     #[cfg(test)]
     registry_insert_hook: Option<RegistryInsertHook>,
@@ -347,11 +648,24 @@ impl ClaudeSessionRuntime {
             + 'static,
     ) -> Self {
         Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(RwLock::new(SessionRegistry::default())),
             runtime_factory: Arc::new(runtime_factory),
             #[cfg(test)]
             registry_insert_hook: None,
         }
+    }
+
+    async fn reserve_session(
+        &self,
+        backend_session_id: &str,
+    ) -> Result<SessionReservation, LocalChatSessionError> {
+        let generation = self.sessions.write().await.reserve(backend_session_id)?;
+        Ok(SessionReservation {
+            sessions: self.sessions.clone(),
+            backend_session_id: backend_session_id.to_string(),
+            generation,
+            active: true,
+        })
     }
 
     pub(crate) async fn create_session(
@@ -360,13 +674,12 @@ impl ClaudeSessionRuntime {
         runtime: LocalChatRuntime,
     ) -> Result<(), LocalChatSessionError> {
         let backend_session_id = input.backend_session_id.clone();
-        if self.sessions.read().await.contains_key(&backend_session_id) {
-            return Err(LocalChatSessionError::SessionExists(backend_session_id));
-        }
+        let reservation = self.reserve_session(&backend_session_id).await?;
 
         let prepared = match PreparedSession::new(&input, &runtime) {
             Ok(prepared) => prepared,
             Err(error) => {
+                reservation.release().await;
                 emit_start_error(
                     &runtime.event_sink(),
                     &backend_session_id,
@@ -375,9 +688,11 @@ impl ClaudeSessionRuntime {
                 return Err(error);
             }
         };
-        self.create_prepared_session(input, runtime, prepared).await
+        self.create_reserved_prepared_session(input, runtime, prepared, reservation)
+            .await
     }
 
+    #[cfg(test)]
     async fn create_prepared_session(
         &self,
         input: HarnessCreateSessionInput,
@@ -385,21 +700,47 @@ impl ClaudeSessionRuntime {
         prepared: PreparedSession,
     ) -> Result<(), LocalChatSessionError> {
         let backend_session_id = input.backend_session_id.clone();
-        if let Some(warning) = &prepared.model_warning {
+        let reservation = self.reserve_session(&backend_session_id).await?;
+        self.create_reserved_prepared_session(input, runtime, prepared, reservation)
+            .await
+    }
+
+    async fn create_reserved_prepared_session(
+        &self,
+        input: HarnessCreateSessionInput,
+        runtime: LocalChatRuntime,
+        prepared: PreparedSession,
+        reservation: SessionReservation,
+    ) -> Result<(), LocalChatSessionError> {
+        let backend_session_id = input.backend_session_id.clone();
+        let generation = reservation.generation();
+        let PreparedSession {
+            working_dir,
+            model,
+            model_warning,
+            provider_config,
+            plugin_resolution,
+            #[cfg(unix)]
+            permission_socket,
+        } = prepared;
+        #[cfg(unix)]
+        let mut permission_socket = permission_socket;
+        if let Some(warning) = &model_warning {
             emit_warning(&runtime.event_sink(), &backend_session_id, warning.clone());
         }
         report_plugin_dir_resolution(
             &runtime.event_sink(),
             &backend_session_id,
-            &prepared.plugin_resolution,
+            &plugin_resolution,
         );
 
         let lifecycle_gate = Arc::new(tokio::sync::Mutex::new(()));
         let event_sink = Arc::new(ClaudeGuiEventSink::new(
             backend_session_id.clone(),
+            generation,
             runtime.event_sink(),
             self.sessions.clone(),
-            prepared.model.clone(),
+            model.clone(),
             runtime.permission_bridge(),
             lifecycle_gate.clone(),
         ));
@@ -407,14 +748,14 @@ impl ClaudeSessionRuntime {
             backend_session_id: backend_session_id.clone(),
             runtime: runtime.clone(),
         });
-        let harness = (self.runtime_factory)(prepared.provider_config);
+        let harness = (self.runtime_factory)(provider_config);
         let request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.clone().map(ProviderResumeId::new),
             config: RequestConfig {
-                working_directory: Some(prepared.working_dir),
-                model: prepared.model,
+                working_directory: Some(working_dir),
+                model,
                 reasoning_effort: input.reasoning_effort,
                 ..RequestConfig::default()
             },
@@ -425,13 +766,24 @@ impl ClaudeSessionRuntime {
         {
             Ok(handle) => handle,
             Err(error) => {
+                #[cfg(unix)]
+                drop(permission_socket.take());
+                reservation.abandon().await;
                 let _ = event_sink.emit_error(error.to_string());
                 return Err(start_error(error));
             }
         };
+        let mut started = StartedSession {
+            handle,
+            reservation: Some(reservation),
+            #[cfg(unix)]
+            permission_socket: permission_socket.take(),
+        };
 
         let _lifecycle = lifecycle_gate.lock().await;
         if event_sink.is_closed() {
+            drop(_lifecycle);
+            started.shutdown().await;
             return Err(LocalChatSessionError::StartFailed(
                 "Claude session ended during initialization".into(),
             ));
@@ -443,15 +795,33 @@ impl ClaudeSessionRuntime {
             hook.reached.notify_one();
             hook.release.notified().await;
         }
-        self.sessions.write().await.insert(
+        if !self
+            .sessions
+            .read()
+            .await
+            .is_starting_generation(&backend_session_id, generation)
+        {
+            drop(_lifecycle);
+            started.shutdown().await;
+            return Err(LocalChatSessionError::StartFailed(
+                "Claude session reservation ended during initialization".into(),
+            ));
+        }
+        let handle = started.handle();
+        let activated = self.sessions.write().await.activate(
             backend_session_id.clone(),
+            generation,
             ActiveSession {
+                generation,
                 handle: handle.clone(),
                 active_turn: active_turn.clone(),
+                permission_bridge: runtime.permission_bridge(),
                 #[cfg(unix)]
-                _permission_socket: prepared.permission_socket,
+                _permission_socket: started.take_permission_socket(),
             },
         );
+        debug_assert!(activated, "checked the startup reservation while gated");
+        started.disarm();
         drop(_lifecycle);
 
         if let Some(prompt) = input
@@ -459,8 +829,26 @@ impl ClaudeSessionRuntime {
             .filter(|prompt| !prompt.trim().is_empty())
         {
             if let Err(error) = send_turn(&handle, &active_turn, prompt).await {
-                self.sessions.write().await.remove(&backend_session_id);
-                let _ = handle.close().await;
+                let closing_session = self.sessions.write().await.begin_close(&backend_session_id);
+                if let Some(session) = closing_session {
+                    let closing_session = ClosingSession {
+                        sessions: self.sessions.clone(),
+                        backend_session_id: backend_session_id.clone(),
+                        generation: session.generation,
+                        session: Some(session),
+                    };
+                    closing_session
+                        .session()
+                        .permission_bridge
+                        .fail_pending_permissions_for_session(
+                            &backend_session_id,
+                            "Claude session ended before the permission request was resolved",
+                        );
+                    let _ = closing_session.session().handle.close().await;
+                    closing_session.finish().await;
+                } else {
+                    let _ = handle.close().await;
+                }
                 let _ = event_sink.emit_error(error.to_string());
                 return Err(send_error(error));
             }
@@ -479,6 +867,7 @@ impl ClaudeSessionRuntime {
             .sessions
             .read()
             .await
+            .active
             .get(session_id)
             .map(|session| (session.handle.clone(), session.active_turn.clone()))
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
@@ -495,15 +884,30 @@ impl ClaudeSessionRuntime {
             .sessions
             .write()
             .await
-            .remove(session_id)
+            .begin_close(session_id)
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
+        let closing_session = ClosingSession {
+            sessions: self.sessions.clone(),
+            backend_session_id: session_id.to_string(),
+            generation: session.generation,
+            session: Some(session),
+        };
         // Closing the GUI handle also cancels any permission dialog that was
         // waiting on either the legacy vtb-gate transport or a harness control.
         // The harness emits SessionClosed too, so this operation is idempotent.
         //
         // Keep the socket guard alive until `close` finishes by retaining
-        // `session` for the duration of the await.
-        let active_turn = session
+        // `closing_session` for the duration of the await. Its drop guard
+        // releases the reservation if this future is cancelled midway.
+        closing_session
+            .session()
+            .permission_bridge
+            .fail_pending_permissions_for_session(
+                session_id,
+                "Claude session ended before the permission request was resolved",
+            );
+        let active_turn = closing_session
+            .session()
             .active_turn
             .lock()
             .map_err(|_| LocalChatSessionError::SendFailed("Claude turn state is poisoned".into()))?
@@ -513,18 +917,20 @@ impl ClaudeSessionRuntime {
         } else {
             None
         };
-        let close_result = session.handle.close().await;
-        match (interrupt_error, close_result) {
+        let close_result = closing_session.session().handle.close().await;
+        let result = match (interrupt_error, close_result) {
             (_, Ok(_)) => Ok(()),
             (None, Err(error)) => Err(LocalChatSessionError::SendFailed(error.to_string())),
             (Some(interrupt), Err(close)) => Err(LocalChatSessionError::SendFailed(format!(
                 "failed to interrupt active Claude turn: {interrupt}; failed to close Claude session: {close}"
             ))),
-        }
+        };
+        closing_session.finish().await;
+        result
     }
 
     pub(crate) async fn has_session(&self, session_id: &str) -> bool {
-        self.sessions.read().await.contains_key(session_id)
+        self.sessions.read().await.active.contains_key(session_id)
     }
 }
 

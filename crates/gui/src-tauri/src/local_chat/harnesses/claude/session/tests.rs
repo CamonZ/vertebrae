@@ -5,12 +5,12 @@ use std::sync::{
 
 use async_trait::async_trait;
 use vertebrae_harness_core::{
-    CompletionStatus, ControlSink, DiagnosticEvent, EventCorrelation, EventId, EventSink,
-    HarnessCapabilities, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId,
-    RunHandle, RunRequest, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId,
-    SessionStarted, SessionUsage, StreamId, TextEvent, TokenUsage, ToolCallEvent, ToolCallId,
-    ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnOutcome, TurnUsage, UpdateSemantics,
-    UsageEvent,
+    ApprovalCategory, ApprovalRequest, CompletionStatus, ControlRequest, ControlRequestEnvelope,
+    ControlSink, DiagnosticEvent, EventCorrelation, EventId, EventSink, HarnessCapabilities,
+    HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId, RunHandle, RunRequest,
+    SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId, SessionStarted,
+    SessionUsage, StreamId, TextEvent, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent,
+    ToolStatus, TurnHandle, TurnId, TurnOutcome, TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use super::*;
@@ -22,6 +22,7 @@ struct MockRuntimeState {
     control_sink: Mutex<Option<Arc<dyn ControlSink>>>,
     start_error: Mutex<Option<String>>,
     close_during_start: std::sync::atomic::AtomicBool,
+    close_then_start_error: Mutex<Option<String>>,
 }
 
 struct MockRuntime {
@@ -72,6 +73,9 @@ impl HarnessRuntime for MockRuntime {
                     }),
                 })
                 .await?;
+            if let Some(error) = self.state.close_then_start_error.lock().unwrap().take() {
+                return Err(HarnessError::Operation(error));
+            }
         }
         Ok(self.handle.clone())
     }
@@ -93,6 +97,8 @@ struct MockSessionHandle {
     send_error: Mutex<Option<String>>,
     close_count: AtomicUsize,
     close_outcome: Mutex<SessionCloseOutcome>,
+    hold_close: std::sync::atomic::AtomicBool,
+    close_release: Arc<tokio::sync::Notify>,
     interrupt_count: Arc<AtomicUsize>,
     interrupt_error: Arc<Mutex<Option<String>>>,
     hold_turns: Arc<std::sync::atomic::AtomicBool>,
@@ -111,6 +117,8 @@ impl MockSessionHandle {
                 status: SessionCloseStatus::Closed,
                 error: None,
             }),
+            hold_close: std::sync::atomic::AtomicBool::new(false),
+            close_release: Arc::new(tokio::sync::Notify::new()),
             interrupt_count: Arc::new(AtomicUsize::new(0)),
             interrupt_error: Arc::new(Mutex::new(None)),
             hold_turns: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -146,6 +154,9 @@ impl SessionHandle for MockSessionHandle {
 
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError> {
         self.close_count.fetch_add(1, Ordering::SeqCst);
+        if self.hold_close.load(Ordering::SeqCst) {
+            self.close_release.notified().await;
+        }
         Ok(self.close_outcome.lock().unwrap().clone())
     }
 }
@@ -386,8 +397,9 @@ fn compatibility_value_text_preserves_strings_and_serializes_values() {
 async fn tauri_delivery_failure_is_returned_to_the_harness_event_source() {
     let sink = ClaudeGuiEventSink::new(
         "backend-delivery".into(),
+        1,
         LocalChatEventSink::failing_for_tests("window closed"),
-        Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(SessionRegistry::default())),
         None,
         crate::local_chat::permissions::PermissionBridge::new(),
         Arc::new(tokio::sync::Mutex::new(())),
@@ -814,10 +826,55 @@ async fn session_closed_during_start_is_never_inserted_into_the_registry() {
     assert!(matches!(error, LocalChatSessionError::StartFailed(message)
         if message.contains("ended during initialization")));
     assert!(!test.adapter.has_session("backend-start-close-race").await);
+    test.runtime_state
+        .close_during_start
+        .store(false, Ordering::SeqCst);
+    test.adapter
+        .create_prepared_session(
+            input("backend-start-close-race", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .expect("startup close must release its reservation after dropping the socket guard");
     assert!(
         matches!(captured_events(&events).as_slice(), [LocalChatEvent::Error(error)]
         if error.error == "exited during startup")
     );
+}
+
+#[tokio::test]
+async fn startup_error_after_session_closed_releases_the_closing_reservation() {
+    let test = test_adapter("backend-start-close-error-race");
+    test.runtime_state
+        .close_during_start
+        .store(true, Ordering::SeqCst);
+    *test.runtime_state.close_then_start_error.lock().unwrap() =
+        Some("startup reported failure after process exit".into());
+
+    let error = test
+        .adapter
+        .create_prepared_session(
+            input("backend-start-close-error-race", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, LocalChatSessionError::StartFailed(message)
+        if message.contains("startup reported failure after process exit")));
+    test.runtime_state
+        .close_during_start
+        .store(false, Ordering::SeqCst);
+    test.adapter
+        .create_prepared_session(
+            input("backend-start-close-error-race", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .expect("the startup error must clear the closing reservation");
 }
 
 #[tokio::test]
@@ -885,6 +942,260 @@ async fn session_closed_racing_registry_insertion_cannot_leave_a_dead_handle() {
     create.await.unwrap().unwrap();
     closed.await.unwrap().unwrap();
     assert!(!test.adapter.has_session("backend-race").await);
+}
+
+#[tokio::test]
+async fn concurrent_creates_reserve_the_backend_id_before_startup() {
+    let mut test = test_adapter("backend-duplicate");
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    test.adapter.registry_insert_hook = Some(RegistryInsertHook {
+        reached: reached.clone(),
+        release: release.clone(),
+    });
+    let adapter = test.adapter.clone();
+    let first = tokio::spawn(async move {
+        adapter
+            .create_prepared_session(
+                input("backend-duplicate", None),
+                LocalChatRuntime::inert_for_tests(),
+                prepared(None),
+            )
+            .await
+    });
+    reached.notified().await;
+
+    let duplicate = test
+        .adapter
+        .create_prepared_session(
+            input("backend-duplicate", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await;
+    assert_eq!(
+        duplicate,
+        Err(LocalChatSessionError::SessionExists(
+            "backend-duplicate".into()
+        ))
+    );
+    assert_eq!(test.runtime_state.start_requests.lock().unwrap().len(), 1);
+
+    release.notify_one();
+    first.await.unwrap().unwrap();
+    assert!(test.adapter.has_session("backend-duplicate").await);
+}
+
+#[tokio::test]
+async fn cancelled_startup_releases_its_backend_id_reservation() {
+    let mut test = test_adapter("backend-cancelled-startup");
+    let reached = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    test.adapter.registry_insert_hook = Some(RegistryInsertHook {
+        reached: reached.clone(),
+        release,
+    });
+    let adapter = test.adapter.clone();
+    let create = tokio::spawn(async move {
+        adapter
+            .create_prepared_session(
+                input("backend-cancelled-startup", None),
+                LocalChatRuntime::inert_for_tests(),
+                prepared(None),
+            )
+            .await
+    });
+    reached.notified().await;
+    create.abort();
+    let _ = create.await;
+    test.adapter.registry_insert_hook = None;
+
+    for _ in 0..100 {
+        match test
+            .adapter
+            .create_prepared_session(
+                input("backend-cancelled-startup", None),
+                LocalChatRuntime::inert_for_tests(),
+                prepared(None),
+            )
+            .await
+        {
+            Ok(()) => return,
+            Err(LocalChatSessionError::SessionExists(_)) => tokio::task::yield_now().await,
+            Err(error) => panic!("cancelled startup should release its reservation: {error}"),
+        }
+    }
+    panic!("cancelled startup kept its reservation");
+}
+
+#[tokio::test]
+async fn stale_session_closed_event_cannot_remove_a_replacement_generation() {
+    let test = test_adapter("backend-replacement");
+    test.adapter
+        .create_prepared_session(
+            input("backend-replacement", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+    let stale_sink = captured_event_sink(&test.runtime_state);
+    test.adapter
+        .close_session("backend-replacement")
+        .await
+        .unwrap();
+
+    test.adapter
+        .create_prepared_session(
+            input("backend-replacement", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+    stale_sink
+        .emit(event(
+            1,
+            UpdateSemantics::Snapshot,
+            HarnessEventPayloadV1::SessionClosed(SessionCloseOutcome {
+                status: SessionCloseStatus::Closed,
+                error: None,
+            }),
+        ))
+        .await
+        .unwrap();
+
+    assert!(test.adapter.has_session("backend-replacement").await);
+}
+
+#[tokio::test]
+async fn close_keeps_the_backend_id_reserved_until_the_old_handle_and_socket_drop() {
+    let test = test_adapter("backend-closing");
+    test.handle.hold_close.store(true, Ordering::SeqCst);
+    test.adapter
+        .create_prepared_session(
+            input("backend-closing", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+
+    let adapter = test.adapter.clone();
+    let closing = tokio::spawn(async move { adapter.close_session("backend-closing").await });
+    while test.handle.close_count.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+
+    let duplicate = test
+        .adapter
+        .create_prepared_session(
+            input("backend-closing", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await;
+    assert_eq!(
+        duplicate,
+        Err(LocalChatSessionError::SessionExists(
+            "backend-closing".into()
+        ))
+    );
+
+    test.handle.close_release.notify_one();
+    closing.await.unwrap().unwrap();
+    test.adapter
+        .create_prepared_session(
+            input("backend-closing", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_close_eventually_releases_its_backend_id_reservation() {
+    let test = test_adapter("backend-cancelled-close");
+    test.handle.hold_close.store(true, Ordering::SeqCst);
+    test.adapter
+        .create_prepared_session(
+            input("backend-cancelled-close", None),
+            LocalChatRuntime::inert_for_tests(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+
+    let adapter = test.adapter.clone();
+    let closing =
+        tokio::spawn(async move { adapter.close_session("backend-cancelled-close").await });
+    while test.handle.close_count.load(Ordering::SeqCst) == 0 {
+        tokio::task::yield_now().await;
+    }
+    closing.abort();
+    let _ = closing.await;
+    test.handle.hold_close.store(false, Ordering::SeqCst);
+    test.handle.close_release.notify_one();
+
+    for _ in 0..100 {
+        match test
+            .adapter
+            .create_prepared_session(
+                input("backend-cancelled-close", None),
+                LocalChatRuntime::inert_for_tests(),
+                prepared(None),
+            )
+            .await
+        {
+            Ok(()) => return,
+            Err(LocalChatSessionError::SessionExists(_)) => tokio::task::yield_now().await,
+            Err(error) => panic!("cancelled close should release its reservation: {error}"),
+        }
+    }
+    panic!("cancelled close kept its reservation");
+}
+
+#[tokio::test]
+async fn explicit_close_denies_pending_harness_controls() {
+    let test = test_adapter("backend-pending-control");
+    let runtime = LocalChatRuntime::inert_for_tests();
+    let permission_bridge = runtime.permission_bridge();
+    test.adapter
+        .create_prepared_session(
+            input("backend-pending-control", None),
+            runtime.clone(),
+            prepared(None),
+        )
+        .await
+        .unwrap();
+
+    let control = ControlRequestEnvelope {
+        request_id: vertebrae_harness_core::ControlRequestId::new("pending-close-control"),
+        session_id: None,
+        turn_id: None,
+        request: ControlRequest::Approval(ApprovalRequest {
+            category: ApprovalCategory::CommandExecution,
+            title: "Run command".into(),
+            details: None,
+            modification_supported: false,
+        }),
+        presentation: None,
+        timeout_ms: None,
+        automatic_resolution: None,
+    };
+    let pending =
+        permission_bridge.queue_harness_control_for_tests("backend-pending-control", control);
+    assert_eq!(
+        permission_bridge.pending_harness_control_count_for_session("backend-pending-control"),
+        1
+    );
+
+    test.adapter
+        .close_session("backend-pending-control")
+        .await
+        .unwrap();
+    assert_eq!(pending.await.unwrap().behavior, "deny");
 }
 
 #[tokio::test]
