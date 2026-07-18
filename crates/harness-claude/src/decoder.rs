@@ -799,7 +799,10 @@ impl ClaudeStreamDecoder {
                     .ok_or_else(|| ClaudeDecodeError::Malformed("text_delta has no text".into()))?;
                 HarnessEventPayloadV1::Text(TextEvent { text: text.into() })
             }
-            Some("signature_delta") => return Ok(()),
+            // Claude streams tool arguments as partial JSON before emitting
+            // the completed assistant tool_use snapshot. The fragments are
+            // transport protocol and have no standalone neutral event.
+            Some("input_json_delta" | "signature_delta") => return Ok(()),
             Some(unknown) => {
                 drafts.push(self.draft(
                     stream_id.clone(),

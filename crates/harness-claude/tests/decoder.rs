@@ -54,6 +54,12 @@ fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
         )
         .unwrap()
         .is_empty());
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"path\": \"src/lib.rs\"}"}}}"#,
+        )
+        .unwrap()
+        .is_empty());
 
     let failure = decoder
         .decode_line(
@@ -65,6 +71,35 @@ fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
         HarnessEventPayloadV1::Error(error)
             if error.code.as_deref() == Some("claude_rate_limited")
                 && error.message.contains("rejected")
+    )));
+}
+
+#[test]
+fn tool_input_json_deltas_are_silent_until_complete_tool_use() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("tool-input-run"),
+        StreamId::from("tool-input-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"tool-input-session"}"#)
+        .unwrap();
+
+    let partial = decoder
+        .decode_line(
+            r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\": \"pwd\"}"}}"#,
+        )
+        .unwrap();
+    assert!(partial.is_empty());
+
+    let complete = decoder
+        .decode_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-input-1","name":"Bash","input":{"command":"pwd"}}]}}"#,
+        )
+        .unwrap();
+    assert!(complete.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::ToolCall(tool)
+            if tool.tool_call_id.as_str() == "tool-input-1" && tool.name == "Bash"
     )));
 }
 
