@@ -113,6 +113,9 @@ pub struct SessionStarted {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_resume_id: Option<ProviderResumeId>,
+    /// Provider-advertised tools available to the session.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

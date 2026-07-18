@@ -113,6 +113,8 @@ pub(crate) struct LocalChatEventSink {
     app_handle: Option<tauri::AppHandle>,
     #[cfg(test)]
     captured_events: Option<Arc<Mutex<Vec<LocalChatEvent>>>>,
+    #[cfg(test)]
+    delivery_error: Option<String>,
 }
 
 impl LocalChatEventSink {
@@ -121,6 +123,8 @@ impl LocalChatEventSink {
             app_handle: Some(app_handle),
             #[cfg(test)]
             captured_events: None,
+            #[cfg(test)]
+            delivery_error: None,
         }
     }
 
@@ -129,6 +133,7 @@ impl LocalChatEventSink {
         Self {
             app_handle: None,
             captured_events: None,
+            delivery_error: None,
         }
     }
 
@@ -139,12 +144,26 @@ impl LocalChatEventSink {
             Self {
                 app_handle: None,
                 captured_events: Some(captured_events.clone()),
+                delivery_error: None,
             },
             captured_events,
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn failing_for_tests(error: &str) -> Self {
+        Self {
+            app_handle: None,
+            captured_events: None,
+            delivery_error: Some(error.to_string()),
+        }
+    }
+
     pub(crate) fn emit(&self, event: LocalChatEvent) {
+        let _ = self.try_emit(event);
+    }
+
+    pub(crate) fn try_emit(&self, event: LocalChatEvent) -> Result<(), String> {
         #[cfg(test)]
         if let Some(captured_events) = &self.captured_events {
             captured_events
@@ -153,36 +172,26 @@ impl LocalChatEventSink {
                 .push(event.clone());
         }
 
+        #[cfg(test)]
+        if let Some(error) = &self.delivery_error {
+            return Err(error.clone());
+        }
+
         let Some(app_handle) = &self.app_handle else {
-            return;
+            return Ok(());
         };
 
-        match &event {
-            LocalChatEvent::Init(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::Text(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::ToolCall(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::ToolResult(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::Usage(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::End(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::Error(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-            LocalChatEvent::Warning(payload) => {
-                let _ = payload.emit(app_handle);
-            }
-        }
+        let result = match &event {
+            LocalChatEvent::Init(payload) => payload.emit(app_handle),
+            LocalChatEvent::Text(payload) => payload.emit(app_handle),
+            LocalChatEvent::ToolCall(payload) => payload.emit(app_handle),
+            LocalChatEvent::ToolResult(payload) => payload.emit(app_handle),
+            LocalChatEvent::Usage(payload) => payload.emit(app_handle),
+            LocalChatEvent::End(payload) => payload.emit(app_handle),
+            LocalChatEvent::Error(payload) => payload.emit(app_handle),
+            LocalChatEvent::Warning(payload) => payload.emit(app_handle),
+        };
+        result.map_err(|error| error.to_string())
     }
 }
 

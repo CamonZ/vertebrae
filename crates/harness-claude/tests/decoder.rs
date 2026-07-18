@@ -7,6 +7,27 @@ use vertebrae_harness_core::{
 };
 
 #[test]
+fn init_preserves_advertised_string_and_object_tool_names() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run-tools"),
+        StreamId::from("stream-tools"),
+    ));
+    let init = decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"init","session_id":"conversation-tools","tools":["Read",{"name":"Bash","description":"Run commands"},42,{"missing":"name"}]}"#,
+        )
+        .unwrap();
+    let started = init
+        .iter()
+        .find_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::SessionStarted(started) => Some(started),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(started.tools, ["Read", "Bash"]);
+}
+
+#[test]
 fn root_child_and_grandchild_are_separate_canonical_streams() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run-1"),
@@ -146,7 +167,7 @@ fn live_content_reasoning_plan_tools_usage_and_terminal_outcome_map_neutrally() 
         2
     );
 
-    let result = decoder.decode_line(r#"{"type":"result","subtype":"success","result":"done","structured_output":{"ok":true},"usage":{"input_tokens":20,"output_tokens":5}}"#).unwrap();
+    let result = decoder.decode_line(r#"{"type":"result","subtype":"success","result":"done","structured_output":{"ok":true},"duration_ms":4321,"num_turns":7,"total_cost_usd":0.42,"modelUsage":{"sonnet":{"contextWindow":180000},"opus":{"contextWindow":200000}},"usage":{"input_tokens":20,"output_tokens":5}}"#).unwrap();
     let outcome = result
         .iter()
         .find_map(|draft| match &draft.payload {
@@ -158,6 +179,38 @@ fn live_content_reasoning_plan_tools_usage_and_terminal_outcome_map_neutrally() 
     assert_eq!(outcome.result_text.as_deref(), Some("done"));
     assert_eq!(outcome.structured_output.as_ref().unwrap()["ok"], true);
     assert_eq!(outcome.usage.as_ref().unwrap().tokens.output_tokens, 5);
+    assert_eq!(outcome.metrics.duration_ms, Some(4321));
+    assert_eq!(outcome.metrics.turn_count, Some(7));
+    assert_eq!(outcome.metrics.total_cost_usd, Some(0.42));
+    assert_eq!(outcome.metrics.context_tokens, Some(0));
+    assert_eq!(outcome.metrics.context_window, Some(200_000));
+}
+
+#[test]
+fn result_cost_is_preserved_without_a_usage_object() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run-cost-only"),
+        StreamId::from("stream-cost-only"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"cost-only"}"#)
+        .unwrap();
+    let result = decoder
+        .decode_line(
+            r#"{"type":"result","subtype":"success","result":"done","duration_ms":9,"num_turns":2,"total_cost_usd":0.375}"#,
+        )
+        .unwrap();
+    let outcome = result
+        .iter()
+        .find_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::RunFinished(outcome) => Some(outcome),
+            _ => None,
+        })
+        .unwrap();
+    assert!(outcome.usage.is_none());
+    assert_eq!(outcome.metrics.total_cost_usd, Some(0.375));
+    assert_eq!(outcome.metrics.duration_ms, Some(9));
+    assert_eq!(outcome.metrics.turn_count, Some(2));
 }
 
 #[test]
@@ -185,7 +238,7 @@ fn unknown_records_are_contained_but_malformed_records_fail_without_ids() {
 }
 
 #[test]
-fn top_level_controls_decode_without_duplicating_ask_user_tool_calls() {
+fn top_level_controls_and_ask_user_tool_calls_both_decode_canonically() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run-control"),
         StreamId::from("stream-control"),
@@ -201,11 +254,11 @@ fn top_level_controls_decode_without_duplicating_ask_user_tool_calls() {
     ));
 
     let assistant = decoder.decode_line(r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"ask-1","name":"AskUserQuestion","input":{"questions":[]}}]}}"#).unwrap();
-    assert!(
-        assistant
-            .iter()
-            .any(|draft| matches!(draft.payload, HarnessEventPayloadV1::ToolCall(_)))
-    );
+    assert!(assistant.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::ToolCall(tool)
+            if tool.name == "AskUserQuestion" && tool.tool_call_id.as_str() == "ask-1"
+    )));
     assert!(
         !assistant
             .iter()
@@ -353,7 +406,7 @@ fn ask_user_controls_and_provider_cancellations_decode_neutrally() {
     decoder
         .decode_line(r#"{"type":"system","subtype":"init","session_id":"questions-session"}"#)
         .unwrap();
-    let events = decoder.decode_line(r#"{"type":"control_request","request_id":"question-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which environment?","header":"Environment","options":[{"label":"Staging","description":"Use staging"},{"label":"Production","description":"Use production"}],"multiSelect":false}]}}}"#).unwrap();
+    let events = decoder.decode_line(r#"{"type":"control_request","request_id":"question-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","tool_use_id":"question-tool","input":{"questions":[{"question":"Which environment?","header":"Environment","options":[{"label":"Staging","description":"Use staging"},{"label":"Production","description":"Use production"}],"multiSelect":false}]}}}"#).unwrap();
     let request = events
         .iter()
         .find_map(|draft| match &draft.payload {
@@ -365,11 +418,26 @@ fn ask_user_controls_and_provider_cancellations_decode_neutrally() {
         ControlRequest::UserQuestion { questions } => {
             assert_eq!(questions[0].id, "Which environment?");
             assert_eq!(questions[0].prompt, "Which environment?");
+            assert_eq!(questions[0].header.as_deref(), Some("Environment"));
             assert_eq!(questions[0].options[0].id, "Staging");
             assert!(!questions[0].multiple);
         }
         other => panic!("expected user question, got {other:?}"),
     }
+    let presentation = request.presentation.as_ref().unwrap();
+    assert_eq!(presentation.tool_name.as_deref(), Some("AskUserQuestion"));
+    assert_eq!(
+        presentation.tool_call_id.as_ref().unwrap().as_str(),
+        "question-tool"
+    );
+    assert_eq!(
+        presentation.input.as_ref().unwrap()["questions"][0]["header"],
+        "Environment"
+    );
+    assert_eq!(
+        presentation.message.as_deref(),
+        Some("AskUserQuestion needs approval")
+    );
 
     let events = decoder
         .decode_line(r#"{"type":"control_cancel_request","request_id":"question-1"}"#)

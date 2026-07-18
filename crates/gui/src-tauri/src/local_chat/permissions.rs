@@ -5,8 +5,12 @@ use std::collections::HashMap;
 #[cfg(unix)]
 use std::io::{BufRead, Write};
 use std::sync::{Arc, Mutex};
-#[cfg(unix)]
 use tauri::Emitter;
+
+use vertebrae_harness_core::{
+    ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution, HarnessError,
+    QuestionAnswer, ResolutionSource,
+};
 
 #[cfg(unix)]
 use crate::events::{PermissionRequestEvent, UserQuestion, UserQuestionOption};
@@ -51,6 +55,25 @@ struct PendingPermission {
     tool_name: String,
     input: serde_json::Value,
     response_tx: std::sync::mpsc::Sender<LocalPermissionDecision>,
+}
+
+struct PendingHarnessControl {
+    session_id: String,
+    request: ControlRequestEnvelope,
+    response_tx: tokio::sync::oneshot::Sender<LocalPermissionDecision>,
+}
+
+struct PendingHarnessControlCleanup {
+    request_id: String,
+    pending: Arc<Mutex<HashMap<String, PendingHarnessControl>>>,
+}
+
+impl Drop for PendingHarnessControlCleanup {
+    fn drop(&mut self) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(&self.request_id);
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -179,6 +202,7 @@ fn validate_ask_user_question_decision(
 #[derive(Clone)]
 pub(crate) struct PermissionBridge {
     pending_permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
+    pending_harness_controls: Arc<Mutex<HashMap<String, PendingHarnessControl>>>,
 }
 
 #[cfg(unix)]
@@ -224,7 +248,53 @@ impl PermissionBridge {
     pub(crate) fn new() -> Self {
         Self {
             pending_permissions: Arc::new(Mutex::new(HashMap::new())),
+            pending_harness_controls: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub(crate) async fn request_harness_control(
+        &self,
+        backend_session_id: &str,
+        app_handle: Option<tauri::AppHandle>,
+        request: ControlRequestEnvelope,
+    ) -> Result<ControlResolution, HarnessError> {
+        let app_handle = app_handle.ok_or_else(|| {
+            HarnessError::Control("Tauri app handle is unavailable for a control request".into())
+        })?;
+        let request_id = request.request_id.to_string();
+        let event = harness_permission_event(backend_session_id, &request)?;
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        {
+            let mut pending = self.pending_harness_controls.lock().map_err(|_| {
+                HarnessError::Control("permission responder lock is poisoned".into())
+            })?;
+            if pending.contains_key(&request_id) {
+                return Err(HarnessError::Control(format!(
+                    "duplicate permission request id: {request_id}"
+                )));
+            }
+            pending.insert(
+                request_id.clone(),
+                PendingHarnessControl {
+                    session_id: backend_session_id.to_string(),
+                    request: request.clone(),
+                    response_tx,
+                },
+            );
+        }
+        let _cleanup = PendingHarnessControlCleanup {
+            request_id: request_id.clone(),
+            pending: self.pending_harness_controls.clone(),
+        };
+        if let Err(error) = app_handle.emit("permission-request-event", &event) {
+            return Err(HarnessError::Control(format!(
+                "failed to emit permission request event: {error}"
+            )));
+        }
+        let decision = response_rx
+            .await
+            .map_err(|_| HarnessError::Control("permission request was cancelled".to_string()))?;
+        local_decision_to_control_resolution(&request, decision)
     }
 
     #[cfg(unix)]
@@ -570,9 +640,10 @@ impl PermissionBridge {
             let mut pending = self.pending_permissions.lock().map_err(|_| {
                 PermissionBridgeError::Internal("permission responder lock is poisoned".to_string())
             })?;
-            let request = pending
-                .get(request_id)
-                .ok_or_else(|| PermissionBridgeError::NotFound(request_id.to_string()))?;
+            let Some(request) = pending.get(request_id) else {
+                drop(pending);
+                return self.resolve_harness_control(request_id, decision);
+            };
             if request.tool_name == ASK_USER_QUESTION_TOOL {
                 validate_ask_user_question_decision(&request.input, &decision)
                     .map_err(PermissionBridgeError::Invalid)?;
@@ -621,7 +692,234 @@ impl PermissionBridge {
                 updated_input: None,
             });
         }
+
+        let pending_controls = {
+            let mut pending = match self.pending_harness_controls.lock() {
+                Ok(pending) => pending,
+                Err(_) => return,
+            };
+            let request_ids = pending
+                .iter()
+                .filter(|(_, pending)| pending.session_id == session_id)
+                .map(|(request_id, _)| request_id.clone())
+                .collect::<Vec<_>>();
+            request_ids
+                .into_iter()
+                .filter_map(|request_id| pending.remove(&request_id))
+                .collect::<Vec<_>>()
+        };
+        for pending in pending_controls {
+            let _ = pending.response_tx.send(LocalPermissionDecision {
+                behavior: "deny".into(),
+                message: Some(cancellation_message.clone()),
+                updated_input: None,
+            });
+        }
     }
+
+    fn resolve_harness_control(
+        &self,
+        request_id: &str,
+        decision: LocalPermissionDecision,
+    ) -> Result<serde_json::Value, PermissionBridgeError> {
+        let mut pending_controls = self.pending_harness_controls.lock().map_err(|_| {
+            PermissionBridgeError::Internal("permission responder lock is poisoned".into())
+        })?;
+        let pending = pending_controls
+            .get(request_id)
+            .ok_or_else(|| PermissionBridgeError::NotFound(request_id.to_string()))?;
+        if matches!(pending.request.request, ControlRequest::UserQuestion { .. }) {
+            validate_harness_question_decision(&pending.request, &decision)
+                .map_err(PermissionBridgeError::Invalid)?;
+        }
+        let pending = pending_controls
+            .remove(request_id)
+            .ok_or_else(|| PermissionBridgeError::NotFound(request_id.to_string()))?;
+        drop(pending_controls);
+        pending
+            .response_tx
+            .send(decision.clone())
+            .map_err(|_| PermissionBridgeError::Unavailable)?;
+        serde_json::to_value(decision)
+            .map_err(|error| PermissionBridgeError::Internal(error.to_string()))
+    }
+}
+
+fn harness_permission_event(
+    backend_session_id: &str,
+    request: &ControlRequestEnvelope,
+) -> Result<crate::events::PermissionRequestEvent, HarnessError> {
+    let (tool_name, tool_use_id, input, message, questions) = match &request.request {
+        ControlRequest::Approval(approval) => {
+            let details = approval
+                .details
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({}));
+            let tool_name = details
+                .get("tool_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(&approval.title)
+                .to_string();
+            let tool_use_id = details
+                .get("tool_use_id")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(request.request_id.as_str())
+                .to_string();
+            let input = details
+                .get("input")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            (
+                tool_name,
+                tool_use_id,
+                input,
+                Some(approval.title.clone()),
+                None,
+            )
+        }
+        ControlRequest::UserQuestion { questions } => {
+            let provider_questions = questions
+                .iter()
+                .map(|question| {
+                    serde_json::json!({
+                        "question": question.prompt,
+                        "header": question.header.as_deref().unwrap_or("Question"),
+                        "options": question.options.iter().map(|option| serde_json::json!({
+                            "label": option.label,
+                            "description": option.description.clone().unwrap_or_default(),
+                        })).collect::<Vec<_>>(),
+                        "multiSelect": question.multiple,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let ui_questions = questions
+                .iter()
+                .map(|question| crate::events::UserQuestion {
+                    question: question.prompt.clone(),
+                    header: question.header.clone().unwrap_or_else(|| "Question".into()),
+                    options: question
+                        .options
+                        .iter()
+                        .map(|option| crate::events::UserQuestionOption {
+                            label: option.label.clone(),
+                            description: option.description.clone().unwrap_or_default(),
+                        })
+                        .collect(),
+                    multi_select: question.multiple,
+                })
+                .collect();
+            (
+                ASK_USER_QUESTION_TOOL.into(),
+                request.request_id.to_string(),
+                serde_json::json!({ "questions": provider_questions }),
+                Some("Claude needs an answer".into()),
+                Some(ui_questions),
+            )
+        }
+        ControlRequest::PermissionGrant(_) => (
+            "PermissionGrant".into(),
+            request.request_id.to_string(),
+            serde_json::json!({}),
+            Some("Claude needs additional permissions".into()),
+            None,
+        ),
+    };
+    let presentation = request.presentation.as_ref();
+    Ok(crate::events::PermissionRequestEvent {
+        request_id: request.request_id.to_string(),
+        session_id: Some(backend_session_id.to_string()),
+        tool_name: presentation
+            .and_then(|value| value.tool_name.clone())
+            .unwrap_or(tool_name),
+        tool_use_id: presentation
+            .and_then(|value| value.tool_call_id.as_ref().map(ToString::to_string))
+            .unwrap_or(tool_use_id),
+        input: presentation
+            .and_then(|value| value.input.clone())
+            .unwrap_or(input),
+        message: presentation
+            .and_then(|value| value.message.clone())
+            .or(message),
+        questions,
+        input_error: None,
+    })
+}
+
+fn validate_harness_question_decision(
+    request: &ControlRequestEnvelope,
+    decision: &LocalPermissionDecision,
+) -> Result<(), String> {
+    if decision.behavior != "allow" {
+        return Ok(());
+    }
+    let answers = decision
+        .updated_input
+        .as_ref()
+        .and_then(|input| input.get("answers"))
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "AskUserQuestion updatedInput requires an answers object".to_string())?;
+    let ControlRequest::UserQuestion { questions } = &request.request else {
+        return Err("question validation received a non-question request".into());
+    };
+    for question in questions {
+        if !answers
+            .get(&question.prompt)
+            .is_some_and(serde_json::Value::is_string)
+        {
+            return Err(format!(
+                "AskUserQuestion answer for exact question text {:?} must be a string",
+                question.prompt
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn local_decision_to_control_resolution(
+    request: &ControlRequestEnvelope,
+    decision: LocalPermissionDecision,
+) -> Result<ControlResolution, HarnessError> {
+    let control_decision = if decision.behavior == "allow" {
+        match &request.request {
+            ControlRequest::UserQuestion { questions } => {
+                let answers = decision
+                    .updated_input
+                    .as_ref()
+                    .and_then(|input| input.get("answers"))
+                    .and_then(serde_json::Value::as_object)
+                    .ok_or_else(|| {
+                        HarnessError::Control(
+                            "AskUserQuestion updatedInput requires an answers object".into(),
+                        )
+                    })?;
+                ControlDecision::QuestionsAnswered(
+                    questions
+                        .iter()
+                        .map(|question| QuestionAnswer {
+                            question_id: question.id.clone(),
+                            selected_option_ids: Vec::new(),
+                            free_form: answers
+                                .get(&question.prompt)
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_owned),
+                        })
+                        .collect(),
+                )
+            }
+            _ => decision
+                .updated_input
+                .map(ControlDecision::Modified)
+                .unwrap_or(ControlDecision::AllowOnce),
+        }
+    } else {
+        ControlDecision::Deny
+    };
+    Ok(ControlResolution {
+        request_id: request.request_id.clone(),
+        source: ResolutionSource::Consumer,
+        decision: Some(control_decision),
+        message: decision.message,
+    })
 }
 
 #[cfg(test)]

@@ -522,7 +522,7 @@ async fn run_persistent_process_v2(
                         let _ = response.send(Err(format!("turn {turn_id} is not active")));
                         continue;
                     }
-                    let outcome = TurnOutcome { status: CompletionStatus::Interrupted, result_text: None, structured_output: None, usage: None, error: None };
+                    let outcome = TurnOutcome { status: CompletionStatus::Interrupted, result_text: None, structured_output: None, usage: None, metrics: vertebrae_harness_core::OutcomeMetrics::default(), error: None };
                     if let Some(turn) = pending_turn.take() {
                         let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome.clone()));
                     }
@@ -938,6 +938,7 @@ async fn run_one_shot_process_v2(
             result_text: None,
             structured_output: None,
             usage: None,
+            metrics: vertebrae_harness_core::OutcomeMetrics::default(),
             error: None,
         }
     } else if let Some(error) = failure {
@@ -946,6 +947,7 @@ async fn run_one_shot_process_v2(
             result_text: None,
             structured_output: None,
             usage: None,
+            metrics: vertebrae_harness_core::OutcomeMetrics::default(),
             error: Some(error),
         }
     } else if let Some(outcome) = terminal {
@@ -956,6 +958,7 @@ async fn run_one_shot_process_v2(
             result_text: None,
             structured_output: None,
             usage: None,
+            metrics: vertebrae_harness_core::OutcomeMetrics::default(),
             error: Some(
                 status
                     .map(|status| {

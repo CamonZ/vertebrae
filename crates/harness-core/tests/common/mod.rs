@@ -17,6 +17,7 @@ pub fn outcome(status: CompletionStatus) -> TurnOutcome {
             },
             cost_microusd: 7,
         }),
+        metrics: OutcomeMetrics::default(),
         error: None,
     }
 }

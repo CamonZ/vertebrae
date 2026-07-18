@@ -107,6 +107,22 @@ pub struct SessionUsage {
     pub context_window: Option<u64>,
 }
 
+/// Provider-neutral terminal measurements that are not token usage.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct OutcomeMetrics {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
+    /// Provider-reported total cost, including results with no usage object.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_cost_usd: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurnOutcome {
     pub status: CompletionStatus,
@@ -117,6 +133,8 @@ pub struct TurnOutcome {
     /// Informational terminal usage. Aggregate only `UsageEvent` payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
+    #[serde(default)]
+    pub metrics: OutcomeMetrics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -131,6 +149,8 @@ pub struct RunOutcome {
     /// Informational terminal usage. Aggregate only `UsageEvent` payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<TurnUsage>,
+    #[serde(default)]
+    pub metrics: OutcomeMetrics,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }

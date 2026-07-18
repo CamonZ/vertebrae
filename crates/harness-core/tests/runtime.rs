@@ -305,6 +305,7 @@ impl RunHandle for MockRun {
             result_text: Some("run".into()),
             structured_output: None,
             usage: None,
+            metrics: OutcomeMetrics::default(),
             error: None,
         })
     }
@@ -561,6 +562,7 @@ async fn control_sink_preserves_correlation_and_resolution_source() {
             permissions: vec!["filesystem".into()],
             scope_supported: vec![GrantScope::Turn, GrantScope::Session],
         }),
+        presentation: None,
         timeout_ms: Some(500),
         automatic_resolution: Some(ControlDecision::Deny),
     };
@@ -585,6 +587,7 @@ async fn durable_control_events_bracket_the_live_control_exchange() {
             details: None,
             modification_supported: false,
         }),
+        presentation: None,
         timeout_ms: Some(100),
         automatic_resolution: Some(ControlDecision::Deny),
     };

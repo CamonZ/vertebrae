@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ControlRequestId, SessionId, TurnId};
+use crate::{ControlRequestId, SessionId, ToolCallId, TurnId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -47,10 +47,25 @@ pub struct QuestionOption {
 pub struct UserQuestion {
     pub id: String,
     pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
     #[serde(default)]
     pub options: Vec<QuestionOption>,
     pub multiple: bool,
     pub free_form: bool,
+}
+
+/// Optional provider-supplied presentation data used by interactive surfaces.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ControlPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<ToolCallId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,6 +108,8 @@ pub struct ControlRequestEnvelope {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
     pub request: ControlRequest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<ControlPresentation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

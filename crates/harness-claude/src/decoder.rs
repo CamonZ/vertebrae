@@ -7,13 +7,13 @@ use chrono::Utc;
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     AgentMetadata, ApprovalCategory, ApprovalRequest, CompletionStatus, ControlDecision,
-    ControlRequest, ControlRequestEnvelope, ControlRequestId, ControlResolution, DiagnosticEvent,
-    EventCorrelation, HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent,
-    ProviderResumeId, ProviderThreadRef, QuestionOption, ResolutionSource, RunId, RunOutcome,
-    SessionId, SessionStarted, SessionUsage, StreamId, TextEvent, ThreadDeclared, ThreadId,
-    ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnId,
-    TurnInput, TurnInputProvenance, TurnOutcome, TurnUsage, UpdateSemantics, UsageEvent,
-    UserQuestion,
+    ControlPresentation, ControlRequest, ControlRequestEnvelope, ControlRequestId,
+    ControlResolution, DiagnosticEvent, EventCorrelation, HarnessEventDraftV1,
+    HarnessEventPayloadV1, OutcomeMetrics, PlanEntry, PlanEvent, ProviderResumeId,
+    ProviderThreadRef, QuestionOption, ResolutionSource, RunId, RunOutcome, SessionId,
+    SessionStarted, SessionUsage, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind,
+    TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnId, TurnInput,
+    TurnInputProvenance, TurnOutcome, TurnUsage, UpdateSemantics, UsageEvent, UserQuestion,
 };
 
 use crate::ClaudeRootLocatorResolver;
@@ -301,6 +301,7 @@ impl ClaudeStreamDecoder {
                         provider: "anthropic".into(),
                         model: string(object, "model").map(str::to_owned),
                         provider_resume_id: self.context.provider_resume_id.clone(),
+                        tools: claude_init_tools(object),
                     }),
                 ));
                 if self.declared_threads.insert(root.clone()) {
@@ -1066,15 +1067,16 @@ impl ClaudeStreamDecoder {
         parent: Option<ToolCallId>,
         drafts: &mut Vec<HarnessEventDraftV1>,
     ) {
+        let total_cost_usd = object
+            .get("total_cost_usd")
+            .or_else(|| object.get("cost_usd"))
+            .and_then(Value::as_f64);
         let mut usage = object
             .get("usage")
             .and_then(Value::as_object)
             .map(turn_usage);
         if let Some(usage) = &mut usage {
-            usage.cost_microusd = object
-                .get("total_cost_usd")
-                .or_else(|| object.get("cost_usd"))
-                .and_then(Value::as_f64)
+            usage.cost_microusd = total_cost_usd
                 .map(|cost| (cost * 1_000_000.0).round() as u64)
                 .unwrap_or(usage.cost_microusd);
         }
@@ -1102,6 +1104,16 @@ impl ClaudeStreamDecoder {
         };
         let result_text = string(object, "result").map(str::to_owned);
         let structured_output = object.get("structured_output").cloned();
+        let metrics = OutcomeMetrics {
+            duration_ms: object.get("duration_ms").and_then(Value::as_u64),
+            turn_count: object.get("num_turns").and_then(Value::as_u64),
+            // Claude's result record carries cumulative model usage. As in the
+            // legacy GUI parser, only its maximum context window is meaningful;
+            // terminal context tokens are explicitly zero.
+            context_tokens: Some(0),
+            context_window: Some(result_context_window(object)),
+            total_cost_usd,
+        };
         let error = failed.then(|| {
             result_text
                 .clone()
@@ -1113,6 +1125,7 @@ impl ClaudeStreamDecoder {
                 result_text,
                 structured_output,
                 usage,
+                metrics,
                 error,
             })
         } else {
@@ -1121,6 +1134,7 @@ impl ClaudeStreamDecoder {
                 result_text,
                 structured_output,
                 usage,
+                metrics,
                 error,
             })
         };
@@ -1195,6 +1209,37 @@ impl ClaudeStreamDecoder {
             payload,
         }
     }
+}
+
+fn result_context_window(object: &Map<String, Value>) -> u64 {
+    object
+        .get("modelUsage")
+        .or_else(|| object.get("model_usage"))
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|usage| usage.values())
+        .filter_map(|usage| {
+            usage
+                .get("contextWindow")
+                .or_else(|| usage.get("context_window"))
+                .and_then(Value::as_u64)
+        })
+        .max()
+        .unwrap_or(DEFAULT_CONTEXT_WINDOW)
+}
+
+fn claude_init_tools(object: &Map<String, Value>) -> Vec<String> {
+    object
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            tool.as_str()
+                .or_else(|| tool.get("name").and_then(Value::as_str))
+                .map(str::to_owned)
+        })
+        .collect()
 }
 
 fn string<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
@@ -1299,6 +1344,8 @@ fn decode_control_request(
         })?;
     let subtype = string(request, "subtype").unwrap_or("unknown");
     let tool_name = string(request, "tool_name").unwrap_or("Claude tool");
+    let raw_input = request.get("input").cloned();
+    let tool_call_id = string(request, "tool_use_id").map(ToolCallId::new);
     let control_request = if subtype == "can_use_tool" && tool_name == "AskUserQuestion" {
         ControlRequest::UserQuestion {
             questions: decode_user_questions(request)?,
@@ -1326,6 +1373,12 @@ fn decode_control_request(
         session_id: context.session_id.clone(),
         turn_id: context.turn_id.clone(),
         request: control_request,
+        presentation: Some(ControlPresentation {
+            tool_name: Some(tool_name.to_owned()),
+            tool_call_id,
+            input: raw_input,
+            message: Some(format!("{tool_name} needs approval")),
+        }),
         timeout_ms: object.get("timeout_ms").and_then(Value::as_u64),
         automatic_resolution: None,
     })
@@ -1412,6 +1465,7 @@ fn decode_user_questions(
             Ok(UserQuestion {
                 id: prompt.clone(),
                 prompt,
+                header: string(question, "header").map(str::to_owned),
                 options,
                 multiple,
                 free_form: true,
