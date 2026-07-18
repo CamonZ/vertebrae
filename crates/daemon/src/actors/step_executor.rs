@@ -29,8 +29,8 @@ use vertebrae_harness_claude::{
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
-    HarnessRuntime, RequestConfig, ResolutionSource, RunHandle, RunId, RunOutcome, RunRequest,
-    SessionUsage, StreamId,
+    HarnessRuntime, ProviderThreadRef, RequestConfig, ResolutionSource, RunHandle, RunId,
+    RunOutcome, RunRequest, SessionId, SessionUsage, StreamId,
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
@@ -46,6 +46,8 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 pub const CHECKPOINT_CLAUDE_ARGV: &str = "claude_argv";
 pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
 pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
+const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 /// Reported when a child process exits without a numeric exit code (e.g.
 /// killed by a signal on Unix, where `ExitStatus::code()` returns `None`).
@@ -191,7 +193,7 @@ struct DaemonHarnessEventSink {
     persistence: Arc<dyn EventSink>,
     root_stream_id: StreamId,
     usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
-    cancel_notify: Arc<tokio::sync::Notify>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
     execution_id: String,
     task_id: String,
     verbose: bool,
@@ -237,9 +239,27 @@ impl EventSink for DaemonHarnessEventSink {
             }
             _ => None,
         };
+        let mut cancel_rx = self.cancel_rx.clone();
+        if *cancel_rx.borrow() {
+            if matches!(&event.payload, HarnessEventPayloadV1::RunFinished(_)) {
+                return tokio::time::timeout(
+                    CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT,
+                    self.persistence.emit(event),
+                )
+                .await
+                .map_err(|_| {
+                    HarnessError::EventSink(
+                        "daemon cancelled while persisting the terminal harness event".into(),
+                    )
+                })?;
+            }
+            return Err(HarnessError::EventSink(
+                "daemon cancelled while persisting a harness event".into(),
+            ));
+        }
         tokio::select! {
             result = self.persistence.emit(event) => result?,
-            () = self.cancel_notify.notified() => {
+            _ = cancel_rx.changed() => {
                 return Err(HarnessError::EventSink(
                     "daemon cancelled while persisting a harness event".into(),
                 ));
@@ -438,6 +458,14 @@ fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
     }
 }
 
+fn daemon_claude_root_locator(session_id: &SessionId) -> ProviderThreadRef {
+    // Daemon one-shot runs do not replay Claude's on-disk transcript, so they
+    // must not guess Claude's project-directory encoding. This stable opaque
+    // identity lets the decoder release pathless init records while leaving
+    // provider-owned transcript discovery to a later replay-capable surface.
+    ProviderThreadRef::new(format!("claude://session/{}", session_id.as_str()))
+}
+
 fn build_claude_harness(
     config: &StepExecutorConfig,
     settings: &SyntheticSettings,
@@ -527,6 +555,9 @@ fn build_claude_harness(
             .map(PathBuf::from)
             .collect(),
         permission_mode,
+        root_locator_resolver: Some(Arc::new(|session_id: &SessionId| {
+            Ok(Some(daemon_claude_root_locator(session_id)))
+        })),
         ..ClaudeProviderConfig::default()
     };
     let request = RunRequest {
@@ -663,7 +694,7 @@ pub struct StepExecutorState {
     harness_run: Option<Arc<dyn RunHandle>>,
     harness_outcome_handle: Option<tokio::task::JoinHandle<()>>,
     harness_usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
-    harness_cancel_notify: Arc<tokio::sync::Notify>,
+    harness_cancel_tx: tokio::sync::watch::Sender<bool>,
     stream_handle: Option<tokio::task::JoinHandle<()>>,
     /// Shared slot for the harness-agnostic aggregate (metrics + result text +
     /// structured output + provider error). Written by the streaming task,
@@ -709,6 +740,7 @@ impl Actor for StepExecutor {
             );
         }
 
+        let (harness_cancel_tx, _harness_cancel_rx) = tokio::sync::watch::channel(false);
         Ok(StepExecutorState {
             execution_id: config.execution_id.clone(),
             task_id: config.task_id.clone(),
@@ -718,7 +750,7 @@ impl Actor for StepExecutor {
             harness_run: None,
             harness_outcome_handle: None,
             harness_usage: Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default())),
-            harness_cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            harness_cancel_tx,
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(
                 HarnessStreamResult::default(),
@@ -770,7 +802,7 @@ impl Actor for StepExecutor {
             handle.abort();
         }
 
-        state.harness_cancel_notify.notify_waiters();
+        let _ = state.harness_cancel_tx.send(true);
         if let Some(run) = state.harness_run.take() {
             let _ = run.cancel().await;
             if tokio::time::timeout(std::time::Duration::from_secs(10), run.await_outcome())
@@ -888,7 +920,7 @@ impl StepExecutor {
                 )),
                 root_stream_id: request.stream_id.clone(),
                 usage,
-                cancel_notify: state.harness_cancel_notify.clone(),
+                cancel_rx: state.harness_cancel_tx.subscribe(),
                 execution_id: state.execution_id.clone(),
                 task_id: state.task_id.clone(),
                 verbose: state.config.step_config.verbose_daemon_logging,
@@ -1073,7 +1105,7 @@ impl StepExecutor {
                 Ok(()) => {
                     // Interrupt persistence waits, but leave terminal status
                     // ownership to the harness RunOutcome.
-                    state.harness_cancel_notify.notify_waiters();
+                    let _ = state.harness_cancel_tx.send(true);
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -1353,6 +1385,21 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct BlocksAfterFirstHarnessPersistence {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl EventSink for BlocksAfterFirstHarnessPersistence {
+        async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(());
+            }
+            std::future::pending().await
+        }
+    }
+
     fn harness_usage_event(stream_id: &str, event_id: &str) -> HarnessEventV1 {
         serde_json::from_value(serde_json::json!({
             "version": 1,
@@ -1373,6 +1420,24 @@ mod tests {
                     },
                     "cost_microusd": 250000
                 }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn harness_cancelled_run_finished_event(event_id: &str) -> HarnessEventV1 {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "event_id": event_id,
+            "stream_id": "root",
+            "sequence": 2,
+            "correlation": {"run_id": "run-1"},
+            "timestamp": "2026-07-18T00:00:01Z",
+            "semantics": "snapshot",
+            "type": "run_finished",
+            "data": {
+                "status": "cancelled",
+                "metrics": {}
             }
         }))
         .unwrap()
@@ -1575,7 +1640,7 @@ if [ "$1" = "--version" ]; then
   echo "2.1.0 (Claude Code)"
   exit 0
 fi
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"daemon-session","transcript_path":"opaque://daemon-session.jsonl","tools":["Bash","StructuredOutput"]}'
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"daemon-session","tools":["Bash","StructuredOutput"]}'
 printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":7,"cache_read_input_tokens":2,"output_tokens":3},"content":[{"type":"text","text":"working"}]}}'
 printf '%s\n' '{"type":"result","subtype":"success","result":"done","duration_ms":42,"total_cost_usd":0.125,"usage":{"input_tokens":11,"output_tokens":5}}'
 "##,
@@ -1959,6 +2024,23 @@ exec sleep 30
                 .count(),
             1
         );
+        let root = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                HarnessEventPayloadV1::ThreadDeclared(declaration)
+                    if declaration.parent_thread_id.is_none() =>
+                {
+                    Some(declaration)
+                }
+                _ => None,
+            })
+            .expect("pathless init must produce a root declaration");
+        assert_eq!(
+            root.provider_thread_ref
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("claude://session/daemon-session")
+        );
         assert!(
             logs.iter()
                 .all(|log| log.format.as_deref() != Some("anthropic"))
@@ -2036,11 +2118,12 @@ exec sleep 30
     async fn normalized_usage_is_counted_once_only_after_durable_root_persistence() {
         let persistence = Arc::new(CapturingHarnessPersistence::default());
         let usage = Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default()));
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
         let sink = DaemonHarnessEventSink {
             persistence: persistence.clone(),
             root_stream_id: StreamId::new("root"),
             usage: usage.clone(),
-            cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            cancel_rx,
             execution_id: "exec-1".into(),
             task_id: "task-1".into(),
             verbose: false,
@@ -2073,6 +2156,43 @@ exec sleep 30
         let observed = usage.lock().unwrap();
         assert_eq!(observed.input_tokens, 13);
         assert_eq!(observed.turn_deltas, 1);
+    }
+
+    #[tokio::test]
+    async fn cancellation_between_writes_interrupts_the_next_blocking_persistence() {
+        let persistence = Arc::new(BlocksAfterFirstHarnessPersistence::default());
+        let usage = Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default()));
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let sink = DaemonHarnessEventSink {
+            persistence: persistence.clone(),
+            root_stream_id: StreamId::new("root"),
+            usage,
+            cancel_rx,
+            execution_id: "exec-between-writes".into(),
+            task_id: "task-between-writes".into(),
+            verbose: false,
+        };
+
+        sink.emit(harness_usage_event("root", "before-cancel"))
+            .await
+            .unwrap();
+        cancel_tx.send(true).unwrap();
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            sink.emit(harness_cancelled_run_finished_event(
+                "terminal-after-cancel",
+            )),
+        )
+        .await
+        .expect("retained cancellation must prevent a later persistence hang")
+        .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(
+            persistence.calls.load(Ordering::SeqCst),
+            2,
+            "the terminal event may enter persistence but must be bounded"
+        );
     }
 
     #[cfg(unix)]
@@ -3523,6 +3643,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"done","structured_
             .json_schema
             .as_ref()
             .map(crate::output_validator::CompiledSchema::compile);
+        let (harness_cancel_tx, _harness_cancel_rx) = tokio::sync::watch::channel(false);
         StepExecutorState {
             execution_id: config.execution_id.clone(),
             task_id: config.task_id.clone(),
@@ -3532,7 +3653,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"done","structured_
             harness_run: None,
             harness_outcome_handle: None,
             harness_usage: Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default())),
-            harness_cancel_notify: Arc::new(tokio::sync::Notify::new()),
+            harness_cancel_tx,
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(
                 HarnessStreamResult::default(),
