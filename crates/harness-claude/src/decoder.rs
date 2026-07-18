@@ -425,6 +425,25 @@ impl ClaudeStreamDecoder {
                     ));
                 }
             }
+            // Claude emits several system telemetry/status records during a
+            // normal turn. They are provider protocol, not user-facing
+            // diagnostics; only the explicitly modeled init/task progress
+            // records above produce normalized events.
+            "system" => {}
+            "rate_limit_event" => {
+                if let Some(message) = rate_limit_failure_message(object) {
+                    drafts.push(self.draft(
+                        stream_id,
+                        &thread_id,
+                        parent_tool_call,
+                        UpdateSemantics::Snapshot,
+                        HarnessEventPayloadV1::Error(DiagnosticEvent {
+                            message,
+                            code: Some("claude_rate_limited".into()),
+                        }),
+                    ));
+                }
+            }
             "content_block_start" | "content_block_stop" | "message_start" | "message_stop" => {}
             unknown => drafts.push(self.draft(
                 stream_id,
@@ -780,6 +799,7 @@ impl ClaudeStreamDecoder {
                     .ok_or_else(|| ClaudeDecodeError::Malformed("text_delta has no text".into()))?;
                 HarnessEventPayloadV1::Text(TextEvent { text: text.into() })
             }
+            Some("signature_delta") => return Ok(()),
             Some(unknown) => {
                 drafts.push(self.draft(
                     stream_id.clone(),
@@ -1244,6 +1264,43 @@ fn claude_init_tools(object: &Map<String, Value>) -> Vec<String> {
 
 fn string<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
     object.get(key).and_then(Value::as_str)
+}
+
+fn rate_limit_failure_message(object: &Map<String, Value>) -> Option<String> {
+    let info = object.get("rate_limit_info").and_then(Value::as_object);
+    let status = info
+        .and_then(|info| string(info, "status"))
+        .or_else(|| string(object, "status"));
+    let message = string(object, "message")
+        .or_else(|| string(object, "reason"))
+        .or_else(|| {
+            object
+                .get("error")
+                .and_then(Value::as_object)
+                .and_then(|error| string(error, "message"))
+        })
+        .or_else(|| info.and_then(|info| string(info, "message")));
+    let message_is_rate_limit = message.is_some_and(|message| {
+        let message = message.to_ascii_lowercase();
+        message.contains("rate limit")
+            || message.contains("rate_limit")
+            || message.contains("too many requests")
+    });
+    let status_is_failure = status.is_some_and(|status| {
+        !matches!(
+            status.to_ascii_lowercase().as_str(),
+            "allowed" | "ok" | "available" | "active"
+        )
+    });
+    if !message_is_rate_limit && !status_is_failure {
+        return None;
+    }
+    Some(
+        message
+            .map(str::to_owned)
+            .or_else(|| status.map(|status| format!("Claude rate limit status: {status}")))
+            .unwrap_or_else(|| "Claude rate limit reached".into()),
+    )
 }
 
 fn required_string<'a>(

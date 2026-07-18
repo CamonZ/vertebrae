@@ -28,6 +28,47 @@ fn init_preserves_advertised_string_and_object_tool_names() {
 }
 
 #[test]
+fn benign_protocol_records_are_silent_but_rate_limit_failures_are_errors() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("protocol-run"),
+        StreamId::from("protocol-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"protocol-session"}"#)
+        .unwrap();
+    assert!(
+        decoder
+            .decode_line(r#"{"type":"system","subtype":"status","status":"requesting"}"#)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"rate_limit_event","session_id":"protocol-session","rate_limit_info":{"status":"allowed"}}"#,
+        )
+        .unwrap()
+        .is_empty());
+    assert!(decoder
+        .decode_line(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"signature_delta","signature":"opaque"}}}"#,
+        )
+        .unwrap()
+        .is_empty());
+
+    let failure = decoder
+        .decode_line(
+            r#"{"type":"rate_limit_event","session_id":"protocol-session","rate_limit_info":{"status":"rejected"}}"#,
+        )
+        .unwrap();
+    assert!(failure.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::Error(error)
+            if error.code.as_deref() == Some("claude_rate_limited")
+                && error.message.contains("rejected")
+    )));
+}
+
+#[test]
 fn root_child_and_grandchild_are_separate_canonical_streams() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run-1"),

@@ -800,12 +800,6 @@ describe("runToThreads — Claude 2.1 live activity", () => {
         label: "Thinking",
         text: "2,333 tokens",
       }),
-      expect.objectContaining({
-        variant: "banner",
-        tone: "warn",
-        label: "Rate limit",
-        text: "five hour · allowed",
-      }),
     ]);
   });
 });

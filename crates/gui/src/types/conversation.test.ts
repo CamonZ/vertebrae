@@ -455,7 +455,7 @@ describe("parseClaudeMessage", () => {
       ]);
     });
 
-    it("parses rate_limit_event into a banner event", () => {
+    it("suppresses an allowed rate_limit_event", () => {
       const raw: ClaudeRawMessage = {
         type: "rate_limit_event",
         session_id: "sess-1",
@@ -469,25 +469,17 @@ describe("parseClaudeMessage", () => {
         },
       };
 
-      expect(parseClaudeMessage(raw, timestamp)).toEqual([
-        {
-          kind: "rate_limit",
-          timestamp,
-          sessionId: "sess-1",
-          status: "allowed",
-          resetsAt: 1781128800,
-          rateLimitType: "five_hour",
-          overageStatus: "rejected",
-          overageDisabledReason: "org_level_disabled",
-          isUsingOverage: false,
-        },
-      ]);
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
     });
 
-    it("parses malformed rate_limit_event without throwing", () => {
+    it("parses a rejected rate_limit_event into a banner event", () => {
       const raw: ClaudeRawMessage = {
         type: "rate_limit_event",
         session_id: "sess-1",
+        rate_limit_info: {
+          status: "rejected",
+          rateLimitType: "five_hour",
+        },
       };
 
       expect(parseClaudeMessage(raw, timestamp)).toEqual([
@@ -495,14 +487,23 @@ describe("parseClaudeMessage", () => {
           kind: "rate_limit",
           timestamp,
           sessionId: "sess-1",
-          status: undefined,
-          rateLimitType: undefined,
+          status: "rejected",
           resetsAt: undefined,
+          rateLimitType: "five_hour",
           overageStatus: undefined,
           overageDisabledReason: undefined,
           isUsingOverage: undefined,
         },
       ]);
+    });
+
+    it("suppresses a malformed rate_limit_event without throwing", () => {
+      const raw: ClaudeRawMessage = {
+        type: "rate_limit_event",
+        session_id: "sess-1",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
     });
   });
 

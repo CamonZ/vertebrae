@@ -509,6 +509,29 @@ function rateLimitEvent(
   };
 }
 
+function isRateLimitFailure(raw: ClaudeRawMessage): boolean {
+  const record = raw as unknown as Record<string, unknown>;
+  const info =
+    raw.rate_limit_info && typeof raw.rate_limit_info === "object"
+      ? (raw.rate_limit_info as unknown as Record<string, unknown>)
+      : undefined;
+  const status = readString(info?.status) ?? readString(record.status);
+  const message =
+    readString(record.message) ??
+    readString(record.reason) ??
+    (record.error && typeof record.error === "object"
+      ? readString((record.error as Record<string, unknown>).message)
+      : undefined) ??
+    readString(info?.message);
+  const messageIsRateLimit = message
+    ? /rate[ _]limit|too many requests/i.test(message)
+    : false;
+  const statusIsFailure = status
+    ? !["allowed", "ok", "available", "active"].includes(status.toLowerCase())
+    : false;
+  return messageIsRateLimit || statusIsFailure;
+}
+
 /**
  * Parse a single Claude JSON message into conversation events.
  * Returns an array because one message can contain multiple content items.
@@ -661,7 +684,7 @@ export function parseClaudeMessage(
     }
 
     case "rate_limit_event":
-      events.push(rateLimitEvent(raw, timestamp));
+      if (isRateLimitFailure(raw)) events.push(rateLimitEvent(raw, timestamp));
       break;
   }
 
