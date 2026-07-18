@@ -1093,9 +1093,13 @@ esac
 
 fn script(temp: &TempDir, name: &str, body: &str) -> PathBuf {
     let path = temp.path().join(name);
-    fs::write(&path, body).unwrap();
-    let mut permissions = fs::metadata(&path).unwrap().permissions();
+    let temporary_path = temp.path().join(format!(".{name}.tmp"));
+    fs::write(&temporary_path, body).unwrap();
+    let mut permissions = fs::metadata(&temporary_path).unwrap().permissions();
     permissions.set_mode(0o755);
-    fs::set_permissions(&path, permissions).unwrap();
+    fs::set_permissions(&temporary_path, permissions).unwrap();
+    // Linux can reject an immediate exec of a directly written script with
+    // ETXTBSY. Rename publishes the fully written, executable fixture at once.
+    fs::rename(&temporary_path, &path).unwrap();
     path
 }
