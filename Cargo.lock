@@ -6743,6 +6743,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vertebrae-core",
+ "vertebrae-harness-claude",
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
