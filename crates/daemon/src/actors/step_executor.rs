@@ -3,8 +3,8 @@
 //! Spawned by ProjectSupervisor upon receiving an execute_step channel event from Sacrum.
 //! Each StepExecutor:
 //! - Receives step config (prompt, model), execution_id, and task_id from its parent
-//! - Runs Claude through `harness-claude` and persists normalized harness events
-//! - Retains the legacy direct process path for providers not yet migrated
+//! - Runs Claude and Codex through shared harness crates and persists normalized events
+//! - Retains legacy direct-process helpers for compatibility and migration tests
 //! - Reports StepCompleted or StepFailed to the parent ProjectSupervisor on exit
 //! - Cancels the active harness/process and awaits process settlement
 //!
@@ -17,15 +17,18 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use serde_json::json;
 use tokio::process::{Child, Command};
 use vertebrae_core::Provider;
 use vertebrae_core::execution_service::ExecutionService;
-use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
+#[cfg(test)]
+use vertebrae_core::models::SessionLog;
+use vertebrae_core::models::{AgentConfig, PermissionMode};
 use vertebrae_harness_claude::{
     ClaudeLaunchMode, ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude,
     ClaudeRuntime,
 };
+use vertebrae_harness_codex::{CodexPermissionConfig, CodexProviderConfig, CodexRuntime};
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
@@ -36,7 +39,9 @@ use vertebrae_harness_core::{
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::helpers::ProviderBinaries;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
-use crate::provider::{ParserKind, ProviderResolutionError, resolve_provider_command};
+#[cfg(test)]
+use crate::provider::ParserKind;
+use crate::provider::ProviderResolutionError;
 use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
 
@@ -593,6 +598,138 @@ fn build_claude_harness(
     Ok((ClaudeRuntime::new(provider), request))
 }
 
+fn codex_permission_config(
+    mode: &PermissionMode,
+    disallowed_tools: &[String],
+) -> CodexPermissionConfig {
+    let mut permission = match mode {
+        PermissionMode::AcceptEdits => CodexPermissionConfig {
+            approval_policy: Some("on-request".into()),
+            permissions: Some(":workspace".into()),
+            ..Default::default()
+        },
+        PermissionMode::Auto => CodexPermissionConfig {
+            approval_policy: Some("on-request".into()),
+            approvals_reviewer: Some("auto_review".into()),
+            permissions: Some(":workspace".into()),
+            ..Default::default()
+        },
+        PermissionMode::BypassPermissions => CodexPermissionConfig {
+            approval_policy: Some("never".into()),
+            permissions: Some(":danger-full-access".into()),
+            ..Default::default()
+        },
+        PermissionMode::DontAsk | PermissionMode::Plan => CodexPermissionConfig {
+            approval_policy: Some("never".into()),
+            permissions: Some(":workspace".into()),
+            ..Default::default()
+        },
+        PermissionMode::Default => CodexPermissionConfig {
+            approval_policy: Some("on-request".into()),
+            permissions: Some(":read-only".into()),
+            ..Default::default()
+        },
+    };
+    let deny_tools = crate::settings_synthesis::SELF_TRANSITION_DENY_TOOLS
+        .iter()
+        .copied()
+        .chain(disallowed_tools.iter().map(String::as_str))
+        .collect::<Vec<_>>();
+    let prefix_rules = deny_tools
+        .iter()
+        .filter_map(|tool| {
+            tool.strip_prefix("Bash(")
+                .and_then(|tool| tool.strip_suffix(')'))
+        })
+        .filter_map(|command| {
+            let words = command
+                .trim_end_matches('*')
+                .split_whitespace()
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>();
+            (!words.is_empty()).then(|| json!({ "prefix_rule": words, "decision": "deny" }))
+        })
+        .collect::<Vec<_>>();
+    if !prefix_rules.is_empty() {
+        permission.prefix_rules = Some(json!(prefix_rules));
+    }
+    permission
+}
+
+fn build_codex_harness(
+    config: &StepExecutorConfig,
+) -> Result<(CodexRuntime, RunRequest), ProviderResolutionError> {
+    vertebrae_core::model_catalog::validate_provider_model_with_codex_provider(
+        Provider::Openai,
+        config.step_config.agent_config.model.as_deref(),
+        config
+            .step_config
+            .agent_config
+            .codex_model_provider
+            .as_deref(),
+    )
+    .map_err(|error| ProviderResolutionError::InvalidProviderModel(error.to_string()))?;
+    vertebrae_core::model_catalog::normalize_provider_reasoning_effort(
+        Provider::Openai,
+        config.step_config.agent_config.reasoning_effort.as_deref(),
+    )
+    .map_err(|error| ProviderResolutionError::InvalidReasoningEffort(error.to_string()))?;
+    let binary = config
+        .provider_binaries
+        .get(Provider::Openai)
+        .ok_or_else(|| ProviderResolutionError::MissingProviderBinary {
+            provider: Provider::Openai,
+            hint: crate::helpers::find_codex_binary("")
+                .err()
+                .unwrap_or_else(|| "Set CODEX_PATH or install codex in PATH.".into()),
+        })?;
+    let mode = config
+        .step_config
+        .agent_config
+        .permission_mode
+        .clone()
+        .unwrap_or(PermissionMode::BypassPermissions);
+    let installed_skills_roots = vertebrae_installer::installed_skills_dir()
+        .ok()
+        .into_iter()
+        .collect();
+    let provider = CodexProviderConfig {
+        executable: Some(binary.to_path_buf()),
+        search_path: Some(config.shell_path.clone().into()),
+        model_provider: config.step_config.agent_config.codex_model_provider.clone(),
+        permission: codex_permission_config(
+            &mode,
+            &config.step_config.agent_config.disallowed_tools,
+        ),
+        installed_skills_roots,
+        ..CodexProviderConfig::default()
+    };
+    let request = RunRequest {
+        run_id: RunId::new(config.execution_id.clone()),
+        stream_id: StreamId::new(config.execution_id.clone()),
+        prompt: config.step_config.prompt.clone(),
+        config: RequestConfig {
+            working_directory: Some(config.working_dir().to_path_buf()),
+            model: config.step_config.agent_config.model.clone(),
+            reasoning_effort: config.step_config.agent_config.reasoning_effort.clone(),
+            output_schema: config.step_config.agent_config.json_schema.clone(),
+            environment: std::iter::once(("PATH".into(), config.shell_path.clone())).collect(),
+        },
+    };
+    if config.step_config.verbose_daemon_logging {
+        tracing::info!(
+            target: VERBOSE_LOG_TARGET,
+            execution_id = %config.execution_id,
+            task_id = %config.task_id,
+            checkpoint = CHECKPOINT_CLAUDE_ARGV,
+            program = %binary.display(),
+            provider = %Provider::Openai,
+            "verbose: built Codex App Server configuration",
+        );
+    }
+    Ok((CodexRuntime::new(provider), request))
+}
+
 /// Convert a Codex `turn.completed` usage into the daemon's [`StreamMetrics`].
 ///
 /// Codex's `input_tokens` already includes the cached portion —
@@ -601,6 +738,7 @@ fn build_claude_harness(
 /// `input_tokens - cached_input_tokens`). So `input_tokens` maps straight
 /// across as the total input; adding `cached_input_tokens` on top would
 /// double-count the cache. Codex emits neither `cost_usd` nor `duration_ms`.
+#[cfg(test)]
 fn codex_usage_to_metrics(
     usage: &crate::codex_jsonl::CodexUsage,
 ) -> crate::stream_json::StreamMetrics {
@@ -612,6 +750,7 @@ fn codex_usage_to_metrics(
     }
 }
 
+#[cfg(test)]
 fn session_log_for_provider_line(
     execution_id: &str,
     line: String,
@@ -872,31 +1011,28 @@ impl StepExecutor {
             state.config.working_dir().display()
         );
 
-        let settings_guard = match SyntheticSettings::create(&state.execution_id) {
-            Ok(guard) => Some(guard),
-            Err(err) => {
-                tracing::error!(
-                    "Failed to synthesize daemon settings for execution {}: {}",
-                    state.execution_id,
-                    err
-                );
-                let _ = state.parent.cast(ProjectMessage::StepFinished {
-                    execution_id: state.execution_id.clone(),
-                    task_id: state.task_id.clone(),
-                    result: StepResult::failed(
-                        None,
-                        format!("Failed to synthesize daemon settings: {err}"),
-                    ),
-                });
-                myself.stop(Some("settings synthesis failed".to_string()));
-                return Ok(());
-            }
-        };
-
         if crate::provider::resolve_provider(&state.config) == Provider::Anthropic {
-            let settings = settings_guard
-                .as_ref()
-                .expect("successful settings synthesis returns a guard");
+            let settings_guard = match SyntheticSettings::create(&state.execution_id) {
+                Ok(guard) => guard,
+                Err(err) => {
+                    tracing::error!(
+                        "Failed to synthesize daemon settings for execution {}: {}",
+                        state.execution_id,
+                        err
+                    );
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Failed to synthesize daemon settings: {err}"),
+                        ),
+                    });
+                    myself.stop(Some("settings synthesis failed".to_string()));
+                    return Ok(());
+                }
+            };
+            let settings = &settings_guard;
             let (runtime, request) = match build_claude_harness(&state.config, settings) {
                 Ok(value) => value,
                 Err(err) => {
@@ -943,7 +1079,7 @@ impl StepExecutor {
                     return Ok(());
                 }
             };
-            state.settings_guard = settings_guard;
+            state.settings_guard = Some(settings_guard);
             state.harness_run = Some(Arc::clone(&run));
             let actor_ref = myself;
             state.harness_outcome_handle = Some(tokio::spawn(async move {
@@ -953,144 +1089,63 @@ impl StepExecutor {
             return Ok(());
         }
 
-        let resolved = match resolve_provider_command(&state.config, settings_guard.as_ref()) {
-            Ok(resolved) => resolved,
-            Err(err) => {
-                tracing::error!(
-                    "Provider resolution failed for execution {}: {}",
-                    state.execution_id,
-                    err
-                );
-                let _ = state.parent.cast(ProjectMessage::StepFinished {
-                    execution_id: state.execution_id.clone(),
-                    task_id: state.task_id.clone(),
-                    result: StepResult::failed(None, format!("Provider resolution failed: {err}")),
-                });
-                myself.stop(Some("provider resolution failed".to_string()));
-                return Ok(());
-            }
-        };
-
-        state.settings_guard = settings_guard;
-        let parser_kind = resolved.parser_kind;
-        debug_assert_eq!(parser_kind, ParserKind::CodexJsonl);
-        let mut cmd = resolved.command;
-
-        match cmd.spawn() {
-            Ok(mut child) => {
-                // Take stdout and stderr before storing child — the streaming task
-                // reads from them while the actor retains the Child handle for kill().
-                let stdout = child.stdout.take();
-                let stderr = child.stderr.take();
-
-                state.child_process = Some(child);
-
-                let actor_ref = myself;
-                let execution_id = state.execution_id.clone();
-                let task_id = state.task_id.clone();
-                let verbose = state.config.step_config.verbose_daemon_logging;
-                let execution_service = Arc::clone(&state.config.execution_service);
-                let result_slot = Arc::clone(&state.stream_result);
-
-                let codex_output_schema_used =
-                    state.config.step_config.agent_config.json_schema.is_some();
-
-                let stream_handle = tokio::spawn(async move {
-                    // Stream stdout line by line, posting each as a SessionLog.
-                    // Anthropic returns above through harness-claude. This
-                    // compatibility process loop now handles Codex only.
-                    let mut codex_aggregate =
-                        crate::codex_jsonl::CodexAggregate::with_output_schema(
-                            codex_output_schema_used,
-                        );
-                    if let Some(stdout) = stdout {
-                        let reader = BufReader::new(stdout);
-                        let mut lines = reader.lines();
-
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            if crate::codex_jsonl::apply_codex_line(&line, &mut codex_aggregate)
-                                && let Ok(mut slot) = result_slot.lock()
-                            {
-                                slot.metrics =
-                                    codex_aggregate.usage.as_ref().map(codex_usage_to_metrics);
-                                slot.result_text = codex_aggregate.final_output.clone();
-                                slot.provider_error = codex_aggregate.error.clone();
-                                if codex_aggregate.output_schema_used {
-                                    slot.structured_output =
-                                        codex_aggregate.final_output_json.clone();
-                                    slot.schema_parse_error =
-                                        codex_aggregate.schema_parse_error.clone();
-                                    slot.structured_output_from_codex =
-                                        slot.structured_output.is_some();
-                                }
-                            }
-
-                            let log =
-                                session_log_for_provider_line(&execution_id, line, parser_kind);
-
-                            if let Err(e) = execution_service.add_log(log).await {
-                                tracing::warn!(
-                                    "Failed to post log for execution {}: {}",
-                                    execution_id,
-                                    e
-                                );
-                            }
-                        }
-                    }
-
-                    // Drain stderr and log it (not posted to Sacrum).
-                    // Verbose checkpoint 4: mirror stderr verbatim to the verbose
-                    // target so init-time schema-rejection messages are captured.
-                    if let Some(stderr) = stderr {
-                        let reader = BufReader::new(stderr);
-                        let mut lines = reader.lines();
-
-                        while let Ok(Some(line)) = lines.next_line().await {
-                            if verbose {
-                                tracing::info!(
-                                    target: VERBOSE_LOG_TARGET,
-                                    execution_id = %execution_id,
-                                    task_id = %task_id,
-                                    checkpoint = CHECKPOINT_CLAUDE_STDERR,
-                                    parser_kind = ?parser_kind,
-                                    line = %line,
-                                    "verbose: provider stderr"
-                                );
-                            } else {
-                                tracing::warn!("stderr [{}]: {}", execution_id, line);
-                            }
-                        }
-                    }
-
-                    // stdout EOF means the process has closed its output.
-                    // Notify the actor so it can wait() for the exit status.
-                    let _ = actor_ref.cast(StepExecutorMessage::ProcessExited(Ok(
-                        // Placeholder — the real exit status is obtained via child.wait() in the actor.
-                        // We send a synthetic success here; the actor overrides it from wait().
-                        std::process::ExitStatus::default(),
-                    )));
-                });
-
-                state.stream_handle = Some(stream_handle);
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to spawn provider CLI for execution {}: {}",
-                    state.execution_id,
-                    e
-                );
-
-                let _ = state.parent.cast(ProjectMessage::StepFinished {
-                    execution_id: state.execution_id.clone(),
-                    task_id: state.task_id.clone(),
-                    result: StepResult::failed(None, format!("Failed to spawn process: {e}")),
-                });
-
-                myself.stop(Some("spawn failed".to_string()));
-            }
+        if crate::provider::resolve_provider(&state.config) == Provider::Openai {
+            let (runtime, request) = match build_codex_harness(&state.config) {
+                Ok(value) => value,
+                Err(err) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Provider resolution failed: {err}"),
+                        ),
+                    });
+                    myself.stop(Some("provider resolution failed".into()));
+                    return Ok(());
+                }
+            };
+            let usage = Arc::clone(&state.harness_usage);
+            let event_sink: Arc<dyn EventSink> = Arc::new(DaemonHarnessEventSink {
+                persistence: Arc::new(SessionLogEventSink::new(
+                    &state.execution_id,
+                    Arc::clone(&state.config.execution_service),
+                )),
+                root_stream_id: request.stream_id.clone(),
+                usage,
+                cancel_rx: state.harness_cancel_tx.subscribe(),
+                execution_id: state.execution_id.clone(),
+                task_id: state.task_id.clone(),
+                verbose: state.config.step_config.verbose_daemon_logging,
+            });
+            let control_sink: Arc<dyn ControlSink> = Arc::new(
+                DaemonControlSink::from_agent_config(&state.config.step_config.agent_config),
+            );
+            let run = match runtime.run_once(request, event_sink, control_sink).await {
+                Ok(run) => run,
+                Err(error) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Failed to start Codex harness: {error}"),
+                        ),
+                    });
+                    myself.stop(Some("harness start failed".into()));
+                    return Ok(());
+                }
+            };
+            state.harness_run = Some(Arc::clone(&run));
+            let actor_ref = myself;
+            state.harness_outcome_handle = Some(tokio::spawn(async move {
+                let result = run.await_outcome().await.map_err(|error| error.to_string());
+                let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(result));
+            }));
+            return Ok(());
         }
 
-        Ok(())
+        unreachable!("all supported providers use a harness runtime")
     }
 
     async fn handle_cancel(

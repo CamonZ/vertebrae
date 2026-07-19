@@ -28,6 +28,7 @@ struct CodexReasoningLevel {
     effort: String,
 }
 
+#[cfg(test)]
 pub(super) fn parse_codex_model_catalog(output: &str) -> Result<CodexModelCatalog, String> {
     serde_json::from_str(output).map_err(|error| format!("Invalid Codex model catalog: {error}"))
 }
