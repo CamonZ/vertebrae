@@ -55,12 +55,11 @@ impl LocalChatSessionManager {
         }
     }
 
-    pub fn catalog(&self) -> LocalChatHarnessCatalog {
-        let mut harnesses: Vec<_> = self
-            .harnesses
-            .values()
-            .map(|harness| harness.info())
-            .collect();
+    pub async fn catalog(&self) -> LocalChatHarnessCatalog {
+        let mut harnesses = Vec::with_capacity(self.harnesses.len());
+        for harness in self.harnesses.values() {
+            harnesses.push(harness.info().await);
+        }
         harnesses.sort_by_key(|info| info.harness);
         let default_harness = harnesses
             .iter()
@@ -92,7 +91,7 @@ impl LocalChatSessionManager {
         let harness_kind = input.harness;
         let backend_session_id = input.backend_session_id.clone();
         let harness = self.harness(harness_kind)?;
-        let info = harness.info();
+        let info = harness.info().await;
         if !info.available {
             return Err(LocalChatSessionError::UnavailableHarness {
                 harness: harness_kind,

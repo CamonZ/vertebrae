@@ -57,8 +57,10 @@ export function useChatSession(sessionId: string) {
     let cancelled = false;
     void commands
       .getSupportedLocalChatHarnesses()
-      .then((catalog) => {
-        if (!cancelled) setHarnessCatalog(catalog);
+      .then((result) => {
+        if (!cancelled && result.status === "ok") {
+          setHarnessCatalog(result.data);
+        }
       })
       .catch(() => {
         // The chat still works without a picker; backend validation remains.

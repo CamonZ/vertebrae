@@ -59,7 +59,7 @@ impl LocalChatHarness for MockHarness {
         self.kind
     }
 
-    fn info(&self) -> LocalChatHarnessInfo {
+    async fn info(&self) -> LocalChatHarnessInfo {
         LocalChatHarnessInfo {
             harness: self.kind,
             label: format!("{:?}", self.kind),
@@ -138,15 +138,15 @@ fn create_input(
     }
 }
 
-#[test]
-fn catalog_defaults_to_the_first_available_harness_and_retains_diagnostics() {
+#[tokio::test]
+async fn catalog_defaults_to_the_first_available_harness_and_retains_diagnostics() {
     let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
         Arc::new(
             MockHarness::new(LocalChatHarnessKind::Claude).unavailable("Claude Code CLI not found"),
         ),
         Arc::new(MockHarness::new(LocalChatHarnessKind::Codex)),
     ]);
-    let catalog = manager.catalog();
+    let catalog = manager.catalog().await;
 
     assert_eq!(catalog.default_harness, LocalChatHarnessKind::Codex);
     assert_eq!(
@@ -167,21 +167,21 @@ fn catalog_defaults_to_the_first_available_harness_and_retains_diagnostics() {
         .any(|info| info.harness == LocalChatHarnessKind::Codex));
 }
 
-#[test]
-fn catalog_uses_claude_when_it_is_the_only_available_harness() {
+#[tokio::test]
+async fn catalog_uses_claude_when_it_is_the_only_available_harness() {
     let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
         Arc::new(MockHarness::new(LocalChatHarnessKind::Claude)),
         Arc::new(MockHarness::new(LocalChatHarnessKind::Codex).unavailable("Codex CLI not found")),
     ]);
 
     assert_eq!(
-        manager.catalog().default_harness,
+        manager.catalog().await.default_harness,
         LocalChatHarnessKind::Claude
     );
 }
 
-#[test]
-fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
+#[tokio::test]
+async fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
     let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
         Arc::new(
             MockHarness::new(LocalChatHarnessKind::Claude).unavailable("Claude Code CLI not found"),
@@ -190,7 +190,7 @@ fn catalog_falls_back_to_claude_kind_when_neither_harness_is_available() {
     ]);
 
     assert_eq!(
-        manager.catalog().default_harness,
+        manager.catalog().await.default_harness,
         LocalChatHarnessKind::Claude
     );
 }

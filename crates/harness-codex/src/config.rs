@@ -9,7 +9,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use vertebrae_harness_core::{HarnessError, RequestConfig};
+use vertebrae_harness_core::{HarnessCapabilities, HarnessError, RequestConfig};
 
 use crate::CodexAppServerLauncher;
 
@@ -122,6 +122,10 @@ impl Default for CodexProviderConfig {
 }
 
 impl CodexProviderConfig {
+    pub async fn discover_capabilities(&self) -> Result<HarnessCapabilities, HarnessError> {
+        crate::models::discover_capabilities(self).await
+    }
+
     pub fn resolve_executable(&self) -> Result<PathBuf, HarnessError> {
         if let Some(path) = &self.executable {
             return validate_executable(path);

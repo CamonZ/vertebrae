@@ -18,13 +18,13 @@ use vertebrae_harness_core::{
     AgentMetadata, ApprovalCategory, ApprovalRequest, CompletionStatus, ControlRequest,
     ControlRequestEnvelope, ControlResolution, ControlSink, DiagnosticEvent, EventCorrelation,
     EventSequencer, EventSink, GrantScope, HarnessCapabilities, HarnessError, HarnessEventDraftV1,
-    HarnessEventPayloadV1, HarnessRuntime, ModelCapability, OutcomeMetrics, ProviderResumeId,
-    ProviderThreadRef, QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest,
-    SendTurnRequest, SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle,
-    SessionId, SessionStarted, SessionUsage, StartSessionRequest, StreamId, TextEvent,
-    ThreadDeclared, ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent,
-    ToolStatus, TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted,
-    TurnUsage, UpdateSemantics, UsageEvent,
+    HarnessEventPayloadV1, HarnessRuntime, OutcomeMetrics, ProviderResumeId, ProviderThreadRef,
+    QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest, SendTurnRequest,
+    SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId,
+    SessionStarted, SessionUsage, StartSessionRequest, StreamId, TextEvent, ThreadDeclared,
+    ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
+    TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted, TurnUsage,
+    UpdateSemantics, UsageEvent,
 };
 
 use crate::{
@@ -922,37 +922,31 @@ impl CodexRuntime {
 #[async_trait]
 impl HarnessRuntime for CodexRuntime {
     async fn capabilities(&self) -> Result<HarnessCapabilities, HarnessError> {
-        let available = self.config.resolve_executable().is_ok() || self.config.launcher.is_some();
-        Ok(HarnessCapabilities {
-            provider: "openai".into(),
-            available,
-            unavailable_reason: (!available)
-                .then(|| format!("{} is unavailable", self.config.executable_environment_key)),
-            persistent_sessions: true,
-            one_shot_runs: true,
-            session_resumption: true,
-            default_model: Some("default".into()),
-            models: vec![ModelCapability {
-                id: "default".into(),
-                label: "Codex default".into(),
-                reasoning_efforts: ["minimal", "low", "medium", "high", "xhigh"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-            }],
-            approval_categories: [
-                ApprovalCategory::CommandExecution,
-                ApprovalCategory::FileChange,
-                ApprovalCategory::AdditionalPermission,
-            ]
-            .into_iter()
-            .collect(),
-            questions: QuestionCapabilities {
-                multiple_selection: true,
-                free_form_answers: true,
-                automatic_resolution: true,
-            },
-        })
+        match self.config.discover_capabilities().await {
+            Ok(capabilities) => Ok(capabilities),
+            Err(error) => Ok(HarnessCapabilities {
+                provider: "openai".into(),
+                available: false,
+                unavailable_reason: Some(error.to_string()),
+                persistent_sessions: true,
+                one_shot_runs: true,
+                session_resumption: true,
+                default_model: None,
+                models: Vec::new(),
+                approval_categories: [
+                    ApprovalCategory::CommandExecution,
+                    ApprovalCategory::FileChange,
+                    ApprovalCategory::AdditionalPermission,
+                ]
+                .into_iter()
+                .collect(),
+                questions: QuestionCapabilities {
+                    multiple_selection: true,
+                    free_form_answers: true,
+                    automatic_resolution: true,
+                },
+            }),
+        }
     }
 
     async fn start_session(

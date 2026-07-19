@@ -762,8 +762,13 @@ async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
 /**
  * List supported local chat harnesses for provider-neutral local sessions.
  */
-async getSupportedLocalChatHarnesses() : Promise<LocalChatHarnessCatalog> {
-    return await TAURI_INVOKE("get_supported_local_chat_harnesses");
+async getSupportedLocalChatHarnesses() : Promise<Result<LocalChatHarnessCatalog, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_supported_local_chat_harnesses") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Create a provider-neutral local chat session.
@@ -1159,7 +1164,7 @@ export type LoadLocalChatSessionMessagesOutput = { lines: string[]; providerJson
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
-export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids: string[] | null }
+export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null }
 export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
-use tokio::sync::RwLock;
+use tokio::sync::{OnceCell, RwLock};
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
@@ -17,14 +17,14 @@ use crate::local_chat::{
 use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
 
 use super::models::{
-    codex_model_options, codex_reasoning_effort_options, requested_model_override,
-    requested_reasoning_effort, CODEX_DEFAULT_MODEL_ID, CODEX_DEFAULT_REASONING_EFFORT,
+    local_chat_harness_info_from_capabilities, requested_model_override, requested_reasoning_effort,
 };
 
 #[derive(Clone)]
 pub(crate) struct CodexLocalChatHarness {
     sessions: Arc<RwLock<HashMap<String, Arc<CodexLocalChatSession>>>>,
     installed_skills_root_override: Option<PathBuf>,
+    catalog: Arc<OnceCell<LocalChatHarnessInfo>>,
 }
 
 impl CodexLocalChatHarness {
@@ -32,6 +32,7 @@ impl CodexLocalChatHarness {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             installed_skills_root_override: None,
+            catalog: Arc::new(OnceCell::new()),
         }
     }
 
@@ -51,6 +52,29 @@ impl CodexLocalChatHarness {
             ))
         }
     }
+
+    async fn discover_info(&self) -> LocalChatHarnessInfo {
+        let binary = match crate::helpers::find_codex_binary() {
+            Ok(binary) => binary,
+            Err(error) => return unavailable_codex_info(error),
+        };
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            openai_executable: Some(binary),
+            search_path: std::env::var_os("PATH"),
+            ..HarnessFactoryConfig::default()
+        });
+        let instance = match factory.create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new().with_provider(Provider::Openai),
+            request_config: Default::default(),
+        }) {
+            Ok(instance) => instance,
+            Err(error) => return unavailable_codex_info(error.to_string()),
+        };
+        match instance.runtime.capabilities().await {
+            Ok(capabilities) => local_chat_harness_info_from_capabilities(capabilities),
+            Err(error) => unavailable_codex_info(error.to_string()),
+        }
+    }
 }
 
 impl Default for CodexLocalChatHarness {
@@ -65,19 +89,11 @@ impl LocalChatHarness for CodexLocalChatHarness {
         LocalChatHarnessKind::Codex
     }
 
-    fn info(&self) -> LocalChatHarnessInfo {
-        let binary = crate::helpers::find_codex_binary();
-        LocalChatHarnessInfo {
-            harness: LocalChatHarnessKind::Codex,
-            label: "Codex".into(),
-            available: binary.is_ok(),
-            unavailable_reason: binary.err(),
-            default_model_id: Some(CODEX_DEFAULT_MODEL_ID.into()),
-            models: codex_model_options(),
-            default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.into()),
-            reasoning_efforts: codex_reasoning_effort_options(),
-            supports_resume: true,
-        }
+    async fn info(&self) -> LocalChatHarnessInfo {
+        self.catalog
+            .get_or_init(|| self.discover_info())
+            .await
+            .clone()
     }
 
     async fn create_session(
@@ -206,6 +222,20 @@ impl LocalChatHarness for CodexLocalChatHarness {
 
     async fn has_session(&self, backend_session_id: &str) -> bool {
         self.sessions.read().await.contains_key(backend_session_id)
+    }
+}
+
+fn unavailable_codex_info(reason: String) -> LocalChatHarnessInfo {
+    LocalChatHarnessInfo {
+        harness: LocalChatHarnessKind::Codex,
+        label: "Codex".into(),
+        available: false,
+        unavailable_reason: Some(reason),
+        default_model_id: None,
+        models: Vec::new(),
+        default_reasoning_effort: None,
+        reasoning_efforts: Vec::new(),
+        supports_resume: true,
     }
 }
 

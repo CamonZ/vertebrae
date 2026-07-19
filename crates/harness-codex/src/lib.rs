@@ -2,6 +2,7 @@
 
 mod config;
 mod launcher;
+mod models;
 mod protocol;
 mod runtime;
 
