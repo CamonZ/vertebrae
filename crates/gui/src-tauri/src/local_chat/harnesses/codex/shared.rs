@@ -1,25 +1,19 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
 use vertebrae_harness_codex::{CodexPermissionConfig, CodexProviderConfig, CodexRuntime};
 use vertebrae_harness_core::{
-    CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
-    HarnessError, HarnessEventPayloadV1, HarnessRuntime, SendTurnRequest, SessionHandle, SessionId,
-    StartSessionRequest, StreamId, ToolStatus, TurnId,
+    EventSink, HarnessError, HarnessRuntime, SendTurnRequest, SessionHandle, SessionId,
+    StartSessionRequest, StreamId, TurnId,
 };
 
 use crate::local_chat::{
-    HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarness,
-    LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
-    LocalChatSessionError, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent,
+    HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness, LocalChatHarnessInfo,
+    LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
 };
+
+use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
 
 use super::models::{
     codex_model_options, codex_reasoning_effort_options, requested_model_override,
@@ -78,9 +72,9 @@ impl LocalChatHarness for CodexLocalChatHarness {
             available: binary.is_ok(),
             unavailable_reason: binary.err(),
             default_model_id: Some(CODEX_DEFAULT_MODEL_ID.into()),
-            models: codex_model_options(None),
+            models: codex_model_options(),
             default_reasoning_effort: Some(CODEX_DEFAULT_REASONING_EFFORT.into()),
-            reasoning_efforts: codex_reasoning_effort_options(None),
+            reasoning_efforts: codex_reasoning_effort_options(),
             supports_resume: true,
         }
     }
@@ -95,7 +89,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
             return Err(LocalChatSessionError::SessionExists(backend_session_id));
         }
         let skills_root = self.installed_skills_root().map_err(|error| {
-            emit_error(&runtime.event_sink(), &backend_session_id, error.clone());
+            emit_error(&runtime, &backend_session_id, error.clone());
             LocalChatSessionError::StartFailed(error)
         })?;
         let initial_prompt = input.initial_prompt.clone();
@@ -107,7 +101,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         };
         let request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),
-            stream_id: StreamId::new(backend_session_id.clone()),
+            stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.map(Into::into),
             config: vertebrae_harness_core::RequestConfig {
                 working_directory: input.working_dir.map(PathBuf::from),
@@ -119,19 +113,22 @@ impl LocalChatHarness for CodexLocalChatHarness {
         };
         let adapter = Arc::new(LocalChatHarnessEventSink::new(
             backend_session_id.clone(),
+            LocalChatHarnessKind::Codex,
             runtime.event_sink(),
+            requested_model_override(input.model_id.as_deref()).map(str::to_owned),
+            0,
+            true,
         ));
         let event_sink: Arc<dyn EventSink> = adapter.clone();
-        let control_sink: Arc<dyn ControlSink> = Arc::new(LocalChatControlSink {
-            backend_session_id: backend_session_id.clone(),
-            runtime: runtime.clone(),
-        });
+        let control_sink: Arc<dyn vertebrae_harness_core::ControlSink> = Arc::new(
+            LocalChatControlSink::new(backend_session_id.clone(), runtime.clone()),
+        );
         let session = CodexRuntime::new(provider)
             .start_session(request, event_sink, control_sink)
             .await
             .map_err(|error| {
                 let error = error.to_string();
-                emit_error(&runtime.event_sink(), &backend_session_id, error.clone());
+                emit_error(&runtime, &backend_session_id, error.clone());
                 LocalChatSessionError::StartFailed(error)
             })?;
         let session = Arc::new(CodexLocalChatSession { adapter, session });
@@ -144,7 +141,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         if let Some(prompt) = initial_prompt {
             tokio::spawn(async move {
                 if let Err(error) = session.send(&prompt).await {
-                    session.adapter.emit_error(error.to_string());
+                    let _ = session.adapter.emit_error(error.to_string());
                 }
             });
         }
@@ -166,7 +163,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let content = content.to_owned();
         tokio::spawn(async move {
             if let Err(error) = session.send(&content).await {
-                session.adapter.emit_error(error.to_string());
+                let _ = session.adapter.emit_error(error.to_string());
             }
         });
         Ok(())
@@ -199,15 +196,7 @@ struct CodexLocalChatSession {
 
 impl CodexLocalChatSession {
     async fn send(&self, content: &str) -> Result<(), HarnessError> {
-        let turn_number = {
-            let mut stats = self
-                .adapter
-                .stats
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            stats.turns = stats.turns.saturating_add(1);
-            stats.turns
-        };
+        let turn_number = self.adapter.record_turn();
         let turn = self
             .session
             .send(SendTurnRequest {
@@ -217,195 +206,6 @@ impl CodexLocalChatSession {
             })
             .await?;
         turn.await_outcome().await.map(|_| ())
-    }
-}
-
-#[derive(Default)]
-struct SessionStats {
-    turns: u32,
-    context_tokens: u32,
-    context_window: u32,
-}
-
-struct LocalChatHarnessEventSink {
-    backend_session_id: String,
-    sink: LocalChatEventSink,
-    stats: Arc<Mutex<SessionStats>>,
-}
-
-impl LocalChatHarnessEventSink {
-    fn new(backend_session_id: String, sink: LocalChatEventSink) -> Self {
-        Self {
-            backend_session_id,
-            sink,
-            stats: Arc::new(Mutex::new(SessionStats::default())),
-        }
-    }
-
-    fn emit_error(&self, error: String) {
-        emit_error(&self.sink, &self.backend_session_id, error);
-    }
-
-    fn emit_end(
-        &self,
-        status: CompletionStatus,
-        result: Option<String>,
-        context_tokens: Option<u64>,
-        context_window: Option<u64>,
-    ) {
-        let stats = self
-            .stats
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.sink
-            .emit(LocalChatEvent::End(LocalChatSessionEndEvent {
-                backend_session_id: self.backend_session_id.clone(),
-                harness: LocalChatHarnessKind::Codex,
-                duration_ms: 0,
-                cost_usd: 0.0,
-                num_turns: stats.turns,
-                result: result.unwrap_or_default(),
-                is_error: status != CompletionStatus::Completed,
-                context_tokens: context_tokens
-                    .unwrap_or(stats.context_tokens as u64)
-                    .min(u32::MAX as u64) as u32,
-                context_window: context_window
-                    .unwrap_or(stats.context_window as u64)
-                    .min(u32::MAX as u64) as u32,
-            }));
-    }
-}
-
-#[async_trait]
-impl EventSink for LocalChatHarnessEventSink {
-    async fn emit(
-        &self,
-        event: vertebrae_harness_core::HarnessEventV1,
-    ) -> Result<(), HarnessError> {
-        let backend = self.backend_session_id.clone();
-        match event.payload {
-            HarnessEventPayloadV1::SessionStarted(value) => {
-                self.sink
-                    .emit(LocalChatEvent::Init(LocalChatSessionInitEvent {
-                        backend_session_id: backend,
-                        harness: LocalChatHarnessKind::Codex,
-                        provider_resume_id: value.provider_resume_id.map(|value| value.to_string()),
-                        model: value.model.unwrap_or_else(|| "Codex default".into()),
-                        tools: value.tools,
-                    }))
-            }
-            HarnessEventPayloadV1::Text(value) => {
-                self.sink.emit(LocalChatEvent::Text(LocalChatTextEvent {
-                    backend_session_id: backend,
-                    harness: LocalChatHarnessKind::Codex,
-                    text: value.text,
-                    is_partial: event.semantics == vertebrae_harness_core::UpdateSemantics::Delta,
-                    parent_tool_use_id: event
-                        .correlation
-                        .parent_tool_call_id
-                        .map(|value| value.to_string()),
-                }))
-            }
-            HarnessEventPayloadV1::ToolCall(value) => {
-                self.sink
-                    .emit(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
-                        backend_session_id: backend,
-                        harness: LocalChatHarnessKind::Codex,
-                        tool_id: value.tool_call_id.to_string(),
-                        tool_name: value.name,
-                        input: value.input.to_string(),
-                        parent_tool_use_id: event
-                            .correlation
-                            .parent_tool_call_id
-                            .map(|value| value.to_string()),
-                    }))
-            }
-            HarnessEventPayloadV1::ToolOutput(value) => {
-                self.sink
-                    .emit(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
-                        backend_session_id: backend,
-                        harness: LocalChatHarnessKind::Codex,
-                        tool_id: value.tool_call_id.to_string(),
-                        result: value.output.to_string(),
-                        is_error: matches!(
-                            value.status,
-                            ToolStatus::Failed | ToolStatus::Declined | ToolStatus::Cancelled
-                        ),
-                        parent_tool_use_id: event
-                            .correlation
-                            .parent_tool_call_id
-                            .map(|value| value.to_string()),
-                    }))
-            }
-            HarnessEventPayloadV1::Usage(value) => {
-                if let Some(snapshot) = value.session_snapshot {
-                    let mut stats = self
-                        .stats
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    stats.context_tokens =
-                        snapshot.context_tokens.unwrap_or(0).min(u32::MAX as u64) as u32;
-                    stats.context_window =
-                        snapshot.context_window.unwrap_or(0).min(u32::MAX as u64) as u32;
-                    self.sink
-                        .emit(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
-                            backend_session_id: backend,
-                            harness: LocalChatHarnessKind::Codex,
-                            model: "Codex".into(),
-                            context_tokens: stats.context_tokens,
-                            context_window: stats.context_window,
-                        }));
-                }
-            }
-            HarnessEventPayloadV1::TurnFinished(outcome) => self.emit_end(
-                outcome.status,
-                outcome.result_text,
-                outcome.metrics.context_tokens,
-                outcome.metrics.context_window,
-            ),
-            HarnessEventPayloadV1::RunFinished(outcome) => self.emit_end(
-                outcome.status,
-                outcome.result_text,
-                outcome.metrics.context_tokens,
-                outcome.metrics.context_window,
-            ),
-            HarnessEventPayloadV1::Warning(value) => {
-                self.sink
-                    .emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
-                        backend_session_id: backend,
-                        harness: LocalChatHarnessKind::Codex,
-                        warning: value.message,
-                    }))
-            }
-            HarnessEventPayloadV1::Error(value) => {
-                self.sink
-                    .emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
-                        backend_session_id: backend,
-                        harness: LocalChatHarnessKind::Codex,
-                        error: value.message,
-                    }))
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-}
-
-struct LocalChatControlSink {
-    backend_session_id: String,
-    runtime: LocalChatRuntime,
-}
-
-#[async_trait]
-impl ControlSink for LocalChatControlSink {
-    async fn request(
-        &self,
-        request: ControlRequestEnvelope,
-    ) -> Result<ControlResolution, HarnessError> {
-        self.runtime
-            .permission_bridge()
-            .request_harness_control(&self.backend_session_id, self.runtime.app_handle(), request)
-            .await
     }
 }
 
@@ -442,10 +242,12 @@ fn permission_config(mode: Option<&crate::types::PermissionMode>) -> CodexPermis
     }
 }
 
-fn emit_error(sink: &LocalChatEventSink, backend_session_id: &str, error: String) {
-    sink.emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
-        backend_session_id: backend_session_id.into(),
-        harness: LocalChatHarnessKind::Codex,
-        error,
-    }));
+fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: String) {
+    runtime
+        .event_sink()
+        .emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
+            backend_session_id: backend_session_id.into(),
+            harness: LocalChatHarnessKind::Codex,
+            error,
+        }));
 }

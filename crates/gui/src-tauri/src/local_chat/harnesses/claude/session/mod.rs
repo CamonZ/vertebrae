@@ -15,10 +15,9 @@ use tauri::Manager;
 use tokio::sync::RwLock;
 use vertebrae_harness_claude::{ClaudePermissionMode, ClaudeProviderConfig, ClaudeRuntime};
 use vertebrae_harness_core::{
-    CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
-    HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId,
-    ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus, SessionHandle,
-    SessionId, StartSessionRequest, StreamId, TurnId, UpdateSemantics,
+    EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime,
+    ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus,
+    SessionHandle, SessionId, StartSessionRequest, StreamId, TurnId,
 };
 
 use crate::commands::AppState;
@@ -26,9 +25,8 @@ use crate::helpers::{build_augmented_path, find_claude_binary, find_vtb_gate_bin
 use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
-    LocalChatRuntime, LocalChatSessionEndEvent, LocalChatSessionError, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
+    LocalChatSessionWarningEvent,
 };
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
@@ -310,21 +308,12 @@ impl Drop for ClosingSession {
     }
 }
 
-#[derive(Default)]
-struct CompatibilityState {
-    model: String,
-    context_tokens: u32,
-    context_window: u32,
-    turn_count: u32,
-}
-
 #[derive(Clone)]
 struct ClaudeGuiEventSink {
     backend_session_id: String,
     generation: u64,
-    event_sink: LocalChatEventSink,
+    adapter: Arc<crate::local_chat::harnesses::shared::LocalChatHarnessEventSink>,
     sessions: Arc<RwLock<SessionRegistry>>,
-    state: Arc<Mutex<CompatibilityState>>,
     permission_bridge: crate::local_chat::permissions::PermissionBridge,
     closed: Arc<AtomicBool>,
     lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
@@ -340,197 +329,55 @@ impl ClaudeGuiEventSink {
         permission_bridge: crate::local_chat::permissions::PermissionBridge,
         lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Self {
+        let adapter_backend_session_id = backend_session_id.clone();
         Self {
             backend_session_id,
             generation,
-            event_sink,
+            adapter: Arc::new(
+                crate::local_chat::harnesses::shared::LocalChatHarnessEventSink::new(
+                    adapter_backend_session_id,
+                    LocalChatHarnessKind::Claude,
+                    event_sink,
+                    initial_model,
+                    DEFAULT_CLAUDE_CONTEXT_WINDOW,
+                    false,
+                ),
+            ),
             sessions,
-            state: Arc::new(Mutex::new(CompatibilityState {
-                model: initial_model.unwrap_or_default(),
-                ..CompatibilityState::default()
-            })),
             permission_bridge,
             closed: Arc::new(AtomicBool::new(false)),
             lifecycle_gate,
         }
     }
 
-    fn emit_local(&self, event: LocalChatEvent) -> Result<(), HarnessError> {
-        self.event_sink
-            .try_emit(event)
-            .map_err(HarnessError::EventSink)
-    }
-
     fn emit_error(&self, error: impl Into<String>) -> Result<(), HarnessError> {
-        self.emit_local(LocalChatEvent::Error(LocalChatSessionErrorEvent {
-            backend_session_id: self.backend_session_id.clone(),
-            harness: LocalChatHarnessKind::Claude,
-            error: error.into(),
-        }))
+        self.adapter.emit_error(error)
     }
 
-    fn parent_tool_use_id(event: &HarnessEventV1) -> Option<String> {
-        event
-            .correlation
-            .parent_tool_call_id
-            .as_ref()
-            .map(ToString::to_string)
-    }
-
+    #[cfg(test)]
     fn value_text(value: &serde_json::Value) -> String {
-        match value {
-            serde_json::Value::String(value) => value.clone(),
-            value => serde_json::to_string(value).unwrap_or_default(),
-        }
+        crate::local_chat::harnesses::shared::LocalChatHarnessEventSink::value_text(value)
     }
 
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
-    }
-
-    fn is_root_stream(&self, event: &HarnessEventV1) -> bool {
-        event.stream_id.as_str() == format!("local-chat:{}", self.backend_session_id)
     }
 }
 
 #[async_trait]
 impl EventSink for ClaudeGuiEventSink {
     async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
-        let parent_tool_use_id = Self::parent_tool_use_id(&event);
-        let is_root_stream = self.is_root_stream(&event);
-        match event.payload {
-            HarnessEventPayloadV1::SessionStarted(started) => {
-                let mut state = self
-                    .state
-                    .lock()
-                    .map_err(|_| HarnessError::EventSink("GUI event state is poisoned".into()))?;
-                if let Some(model) = started.model {
-                    state.model = model;
-                }
-                self.emit_local(LocalChatEvent::Init(LocalChatSessionInitEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    provider_resume_id: started
-                        .provider_resume_id
-                        .as_ref()
-                        .map(ToString::to_string),
-                    model: state.model.clone(),
-                    tools: started.tools,
-                }))?;
-            }
-            HarnessEventPayloadV1::Text(text) => {
-                self.emit_local(LocalChatEvent::Text(LocalChatTextEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    text: text.text,
-                    is_partial: event.semantics == UpdateSemantics::Delta,
-                    parent_tool_use_id,
-                }))?;
-            }
-            HarnessEventPayloadV1::ToolCall(tool) => {
-                if tool.name == crate::local_chat::permissions::ASK_USER_QUESTION_TOOL {
-                    return Ok(());
-                }
-                self.emit_local(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    tool_id: tool.tool_call_id.to_string(),
-                    tool_name: tool.name,
-                    input: serde_json::to_string(&tool.input).unwrap_or_default(),
-                    parent_tool_use_id,
-                }))?;
-            }
-            HarnessEventPayloadV1::ToolOutput(output) => {
-                self.emit_local(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    tool_id: output.tool_call_id.to_string(),
-                    result: Self::value_text(&output.output),
-                    is_error: matches!(
-                        output.status,
-                        vertebrae_harness_core::ToolStatus::Failed
-                            | vertebrae_harness_core::ToolStatus::Declined
-                            | vertebrae_harness_core::ToolStatus::Cancelled
-                    ),
-                    parent_tool_use_id,
-                }))?;
-            }
-            HarnessEventPayloadV1::Usage(usage) => {
-                // Agent records have their own canonical stream. Their usage may
-                // omit `parent_tool_call_id`, so stream identity is the reliable
-                // boundary for the root conversation's context meter.
-                if !is_root_stream {
-                    return Ok(());
-                }
-                if let Some(snapshot) = usage.session_snapshot {
-                    let mut state = self.state.lock().map_err(|_| {
-                        HarnessError::EventSink("GUI event state is poisoned".into())
-                    })?;
-                    state.context_tokens = snapshot
-                        .context_tokens
-                        .unwrap_or_default()
-                        .min(u64::from(u32::MAX)) as u32;
-                    state.context_window = snapshot
-                        .context_window
-                        .unwrap_or_default()
-                        .min(u64::from(u32::MAX)) as u32;
-                    self.emit_local(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
-                        backend_session_id: self.backend_session_id.clone(),
-                        harness: LocalChatHarnessKind::Claude,
-                        model: state.model.clone(),
-                        context_tokens: state.context_tokens,
-                        context_window: state.context_window,
-                    }))?;
-                }
-            }
-            HarnessEventPayloadV1::TurnFinished(outcome) => {
-                let mut state = self
-                    .state
-                    .lock()
-                    .map_err(|_| HarnessError::EventSink("GUI event state is poisoned".into()))?;
-                // These defaults intentionally mirror the legacy Claude JSONL
-                // compatibility contract. A result is authoritative and must
-                // not inherit a previous per-turn usage snapshot.
-                state.turn_count = outcome
-                    .metrics
-                    .turn_count
-                    .unwrap_or_default()
-                    .min(u64::from(u32::MAX)) as u32;
-                state.context_tokens = outcome
-                    .metrics
-                    .context_tokens
-                    .unwrap_or_default()
-                    .min(u64::from(u32::MAX)) as u32;
-                state.context_window = outcome
-                    .metrics
-                    .context_window
-                    .unwrap_or(u64::from(DEFAULT_CLAUDE_CONTEXT_WINDOW))
-                    .min(u64::from(u32::MAX)) as u32;
-                let cost_usd = outcome.metrics.total_cost_usd.unwrap_or_default();
-                self.emit_local(LocalChatEvent::End(LocalChatSessionEndEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    duration_ms: outcome
-                        .metrics
-                        .duration_ms
-                        .unwrap_or_default()
-                        .min(u64::from(u32::MAX)) as u32,
-                    cost_usd,
-                    num_turns: state.turn_count,
-                    result: outcome.result_text.unwrap_or_default(),
-                    is_error: outcome.status != CompletionStatus::Completed,
-                    context_tokens: state.context_tokens,
-                    context_window: state.context_window,
-                }))?;
-            }
-            HarnessEventPayloadV1::Warning(warning) => {
-                self.emit_local(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
-                    backend_session_id: self.backend_session_id.clone(),
-                    harness: LocalChatHarnessKind::Claude,
-                    warning: warning.message,
-                }))?;
-            }
-            HarnessEventPayloadV1::Error(error) => self.emit_error(error.message)?,
+        let HarnessEventV1 {
+            event_id,
+            stream_id,
+            sequence,
+            correlation,
+            timestamp,
+            semantics,
+            provider_sequence,
+            payload,
+        } = event;
+        match payload {
             HarnessEventPayloadV1::SessionClosed(outcome) => {
                 let _lifecycle = self.lifecycle_gate.lock().await;
                 self.closed.store(true, Ordering::Release);
@@ -586,37 +433,22 @@ impl EventSink for ClaudeGuiEventSink {
                     )?,
                 }
             }
-            HarnessEventPayloadV1::Reasoning(_)
-            | HarnessEventPayloadV1::Plan(_)
-            | HarnessEventPayloadV1::FileChange(_)
-            | HarnessEventPayloadV1::ThreadDeclared(_)
-            | HarnessEventPayloadV1::TurnStarted(_)
-            | HarnessEventPayloadV1::TurnInput(_)
-            | HarnessEventPayloadV1::ControlRequested(_)
-            | HarnessEventPayloadV1::ControlResolved(_)
-            | HarnessEventPayloadV1::RunFinished(_)
-            | HarnessEventPayloadV1::Unknown { .. } => {}
+            payload => {
+                self.adapter
+                    .emit(HarnessEventV1 {
+                        event_id,
+                        stream_id,
+                        sequence,
+                        correlation,
+                        timestamp,
+                        semantics,
+                        provider_sequence,
+                        payload,
+                    })
+                    .await?;
+            }
         }
         Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct ClaudeGuiControlSink {
-    backend_session_id: String,
-    runtime: LocalChatRuntime,
-}
-
-#[async_trait]
-impl ControlSink for ClaudeGuiControlSink {
-    async fn request(
-        &self,
-        request: ControlRequestEnvelope,
-    ) -> Result<ControlResolution, HarnessError> {
-        self.runtime
-            .permission_bridge()
-            .request_harness_control(&self.backend_session_id, self.runtime.app_handle(), request)
-            .await
     }
 }
 
@@ -744,10 +576,12 @@ impl ClaudeSessionRuntime {
             runtime.permission_bridge(),
             lifecycle_gate.clone(),
         ));
-        let control_sink = Arc::new(ClaudeGuiControlSink {
-            backend_session_id: backend_session_id.clone(),
-            runtime: runtime.clone(),
-        });
+        let control_sink = Arc::new(
+            crate::local_chat::harnesses::shared::LocalChatControlSink::new(
+                backend_session_id.clone(),
+                runtime.clone(),
+            ),
+        );
         let harness = (self.runtime_factory)(provider_config);
         let request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),

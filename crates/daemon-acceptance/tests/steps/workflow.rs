@@ -7,42 +7,6 @@ pub async fn given_workflow_with_one_execute_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
 }
 
-#[given("a workflow with one execute step using openai")]
-pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
-    create_workflow_and_step(world, None).await;
-    update_current_step_openai(world, "gpt-5", None).await;
-    world.assert_vtb_ok("step update --provider openai");
-}
-
-#[given(expr = "a workflow with one execute step using openai and reasoning effort {string}")]
-pub async fn given_workflow_with_codex_step_and_reasoning_effort(
-    world: &mut DaemonWorld,
-    reasoning_effort: String,
-) {
-    create_workflow_and_step(world, None).await;
-    update_current_step_openai(world, "gpt-5.5", Some(&reasoning_effort)).await;
-    world.assert_vtb_ok("step update --provider openai --reasoning-effort");
-}
-
-#[given(
-    expr = "a workflow with one execute step using openai, codex model provider {string}, and model {string}"
-)]
-pub async fn given_workflow_with_codex_step_model_provider_and_model(
-    world: &mut DaemonWorld,
-    codex_model_provider: String,
-    model: String,
-) {
-    create_workflow_and_step(world, None).await;
-    update_current_step_openai_with_codex_model_provider(
-        world,
-        &model,
-        &codex_model_provider,
-        None,
-    )
-    .await;
-    world.assert_vtb_ok("step update --provider openai --codex-model-provider");
-}
-
 #[given("a workflow with one execute step and an output schema")]
 pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
@@ -54,75 +18,6 @@ pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
         "additionalProperties": false
     });
     create_workflow_and_step(world, Some(schema.to_string())).await;
-}
-
-#[given("a workflow with one execute step using openai and an output schema")]
-pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
-    // Same schema shape as the Anthropic schema_validation feature so the
-    // happy-path payload is small and obvious. The daemon does NOT validate
-    // against this schema for the Codex path -- it only verifies the final
-    // agent_message text parses as JSON -- but the schema must still be
-    // Codex strict-compatible so Sacrum accepts it and Codex receives
-    // `--output-schema`.
-    let schema = serde_json::json!({
-        "type": "object",
-        "properties": {
-            "verdict": { "type": "string" },
-            "score":   { "type": "number" }
-        },
-        "required": ["verdict", "score"],
-        "additionalProperties": false
-    });
-    create_workflow_and_step(world, Some(schema.to_string())).await;
-    update_current_step_openai(world, "gpt-5", None).await;
-    world.assert_vtb_ok("step update --provider openai");
-}
-
-async fn update_current_step_openai(
-    world: &mut DaemonWorld,
-    model: &str,
-    reasoning_effort: Option<&str>,
-) {
-    let step_id = world.step_id.as_ref().expect("step not created").clone();
-    let mut args = vec![
-        "step",
-        "update",
-        step_id.as_str(),
-        "--provider",
-        "openai",
-        "--model",
-        model,
-    ];
-    if let Some(reasoning_effort) = reasoning_effort {
-        args.push("--reasoning-effort");
-        args.push(reasoning_effort);
-    }
-    world.run_vtb(&args).await;
-}
-
-async fn update_current_step_openai_with_codex_model_provider(
-    world: &mut DaemonWorld,
-    model: &str,
-    codex_model_provider: &str,
-    reasoning_effort: Option<&str>,
-) {
-    let step_id = world.step_id.as_ref().expect("step not created").clone();
-    let mut args = vec![
-        "step",
-        "update",
-        step_id.as_str(),
-        "--provider",
-        "openai",
-        "--codex-model-provider",
-        codex_model_provider,
-        "--model",
-        model,
-    ];
-    if let Some(reasoning_effort) = reasoning_effort {
-        args.push("--reasoning-effort");
-        args.push(reasoning_effort);
-    }
-    world.run_vtb(&args).await;
 }
 
 #[given(expr = "the step is configured with agent_config {string}")]

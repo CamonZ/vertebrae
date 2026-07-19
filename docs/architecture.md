@@ -162,11 +162,11 @@ DaemonSupervisor
 - Connects to Sacrum via Phoenix WebSocket (`client_type: "daemon"`)
 - Receives `run_step` events with prompt + agent config + output schema
 - Resolves the step's `agent_config.provider` to a built-in harness:
-  `anthropic` (default) → `claude -p "<prompt>" --output-format stream-json`,
-  `openai` → `codex exec --json "<prompt>"`. See
+  `anthropic` (default) → the Claude streaming harness,
+  `openai` → the Codex App Server streaming harness. See
   [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
-- When a step has an `output_schema`, passes it as `--json-schema` (Claude) or
-  `--output-schema <path>` (Codex) to enforce structured output
+- When a step has an `output_schema`, passes it through the provider-neutral
+  harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
 - Streams stdout as `SessionLog` records to Sacrum
 - Reports completion/failure with token counts, cost, and the actual

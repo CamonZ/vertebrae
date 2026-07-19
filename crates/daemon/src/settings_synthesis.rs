@@ -45,20 +45,6 @@ impl SyntheticSettings {
     pub fn dir(&self) -> &Path {
         self.dir.path()
     }
-
-    /// Write the given JSON schema into a sibling file inside this bundle and
-    /// return its path. Used by the Codex command builder to satisfy
-    /// `codex exec --output-schema <path>` (Codex requires a file path, not
-    /// inline JSON). The file is removed when the bundle is dropped.
-    pub fn write_codex_output_schema(
-        &self,
-        schema: &serde_json::Value,
-    ) -> std::io::Result<PathBuf> {
-        let path = self.dir.path().join("codex-output-schema.json");
-        let body = serde_json::to_string_pretty(schema).map_err(std::io::Error::other)?;
-        std::fs::write(&path, body)?;
-        Ok(path)
-    }
 }
 
 /// Layers two independent defenses: `permissions.deny` blocks the common

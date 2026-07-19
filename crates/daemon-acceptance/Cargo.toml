@@ -18,10 +18,6 @@ thiserror = "1"
 name = "mock-claude"
 path = "src/bin/mock_claude.rs"
 
-[[bin]]
-name = "mock-codex"
-path = "src/bin/mock_codex.rs"
-
 [[test]]
 name = "daemon_acceptance"
 harness = false
