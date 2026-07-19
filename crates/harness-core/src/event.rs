@@ -244,7 +244,20 @@ pub struct FileChange {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileChangeEvent {
+    /// Provider tool/item identity, when the change came from a file-editing
+    /// tool. This lets consumers replace a started snapshot with its terminal
+    /// snapshot instead of rendering two file-change rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<ToolCallId>,
     pub changes: Vec<FileChange>,
+    /// File changes have the same lifecycle as tool calls. Older persisted V1
+    /// events did not carry a status, so they remain terminal by default.
+    #[serde(default = "default_file_change_status")]
+    pub status: ToolStatus,
+}
+
+fn default_file_change_status() -> ToolStatus {
+    ToolStatus::Completed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

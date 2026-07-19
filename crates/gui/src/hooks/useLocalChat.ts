@@ -6,6 +6,7 @@ import type {
   LocalChatTextEvent,
   LocalChatToolCallEvent,
   LocalChatToolResultEvent,
+  LocalChatFileChangeEvent,
   PermissionRequestEvent,
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
@@ -234,6 +235,27 @@ export function handleToolResultEvent(
     toolId: payload.tool_id,
     result: payload.result,
     isError: payload.is_error,
+    timestamp: new Date().toISOString(),
+    parentToolUseId: payload.parent_tool_use_id ?? undefined,
+  });
+}
+
+export function handleFileChangeEvent(
+  payload: LocalChatFileChangeEvent,
+  backendSessionId: string | null,
+  sessionId: string,
+  addMessage: (sessionId: string, msg: ChatMessage) => void
+) {
+  if (payload.backend_session_id !== backendSessionId) return;
+  addMessage(sessionId, {
+    kind: "file_edit",
+    toolId: payload.tool_id,
+    status: payload.status,
+    changes: payload.changes.map((change) => ({
+      path: change.path,
+      kind: change.kind,
+      ...(change.diff !== null ? { diff: change.diff } : {}),
+    })),
     timestamp: new Date().toISOString(),
     parentToolUseId: payload.parent_tool_use_id ?? undefined,
   });
@@ -563,9 +585,7 @@ export function useLocalChat(sessionId: string | null) {
   );
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
-  const markStreamingIfSending = useChatStore(
-    (s) => s.markStreamingIfSending
-  );
+  const markStreamingIfSending = useChatStore((s) => s.markStreamingIfSending);
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const markPendingUserQuestionsUnavailable = useChatStore(

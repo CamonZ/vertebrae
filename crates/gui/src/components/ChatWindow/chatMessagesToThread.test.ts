@@ -111,12 +111,11 @@ describe("chatMessagesToThread", () => {
     expect(laterRows.some((m) => m.type === "spawn")).toBe(false);
     expect(
       laterRows.some(
-        (m) => m.type === "agent" && (m as AgentMessage).prose === "child findings"
+        (m) =>
+          m.type === "agent" && (m as AgentMessage).prose === "child findings"
       )
     ).toBe(false);
-    const mainProse = laterRows.find(
-      (m) => m.type === "agent"
-    ) as AgentMessage;
+    const mainProse = laterRows.find((m) => m.type === "agent") as AgentMessage;
     expect(mainProse.prose).toBe("main answer");
   });
 
@@ -234,7 +233,8 @@ describe("chatMessagesToThread", () => {
     );
     const laterRows = thread.turns[1].messages;
     const resultRow = laterRows.find(
-      (m) => m.type === "tool" && m.evt === "agent:child-thread:result:child-turn"
+      (m) =>
+        m.type === "tool" && m.evt === "agent:child-thread:result:child-turn"
     ) as ToolMessage;
     expect(resultRow).toBeDefined();
     expect(resultRow.name).toBe("Agent Result");
@@ -344,6 +344,45 @@ describe("chatMessagesToThread", () => {
     expect(tool.status).toBe("err");
     expect(tool.error).toBe(true);
     expect(tool.body).toBe("boom");
+  });
+
+  it("renders a structured file edit once and hides its generic tool lifecycle", () => {
+    const thread = build([
+      { kind: "user", text: "edit it", timestamp: TS },
+      {
+        kind: "tool_call",
+        toolName: "Edit",
+        toolId: "file-1",
+        input: JSON.stringify({ file_path: "/repo/src/lib.ts" }),
+        timestamp: TS,
+      },
+      {
+        kind: "tool_result",
+        toolId: "file-1",
+        result: "ok",
+        isError: false,
+        timestamp: TS,
+      },
+      {
+        kind: "file_edit",
+        toolId: "file-1",
+        status: "completed",
+        changes: [
+          {
+            path: "src/lib.ts",
+            kind: "update",
+            diff: "@@\n-old\n+new",
+          },
+        ],
+        timestamp: TS,
+      },
+    ]);
+    const tools = thread.turns[0].messages.filter((m) => m.type === "tool");
+    expect(tools).toHaveLength(1);
+    expect((tools[0] as ToolMessage).evt).toBe("file-1");
+    expect((tools[0] as ToolMessage).cmd).toBe("apply_patch");
+    expect((tools[0] as ToolMessage).body).toContain("+new");
+    expect((tools[0] as ToolMessage).status).toBe("done");
   });
 
   it("renders a tool_call with no preceding assistant as a standalone tool row", () => {
@@ -497,9 +536,9 @@ describe("chatMessagesToThread", () => {
     ]);
     const msgs = thread.turns[0].messages;
 
-    expect(
-      msgs.some((m) => m.type === "tool" && m.evt === "toolu_AGENT")
-    ).toBe(true);
+    expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_AGENT")).toBe(
+      true
+    );
     expect(msgs.some((m) => m.type === "spawn")).toBe(false);
     expect(msgs.some((m) => m.type === "tool" && m.evt === "toolu_child")).toBe(
       false
@@ -550,12 +589,12 @@ describe("chatMessagesToThread", () => {
     ]);
 
     const msgs = thread.turns[0].messages;
-    expect(msgs.some((m) => m.type === "tool" && m.evt === "spawn-1")).toBe(true);
+    expect(msgs.some((m) => m.type === "tool" && m.evt === "spawn-1")).toBe(
+      true
+    );
     expect(msgs.some((m) => m.evt === "wait-1")).toBe(false);
     expect(
-      msgs.some(
-        (m) => m.type === "agent" && m.prose === "waited child output"
-      )
+      msgs.some((m) => m.type === "agent" && m.prose === "waited child output")
     ).toBe(false);
   });
 
@@ -588,9 +627,7 @@ describe("chatMessagesToThread", () => {
       true
     );
     expect(
-      msgs.some(
-        (m) => m.type === "agent" && m.prose === "child analysis"
-      )
+      msgs.some((m) => m.type === "agent" && m.prose === "child analysis")
     ).toBe(false);
   });
 
@@ -623,9 +660,7 @@ describe("chatMessagesToThread", () => {
       true
     );
     expect(
-      msgs.some(
-        (m) => m.type === "agent" && m.prose === "child analysis"
-      )
+      msgs.some((m) => m.type === "agent" && m.prose === "child analysis")
     ).toBe(false);
   });
 

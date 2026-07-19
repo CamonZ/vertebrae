@@ -930,6 +930,7 @@ async installComponents(installCli: boolean, installDaemon: boolean, installGate
 
 
 export const events = __makeEvents__<{
+localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
 localChatSessionInitEvent: LocalChatSessionInitEvent,
@@ -953,6 +954,7 @@ taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
+localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
 localChatSessionInitEvent: "local-chat-session-init-event",
@@ -1161,6 +1163,8 @@ export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 export type LoadLocalChatSessionMessagesInput = { harness: LocalChatHarnessKind; providerResumeId: string; projectPath: string | null; createdAt: string | null; providerJsonlPath: string | null }
 export type LoadLocalChatSessionMessagesOutput = { lines: string[]; providerJsonlPath: string | null }
+export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
+export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"

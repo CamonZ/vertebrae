@@ -25,7 +25,7 @@ use vertebrae_harness_core::{
     EventId, EventSink, FileChange, FileChangeEvent, FileChangeKind, HarnessError,
     HarnessEventPayloadV1, HarnessEventV1, HarnessProjection, HarnessRuntime, ProviderResumeId,
     ProviderThreadRef, RequestConfig, ResolutionSource, RunId, RunRequest, SendTurnRequest,
-    SessionId, StartSessionRequest, StreamId, ToolStatus, TurnId, TurnInputProvenance,
+    SessionId, StartSessionRequest, StreamId, ToolCallId, ToolStatus, TurnId, TurnInputProvenance,
     UpdateSemantics,
 };
 
@@ -820,12 +820,14 @@ fn inject_consumer_file_change_fixture(events: &mut Vec<HarnessEventV1>) {
     event.semantics = UpdateSemantics::Delta;
     event.provider_sequence = None;
     event.payload = HarnessEventPayloadV1::FileChange(FileChangeEvent {
+        tool_call_id: Some(ToolCallId::from("consumer-file-change")),
         changes: vec![FileChange {
             path: "src/parity.rs".into(),
             kind: FileChangeKind::Modified,
             previous_path: None,
             patch: Some("@@ parity @@".into()),
         }],
+        status: ToolStatus::Completed,
     });
     events.push(event);
 }

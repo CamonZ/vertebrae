@@ -3,14 +3,19 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use vertebrae_harness_core::{
     CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
-    HarnessError, HarnessEventPayloadV1, HarnessEventV1, ToolStatus, UpdateSemantics,
+    FileChangeKind, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ToolStatus,
+    UpdateSemantics,
+};
+#[cfg(test)]
+use vertebrae_harness_core::{
+    EventCorrelation, EventId, FileChange, FileChangeEvent, StreamId, ToolCallId,
 };
 
 use crate::local_chat::{
-    LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind, LocalChatRuntime,
-    LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatEvent, LocalChatEventSink, LocalChatFileChange, LocalChatFileChangeEvent,
+    LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
+    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
 };
 
 #[derive(Default)]
@@ -225,6 +230,27 @@ impl EventSink for LocalChatHarnessEventSink {
                     parent_tool_use_id,
                 }))?;
             }
+            HarnessEventPayloadV1::FileChange(value) => {
+                self.emit_local(LocalChatEvent::FileChange(LocalChatFileChangeEvent {
+                    backend_session_id,
+                    harness,
+                    tool_id: value
+                        .tool_call_id
+                        .map(|tool_id| tool_id.to_string())
+                        .unwrap_or_default(),
+                    status: file_change_status(value.status),
+                    changes: value
+                        .changes
+                        .into_iter()
+                        .map(|change| LocalChatFileChange {
+                            path: change.path,
+                            kind: file_change_kind(change.kind),
+                            diff: change.patch,
+                        })
+                        .collect(),
+                    parent_tool_use_id,
+                }))?;
+            }
             HarnessEventPayloadV1::Usage(value) => {
                 if !is_root_stream {
                     return Ok(());
@@ -288,6 +314,27 @@ impl EventSink for LocalChatHarnessEventSink {
     }
 }
 
+fn file_change_status(status: ToolStatus) -> String {
+    match status {
+        ToolStatus::Started | ToolStatus::Running => "started",
+        ToolStatus::Completed => "completed",
+        ToolStatus::Failed => "failed",
+        ToolStatus::Declined => "declined",
+        ToolStatus::Cancelled => "cancelled",
+    }
+    .into()
+}
+
+fn file_change_kind(kind: FileChangeKind) -> String {
+    match kind {
+        FileChangeKind::Added => "add",
+        FileChangeKind::Modified => "update",
+        FileChangeKind::Deleted => "delete",
+        FileChangeKind::Renamed => "rename",
+    }
+    .into()
+}
+
 #[derive(Clone)]
 pub(crate) struct LocalChatControlSink {
     backend_session_id: String,
@@ -313,5 +360,55 @@ impl ControlSink for LocalChatControlSink {
             .permission_bridge()
             .request_harness_control(&self.backend_session_id, self.runtime.app_handle(), request)
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn translates_file_change_events_for_local_chat() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Codex,
+            event_sink,
+            Some("gpt".into()),
+            1_000,
+            false,
+        );
+
+        sink.emit(HarnessEventV1 {
+            event_id: EventId::new("file-event"),
+            stream_id: StreamId::new("local-chat:backend-1"),
+            sequence: 1,
+            correlation: EventCorrelation::default(),
+            timestamp: chrono::Utc::now(),
+            semantics: UpdateSemantics::Snapshot,
+            provider_sequence: None,
+            payload: HarnessEventPayloadV1::FileChange(FileChangeEvent {
+                tool_call_id: Some(ToolCallId::new("file-1")),
+                changes: vec![FileChange {
+                    path: "src/new.rs".into(),
+                    kind: FileChangeKind::Added,
+                    previous_path: None,
+                    patch: Some("+fn main() {}".into()),
+                }],
+                status: ToolStatus::Completed,
+            }),
+        })
+        .await
+        .unwrap();
+
+        let captured = captured.lock().unwrap();
+        assert!(matches!(
+            captured.as_slice(),
+            [LocalChatEvent::FileChange(event)]
+                if event.harness == LocalChatHarnessKind::Codex
+                    && event.tool_id == "file-1"
+                    && event.status == "completed"
+                    && event.changes[0].kind == "add"
+        ));
     }
 }

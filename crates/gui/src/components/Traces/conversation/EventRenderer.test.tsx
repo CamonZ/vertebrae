@@ -295,6 +295,18 @@ describe("EventRenderer", () => {
     expect(label.className).toMatch(/text-err/);
   });
 
+  it("renders an in-progress file_edit as patching", () => {
+    const event: FileEditEvent = {
+      kind: "file_edit",
+      timestamp: ts,
+      toolId: "fc3",
+      status: "started",
+      changes: [{ path: "src/x.rs", kind: "update" }],
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    expect(screen.getByText("patching")).toBeInTheDocument();
+  });
+
   it("renders todo_list as a checklist with completed items struck through", () => {
     const event: TodoListEvent = {
       kind: "todo_list",

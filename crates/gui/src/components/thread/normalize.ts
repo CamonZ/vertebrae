@@ -272,7 +272,7 @@ function isStatusOnlyAgentSpawnResult(result: string): boolean {
   );
 }
 
-/** Build a ToolMessage from a Codex file_edit (apply_patch style). */
+/** Build a ToolMessage from either harness's normalized file_edit event. */
 function fileEditMessage(
   ev: FileEditEvent,
   runStartMs: number | null
@@ -283,6 +283,7 @@ function fileEditMessage(
     .map((c) => c.diff)
     .filter((d): d is string => typeof d === "string" && d.length > 0)
     .join("\n");
+  const status = fileEditMessageStatus(ev.status);
   return {
     evt: ev.toolId || nextEvt("edit"),
     type: "tool",
@@ -291,11 +292,28 @@ function fileEditMessage(
     em: paths || undefined,
     at: clock(ev.timestamp),
     rel: rel(runStartMs, atMs),
-    status: ev.status === "failed" ? "err" : "done",
-    error: ev.status === "failed" || undefined,
+    status,
+    error: status === "err" || undefined,
     body: diffs || undefined,
     collapsed: true,
   };
+}
+
+function fileEditMessageStatus(status: string): ToolMessage["status"] {
+  switch (status.toLowerCase()) {
+    case "started":
+    case "running":
+    case "inprogress":
+    case "in_progress":
+      return "pending";
+    case "failed":
+    case "declined":
+    case "cancelled":
+    case "canceled":
+      return "err";
+    default:
+      return "done";
+  }
 }
 
 /**
@@ -747,6 +765,14 @@ function eventsToMessages(
   runStartMs: number | null
 ): Message[] {
   const out: Message[] = [];
+  const fileEditIds = new Set(
+    events
+      .filter(
+        (event): event is FileEditEvent =>
+          event.kind === "file_edit" && event.toolId.length > 0
+      )
+      .map((event) => event.toolId)
+  );
   for (const ev of events) {
     switch (ev.kind) {
       case "user_message":
@@ -787,6 +813,7 @@ function eventsToMessages(
         );
         break;
       case "tool_call":
+        if (fileEditIds.has(ev.toolId)) break;
         out.push(toolMessage(ev, resultById.get(ev.toolId), runStartMs));
         break;
       case "tool_result":

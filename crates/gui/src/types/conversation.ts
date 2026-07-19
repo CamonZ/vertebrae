@@ -283,9 +283,8 @@ export interface FileUpdateChange {
 
 /**
  * File-edit event carrying one or more {@link FileUpdateChange} entries
- * plus the patch application status. Sourced from Codex `file_change`
- * `item.completed` events; Claude's per-file edits still go through the
- * generic `Edit`/`Write` `tool_call` path.
+ * plus the patch application status. Both harnesses normalize their native
+ * edit/write/apply-patch lifecycle into this shape.
  */
 export interface FileEditEvent extends BaseEvent {
   kind: "file_edit";
@@ -558,7 +557,12 @@ function isRateLimitFailure(raw: ClaudeRawMessage): boolean {
 export function parseClaudeMessage(
   raw: ClaudeRawMessage,
   timestamp: string,
-  options: ParseSessionLogsOptions = {}
+  options: ParseSessionLogsOptions = {},
+  state: ClaudeParseState = {
+    latestSnapshotByKey: new Map(),
+    fileChangesByToolId: new Map(),
+    fileEditByToolId: new Map(),
+  }
 ): ConversationEvent[] {
   const events: ConversationEvent[] = [];
 
@@ -628,6 +632,17 @@ export function parseClaudeMessage(
                 text: item.text,
               });
             } else if (item.type === "tool_use") {
+              const changes = claudeFileChanges(item.name, item.input);
+              if (changes.length > 0) {
+                state.fileChangesByToolId.set(item.id, changes);
+                events.push({
+                  kind: "file_edit",
+                  timestamp,
+                  toolId: item.id,
+                  status: "started",
+                  changes,
+                });
+              }
               events.push({
                 kind: "tool_call",
                 timestamp,
@@ -663,6 +678,17 @@ export function parseClaudeMessage(
         if (Array.isArray(content)) {
           for (const item of content) {
             if (item.type === "tool_result") {
+              const changes = state.fileChangesByToolId.get(item.tool_use_id);
+              if (changes) {
+                state.fileChangesByToolId.delete(item.tool_use_id);
+                events.push({
+                  kind: "file_edit",
+                  timestamp,
+                  toolId: item.tool_use_id,
+                  status: item.is_error ? "failed" : "completed",
+                  changes,
+                });
+              }
               const toolResultContent = item.content;
               const resultText =
                 typeof toolResultContent === "string"
@@ -731,6 +757,58 @@ export function parseClaudeMessage(
   return events;
 }
 
+/** Convert Claude's native file-writing tools into the shared file-edit row. */
+function claudeFileChanges(
+  name: string,
+  input: Record<string, unknown>
+): FileUpdateChange[] {
+  const path = readString(input.file_path) ?? readString(input.path);
+  if (!path) return [];
+  if (name === "Edit") {
+    const oldValue =
+      typeof input.old_string === "string" ? input.old_string : "";
+    const newValue =
+      typeof input.new_string === "string" ? input.new_string : "";
+    return [
+      {
+        path,
+        kind: "update",
+        diff: syntheticDiff(oldValue, newValue),
+      },
+    ];
+  }
+  if (name === "Write") {
+    const content = typeof input.content === "string" ? input.content : "";
+    return [{ path, kind: "add", diff: syntheticDiff("", content) }];
+  }
+  if (name === "NotebookEdit") {
+    const source = typeof input.new_source === "string" ? input.new_source : "";
+    return [{ path, kind: "update", diff: syntheticDiff("", source) }];
+  }
+  if (name === "MultiEdit" && Array.isArray(input.edits)) {
+    const diffs = input.edits.flatMap((edit) => {
+      const record = readRecord(edit);
+      if (!record) return [];
+      const oldValue =
+        typeof record.old_string === "string" ? record.old_string : "";
+      const newValue =
+        typeof record.new_string === "string" ? record.new_string : "";
+      return [syntheticDiff(oldValue, newValue)];
+    });
+    if (diffs.length > 0)
+      return [{ path, kind: "update", diff: diffs.join("\n") }];
+  }
+  return [];
+}
+
+function syntheticDiff(oldValue: string, newValue: string): string {
+  const lines = ["@@"];
+  if (oldValue) lines.push(...oldValue.split("\n").map((line) => `-${line}`));
+  if (newValue) lines.push(...newValue.split("\n").map((line) => `+${line}`));
+  if (lines.length === 1) lines.push("+");
+  return lines.join("\n");
+}
+
 function isHarnessRawEvent(raw: unknown): raw is HarnessRawEvent {
   const record = readRecord(raw);
   return (
@@ -743,7 +821,7 @@ function isHarnessRawEvent(raw: unknown): raw is HarnessRawEvent {
 }
 
 function outputText(output: unknown): string {
-  return typeof output === "string" ? output : JSON.stringify(output) ?? "";
+  return typeof output === "string" ? output : (JSON.stringify(output) ?? "");
 }
 
 function harnessOutcomeMetrics(data: Record<string, unknown>): {
@@ -829,10 +907,15 @@ function parseHarnessEvent(
     case "text": {
       const text = readString(data.text);
       if (text) {
-        if (raw.semantics === "snapshot" && turnPayloadKey && state.deltaPayloads.has(turnPayloadKey)) {
+        if (
+          raw.semantics === "snapshot" &&
+          turnPayloadKey &&
+          state.deltaPayloads.has(turnPayloadKey)
+        ) {
           break;
         }
-        if (raw.semantics === "delta" && turnPayloadKey) state.deltaPayloads.add(turnPayloadKey);
+        if (raw.semantics === "delta" && turnPayloadKey)
+          state.deltaPayloads.add(turnPayloadKey);
         if (turnKey) state.turnsWithText.add(turnKey);
         events.push({ kind: "assistant_message", timestamp, text });
       }
@@ -841,10 +924,15 @@ function parseHarnessEvent(
     case "reasoning": {
       const text = readString(data.text);
       if (text) {
-        if (raw.semantics === "snapshot" && turnPayloadKey && state.deltaPayloads.has(turnPayloadKey)) {
+        if (
+          raw.semantics === "snapshot" &&
+          turnPayloadKey &&
+          state.deltaPayloads.has(turnPayloadKey)
+        ) {
           break;
         }
-        if (raw.semantics === "delta" && turnPayloadKey) state.deltaPayloads.add(turnPayloadKey);
+        if (raw.semantics === "delta" && turnPayloadKey)
+          state.deltaPayloads.add(turnPayloadKey);
         events.push({ kind: "thinking", timestamp, text });
       }
       break;
@@ -856,7 +944,9 @@ function parseHarnessEvent(
         const text = readString(plan?.text);
         if (!text) return [];
         const status = readString(plan?.status)?.toLowerCase();
-        return [{ text, completed: status === "completed" || status === "done" }];
+        return [
+          { text, completed: status === "completed" || status === "done" },
+        ];
       });
       if (items.length > 0) {
         events.push({
@@ -894,30 +984,44 @@ function parseHarnessEvent(
           kind: "tool_result",
           timestamp,
           toolUseId,
-          isError: status === "failed" || status === "declined" || status === "cancelled",
+          isError:
+            status === "failed" ||
+            status === "declined" ||
+            status === "cancelled",
           result: outputText(data.output),
         });
       }
       break;
     }
     case "file_change": {
-      const changes = (Array.isArray(data.changes) ? data.changes : []).flatMap((change) => {
-        const file = readRecord(change);
-        const path = readString(file?.path);
-        if (!path) return [];
-        const kind = readString(file?.kind)?.toLowerCase();
-        return [{
-          path,
-          kind: kind === "added" ? "add" : kind === "deleted" ? "delete" : "update",
-          diff: readString(file?.patch),
-        }];
-      });
+      const changes = (Array.isArray(data.changes) ? data.changes : []).flatMap(
+        (change) => {
+          const file = readRecord(change);
+          const path = readString(file?.path);
+          if (!path) return [];
+          const kind = readString(file?.kind)?.toLowerCase();
+          return [
+            {
+              path,
+              kind:
+                kind === "add" || kind === "added"
+                  ? "add"
+                  : kind === "delete" || kind === "deleted"
+                    ? "delete"
+                    : kind === "rename" || kind === "renamed"
+                      ? "rename"
+                      : "update",
+              diff: readString(file?.patch) ?? readString(file?.diff),
+            },
+          ];
+        }
+      );
       if (changes.length > 0) {
         events.push({
           kind: "file_edit",
           timestamp,
-          toolId: raw.event_id,
-          status: "completed",
+          toolId: readString(data.tool_call_id) ?? raw.event_id,
+          status: readString(data.status) ?? "completed",
           changes,
         });
       }
@@ -929,7 +1033,11 @@ function parseHarnessEvent(
       if (resultText && (!turnKey || !state.turnsWithText.has(turnKey))) {
         events.push({ kind: "assistant_message", timestamp, text: resultText });
       }
-      events.push({ kind: "session_end", timestamp, ...harnessOutcomeMetrics(data) });
+      events.push({
+        kind: "session_end",
+        timestamp,
+        ...harnessOutcomeMetrics(data),
+      });
       break;
     }
   }
@@ -956,6 +1064,7 @@ export interface CodexItem {
     | "mcp_tool_call"
     | "web_search"
     | "file_change"
+    | "fileChange"
     | "todo_list"
     | "collab_tool_call"
     | string;
@@ -1051,7 +1160,9 @@ export interface CodexRolloutRawMessage {
     namespace?: string;
     name?: string;
     arguments?: unknown;
+    input?: unknown;
     output?: unknown;
+    exit_code?: number;
     message?: string;
     // -- event_msg "patch_apply_end" --
     success?: boolean;
@@ -1124,7 +1235,11 @@ function isCodexRolloutRawMessage(raw: unknown): raw is CodexRolloutRawMessage {
 export function parseCodexMessage(
   raw: CodexRawMessage,
   timestamp: string,
-  state: CodexParseState = { turnCount: 0, todoListByItemId: new Map() }
+  state: CodexParseState = {
+    turnCount: 0,
+    todoListByItemId: new Map(),
+    fileEditByItemId: new Map(),
+  }
 ): ConversationEvent[] {
   const events: ConversationEvent[] = [];
 
@@ -1145,11 +1260,24 @@ export function parseCodexMessage(
 
     case "item.started":
     case "item.updated": {
+      const item = raw.item;
+      if (item?.type === "file_change" || item?.type === "fileChange") {
+        const changes = Array.isArray(item.changes) ? item.changes : [];
+        if (changes.length > 0) {
+          events.push({
+            kind: "file_edit",
+            timestamp,
+            toolId: item.id ?? "",
+            status: item.status ?? "started",
+            changes,
+          });
+        }
+        break;
+      }
       // Only `todo_list` items use the started/updated channel for
       // user-visible state -- agent_message text streams in via these too
       // but the final text is what we render, on item.completed. Per the
       // upstream Codex schema, plan refinements arrive as `item.updated`.
-      const item = raw.item;
       if (!item || item.type !== "todo_list") break;
       const ev = makeTodoListEvent(item, timestamp);
       if (ev) events.push(ev);
@@ -1265,7 +1393,8 @@ export function parseCodexMessage(
           });
           break;
         }
-        case "file_change": {
+        case "file_change":
+        case "fileChange": {
           const changes = Array.isArray(item.changes) ? item.changes : [];
           // Drop empty patches silently -- nothing to render.
           if (changes.length === 0) break;
@@ -1381,6 +1510,7 @@ export interface CodexRolloutParseState {
    * of dozens of identical ones.
    */
   emittedSessionStartIds: Set<string>;
+  fileEditByToolId: Map<string, number>;
 }
 
 function newCodexRolloutParseState(): CodexRolloutParseState {
@@ -1390,6 +1520,7 @@ function newCodexRolloutParseState(): CodexRolloutParseState {
     agentSpawnEventByAgentPath: new Map(),
     completedAgentPaths: new Set(),
     emittedSessionStartIds: new Set(),
+    fileEditByToolId: new Map(),
   };
 }
 
@@ -1697,6 +1828,50 @@ function patchApplyChanges(
   }));
 }
 
+/** Parse Codex's rollout-only `apply_patch` custom tool input. */
+function applyPatchInputChanges(input: unknown): FileUpdateChange[] {
+  const text =
+    typeof input === "string" ? input : (JSON.stringify(input) ?? "");
+  const lines = text.split("\n");
+  const changes: FileUpdateChange[] = [];
+  let current: FileUpdateChange | null = null;
+  const body: string[] = [];
+  const finish = () => {
+    if (!current) return;
+    const diff = body.filter((line) => line.length > 0).join("\n");
+    changes.push({ ...current, ...(diff ? { diff } : {}) });
+    current = null;
+    body.length = 0;
+  };
+  for (const line of lines) {
+    const add = line.match(/^\*\*\* Add File: (.+)$/);
+    const update = line.match(/^\*\*\* Update File: (.+)$/);
+    const remove = line.match(/^\*\*\* Delete File: (.+)$/);
+    const move = line.match(/^\*\*\* Move to: (.+)$/);
+    if (add || update || remove) {
+      finish();
+      current = {
+        path: (add ?? update ?? remove)![1],
+        kind: add ? "add" : remove ? "delete" : "update",
+      };
+      continue;
+    }
+    if (move && current) {
+      current = { ...current, kind: "rename", diff: undefined };
+      body.push(`*** Move to: ${move[1]}`);
+      continue;
+    }
+    if (
+      current &&
+      (line.startsWith("+") || line.startsWith("-") || line.startsWith("@@"))
+    ) {
+      body.push(line);
+    }
+  }
+  finish();
+  return changes;
+}
+
 /**
  * Map a Codex rollout `event_msg` line to conversation events.
  *
@@ -1772,6 +1947,33 @@ function parseCodexRolloutEventMsg(
       ];
     }
 
+    case "custom_tool_call": {
+      if (readString(payload.name) !== "apply_patch") return [];
+      const toolId = readString(payload.call_id) ?? readString(payload.id);
+      if (!toolId) return [];
+      const changes = applyPatchInputChanges(
+        payload.input ?? payload.arguments
+      );
+      return changes.length > 0
+        ? [{ kind: "file_edit", timestamp, toolId, status: "started", changes }]
+        : [];
+    }
+
+    case "custom_tool_call_output": {
+      const toolId = readString(payload.call_id) ?? readString(payload.id);
+      if (!toolId) return [];
+      const output = readRecord(payload.output);
+      const status =
+        payload.exit_code !== undefined && payload.exit_code !== 0
+          ? "failed"
+          : (readString(output?.status) ?? "completed");
+      // The output carries the result, not the original patch. The stateful
+      // dedupe in parseSessionLogs replaces the started row only when the
+      // terminal event also has changes, so leave the input row visible when
+      // Codex omits the patch body here.
+      return [{ kind: "file_edit", timestamp, toolId, status, changes: [] }];
+    }
+
     // Per-file patch application result. Confirmed via real rollouts that
     // this does NOT correspond to any response_item -- patches are applied
     // via a plain `exec_command` function_call whose call_id never matches
@@ -1825,6 +2027,41 @@ export function parseCodexRolloutMessage(
   if (!payload || typeof payload !== "object") return events;
 
   switch (payload.type) {
+    case "custom_tool_call": {
+      if (readString(payload.name) !== "apply_patch") break;
+      const toolId = readString(payload.call_id) ?? readString(payload.id);
+      if (!toolId) break;
+      const changes = applyPatchInputChanges(
+        payload.input ?? payload.arguments
+      );
+      if (changes.length > 0) {
+        events.push({
+          kind: "file_edit",
+          timestamp,
+          toolId,
+          status: "started",
+          changes,
+        });
+      }
+      break;
+    }
+    case "custom_tool_call_output": {
+      const toolId = readString(payload.call_id) ?? readString(payload.id);
+      if (!toolId) break;
+      const output = readRecord(payload.output);
+      const status =
+        payload.exit_code !== undefined && payload.exit_code !== 0
+          ? "failed"
+          : (readString(output?.status) ?? "completed");
+      events.push({
+        kind: "file_edit",
+        timestamp,
+        toolId,
+        status,
+        changes: [],
+      });
+      break;
+    }
     case "message": {
       const text = contentText(payload.content).trim();
       if (!text) break;
@@ -1962,10 +2199,13 @@ export interface CodexParseState {
    * so concurrent executions don't share plans even if `item.id`s collide.
    */
   todoListByItemId: Map<string, number>;
+  fileEditByItemId: Map<string, number>;
 }
 
 interface ClaudeParseState {
   latestSnapshotByKey: Map<string, number>;
+  fileChangesByToolId: Map<string, FileUpdateChange[]>;
+  fileEditByToolId: Map<string, number>;
 }
 
 interface HarnessParseState {
@@ -1975,6 +2215,7 @@ interface HarnessParseState {
   turnsWithText: Set<string>;
   /** Snapshot plans replace their prior version instead of growing the trace. */
   todoListByItemId: Map<string, number>;
+  fileEditByToolId: Map<string, number>;
 }
 
 function claudeSnapshotKey(
@@ -2034,6 +2275,7 @@ export function parseSessionLogs(
           deltaPayloads: new Set(),
           turnsWithText: new Set(),
           todoListByItemId: new Map(),
+          fileEditByToolId: new Map(),
         };
         harnessStateByExecution.set(execId, state);
       }
@@ -2046,13 +2288,29 @@ export function parseSessionLogs(
           }
           state.todoListByItemId.set(ev.itemId, events.length);
         }
+        if (ev.kind === "file_edit" && ev.toolId) {
+          const priorIndex = state.fileEditByToolId.get(ev.toolId);
+          if (priorIndex !== undefined) {
+            const previous = events[priorIndex];
+            events[priorIndex] =
+              previous?.kind === "file_edit" && ev.changes.length === 0
+                ? { ...ev, changes: previous.changes }
+                : ev;
+            continue;
+          }
+          state.fileEditByToolId.set(ev.toolId, events.length);
+        }
         events.push(ev);
       }
     } else if (isCodexRawMessage(raw)) {
       const execId = log.step_execution_id ?? "";
       let state = codexStateByExecution.get(execId);
       if (!state) {
-        state = { turnCount: 0, todoListByItemId: new Map() };
+        state = {
+          turnCount: 0,
+          todoListByItemId: new Map(),
+          fileEditByItemId: new Map(),
+        };
         codexStateByExecution.set(execId, state);
       }
       for (const ev of parseCodexMessage(raw, ts, state)) {
@@ -2064,6 +2322,18 @@ export function parseSessionLogs(
           }
           state.todoListByItemId.set(ev.itemId, events.length);
         }
+        if (ev.kind === "file_edit" && ev.toolId) {
+          const priorIndex = state.fileEditByItemId.get(ev.toolId);
+          if (priorIndex !== undefined) {
+            const previous = events[priorIndex];
+            events[priorIndex] =
+              previous?.kind === "file_edit" && ev.changes.length === 0
+                ? { ...ev, changes: previous.changes }
+                : ev;
+            continue;
+          }
+          state.fileEditByItemId.set(ev.toolId, events.length);
+        }
         events.push(ev);
       }
     } else if (isCodexRolloutRawMessage(raw)) {
@@ -2074,20 +2344,49 @@ export function parseSessionLogs(
         codexRolloutStateByExecution.set(execId, state);
       }
       for (const ev of parseCodexRolloutMessage(raw, ts, options, state)) {
+        if (ev.kind === "file_edit" && ev.toolId) {
+          const priorIndex = state.fileEditByToolId.get(ev.toolId);
+          if (priorIndex !== undefined) {
+            const previous = events[priorIndex];
+            events[priorIndex] =
+              previous?.kind === "file_edit" && ev.changes.length === 0
+                ? { ...ev, changes: previous.changes }
+                : ev;
+            continue;
+          }
+          state.fileEditByToolId.set(ev.toolId, events.length);
+        }
         events.push(ev);
       }
     } else {
       const execId = log.step_execution_id ?? "";
       let state = claudeStateByExecution.get(execId);
       if (!state) {
-        state = { latestSnapshotByKey: new Map() };
+        state = {
+          latestSnapshotByKey: new Map(),
+          fileChangesByToolId: new Map(),
+          fileEditByToolId: new Map(),
+        };
         claudeStateByExecution.set(execId, state);
       }
       for (const ev of parseClaudeMessage(
         raw as ClaudeRawMessage,
         ts,
-        options
+        options,
+        state
       )) {
+        if (ev.kind === "file_edit" && ev.toolId) {
+          const priorIndex = state.fileEditByToolId.get(ev.toolId);
+          if (priorIndex !== undefined) {
+            const previous = events[priorIndex];
+            events[priorIndex] =
+              previous?.kind === "file_edit" && ev.changes.length === 0
+                ? { ...ev, changes: previous.changes }
+                : ev;
+            continue;
+          }
+          state.fileEditByToolId.set(ev.toolId, events.length);
+        }
         const key = claudeSnapshotKey(ev, execId);
         if (key) {
           const priorIndex = state.latestSnapshotByKey.get(key);

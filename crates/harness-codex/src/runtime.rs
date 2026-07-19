@@ -17,14 +17,14 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async, tungsten
 use vertebrae_harness_core::{
     AgentMetadata, ApprovalCategory, ApprovalRequest, CompletionStatus, ControlRequest,
     ControlRequestEnvelope, ControlResolution, ControlSink, DiagnosticEvent, EventCorrelation,
-    EventSequencer, EventSink, GrantScope, HarnessCapabilities, HarnessError, HarnessEventDraftV1,
-    HarnessEventPayloadV1, HarnessRuntime, OutcomeMetrics, ProviderResumeId, ProviderThreadRef,
-    QuestionCapabilities, RunHandle, RunId, RunOutcome, RunRequest, SendTurnRequest,
-    SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle, SessionId,
-    SessionStarted, SessionUsage, StartSessionRequest, StreamId, TextEvent, ThreadDeclared,
-    ThreadId, ThreadKind, TokenUsage, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
-    TurnHandle, TurnId, TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted, TurnUsage,
-    UpdateSemantics, UsageEvent,
+    EventSequencer, EventSink, FileChange, FileChangeEvent, FileChangeKind, GrantScope,
+    HarnessCapabilities, HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, HarnessRuntime,
+    OutcomeMetrics, ProviderResumeId, ProviderThreadRef, QuestionCapabilities, RunHandle, RunId,
+    RunOutcome, RunRequest, SendTurnRequest, SequencedEventSink, SessionCloseOutcome,
+    SessionCloseStatus, SessionHandle, SessionId, SessionStarted, SessionUsage,
+    StartSessionRequest, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, TokenUsage,
+    ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus, TurnHandle, TurnId, TurnInput,
+    TurnInputProvenance, TurnOutcome, TurnStarted, TurnUsage, UpdateSemantics, UsageEvent,
 };
 
 use crate::{
@@ -536,7 +536,15 @@ impl SessionState {
                         "Codex item/started is missing item".into(),
                     ));
                 };
-                if let Some((tool_id, name, input, is_spawn)) = tool_call(item) {
+                if let Some(file_change) = file_change_event(item) {
+                    self.emit(
+                        stream,
+                        correlation,
+                        HarnessEventPayloadV1::FileChange(file_change),
+                        UpdateSemantics::Snapshot,
+                    )
+                    .await?;
+                } else if let Some((tool_id, name, input, is_spawn)) = tool_call(item) {
                     if is_spawn {
                         let parent_thread = thread_id
                             .as_deref()
@@ -564,39 +572,49 @@ impl SessionState {
                         "Codex item/completed is missing item".into(),
                     ));
                 };
-                match item.get("type").and_then(Value::as_str) {
-                    Some("agentMessage") => {
-                        if let Some(text) = item.get("text").and_then(Value::as_str) {
-                            if !is_child {
-                                root_turn.text = text.to_string();
+                if let Some(file_change) = file_change_event(item) {
+                    self.emit(
+                        stream,
+                        correlation,
+                        HarnessEventPayloadV1::FileChange(file_change),
+                        UpdateSemantics::Snapshot,
+                    )
+                    .await?;
+                } else {
+                    match item.get("type").and_then(Value::as_str) {
+                        Some("agentMessage") => {
+                            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                                if !is_child {
+                                    root_turn.text = text.to_string();
+                                }
+                                self.emit(
+                                    stream,
+                                    correlation,
+                                    HarnessEventPayloadV1::Text(TextEvent { text: text.into() }),
+                                    UpdateSemantics::Snapshot,
+                                )
+                                .await?;
                             }
-                            self.emit(
-                                stream,
-                                correlation,
-                                HarnessEventPayloadV1::Text(TextEvent { text: text.into() }),
-                                UpdateSemantics::Snapshot,
-                            )
-                            .await?;
                         }
-                    }
-                    _ => {
-                        if let Some((tool_id, output, failed)) = tool_output(item) {
-                            self.emit(
-                                stream,
-                                correlation,
-                                HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
-                                    tool_call_id: ToolCallId::new(tool_id),
-                                    output,
-                                    status: if failed {
-                                        ToolStatus::Failed
-                                    } else {
-                                        ToolStatus::Completed
-                                    },
-                                    content_semantics: UpdateSemantics::Snapshot,
-                                }),
-                                UpdateSemantics::Snapshot,
-                            )
-                            .await?;
+                        _ => {
+                            if let Some((tool_id, output, failed)) = tool_output(item) {
+                                self.emit(
+                                    stream,
+                                    correlation,
+                                    HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
+                                        tool_call_id: ToolCallId::new(tool_id),
+                                        output,
+                                        status: if failed {
+                                            ToolStatus::Failed
+                                        } else {
+                                            ToolStatus::Completed
+                                        },
+                                        content_semantics: UpdateSemantics::Snapshot,
+                                    }),
+                                    UpdateSemantics::Snapshot,
+                                )
+                                .await?;
+                            }
                         }
                     }
                 }
@@ -1305,7 +1323,10 @@ async fn emit_direct(
 
 fn tool_call(item: &Value) -> Option<(String, String, Value, bool)> {
     let kind = item.get("type").and_then(Value::as_str)?;
-    let is_tool = kind.contains("tool") || kind == "commandExecution" || kind == "fileChange";
+    if kind == "fileChange" {
+        return None;
+    }
+    let is_tool = kind.contains("tool") || kind == "commandExecution";
     if !is_tool {
         return None;
     }
@@ -1325,6 +1346,50 @@ fn tool_call(item: &Value) -> Option<(String, String, Value, bool)> {
         .or_else(|| item.get("arguments").cloned())
         .unwrap_or_else(|| json!({"item":item}));
     Some((id, name, input, kind == "collabAgentToolCall"))
+}
+
+fn file_change_event(item: &Value) -> Option<FileChangeEvent> {
+    if item.get("type").and_then(Value::as_str) != Some("fileChange") {
+        return None;
+    }
+    let tool_call_id = optional_string(item, &["/id", "/itemId", "/toolCallId"])?;
+    let changes = item
+        .get("changes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|change| {
+            let path = optional_string(change, &["/path"])?;
+            let kind = match optional_string(change, &["/kind", "/type"])?.as_str() {
+                "add" | "added" => FileChangeKind::Added,
+                "delete" | "deleted" => FileChangeKind::Deleted,
+                "rename" | "renamed" => FileChangeKind::Renamed,
+                "update" | "updated" | "modify" | "modified" => FileChangeKind::Modified,
+                _ => return None,
+            };
+            Some(FileChange {
+                path,
+                kind,
+                previous_path: optional_string(change, &["/previousPath", "/previous_path"]),
+                patch: optional_string(change, &["/diff", "/patch", "/unifiedDiff"]),
+            })
+        })
+        .collect::<Vec<_>>();
+    if changes.is_empty() {
+        return None;
+    }
+    let status = match optional_string(item, &["/status"]).as_deref() {
+        Some("inProgress") | Some("started") | Some("running") => ToolStatus::Started,
+        Some("failed") | Some("error") => ToolStatus::Failed,
+        Some("declined") => ToolStatus::Declined,
+        Some("cancelled") | Some("canceled") => ToolStatus::Cancelled,
+        _ => ToolStatus::Completed,
+    };
+    Some(FileChangeEvent {
+        tool_call_id: Some(ToolCallId::new(tool_call_id)),
+        changes,
+        status,
+    })
 }
 
 fn tool_output(item: &Value) -> Option<(String, Value, bool)> {
@@ -1482,7 +1547,9 @@ fn summary(content: &str) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{parse_usage, tool_call, tool_output};
+    use super::{
+        FileChangeKind, ToolStatus, file_change_event, parse_usage, tool_call, tool_output,
+    };
 
     #[test]
     fn maps_command_execution_start_and_completion_to_one_tool_lifecycle() {
@@ -1531,6 +1598,31 @@ mod tests {
             tool_output(&completed),
             Some(("exec-2".into(), "boom".into(), true))
         );
+    }
+
+    #[test]
+    fn maps_file_change_items_to_structured_lifecycle_events() {
+        let started = json!({
+            "type": "fileChange",
+            "id": "file-1",
+            "status": "inProgress",
+            "changes": [{"path": "src/new.rs", "kind": "add", "diff": "+fn main() {}"}]
+        });
+        let completed = json!({
+            "type": "fileChange",
+            "id": "file-1",
+            "status": "completed",
+            "changes": [{"path": "src/new.rs", "kind": "add", "diff": "+fn main() {}"}]
+        });
+
+        let started = file_change_event(&started).expect("started file change");
+        assert_eq!(started.tool_call_id.as_ref().unwrap().as_str(), "file-1");
+        assert_eq!(started.status, ToolStatus::Started);
+        assert_eq!(started.changes[0].kind, FileChangeKind::Added);
+
+        let completed = file_change_event(&completed).expect("completed file change");
+        assert_eq!(completed.status, ToolStatus::Completed);
+        assert_eq!(completed.changes[0].path, "src/new.rs");
     }
 
     #[test]

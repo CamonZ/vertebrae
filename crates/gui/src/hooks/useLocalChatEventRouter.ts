@@ -9,6 +9,7 @@ import type {
   LocalChatTextEvent,
   LocalChatToolCallEvent,
   LocalChatToolResultEvent,
+  LocalChatFileChangeEvent,
   PermissionRequestEvent,
 } from "../bindings";
 import {
@@ -26,6 +27,7 @@ import {
   handleTextEvent,
   handleToolCallEvent,
   handleToolResultEvent,
+  handleFileChangeEvent,
   handleUsageEvent,
   handleWarningEvent,
 } from "./useLocalChat";
@@ -112,6 +114,20 @@ export function routeLocalChatToolResultEvent(
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
   handleToolResultEvent(
+    payload,
+    payload.backend_session_id,
+    sessionId,
+    useChatStore.getState().addMessage
+  );
+  return true;
+}
+
+export function routeLocalChatFileChangeEvent(
+  payload: LocalChatFileChangeEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId) return false;
+  handleFileChangeEvent(
     payload,
     payload.backend_session_id,
     sessionId,
@@ -291,6 +307,13 @@ function subscribeLocalChatEvents(): Unlisten {
       routeLocalChatToolResultEvent(event.payload);
     })
   );
+  if (events.localChatFileChangeEvent) {
+    void register(
+      events.localChatFileChangeEvent.listen((event) => {
+        routeLocalChatFileChangeEvent(event.payload);
+      })
+    );
+  }
   if (events.permissionRequestEvent) {
     void register(
       events.permissionRequestEvent.listen((event) => {

@@ -5,8 +5,8 @@ use std::{
 
 use serde_json::Value;
 use vertebrae_harness_core::{
-    AgentMetadata, ControlRequestId, HarnessEventDraftV1, ProviderResumeId, ProviderThreadRef,
-    RunId, SessionId, StreamId, ThreadId, ToolCallId, TurnId,
+    AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ProviderResumeId,
+    ProviderThreadRef, RunId, SessionId, StreamId, ThreadId, ToolCallId, TurnId,
 };
 
 use crate::ClaudeRootLocatorResolver;
@@ -104,6 +104,7 @@ pub struct ClaudeStreamDecoder {
     agent_locators: HashMap<String, ProviderThreadRef>,
     agent_spawn_tools: HashMap<String, ToolCallId>,
     provider_control_inputs: HashMap<ControlRequestId, Value>,
+    pending_file_changes: HashMap<ToolCallId, Vec<FileChange>>,
 }
 
 impl ClaudeStreamDecoder {
@@ -130,6 +131,7 @@ impl ClaudeStreamDecoder {
             agent_locators: HashMap::new(),
             agent_spawn_tools: HashMap::new(),
             provider_control_inputs: HashMap::new(),
+            pending_file_changes: HashMap::new(),
         }
     }
 

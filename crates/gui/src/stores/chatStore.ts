@@ -25,6 +25,7 @@ import {
 import {
   parseSessionLogs,
   type ConversationEvent,
+  type FileUpdateChange,
 } from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
@@ -67,6 +68,15 @@ export type ChatMessage =
       isError: boolean;
       timestamp: string;
       /** Parent spawn `tool_use` id when this result belongs to a sub-agent. */
+      parentToolUseId?: string;
+    }
+  | {
+      kind: "file_edit";
+      toolId: string;
+      status: string;
+      changes: FileUpdateChange[];
+      timestamp: string;
+      /** Parent spawn `tool_use` id when this edit belongs to a sub-agent. */
       parentToolUseId?: string;
     }
   | {
@@ -161,6 +171,28 @@ function normalizeStoredChatMessage(value: unknown): ChatMessage | null {
                 : undefined,
           }
         : null;
+    case "file_edit":
+      return typeof record.toolId === "string" &&
+        typeof record.status === "string" &&
+        Array.isArray(record.changes)
+        ? {
+            kind: "file_edit",
+            toolId: record.toolId,
+            status: record.status,
+            changes: record.changes.filter(
+              (change): change is FileUpdateChange =>
+                !!change &&
+                typeof change === "object" &&
+                typeof (change as Record<string, unknown>).path === "string" &&
+                typeof (change as Record<string, unknown>).kind === "string"
+            ),
+            timestamp,
+            parentToolUseId:
+              typeof record.parentToolUseId === "string"
+                ? record.parentToolUseId
+                : undefined,
+          }
+        : null;
     case "warning":
       return typeof record.message === "string"
         ? { kind: "warning", message: record.message, timestamp }
@@ -242,6 +274,17 @@ function conversationEventToChatMessage(
         toolId: event.toolUseId,
         result: event.result,
         isError: event.isError,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "file_edit":
+      return {
+        kind: "file_edit",
+        toolId: event.toolId,
+        status: event.status,
+        changes: event.changes,
         timestamp: event.timestamp,
         ...(event.parentToolUseId
           ? { parentToolUseId: event.parentToolUseId }
@@ -360,12 +403,8 @@ function sanitizeSessionMessages(
   const askUserQuestionToolIds = new Set(
     messages
       .filter(
-        (message): message is Extract<
-          ChatMessage,
-          { kind: "tool_call" }
-        > =>
-          message.kind === "tool_call" &&
-          message.toolName === "AskUserQuestion"
+        (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
+          message.kind === "tool_call" && message.toolName === "AskUserQuestion"
       )
       .map((message) => message.toolId)
   );
@@ -423,6 +462,8 @@ function chatMessageKey(message: ChatMessage): string {
       return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
     case "tool_call":
     case "tool_result":
+      return `${message.kind}:${message.toolId}`;
+    case "file_edit":
       return `${message.kind}:${message.toolId}`;
     case "permission_request":
       return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
@@ -1850,6 +1891,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
               };
             }
           }
+          if (message.kind === "file_edit" && message.toolId) {
+            const existingIndex = messages.findIndex(
+              (existing) =>
+                existing.kind === "file_edit" &&
+                existing.toolId === message.toolId
+            );
+            if (existingIndex !== -1) {
+              const existing = messages[existingIndex] as Extract<
+                ChatMessage,
+                { kind: "file_edit" }
+              >;
+              messages[existingIndex] = {
+                ...existing,
+                ...message,
+                timestamp: existing.timestamp,
+              };
+              return {
+                ...session,
+                messages,
+                updatedAt: message.timestamp,
+              };
+            }
+          }
           if (message.kind === "assistant" && message.parentToolUseId) {
             return {
               ...session,
@@ -1873,8 +1937,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.map((message) =>
-          message.kind === "user_question" &&
-          message.requestId === requestId
+          message.kind === "user_question" && message.requestId === requestId
             ? { ...message, status: "resolved" as const }
             : message
         ),
@@ -1885,8 +1948,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.map((message) =>
-          message.kind === "user_question" &&
-          message.requestId === requestId
+          message.kind === "user_question" && message.requestId === requestId
             ? { ...message, status: "unavailable" as const }
             : message
         ),

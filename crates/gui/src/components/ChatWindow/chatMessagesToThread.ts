@@ -37,6 +37,7 @@ import type { ChatMessage } from "../../stores/chatStore";
 import {
   getToolIcon,
   type ConversationEvent,
+  type FileEditEvent,
   type ToolCallEvent,
   type ToolResultEvent,
 } from "../../types/conversation";
@@ -93,6 +94,14 @@ export function chatMessagesToThread(
   const resultById = new Map<string, ToolResultEvent>();
   const seenToolCallIds = new Set<string>();
   const toolCallById = new Map<string, ToolCallEvent>();
+  const fileEditIds = new Set(
+    messages
+      .filter(
+        (message): message is Extract<ChatMessage, { kind: "file_edit" }> =>
+          message.kind === "file_edit" && message.toolId.length > 0
+      )
+      .map((message) => message.toolId)
+  );
 
   let current: TurnDraft | null = null;
   const openDraft = (): TurnDraft => {
@@ -140,6 +149,7 @@ export function chatMessagesToThread(
 
       case "tool_call": {
         if (m.parentToolUseId) continue;
+        if (fileEditIds.has(m.toolId)) continue;
         if (isNonSpawnAgentControlMessage(m)) continue;
         const ev = toToolCallEvent(m);
         if (seenToolCallIds.has(m.toolId)) {
@@ -156,11 +166,28 @@ export function chatMessagesToThread(
 
       case "tool_result": {
         if (m.parentToolUseId) continue;
+        if (fileEditIds.has(m.toolId)) continue;
         const draft = openDraft();
         const ev = toToolResultEvent(m);
         draft.events.push(ev);
         draft.endsWithPartialAssistant = false;
         if (!resultById.has(ev.toolUseId)) resultById.set(ev.toolUseId, ev);
+        continue;
+      }
+
+      case "file_edit": {
+        if (m.parentToolUseId) continue;
+        const draft = openDraft();
+        const ev: FileEditEvent = {
+          kind: "file_edit",
+          toolId: m.toolId,
+          status: m.status,
+          changes: m.changes,
+          timestamp: m.timestamp,
+          parentToolUseId: m.parentToolUseId,
+        };
+        draft.events.push(ev);
+        draft.endsWithPartialAssistant = false;
         continue;
       }
 

@@ -28,9 +28,10 @@ use events::{
     TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use local_chat::{
-    LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionManager, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
+    LocalChatSessionInitEvent, LocalChatSessionManager, LocalChatSessionUsageEvent,
+    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
+    LocalChatToolResultEvent,
 };
 use project_config::ProjectConfig;
 
@@ -165,6 +166,7 @@ fn create_builder() -> Builder {
             LocalChatTextEvent,
             LocalChatToolCallEvent,
             LocalChatToolResultEvent,
+            LocalChatFileChangeEvent,
             LocalChatSessionUsageEvent,
             LocalChatSessionEndEvent,
             LocalChatSessionErrorEvent,

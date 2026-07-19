@@ -5,6 +5,7 @@ import {
   handleTextEvent,
   handleToolCallEvent,
   handleToolResultEvent,
+  handleFileChangeEvent,
   handleSacrumPermissionRequestEvent,
   handleEndEvent,
   handleErrorEvent,
@@ -169,10 +170,14 @@ describe("handleUsageEvent", () => {
       SESSION_ID,
       setUsage
     );
-    expect(setUsage).toHaveBeenCalledWith(SESSION_ID, "claude-mystery-9-9", {
-      used: 50_000,
-      max: 250_000,
-    });
+    expect(setUsage).toHaveBeenCalledWith(
+      SESSION_ID,
+      "claude-mystery-9-9",
+      {
+        used: 50_000,
+        max: 250_000,
+      }
+    );
   });
 
   it("ignores events for a different session", () => {
@@ -492,6 +497,35 @@ describe("handleToolResultEvent", () => {
       addMsg
     );
     expect(addMsg).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleFileChangeEvent", () => {
+  it("normalizes Claude and Codex file changes into one chat message shape", () => {
+    const addMsg = vi.fn();
+    handleFileChangeEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "codex",
+        tool_id: "file-1",
+        status: "completed",
+        changes: [{ path: "src/new.ts", kind: "add", diff: "+export {}" }],
+        parent_tool_use_id: "parent-1",
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      addMsg
+    );
+    expect(addMsg).toHaveBeenCalledWith(
+      SESSION_ID,
+      expect.objectContaining({
+        kind: "file_edit",
+        toolId: "file-1",
+        status: "completed",
+        changes: [{ path: "src/new.ts", kind: "add", diff: "+export {}" }],
+        parentToolUseId: "parent-1",
+      })
+    );
   });
 });
 
@@ -1083,15 +1117,12 @@ describe("doStartSession", () => {
       working_dir: "/test/project",
     });
     await vi.waitFor(() =>
-      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(
-        SESSION_ID,
-        {
-          title: "Inferred Title",
-          confidence: 0.91,
-          sufficientSignal: true,
-          userMessageCount: 1,
-        }
-      )
+      expect(deps.setSessionTitleCandidate).toHaveBeenCalledWith(SESSION_ID, {
+        title: "Inferred Title",
+        confidence: 0.91,
+        sufficientSignal: true,
+        userMessageCount: 1,
+      })
     );
   });
 
@@ -1187,7 +1218,12 @@ describe("doStartSession", () => {
       setSessionLifecycle: vi.fn(),
     };
 
-    await doStartSession(makeSession({ label: "Task Chat" }), SESSION_ID, deps, "Help");
+    await doStartSession(
+      makeSession({ label: "Task Chat" }),
+      SESSION_ID,
+      deps,
+      "Help"
+    );
 
     expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
     expect(deps.setSessionTitleCandidate).not.toHaveBeenCalled();
@@ -1573,13 +1609,9 @@ describe("doSendMessage", () => {
     ) {
       const content = queuedMessages.shift();
       if (content) {
-        await doSendMessage(
-          CLAUDE_SESSION_ID,
-          sessionId,
-          content,
-          deps,
-          { addUserMessage: false }
-        );
+        await doSendMessage(CLAUDE_SESSION_ID, sessionId, content, deps, {
+          addUserMessage: false,
+        });
       }
     }
 
