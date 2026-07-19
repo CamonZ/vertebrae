@@ -386,11 +386,15 @@ fn root_locator_uses_claude_project_encoding() {
 #[test]
 fn compatibility_value_text_preserves_strings_and_serializes_values() {
     assert_eq!(
-        ClaudeGuiEventSink::value_text(&serde_json::json!("done")),
+        crate::local_chat::harnesses::shared::LocalChatHarnessEventSink::value_text(
+            &serde_json::json!("done"),
+        ),
         "done"
     );
     assert_eq!(
-        ClaudeGuiEventSink::value_text(&serde_json::json!({"ok": true})),
+        crate::local_chat::harnesses::shared::LocalChatHarnessEventSink::value_text(
+            &serde_json::json!({"ok": true}),
+        ),
         r#"{"ok":true}"#
     );
 }

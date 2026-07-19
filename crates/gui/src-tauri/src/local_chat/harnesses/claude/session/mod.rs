@@ -359,11 +359,6 @@ impl ClaudeGuiEventSink {
         self.adapter.emit_error(error)
     }
 
-    #[cfg(test)]
-    fn value_text(value: &serde_json::Value) -> String {
-        crate::local_chat::harnesses::shared::LocalChatHarnessEventSink::value_text(value)
-    }
-
     fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }
