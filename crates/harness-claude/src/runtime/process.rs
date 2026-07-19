@@ -1,4 +1,4 @@
-use std::process::Stdio;
+use std::{io::ErrorKind, process::Stdio, time::Duration};
 
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -13,6 +13,8 @@ use crate::ClaudeCommandSpec;
 /// event sink or a control response. Reader tasks naturally apply backpressure
 /// to the child process once this queue is full.
 const OUTPUT_CHANNEL_CAPACITY: usize = 256;
+const EXECUTABLE_BUSY_RETRIES: usize = 10;
+const EXECUTABLE_BUSY_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 pub(super) enum ProcessOutput {
     Stdout(String),
@@ -22,7 +24,7 @@ pub(super) enum ProcessOutput {
     ReadError(String),
 }
 
-pub(super) fn spawn_process(
+pub(super) async fn spawn_process(
     spec: &ClaudeCommandSpec,
     piped_stdin: bool,
 ) -> Result<Child, HarnessError> {
@@ -40,12 +42,24 @@ pub(super) fn spawn_process(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    command.spawn().map_err(|error| {
-        HarnessError::Operation(format!(
-            "failed to spawn Claude at {}: {error}",
-            spec.program.display()
-        ))
-    })
+    for attempt in 0..=EXECUTABLE_BUSY_RETRIES {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error)
+                if error.kind() == ErrorKind::ExecutableFileBusy
+                    && attempt < EXECUTABLE_BUSY_RETRIES =>
+            {
+                tokio::time::sleep(EXECUTABLE_BUSY_RETRY_DELAY).await;
+            }
+            Err(error) => {
+                return Err(HarnessError::Operation(format!(
+                    "failed to spawn Claude at {}: {error}",
+                    spec.program.display()
+                )));
+            }
+        }
+    }
+    unreachable!("the retry loop either spawned a process or returned its final error")
 }
 
 pub(super) fn spawn_output_readers(
@@ -142,7 +156,9 @@ pub(super) async fn reap(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::time::Duration;
+    use std::{fs, os::unix::fs::PermissionsExt, time::Duration};
+
+    use tempfile::TempDir;
 
     use super::*;
 
@@ -172,5 +188,32 @@ mod tests {
 
         drop(output);
         let _ = tokio::time::timeout(Duration::from_secs(1), child.wait()).await;
+    }
+
+    #[tokio::test]
+    async fn spawn_retries_while_a_fixture_is_open_for_writing() {
+        let temp = TempDir::new().unwrap();
+        let script = temp.path().join("busy-fixture");
+        fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut permissions = fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).unwrap();
+        let writer = fs::OpenOptions::new().write(true).open(&script).unwrap();
+
+        let release_writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            drop(writer);
+        });
+        let spec = ClaudeCommandSpec {
+            program: script,
+            args: Vec::new(),
+            current_dir: None,
+            environment: Default::default(),
+        };
+        let mut child = spawn_process(&spec, false)
+            .await
+            .expect("the launcher should retry a transient executable-busy error");
+        release_writer.await.unwrap();
+        assert!(child.wait().await.unwrap().success());
     }
 }

@@ -117,7 +117,7 @@ impl HarnessRuntime for ClaudeRuntime {
             },
             &request.config,
         )?;
-        let mut child = spawn_process(&spec, true)?;
+        let mut child = spawn_process(&spec, true).await?;
         let stdin = child.stdin.take().ok_or_else(|| {
             HarnessError::Operation("Claude process was spawned without piped stdin".into())
         })?;
@@ -184,7 +184,7 @@ impl HarnessRuntime for ClaudeRuntime {
             },
             &request.config,
         )?;
-        let mut child = spawn_process(&spec, true)?;
+        let mut child = spawn_process(&spec, true).await?;
         let stdin = child.stdin.take().ok_or_else(|| {
             HarnessError::Operation("Claude process was spawned without piped stdin".into())
         })?;
