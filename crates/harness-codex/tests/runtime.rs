@@ -87,9 +87,12 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>) {
                 "thread/start" => socket.send(Message::Text(json!({"id": id, "result": {"thread": {"id": "root-thread"}, "model": "gpt-test"}}).to_string())).await.unwrap(),
                 "turn/start" => {
                     socket.send(Message::Text(json!({"id": id, "result": {"turn": {"id": "turn-1"}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"turn/started","params":{"threadId":"root-thread","turn":{"id":"turn-1","status":"inProgress"}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"mcpServer/startupStatus/updated","params":{"threadId":"root-thread","name":"node_repl","status":"ready"}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":21}}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/agentMessage/delta","params":{"threadId":"root-thread","turnId":"turn-1","delta":"hello"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/completed","params":{"threadId":"root-thread","turnId":"turn-1","item":{"type":"agentMessage","text":"hello"}}}).to_string())).await.unwrap();
-                    socket.send(Message::Text(json!({"method":"turn/completed","params":{"threadId":"root-thread","turnId":"turn-1","turn":{"id":"turn-1","status":"completed","durationMs":12}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"turn/completed","params":{"threadId":"root-thread","turn":{"id":"turn-1","status":"completed","durationMs":12}}}).to_string())).await.unwrap();
                 }
                 "skills/extraRoots/set" => socket.send(Message::Text(json!({"id": id, "result": {}}).to_string())).await.unwrap(),
                 _ => socket.send(Message::Text(json!({"id": id, "result": {}}).to_string())).await.unwrap(),
@@ -144,6 +147,11 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         |event| matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "hello")
     ));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnFinished(outcome) if outcome.status == CompletionStatus::Completed)));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(&event.payload, HarnessEventPayloadV1::Warning(_)))
+    );
     drop(events);
     session.close().await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), server)

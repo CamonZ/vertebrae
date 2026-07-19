@@ -630,17 +630,14 @@ impl SessionState {
             CodexNotification::ThreadStarted(_) | CodexNotification::ThreadStatusChanged(_) => {
                 let _ = self.declare_child(&params).await?;
             }
-            CodexNotification::Unknown { method, params } => {
-                self.emit(
-                    stream,
-                    correlation,
-                    HarnessEventPayloadV1::Warning(DiagnosticEvent {
-                        message: format!("unknown Codex notification {method}: {params}"),
-                        code: Some("codex_unknown_notification".into()),
-                    }),
-                    UpdateSemantics::Snapshot,
-                )
-                .await?;
+            CodexNotification::Unknown { .. } => {
+                // App Server notifications are an extensible provider
+                // protocol. Routine lifecycle and capability notifications
+                // are not chat content, and surfacing them as warnings makes
+                // the local chat transcript provider-version dependent. Keep
+                // the unknown value observable at the protocol boundary, but
+                // let the provider-neutral stream ignore notifications it does
+                // not project into V1 events.
             }
         }
         Ok(None)

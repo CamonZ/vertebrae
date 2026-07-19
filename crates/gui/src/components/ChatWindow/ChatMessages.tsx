@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { ChatMessage } from "../../stores/chatStore";
 import { Thread } from "../thread";
 import type { ThreadModel } from "../thread";
@@ -9,6 +9,14 @@ import { useChatStore } from "../../stores/chatStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
+const BOTTOM_SCROLL_TOLERANCE_PX = 24;
+
+function isNearBottom(element: HTMLElement): boolean {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight <=
+    BOTTOM_SCROLL_TOLERANCE_PX
+  );
+}
 
 type ChatRenderItem =
   | { kind: "thread"; key: string; thread: ThreadModel }
@@ -95,18 +103,25 @@ export function ChatMessages({
   const markUserQuestionUnavailable = useChatStore(
     (state) => state.markUserQuestionUnavailable
   );
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
+  const keepAtBottomRef = useRef(true);
 
   const renderItems = useMemo(
     () => buildChatRenderItems(messages, assistantLabel),
     [assistantLabel, messages]
   );
 
-  // Auto-scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingAssistant]);
+  // Keep streaming updates inside this scroll container. Calling
+  // scrollIntoView on every delta also scrolls ancestor containers and queues
+  // a smooth animation for every line, which makes the entire chat panel jump
+  // upward while the provider is responding.
+  useLayoutEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !keepAtBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [isWaiting, messages, streamingAssistant]);
 
   useEffect(() => {
     const handleScrollToSpawn = (event: Event) => {
@@ -133,7 +148,15 @@ export function ChatMessages({
   }, [sessionId]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div
+      ref={messagesContainerRef}
+      className="min-h-0 flex-1 overflow-y-auto p-4"
+      data-testid="chat-messages-scroll"
+      onScroll={() => {
+        const container = messagesContainerRef.current;
+        if (container) keepAtBottomRef.current = isNearBottom(container);
+      }}
+    >
       {isEmpty && !isActive && (
         <div className="flex h-full flex-col items-center justify-center text-center">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
