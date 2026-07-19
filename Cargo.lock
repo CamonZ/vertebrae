@@ -6788,6 +6788,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "log",
  "serde",
  "serde_json",
  "tempfile",

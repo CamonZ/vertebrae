@@ -289,8 +289,7 @@ export function useChatSession(sessionId: string) {
     (lifecycle === "starting" ||
       lifecycle === "resuming" ||
       lifecycle === "sending" ||
-      lifecycle === "streaming" ||
-      isActive);
+      lifecycle === "streaming");
 
   const handleStopGeneration = useCallback(async () => {
     if (!session?.backendSessionId) return;

@@ -35,6 +35,21 @@ use crate::{
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+const RAW_TRAFFIC_ENV: &str = "VERTEBRAE_CODEX_RAW_TRAFFIC";
+
+fn raw_traffic_logging_enabled() -> bool {
+    matches!(
+        std::env::var(RAW_TRAFFIC_ENV).as_deref(),
+        Ok("1" | "true" | "TRUE" | "yes" | "YES")
+    )
+}
+
+fn log_raw_traffic(direction: &str, payload: &str) {
+    if raw_traffic_logging_enabled() {
+        log::info!("[Codex][raw][{direction}] {payload}");
+    }
+}
+
 #[derive(Clone)]
 struct NotificationMessage {
     method: String,
@@ -93,6 +108,7 @@ impl CodexConnection {
                 }) else {
                     break "Codex App Server websocket closed".into();
                 };
+                log_raw_traffic("recv", &text);
                 let message: crate::CodexRpcMessage = match serde_json::from_str(&text) {
                     Ok(message) => message,
                     Err(error) => break format!("malformed Codex App Server JSON: {error}"),
@@ -177,10 +193,12 @@ impl CodexConnection {
     }
 
     async fn send(&self, value: Value) -> Result<(), HarnessError> {
+        let text = value.to_string();
+        log_raw_traffic("send", &text);
         self.writer
             .lock()
             .await
-            .send(Message::Text(value.to_string()))
+            .send(Message::Text(text))
             .await
             .map_err(|error| {
                 HarnessError::Operation(format!("failed to send Codex App Server message: {error}"))
@@ -220,6 +238,7 @@ async fn respond_to_control_request(
             }
         },
     };
+    log_raw_traffic("send", &response.to_string());
     let _ = writer
         .lock()
         .await
@@ -481,6 +500,10 @@ impl SessionState {
             if let Some(expected) = expected_turn {
                 let actual = optional_string(&params, &["/turnId", "/turn/id"]);
                 if actual.as_deref().is_some_and(|actual| actual != expected) {
+                    log::warn!(
+                        "[Codex] dropping {} for mismatched turn_id actual={actual:?} expected={expected}",
+                        notification.method()
+                    );
                     return Ok(None);
                 }
             }
@@ -597,6 +620,10 @@ impl SessionState {
             CodexNotification::TurnCompleted(params) => {
                 let status = optional_string(&params, &["/turn/status", "/status"])
                     .unwrap_or_else(|| "completed".into());
+                let actual_turn = optional_string(&params, &["/turnId", "/turn/id"]);
+                log::info!(
+                    "[Codex] turn/completed received thread_id={thread_id:?} turn_id={actual_turn:?} expected_turn={expected_turn:?} status={status}"
+                );
                 let outcome = outcome_from_completion(&params, status, root_turn);
                 if is_child {
                     self.emit(
@@ -699,6 +726,10 @@ impl SessionState {
             "turn/start response turn id",
         )
         .map_err(HarnessError::Operation)?;
+        log::info!(
+            "[Codex] turn/start accepted requested_turn_id={} provider_turn_id={provider_turn}",
+            turn_id
+        );
         let mut accumulator = TurnAccumulator::default();
         if let Some(error) = connection_closed.borrow().clone() {
             return Err(HarnessError::Operation(error));
@@ -731,6 +762,11 @@ impl SessionState {
             }
         };
         let mut result = result;
+        log::info!(
+            "[Codex] turn finished provider_turn_id={provider_turn} status={:?} result_text_len={}",
+            result.status,
+            result.result_text.as_deref().map_or(0, str::len)
+        );
         if structured_output_requested
             && result.status == CompletionStatus::Completed
             && result.structured_output.is_none()

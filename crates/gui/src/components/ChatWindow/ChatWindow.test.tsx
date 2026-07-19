@@ -1244,6 +1244,30 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("disables stop after a persistent turn returns to idle", () => {
+    const session = createSession({
+      backendSessionId: "codex-idle",
+      harness: "codex",
+      lifecycle: "idle",
+      messages: [
+        {
+          kind: "assistant",
+          text: "Completed answer",
+          timestamp: "2026-07-19T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+  });
+
   it("stops an active backend session with Cmd+period", async () => {
     const session = createSession({
       backendSessionId: "codex-hotkey",
