@@ -24,6 +24,7 @@ pub struct LocalChatSessionIndexEntry {
     pub project_path: Option<String>,
     pub provider_resume_id: Option<String>,
     pub provider_jsonl_path: Option<String>,
+    pub thread_total_tokens: Option<u32>,
     pub message_count: u32,
     pub lifecycle: String,
     pub status: String,

@@ -138,6 +138,7 @@ describe("handleUsageEvent", () => {
         context_tokens: 100_050,
         // Backend reports 200k fallback — should be overridden by lookup table.
         context_window: 200_000,
+        thread_total_tokens: 979_558,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -149,7 +150,8 @@ describe("handleUsageEvent", () => {
       {
         used: 100_050,
         max: 1_000_000,
-      }
+      },
+      979_558
     );
   });
 

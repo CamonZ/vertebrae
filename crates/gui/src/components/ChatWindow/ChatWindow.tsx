@@ -110,6 +110,7 @@ export function ChatWindow({
         ctxPct={chat.ctxPct}
         ctxColor={chat.ctxColor}
         usage={chat.usage}
+        threadTotalTokens={chat.threadTotalTokens}
         onSend={chat.handleSend}
         onStartSession={chat.handleStartSession}
         onHarnessChange={chat.handleHarnessChange}

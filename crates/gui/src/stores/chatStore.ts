@@ -634,6 +634,8 @@ export interface ChatSession {
   model?: string;
   /** Latest per-turn current request input-context utilization for the badge */
   tokenUsage?: { used: number; max: number };
+  /** Cumulative token total reported for the provider thread. */
+  threadTotalTokens?: number;
   /** Whether this session is detached into a standalone pop-out window */
   isDetached?: boolean;
   /** Runtime-only local chat lifecycle state */
@@ -791,7 +793,8 @@ interface ChatStoreActions {
   setSessionUsage: (
     sessionId: string,
     model: string,
-    usage: { used: number; max: number }
+    usage: { used: number; max: number },
+    threadTotalTokens?: number
   ) => void;
   /** Mark a session as closed */
   markSessionClosed: (sessionId: string) => void;
@@ -2207,16 +2210,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
     },
 
-    setSessionUsage: (sessionId, model, usage) => {
+    setSessionUsage: (sessionId, model, usage, threadTotalTokens) => {
       updateSession(sessionId, (session) => {
+        const nextThreadTotalTokens =
+          threadTotalTokens ?? session.threadTotalTokens;
         if (
           session.model === model &&
           session.tokenUsage?.used === usage.used &&
-          session.tokenUsage?.max === usage.max
+          session.tokenUsage?.max === usage.max &&
+          session.threadTotalTokens === nextThreadTotalTokens
         ) {
           return session;
         }
-        return { ...session, model, tokenUsage: usage };
+        return {
+          ...session,
+          model,
+          tokenUsage: usage,
+          threadTotalTokens: nextThreadTotalTokens,
+        };
       });
     },
 

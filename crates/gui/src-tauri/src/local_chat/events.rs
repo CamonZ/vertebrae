@@ -51,6 +51,9 @@ pub struct LocalChatSessionUsageEvent {
     pub model: String,
     pub context_tokens: u32,
     pub context_window: u32,
+    /// Cumulative thread token total, distinct from the current request's
+    /// context utilization above.
+    pub thread_total_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]

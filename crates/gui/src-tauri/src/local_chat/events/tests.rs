@@ -39,6 +39,7 @@ fn local_chat_event_names_match_public_contract() {
             model: "sonnet".to_string(),
             context_tokens: 42,
             context_window: 200_000,
+            thread_total_tokens: 100,
         }),
         LocalChatEvent::End(LocalChatSessionEndEvent {
             backend_session_id: "session-1".to_string(),

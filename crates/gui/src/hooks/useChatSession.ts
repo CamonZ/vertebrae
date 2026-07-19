@@ -437,6 +437,7 @@ export function useChatSession(sessionId: string) {
 
     // context utilization
     usage,
+    threadTotalTokens: session?.threadTotalTokens,
     ctxPct,
     ctxColor,
 

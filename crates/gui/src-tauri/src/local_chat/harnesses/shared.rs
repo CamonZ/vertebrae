@@ -18,6 +18,7 @@ pub(crate) struct LocalChatSessionStats {
     pub(crate) turns: u32,
     pub(crate) context_tokens: u32,
     pub(crate) context_window: u32,
+    pub(crate) thread_total_tokens: u32,
     pub(crate) model: String,
 }
 
@@ -240,9 +241,16 @@ impl EventSink for LocalChatHarnessEventSink {
                         .context_window
                         .unwrap_or_default()
                         .min(u64::from(u32::MAX)) as u32;
+                    stats.thread_total_tokens = snapshot
+                        .tokens
+                        .input_tokens
+                        .saturating_add(snapshot.tokens.output_tokens)
+                        .min(u64::from(u32::MAX))
+                        as u32;
                     let model = stats.model.clone();
                     let context_tokens = stats.context_tokens;
                     let context_window = stats.context_window;
+                    let thread_total_tokens = stats.thread_total_tokens;
                     drop(stats);
                     self.emit_local(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
                         backend_session_id,
@@ -250,6 +258,7 @@ impl EventSink for LocalChatHarnessEventSink {
                         model,
                         context_tokens,
                         context_window,
+                        thread_total_tokens,
                     }))?;
                 }
             }

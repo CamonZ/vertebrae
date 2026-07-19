@@ -154,16 +154,27 @@ export function handleUsageEvent(
   setSessionUsage: (
     sessionId: string,
     model: string,
-    usage: { used: number; max: number }
+    usage: { used: number; max: number },
+    threadTotalTokens?: number
   ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
   const max = resolveContextWindow(payload.model, payload.context_window);
   if (max && max > 0) {
-    setSessionUsage(sessionId, payload.model, {
+    const usage = {
       used: payload.context_tokens,
       max,
-    });
+    };
+    if (payload.thread_total_tokens === undefined) {
+      setSessionUsage(sessionId, payload.model, usage);
+    } else {
+      setSessionUsage(
+        sessionId,
+        payload.model,
+        usage,
+        payload.thread_total_tokens
+      );
+    }
   }
 }
 

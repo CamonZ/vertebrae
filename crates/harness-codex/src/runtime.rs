@@ -603,14 +603,30 @@ impl SessionState {
             }
             CodexNotification::TokenUsageUpdated(params) => {
                 let usage = parse_usage(&params);
-                if !is_child {
-                    root_turn.usage = usage.0.clone();
-                }
+                let turn_delta = if !is_child {
+                    let turn_delta = usage.0.as_ref().map(|current| {
+                        let delta = usage_delta(root_turn.last_usage.as_ref(), current);
+                        root_turn.last_usage = Some(current.clone());
+                        root_turn.usage = Some(current.clone());
+                        delta
+                    });
+                    root_turn.context_tokens = usage
+                        .1
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.context_tokens);
+                    root_turn.context_window = usage
+                        .1
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.context_window);
+                    turn_delta
+                } else {
+                    usage.0.clone()
+                };
                 self.emit(
                     stream,
                     correlation,
                     HarnessEventPayloadV1::Usage(UsageEvent {
-                        turn_delta: usage.0,
+                        turn_delta,
                         session_snapshot: usage.1,
                     }),
                     UpdateSemantics::Snapshot,
@@ -822,6 +838,9 @@ impl SessionState {
 struct TurnAccumulator {
     text: String,
     usage: Option<TurnUsage>,
+    last_usage: Option<TurnUsage>,
+    context_tokens: Option<u64>,
+    context_window: Option<u64>,
 }
 
 struct CodexSessionHandle {
@@ -1291,6 +1310,14 @@ fn tool_call(item: &Value) -> Option<(String, String, Value, bool)> {
         return None;
     }
     let id = optional_string(item, &["/id", "/toolCallId", "/tool_call_id"])?;
+    if kind == "commandExecution" {
+        let command = optional_string(item, &["/command"])?;
+        let mut input = json!({"command": command});
+        if let Some(cwd) = optional_string(item, &["/cwd"]) {
+            input["cwd"] = json!(cwd);
+        }
+        return Some((id, "Bash".into(), input, false));
+    }
     let name = optional_string(item, &["/tool", "/name", "/type"]).unwrap_or_else(|| kind.into());
     let input = item
         .get("input")
@@ -1306,37 +1333,88 @@ fn tool_output(item: &Value) -> Option<(String, Value, bool)> {
         .get("output")
         .cloned()
         .or_else(|| item.get("result").cloned())
+        .or_else(|| item.get("aggregatedOutput").cloned())
+        .or_else(|| item.get("aggregated_output").cloned())
         .or_else(|| item.get("text").cloned())?;
     let failed = item
         .get("status")
         .and_then(Value::as_str)
-        .is_some_and(|status| matches!(status, "failed" | "error"));
+        .is_some_and(|status| matches!(status, "failed" | "error"))
+        || item
+            .get("exitCode")
+            .or_else(|| item.get("exit_code"))
+            .and_then(Value::as_i64)
+            .is_some_and(|exit_code| exit_code != 0);
     Some((id, output, failed))
 }
 
 fn parse_usage(params: &Value) -> (Option<TurnUsage>, Option<SessionUsage>) {
-    let total = |path: &str| number(params, &[path]);
-    let tokens = TokenUsage {
-        input_tokens: total("/tokenUsage/total/inputTokens")
-            .or_else(|| total("/tokenUsage/inputTokens"))
+    let total = |field: &str| number(params, &[&format!("/tokenUsage/total/{field}")]);
+    let last = |field: &str| number(params, &[&format!("/tokenUsage/last/{field}")]);
+    let fallback =
+        |field: &str| total(field).or_else(|| number(params, &[&format!("/tokenUsage/{field}")]));
+    let turn_tokens = TokenUsage {
+        input_tokens: last("inputTokens")
+            .or_else(|| fallback("inputTokens"))
             .unwrap_or(0),
-        cached_input_tokens: total("/tokenUsage/total/cachedInputTokens").unwrap_or(0),
-        output_tokens: total("/tokenUsage/total/outputTokens")
-            .or_else(|| total("/tokenUsage/outputTokens"))
+        cached_input_tokens: last("cachedInputTokens")
+            .or_else(|| fallback("cachedInputTokens"))
             .unwrap_or(0),
-        reasoning_tokens: total("/tokenUsage/total/reasoningTokens").unwrap_or(0),
+        output_tokens: last("outputTokens")
+            .or_else(|| fallback("outputTokens"))
+            .unwrap_or(0),
+        reasoning_tokens: last("reasoningOutputTokens")
+            .or_else(|| last("reasoningTokens"))
+            .or_else(|| fallback("reasoningOutputTokens"))
+            .or_else(|| fallback("reasoningTokens"))
+            .unwrap_or(0),
     };
-    let turn = (tokens.input_tokens > 0 || tokens.output_tokens > 0).then(|| TurnUsage {
-        tokens: tokens.clone(),
-        cost_microusd: 0,
-    });
-    let snapshot = (tokens.input_tokens > 0 || tokens.output_tokens > 0).then(|| SessionUsage {
-        tokens,
-        cost_microusd: 0,
-        context_tokens: total("/tokenUsage/total/totalTokens"),
-        context_window: number(params, &["/tokenUsage/modelContextWindow"]),
-    });
+    let thread_tokens = TokenUsage {
+        input_tokens: fallback("inputTokens").unwrap_or(0),
+        cached_input_tokens: fallback("cachedInputTokens").unwrap_or(0),
+        output_tokens: fallback("outputTokens").unwrap_or(0),
+        reasoning_tokens: fallback("reasoningOutputTokens")
+            .or_else(|| fallback("reasoningTokens"))
+            .unwrap_or(0),
+    };
+    let turn =
+        (turn_tokens.input_tokens > 0 || turn_tokens.output_tokens > 0).then_some(TurnUsage {
+            tokens: turn_tokens,
+            cost_microusd: 0,
+        });
+    let snapshot =
+        (thread_tokens.input_tokens > 0 || thread_tokens.output_tokens > 0).then(|| SessionUsage {
+            tokens: thread_tokens,
+            cost_microusd: 0,
+            context_tokens: last("totalTokens").or_else(|| fallback("totalTokens")),
+            context_window: number(params, &["/tokenUsage/modelContextWindow"]),
+        });
     (turn, snapshot)
+}
+
+fn usage_delta(previous: Option<&TurnUsage>, current: &TurnUsage) -> TurnUsage {
+    let previous = previous.cloned().unwrap_or_default();
+    TurnUsage {
+        tokens: TokenUsage {
+            input_tokens: current
+                .tokens
+                .input_tokens
+                .saturating_sub(previous.tokens.input_tokens),
+            cached_input_tokens: current
+                .tokens
+                .cached_input_tokens
+                .saturating_sub(previous.tokens.cached_input_tokens),
+            output_tokens: current
+                .tokens
+                .output_tokens
+                .saturating_sub(previous.tokens.output_tokens),
+            reasoning_tokens: current
+                .tokens
+                .reasoning_tokens
+                .saturating_sub(previous.tokens.reasoning_tokens),
+        },
+        cost_microusd: current.cost_microusd.saturating_sub(previous.cost_microusd),
+    }
 }
 
 fn outcome_from_completion(
@@ -1380,11 +1458,8 @@ fn outcome_from_completion(
         metrics: OutcomeMetrics {
             duration_ms: number(params, &["/turn/durationMs"]),
             turn_count: None,
-            context_tokens: accumulator
-                .usage
-                .as_ref()
-                .map(|usage| usage.tokens.input_tokens + usage.tokens.output_tokens),
-            context_window: None,
+            context_tokens: accumulator.context_tokens,
+            context_window: accumulator.context_window,
             total_cost_usd: None,
         },
         error,
@@ -1400,5 +1475,94 @@ fn summary(content: &str) -> Option<String> {
         Some(format!("{value}…"))
     } else {
         Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{parse_usage, tool_call, tool_output};
+
+    #[test]
+    fn maps_command_execution_start_and_completion_to_one_tool_lifecycle() {
+        let started = json!({
+            "type": "commandExecution",
+            "id": "exec-1",
+            "command": "/bin/zsh -lc \"pwd\"",
+            "cwd": "/repo",
+            "status": "inProgress",
+        });
+        let completed = json!({
+            "type": "commandExecution",
+            "id": "exec-1",
+            "command": "/bin/zsh -lc \"pwd\"",
+            "status": "completed",
+            "exitCode": 0,
+            "aggregatedOutput": "/repo",
+        });
+
+        assert_eq!(
+            tool_call(&started),
+            Some((
+                "exec-1".into(),
+                "Bash".into(),
+                json!({"command":"/bin/zsh -lc \"pwd\"", "cwd":"/repo"}),
+                false,
+            ))
+        );
+        assert_eq!(
+            tool_output(&completed),
+            Some(("exec-1".into(), "/repo".into(), false))
+        );
+    }
+
+    #[test]
+    fn maps_nonzero_command_exit_code_to_failed_tool_output() {
+        let completed = json!({
+            "type": "commandExecution",
+            "id": "exec-2",
+            "status": "completed",
+            "exitCode": 1,
+            "aggregatedOutput": "boom",
+        });
+
+        assert_eq!(
+            tool_output(&completed),
+            Some(("exec-2".into(), "boom".into(), true))
+        );
+    }
+
+    #[test]
+    fn keeps_thread_totals_separate_from_last_turn_context_usage() {
+        let params = json!({
+            "tokenUsage": {
+                "total": {
+                    "totalTokens": 979558,
+                    "inputTokens": 969766,
+                    "cachedInputTokens": 841984,
+                    "outputTokens": 9792,
+                    "reasoningOutputTokens": 3276,
+                },
+                "last": {
+                    "totalTokens": 98480,
+                    "inputTokens": 96621,
+                    "cachedInputTokens": 94976,
+                    "outputTokens": 1859,
+                    "reasoningOutputTokens": 516,
+                },
+                "modelContextWindow": 258400,
+            }
+        });
+
+        let (turn, snapshot) = parse_usage(&params);
+        let turn = turn.expect("last usage should populate the turn delta");
+        let snapshot = snapshot.expect("total usage should populate the thread snapshot");
+        assert_eq!(turn.tokens.input_tokens, 96621);
+        assert_eq!(turn.tokens.output_tokens, 1859);
+        assert_eq!(snapshot.tokens.input_tokens, 969766);
+        assert_eq!(snapshot.tokens.output_tokens, 9792);
+        assert_eq!(snapshot.context_tokens, Some(98480));
+        assert_eq!(snapshot.context_window, Some(258400));
     }
 }
