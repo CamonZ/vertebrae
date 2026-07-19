@@ -1603,7 +1603,7 @@ describe("parseCodexRolloutMessage", () => {
       ]);
     });
 
-    it("maps patch_apply_end to a file_edit event, distinguishing update (diff) from add/delete (no diff)", () => {
+    it("maps patch_apply_end content for added and deleted files into diff bodies", () => {
       const raw: CodexRolloutRawMessage = {
         type: "event_msg",
         payload: {
@@ -1640,11 +1640,130 @@ describe("parseCodexRolloutMessage", () => {
               kind: "update",
               diff: "@@ -1 +1 @@\n-old\n+new",
             },
-            { path: "/repo/src/added.rs", kind: "add", diff: undefined },
-            { path: "/repo/src/removed.rs", kind: "delete", diff: undefined },
+            { path: "/repo/src/added.rs", kind: "add", diff: "+fn added() {}" },
+            {
+              path: "/repo/src/removed.rs",
+              kind: "delete",
+              diff: "-fn removed() {}",
+            },
           ],
         },
       ]);
+    });
+
+    it("restores an apply_patch diff from Codex exec transcript records", () => {
+      const logs: SessionLog[] = [
+        {
+          id: "exec-call",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "exec",
+              call_id: "call-wrapper",
+              input:
+                'const patch = "*** Begin Patch\\n*** Update File: patch-demo.txt\\n@@\\n-This file was added\\n+This file was created\\n*** End Patch";',
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "patch-result",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "event_msg",
+            payload: {
+              type: "patch_apply_end",
+              call_id: "exec-patch",
+              success: true,
+              changes: {
+                "/repo/patch-demo.txt": {
+                  type: "update",
+                  unified_diff:
+                    "@@ -1,1 +1,1 @@\\n-This file was added\\n+This file was created\\n",
+                },
+              },
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "exec-wrapper-output",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call_output",
+              call_id: "call-wrapper",
+              output: [{ type: "input_text", text: "{}" }],
+            },
+          }),
+          created_at: timestamp,
+        },
+      ];
+
+      const events = parseSessionLogs(logs);
+      expect(events.filter((event) => event.kind === "file_edit")).toHaveLength(
+        1
+      );
+      expect(events).toContainEqual({
+        kind: "file_edit",
+        timestamp,
+        toolId: "exec-patch",
+        status: "completed",
+        changes: [
+          {
+            path: "/repo/patch-demo.txt",
+            kind: "update",
+            diff: "@@ -1,1 +1,1 @@\\n-This file was added\\n+This file was created\\n",
+          },
+        ],
+      });
+    });
+
+    it("skips Codex bootstrap context stored as a user-role response item", () => {
+      const injectedContext: CodexRolloutRawMessage = {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<recommended_plugins>\n- GitHub\n</recommended_plugins>",
+            },
+            {
+              type: "input_text",
+              text: "# AGENTS.md instructions for /repo\n<INSTRUCTIONS>Do things</INSTRUCTIONS>",
+            },
+            {
+              type: "input_text",
+              text: "<environment_context><cwd>/repo</cwd></environment_context>",
+            },
+          ],
+        },
+      };
+
+      const actualUserMessage: CodexRolloutRawMessage = {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Hey there" }],
+        },
+      };
+
+      expect(
+        parseCodexRolloutMessage(injectedContext, timestamp, {
+          includeUserMessages: true,
+        })
+      ).toEqual([]);
+      expect(
+        parseCodexRolloutMessage(actualUserMessage, timestamp, {
+          includeUserMessages: true,
+        })
+      ).toEqual([{ kind: "user_message", timestamp, text: "Hey there" }]);
     });
 
     it("marks patch_apply_end as failed when success is false", () => {

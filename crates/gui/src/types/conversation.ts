@@ -277,7 +277,7 @@ export interface FileUpdateChange {
   path: string;
   /** Codex change kind: add, delete, or update (open string for forward-compat). */
   kind: "add" | "delete" | "update" | string;
-  /** Unified diff body, when Codex provides one. */
+  /** Unified diff body, including projected file content for add/delete changes. */
   diff?: string;
 }
 
@@ -476,7 +476,10 @@ function parseRecord(value: unknown): Record<string, unknown> | undefined {
 function shouldKeepUserMessage(text: string): boolean {
   const trimmed = text.trim();
   return (
-    trimmed.length > 0 && !trimmed.startsWith("# AGENTS.md instructions for ")
+    trimmed.length > 0 &&
+    !trimmed.includes("# AGENTS.md instructions for ") &&
+    !trimmed.includes("<recommended_plugins>") &&
+    !trimmed.includes("<environment_context>")
   );
 }
 
@@ -1139,8 +1142,8 @@ export interface CodexRawMessage {
  * `event_msg` payload, keyed by absolute file path (see
  * {@link CodexRolloutRawMessage.payload.changes}). Distinct from
  * {@link FileUpdateChange} (the `exec --json` `file_change` shape): real
- * rollout files show only `update` changes carry `unified_diff` -- `add` and
- * `delete` changes carry the full file `content` instead, with no diff.
+ * rollout files carry `unified_diff` for updates and full file `content` for
+ * additions/deletions; the parser projects both into `FileUpdateChange.diff`.
  */
 interface CodexRolloutFileChange {
   type: "add" | "delete" | "update" | string;
@@ -1502,6 +1505,8 @@ export interface CodexRolloutParseState {
   agentToolIdByAgentPath: Map<string, string>;
   agentSpawnEventByAgentPath: Map<string, ToolCallEvent>;
   completedAgentPaths: Set<string>;
+  /** Custom tool names keyed by their response-item call id. */
+  customToolNameByCallId: Map<string, string>;
   /**
    * `session_meta.payload.id` values already turned into a `session_start`
    * event. Real rollout files repeat the identical `session_meta` line many
@@ -1519,6 +1524,7 @@ function newCodexRolloutParseState(): CodexRolloutParseState {
     agentToolIdByAgentPath: new Map(),
     agentSpawnEventByAgentPath: new Map(),
     completedAgentPaths: new Set(),
+    customToolNameByCallId: new Map(),
     emittedSessionStartIds: new Set(),
     fileEditByToolId: new Map(),
   };
@@ -1818,14 +1824,28 @@ function patchApplyChanges(
   return Object.entries(changes).map(([path, change]) => ({
     path,
     kind: change.type,
-    // Only `update` changes carry a unified diff; `add`/`delete` changes
-    // carry the full file `content` instead (verified against real
-    // rollouts). We don't synthesize a diff from raw content --
-    // FileEditBlock already renders a plain kind+path row with no
-    // expandable body when `diff` is absent, which is the right degraded
-    // display for those two kinds.
-    diff: readString(change.unified_diff),
+    // Rollout `patch_apply_end` uses `unified_diff` for updates but reports
+    // the complete file body for additions and deletions. Project those
+    // bodies into the same collapsed diff view used by updates so file
+    // changes remain inspectable after transcript restoration.
+    diff:
+      readString(change.unified_diff) ??
+      fileContentDiff(change.type, readString(change.content)),
   }));
+}
+
+function fileContentDiff(
+  kind: string,
+  content: string | undefined
+): string | undefined {
+  if (!content) return undefined;
+  const prefix = kind === "delete" ? "-" : kind === "add" ? "+" : "";
+  return prefix
+    ? content
+        .split("\n")
+        .map((line) => `${prefix}${line}`)
+        .join("\n")
+    : undefined;
 }
 
 /** Parse Codex's rollout-only `apply_patch` custom tool input. */
@@ -1882,7 +1902,8 @@ function applyPatchInputChanges(input: unknown): FileUpdateChange[] {
  */
 function parseCodexRolloutEventMsg(
   raw: CodexRolloutRawMessage,
-  timestamp: string
+  timestamp: string,
+  state: CodexRolloutParseState
 ): ConversationEvent[] {
   const payload = raw.payload;
   if (!payload || typeof payload.type !== "string") return [];
@@ -1948,9 +1969,11 @@ function parseCodexRolloutEventMsg(
     }
 
     case "custom_tool_call": {
-      if (readString(payload.name) !== "apply_patch") return [];
       const toolId = readString(payload.call_id) ?? readString(payload.id);
-      if (!toolId) return [];
+      const toolName = readString(payload.name);
+      if (toolId && toolName)
+        state.customToolNameByCallId.set(toolId, toolName);
+      if (!toolId || toolName !== "apply_patch") return [];
       const changes = applyPatchInputChanges(
         payload.input ?? payload.arguments
       );
@@ -1962,6 +1985,11 @@ function parseCodexRolloutEventMsg(
     case "custom_tool_call_output": {
       const toolId = readString(payload.call_id) ?? readString(payload.id);
       if (!toolId) return [];
+      const toolName = state.customToolNameByCallId.get(toolId);
+      state.customToolNameByCallId.delete(toolId);
+      if (toolName !== "apply_patch") {
+        return [];
+      }
       const output = readRecord(payload.output);
       const status =
         payload.exit_code !== undefined && payload.exit_code !== 0
@@ -2018,7 +2046,7 @@ export function parseCodexRolloutMessage(
     return parseCodexRolloutSessionMeta(raw, timestamp, state);
   }
   if (raw.type === "event_msg") {
-    return parseCodexRolloutEventMsg(raw, timestamp);
+    return parseCodexRolloutEventMsg(raw, timestamp, state);
   }
 
   const events: ConversationEvent[] = [];
@@ -2028,9 +2056,12 @@ export function parseCodexRolloutMessage(
 
   switch (payload.type) {
     case "custom_tool_call": {
-      if (readString(payload.name) !== "apply_patch") break;
       const toolId = readString(payload.call_id) ?? readString(payload.id);
-      if (!toolId) break;
+      const toolName = readString(payload.name);
+      if (toolId && toolName) {
+        state.customToolNameByCallId.set(toolId, toolName);
+      }
+      if (!toolId || toolName !== "apply_patch") break;
       const changes = applyPatchInputChanges(
         payload.input ?? payload.arguments
       );
@@ -2048,6 +2079,11 @@ export function parseCodexRolloutMessage(
     case "custom_tool_call_output": {
       const toolId = readString(payload.call_id) ?? readString(payload.id);
       if (!toolId) break;
+      const toolName = state.customToolNameByCallId.get(toolId);
+      state.customToolNameByCallId.delete(toolId);
+      if (toolName !== "apply_patch") {
+        break;
+      }
       const output = readRecord(payload.output);
       const status =
         payload.exit_code !== undefined && payload.exit_code !== 0

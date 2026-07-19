@@ -486,10 +486,42 @@ function mergeHydratedMessages(
 ): ChatMessage[] {
   if (current.length === 0) return hydrated;
   const currentKeys = new Set(current.map(chatMessageKey));
+  const hydratedByKey = new Map(
+    hydrated.map((message) => [chatMessageKey(message), message])
+  );
+  let enriched = false;
+  const mergedCurrent = current.map((currentMessage) => {
+    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
+    if (
+      currentMessage.kind !== "file_edit" ||
+      hydratedMessage?.kind !== "file_edit"
+    ) {
+      return currentMessage;
+    }
+
+    const changes =
+      hydratedMessage.changes.length > 0
+        ? hydratedMessage.changes
+        : currentMessage.changes;
+    const changesChanged =
+      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes);
+    if (hydratedMessage.status !== currentMessage.status || changesChanged) {
+      enriched = true;
+      return {
+        ...currentMessage,
+        status: hydratedMessage.status,
+        changes,
+        // Keep the live receipt time so merging hydration does not reorder the
+        // currently visible conversation.
+      };
+    }
+    return currentMessage;
+  });
   const missing = hydrated.filter(
     (message) => !currentKeys.has(chatMessageKey(message))
   );
-  return missing.length > 0 ? [...missing, ...current] : current;
+  if (missing.length > 0) return [...missing, ...mergedCurrent];
+  return enriched ? mergedCurrent : current;
 }
 
 function parseJsonObjectInput(input: string): Record<string, unknown> | null {

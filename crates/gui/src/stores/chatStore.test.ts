@@ -1047,6 +1047,75 @@ describe("chatStore", () => {
       ]);
     });
 
+    it("enriches a live file edit with the hydrated diff for the same tool", async () => {
+      vi.spyOn(commands, "loadLocalChatSessionMessages").mockResolvedValue({
+        status: "ok",
+        data: {
+          messages: [
+            {
+              kind: "file_edit",
+              toolId: "exec-patch",
+              status: "completed",
+              changes: [
+                {
+                  path: "/repo/patch-demo.txt",
+                  kind: "update",
+                  diff: "@@ -1 +1 @@\\n-old\\n+new",
+                },
+              ],
+              timestamp: "2026-01-01T00:00:00Z",
+            },
+          ],
+          providerJsonlPath: null,
+        } as never,
+      });
+      useChatStore.setState({
+        sessions: {
+          metadata: {
+            id: "metadata",
+            label: "Metadata",
+            messages: [
+              {
+                kind: "file_edit",
+                toolId: "exec-patch",
+                status: "started",
+                changes: [{ path: "/repo/patch-demo.txt", kind: "update" }],
+                timestamp: "2026-01-01T00:00:01Z",
+              },
+            ],
+            status: "open",
+            harness: "codex",
+            backendSessionId: null,
+            providerResumeId: "thread-1",
+            projectPath: "/repo",
+            messageCount: 1,
+          },
+        },
+        activeSessionId: null,
+        panelOpen: false,
+      });
+
+      useChatStore.getState().focusSession("metadata");
+
+      await waitFor(() =>
+        expect(useChatStore.getState().sessions.metadata.messages).toEqual([
+          {
+            kind: "file_edit",
+            toolId: "exec-patch",
+            status: "completed",
+            changes: [
+              {
+                path: "/repo/patch-demo.txt",
+                kind: "update",
+                diff: "@@ -1 +1 @@\\n-old\\n+new",
+              },
+            ],
+            timestamp: "2026-01-01T00:00:01Z",
+          },
+        ])
+      );
+    });
+
     it("focuses an already-loaded session without dropping live runtime state", async () => {
       const id = useChatStore.getState().openSession("Live Task", "/repo");
       useChatStore.getState().setBackendSessionId(id, "live-backend");
