@@ -1352,6 +1352,10 @@ step_execution_id?: string;
  */
 content?: string; 
 /**
+ * Producer format used to select the compatible frontend parser.
+ */
+format?: string | null;
+/**
  * When this log was created (ISO 8601 string)
  */
 created_at?: string }

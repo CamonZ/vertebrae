@@ -455,7 +455,7 @@ describe("parseClaudeMessage", () => {
       ]);
     });
 
-    it("parses rate_limit_event into a banner event", () => {
+    it("suppresses an allowed rate_limit_event", () => {
       const raw: ClaudeRawMessage = {
         type: "rate_limit_event",
         session_id: "sess-1",
@@ -469,25 +469,17 @@ describe("parseClaudeMessage", () => {
         },
       };
 
-      expect(parseClaudeMessage(raw, timestamp)).toEqual([
-        {
-          kind: "rate_limit",
-          timestamp,
-          sessionId: "sess-1",
-          status: "allowed",
-          resetsAt: 1781128800,
-          rateLimitType: "five_hour",
-          overageStatus: "rejected",
-          overageDisabledReason: "org_level_disabled",
-          isUsingOverage: false,
-        },
-      ]);
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
     });
 
-    it("parses malformed rate_limit_event without throwing", () => {
+    it("parses a rejected rate_limit_event into a banner event", () => {
       const raw: ClaudeRawMessage = {
         type: "rate_limit_event",
         session_id: "sess-1",
+        rate_limit_info: {
+          status: "rejected",
+          rateLimitType: "five_hour",
+        },
       };
 
       expect(parseClaudeMessage(raw, timestamp)).toEqual([
@@ -495,14 +487,23 @@ describe("parseClaudeMessage", () => {
           kind: "rate_limit",
           timestamp,
           sessionId: "sess-1",
-          status: undefined,
-          rateLimitType: undefined,
+          status: "rejected",
           resetsAt: undefined,
+          rateLimitType: "five_hour",
           overageStatus: undefined,
           overageDisabledReason: undefined,
           isUsingOverage: undefined,
         },
       ]);
+    });
+
+    it("suppresses a malformed rate_limit_event without throwing", () => {
+      const raw: ClaudeRawMessage = {
+        type: "rate_limit_event",
+        session_id: "sess-1",
+      };
+
+      expect(parseClaudeMessage(raw, timestamp)).toEqual([]);
     });
   });
 
@@ -1689,6 +1690,259 @@ describe("parseSessionLogs provider dispatch", () => {
       kind: "assistant_message",
       text: "Hello",
     });
+  });
+
+  it("projects daemon harness logs into trace events without changing legacy parser dispatch", () => {
+    const harness = (
+      type: string,
+      data: Record<string, unknown>,
+      sequence: number,
+      streamId = "root"
+    ) =>
+      JSON.stringify({
+        version: 1,
+        event_id: `harness-${sequence}`,
+        stream_id: streamId,
+        sequence,
+        correlation:
+          streamId === "child"
+            ? {
+                session_id: "session-1",
+                thread_id: "child-thread",
+                turn_id: "child-turn",
+                parent_tool_call_id: "spawn-1",
+              }
+            : {
+                session_id: "session-1",
+                thread_id: "root-thread",
+                turn_id: "root-turn",
+              },
+        timestamp: `2024-01-02T08:00:0${sequence}Z`,
+        semantics: type === "text" && sequence === 4 ? "delta" : "snapshot",
+        type,
+        data,
+      });
+    const harnessLog = (
+      content: string,
+      createdAt: string,
+      sequence: number
+    ): SessionLog => {
+      return {
+        ...createLog(content, createdAt, "harness-exec"),
+        id: `harness-log-${sequence}`,
+        format: "harness",
+        content,
+        step_execution_id: "harness-exec",
+      };
+    };
+
+    const logs: SessionLog[] = [
+      harnessLog(
+        harness(
+          "session_started",
+          {
+            provider: "anthropic",
+            model: "claude-sonnet",
+            provider_resume_id: "session-1",
+          },
+          1
+        ),
+        "2024-01-02T08:00:01Z",
+        1
+      ),
+      harnessLog(
+        harness(
+          "tool_call",
+          { tool_call_id: "spawn-1", name: "Task", input: { prompt: "Inspect" } },
+          2
+        ),
+        "2024-01-02T08:00:02Z",
+        2
+      ),
+      harnessLog(
+        harness(
+          "turn_input",
+          { thread_id: "child-thread", content: "Inspect", provenance: "agent" },
+          3,
+          "child"
+        ),
+        "2024-01-02T08:00:03Z",
+        3
+      ),
+      harnessLog(
+        harness("text", { text: "Child report" }, 4, "child"),
+        "2024-01-02T08:00:04Z",
+        4
+      ),
+      harnessLog(
+        harness("text", { text: "Child report" }, 5, "child"),
+        "2024-01-02T08:00:05Z",
+        5
+      ),
+      harnessLog(
+        harness(
+          "tool_call",
+          { tool_call_id: "bash-1", name: "Bash", input: { command: "pwd" } },
+          6,
+          "child"
+        ),
+        "2024-01-02T08:00:06Z",
+        6
+      ),
+      harnessLog(
+        harness(
+          "tool_output",
+          { tool_call_id: "bash-1", output: { stdout: "/repo" }, status: "completed" },
+          7,
+          "child"
+        ),
+        "2024-01-02T08:00:07Z",
+        7
+      ),
+      harnessLog(
+        harness("usage", { session_snapshot: { cost_microusd: 42000 } }, 8),
+        "2024-01-02T08:00:08Z",
+        8
+      ),
+      harnessLog(
+        harness(
+          "run_finished",
+          {
+            status: "completed",
+            metrics: { duration_ms: 1200, turn_count: 1, total_cost_usd: 0.042 },
+          },
+          9
+        ),
+        "2024-01-02T08:00:09Z",
+        9
+      ),
+    ];
+
+    const events = parseSessionLogs(logs);
+
+    expect(events.map((event) => event.kind)).toEqual([
+      "session_start",
+      "tool_call",
+      "user_message",
+      "assistant_message",
+      "tool_call",
+      "tool_result",
+      "session_end",
+    ]);
+    expect(events[3]).toMatchObject({
+      text: "Child report",
+      parentToolUseId: "spawn-1",
+    });
+    expect(events[5]).toMatchObject({
+      toolUseId: "bash-1",
+      parentToolUseId: "spawn-1",
+      result: '{"stdout":"/repo"}',
+    });
+    expect(events[events.length - 1]).toMatchObject({
+      kind: "session_end",
+      durationMs: 1200,
+      numTurns: 1,
+      costUsd: 0.042,
+    });
+  });
+
+  it("keeps harness dedupe within a turn and replaces harness plan snapshots", () => {
+    const log = (
+      sequence: number,
+      type: string,
+      data: Record<string, unknown>,
+      turnId?: string
+    ): SessionLog => ({
+      ...createLog(
+        JSON.stringify({
+          version: 1,
+          event_id: `harness-state-${sequence}`,
+          stream_id: "persistent-root",
+          sequence,
+          correlation: {
+            session_id: "session-1",
+            thread_id: "root-thread",
+            ...(turnId ? { turn_id: turnId } : {}),
+          },
+          timestamp: `2024-01-03T08:00:0${sequence}Z`,
+          semantics: type === "text" && sequence === 1 ? "delta" : "snapshot",
+          type,
+          data,
+        }),
+        `2024-01-03T08:00:0${sequence}Z`,
+        "harness-exec"
+      ),
+      id: `harness-state-log-${sequence}`,
+      format: "harness",
+    });
+
+    const events = parseSessionLogs([
+      log(1, "text", { text: "turn one delta" }, "turn-1"),
+      log(2, "text", { text: "turn one snapshot" }, "turn-1"),
+      log(3, "turn_finished", { status: "completed", result_text: "turn one result" }, "turn-1"),
+      log(4, "turn_finished", { status: "completed", result_text: "turn two result" }, "turn-2"),
+      log(
+        5,
+        "plan",
+        { entries: [{ id: "plan-1", text: "Review", status: "pending" }] },
+        "turn-2"
+      ),
+      log(
+        6,
+        "plan",
+        { entries: [{ id: "plan-1", text: "Review", status: "completed" }] },
+        "turn-2"
+      ),
+      log(
+        7,
+        "file_change",
+        {
+          changes: [
+            { path: "new.rs", kind: "Added" },
+            { path: "old.rs", kind: "deleted" },
+            { path: "renamed.rs", kind: "Renamed", previous_path: "before.rs" },
+          ],
+        },
+        "turn-2"
+      ),
+    ]);
+
+    expect(events.filter((event) => event.kind === "assistant_message")).toMatchObject([
+      { text: "turn one delta" },
+      { text: "turn two result" },
+    ]);
+    expect(events.filter((event) => event.kind === "todo_list")).toMatchObject([
+      { itemId: "harness-plan:root-thread", items: [{ text: "Review", completed: true }] },
+    ]);
+    expect(events.find((event) => event.kind === "file_edit")).toMatchObject({
+      changes: [
+        { path: "new.rs", kind: "add" },
+        { path: "old.rs", kind: "delete" },
+        { path: "renamed.rs", kind: "update" },
+      ],
+    });
+  });
+
+  it("uses the Claude label when a harness session start has no model", () => {
+    const events = parseSessionLogs([
+      {
+        ...createLog(
+          JSON.stringify({
+            version: 1,
+            event_id: "harness-session-start",
+            stream_id: "root",
+            correlation: { session_id: "session-1" },
+            type: "session_started",
+            data: { provider: "anthropic" },
+          }),
+          "2024-01-03T08:01:00Z",
+          "harness-exec"
+        ),
+        format: "harness",
+      },
+    ]);
+
+    expect(events).toMatchObject([{ kind: "session_start", model: "Claude" }]);
   });
 
   it("normalizes Codex rollout multi-agent records into spawn parents and child transcript rows", () => {

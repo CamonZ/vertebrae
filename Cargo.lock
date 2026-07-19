@@ -2186,6 +2186,8 @@ dependencies = [
  "url",
  "uuid",
  "vertebrae-core",
+ "vertebrae-harness-claude",
+ "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
  "vertebrae-skills-assets",
@@ -6741,9 +6743,24 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vertebrae-core",
+ "vertebrae-harness-claude",
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
+]
+
+[[package]]
+name = "vertebrae-harness-claude"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "vertebrae-harness-core",
 ]
 
 [[package]]

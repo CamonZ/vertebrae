@@ -1,53 +1,1118 @@
-//! Claude CLI session runtime with JSONL streaming
-//!
-//! Harness-private runtime that owns the live Claude process registry and
-//! translates JSONL stream events into neutral [`LocalChatEvent`] payloads.
+//! GUI-owned Claude session registry backed by the reusable Claude harness.
 
-#![allow(dead_code)] // Some fields are parsed but not yet used
+use std::{
+    collections::{BTreeMap, HashMap},
+    ffi::OsString,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+};
 
-use std::collections::HashMap;
-use std::io::BufRead;
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::thread;
+use async_trait::async_trait;
 use tauri::Manager;
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::RwLock;
+use vertebrae_harness_claude::{ClaudePermissionMode, ClaudeProviderConfig, ClaudeRuntime};
+use vertebrae_harness_core::{
+    CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
+    HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, ProviderResumeId,
+    ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus, SessionHandle,
+    SessionId, StartSessionRequest, StreamId, TurnId, UpdateSemantics,
+};
 
 use crate::commands::AppState;
 use crate::helpers::{build_augmented_path, find_claude_binary, find_vtb_gate_binary};
-use crate::local_chat::harnesses::claude::args::{
-    build_claude_args, resolve_requested_claude_model,
-};
-use crate::local_chat::harnesses::claude::jsonl::{self, EmittedEvent};
-use crate::local_chat::harnesses::claude::live_jsonl::{
-    encode_claude_user_jsonl_message, process_claude_stderr_lines, ClaudeLiveJsonlCommand,
-    ClaudeLiveJsonlExitReason, ClaudeLiveJsonlProcessError, ClaudeLiveJsonlProcessRunner,
-    ClaudeLiveJsonlRunResult,
-};
-use crate::local_chat::permissions::PermissionBridge;
+use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
-    LocalChatRuntime, LocalChatSessionEndEvent as NeutralSessionEndEvent, LocalChatSessionError,
-    LocalChatSessionErrorEvent as NeutralSessionErrorEvent,
-    LocalChatSessionInitEvent as NeutralSessionInitEvent,
-    LocalChatSessionUsageEvent as NeutralSessionUsageEvent,
-    LocalChatSessionWarningEvent as NeutralSessionWarningEvent,
-    LocalChatTextEvent as NeutralTextEvent, LocalChatToolCallEvent as NeutralToolCallEvent,
-    LocalChatToolResultEvent as NeutralToolResultEvent,
+    LocalChatRuntime, LocalChatSessionEndEvent, LocalChatSessionError, LocalChatSessionErrorEvent,
+    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
 };
+use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
 
-/// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
-fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
-    if max_bytes >= s.len() {
-        return s;
+type RuntimeFactory =
+    dyn Fn(ClaudeProviderConfig) -> Arc<dyn HarnessRuntime> + Send + Sync + 'static;
+
+const DEFAULT_CLAUDE_CONTEXT_WINDOW: u32 = 200_000;
+
+struct ActiveSession {
+    generation: u64,
+    handle: Arc<dyn SessionHandle>,
+    active_turn: Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
+    permission_bridge: crate::local_chat::permissions::PermissionBridge,
+    #[cfg(unix)]
+    _permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
+}
+
+/// A backend id is reserved before any asynchronous session startup. Keeping
+/// the reservation and active entry under one lock prevents concurrent create
+/// requests from both launching a Claude process. The monotonically increasing
+/// generation also lets stale lifecycle events leave a replacement untouched.
+#[derive(Default)]
+struct SessionRegistry {
+    active: HashMap<String, ActiveSession>,
+    starting: HashMap<String, u64>,
+    closing: HashMap<String, u64>,
+    next_generation: u64,
+}
+
+enum TerminalSession {
+    Starting,
+    Active(ActiveSession),
+    Closing,
+}
+
+impl SessionRegistry {
+    fn reserve(&mut self, backend_session_id: &str) -> Result<u64, LocalChatSessionError> {
+        if self.active.contains_key(backend_session_id)
+            || self.starting.contains_key(backend_session_id)
+            || self.closing.contains_key(backend_session_id)
+        {
+            return Err(LocalChatSessionError::SessionExists(
+                backend_session_id.to_string(),
+            ));
+        }
+        self.next_generation = self.next_generation.wrapping_add(1);
+        let generation = self.next_generation;
+        self.starting
+            .insert(backend_session_id.to_string(), generation);
+        Ok(generation)
     }
-    let mut end = max_bytes;
-    while !s.is_char_boundary(end) {
-        end -= 1;
+
+    fn release_reservation(&mut self, backend_session_id: &str, generation: u64) {
+        if self.starting.get(backend_session_id) == Some(&generation) {
+            self.starting.remove(backend_session_id);
+        }
     }
-    &s[..end]
+
+    fn activate(
+        &mut self,
+        backend_session_id: String,
+        generation: u64,
+        session: ActiveSession,
+    ) -> bool {
+        if self.starting.get(&backend_session_id) != Some(&generation) {
+            return false;
+        }
+        self.starting.remove(&backend_session_id);
+        self.active.insert(backend_session_id, session);
+        true
+    }
+
+    fn is_starting_generation(&self, backend_session_id: &str, generation: u64) -> bool {
+        self.starting.get(backend_session_id) == Some(&generation)
+    }
+
+    fn begin_terminal_close(
+        &mut self,
+        backend_session_id: &str,
+        generation: u64,
+    ) -> Option<TerminalSession> {
+        if self.starting.get(backend_session_id) == Some(&generation) {
+            self.starting.remove(backend_session_id);
+            self.closing
+                .insert(backend_session_id.to_string(), generation);
+            return Some(TerminalSession::Starting);
+        }
+        if let Some(session) = self.active.remove(backend_session_id) {
+            if session.generation == generation {
+                self.closing
+                    .insert(backend_session_id.to_string(), generation);
+                return Some(TerminalSession::Active(session));
+            }
+            self.active.insert(backend_session_id.to_string(), session);
+        }
+        (self.closing.get(backend_session_id) == Some(&generation))
+            .then_some(TerminalSession::Closing)
+    }
+
+    fn begin_close(&mut self, backend_session_id: &str) -> Option<ActiveSession> {
+        let session = self.active.remove(backend_session_id)?;
+        self.closing
+            .insert(backend_session_id.to_string(), session.generation);
+        Some(session)
+    }
+
+    fn finish_close(&mut self, backend_session_id: &str, generation: u64) {
+        if self.closing.get(backend_session_id) == Some(&generation) {
+            self.closing.remove(backend_session_id);
+        }
+    }
+
+    fn abandon_reservation(&mut self, backend_session_id: &str, generation: u64) {
+        self.release_reservation(backend_session_id, generation);
+        self.finish_close(backend_session_id, generation);
+    }
+}
+
+/// Removes a startup reservation if the create future is cancelled before it
+/// can either activate the session or report a normal startup error.
+struct SessionReservation {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    backend_session_id: String,
+    generation: u64,
+    active: bool,
+}
+
+impl SessionReservation {
+    fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    async fn release(mut self) {
+        self.sessions
+            .write()
+            .await
+            .release_reservation(&self.backend_session_id, self.generation);
+        self.active = false;
+    }
+
+    async fn abandon(mut self) {
+        self.sessions
+            .write()
+            .await
+            .abandon_reservation(&self.backend_session_id, self.generation);
+        self.active = false;
+    }
+
+    fn disarm(mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for SessionReservation {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+        let sessions = self.sessions.clone();
+        let backend_session_id = self.backend_session_id.clone();
+        let generation = self.generation;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                sessions
+                    .write()
+                    .await
+                    .abandon_reservation(&backend_session_id, generation);
+            });
+        }
+    }
+}
+
+/// Owns a successfully started handle until the registry activates it. This
+/// closes and retires a process if its startup future is cancelled in the
+/// narrow window before activation.
+struct StartedSession {
+    handle: Arc<dyn SessionHandle>,
+    reservation: Option<SessionReservation>,
+    #[cfg(unix)]
+    permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
+}
+
+impl StartedSession {
+    fn handle(&self) -> Arc<dyn SessionHandle> {
+        self.handle.clone()
+    }
+
+    #[cfg(unix)]
+    fn take_permission_socket(
+        &mut self,
+    ) -> Option<crate::local_chat::permissions::PermissionSocketGuard> {
+        self.permission_socket.take()
+    }
+
+    fn disarm(mut self) {
+        if let Some(reservation) = self.reservation.take() {
+            reservation.disarm();
+        }
+    }
+
+    async fn shutdown(mut self) {
+        let _ = self.handle.close().await;
+        #[cfg(unix)]
+        drop(self.permission_socket.take());
+        if let Some(reservation) = self.reservation.take() {
+            reservation.abandon().await;
+        }
+    }
+}
+
+impl Drop for StartedSession {
+    fn drop(&mut self) {
+        let Some(reservation) = self.reservation.take() else {
+            return;
+        };
+        let sessions = reservation.sessions.clone();
+        let backend_session_id = reservation.backend_session_id.clone();
+        let generation = reservation.generation;
+        let handle = self.handle.clone();
+        #[cfg(unix)]
+        let permission_socket = self.permission_socket.take();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            reservation.disarm();
+            runtime.spawn(async move {
+                let _ = handle.close().await;
+                #[cfg(unix)]
+                drop(permission_socket);
+                sessions
+                    .write()
+                    .await
+                    .abandon_reservation(&backend_session_id, generation);
+            });
+        }
+    }
+}
+
+/// Keeps an explicit close reservation alive until its active session—and
+/// therefore its deterministic permission socket—has been dropped.
+struct ClosingSession {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    backend_session_id: String,
+    generation: u64,
+    session: Option<ActiveSession>,
+}
+
+impl ClosingSession {
+    fn session(&self) -> &ActiveSession {
+        self.session.as_ref().expect("closing session is present")
+    }
+
+    async fn finish(mut self) {
+        drop(self.session.take());
+        self.sessions
+            .write()
+            .await
+            .finish_close(&self.backend_session_id, self.generation);
+    }
+}
+
+impl Drop for ClosingSession {
+    fn drop(&mut self) {
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let sessions = self.sessions.clone();
+        let backend_session_id = self.backend_session_id.clone();
+        let generation = self.generation;
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let _ = session.handle.close().await;
+                drop(session);
+                sessions
+                    .write()
+                    .await
+                    .finish_close(&backend_session_id, generation);
+            });
+        }
+    }
+}
+
+#[derive(Default)]
+struct CompatibilityState {
+    model: String,
+    context_tokens: u32,
+    context_window: u32,
+    turn_count: u32,
+}
+
+#[derive(Clone)]
+struct ClaudeGuiEventSink {
+    backend_session_id: String,
+    generation: u64,
+    event_sink: LocalChatEventSink,
+    sessions: Arc<RwLock<SessionRegistry>>,
+    state: Arc<Mutex<CompatibilityState>>,
+    permission_bridge: crate::local_chat::permissions::PermissionBridge,
+    closed: Arc<AtomicBool>,
+    lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl ClaudeGuiEventSink {
+    fn new(
+        backend_session_id: String,
+        generation: u64,
+        event_sink: LocalChatEventSink,
+        sessions: Arc<RwLock<SessionRegistry>>,
+        initial_model: Option<String>,
+        permission_bridge: crate::local_chat::permissions::PermissionBridge,
+        lifecycle_gate: Arc<tokio::sync::Mutex<()>>,
+    ) -> Self {
+        Self {
+            backend_session_id,
+            generation,
+            event_sink,
+            sessions,
+            state: Arc::new(Mutex::new(CompatibilityState {
+                model: initial_model.unwrap_or_default(),
+                ..CompatibilityState::default()
+            })),
+            permission_bridge,
+            closed: Arc::new(AtomicBool::new(false)),
+            lifecycle_gate,
+        }
+    }
+
+    fn emit_local(&self, event: LocalChatEvent) -> Result<(), HarnessError> {
+        self.event_sink
+            .try_emit(event)
+            .map_err(HarnessError::EventSink)
+    }
+
+    fn emit_error(&self, error: impl Into<String>) -> Result<(), HarnessError> {
+        self.emit_local(LocalChatEvent::Error(LocalChatSessionErrorEvent {
+            backend_session_id: self.backend_session_id.clone(),
+            harness: LocalChatHarnessKind::Claude,
+            error: error.into(),
+        }))
+    }
+
+    fn parent_tool_use_id(event: &HarnessEventV1) -> Option<String> {
+        event
+            .correlation
+            .parent_tool_call_id
+            .as_ref()
+            .map(ToString::to_string)
+    }
+
+    fn value_text(value: &serde_json::Value) -> String {
+        match value {
+            serde_json::Value::String(value) => value.clone(),
+            value => serde_json::to_string(value).unwrap_or_default(),
+        }
+    }
+
+    fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Acquire)
+    }
+
+    fn is_root_stream(&self, event: &HarnessEventV1) -> bool {
+        event.stream_id.as_str() == format!("local-chat:{}", self.backend_session_id)
+    }
+}
+
+#[async_trait]
+impl EventSink for ClaudeGuiEventSink {
+    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        let parent_tool_use_id = Self::parent_tool_use_id(&event);
+        let is_root_stream = self.is_root_stream(&event);
+        match event.payload {
+            HarnessEventPayloadV1::SessionStarted(started) => {
+                let mut state = self
+                    .state
+                    .lock()
+                    .map_err(|_| HarnessError::EventSink("GUI event state is poisoned".into()))?;
+                if let Some(model) = started.model {
+                    state.model = model;
+                }
+                self.emit_local(LocalChatEvent::Init(LocalChatSessionInitEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    provider_resume_id: started
+                        .provider_resume_id
+                        .as_ref()
+                        .map(ToString::to_string),
+                    model: state.model.clone(),
+                    tools: started.tools,
+                }))?;
+            }
+            HarnessEventPayloadV1::Text(text) => {
+                self.emit_local(LocalChatEvent::Text(LocalChatTextEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    text: text.text,
+                    is_partial: event.semantics == UpdateSemantics::Delta,
+                    parent_tool_use_id,
+                }))?;
+            }
+            HarnessEventPayloadV1::ToolCall(tool) => {
+                if tool.name == crate::local_chat::permissions::ASK_USER_QUESTION_TOOL {
+                    return Ok(());
+                }
+                self.emit_local(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    tool_id: tool.tool_call_id.to_string(),
+                    tool_name: tool.name,
+                    input: serde_json::to_string(&tool.input).unwrap_or_default(),
+                    parent_tool_use_id,
+                }))?;
+            }
+            HarnessEventPayloadV1::ToolOutput(output) => {
+                self.emit_local(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    tool_id: output.tool_call_id.to_string(),
+                    result: Self::value_text(&output.output),
+                    is_error: matches!(
+                        output.status,
+                        vertebrae_harness_core::ToolStatus::Failed
+                            | vertebrae_harness_core::ToolStatus::Declined
+                            | vertebrae_harness_core::ToolStatus::Cancelled
+                    ),
+                    parent_tool_use_id,
+                }))?;
+            }
+            HarnessEventPayloadV1::Usage(usage) => {
+                // Agent records have their own canonical stream. Their usage may
+                // omit `parent_tool_call_id`, so stream identity is the reliable
+                // boundary for the root conversation's context meter.
+                if !is_root_stream {
+                    return Ok(());
+                }
+                if let Some(snapshot) = usage.session_snapshot {
+                    let mut state = self.state.lock().map_err(|_| {
+                        HarnessError::EventSink("GUI event state is poisoned".into())
+                    })?;
+                    state.context_tokens = snapshot
+                        .context_tokens
+                        .unwrap_or_default()
+                        .min(u64::from(u32::MAX)) as u32;
+                    state.context_window = snapshot
+                        .context_window
+                        .unwrap_or_default()
+                        .min(u64::from(u32::MAX)) as u32;
+                    self.emit_local(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
+                        backend_session_id: self.backend_session_id.clone(),
+                        harness: LocalChatHarnessKind::Claude,
+                        model: state.model.clone(),
+                        context_tokens: state.context_tokens,
+                        context_window: state.context_window,
+                    }))?;
+                }
+            }
+            HarnessEventPayloadV1::TurnFinished(outcome) => {
+                let mut state = self
+                    .state
+                    .lock()
+                    .map_err(|_| HarnessError::EventSink("GUI event state is poisoned".into()))?;
+                // These defaults intentionally mirror the legacy Claude JSONL
+                // compatibility contract. A result is authoritative and must
+                // not inherit a previous per-turn usage snapshot.
+                state.turn_count = outcome
+                    .metrics
+                    .turn_count
+                    .unwrap_or_default()
+                    .min(u64::from(u32::MAX)) as u32;
+                state.context_tokens = outcome
+                    .metrics
+                    .context_tokens
+                    .unwrap_or_default()
+                    .min(u64::from(u32::MAX)) as u32;
+                state.context_window = outcome
+                    .metrics
+                    .context_window
+                    .unwrap_or(u64::from(DEFAULT_CLAUDE_CONTEXT_WINDOW))
+                    .min(u64::from(u32::MAX)) as u32;
+                let cost_usd = outcome.metrics.total_cost_usd.unwrap_or_default();
+                self.emit_local(LocalChatEvent::End(LocalChatSessionEndEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    duration_ms: outcome
+                        .metrics
+                        .duration_ms
+                        .unwrap_or_default()
+                        .min(u64::from(u32::MAX)) as u32,
+                    cost_usd,
+                    num_turns: state.turn_count,
+                    result: outcome.result_text.unwrap_or_default(),
+                    is_error: outcome.status != CompletionStatus::Completed,
+                    context_tokens: state.context_tokens,
+                    context_window: state.context_window,
+                }))?;
+            }
+            HarnessEventPayloadV1::Warning(warning) => {
+                self.emit_local(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
+                    backend_session_id: self.backend_session_id.clone(),
+                    harness: LocalChatHarnessKind::Claude,
+                    warning: warning.message,
+                }))?;
+            }
+            HarnessEventPayloadV1::Error(error) => self.emit_error(error.message)?,
+            HarnessEventPayloadV1::SessionClosed(outcome) => {
+                let _lifecycle = self.lifecycle_gate.lock().await;
+                self.closed.store(true, Ordering::Release);
+                let terminal_session = self
+                    .sessions
+                    .write()
+                    .await
+                    .begin_terminal_close(&self.backend_session_id, self.generation);
+                match terminal_session {
+                    Some(TerminalSession::Active(session)) => {
+                        // Do not release the ID or its permission socket until
+                        // the matching generation's controls are denied. That
+                        // prevents a same-ID replacement from being cleaned up
+                        // by this terminal event while the bridge mutex waits.
+                        session
+                            .permission_bridge
+                            .fail_pending_permissions_for_session(
+                                &self.backend_session_id,
+                                "Claude session ended before the permission request was resolved",
+                            );
+                        drop(session);
+                        self.sessions
+                            .write()
+                            .await
+                            .finish_close(&self.backend_session_id, self.generation);
+                    }
+                    Some(TerminalSession::Starting) => {
+                        self.permission_bridge.fail_pending_permissions_for_session(
+                            &self.backend_session_id,
+                            "Claude session ended before the permission request was resolved",
+                        );
+                    }
+                    Some(TerminalSession::Closing) => {}
+                    None => {
+                        // A previous generation can finish after a replacement
+                        // has been registered. Its terminal event must not
+                        // alter the replacement's registry, controls, or
+                        // visible status.
+                        return Ok(());
+                    }
+                }
+                match outcome.status {
+                    SessionCloseStatus::Closed => {}
+                    SessionCloseStatus::ProcessLost => self.emit_error(
+                        outcome
+                            .error
+                            .unwrap_or_else(|| "Claude session process was lost".into()),
+                    )?,
+                    SessionCloseStatus::Failed => self.emit_error(
+                        outcome
+                            .error
+                            .unwrap_or_else(|| "Claude session failed while closing".into()),
+                    )?,
+                }
+            }
+            HarnessEventPayloadV1::Reasoning(_)
+            | HarnessEventPayloadV1::Plan(_)
+            | HarnessEventPayloadV1::FileChange(_)
+            | HarnessEventPayloadV1::ThreadDeclared(_)
+            | HarnessEventPayloadV1::TurnStarted(_)
+            | HarnessEventPayloadV1::TurnInput(_)
+            | HarnessEventPayloadV1::ControlRequested(_)
+            | HarnessEventPayloadV1::ControlResolved(_)
+            | HarnessEventPayloadV1::RunFinished(_)
+            | HarnessEventPayloadV1::Unknown { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct ClaudeGuiControlSink {
+    backend_session_id: String,
+    runtime: LocalChatRuntime,
+}
+
+#[async_trait]
+impl ControlSink for ClaudeGuiControlSink {
+    async fn request(
+        &self,
+        request: ControlRequestEnvelope,
+    ) -> Result<ControlResolution, HarnessError> {
+        self.runtime
+            .permission_bridge()
+            .request_harness_control(&self.backend_session_id, self.runtime.app_handle(), request)
+            .await
+    }
+}
+
+/// GUI adapter that owns backend-session routing and provider-neutral handles.
+#[derive(Clone)]
+pub(crate) struct ClaudeSessionRuntime {
+    sessions: Arc<RwLock<SessionRegistry>>,
+    runtime_factory: Arc<RuntimeFactory>,
+    #[cfg(test)]
+    registry_insert_hook: Option<RegistryInsertHook>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct RegistryInsertHook {
+    reached: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl ClaudeSessionRuntime {
+    pub(crate) fn new() -> Self {
+        Self::with_runtime_factory(|config| Arc::new(ClaudeRuntime::new(config)))
+    }
+
+    fn with_runtime_factory(
+        runtime_factory: impl Fn(ClaudeProviderConfig) -> Arc<dyn HarnessRuntime>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            sessions: Arc::new(RwLock::new(SessionRegistry::default())),
+            runtime_factory: Arc::new(runtime_factory),
+            #[cfg(test)]
+            registry_insert_hook: None,
+        }
+    }
+
+    async fn reserve_session(
+        &self,
+        backend_session_id: &str,
+    ) -> Result<SessionReservation, LocalChatSessionError> {
+        let generation = self.sessions.write().await.reserve(backend_session_id)?;
+        Ok(SessionReservation {
+            sessions: self.sessions.clone(),
+            backend_session_id: backend_session_id.to_string(),
+            generation,
+            active: true,
+        })
+    }
+
+    pub(crate) async fn create_session(
+        &self,
+        input: HarnessCreateSessionInput,
+        runtime: LocalChatRuntime,
+    ) -> Result<(), LocalChatSessionError> {
+        let backend_session_id = input.backend_session_id.clone();
+        let reservation = self.reserve_session(&backend_session_id).await?;
+
+        let prepared = match PreparedSession::new(&input, &runtime) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                reservation.release().await;
+                emit_start_error(
+                    &runtime.event_sink(),
+                    &backend_session_id,
+                    error.to_string(),
+                );
+                return Err(error);
+            }
+        };
+        self.create_reserved_prepared_session(input, runtime, prepared, reservation)
+            .await
+    }
+
+    #[cfg(test)]
+    async fn create_prepared_session(
+        &self,
+        input: HarnessCreateSessionInput,
+        runtime: LocalChatRuntime,
+        prepared: PreparedSession,
+    ) -> Result<(), LocalChatSessionError> {
+        let backend_session_id = input.backend_session_id.clone();
+        let reservation = self.reserve_session(&backend_session_id).await?;
+        self.create_reserved_prepared_session(input, runtime, prepared, reservation)
+            .await
+    }
+
+    async fn create_reserved_prepared_session(
+        &self,
+        input: HarnessCreateSessionInput,
+        runtime: LocalChatRuntime,
+        prepared: PreparedSession,
+        reservation: SessionReservation,
+    ) -> Result<(), LocalChatSessionError> {
+        let backend_session_id = input.backend_session_id.clone();
+        let generation = reservation.generation();
+        let PreparedSession {
+            working_dir,
+            model,
+            model_warning,
+            provider_config,
+            plugin_resolution,
+            #[cfg(unix)]
+            permission_socket,
+        } = prepared;
+        #[cfg(unix)]
+        let mut permission_socket = permission_socket;
+        if let Some(warning) = &model_warning {
+            emit_warning(&runtime.event_sink(), &backend_session_id, warning.clone());
+        }
+        report_plugin_dir_resolution(
+            &runtime.event_sink(),
+            &backend_session_id,
+            &plugin_resolution,
+        );
+
+        let lifecycle_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let event_sink = Arc::new(ClaudeGuiEventSink::new(
+            backend_session_id.clone(),
+            generation,
+            runtime.event_sink(),
+            self.sessions.clone(),
+            model.clone(),
+            runtime.permission_bridge(),
+            lifecycle_gate.clone(),
+        ));
+        let control_sink = Arc::new(ClaudeGuiControlSink {
+            backend_session_id: backend_session_id.clone(),
+            runtime: runtime.clone(),
+        });
+        let harness = (self.runtime_factory)(provider_config);
+        let request = StartSessionRequest {
+            session_id: SessionId::new(backend_session_id.clone()),
+            stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
+            resume_id: input.provider_resume_id.clone().map(ProviderResumeId::new),
+            config: RequestConfig {
+                working_directory: Some(working_dir),
+                model,
+                reasoning_effort: input.reasoning_effort,
+                ..RequestConfig::default()
+            },
+        };
+        let handle = match harness
+            .start_session(request, event_sink.clone(), control_sink)
+            .await
+        {
+            Ok(handle) => handle,
+            Err(error) => {
+                #[cfg(unix)]
+                drop(permission_socket.take());
+                reservation.abandon().await;
+                let _ = event_sink.emit_error(error.to_string());
+                return Err(start_error(error));
+            }
+        };
+        let mut started = StartedSession {
+            handle,
+            reservation: Some(reservation),
+            #[cfg(unix)]
+            permission_socket: permission_socket.take(),
+        };
+
+        let _lifecycle = lifecycle_gate.lock().await;
+        if event_sink.is_closed() {
+            drop(_lifecycle);
+            started.shutdown().await;
+            return Err(LocalChatSessionError::StartFailed(
+                "Claude session ended during initialization".into(),
+            ));
+        }
+
+        let active_turn = Arc::new(Mutex::new(None));
+        #[cfg(test)]
+        if let Some(hook) = &self.registry_insert_hook {
+            hook.reached.notify_one();
+            hook.release.notified().await;
+        }
+        if !self
+            .sessions
+            .read()
+            .await
+            .is_starting_generation(&backend_session_id, generation)
+        {
+            drop(_lifecycle);
+            started.shutdown().await;
+            return Err(LocalChatSessionError::StartFailed(
+                "Claude session reservation ended during initialization".into(),
+            ));
+        }
+        let handle = started.handle();
+        let activated = self.sessions.write().await.activate(
+            backend_session_id.clone(),
+            generation,
+            ActiveSession {
+                generation,
+                handle: handle.clone(),
+                active_turn: active_turn.clone(),
+                permission_bridge: runtime.permission_bridge(),
+                #[cfg(unix)]
+                _permission_socket: started.take_permission_socket(),
+            },
+        );
+        debug_assert!(activated, "checked the startup reservation while gated");
+        started.disarm();
+        drop(_lifecycle);
+
+        if let Some(prompt) = input
+            .initial_prompt
+            .filter(|prompt| !prompt.trim().is_empty())
+        {
+            if let Err(error) = send_turn(&handle, &active_turn, prompt).await {
+                let closing_session = self.sessions.write().await.begin_close(&backend_session_id);
+                if let Some(session) = closing_session {
+                    let closing_session = ClosingSession {
+                        sessions: self.sessions.clone(),
+                        backend_session_id: backend_session_id.clone(),
+                        generation: session.generation,
+                        session: Some(session),
+                    };
+                    closing_session
+                        .session()
+                        .permission_bridge
+                        .fail_pending_permissions_for_session(
+                            &backend_session_id,
+                            "Claude session ended before the permission request was resolved",
+                        );
+                    let _ = closing_session.session().handle.close().await;
+                    closing_session.finish().await;
+                } else {
+                    let _ = handle.close().await;
+                }
+                let _ = event_sink.emit_error(error.to_string());
+                return Err(send_error(error));
+            }
+        }
+
+        log::info!("Claude harness session {} created", backend_session_id);
+        Ok(())
+    }
+
+    pub(crate) async fn send_message(
+        &self,
+        session_id: &str,
+        content: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        let (handle, active_turn) = self
+            .sessions
+            .read()
+            .await
+            .active
+            .get(session_id)
+            .map(|session| (session.handle.clone(), session.active_turn.clone()))
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
+        send_turn(&handle, &active_turn, content.to_string())
+            .await
+            .map_err(send_error)
+    }
+
+    pub(crate) async fn close_session(
+        &self,
+        session_id: &str,
+    ) -> Result<(), LocalChatSessionError> {
+        let session = self
+            .sessions
+            .write()
+            .await
+            .begin_close(session_id)
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
+        let closing_session = ClosingSession {
+            sessions: self.sessions.clone(),
+            backend_session_id: session_id.to_string(),
+            generation: session.generation,
+            session: Some(session),
+        };
+        // Closing the GUI handle also cancels any permission dialog that was
+        // waiting on either the legacy vtb-gate transport or a harness control.
+        // The harness emits SessionClosed too, so this operation is idempotent.
+        //
+        // Keep the socket guard alive until `close` finishes by retaining
+        // `closing_session` for the duration of the await. Its drop guard
+        // releases the reservation if this future is cancelled midway.
+        closing_session
+            .session()
+            .permission_bridge
+            .fail_pending_permissions_for_session(
+                session_id,
+                "Claude session ended before the permission request was resolved",
+            );
+        let active_turn = closing_session
+            .session()
+            .active_turn
+            .lock()
+            .map_err(|_| LocalChatSessionError::SendFailed("Claude turn state is poisoned".into()))?
+            .take();
+        let interrupt_error = if let Some(turn) = active_turn {
+            turn.interrupt().await.err()
+        } else {
+            None
+        };
+        let close_result = closing_session.session().handle.close().await;
+        let result = match (interrupt_error, close_result) {
+            (_, Ok(_)) => Ok(()),
+            (None, Err(error)) => Err(LocalChatSessionError::SendFailed(error.to_string())),
+            (Some(interrupt), Err(close)) => Err(LocalChatSessionError::SendFailed(format!(
+                "failed to interrupt active Claude turn: {interrupt}; failed to close Claude session: {close}"
+            ))),
+        };
+        closing_session.finish().await;
+        result
+    }
+
+    pub(crate) async fn has_session(&self, session_id: &str) -> bool {
+        self.sessions.read().await.active.contains_key(session_id)
+    }
+}
+
+impl Default for ClaudeSessionRuntime {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+struct PreparedSession {
+    working_dir: PathBuf,
+    model: Option<String>,
+    model_warning: Option<String>,
+    provider_config: ClaudeProviderConfig,
+    plugin_resolution: ClaudePluginDirResolution,
+    #[cfg(unix)]
+    permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
+}
+
+impl PreparedSession {
+    fn new(
+        input: &HarnessCreateSessionInput,
+        runtime: &LocalChatRuntime,
+    ) -> Result<Self, LocalChatSessionError> {
+        let app_handle = runtime.app_handle().ok_or_else(|| {
+            LocalChatSessionError::SpawnFailed(
+                "Tauri app handle is required to start a Claude session".into(),
+            )
+        })?;
+        let working_dir = resolve_working_dir(input.working_dir.clone(), &app_handle)
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                LocalChatSessionError::StartFailed(
+                    "Cannot start Claude session without a selected project path".into(),
+                )
+            })?;
+        if !working_dir.is_dir() {
+            return Err(LocalChatSessionError::StartFailed(format!(
+                "Working directory does not exist or is not a directory: {}",
+                working_dir.display()
+            )));
+        }
+
+        let claude_binary = find_claude_binary().map_err(LocalChatSessionError::SpawnFailed)?;
+        let augmented_path = build_augmented_path();
+        let plugin_resolution =
+            resolve_claude_plugin_dir(&claude_binary, &working_dir, &augmented_path);
+        let gate = find_vtb_gate_binary().map_err(LocalChatSessionError::StartFailed)?;
+        #[cfg(unix)]
+        let permission_socket = runtime
+            .permission_bridge()
+            .start_socket(&input.backend_session_id, app_handle)
+            .map_err(LocalChatSessionError::StartFailed)?;
+
+        let resolved_model = resolve_requested_claude_model(
+            input.model_id.clone(),
+            input.provider_resume_id.is_some(),
+        );
+        let root_locator_dir = claude_project_directory(&working_dir);
+        let provider_config = build_provider_config(
+            claude_binary,
+            &augmented_path,
+            &plugin_resolution,
+            gate,
+            &input.backend_session_id,
+            input.permission_mode.as_ref(),
+            root_locator_dir,
+            #[cfg(unix)]
+            Some(permission_socket.path()),
+            #[cfg(not(unix))]
+            None,
+        );
+
+        Ok(Self {
+            working_dir,
+            model: resolved_model.model_id,
+            model_warning: resolved_model.warning,
+            provider_config,
+            plugin_resolution,
+            #[cfg(unix)]
+            permission_socket: Some(permission_socket),
+        })
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_provider_config(
+    claude_binary: PathBuf,
+    augmented_path: &str,
+    plugin_resolution: &ClaudePluginDirResolution,
+    gate: PathBuf,
+    backend_session_id: &str,
+    permission_mode: Option<&PermissionMode>,
+    root_locator_dir: PathBuf,
+    permission_socket: Option<&Path>,
+) -> ClaudeProviderConfig {
+    let mut environment = BTreeMap::from([(
+        "VTB_CLAUDE_SESSION_ID".to_string(),
+        backend_session_id.to_string(),
+    )]);
+    if let Some(permission_socket) = permission_socket {
+        environment.insert(
+            "VTB_GATE_SOCKET".to_string(),
+            permission_socket.to_string_lossy().into_owned(),
+        );
+    }
+    ClaudeProviderConfig {
+        executable: Some(claude_binary),
+        search_path: Some(OsString::from(augmented_path)),
+        environment,
+        plugin_roots: plugin_resolution.plugin_root.clone().into_iter().collect(),
+        permission_mode: permission_mode.map(claude_permission_mode),
+        permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
+        mcp_config: Some(serde_json::json!({
+            "mcpServers": { "vtb-gate": { "command": gate } }
+        })),
+        root_locator_resolver: Some(Arc::new(move |session_id: &SessionId| {
+            Ok(Some(ProviderThreadRef::new(
+                root_locator_dir
+                    .join(format!("{}.jsonl", session_id.as_str()))
+                    .to_string_lossy()
+                    .into_owned(),
+            )))
+        })),
+        ..ClaudeProviderConfig::default()
+    }
+}
+
+async fn send_turn(
+    handle: &Arc<dyn SessionHandle>,
+    active_turn: &Arc<Mutex<Option<Arc<dyn vertebrae_harness_core::TurnHandle>>>>,
+    content: String,
+) -> Result<(), HarnessError> {
+    let turn = handle
+        .send(SendTurnRequest {
+            turn_id: TurnId::new(uuid::Uuid::new_v4().to_string()),
+            content,
+            output_schema: None,
+        })
+        .await?;
+    active_turn
+        .lock()
+        .map_err(|_| HarnessError::Operation("Claude turn state is poisoned".into()))?
+        .replace(turn.clone());
+    let active_turn = active_turn.clone();
+    let turn_id = turn.turn_id().clone();
+    tokio::spawn(async move {
+        if let Err(error) = turn.await_outcome().await {
+            log::warn!("Claude harness turn ended without an outcome: {}", error);
+        }
+        if let Ok(mut active) = active_turn.lock() {
+            if active
+                .as_ref()
+                .is_some_and(|candidate| candidate.turn_id() == &turn_id)
+            {
+                active.take();
+            }
+        }
+    });
+    Ok(())
+}
+
+fn start_error(error: HarnessError) -> LocalChatSessionError {
+    match error {
+        HarnessError::Unavailable(message) => LocalChatSessionError::SpawnFailed(message),
+        error => LocalChatSessionError::StartFailed(error.to_string()),
+    }
+}
+
+fn send_error(error: HarnessError) -> LocalChatSessionError {
+    LocalChatSessionError::SendFailed(error.to_string())
+}
+
+fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
+    match mode {
+        PermissionMode::AcceptEdits => ClaudePermissionMode::AcceptEdits,
+        PermissionMode::Auto => ClaudePermissionMode::Auto,
+        PermissionMode::BypassPermissions => ClaudePermissionMode::BypassPermissions,
+        PermissionMode::Default => ClaudePermissionMode::Default,
+        PermissionMode::DontAsk => ClaudePermissionMode::DontAsk,
+        PermissionMode::Plan => ClaudePermissionMode::Plan,
+    }
 }
 
 fn current_project_path<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> Option<String> {
@@ -58,10 +1123,10 @@ fn current_project_path<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> 
             .projects
             .get(&slug)
             .map(|project| project.path.clone()),
-        Err(err) => {
+        Err(error) => {
             log::warn!(
                 "Failed to load config while resolving current project path: {}",
-                err
+                error
             );
             None
         }
@@ -78,22 +1143,17 @@ fn resolve_working_dir<R: tauri::Runtime>(
         .filter(|dir| !dir.trim().is_empty())
 }
 
-fn configure_claude_process(
-    claude_binary: &Path,
-    args: &[String],
-    working_dir: &Path,
-    augmented_path: &str,
-    session_id: &str,
-) -> Command {
-    let mut command = Command::new(claude_binary);
-    command.args(args);
-    command.current_dir(working_dir);
-    command.env("PATH", augmented_path);
-    command.env("VTB_CLAUDE_SESSION_ID", session_id);
-    command.stdin(Stdio::piped());
-    command.stdout(Stdio::piped());
-    command.stderr(Stdio::piped());
-    command
+fn claude_project_directory(working_dir: &Path) -> PathBuf {
+    let encoded = working_dir
+        .to_string_lossy()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect::<String>();
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".claude")
+        .join("projects")
+        .join(encoded)
 }
 
 fn report_plugin_dir_resolution(
@@ -103,7 +1163,7 @@ fn report_plugin_dir_resolution(
 ) {
     if let Some(warning) = &resolution.warning {
         log::warn!("{}", warning);
-        ClaudeSessionRuntime::emit_warning(event_sink, session_id, warning.clone());
+        emit_warning(event_sink, session_id, warning.clone());
     } else if let Some(plugin_root) = &resolution.plugin_root {
         log::info!(
             "Loading Vertebrae-installed Claude skills from plugin root: {}",
@@ -112,474 +1172,21 @@ fn report_plugin_dir_resolution(
     }
 }
 
-// ============================================================================
-// Session runtime
-// ============================================================================
-
-struct SessionHandle {
-    command_tx: mpsc::UnboundedSender<ClaudeLiveJsonlCommand>,
+fn emit_start_error(event_sink: &LocalChatEventSink, session_id: &str, error: String) {
+    event_sink.emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
+        backend_session_id: session_id.to_string(),
+        harness: LocalChatHarnessKind::Claude,
+        error,
+    }));
 }
 
-struct SessionRuntimeState {
-    runtime: LocalChatRuntime,
-    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-}
-
-struct SessionCleanup {
-    session_id: String,
-    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-    permission_bridge: PermissionBridge,
-}
-
-impl SessionCleanup {
-    fn new(
-        session_id: String,
-        sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-        permission_bridge: PermissionBridge,
-    ) -> Self {
-        Self {
-            session_id,
-            sessions,
-            permission_bridge,
-        }
-    }
-}
-
-impl Drop for SessionCleanup {
-    fn drop(&mut self) {
-        self.permission_bridge.fail_pending_permissions_for_session(
-            &self.session_id,
-            "Claude session ended before the permission request was resolved",
-        );
-        let mut sessions = self.sessions.blocking_write();
-        sessions.remove(&self.session_id);
-    }
-}
-
-/// Harness-private runtime that manages active Claude CLI sessions.
-#[derive(Clone)]
-pub(crate) struct ClaudeSessionRuntime {
-    sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
-}
-
-impl ClaudeSessionRuntime {
-    pub(crate) fn new() -> Self {
-        Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    pub(crate) async fn create_session(
-        &self,
-        input: HarnessCreateSessionInput,
-        runtime: LocalChatRuntime,
-    ) -> Result<(), LocalChatSessionError> {
-        let session_id = input.backend_session_id.clone();
-        if runtime.app_handle().is_none() {
-            return Err(LocalChatSessionError::SpawnFailed(
-                "Tauri app handle is required to start a Claude session".to_string(),
-            ));
-        }
-        {
-            let sessions = self.sessions.read().await;
-            if sessions.contains_key(&session_id) {
-                return Err(LocalChatSessionError::SessionExists(session_id));
-            }
-        }
-
-        let (command_tx, command_rx) = mpsc::unbounded_channel();
-
-        {
-            let mut sessions = self.sessions.write().await;
-            sessions.insert(session_id.clone(), SessionHandle { command_tx });
-        }
-
-        let runtime_state = SessionRuntimeState {
-            runtime,
-            sessions: self.sessions.clone(),
-        };
-        thread::spawn(move || {
-            Self::run_session(input, command_rx, runtime_state);
-        });
-
-        log::info!("Claude session {} created", session_id);
-        Ok(())
-    }
-
-    fn run_session(
-        input: HarnessCreateSessionInput,
-        command_rx: mpsc::UnboundedReceiver<ClaudeLiveJsonlCommand>,
-        runtime_state: SessionRuntimeState,
-    ) {
-        let HarnessCreateSessionInput {
-            backend_session_id: session_id,
-            working_dir,
-            initial_prompt,
-            provider_resume_id: resume_session_id,
-            model_id: requested_model_id,
-            permission_mode,
-            ..
-        } = input;
-        let SessionRuntimeState { runtime, sessions } = runtime_state;
-        let Some(app_handle) = runtime.app_handle() else {
-            log::error!("Cannot run Claude session without a Tauri app handle");
-            return;
-        };
-        let event_sink = runtime.event_sink();
-        let permission_bridge = runtime.permission_bridge();
-        let cleanup_guard =
-            SessionCleanup::new(session_id.clone(), sessions, permission_bridge.clone());
-        let Some(working_dir) = resolve_working_dir(working_dir, &app_handle) else {
-            let error = "Cannot start Claude session without a selected project path".to_string();
-            log::error!("{}", error);
-            Self::emit_error(&event_sink, &session_id, error);
-            return;
-        };
-
-        let resolved_model =
-            resolve_requested_claude_model(requested_model_id, resume_session_id.is_some());
-        if let Some(warning) = &resolved_model.warning {
-            log::warn!("{}", warning);
-            Self::emit_warning(&event_sink, &session_id, warning.clone());
-        }
-
-        let claude_binary = match find_claude_binary() {
-            Ok(path) => path,
-            Err(e) => {
-                log::error!("Failed to find Claude Code CLI: {}", e);
-                Self::emit_init(&event_sink, &session_id, None, String::new(), vec![]);
-                return;
-            }
-        };
-
-        log::info!(
-            "Starting Claude session: id={}, working_dir={:?}, resume={:?}, model={:?}, claude_binary={}",
-            session_id,
-            Some(&working_dir),
-            resume_session_id,
-            resolved_model.model_id,
-            claude_binary.display()
-        );
-
-        let augmented_path = build_augmented_path();
-        let plugin_dir =
-            resolve_claude_plugin_dir(&claude_binary, Path::new(&working_dir), &augmented_path);
-        report_plugin_dir_resolution(&event_sink, &session_id, &plugin_dir);
-
-        let vtb_gate_binary = match find_vtb_gate_binary() {
-            Ok(path) => path.to_string_lossy().to_string(),
-            Err(e) => {
-                log::error!("Failed to find vtb-gate: {}", e);
-                Self::emit_error(&event_sink, &session_id, e);
-                return;
-            }
-        };
-        let mcp_config = serde_json::json!({
-            "mcpServers": {
-                "vtb-gate": {
-                    "command": vtb_gate_binary
-                }
-            }
-        })
-        .to_string();
-
-        if let Some(ref resume_id) = resume_session_id {
-            log::info!("Resuming Claude conversation: {}", resume_id);
-        }
-
-        let args = build_claude_args(
-            &mcp_config,
-            resume_session_id.as_deref(),
-            resolved_model.model_id.as_deref(),
-            permission_mode,
-            plugin_dir.plugin_root.as_deref(),
-        );
-
-        let path = Path::new(&working_dir);
-        if path.exists() && path.is_dir() {
-            log::info!("Setting working directory to: {}", working_dir);
-        } else {
-            let error = format!(
-                "Working directory does not exist or is not a directory: {}",
-                working_dir
-            );
-            log::error!("{}", error);
-            Self::emit_error(&event_sink, &session_id, error);
-            return;
-        }
-
-        log::info!(
-            "Setting augmented PATH for Claude subprocess: {}",
-            augmented_path
-        );
-        let mut cmd =
-            configure_claude_process(&claude_binary, &args, path, &augmented_path, &session_id);
-        #[cfg(unix)]
-        let _permission_socket_guard =
-            match permission_bridge.start_socket(&session_id, app_handle.clone()) {
-                Ok(socket) => {
-                    log::info!(
-                        "Created vtb-gate permission socket for session {} at {:?}",
-                        session_id,
-                        socket.path()
-                    );
-                    cmd.env("VTB_GATE_SOCKET", socket.path());
-                    socket
-                }
-                Err(e) => {
-                    log::error!("Failed to create vtb-gate permission socket: {}", e);
-                    Self::emit_error(&event_sink, &session_id, e);
-                    return;
-                }
-            };
-        #[cfg(not(unix))]
-        log::warn!("VTB_GATE_SOCKET permission transport is unavailable on this platform");
-
-        let event_sink_for_reader = event_sink.clone();
-        let stdout_processor = Box::new(move |reader, session_id: String| {
-            jsonl::process_jsonl_lines(reader, &session_id, |events| {
-                Self::emit_jsonl_events(&event_sink_for_reader, events);
-            });
-        });
-
-        let event_sink_for_stderr = event_sink.clone();
-        let stderr_processor = Box::new(move |reader, session_id: String| {
-            process_claude_stderr_lines(reader, &session_id, |warning| {
-                Self::emit_warning(&event_sink_for_stderr, &session_id, warning);
-            });
-        });
-
-        let runner = ClaudeLiveJsonlProcessRunner::new(
-            session_id.clone(),
-            cmd,
-            command_rx,
-            Box::new(encode_claude_user_jsonl_message),
-            stdout_processor,
-            stderr_processor,
-        )
-        .with_initial_prompt(initial_prompt);
-
-        match runner.run() {
-            Ok(result) => {
-                log::debug!(
-                    "Claude session {} live JSONL runner exited via {:?}, status={:?}",
-                    session_id,
-                    result.exit_reason,
-                    result.wait_status
-                );
-                Self::emit_error_for_unexpected_runner_exit(&event_sink, &session_id, &result);
-            }
-            Err(ClaudeLiveJsonlProcessError::Spawn(err)) => {
-                let error = format!(
-                    "Failed to spawn claude at {}: {}",
-                    claude_binary.display(),
-                    err
-                );
-                log::error!("{}", error);
-                Self::emit_error(&event_sink, &session_id, error);
-                return;
-            }
-            Err(err) => {
-                let error = err.to_string();
-                log::error!("{}", error);
-                Self::emit_error(&event_sink, &session_id, error);
-                return;
-            }
-        }
-
-        drop(cleanup_guard);
-        log::info!("Claude session {} ended", session_id);
-    }
-
-    fn emit_jsonl_events(event_sink: &LocalChatEventSink, events: Vec<EmittedEvent>) {
-        for event in events {
-            let event = Self::local_chat_event_from_claude_emitted(event);
-            if let LocalChatEvent::Init(e) = &event {
-                log::info!(
-                    "[Claude Init] conversation_id={:?}, model={}",
-                    e.provider_resume_id,
-                    e.model
-                );
-            }
-            event_sink.emit(event);
-        }
-    }
-
-    fn emit_error_for_unexpected_runner_exit(
-        event_sink: &LocalChatEventSink,
-        session_id: &str,
-        result: &ClaudeLiveJsonlRunResult,
-    ) {
-        let reason = match result.exit_reason {
-            ClaudeLiveJsonlExitReason::CloseCommand => return,
-            ClaudeLiveJsonlExitReason::StdoutClosed => "stdout closed",
-            ClaudeLiveJsonlExitReason::CommandChannelClosed => "command channel closed",
-        };
-        let mut error = format!("Claude session ended unexpectedly: {reason}");
-        if let Some(status) = &result.wait_status {
-            error.push_str(&format!(" (status: {status})"));
-        }
-        log::error!("{}", error);
-        Self::emit_error(event_sink, session_id, error);
-    }
-
-    fn local_chat_event_from_claude_emitted(event: EmittedEvent) -> LocalChatEvent {
-        match event {
-            EmittedEvent::Init(e) => LocalChatEvent::Init(NeutralSessionInitEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                provider_resume_id: e.claude_conversation_id,
-                model: e.model,
-                tools: e.tools,
-            }),
-            EmittedEvent::Text(e) => LocalChatEvent::Text(NeutralTextEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                text: e.text,
-                is_partial: e.is_partial,
-                parent_tool_use_id: e.parent_tool_use_id,
-            }),
-            EmittedEvent::ToolCall(e) => LocalChatEvent::ToolCall(NeutralToolCallEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                tool_id: e.tool_id,
-                tool_name: e.tool_name,
-                input: e.input,
-                parent_tool_use_id: e.parent_tool_use_id,
-            }),
-            EmittedEvent::ToolResult(e) => LocalChatEvent::ToolResult(NeutralToolResultEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                tool_id: e.tool_id,
-                result: e.result,
-                is_error: e.is_error,
-                parent_tool_use_id: e.parent_tool_use_id,
-            }),
-            EmittedEvent::Usage(e) => LocalChatEvent::Usage(NeutralSessionUsageEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                model: e.model,
-                context_tokens: e.context_tokens,
-                context_window: e.context_window,
-            }),
-            EmittedEvent::SessionEnd(e) => LocalChatEvent::End(NeutralSessionEndEvent {
-                backend_session_id: e.session_id,
-                harness: LocalChatHarnessKind::Claude,
-                duration_ms: e.duration_ms,
-                cost_usd: e.cost_usd,
-                num_turns: e.num_turns,
-                result: e.result,
-                is_error: e.is_error,
-                context_tokens: e.context_tokens,
-                context_window: e.context_window,
-            }),
-        }
-    }
-
-    fn emit_init(
-        event_sink: &LocalChatEventSink,
-        session_id: &str,
-        provider_resume_id: Option<String>,
-        model: String,
-        tools: Vec<String>,
-    ) {
-        event_sink.emit(LocalChatEvent::Init(NeutralSessionInitEvent {
-            backend_session_id: session_id.to_string(),
-            harness: LocalChatHarnessKind::Claude,
-            provider_resume_id,
-            model,
-            tools,
-        }));
-    }
-
-    fn emit_error(event_sink: &LocalChatEventSink, session_id: &str, error: String) {
-        event_sink.emit(LocalChatEvent::Error(NeutralSessionErrorEvent {
-            backend_session_id: session_id.to_string(),
-            harness: LocalChatHarnessKind::Claude,
-            error,
-        }));
-    }
-
-    fn emit_warning(event_sink: &LocalChatEventSink, session_id: &str, warning: String) {
-        event_sink.emit(LocalChatEvent::Warning(NeutralSessionWarningEvent {
-            backend_session_id: session_id.to_string(),
-            harness: LocalChatHarnessKind::Claude,
-            warning,
-        }));
-    }
-
-    /// Process stderr lines from the Claude CLI.
-    fn process_stderr_lines(reader: impl BufRead, session_id: &str, on_error: impl FnMut(String)) {
-        process_claude_stderr_lines(reader, session_id, on_error);
-    }
-
-    pub(crate) async fn send_message(
-        &self,
-        session_id: &str,
-        content: &str,
-    ) -> Result<(), LocalChatSessionError> {
-        let sessions = self.sessions.read().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-
-        let (response_tx, response_rx) = oneshot::channel();
-        session
-            .command_tx
-            .send(ClaudeLiveJsonlCommand::SendMessage {
-                content: content.to_string(),
-                response: response_tx,
-            })
-            .map_err(|_| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-
-        response_rx
-            .await
-            .map_err(|_| LocalChatSessionError::SendFailed("Session closed".to_string()))?
-            .map_err(LocalChatSessionError::SendFailed)
-    }
-
-    pub(crate) async fn close_session(
-        &self,
-        session_id: &str,
-    ) -> Result<(), LocalChatSessionError> {
-        let sessions = self.sessions.read().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-
-        let (response_tx, response_rx) = oneshot::channel();
-        session
-            .command_tx
-            .send(ClaudeLiveJsonlCommand::Close {
-                response: response_tx,
-            })
-            .map_err(|_| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
-
-        response_rx
-            .await
-            .map_err(|_| LocalChatSessionError::SessionNotFound("Session closed".to_string()))?
-            .map_err(LocalChatSessionError::SessionNotFound)
-    }
-
-    pub(crate) async fn has_session(&self, session_id: &str) -> bool {
-        let sessions = self.sessions.read().await;
-        sessions.contains_key(session_id)
-    }
-}
-
-impl Default for ClaudeSessionRuntime {
-    fn default() -> Self {
-        Self::new()
-    }
+fn emit_warning(event_sink: &LocalChatEventSink, session_id: &str, warning: String) {
+    event_sink.emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
+        backend_session_id: session_id.to_string(),
+        harness: LocalChatHarnessKind::Claude,
+        warning,
+    }));
 }
 
 #[cfg(test)]
-mod line_processing_tests;
-#[cfg(test)]
-mod local_chat_event_mapping_tests;
-#[cfg(test)]
-mod manager_session_registry_tests;
-#[cfg(test)]
-mod path_utilities_tests;
-#[cfg(test)]
-mod process_configuration_tests;
+mod tests;

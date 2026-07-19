@@ -29,6 +29,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 url = "2.5"
 vertebrae-core = { path = "../core" }
 vertebrae-harness-core = { path = "../harness-core" }
+vertebrae-harness-claude = { path = "../harness-claude" }
 vertebrae-installer = { path = "../installer" }
 vertebrae-sacrum-client = { path = "../sacrum-client" }
 

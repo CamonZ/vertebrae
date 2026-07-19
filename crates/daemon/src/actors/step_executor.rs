@@ -1,12 +1,12 @@
-//! StepExecutor - per-step actor that runs Claude Code CLI for a single workflow step.
+//! StepExecutor - per-step actor that runs a provider harness for one workflow step.
 //!
 //! Spawned by ProjectSupervisor upon receiving an execute_step channel event from Sacrum.
 //! Each StepExecutor:
 //! - Receives step config (prompt, model), execution_id, and task_id from its parent
-//! - Spawns `claude -p <prompt> --output-format stream-json --verbose` as a child process
-//! - Streams stdout line by line, posting each line as a SessionLog to the ExecutionService
+//! - Runs Claude through `harness-claude` and persists normalized harness events
+//! - Retains the legacy direct process path for providers not yet migrated
 //! - Reports StepCompleted or StepFailed to the parent ProjectSupervisor on exit
-//! - Kills the child process on Cancel or actor stop
+//! - Cancels the active harness/process and awaits process settlement
 //!
 //! Orchestration (step ordering, parallel vs serial, retry logic) lives entirely
 //! in Sacrum/Elixir -- the daemon just executes what it is told.
@@ -15,17 +15,29 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use vertebrae_core::Provider;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
+use vertebrae_harness_claude::{
+    ClaudeLaunchMode, ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude,
+    ClaudeRuntime,
+};
+use vertebrae_harness_core::{
+    CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
+    ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
+    HarnessRuntime, ProviderThreadRef, RequestConfig, ResolutionSource, RunHandle, RunId,
+    RunOutcome, RunRequest, SessionId, SessionUsage, StreamId,
+};
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::helpers::ProviderBinaries;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
 use crate::provider::{ParserKind, ProviderResolutionError, resolve_provider_command};
+use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
 
 /// Default model used when agent_config does not specify one.
@@ -34,6 +46,8 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 pub const CHECKPOINT_CLAUDE_ARGV: &str = "claude_argv";
 pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
 pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
+const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(250);
 
 /// Reported when a child process exits without a numeric exit code (e.g.
 /// killed by a signal on Unix, where `ExitStatus::code()` returns `None`).
@@ -152,6 +166,7 @@ pub enum StepExecutorMessage {
     Execute,
     Cancel,
     ProcessExited(Result<ExitStatus, String>),
+    HarnessSettled(Result<RunOutcome, String>),
 }
 
 impl std::fmt::Debug for StepExecutorMessage {
@@ -160,7 +175,167 @@ impl std::fmt::Debug for StepExecutorMessage {
             Self::Execute => write!(f, "Execute"),
             Self::Cancel => write!(f, "Cancel"),
             Self::ProcessExited(result) => f.debug_tuple("ProcessExited").field(result).finish(),
+            Self::HarnessSettled(result) => f.debug_tuple("HarnessSettled").field(result).finish(),
         }
+    }
+}
+
+#[derive(Default)]
+struct HarnessUsageMetrics {
+    input_tokens: u64,
+    output_tokens: u64,
+    cost_microusd: u64,
+    turn_deltas: u64,
+    session_snapshot: Option<SessionUsage>,
+}
+
+struct DaemonHarnessEventSink {
+    persistence: Arc<dyn EventSink>,
+    root_stream_id: StreamId,
+    usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
+    execution_id: String,
+    task_id: String,
+    verbose: bool,
+}
+
+#[async_trait]
+impl EventSink for DaemonHarnessEventSink {
+    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        if self.verbose {
+            match &event.payload {
+                HarnessEventPayloadV1::SessionStarted(started) => tracing::info!(
+                    target: VERBOSE_LOG_TARGET,
+                    execution_id = %self.execution_id,
+                    task_id = %self.task_id,
+                    checkpoint = CHECKPOINT_STREAM_JSON_INIT,
+                    session_id = ?started.provider_resume_id,
+                    tools = ?started.tools,
+                    structured_output_advertised = started.tools.iter().any(|tool| tool == "StructuredOutput"),
+                    "verbose: Claude harness session started"
+                ),
+                HarnessEventPayloadV1::Warning(diagnostic)
+                | HarnessEventPayloadV1::Error(diagnostic)
+                    if diagnostic.code.as_deref() == Some("claude_stderr") =>
+                {
+                    tracing::info!(
+                        target: VERBOSE_LOG_TARGET,
+                        execution_id = %self.execution_id,
+                        task_id = %self.task_id,
+                        checkpoint = CHECKPOINT_CLAUDE_STDERR,
+                        line = %diagnostic.message,
+                        "verbose: Claude harness stderr"
+                    );
+                }
+                _ => {}
+            }
+        }
+        // Only durable normalized events contribute to the daemon's legacy
+        // StepResult metrics. Terminal RunOutcome.usage is informational and
+        // intentionally ignored to avoid counting the same turn twice.
+        let normalized_usage = match &event.payload {
+            HarnessEventPayloadV1::Usage(usage) if event.stream_id == self.root_stream_id => {
+                Some((usage.turn_delta.clone(), usage.session_snapshot.clone()))
+            }
+            _ => None,
+        };
+        let mut cancel_rx = self.cancel_rx.clone();
+        if *cancel_rx.borrow() {
+            if matches!(&event.payload, HarnessEventPayloadV1::RunFinished(_)) {
+                return tokio::time::timeout(
+                    CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT,
+                    self.persistence.emit(event),
+                )
+                .await
+                .map_err(|_| {
+                    HarnessError::EventSink(
+                        "daemon cancelled while persisting the terminal harness event".into(),
+                    )
+                })?;
+            }
+            return Err(HarnessError::EventSink(
+                "daemon cancelled while persisting a harness event".into(),
+            ));
+        }
+        tokio::select! {
+            result = self.persistence.emit(event) => result?,
+            _ = cancel_rx.changed() => {
+                return Err(HarnessError::EventSink(
+                    "daemon cancelled while persisting a harness event".into(),
+                ));
+            }
+        }
+        if let Some((turn_delta, session_snapshot)) = normalized_usage {
+            let mut usage = self
+                .usage
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(delta) = turn_delta {
+                usage.input_tokens = usage.input_tokens.saturating_add(delta.tokens.input_tokens);
+                usage.output_tokens = usage
+                    .output_tokens
+                    .saturating_add(delta.tokens.output_tokens);
+                usage.cost_microusd = usage.cost_microusd.saturating_add(delta.cost_microusd);
+                usage.turn_deltas = usage.turn_deltas.saturating_add(1);
+            }
+            if let Some(snapshot) = session_snapshot {
+                usage.session_snapshot = Some(snapshot);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct DaemonControlSink {
+    permission_mode: PermissionMode,
+}
+
+impl DaemonControlSink {
+    fn from_agent_config(agent_config: &AgentConfig) -> Self {
+        Self {
+            permission_mode: agent_config
+                .permission_mode
+                .clone()
+                .unwrap_or(PermissionMode::BypassPermissions),
+        }
+    }
+}
+
+#[async_trait]
+impl ControlSink for DaemonControlSink {
+    async fn request(
+        &self,
+        request: ControlRequestEnvelope,
+    ) -> Result<ControlResolution, HarnessError> {
+        if matches!(request.request, ControlRequest::UserQuestion { .. }) {
+            return Err(HarnessError::Control(
+                "daemon workflow runs cannot answer interactive Claude questions".into(),
+            ));
+        }
+        let decision = request.automatic_resolution.unwrap_or_else(|| {
+            match (&self.permission_mode, &request.request) {
+                (PermissionMode::BypassPermissions, ControlRequest::PermissionGrant(grant)) => {
+                    ControlDecision::PermissionsGranted {
+                        permissions: grant.permissions.clone(),
+                        scope: GrantScope::Turn,
+                    }
+                }
+                (PermissionMode::BypassPermissions, _) => ControlDecision::AllowOnce,
+                _ => ControlDecision::Deny,
+            }
+        });
+        let message = if matches!(decision, ControlDecision::Deny) {
+            "denied by daemon permission mode"
+        } else {
+            "resolved by daemon automatic control policy"
+        };
+        Ok(ControlResolution {
+            request_id: request.request_id,
+            source: ResolutionSource::Consumer,
+            decision: Some(decision),
+            message: Some(message.into()),
+        })
     }
 }
 
@@ -272,6 +447,152 @@ pub(crate) fn build_claude_command_with_settings_and_managed_root(
     Ok(cmd)
 }
 
+fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
+    match mode {
+        PermissionMode::AcceptEdits => ClaudePermissionMode::AcceptEdits,
+        PermissionMode::Auto => ClaudePermissionMode::Auto,
+        PermissionMode::BypassPermissions => ClaudePermissionMode::BypassPermissions,
+        PermissionMode::Default => ClaudePermissionMode::Default,
+        PermissionMode::DontAsk => ClaudePermissionMode::DontAsk,
+        PermissionMode::Plan => ClaudePermissionMode::Plan,
+    }
+}
+
+fn daemon_claude_root_locator(session_id: &SessionId) -> ProviderThreadRef {
+    // Daemon one-shot runs do not replay Claude's on-disk transcript, so they
+    // must not guess Claude's project-directory encoding. This stable opaque
+    // identity lets the decoder release pathless init records while leaving
+    // provider-owned transcript discovery to a later replay-capable surface.
+    ProviderThreadRef::new(format!("claude://session/{}", session_id.as_str()))
+}
+
+fn build_claude_harness(
+    config: &StepExecutorConfig,
+    settings: &SyntheticSettings,
+) -> Result<(ClaudeRuntime, RunRequest), ProviderResolutionError> {
+    vertebrae_core::model_catalog::validate_provider_model_with_codex_provider(
+        Provider::Anthropic,
+        config.step_config.agent_config.model.as_deref(),
+        config
+            .step_config
+            .agent_config
+            .codex_model_provider
+            .as_deref(),
+    )
+    .map_err(|error| ProviderResolutionError::InvalidProviderModel(error.to_string()))?;
+    vertebrae_core::model_catalog::normalize_provider_reasoning_effort(
+        Provider::Anthropic,
+        config.step_config.agent_config.reasoning_effort.as_deref(),
+    )
+    .map_err(|error| ProviderResolutionError::InvalidReasoningEffort(error.to_string()))?;
+
+    let binary = config
+        .provider_binaries
+        .get(Provider::Anthropic)
+        .ok_or_else(|| ProviderResolutionError::MissingProviderBinary {
+            provider: Provider::Anthropic,
+            hint: crate::helpers::find_claude_binary("")
+                .err()
+                .unwrap_or_else(|| "Set CLAUDE_CODE_PATH or install claude in PATH.".into()),
+        })?;
+
+    let resolution = vertebrae_installer::resolve_claude_plugin_dir(
+        binary,
+        config.working_dir(),
+        &config.shell_path,
+    );
+    if let Some(warning) = resolution.warning {
+        tracing::warn!(
+            execution_id = %config.execution_id,
+            task_id = %config.task_id,
+            claude_binary = %binary.display(),
+            "{}",
+            warning,
+        );
+    }
+
+    let mut agent_config = config.step_config.agent_config.clone();
+    if agent_config.model.is_none() {
+        agent_config.model = Some(DEFAULT_MODEL.into());
+    }
+    for skill in &config.step_config.skills {
+        if !agent_config.allowed_tools.contains(skill) {
+            agent_config.allowed_tools.push(skill.clone());
+        }
+    }
+    if agent_config.permission_mode.is_none() {
+        agent_config.permission_mode = Some(PermissionMode::BypassPermissions);
+    }
+    if let Some(root) = resolution.plugin_root.as_deref() {
+        merge_managed_plugin_root(&mut agent_config, root);
+    }
+
+    let model = agent_config.model.take();
+    let permission_mode = agent_config
+        .permission_mode
+        .take()
+        .as_ref()
+        .map(claude_permission_mode);
+    let output_schema = agent_config.json_schema.take();
+    let plugin_roots = std::mem::take(&mut agent_config.plugin_dirs)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let provider = ClaudeProviderConfig {
+        executable: Some(binary.to_path_buf()),
+        search_path: Some(config.shell_path.clone().into()),
+        prelude: ClaudeProviderPrelude {
+            settings_path: Some(settings.settings_path()),
+            // These are daemon-owned Claude flags not represented in the
+            // portable RequestConfig contract.
+            args: agent_config.to_claude_cli_args(),
+        },
+        plugin_roots,
+        agent_paths: config
+            .step_config
+            .agents
+            .iter()
+            .map(PathBuf::from)
+            .collect(),
+        permission_mode,
+        root_locator_resolver: Some(Arc::new(|session_id: &SessionId| {
+            Ok(Some(daemon_claude_root_locator(session_id)))
+        })),
+        ..ClaudeProviderConfig::default()
+    };
+    let request = RunRequest {
+        run_id: RunId::new(config.execution_id.clone()),
+        stream_id: StreamId::new(config.execution_id.clone()),
+        prompt: config.step_config.prompt.clone(),
+        config: RequestConfig {
+            working_directory: Some(config.working_dir().to_path_buf()),
+            model,
+            output_schema,
+            ..RequestConfig::default()
+        },
+    };
+    if config.step_config.verbose_daemon_logging
+        && let Ok(spec) = provider.command_spec(
+            ClaudeLaunchMode::OneShot {
+                prompt: &request.prompt,
+            },
+            &request.config,
+        )
+    {
+        tracing::info!(
+            target: VERBOSE_LOG_TARGET,
+            execution_id = %config.execution_id,
+            task_id = %config.task_id,
+            checkpoint = CHECKPOINT_CLAUDE_ARGV,
+            program = %spec.program.display(),
+            argv = ?spec.args,
+            provider = %Provider::Anthropic,
+            "verbose: built Claude harness command",
+        );
+    }
+    Ok((ClaudeRuntime::new(provider), request))
+}
+
 /// Convert a Codex `turn.completed` usage into the daemon's [`StreamMetrics`].
 ///
 /// Codex's `input_tokens` already includes the cached portion —
@@ -370,6 +691,10 @@ pub struct StepExecutorState {
     config: StepExecutorConfig,
     parent: ActorRef<ProjectMessage>,
     child_process: Option<Child>,
+    harness_run: Option<Arc<dyn RunHandle>>,
+    harness_outcome_handle: Option<tokio::task::JoinHandle<()>>,
+    harness_usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
+    harness_cancel_tx: tokio::sync::watch::Sender<bool>,
     stream_handle: Option<tokio::task::JoinHandle<()>>,
     /// Shared slot for the harness-agnostic aggregate (metrics + result text +
     /// structured output + provider error). Written by the streaming task,
@@ -415,12 +740,17 @@ impl Actor for StepExecutor {
             );
         }
 
+        let (harness_cancel_tx, _harness_cancel_rx) = tokio::sync::watch::channel(false);
         Ok(StepExecutorState {
             execution_id: config.execution_id.clone(),
             task_id: config.task_id.clone(),
             config,
             parent,
             child_process: None,
+            harness_run: None,
+            harness_outcome_handle: None,
+            harness_usage: Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default())),
+            harness_cancel_tx,
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(
                 HarnessStreamResult::default(),
@@ -446,6 +776,9 @@ impl Actor for StepExecutor {
             StepExecutorMessage::ProcessExited(result) => {
                 self.handle_process_exited(result, myself, state).await;
             }
+            StepExecutorMessage::HarnessSettled(result) => {
+                self.handle_harness_settled(result, myself, state).await;
+            }
         }
         Ok(())
     }
@@ -466,6 +799,23 @@ impl Actor for StepExecutor {
         }
 
         if let Some(handle) = state.stream_handle.take() {
+            handle.abort();
+        }
+
+        let _ = state.harness_cancel_tx.send(true);
+        if let Some(run) = state.harness_run.take() {
+            let _ = run.cancel().await;
+            if tokio::time::timeout(std::time::Duration::from_secs(10), run.await_outcome())
+                .await
+                .is_err()
+            {
+                tracing::error!(
+                    "Timed out awaiting Claude harness cleanup for execution {}",
+                    state.execution_id
+                );
+            }
+        }
+        if let Some(handle) = state.harness_outcome_handle.take() {
             handle.abort();
         }
 
@@ -506,7 +856,7 @@ impl StepExecutor {
         myself: ActorRef<StepExecutorMessage>,
         state: &mut StepExecutorState,
     ) -> Result<(), ActorProcessingErr> {
-        if state.child_process.is_some() {
+        if state.child_process.is_some() || state.harness_run.is_some() {
             tracing::warn!(
                 "Execute received but process already running for execution {}",
                 state.execution_id
@@ -543,6 +893,66 @@ impl StepExecutor {
             }
         };
 
+        if crate::provider::resolve_provider(&state.config) == Provider::Anthropic {
+            let settings = settings_guard
+                .as_ref()
+                .expect("successful settings synthesis returns a guard");
+            let (runtime, request) = match build_claude_harness(&state.config, settings) {
+                Ok(value) => value,
+                Err(err) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Provider resolution failed: {err}"),
+                        ),
+                    });
+                    myself.stop(Some("provider resolution failed".into()));
+                    return Ok(());
+                }
+            };
+            let usage = Arc::clone(&state.harness_usage);
+            let event_sink: Arc<dyn EventSink> = Arc::new(DaemonHarnessEventSink {
+                persistence: Arc::new(SessionLogEventSink::new(
+                    &state.execution_id,
+                    Arc::clone(&state.config.execution_service),
+                )),
+                root_stream_id: request.stream_id.clone(),
+                usage,
+                cancel_rx: state.harness_cancel_tx.subscribe(),
+                execution_id: state.execution_id.clone(),
+                task_id: state.task_id.clone(),
+                verbose: state.config.step_config.verbose_daemon_logging,
+            });
+            let control_sink: Arc<dyn ControlSink> = Arc::new(
+                DaemonControlSink::from_agent_config(&state.config.step_config.agent_config),
+            );
+            let run = match runtime.run_once(request, event_sink, control_sink).await {
+                Ok(run) => run,
+                Err(error) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Failed to start Claude harness: {error}"),
+                        ),
+                    });
+                    myself.stop(Some("harness start failed".into()));
+                    return Ok(());
+                }
+            };
+            state.settings_guard = settings_guard;
+            state.harness_run = Some(Arc::clone(&run));
+            let actor_ref = myself;
+            state.harness_outcome_handle = Some(tokio::spawn(async move {
+                let result = run.await_outcome().await.map_err(|error| error.to_string());
+                let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(result));
+            }));
+            return Ok(());
+        }
+
         let resolved = match resolve_provider_command(&state.config, settings_guard.as_ref()) {
             Ok(resolved) => resolved,
             Err(err) => {
@@ -563,6 +973,7 @@ impl StepExecutor {
 
         state.settings_guard = settings_guard;
         let parser_kind = resolved.parser_kind;
+        debug_assert_eq!(parser_kind, ParserKind::CodexJsonl);
         let mut cmd = resolved.command;
 
         match cmd.spawn() {
@@ -586,8 +997,8 @@ impl StepExecutor {
 
                 let stream_handle = tokio::spawn(async move {
                     // Stream stdout line by line, posting each as a SessionLog.
-                    // Structured-result extraction dispatches on parser_kind;
-                    // raw lines are always stored as logs.
+                    // Anthropic returns above through harness-claude. This
+                    // compatibility process loop now handles Codex only.
                     let mut codex_aggregate =
                         crate::codex_jsonl::CodexAggregate::with_output_schema(
                             codex_output_schema_used,
@@ -597,57 +1008,20 @@ impl StepExecutor {
                         let mut lines = reader.lines();
 
                         while let Ok(Some(line)) = lines.next_line().await {
-                            match parser_kind {
-                                ParserKind::StreamJson => {
-                                    if let Some(parsed) =
-                                        crate::stream_json::parse_stream_json_line(&line)
-                                        && let Ok(mut slot) = result_slot.lock()
-                                    {
-                                        slot.metrics = parsed.metrics;
-                                        slot.result_text = parsed.result_text;
-                                        slot.structured_output = parsed.structured_output;
-                                    }
-
-                                    // Verbose checkpoint 5: parse and log the stream-json
-                                    // system/init line — its `tools` array is the source of
-                                    // the StructuredOutput-advertisement metric (0/39 vs 39/39).
-                                    if verbose
-                                        && let Some(init) =
-                                            crate::stream_json::parse_stream_json_init_line(&line)
-                                    {
-                                        tracing::info!(
-                                            target: VERBOSE_LOG_TARGET,
-                                            execution_id = %execution_id,
-                                            task_id = %task_id,
-                                            checkpoint = CHECKPOINT_STREAM_JSON_INIT,
-                                            session_id = ?init.session_id,
-                                            tools = ?init.tools,
-                                            structured_output_advertised = init.structured_output_advertised(),
-                                            "verbose: claude system/init line"
-                                        );
-                                    }
-                                }
-                                ParserKind::CodexJsonl => {
-                                    if crate::codex_jsonl::apply_codex_line(
-                                        &line,
-                                        &mut codex_aggregate,
-                                    ) && let Ok(mut slot) = result_slot.lock()
-                                    {
-                                        slot.metrics = codex_aggregate
-                                            .usage
-                                            .as_ref()
-                                            .map(codex_usage_to_metrics);
-                                        slot.result_text = codex_aggregate.final_output.clone();
-                                        slot.provider_error = codex_aggregate.error.clone();
-                                        if codex_aggregate.output_schema_used {
-                                            slot.structured_output =
-                                                codex_aggregate.final_output_json.clone();
-                                            slot.schema_parse_error =
-                                                codex_aggregate.schema_parse_error.clone();
-                                            slot.structured_output_from_codex =
-                                                slot.structured_output.is_some();
-                                        }
-                                    }
+                            if crate::codex_jsonl::apply_codex_line(&line, &mut codex_aggregate)
+                                && let Ok(mut slot) = result_slot.lock()
+                            {
+                                slot.metrics =
+                                    codex_aggregate.usage.as_ref().map(codex_usage_to_metrics);
+                                slot.result_text = codex_aggregate.final_output.clone();
+                                slot.provider_error = codex_aggregate.error.clone();
+                                if codex_aggregate.output_schema_used {
+                                    slot.structured_output =
+                                        codex_aggregate.final_output_json.clone();
+                                    slot.schema_parse_error =
+                                        codex_aggregate.schema_parse_error.clone();
+                                    slot.structured_output_from_codex =
+                                        slot.structured_output.is_some();
                                 }
                             }
 
@@ -725,6 +1099,26 @@ impl StepExecutor {
         state: &mut StepExecutorState,
     ) {
         tracing::info!("Cancel requested for execution {}", state.execution_id);
+
+        if let Some(run) = state.harness_run.as_ref() {
+            match run.cancel().await {
+                Ok(()) => {
+                    // Interrupt persistence waits, but leave terminal status
+                    // ownership to the harness RunOutcome.
+                    let _ = state.harness_cancel_tx.send(true);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "Failed to cancel Claude harness for execution {}: {}",
+                        state.execution_id,
+                        error
+                    );
+                }
+            }
+            // HarnessSettled is the single terminal boundary. The runtime
+            // reaps the process and settles controls before publishing it.
+            return;
+        }
 
         // Kill the child process explicitly.
         if let Some(ref mut child) = state.child_process {
@@ -877,17 +1271,458 @@ impl StepExecutor {
 
         myself.stop(Some("process exited".to_string()));
     }
+
+    async fn handle_harness_settled(
+        &self,
+        result: Result<RunOutcome, String>,
+        myself: ActorRef<StepExecutorMessage>,
+        state: &mut StepExecutorState,
+    ) {
+        state.harness_run.take();
+        state.harness_outcome_handle.take();
+
+        let step_result = match result {
+            Err(error) => StepResult::failed(None, error),
+            Ok(outcome) => match outcome.status {
+                CompletionStatus::Completed => {
+                    match self.validate_output(
+                        state,
+                        outcome.structured_output.as_ref(),
+                        outcome.result_text.as_deref(),
+                    ) {
+                        Err(error) => step_result_for_schema_error(error),
+                        Ok(()) => {
+                            let usage = state
+                                .harness_usage
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            let normalized = if usage.turn_deltas > 0 {
+                                Some((usage.input_tokens, usage.output_tokens, usage.cost_microusd))
+                            } else {
+                                usage.session_snapshot.as_ref().map(|snapshot| {
+                                    (
+                                        snapshot.tokens.input_tokens,
+                                        snapshot.tokens.output_tokens,
+                                        snapshot.cost_microusd,
+                                    )
+                                })
+                            };
+                            let metrics = normalized.map(|(input, output, cost)| {
+                                crate::stream_json::StreamMetrics {
+                                    input_tokens: i64::try_from(input).unwrap_or(i64::MAX),
+                                    output_tokens: i64::try_from(output).unwrap_or(i64::MAX),
+                                    cost_usd: outcome
+                                        .metrics
+                                        .total_cost_usd
+                                        .unwrap_or(cost as f64 / 1_000_000.0),
+                                    duration_ms: outcome
+                                        .metrics
+                                        .duration_ms
+                                        .map(|value| i64::try_from(value).unwrap_or(i64::MAX))
+                                        .unwrap_or_default(),
+                                }
+                            });
+                            drop(usage);
+                            let output = outcome
+                                .structured_output
+                                .as_ref()
+                                .and_then(|value| serde_json::to_string_pretty(value).ok())
+                                .or(outcome.result_text);
+                            StepResult::Completed {
+                                exit_code: 0,
+                                metrics,
+                                output,
+                            }
+                        }
+                    }
+                }
+                CompletionStatus::Cancelled => StepResult::failed(None, "Cancelled"),
+                CompletionStatus::Interrupted => StepResult::failed(None, "Interrupted"),
+                CompletionStatus::Failed => StepResult::failed(
+                    None,
+                    outcome
+                        .error
+                        .or(outcome.result_text)
+                        .unwrap_or_else(|| "Claude harness failed".into()),
+                ),
+            },
+        };
+
+        let _ = state.parent.cast(ProjectMessage::StepFinished {
+            execution_id: state.execution_id.clone(),
+            task_id: state.task_id.clone(),
+            result: step_result,
+        });
+        myself.stop(Some("harness settled".into()));
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::Duration;
 
     use super::*;
+    use vertebrae_core::{
+        ServiceError, ServiceResult, StepExecution, StopRunTarget, TaskRun, TaskRunTrace,
+        UpdateExecutionStatusParams,
+    };
+
+    #[derive(Default)]
+    struct CapturingHarnessPersistence {
+        events: std::sync::Mutex<Vec<HarnessEventV1>>,
+        reject: std::sync::atomic::AtomicBool,
+    }
+
+    #[async_trait]
+    impl EventSink for CapturingHarnessPersistence {
+        async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+            if self.reject.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(HarnessError::EventSink("rejected durable event".into()));
+            }
+            self.events.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct BlocksAfterFirstHarnessPersistence {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl EventSink for BlocksAfterFirstHarnessPersistence {
+        async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                return Ok(());
+            }
+            std::future::pending().await
+        }
+    }
+
+    fn harness_usage_event(stream_id: &str, event_id: &str) -> HarnessEventV1 {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "event_id": event_id,
+            "stream_id": stream_id,
+            "sequence": 1,
+            "correlation": {"run_id": "run-1"},
+            "timestamp": "2026-07-18T00:00:00Z",
+            "semantics": "delta",
+            "type": "usage",
+            "data": {
+                "turn_delta": {
+                    "tokens": {
+                        "input_tokens": 13,
+                        "cached_input_tokens": 3,
+                        "output_tokens": 5,
+                        "reasoning_tokens": 2
+                    },
+                    "cost_microusd": 250000
+                }
+            }
+        }))
+        .unwrap()
+    }
+
+    fn harness_cancelled_run_finished_event(event_id: &str) -> HarnessEventV1 {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "event_id": event_id,
+            "stream_id": "root",
+            "sequence": 2,
+            "correlation": {"run_id": "run-1"},
+            "timestamp": "2026-07-18T00:00:01Z",
+            "semantics": "snapshot",
+            "type": "run_finished",
+            "data": {
+                "status": "cancelled",
+                "metrics": {}
+            }
+        }))
+        .unwrap()
+    }
 
     /// Captured `StepFinished` payloads `(execution_id, task_id, result)` shared
     /// from a test parent actor back to the assertion site.
     type CapturedResults = Arc<std::sync::Mutex<Vec<(String, String, StepResult)>>>;
+
+    #[derive(Default)]
+    struct CapturingExecutionService {
+        logs: std::sync::Mutex<Vec<SessionLog>>,
+        reject_on_call: AtomicUsize,
+        add_calls: AtomicUsize,
+        block_logs: AtomicBool,
+        add_started: tokio::sync::Notify,
+    }
+
+    impl CapturingExecutionService {
+        fn rejecting() -> Self {
+            Self {
+                // Preserve the first normalized event, then reject the next.
+                reject_on_call: AtomicUsize::new(2),
+                ..Self::default()
+            }
+        }
+
+        fn blocking() -> Self {
+            Self {
+                block_logs: AtomicBool::new(true),
+                ..Self::default()
+            }
+        }
+
+        fn logs(&self) -> Vec<SessionLog> {
+            self.logs.lock().unwrap().clone()
+        }
+    }
+
+    fn unused<T>() -> ServiceResult<T> {
+        Err(ServiceError::invalid_input("unused test service method"))
+    }
+
+    #[async_trait]
+    impl ExecutionService for CapturingExecutionService {
+        async fn create_execution(&self, _execution: StepExecution) -> ServiceResult<String> {
+            unused()
+        }
+        async fn get_execution(&self, _id: &str) -> ServiceResult<Option<StepExecution>> {
+            unused()
+        }
+        async fn list_executions_for_task(
+            &self,
+            _task_id: &str,
+        ) -> ServiceResult<Vec<StepExecution>> {
+            unused()
+        }
+        async fn add_log(&self, log: SessionLog) -> ServiceResult<String> {
+            self.add_started.notify_one();
+            if self.block_logs.load(Ordering::SeqCst) {
+                std::future::pending::<()>().await;
+            }
+            let call = self.add_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if self.reject_on_call.load(Ordering::SeqCst) == call {
+                return Err(ServiceError::network_error(
+                    "simulated persistence rejection",
+                ));
+            }
+            self.logs.lock().unwrap().push(log);
+            Ok("log-id".into())
+        }
+        async fn list_logs_for_execution(
+            &self,
+            _execution_id: &str,
+        ) -> ServiceResult<Vec<SessionLog>> {
+            unused()
+        }
+        async fn get_latest_execution_for_task(
+            &self,
+            _task_id: &str,
+        ) -> ServiceResult<Option<StepExecution>> {
+            unused()
+        }
+        async fn update_execution(
+            &self,
+            _execution_id: &str,
+            _output: Option<String>,
+            _transition_result: Option<String>,
+        ) -> ServiceResult<()> {
+            unused()
+        }
+        async fn run_step(&self, _task_id: &str, _step_id: &str) -> ServiceResult<StepExecution> {
+            unused()
+        }
+        async fn update_execution_status(
+            &self,
+            _execution_id: &str,
+            _params: UpdateExecutionStatusParams,
+        ) -> ServiceResult<()> {
+            unused()
+        }
+        async fn orchestrate_task(&self, _task_id: &str) -> ServiceResult<()> {
+            unused()
+        }
+        async fn stop_orchestrator(&self, _task_id: &str) -> ServiceResult<()> {
+            unused()
+        }
+        async fn active_run(&self, _task_id: &str) -> ServiceResult<Option<TaskRun>> {
+            unused()
+        }
+        async fn task_runs(&self, _task_id: &str) -> ServiceResult<Vec<TaskRun>> {
+            unused()
+        }
+        async fn task_run(&self, _task_run_id: &str) -> ServiceResult<Option<TaskRun>> {
+            unused()
+        }
+        async fn task_run_trace(&self, _root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {
+            unused()
+        }
+        async fn run_workflow(&self, _task_id: &str) -> ServiceResult<TaskRun> {
+            unused()
+        }
+        async fn stop_run(&self, _target: StopRunTarget) -> ServiceResult<Option<TaskRun>> {
+            unused()
+        }
+    }
+
+    struct HarnessParent;
+
+    impl Actor for HarnessParent {
+        type Msg = ProjectMessage;
+        type State = CapturedResults;
+        type Arguments = CapturedResults;
+
+        async fn pre_start(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            results: Self::Arguments,
+        ) -> Result<Self::State, ActorProcessingErr> {
+            Ok(results)
+        }
+
+        async fn handle(
+            &self,
+            _myself: ActorRef<Self::Msg>,
+            message: Self::Msg,
+            results: &mut Self::State,
+        ) -> Result<(), ActorProcessingErr> {
+            if let ProjectMessage::StepFinished {
+                execution_id,
+                task_id,
+                result,
+            } = message
+            {
+                results
+                    .lock()
+                    .unwrap()
+                    .push((execution_id, task_id, result));
+            }
+            Ok(())
+        }
+    }
+
+    struct CleanupFailingRun {
+        run_id: RunId,
+    }
+
+    #[async_trait]
+    impl RunHandle for CleanupFailingRun {
+        fn run_id(&self) -> &RunId {
+            &self.run_id
+        }
+
+        async fn cancel(&self) -> Result<(), HarnessError> {
+            Ok(())
+        }
+
+        async fn await_outcome(&self) -> Result<RunOutcome, HarnessError> {
+            Ok(RunOutcome {
+                status: CompletionStatus::Failed,
+                result_text: None,
+                structured_output: None,
+                usage: None,
+                metrics: vertebrae_harness_core::OutcomeMetrics::default(),
+                error: Some("cleanup sink failure".into()),
+            })
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_claude_script() -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("claude");
+        std::fs::write(
+            &path,
+            r##"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "2.1.0 (Claude Code)"
+  exit 0
+fi
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"daemon-session","tools":["Bash","StructuredOutput"]}'
+printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":7,"cache_read_input_tokens":2,"output_tokens":3},"content":[{"type":"text","text":"working"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"done","duration_ms":42,"total_cost_usd":0.125,"usage":{"input_tokens":11,"output_tokens":5}}'
+"##,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        (directory, path)
+    }
+
+    #[cfg(unix)]
+    fn fake_hanging_claude_script() -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("claude");
+        std::fs::write(
+            &path,
+            r##"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "2.1.0 (Claude Code)"
+  exit 0
+fi
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"cancel-session","transcript_path":"opaque://cancel.jsonl"}'
+exec sleep 30
+"##,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        (directory, path)
+    }
+
+    #[cfg(unix)]
+    fn fake_claude_with_body(body: &str) -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("claude");
+        std::fs::write(
+            &path,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then\n  echo \"2.1.0 (Claude Code)\"\n  exit 0\nfi\n{body}\n"
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        (directory, path)
+    }
+
+    #[cfg(unix)]
+    async fn execute_harness_fixture(
+        binary: PathBuf,
+        agent_config: AgentConfig,
+        service: Arc<CapturingExecutionService>,
+    ) -> CapturedResults {
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(None, HarnessParent, results.clone())
+            .await
+            .unwrap();
+        let mut config = test_config("harness-fixture");
+        config.project_root = binary.parent().unwrap().to_path_buf();
+        config.provider_binaries.anthropic = Some(binary);
+        config.step_config.agent_config = agent_config;
+        config.execution_service = service;
+        let (executor, executor_handle) =
+            Actor::spawn(None, StepExecutor, (config, parent.clone()))
+                .await
+                .unwrap();
+        executor.cast(StepExecutorMessage::Execute).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), executor_handle)
+            .await
+            .expect("harness fixture should settle")
+            .expect("executor actor should join");
+        tokio::task::yield_now().await;
+        parent.stop(None);
+        results
+    }
 
     fn test_execution_service() -> Arc<dyn ExecutionService> {
         use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SacrumExecutionService};
@@ -927,6 +1762,340 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn claude_harness_preserves_daemon_provider_policy_without_duplicate_structured_flags() {
+        let (directory, binary) = fake_claude_script();
+        let settings = SyntheticSettings::create("harness-policy").unwrap();
+        let mut config = test_config("harness-policy");
+        config.project_root = PathBuf::from("/");
+        config.worktree = Some(directory.path().to_path_buf());
+        config.provider_binaries.anthropic = Some(binary.clone());
+        config.step_config.prompt = "exact prompt".into();
+        config.step_config.agents = vec!["agents/reviewer.md".into()];
+        config.step_config.skills = vec!["SkillOne".into()];
+        config.step_config.agent_config = AgentConfig::new()
+            .with_model("claude-opus")
+            .with_fallback_model("claude-sonnet")
+            .with_system_prompt("system")
+            .with_append_system_prompt("append")
+            .with_tools(vec!["Bash".into()])
+            .with_allowed_tools(vec!["Read".into()])
+            .with_disallowed_tools(vec!["Bash(rm *)".into()])
+            .with_permission_mode(PermissionMode::Plan)
+            .with_max_budget_usd(2.5)
+            .with_mcp_config(vec!["mcp.json".into()])
+            .with_plugin_dirs(vec!["custom-plugin".into()])
+            .with_json_schema(serde_json::json!({"type": "object"}));
+
+        let (runtime, request) = build_claude_harness(&config, &settings).unwrap();
+        let spec = runtime
+            .config()
+            .command_spec(
+                ClaudeLaunchMode::OneShot {
+                    prompt: &request.prompt,
+                },
+                &request.config,
+            )
+            .unwrap();
+
+        assert_eq!(spec.program, binary);
+        assert_eq!(spec.current_dir.as_deref(), Some(directory.path()));
+        assert_eq!(spec.environment.get("PATH"), Some(&config.shell_path));
+        assert_eq!(request.run_id.as_str(), "harness-policy");
+        assert_eq!(request.stream_id.as_str(), "harness-policy");
+        assert_eq!(request.prompt, "exact prompt");
+        assert_eq!(request.config.model.as_deref(), Some("claude-opus"));
+        assert_eq!(
+            request.config.output_schema,
+            Some(serde_json::json!({"type": "object"}))
+        );
+        for flag in ["--model", "--permission-mode", "--json-schema"] {
+            assert_eq!(
+                spec.args.iter().filter(|arg| arg.as_str() == flag).count(),
+                1,
+                "{flag} must be represented exactly once"
+            );
+        }
+        for value in [
+            "claude-opus",
+            "claude-sonnet",
+            "system",
+            "append",
+            "Bash",
+            "Read",
+            "SkillOne",
+            "Bash(rm *)",
+            "plan",
+            "2.5",
+            "mcp.json",
+            "custom-plugin",
+            "agents/reviewer.md",
+            "exact prompt",
+        ] {
+            assert!(spec.args.iter().any(|arg| arg == value), "missing {value}");
+        }
+        let settings_path = settings.settings_path().to_string_lossy().into_owned();
+        assert!(spec.args.iter().any(|arg| arg == &settings_path));
+    }
+
+    #[tokio::test]
+    async fn daemon_control_sink_derives_resolution_from_permission_mode() {
+        use vertebrae_harness_core::{
+            ApprovalCategory, ApprovalRequest, ControlDecision, ControlRequestId, UserQuestion,
+        };
+
+        let sink = DaemonControlSink::from_agent_config(&AgentConfig::default());
+        let bypass = sink
+            .request(ControlRequestEnvelope {
+                request_id: ControlRequestId::new("automatic"),
+                session_id: None,
+                turn_id: None,
+                request: ControlRequest::Approval(ApprovalRequest {
+                    category: ApprovalCategory::CommandExecution,
+                    title: "run".into(),
+                    details: None,
+                    modification_supported: false,
+                }),
+                presentation: None,
+                timeout_ms: None,
+                automatic_resolution: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(bypass.decision, Some(ControlDecision::AllowOnce));
+        assert_eq!(bypass.source, ResolutionSource::Consumer);
+
+        let plan = DaemonControlSink::from_agent_config(
+            &AgentConfig::new().with_permission_mode(PermissionMode::Plan),
+        )
+        .request(ControlRequestEnvelope {
+            request_id: ControlRequestId::new("plan"),
+            session_id: None,
+            turn_id: None,
+            request: ControlRequest::Approval(ApprovalRequest {
+                category: ApprovalCategory::CommandExecution,
+                title: "run".into(),
+                details: None,
+                modification_supported: false,
+            }),
+            presentation: None,
+            timeout_ms: None,
+            automatic_resolution: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(plan.decision, Some(ControlDecision::Deny));
+
+        let accept_edit = DaemonControlSink::from_agent_config(
+            &AgentConfig::new().with_permission_mode(PermissionMode::AcceptEdits),
+        )
+        .request(ControlRequestEnvelope {
+            request_id: ControlRequestId::new("edit"),
+            session_id: None,
+            turn_id: None,
+            request: ControlRequest::Approval(ApprovalRequest {
+                category: ApprovalCategory::FileChange,
+                title: "edit".into(),
+                details: None,
+                modification_supported: false,
+            }),
+            presentation: None,
+            timeout_ms: None,
+            automatic_resolution: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(accept_edit.decision, Some(ControlDecision::Deny));
+
+        let auto = DaemonControlSink::from_agent_config(
+            &AgentConfig::new().with_permission_mode(PermissionMode::Auto),
+        )
+        .request(ControlRequestEnvelope {
+            request_id: ControlRequestId::new("auto"),
+            session_id: None,
+            turn_id: None,
+            request: ControlRequest::Approval(ApprovalRequest {
+                category: ApprovalCategory::CommandExecution,
+                title: "run".into(),
+                details: None,
+                modification_supported: false,
+            }),
+            presentation: None,
+            timeout_ms: None,
+            automatic_resolution: None,
+        })
+        .await
+        .unwrap();
+        assert_eq!(auto.decision, Some(ControlDecision::Deny));
+
+        let question = sink
+            .request(ControlRequestEnvelope {
+                request_id: ControlRequestId::new("question"),
+                session_id: None,
+                turn_id: None,
+                request: ControlRequest::UserQuestion {
+                    questions: vec![UserQuestion {
+                        id: "q".into(),
+                        prompt: "choose".into(),
+                        header: None,
+                        options: Vec::new(),
+                        multiple: false,
+                        free_form: true,
+                    }],
+                },
+                presentation: None,
+                timeout_ms: None,
+                automatic_resolution: None,
+            })
+            .await
+            .unwrap_err();
+        assert!(question.to_string().contains("cannot answer interactive"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn anthropic_execute_uses_harness_runtime_and_persists_only_normalized_events() {
+        let (directory, binary) = fake_claude_script();
+        let service = Arc::new(CapturingExecutionService::default());
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(
+            Some("harness-normalized-parent".into()),
+            HarnessParent,
+            Arc::clone(&results),
+        )
+        .await
+        .unwrap();
+        let mut config = test_config("harness-normalized");
+        config.project_root = directory.path().to_path_buf();
+        config.provider_binaries.anthropic = Some(binary);
+        config.execution_service = service.clone();
+
+        let (executor, executor_handle) = Actor::spawn(
+            Some("harness-normalized-executor".into()),
+            StepExecutor,
+            (config, parent.clone()),
+        )
+        .await
+        .unwrap();
+        executor.cast(StepExecutorMessage::Execute).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), executor_handle)
+            .await
+            .expect("Claude harness actor must settle")
+            .expect("actor task must join");
+
+        let results = results.lock().unwrap();
+        assert_eq!(results.len(), 1, "execution must settle exactly once");
+        match &results[0].2 {
+            StepResult::Completed {
+                exit_code,
+                metrics: Some(metrics),
+                output,
+            } => {
+                assert_eq!(*exit_code, 0);
+                assert_eq!(metrics.input_tokens, 11);
+                assert_eq!(metrics.output_tokens, 5);
+                assert_eq!(metrics.duration_ms, 42);
+                assert!((metrics.cost_usd - 0.125).abs() < f64::EPSILON);
+                assert_eq!(output.as_deref(), Some("done"));
+            }
+            other => panic!("expected completed harness result, got {other:?}"),
+        }
+        drop(results);
+
+        let logs = service.logs();
+        assert!(!logs.is_empty());
+        assert!(
+            logs.iter()
+                .all(|log| log.format.as_deref() == Some("harness"))
+        );
+        assert!(logs.iter().all(|log| {
+            let event: HarnessEventV1 = serde_json::from_str(&log.content).unwrap();
+            log.logical_key.as_deref() == Some(&format!("harness:{}", event.event_id))
+        }));
+        let events = logs
+            .iter()
+            .map(|log| serde_json::from_str::<HarnessEventV1>(&log.content).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event.payload, HarnessEventPayloadV1::RunFinished(_)))
+                .count(),
+            1
+        );
+        let root = events
+            .iter()
+            .find_map(|event| match &event.payload {
+                HarnessEventPayloadV1::ThreadDeclared(declaration)
+                    if declaration.parent_thread_id.is_none() =>
+                {
+                    Some(declaration)
+                }
+                _ => None,
+            })
+            .expect("pathless init must produce a root declaration");
+        assert_eq!(
+            root.provider_thread_ref
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("claude://session/daemon-session")
+        );
+        assert!(
+            logs.iter()
+                .all(|log| log.format.as_deref() != Some("anthropic"))
+        );
+        parent.stop(Some("done".into()));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn harness_persistence_rejection_fails_execution_without_raw_fallback() {
+        let (directory, binary) = fake_claude_script();
+        let service = Arc::new(CapturingExecutionService::rejecting());
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(
+            Some("harness-reject-parent".into()),
+            HarnessParent,
+            Arc::clone(&results),
+        )
+        .await
+        .unwrap();
+        let mut config = test_config("harness-reject");
+        config.project_root = directory.path().to_path_buf();
+        config.provider_binaries.anthropic = Some(binary);
+        config.execution_service = service.clone();
+        let (executor, executor_handle) = Actor::spawn(
+            Some("harness-reject-executor".into()),
+            StepExecutor,
+            (config, parent.clone()),
+        )
+        .await
+        .unwrap();
+        executor.cast(StepExecutorMessage::Execute).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), executor_handle)
+            .await
+            .expect("rejected sink must settle")
+            .expect("actor task must join");
+
+        let results = results.lock().unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(matches!(results[0].2, StepResult::Failed { .. }));
+        let logs = service.logs();
+        assert_eq!(logs.len(), 1, "the prior durable event must remain");
+        assert_eq!(logs[0].format.as_deref(), Some("harness"));
+        let event: HarnessEventV1 = serde_json::from_str(&logs[0].content).unwrap();
+        assert_eq!(
+            logs[0].logical_key.as_deref(),
+            Some(format!("harness:{}", event.event_id).as_str())
+        );
+        assert!(
+            logs.iter()
+                .all(|log| log.format.as_deref() != Some("anthropic"))
+        );
+        parent.stop(Some("done".into()));
+    }
+
     #[test]
     fn codex_usage_to_metrics_does_not_double_count_cached_input() {
         // codex-rs `input_tokens` already includes `cached_input_tokens` (the
@@ -943,6 +2112,382 @@ mod tests {
         assert_eq!(metrics.output_tokens, 800);
         assert_eq!(metrics.cost_usd, 0.0);
         assert_eq!(metrics.duration_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn normalized_usage_is_counted_once_only_after_durable_root_persistence() {
+        let persistence = Arc::new(CapturingHarnessPersistence::default());
+        let usage = Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default()));
+        let (_cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let sink = DaemonHarnessEventSink {
+            persistence: persistence.clone(),
+            root_stream_id: StreamId::new("root"),
+            usage: usage.clone(),
+            cancel_rx,
+            execution_id: "exec-1".into(),
+            task_id: "task-1".into(),
+            verbose: false,
+        };
+
+        sink.emit(harness_usage_event("root", "root-usage"))
+            .await
+            .unwrap();
+        sink.emit(harness_usage_event("root/agent/child", "child-usage"))
+            .await
+            .unwrap();
+
+        {
+            let observed = usage.lock().unwrap();
+            assert_eq!(observed.input_tokens, 13);
+            assert_eq!(observed.output_tokens, 5);
+            assert_eq!(observed.cost_microusd, 250_000);
+            assert_eq!(observed.turn_deltas, 1);
+        }
+        assert_eq!(persistence.events.lock().unwrap().len(), 2);
+
+        persistence
+            .reject
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let error = sink
+            .emit(harness_usage_event("root", "rejected-usage"))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("rejected durable event"));
+        let observed = usage.lock().unwrap();
+        assert_eq!(observed.input_tokens, 13);
+        assert_eq!(observed.turn_deltas, 1);
+    }
+
+    #[tokio::test]
+    async fn cancellation_between_writes_interrupts_the_next_blocking_persistence() {
+        let persistence = Arc::new(BlocksAfterFirstHarnessPersistence::default());
+        let usage = Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default()));
+        let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+        let sink = DaemonHarnessEventSink {
+            persistence: persistence.clone(),
+            root_stream_id: StreamId::new("root"),
+            usage,
+            cancel_rx,
+            execution_id: "exec-between-writes".into(),
+            task_id: "task-between-writes".into(),
+            verbose: false,
+        };
+
+        sink.emit(harness_usage_event("root", "before-cancel"))
+            .await
+            .unwrap();
+        cancel_tx.send(true).unwrap();
+
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            sink.emit(harness_cancelled_run_finished_event(
+                "terminal-after-cancel",
+            )),
+        )
+        .await
+        .expect("retained cancellation must prevent a later persistence hang")
+        .unwrap_err();
+        assert!(error.to_string().contains("cancelled"));
+        assert_eq!(
+            persistence.calls.load(Ordering::SeqCst),
+            2,
+            "the terminal event may enter persistence but must be bounded"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn claude_harness_cancellation_awaits_cleanup_and_settles_once() {
+        let (_directory, binary) = fake_hanging_claude_script();
+        let service = Arc::new(CapturingExecutionService::default());
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(None, HarnessParent, results.clone())
+            .await
+            .unwrap();
+        let mut config = test_config("exec-harness-cancel");
+        config.provider_binaries.anthropic = Some(binary);
+        config.execution_service = service.clone();
+
+        let (executor, executor_handle) =
+            Actor::spawn(None, StepExecutor, (config, parent.clone()))
+                .await
+                .unwrap();
+        executor.cast(StepExecutorMessage::Execute).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while service.logs().is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("harness should emit an event before cancellation");
+        executor.cast(StepExecutorMessage::Cancel).unwrap();
+        let _ = tokio::time::timeout(Duration::from_secs(3), executor_handle)
+            .await
+            .expect("cancellation should reap Claude and settle");
+        tokio::task::yield_now().await;
+
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1, "cancellation must settle exactly once");
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected cancelled failure, got {:?}", captured[0].2)
+        };
+        assert_eq!(error, "Cancelled");
+        parent.stop(None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn decoded_claude_control_uses_daemon_permission_policy() {
+        let response_directory = tempfile::tempdir().unwrap();
+        let response_path = response_directory.path().join("control-response.jsonl");
+        let body = format!(
+            r#"printf '%s\n' '{{"type":"system","subtype":"init","session_id":"control-session","transcript_path":"opaque://control.jsonl"}}'
+printf '%s\n' '{{"type":"control_request","request_id":"control-1","request":{{"subtype":"can_use_tool","tool_name":"Bash","input":{{"command":"pwd"}},"tool_use_id":"tool-1"}}}}'
+IFS= read -r response
+printf '%s\n' "$response" > '{}'
+printf '%s\n' '{{"type":"result","subtype":"success","result":"done"}}'"#,
+            response_path.display()
+        );
+        let (_directory, binary) = fake_claude_with_body(&body);
+        let service = Arc::new(CapturingExecutionService::default());
+        let results =
+            execute_harness_fixture(binary, AgentConfig::default(), service.clone()).await;
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert!(matches!(captured[0].2, StepResult::Completed { .. }));
+        drop(captured);
+
+        let response: serde_json::Value =
+            serde_json::from_str(std::fs::read_to_string(response_path).unwrap().trim()).unwrap();
+        assert_eq!(response["response"]["request_id"], "control-1");
+        assert_eq!(response["response"]["response"]["behavior"], "allow");
+        let logs = service.logs();
+        let events = logs
+            .iter()
+            .map(|log| serde_json::from_str::<HarnessEventV1>(&log.content).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.payload, HarnessEventPayloadV1::ControlRequested(_)))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event.payload, HarnessEventPayloadV1::ControlResolved(_)))
+        );
+        assert!(
+            logs.iter()
+                .all(|log| log.format.as_deref() == Some("harness"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn decoded_interactive_control_failure_settles_actor_once() {
+        let body = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"question-session","transcript_path":"opaque://question.jsonl"}'
+printf '%s\n' '{"type":"control_request","request_id":"question-1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Choose?","header":"Choice","options":[],"multiSelect":false}]}}}'
+exec sleep 30"#;
+        let (_directory, binary) = fake_claude_with_body(body);
+        let service = Arc::new(CapturingExecutionService::default());
+        let results =
+            execute_harness_fixture(binary, AgentConfig::default(), service.clone()).await;
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected control failure, got {:?}", captured[0].2)
+        };
+        assert!(error.contains("cannot answer interactive"));
+        assert!(
+            service
+                .logs()
+                .iter()
+                .all(|log| log.format.as_deref() == Some("harness"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn nonzero_provider_outcome_settles_actor_once() {
+        let body = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"failed-session","transcript_path":"opaque://failed.jsonl"}'
+printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":"provider rejected the run"}'
+exit 7"#;
+        let (_directory, binary) = fake_claude_with_body(body);
+        let results = execute_harness_fixture(
+            binary,
+            AgentConfig::default(),
+            Arc::new(CapturingExecutionService::default()),
+        )
+        .await;
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected provider failure, got {:?}", captured[0].2)
+        };
+        assert!(error.contains("provider rejected the run"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn provider_process_loss_settles_actor_once() {
+        let body = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"lost-session","transcript_path":"opaque://lost.jsonl"}'
+exit 9"#;
+        let (_directory, binary) = fake_claude_with_body(body);
+        let results = execute_harness_fixture(
+            binary,
+            AgentConfig::default(),
+            Arc::new(CapturingExecutionService::default()),
+        )
+        .await;
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected process loss, got {:?}", captured[0].2)
+        };
+        assert!(error.contains("without a result record"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn harness_schema_mismatch_preserves_structured_validation_errors() {
+        let body = r#"printf '%s\n' '{"type":"system","subtype":"init","session_id":"schema-session","transcript_path":"opaque://schema.jsonl"}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"done","structured_output":{"answer":42}}'"#;
+        let (_directory, binary) = fake_claude_with_body(body);
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"]
+        });
+        let results = execute_harness_fixture(
+            binary,
+            AgentConfig::new().with_json_schema(schema),
+            Arc::new(CapturingExecutionService::default()),
+        )
+        .await;
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed {
+            schema_errors: Some(errors),
+            ..
+        } = &captured[0].2
+        else {
+            panic!("expected schema failure, got {:?}", captured[0].2)
+        };
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].instance_path, "/answer");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn claude_harness_cancellation_interrupts_blocked_persistence() {
+        let (_directory, binary) = fake_hanging_claude_script();
+        let service = Arc::new(CapturingExecutionService::blocking());
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(None, HarnessParent, results.clone())
+            .await
+            .unwrap();
+        let mut config = test_config("exec-harness-blocked-persistence");
+        config.provider_binaries.anthropic = Some(binary);
+        config.execution_service = service.clone();
+
+        let (executor, executor_handle) =
+            Actor::spawn(None, StepExecutor, (config, parent.clone()))
+                .await
+                .unwrap();
+        executor.cast(StepExecutorMessage::Execute).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), service.add_started.notified())
+            .await
+            .expect("harness should attempt durable persistence");
+
+        executor.cast(StepExecutorMessage::Cancel).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), executor_handle)
+            .await
+            .expect("cancellation must interrupt blocked persistence")
+            .expect("actor task must join");
+        tokio::task::yield_now().await;
+
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1, "cancellation must settle exactly once");
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected terminal failure, got {:?}", captured[0].2)
+        };
+        assert!(
+            error.contains("event sink failed"),
+            "runtime failure must remain authoritative, got {error}"
+        );
+        assert!(service.logs().is_empty());
+        parent.stop(None);
+    }
+
+    #[tokio::test]
+    async fn accepted_cancel_does_not_mask_later_cleanup_failure() {
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(None, HarnessParent, results.clone())
+            .await
+            .unwrap();
+        let mut state = build_state(AgentConfig::default()).await;
+        state.parent = parent.clone();
+        let run: Arc<dyn RunHandle> = Arc::new(CleanupFailingRun {
+            run_id: RunId::new("cleanup-failure-run"),
+        });
+        state.harness_run = Some(run.clone());
+        let (actor_ref, actor_handle) = Actor::spawn(
+            None,
+            StepExecutor,
+            (test_config("late-cancel-probe"), state.parent.clone()),
+        )
+        .await
+        .unwrap();
+
+        StepExecutor
+            .handle_cancel(actor_ref.clone(), &mut state)
+            .await;
+        let outcome = run.await_outcome().await.unwrap();
+        StepExecutor
+            .handle_harness_settled(Ok(outcome), actor_ref.clone(), &mut state)
+            .await;
+        let _ = actor_handle.await;
+        tokio::task::yield_now().await;
+
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected cleanup failure, got {:?}", captured[0].2)
+        };
+        assert_eq!(error, "cleanup sink failure");
+        parent.stop(None);
+    }
+
+    #[tokio::test]
+    async fn harness_settlement_before_late_cancel_reports_failure_exactly_once() {
+        let results: CapturedResults = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (parent, _parent_handle) = Actor::spawn(None, HarnessParent, results.clone())
+            .await
+            .unwrap();
+        let (executor, executor_handle) = Actor::spawn(
+            None,
+            StepExecutor,
+            (test_config("settled-before-cancel"), parent.clone()),
+        )
+        .await
+        .unwrap();
+
+        executor
+            .cast(StepExecutorMessage::HarnessSettled(Err(
+                "settled provider failure".into(),
+            )))
+            .unwrap();
+        executor.cast(StepExecutorMessage::Cancel).unwrap();
+        let _ = executor_handle.await;
+        tokio::task::yield_now().await;
+
+        let captured = results.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let StepResult::Failed { error, .. } = &captured[0].2 else {
+            panic!("expected settled failure, got {:?}", captured[0].2)
+        };
+        assert!(error.contains("settled provider failure"));
+        parent.stop(None);
     }
 
     #[test]
@@ -2098,12 +3643,17 @@ mod tests {
             .json_schema
             .as_ref()
             .map(crate::output_validator::CompiledSchema::compile);
+        let (harness_cancel_tx, _harness_cancel_rx) = tokio::sync::watch::channel(false);
         StepExecutorState {
             execution_id: config.execution_id.clone(),
             task_id: config.task_id.clone(),
             config,
             parent,
             child_process: None,
+            harness_run: None,
+            harness_outcome_handle: None,
+            harness_usage: Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default())),
+            harness_cancel_tx,
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(
                 HarnessStreamResult::default(),

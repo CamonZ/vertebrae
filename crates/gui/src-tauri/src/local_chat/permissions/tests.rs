@@ -1,5 +1,203 @@
 use super::*;
 
+fn harness_approval_request(id: &str) -> ControlRequestEnvelope {
+    ControlRequestEnvelope {
+        request_id: vertebrae_harness_core::ControlRequestId::new(id),
+        session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
+        turn_id: Some(vertebrae_harness_core::TurnId::new("turn-1")),
+        request: ControlRequest::Approval(vertebrae_harness_core::ApprovalRequest {
+            category: vertebrae_harness_core::ApprovalCategory::CommandExecution,
+            title: "Run shell command".into(),
+            details: Some(serde_json::json!({
+                "tool_name": "Bash",
+                "tool_use_id": "tool-control",
+                "input": {"command": "pwd"}
+            })),
+            modification_supported: true,
+        }),
+        presentation: None,
+        timeout_ms: None,
+        automatic_resolution: None,
+    }
+}
+
+#[test]
+fn harness_control_allow_and_deny_preserve_gui_and_neutral_shapes() {
+    let request = harness_approval_request("allow-control");
+    let event = harness_permission_event("backend-control", &request).unwrap();
+    assert_eq!(event.session_id.as_deref(), Some("backend-control"));
+    assert_eq!(event.tool_name, "Bash");
+    assert_eq!(event.tool_use_id, "tool-control");
+    assert_eq!(event.input, serde_json::json!({"command": "pwd"}));
+
+    let allow = local_decision_to_control_resolution(
+        &request,
+        LocalPermissionDecision {
+            behavior: "allow".into(),
+            message: None,
+            updated_input: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(allow.decision, Some(ControlDecision::AllowOnce));
+
+    let deny = local_decision_to_control_resolution(
+        &harness_approval_request("deny-control"),
+        LocalPermissionDecision {
+            behavior: "deny".into(),
+            message: Some("not allowed".into()),
+            updated_input: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(deny.decision, Some(ControlDecision::Deny));
+    assert_eq!(deny.message.as_deref(), Some("not allowed"));
+}
+
+#[test]
+fn harness_question_control_preserves_ui_shape_and_returns_exact_answer() {
+    let request = ControlRequestEnvelope {
+        request_id: vertebrae_harness_core::ControlRequestId::new("question-control"),
+        session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
+        turn_id: Some(vertebrae_harness_core::TurnId::new("turn-1")),
+        request: ControlRequest::UserQuestion {
+            questions: vec![vertebrae_harness_core::UserQuestion {
+                id: "environment".into(),
+                prompt: "Which environment?".into(),
+                header: Some("Environment".into()),
+                options: vec![vertebrae_harness_core::QuestionOption {
+                    id: "staging".into(),
+                    label: "Staging".into(),
+                    description: Some("Use staging".into()),
+                }],
+                multiple: false,
+                free_form: true,
+            }],
+        },
+        presentation: Some(vertebrae_harness_core::ControlPresentation {
+            tool_name: Some("AskUserQuestion".into()),
+            tool_call_id: Some(vertebrae_harness_core::ToolCallId::new("tool-question")),
+            input: Some(serde_json::json!({
+                "questions": [{
+                    "question": "Which environment?",
+                    "header": "Environment",
+                    "options": [{"label": "Staging", "description": "Use staging"}],
+                    "multiSelect": false
+                }]
+            })),
+            message: Some("AskUserQuestion needs approval".into()),
+        }),
+        timeout_ms: Some(30_000),
+        automatic_resolution: None,
+    };
+    let event = harness_permission_event("backend-control", &request).unwrap();
+    assert_eq!(event.tool_name, "AskUserQuestion");
+    assert_eq!(event.tool_use_id, "tool-question");
+    assert_eq!(
+        event.input,
+        request
+            .presentation
+            .as_ref()
+            .unwrap()
+            .input
+            .clone()
+            .unwrap()
+    );
+    assert_eq!(
+        event.message.as_deref(),
+        Some("AskUserQuestion needs approval")
+    );
+    let questions = event.questions.unwrap();
+    assert_eq!(questions.len(), 1);
+    assert_eq!(questions[0].question, "Which environment?");
+    assert_eq!(questions[0].header, "Environment");
+    assert_eq!(questions[0].options[0].label, "Staging");
+    assert!(!questions[0].multi_select);
+
+    let resolution = local_decision_to_control_resolution(
+        &request,
+        LocalPermissionDecision {
+            behavior: "allow".into(),
+            message: None,
+            updated_input: Some(serde_json::json!({
+                "answers": {"Which environment?": "Staging"}
+            })),
+        },
+    )
+    .unwrap();
+    assert!(
+        matches!(resolution.decision, Some(ControlDecision::QuestionsAnswered(answers))
+        if answers.len() == 1
+            && answers[0].question_id == "environment"
+            && answers[0].free_form.as_deref() == Some("Staging"))
+    );
+}
+
+#[tokio::test]
+async fn invalid_harness_question_answer_remains_pending_for_retry() {
+    let bridge = PermissionBridge::new();
+    let request = ControlRequestEnvelope {
+        request_id: vertebrae_harness_core::ControlRequestId::new("retry-question"),
+        session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
+        turn_id: None,
+        request: ControlRequest::UserQuestion {
+            questions: vec![vertebrae_harness_core::UserQuestion {
+                id: "environment".into(),
+                prompt: "Which environment?".into(),
+                header: Some("Environment".into()),
+                options: Vec::new(),
+                multiple: false,
+                free_form: true,
+            }],
+        },
+        presentation: None,
+        timeout_ms: None,
+        automatic_resolution: None,
+    };
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    bridge.pending_harness_controls.lock().unwrap().insert(
+        "retry-question".into(),
+        PendingHarnessControl {
+            session_id: "backend-control".into(),
+            request,
+            response_tx,
+        },
+    );
+
+    let invalid = bridge.resolve_permission_request(
+        "retry-question",
+        LocalPermissionDecision {
+            behavior: "allow".into(),
+            message: None,
+            updated_input: Some(serde_json::json!({"answers": {}})),
+        },
+    );
+    assert!(matches!(invalid, Err(PermissionBridgeError::Invalid(_))));
+    assert!(bridge
+        .pending_harness_controls
+        .lock()
+        .unwrap()
+        .contains_key("retry-question"));
+
+    bridge
+        .resolve_permission_request(
+            "retry-question",
+            LocalPermissionDecision {
+                behavior: "allow".into(),
+                message: None,
+                updated_input: Some(serde_json::json!({
+                    "answers": {"Which environment?": "Staging"}
+                })),
+            },
+        )
+        .unwrap();
+    let decision = response_rx.await.unwrap();
+    assert_eq!(
+        decision.updated_input.unwrap()["answers"]["Which environment?"],
+        "Staging"
+    );
+}
+
 #[test]
 fn test_resolve_permission_request_sends_local_decision() {
     let bridge = PermissionBridge::new();

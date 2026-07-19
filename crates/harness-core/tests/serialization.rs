@@ -68,6 +68,7 @@ fn control_request() -> ControlRequestEnvelope {
             questions: vec![UserQuestion {
                 id: "q1".into(),
                 prompt: "Choose".into(),
+                header: None,
                 options: vec![QuestionOption {
                     id: "a".into(),
                     label: "A".into(),
@@ -77,6 +78,12 @@ fn control_request() -> ControlRequestEnvelope {
                 free_form: true,
             }],
         },
+        presentation: Some(ControlPresentation {
+            tool_name: Some("AskUserQuestion".into()),
+            tool_call_id: Some(ToolCallId::from("tool-question")),
+            input: Some(json!({"questions": []})),
+            message: Some("Answer a question".into()),
+        }),
         timeout_ms: Some(1_000),
         automatic_resolution: Some(ControlDecision::Deny),
     }
@@ -90,6 +97,13 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
         result_text: None,
         structured_output: None,
         usage: None,
+        metrics: OutcomeMetrics {
+            duration_ms: Some(123),
+            turn_count: Some(4),
+            context_tokens: Some(0),
+            context_window: Some(200_000),
+            total_cost_usd: Some(0.42),
+        },
         error: Some("cancelled".into()),
     };
     let close_outcome = SessionCloseOutcome {
@@ -102,6 +116,7 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             provider: "test".into(),
             model: Some("model".into()),
             provider_resume_id: Some(ProviderResumeId::from("resume")),
+            tools: vec!["Read".into(), "Bash".into()],
         }),
         HarnessEventPayloadV1::ThreadDeclared(ThreadDeclared {
             thread_id: ThreadId::from("thread-s"),
@@ -434,6 +449,7 @@ fn control_scenarios_round_trip_as_correlated_durable_pairs() {
                 questions: vec![UserQuestion {
                     id: "q".into(),
                     prompt: "Choose".into(),
+                    header: None,
                     options: vec![QuestionOption {
                         id: "a".into(),
                         label: "A".into(),
@@ -474,6 +490,7 @@ fn control_scenarios_round_trip_as_correlated_durable_pairs() {
                 session_id: Some(SessionId::from("session")),
                 turn_id: Some(TurnId::from("turn")),
                 request,
+                presentation: None,
                 timeout_ms: Some(100),
                 automatic_resolution: Some(ControlDecision::Deny),
             }),

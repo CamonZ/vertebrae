@@ -98,6 +98,25 @@ export interface ClaudeRawMessage {
   total_cost_usd?: number;
 }
 
+/** Persisted provider-neutral event emitted by the shared harness runtime. */
+interface HarnessRawEvent {
+  version: 1;
+  event_id: string;
+  stream_id: string;
+  correlation?: {
+    session_id?: string;
+    thread_id?: string;
+    turn_id?: string;
+    run_id?: string;
+    parent_tool_call_id?: string;
+    provider_resume_id?: string;
+  };
+  timestamp?: string;
+  semantics?: "delta" | "snapshot";
+  type: string;
+  data: Record<string, unknown>;
+}
+
 // ============================================================================
 // Parsed Conversation Event Types
 // ============================================================================
@@ -509,6 +528,29 @@ function rateLimitEvent(
   };
 }
 
+function isRateLimitFailure(raw: ClaudeRawMessage): boolean {
+  const record = raw as unknown as Record<string, unknown>;
+  const info =
+    raw.rate_limit_info && typeof raw.rate_limit_info === "object"
+      ? (raw.rate_limit_info as unknown as Record<string, unknown>)
+      : undefined;
+  const status = readString(info?.status) ?? readString(record.status);
+  const message =
+    readString(record.message) ??
+    readString(record.reason) ??
+    (record.error && typeof record.error === "object"
+      ? readString((record.error as Record<string, unknown>).message)
+      : undefined) ??
+    readString(info?.message);
+  const messageIsRateLimit = message
+    ? /rate[ _]limit|too many requests/i.test(message)
+    : false;
+  const statusIsFailure = status
+    ? !["allowed", "ok", "available", "active"].includes(status.toLowerCase())
+    : false;
+  return messageIsRateLimit || statusIsFailure;
+}
+
 /**
  * Parse a single Claude JSON message into conversation events.
  * Returns an array because one message can contain multiple content items.
@@ -661,7 +703,7 @@ export function parseClaudeMessage(
     }
 
     case "rate_limit_event":
-      events.push(rateLimitEvent(raw, timestamp));
+      if (isRateLimitFailure(raw)) events.push(rateLimitEvent(raw, timestamp));
       break;
   }
 
@@ -687,6 +729,212 @@ export function parseClaudeMessage(
   }
 
   return events;
+}
+
+function isHarnessRawEvent(raw: unknown): raw is HarnessRawEvent {
+  const record = readRecord(raw);
+  return (
+    record?.version === 1 &&
+    typeof record.event_id === "string" &&
+    typeof record.stream_id === "string" &&
+    typeof record.type === "string" &&
+    readRecord(record.data) !== undefined
+  );
+}
+
+function outputText(output: unknown): string {
+  return typeof output === "string" ? output : JSON.stringify(output) ?? "";
+}
+
+function harnessOutcomeMetrics(data: Record<string, unknown>): {
+  durationMs: number;
+  numTurns: number;
+  costUsd: number;
+} {
+  const metrics = readRecord(data.metrics);
+  const usage = readRecord(data.usage);
+  const usageCostMicrousd = readNumber(usage?.cost_microusd);
+  return {
+    durationMs: readNumber(metrics?.duration_ms) ?? 0,
+    numTurns: readNumber(metrics?.turn_count) ?? 0,
+    costUsd:
+      readNumber(metrics?.total_cost_usd) ??
+      (usageCostMicrousd === undefined ? 0 : usageCostMicrousd / 1_000_000),
+  };
+}
+
+function tagHarnessParent(
+  events: ConversationEvent[],
+  event: HarnessRawEvent
+): ConversationEvent[] {
+  const parentToolUseId = readString(
+    readRecord(event.correlation)?.parent_tool_call_id
+  );
+  if (parentToolUseId) {
+    for (const parsed of events) parsed.parentToolUseId = parentToolUseId;
+  }
+  return events;
+}
+
+/**
+ * Persistent sessions share a stream across turns. Dedupe state must therefore
+ * be scoped to the emitted turn (or one-shot run), never the stream alone.
+ * When neither identity is present, preserve all events rather than risking a
+ * later turn being hidden.
+ */
+function harnessTurnKey(event: HarnessRawEvent): string | undefined {
+  const correlation = readRecord(event.correlation);
+  const turnId = readString(correlation?.turn_id);
+  if (turnId) return `turn:${event.stream_id}:${turnId}`;
+  const runId = readString(correlation?.run_id);
+  if (runId) return `run:${event.stream_id}:${runId}`;
+  return undefined;
+}
+
+/**
+ * Projects persisted neutral harness events onto the trace's established
+ * conversation-event model. The projection deliberately preserves the legacy
+ * Claude parser: only logs tagged `format: "harness"` use this path.
+ */
+function parseHarnessEvent(
+  raw: HarnessRawEvent,
+  fallbackTimestamp: string,
+  state: HarnessParseState
+): ConversationEvent[] {
+  const timestamp = readString(raw.timestamp) ?? fallbackTimestamp;
+  const data = raw.data;
+  const correlation = readRecord(raw.correlation);
+  const turnKey = harnessTurnKey(raw);
+  const turnPayloadKey = turnKey ? `${turnKey}:${raw.type}` : undefined;
+  const events: ConversationEvent[] = [];
+
+  switch (raw.type) {
+    case "session_started": {
+      const model = readString(data.model) ?? "Claude";
+      const sessionId =
+        readString(correlation?.session_id) ??
+        readString(data.provider_resume_id) ??
+        raw.stream_id;
+      events.push({ kind: "session_start", timestamp, model, sessionId });
+      break;
+    }
+    case "turn_input": {
+      const provenance = readString(data.provenance);
+      const text = readString(data.content);
+      if ((provenance === "human" || provenance === "agent") && text) {
+        events.push({ kind: "user_message", timestamp, text });
+      }
+      break;
+    }
+    case "text": {
+      const text = readString(data.text);
+      if (text) {
+        if (raw.semantics === "snapshot" && turnPayloadKey && state.deltaPayloads.has(turnPayloadKey)) {
+          break;
+        }
+        if (raw.semantics === "delta" && turnPayloadKey) state.deltaPayloads.add(turnPayloadKey);
+        if (turnKey) state.turnsWithText.add(turnKey);
+        events.push({ kind: "assistant_message", timestamp, text });
+      }
+      break;
+    }
+    case "reasoning": {
+      const text = readString(data.text);
+      if (text) {
+        if (raw.semantics === "snapshot" && turnPayloadKey && state.deltaPayloads.has(turnPayloadKey)) {
+          break;
+        }
+        if (raw.semantics === "delta" && turnPayloadKey) state.deltaPayloads.add(turnPayloadKey);
+        events.push({ kind: "thinking", timestamp, text });
+      }
+      break;
+    }
+    case "plan": {
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const items = entries.flatMap((entry) => {
+        const plan = readRecord(entry);
+        const text = readString(plan?.text);
+        if (!text) return [];
+        const status = readString(plan?.status)?.toLowerCase();
+        return [{ text, completed: status === "completed" || status === "done" }];
+      });
+      if (items.length > 0) {
+        events.push({
+          kind: "todo_list",
+          timestamp,
+          itemId: `harness-plan:${readString(correlation?.thread_id) ?? raw.stream_id}`,
+          items,
+        });
+      }
+      break;
+    }
+    case "tool_call": {
+      const toolId = readString(data.tool_call_id);
+      const toolName = readString(data.name);
+      if (toolId && toolName) {
+        const input = readRecord(data.input) ?? {};
+        events.push({
+          kind: "tool_call",
+          timestamp,
+          toolId,
+          toolName,
+          displayName: getToolDisplayName(toolName),
+          icon: getToolIcon(toolName),
+          summary: getToolSummary(toolName, input),
+          input,
+        });
+      }
+      break;
+    }
+    case "tool_output": {
+      const toolUseId = readString(data.tool_call_id);
+      if (toolUseId) {
+        const status = readString(data.status);
+        events.push({
+          kind: "tool_result",
+          timestamp,
+          toolUseId,
+          isError: status === "failed" || status === "declined" || status === "cancelled",
+          result: outputText(data.output),
+        });
+      }
+      break;
+    }
+    case "file_change": {
+      const changes = (Array.isArray(data.changes) ? data.changes : []).flatMap((change) => {
+        const file = readRecord(change);
+        const path = readString(file?.path);
+        if (!path) return [];
+        const kind = readString(file?.kind)?.toLowerCase();
+        return [{
+          path,
+          kind: kind === "added" ? "add" : kind === "deleted" ? "delete" : "update",
+          diff: readString(file?.patch),
+        }];
+      });
+      if (changes.length > 0) {
+        events.push({
+          kind: "file_edit",
+          timestamp,
+          toolId: raw.event_id,
+          status: "completed",
+          changes,
+        });
+      }
+      break;
+    }
+    case "turn_finished":
+    case "run_finished": {
+      const resultText = readString(data.result_text);
+      if (resultText && (!turnKey || !state.turnsWithText.has(turnKey))) {
+        events.push({ kind: "assistant_message", timestamp, text: resultText });
+      }
+      events.push({ kind: "session_end", timestamp, ...harnessOutcomeMetrics(data) });
+      break;
+    }
+  }
+
+  return tagHarnessParent(events, raw);
 }
 
 // ============================================================================
@@ -1720,6 +1968,15 @@ interface ClaudeParseState {
   latestSnapshotByKey: Map<string, number>;
 }
 
+interface HarnessParseState {
+  /** Streaming deltas supersede the equivalent completed snapshot. */
+  deltaPayloads: Set<string>;
+  /** Avoid duplicating a terminal result after provider text was already shown. */
+  turnsWithText: Set<string>;
+  /** Snapshot plans replace their prior version instead of growing the trace. */
+  todoListByItemId: Map<string, number>;
+}
+
 function claudeSnapshotKey(
   ev: ConversationEvent,
   executionId: string
@@ -1758,6 +2015,7 @@ export function parseSessionLogs(
     CodexRolloutParseState
   >();
   const claudeStateByExecution = new Map<string, ClaudeParseState>();
+  const harnessStateByExecution = new Map<string, HarnessParseState>();
 
   for (const log of logs) {
     let raw: unknown;
@@ -1768,7 +2026,29 @@ export function parseSessionLogs(
     }
 
     const ts = log.created_at ?? "";
-    if (isCodexRawMessage(raw)) {
+    if (log.format === "harness" && isHarnessRawEvent(raw)) {
+      const execId = log.step_execution_id ?? "";
+      let state = harnessStateByExecution.get(execId);
+      if (!state) {
+        state = {
+          deltaPayloads: new Set(),
+          turnsWithText: new Set(),
+          todoListByItemId: new Map(),
+        };
+        harnessStateByExecution.set(execId, state);
+      }
+      for (const ev of parseHarnessEvent(raw, ts, state)) {
+        if (ev.kind === "todo_list") {
+          const priorIndex = state.todoListByItemId.get(ev.itemId);
+          if (priorIndex !== undefined) {
+            events[priorIndex] = ev;
+            continue;
+          }
+          state.todoListByItemId.set(ev.itemId, events.length);
+        }
+        events.push(ev);
+      }
+    } else if (isCodexRawMessage(raw)) {
       const execId = log.step_execution_id ?? "";
       let state = codexStateByExecution.get(execId);
       if (!state) {

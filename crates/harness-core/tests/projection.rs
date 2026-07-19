@@ -321,6 +321,7 @@ fn terminal_outcomes_controls_and_unknown_events_project_without_cross_talk() {
             details: None,
             modification_supported: true,
         }),
+        presentation: None,
         timeout_ms: None,
         automatic_resolution: None,
     };
@@ -396,6 +397,7 @@ fn session_end_and_turn_cancellation_settle_pending_controls() {
                     details: None,
                     modification_supported: false,
                 }),
+                presentation: None,
                 timeout_ms: Some(10),
                 automatic_resolution: Some(ControlDecision::Deny),
             }),
@@ -526,6 +528,7 @@ fn one_shot_run_correlation_settles_controls_without_double_counting_terminal_us
                     details: None,
                     modification_supported: false,
                 }),
+                presentation: None,
                 timeout_ms: None,
                 automatic_resolution: Some(ControlDecision::Deny),
             }),
@@ -565,6 +568,7 @@ fn one_shot_run_correlation_settles_controls_without_double_counting_terminal_us
                 },
                 cost_microusd: 999,
             }),
+            metrics: OutcomeMetrics::default(),
             error: None,
         };
         let mut finished = event(
@@ -897,6 +901,7 @@ fn conflicting_run_cannot_settle_controls_owned_by_the_stream_run() {
                 details: None,
                 modification_supported: false,
             }),
+            presentation: None,
             timeout_ms: None,
             automatic_resolution: Some(ControlDecision::Deny),
         }),
@@ -911,6 +916,7 @@ fn conflicting_run_cannot_settle_controls_owned_by_the_stream_run() {
         result_text: None,
         structured_output: None,
         usage: None,
+        metrics: OutcomeMetrics::default(),
         error: None,
     };
     let mut wrong_run_finished = event(
@@ -1356,6 +1362,7 @@ fn remaining_known_payloads_update_their_canonical_state() {
         result_text: None,
         structured_output: None,
         usage: None,
+        metrics: OutcomeMetrics::default(),
         error: Some("failed".into()),
     };
     let events = vec![
@@ -1368,6 +1375,7 @@ fn remaining_known_payloads_update_their_canonical_state() {
                 provider: "mock".into(),
                 model: Some("model".into()),
                 provider_resume_id: Some(ProviderResumeId::from("resume")),
+                tools: Vec::new(),
             }),
         ),
         event(
