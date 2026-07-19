@@ -89,7 +89,7 @@ pub struct DaemonConfig {
     /// Provider CLI binaries resolved at daemon startup. Each entry is
     /// `Some` when the binary was found; `None` when it was not. The daemon
     /// starts even if one is missing -- only steps requesting that provider
-    /// fail (with `MissingProviderBinary`) before spawn.
+    /// fail during shared harness construction before spawn.
     pub provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH, resolved at startup.
     /// Passed to child processes so they can find tools like `mix`, `node`, `vtb`, etc.

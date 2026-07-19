@@ -2188,6 +2188,7 @@ dependencies = [
  "url",
  "uuid",
  "vertebrae-core",
+ "vertebrae-harness",
  "vertebrae-harness-claude",
  "vertebrae-harness-codex",
  "vertebrae-harness-core",
@@ -6746,11 +6747,24 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "vertebrae-core",
+ "vertebrae-harness",
  "vertebrae-harness-claude",
  "vertebrae-harness-codex",
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
+]
+
+[[package]]
+name = "vertebrae-harness"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "vertebrae-core",
+ "vertebrae-harness-claude",
+ "vertebrae-harness-codex",
+ "vertebrae-harness-core",
+ "vertebrae-installer",
 ]
 
 [[package]]

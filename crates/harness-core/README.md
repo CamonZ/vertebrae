@@ -110,11 +110,13 @@ callers.
 
 `RequestConfig` contains portable, per-request behavior: working directory,
 model selection, reasoning effort, output schema, and request environment.
-Provider-specific runtime construction stays in the adapter constructor. This
-includes executable paths, launch arguments, app-server or API endpoints,
-credentials, protocol clients, provider feature flags, and permission/control
-plumbing. Do not tunnel those settings through `RequestConfig` or encode them
-as provider-specific event data.
+`vertebrae-harness` is the composition layer for the existing contract: it
+selects and configures the provider adapter from `AgentConfig` plus surface
+options, then returns the provider-neutral `HarnessRuntime` and normalized
+request. Provider-specific executable paths, launch arguments, app-server
+protocols, feature flags, and permission/control plumbing remain behind that
+factory and inside the adapter crates. Do not tunnel those settings through
+`RequestConfig` or encode them as provider-specific event data.
 
 ## V1 extensibility
 

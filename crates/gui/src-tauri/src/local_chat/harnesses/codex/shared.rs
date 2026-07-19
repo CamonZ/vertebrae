@@ -2,10 +2,11 @@ use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use tokio::sync::RwLock;
-use vertebrae_harness_codex::{CodexPermissionConfig, CodexProviderConfig, CodexRuntime};
+use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
+use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, HarnessRuntime, SendTurnRequest, SessionHandle, SessionId,
-    StartSessionRequest, StreamId, TurnId,
+    EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, StartSessionRequest,
+    StreamId, TurnId,
 };
 
 use crate::local_chat::{
@@ -93,21 +94,24 @@ impl LocalChatHarness for CodexLocalChatHarness {
             LocalChatSessionError::StartFailed(error)
         })?;
         let initial_prompt = input.initial_prompt.clone();
-        let provider = CodexProviderConfig {
-            installed_skills_roots: vec![skills_root],
-            permission: permission_config(input.permission_mode.as_ref()),
-            search_path: Some(std::env::var_os("PATH").unwrap_or_default()),
-            ..CodexProviderConfig::default()
+        let model = requested_model_override(input.model_id.as_deref()).map(str::to_owned);
+        let reasoning_effort =
+            requested_reasoning_effort(input.reasoning_effort.as_deref()).map(str::to_owned);
+        let agent_config = AgentConfig {
+            provider: Some(Provider::Openai),
+            model: model.clone(),
+            reasoning_effort: reasoning_effort.clone(),
+            permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
+            ..AgentConfig::default()
         };
-        let request = StartSessionRequest {
+        let mut request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.map(Into::into),
             config: vertebrae_harness_core::RequestConfig {
                 working_directory: input.working_dir.map(PathBuf::from),
-                model: requested_model_override(input.model_id.as_deref()).map(str::to_owned),
-                reasoning_effort: requested_reasoning_effort(input.reasoning_effort.as_deref())
-                    .map(str::to_owned),
+                model,
+                reasoning_effort,
                 ..Default::default()
             },
         };
@@ -123,7 +127,23 @@ impl LocalChatHarness for CodexLocalChatHarness {
         let control_sink: Arc<dyn vertebrae_harness_core::ControlSink> = Arc::new(
             LocalChatControlSink::new(backend_session_id.clone(), runtime.clone()),
         );
-        let session = CodexRuntime::new(provider)
+        let instance = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            search_path: std::env::var_os("PATH"),
+            installed_skills_roots: vec![skills_root],
+            ..HarnessFactoryConfig::default()
+        })
+        .create(HarnessRuntimeOptions {
+            agent_config,
+            request_config: request.config.clone(),
+        })
+        .map_err(|error| {
+            let error = error.to_string();
+            emit_error(&runtime, &backend_session_id, error.clone());
+            LocalChatSessionError::StartFailed(error)
+        })?;
+        request.config = instance.request_config;
+        let session = instance
+            .runtime
             .start_session(request, event_sink, control_sink)
             .await
             .map_err(|error| {
@@ -209,36 +229,14 @@ impl CodexLocalChatSession {
     }
 }
 
-fn permission_config(mode: Option<&crate::types::PermissionMode>) -> CodexPermissionConfig {
-    use crate::types::PermissionMode;
+fn core_permission_mode(mode: &crate::types::PermissionMode) -> CorePermissionMode {
     match mode {
-        Some(PermissionMode::AcceptEdits) => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        Some(PermissionMode::Auto) => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            approvals_reviewer: Some("auto_review".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        Some(PermissionMode::BypassPermissions) => CodexPermissionConfig {
-            approval_policy: Some("never".into()),
-            permissions: Some(":danger-full-access".into()),
-            ..Default::default()
-        },
-        Some(PermissionMode::DontAsk) | Some(PermissionMode::Plan) => CodexPermissionConfig {
-            approval_policy: Some("never".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        Some(PermissionMode::Default) => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            permissions: Some(":read-only".into()),
-            ..Default::default()
-        },
-        None => CodexPermissionConfig::default(),
+        crate::types::PermissionMode::AcceptEdits => CorePermissionMode::AcceptEdits,
+        crate::types::PermissionMode::Auto => CorePermissionMode::Auto,
+        crate::types::PermissionMode::BypassPermissions => CorePermissionMode::BypassPermissions,
+        crate::types::PermissionMode::Default => CorePermissionMode::Default,
+        crate::types::PermissionMode::DontAsk => CorePermissionMode::DontAsk,
+        crate::types::PermissionMode::Plan => CorePermissionMode::Plan,
     }
 }
 

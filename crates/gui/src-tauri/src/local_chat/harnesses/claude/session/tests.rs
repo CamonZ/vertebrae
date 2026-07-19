@@ -203,7 +203,7 @@ struct TestAdapter {
     adapter: ClaudeSessionRuntime,
     runtime_state: Arc<MockRuntimeState>,
     handle: Arc<MockSessionHandle>,
-    provider_configs: Arc<Mutex<Vec<ClaudeProviderConfig>>>,
+    provider_configs: Arc<Mutex<Vec<HarnessFactoryConfig>>>,
 }
 
 fn test_adapter(session_id: &str) -> TestAdapter {
@@ -214,11 +214,15 @@ fn test_adapter(session_id: &str) -> TestAdapter {
         let runtime_state = runtime_state.clone();
         let handle = handle.clone();
         let provider_configs = provider_configs.clone();
-        move |config| {
+        move |config, options| {
             provider_configs.lock().unwrap().push(config);
-            Arc::new(MockRuntime {
-                state: runtime_state.clone(),
-                handle: handle.clone(),
+            Ok(vertebrae_harness::HarnessRuntimeInstance {
+                provider: Provider::Anthropic,
+                runtime: Arc::new(MockRuntime {
+                    state: runtime_state.clone(),
+                    handle: handle.clone(),
+                }),
+                request_config: options.request_config,
             })
         }
     });
@@ -243,15 +247,15 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
 }
 
 fn prepared(model: Option<&str>) -> PreparedSession {
-    let mut provider_config = ClaudeProviderConfig::default();
-    provider_config
+    let mut factory_config = HarnessFactoryConfig::default();
+    factory_config
         .environment
         .insert("ADAPTER_TEST".into(), "present".into());
     PreparedSession {
         working_dir: PathBuf::from("/tmp/gui-claude-adapter-test"),
         model: model.map(str::to_owned),
         model_warning: None,
-        provider_config,
+        factory_config,
         plugin_resolution: ClaudePluginDirResolution {
             plugin_root: None,
             warning: None,
@@ -297,12 +301,12 @@ fn captured_events(events: &Arc<Mutex<Vec<LocalChatEvent>>>) -> Vec<LocalChatEve
 #[test]
 fn permission_modes_map_to_harness_values() {
     assert_eq!(
-        claude_permission_mode(&PermissionMode::Default),
-        ClaudePermissionMode::Default
+        core_permission_mode(&PermissionMode::Default),
+        CorePermissionMode::Default
     );
     assert_eq!(
-        claude_permission_mode(&PermissionMode::Plan),
-        ClaudePermissionMode::Plan
+        core_permission_mode(&PermissionMode::Plan),
+        CorePermissionMode::Plan
     );
 }
 
@@ -314,7 +318,7 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
     let permission_socket = PathBuf::from("/tmp/vertebrae-gate/session.sock");
     let locator_root = PathBuf::from("/tmp/claude-project");
     let augmented_path = "/opt/vertebrae/bin:/usr/bin";
-    let config = build_provider_config(
+    let config = build_factory_config(
         claude_binary.clone(),
         augmented_path,
         &ClaudePluginDirResolution {
@@ -323,17 +327,16 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
         },
         gate_binary.clone(),
         "backend-config",
-        Some(&PermissionMode::Plan),
         locator_root.clone(),
         Some(&permission_socket),
     );
 
-    assert_eq!(config.executable.as_ref(), Some(&claude_binary));
+    assert_eq!(config.anthropic_executable.as_ref(), Some(&claude_binary));
     assert_eq!(
         config.search_path.as_deref(),
         Some(std::ffi::OsStr::new(augmented_path))
     );
-    assert_eq!(config.plugin_roots, [plugin_root]);
+    assert_eq!(config.claude_plugin_roots, [plugin_root]);
     assert_eq!(
         config
             .environment
@@ -348,19 +351,18 @@ fn provider_config_preserves_every_gui_claude_process_setting() {
             .map(String::as_str),
         Some(permission_socket.to_string_lossy().as_ref())
     );
-    assert_eq!(config.permission_mode, Some(ClaudePermissionMode::Plan));
     assert_eq!(
-        config.permission_prompt_tool.as_deref(),
+        config.claude_permission_prompt_tool.as_deref(),
         Some("mcp__vtb-gate__permission_prompt")
     );
     assert_eq!(
-        config.mcp_config,
+        config.claude_mcp_config,
         Some(serde_json::json!({
             "mcpServers": { "vtb-gate": { "command": gate_binary } }
         }))
     );
     let locator = config
-        .root_locator_resolver
+        .claude_root_locator_resolver
         .as_ref()
         .expect("GUI config should resolve Claude transcript locators")
         .resolve(&SessionId::new("provider-session"))

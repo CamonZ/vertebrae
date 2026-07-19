@@ -15,26 +15,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
-use serde_json::json;
 use vertebrae_core::Provider;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode};
-use vertebrae_harness_claude::{
-    ClaudeLaunchMode, ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude,
-    ClaudeRuntime,
-};
-use vertebrae_harness_codex::{CodexPermissionConfig, CodexProviderConfig, CodexRuntime};
+use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
-    HarnessRuntime, ProviderThreadRef, RequestConfig, ResolutionSource, RunHandle, RunId,
-    RunOutcome, RunRequest, SessionId, SessionUsage, StreamId,
+    RequestConfig, ResolutionSource, RunHandle, RunOutcome, SessionUsage, StreamId,
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::helpers::ProviderBinaries;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
-use crate::provider::ProviderResolutionError;
 use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
 
@@ -46,26 +39,6 @@ pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
 pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
 const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(250);
-
-fn merge_managed_plugin_root(agent_config: &mut AgentConfig, plugin_root: &Path) {
-    let mut managed_root_seen = false;
-    agent_config.plugin_dirs.retain(|configured| {
-        if Path::new(configured) != plugin_root {
-            return true;
-        }
-        if managed_root_seen {
-            return false;
-        }
-        managed_root_seen = true;
-        true
-    });
-
-    if !managed_root_seen {
-        agent_config
-            .plugin_dirs
-            .push(plugin_root.to_string_lossy().into_owned());
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
@@ -126,9 +99,9 @@ pub struct StepExecutorConfig {
     /// Optional worktree path override. When set, used as current_dir instead of project_root.
     pub worktree: Option<PathBuf>,
     /// Provider CLI binaries resolved at daemon startup. Each entry is
-    /// `Some` when the binary was found; `None` when it was not. Per-step
-    /// resolution looks up the binary for the step's resolved provider and
-    /// fails the step with `MissingProviderBinary` if it's absent.
+    /// `Some` when the binary was found; `None` when it was not. The shared
+    /// runtime factory receives these deployment hints and reports an
+    /// unavailable provider before attempting to start a process.
     pub provider_binaries: ProviderBinaries,
     /// The user's full login shell PATH for the child process.
     pub shell_path: String,
@@ -331,284 +304,6 @@ impl ControlSink for DaemonControlSink {
     }
 }
 
-fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
-    match mode {
-        PermissionMode::AcceptEdits => ClaudePermissionMode::AcceptEdits,
-        PermissionMode::Auto => ClaudePermissionMode::Auto,
-        PermissionMode::BypassPermissions => ClaudePermissionMode::BypassPermissions,
-        PermissionMode::Default => ClaudePermissionMode::Default,
-        PermissionMode::DontAsk => ClaudePermissionMode::DontAsk,
-        PermissionMode::Plan => ClaudePermissionMode::Plan,
-    }
-}
-
-fn daemon_claude_root_locator(session_id: &SessionId) -> ProviderThreadRef {
-    // Daemon one-shot runs do not replay Claude's on-disk transcript, so they
-    // must not guess Claude's project-directory encoding. This stable opaque
-    // identity lets the decoder release pathless init records while leaving
-    // provider-owned transcript discovery to a later replay-capable surface.
-    ProviderThreadRef::new(format!("claude://session/{}", session_id.as_str()))
-}
-
-fn build_claude_harness(
-    config: &StepExecutorConfig,
-    settings: &SyntheticSettings,
-) -> Result<(ClaudeRuntime, RunRequest), ProviderResolutionError> {
-    vertebrae_core::model_catalog::validate_provider_model_with_codex_provider(
-        Provider::Anthropic,
-        config.step_config.agent_config.model.as_deref(),
-        config
-            .step_config
-            .agent_config
-            .codex_model_provider
-            .as_deref(),
-    )
-    .map_err(|error| ProviderResolutionError::InvalidProviderModel(error.to_string()))?;
-    vertebrae_core::model_catalog::normalize_provider_reasoning_effort(
-        Provider::Anthropic,
-        config.step_config.agent_config.reasoning_effort.as_deref(),
-    )
-    .map_err(|error| ProviderResolutionError::InvalidReasoningEffort(error.to_string()))?;
-
-    let binary = config
-        .provider_binaries
-        .get(Provider::Anthropic)
-        .ok_or_else(|| ProviderResolutionError::MissingProviderBinary {
-            provider: Provider::Anthropic,
-            hint: crate::helpers::find_claude_binary("")
-                .err()
-                .unwrap_or_else(|| "Set CLAUDE_CODE_PATH or install claude in PATH.".into()),
-        })?;
-
-    let resolution = vertebrae_installer::resolve_claude_plugin_dir(
-        binary,
-        config.working_dir(),
-        &config.shell_path,
-    );
-    if let Some(warning) = resolution.warning {
-        tracing::warn!(
-            execution_id = %config.execution_id,
-            task_id = %config.task_id,
-            claude_binary = %binary.display(),
-            "{}",
-            warning,
-        );
-    }
-
-    let mut agent_config = config.step_config.agent_config.clone();
-    if agent_config.model.is_none() {
-        agent_config.model = Some(DEFAULT_MODEL.into());
-    }
-    for skill in &config.step_config.skills {
-        if !agent_config.allowed_tools.contains(skill) {
-            agent_config.allowed_tools.push(skill.clone());
-        }
-    }
-    if agent_config.permission_mode.is_none() {
-        agent_config.permission_mode = Some(PermissionMode::BypassPermissions);
-    }
-    if let Some(root) = resolution.plugin_root.as_deref() {
-        merge_managed_plugin_root(&mut agent_config, root);
-    }
-
-    let model = agent_config.model.take();
-    let permission_mode = agent_config
-        .permission_mode
-        .take()
-        .as_ref()
-        .map(claude_permission_mode);
-    let output_schema = agent_config.json_schema.take();
-    let plugin_roots = std::mem::take(&mut agent_config.plugin_dirs)
-        .into_iter()
-        .map(PathBuf::from)
-        .collect();
-    let provider = ClaudeProviderConfig {
-        executable: Some(binary.to_path_buf()),
-        search_path: Some(config.shell_path.clone().into()),
-        prelude: ClaudeProviderPrelude {
-            settings_path: Some(settings.settings_path()),
-            // These are daemon-owned Claude flags not represented in the
-            // portable RequestConfig contract.
-            args: agent_config.to_claude_cli_args(),
-        },
-        plugin_roots,
-        agent_paths: config
-            .step_config
-            .agents
-            .iter()
-            .map(PathBuf::from)
-            .collect(),
-        permission_mode,
-        root_locator_resolver: Some(Arc::new(|session_id: &SessionId| {
-            Ok(Some(daemon_claude_root_locator(session_id)))
-        })),
-        ..ClaudeProviderConfig::default()
-    };
-    let request = RunRequest {
-        run_id: RunId::new(config.execution_id.clone()),
-        stream_id: StreamId::new(config.execution_id.clone()),
-        prompt: config.step_config.prompt.clone(),
-        config: RequestConfig {
-            working_directory: Some(config.working_dir().to_path_buf()),
-            model,
-            output_schema,
-            ..RequestConfig::default()
-        },
-    };
-    if config.step_config.verbose_daemon_logging
-        && let Ok(spec) = provider.command_spec(
-            ClaudeLaunchMode::OneShot {
-                prompt: &request.prompt,
-            },
-            &request.config,
-        )
-    {
-        tracing::info!(
-            target: VERBOSE_LOG_TARGET,
-            execution_id = %config.execution_id,
-            task_id = %config.task_id,
-            checkpoint = CHECKPOINT_CLAUDE_ARGV,
-            program = %spec.program.display(),
-            argv = ?spec.args,
-            provider = %Provider::Anthropic,
-            "verbose: built Claude harness command",
-        );
-    }
-    Ok((ClaudeRuntime::new(provider), request))
-}
-
-fn codex_permission_config(
-    mode: &PermissionMode,
-    disallowed_tools: &[String],
-) -> CodexPermissionConfig {
-    let mut permission = match mode {
-        PermissionMode::AcceptEdits => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        PermissionMode::Auto => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            approvals_reviewer: Some("auto_review".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        PermissionMode::BypassPermissions => CodexPermissionConfig {
-            approval_policy: Some("never".into()),
-            permissions: Some(":danger-full-access".into()),
-            ..Default::default()
-        },
-        PermissionMode::DontAsk | PermissionMode::Plan => CodexPermissionConfig {
-            approval_policy: Some("never".into()),
-            permissions: Some(":workspace".into()),
-            ..Default::default()
-        },
-        PermissionMode::Default => CodexPermissionConfig {
-            approval_policy: Some("on-request".into()),
-            permissions: Some(":read-only".into()),
-            ..Default::default()
-        },
-    };
-    let deny_tools = crate::settings_synthesis::SELF_TRANSITION_DENY_TOOLS
-        .iter()
-        .copied()
-        .chain(disallowed_tools.iter().map(String::as_str))
-        .collect::<Vec<_>>();
-    let prefix_rules = deny_tools
-        .iter()
-        .filter_map(|tool| {
-            tool.strip_prefix("Bash(")
-                .and_then(|tool| tool.strip_suffix(')'))
-        })
-        .filter_map(|command| {
-            let words = command
-                .trim_end_matches('*')
-                .split_whitespace()
-                .map(ToOwned::to_owned)
-                .collect::<Vec<_>>();
-            (!words.is_empty()).then(|| json!({ "prefix_rule": words, "decision": "deny" }))
-        })
-        .collect::<Vec<_>>();
-    if !prefix_rules.is_empty() {
-        permission.prefix_rules = Some(json!(prefix_rules));
-    }
-    permission
-}
-
-fn build_codex_harness(
-    config: &StepExecutorConfig,
-) -> Result<(CodexRuntime, RunRequest), ProviderResolutionError> {
-    vertebrae_core::model_catalog::validate_provider_model_with_codex_provider(
-        Provider::Openai,
-        config.step_config.agent_config.model.as_deref(),
-        config
-            .step_config
-            .agent_config
-            .codex_model_provider
-            .as_deref(),
-    )
-    .map_err(|error| ProviderResolutionError::InvalidProviderModel(error.to_string()))?;
-    let reasoning_effort = vertebrae_core::model_catalog::normalize_provider_reasoning_effort(
-        Provider::Openai,
-        config.step_config.agent_config.reasoning_effort.as_deref(),
-    )
-    .map_err(|error| ProviderResolutionError::InvalidReasoningEffort(error.to_string()))?;
-    let binary = config
-        .provider_binaries
-        .get(Provider::Openai)
-        .ok_or_else(|| ProviderResolutionError::MissingProviderBinary {
-            provider: Provider::Openai,
-            hint: crate::helpers::find_codex_binary("")
-                .err()
-                .unwrap_or_else(|| "Set CODEX_PATH or install codex in PATH.".into()),
-        })?;
-    let mode = config
-        .step_config
-        .agent_config
-        .permission_mode
-        .clone()
-        .unwrap_or(PermissionMode::BypassPermissions);
-    let installed_skills_roots = vertebrae_installer::installed_skills_dir()
-        .ok()
-        .into_iter()
-        .collect();
-    let provider = CodexProviderConfig {
-        executable: Some(binary.to_path_buf()),
-        search_path: Some(config.shell_path.clone().into()),
-        model_provider: config.step_config.agent_config.codex_model_provider.clone(),
-        permission: codex_permission_config(
-            &mode,
-            &config.step_config.agent_config.disallowed_tools,
-        ),
-        installed_skills_roots,
-        ..CodexProviderConfig::default()
-    };
-    let request = RunRequest {
-        run_id: RunId::new(config.execution_id.clone()),
-        stream_id: StreamId::new(config.execution_id.clone()),
-        prompt: config.step_config.prompt.clone(),
-        config: RequestConfig {
-            working_directory: Some(config.working_dir().to_path_buf()),
-            model: config.step_config.agent_config.model.clone(),
-            reasoning_effort,
-            output_schema: config.step_config.agent_config.json_schema.clone(),
-            environment: std::iter::once(("PATH".into(), config.shell_path.clone())).collect(),
-        },
-    };
-    if config.step_config.verbose_daemon_logging {
-        tracing::info!(
-            target: VERBOSE_LOG_TARGET,
-            execution_id = %config.execution_id,
-            task_id = %config.task_id,
-            checkpoint = CHECKPOINT_CLAUDE_ARGV,
-            program = %binary.display(),
-            provider = %Provider::Openai,
-            "verbose: built Codex App Server configuration",
-        );
-    }
-    Ok((CodexRuntime::new(provider), request))
-}
-
 pub struct StepExecutorState {
     execution_id: String,
     task_id: String,
@@ -769,9 +464,10 @@ impl StepExecutor {
             state.config.working_dir().display()
         );
 
-        if crate::provider::resolve_provider(&state.config) == Provider::Anthropic {
-            let settings_guard = match SyntheticSettings::create(&state.execution_id) {
-                Ok(guard) => guard,
+        let provider = HarnessRuntimeFactory::provider_for(&state.config.step_config.agent_config);
+        let settings_guard = if provider == Provider::Anthropic {
+            match SyntheticSettings::create(&state.execution_id) {
+                Ok(guard) => Some(guard),
                 Err(err) => {
                     tracing::error!(
                         "Failed to synthesize daemon settings for execution {}: {}",
@@ -789,121 +485,136 @@ impl StepExecutor {
                     myself.stop(Some("settings synthesis failed".to_string()));
                     return Ok(());
                 }
-            };
-            let settings = &settings_guard;
-            let (runtime, request) = match build_claude_harness(&state.config, settings) {
-                Ok(value) => value,
-                Err(err) => {
-                    let _ = state.parent.cast(ProjectMessage::StepFinished {
-                        execution_id: state.execution_id.clone(),
-                        task_id: state.task_id.clone(),
-                        result: StepResult::failed(
-                            None,
-                            format!("Provider resolution failed: {err}"),
-                        ),
-                    });
-                    myself.stop(Some("provider resolution failed".into()));
-                    return Ok(());
-                }
-            };
-            let usage = Arc::clone(&state.harness_usage);
-            let event_sink: Arc<dyn EventSink> = Arc::new(DaemonHarnessEventSink {
-                persistence: Arc::new(SessionLogEventSink::new(
-                    &state.execution_id,
-                    Arc::clone(&state.config.execution_service),
-                )),
-                root_stream_id: request.stream_id.clone(),
-                usage,
-                cancel_rx: state.harness_cancel_tx.subscribe(),
-                execution_id: state.execution_id.clone(),
-                task_id: state.task_id.clone(),
-                verbose: state.config.step_config.verbose_daemon_logging,
-            });
-            let control_sink: Arc<dyn ControlSink> = Arc::new(
-                DaemonControlSink::from_agent_config(&state.config.step_config.agent_config),
-            );
-            let run = match runtime.run_once(request, event_sink, control_sink).await {
-                Ok(run) => run,
+            }
+        } else {
+            None
+        };
+
+        let mut agent_config = state.config.step_config.agent_config.clone();
+        if provider == Provider::Anthropic && agent_config.model.is_none() {
+            agent_config.model = Some(DEFAULT_MODEL.into());
+        }
+        for skill in &state.config.step_config.skills {
+            if !agent_config.allowed_tools.contains(skill) {
+                agent_config.allowed_tools.push(skill.clone());
+            }
+        }
+        for tool in crate::settings_synthesis::SELF_TRANSITION_DENY_TOOLS {
+            if !agent_config
+                .disallowed_tools
+                .iter()
+                .any(|configured| configured == tool)
+            {
+                agent_config.disallowed_tools.push((*tool).into());
+            }
+        }
+
+        let factory_config = HarnessFactoryConfig {
+            anthropic_executable: state.config.provider_binaries.anthropic.clone(),
+            openai_executable: state.config.provider_binaries.openai.clone(),
+            search_path: Some(state.config.shell_path.clone().into()),
+            installed_skills_roots: vertebrae_installer::installed_skills_dir()
+                .ok()
+                .into_iter()
+                .collect(),
+            claude_settings_path: settings_guard
+                .as_ref()
+                .map(SyntheticSettings::settings_path),
+            claude_agent_paths: state
+                .config
+                .step_config
+                .agents
+                .iter()
+                .map(PathBuf::from)
+                .collect(),
+            claude_root_locator_resolver: Some(Arc::new(
+                vertebrae_harness::daemon_opaque_claude_locator,
+            )),
+            default_permission_mode: Some(PermissionMode::BypassPermissions),
+            ..HarnessFactoryConfig::default()
+        };
+        let request_config = RequestConfig {
+            working_directory: Some(state.config.working_dir().to_path_buf()),
+            model: agent_config.model.clone(),
+            reasoning_effort: agent_config.reasoning_effort.clone(),
+            output_schema: agent_config.json_schema.clone(),
+            environment: std::iter::once(("PATH".into(), state.config.shell_path.clone()))
+                .collect(),
+        };
+        let instance =
+            match HarnessRuntimeFactory::new(factory_config).create(HarnessRuntimeOptions {
+                agent_config: agent_config.clone(),
+                request_config,
+            }) {
+                Ok(instance) => instance,
                 Err(error) => {
                     let _ = state.parent.cast(ProjectMessage::StepFinished {
                         execution_id: state.execution_id.clone(),
                         task_id: state.task_id.clone(),
                         result: StepResult::failed(
                             None,
-                            format!("Failed to start Claude harness: {error}"),
-                        ),
-                    });
-                    myself.stop(Some("harness start failed".into()));
-                    return Ok(());
-                }
-            };
-            state.settings_guard = Some(settings_guard);
-            state.harness_run = Some(Arc::clone(&run));
-            let actor_ref = myself;
-            state.harness_outcome_handle = Some(tokio::spawn(async move {
-                let result = run.await_outcome().await.map_err(|error| error.to_string());
-                let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
-            }));
-            return Ok(());
-        }
-
-        if crate::provider::resolve_provider(&state.config) == Provider::Openai {
-            let (runtime, request) = match build_codex_harness(&state.config) {
-                Ok(value) => value,
-                Err(err) => {
-                    let _ = state.parent.cast(ProjectMessage::StepFinished {
-                        execution_id: state.execution_id.clone(),
-                        task_id: state.task_id.clone(),
-                        result: StepResult::failed(
-                            None,
-                            format!("Provider resolution failed: {err}"),
+                            format!("Provider resolution failed: {error}"),
                         ),
                     });
                     myself.stop(Some("provider resolution failed".into()));
                     return Ok(());
                 }
             };
-            let usage = Arc::clone(&state.harness_usage);
-            let event_sink: Arc<dyn EventSink> = Arc::new(DaemonHarnessEventSink {
-                persistence: Arc::new(SessionLogEventSink::new(
-                    &state.execution_id,
-                    Arc::clone(&state.config.execution_service),
-                )),
-                root_stream_id: request.stream_id.clone(),
-                usage,
-                cancel_rx: state.harness_cancel_tx.subscribe(),
-                execution_id: state.execution_id.clone(),
-                task_id: state.task_id.clone(),
-                verbose: state.config.step_config.verbose_daemon_logging,
-            });
-            let control_sink: Arc<dyn ControlSink> = Arc::new(
-                DaemonControlSink::from_agent_config(&state.config.step_config.agent_config),
+        let request = vertebrae_harness_core::RunRequest {
+            run_id: vertebrae_harness_core::RunId::new(state.execution_id.clone()),
+            stream_id: vertebrae_harness_core::StreamId::new(state.execution_id.clone()),
+            prompt: state.config.step_config.prompt.clone(),
+            config: instance.request_config,
+        };
+        if state.config.step_config.verbose_daemon_logging {
+            tracing::info!(
+                target: VERBOSE_LOG_TARGET,
+                execution_id = %state.execution_id,
+                task_id = %state.task_id,
+                checkpoint = CHECKPOINT_CLAUDE_ARGV,
+                provider = %instance.provider,
+                "verbose: built provider harness through the shared runtime factory",
             );
-            let run = match runtime.run_once(request, event_sink, control_sink).await {
-                Ok(run) => run,
-                Err(error) => {
-                    let _ = state.parent.cast(ProjectMessage::StepFinished {
-                        execution_id: state.execution_id.clone(),
-                        task_id: state.task_id.clone(),
-                        result: StepResult::failed(
-                            None,
-                            format!("Failed to start Codex harness: {error}"),
-                        ),
-                    });
-                    myself.stop(Some("harness start failed".into()));
-                    return Ok(());
-                }
-            };
-            state.harness_run = Some(Arc::clone(&run));
-            let actor_ref = myself;
-            state.harness_outcome_handle = Some(tokio::spawn(async move {
-                let result = run.await_outcome().await.map_err(|error| error.to_string());
-                let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
-            }));
-            return Ok(());
         }
 
-        unreachable!("all supported providers use a harness runtime")
+        let event_sink: Arc<dyn EventSink> = Arc::new(DaemonHarnessEventSink {
+            persistence: Arc::new(SessionLogEventSink::new(
+                &state.execution_id,
+                Arc::clone(&state.config.execution_service),
+            )),
+            root_stream_id: request.stream_id.clone(),
+            usage: Arc::clone(&state.harness_usage),
+            cancel_rx: state.harness_cancel_tx.subscribe(),
+            execution_id: state.execution_id.clone(),
+            task_id: state.task_id.clone(),
+            verbose: state.config.step_config.verbose_daemon_logging,
+        });
+        let control_sink: Arc<dyn ControlSink> =
+            Arc::new(DaemonControlSink::from_agent_config(&agent_config));
+        let run = match instance
+            .runtime
+            .run_once(request, event_sink, control_sink)
+            .await
+        {
+            Ok(run) => run,
+            Err(error) => {
+                let _ = state.parent.cast(ProjectMessage::StepFinished {
+                    execution_id: state.execution_id.clone(),
+                    task_id: state.task_id.clone(),
+                    result: StepResult::failed(None, format!("Failed to start harness: {error}")),
+                });
+                myself.stop(Some("harness start failed".into()));
+                return Ok(());
+            }
+        };
+        state.settings_guard = settings_guard;
+        state.harness_run = Some(Arc::clone(&run));
+        let actor_ref = myself;
+        state.harness_outcome_handle = Some(tokio::spawn(async move {
+            let result = run.await_outcome().await.map_err(|error| error.to_string());
+            let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
+        }));
+        Ok(())
     }
 
     async fn handle_cancel(

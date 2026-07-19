@@ -46,6 +46,7 @@ futures = "0.3"
 
 # Workspace dependencies
 vertebrae-core = { path = "../../core" }
+vertebrae-harness = { path = "../../harness" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
 vertebrae-installer = { path = "../../installer" }
 vertebrae-skills-assets = { path = "../../skills-assets" }

@@ -2,7 +2,6 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    ffi::OsString,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -13,11 +12,12 @@ use std::{
 use async_trait::async_trait;
 use tauri::Manager;
 use tokio::sync::RwLock;
-use vertebrae_harness_claude::{ClaudePermissionMode, ClaudeProviderConfig, ClaudeRuntime};
+use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
+use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
-    EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime,
-    ProviderResumeId, ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus,
-    SessionHandle, SessionId, StartSessionRequest, StreamId, TurnId,
+    EventSink, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ProviderResumeId,
+    ProviderThreadRef, RequestConfig, SendTurnRequest, SessionCloseStatus, SessionHandle,
+    SessionId, StartSessionRequest, StreamId, TurnId,
 };
 
 use crate::commands::AppState;
@@ -31,8 +31,13 @@ use crate::local_chat::{
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
 
-type RuntimeFactory =
-    dyn Fn(ClaudeProviderConfig) -> Arc<dyn HarnessRuntime> + Send + Sync + 'static;
+type RuntimeFactory = dyn Fn(
+        HarnessFactoryConfig,
+        HarnessRuntimeOptions,
+    ) -> Result<vertebrae_harness::HarnessRuntimeInstance, HarnessError>
+    + Send
+    + Sync
+    + 'static;
 
 const DEFAULT_CLAUDE_CONTEXT_WINDOW: u32 = 200_000;
 
@@ -470,11 +475,16 @@ struct RegistryInsertHook {
 
 impl ClaudeSessionRuntime {
     pub(crate) fn new() -> Self {
-        Self::with_runtime_factory(|config| Arc::new(ClaudeRuntime::new(config)))
+        Self::with_runtime_factory(|config, options| {
+            HarnessRuntimeFactory::new(config).create(options)
+        })
     }
 
     fn with_runtime_factory(
-        runtime_factory: impl Fn(ClaudeProviderConfig) -> Arc<dyn HarnessRuntime>
+        runtime_factory: impl Fn(
+                HarnessFactoryConfig,
+                HarnessRuntimeOptions,
+            ) -> Result<vertebrae_harness::HarnessRuntimeInstance, HarnessError>
             + Send
             + Sync
             + 'static,
@@ -550,7 +560,7 @@ impl ClaudeSessionRuntime {
             working_dir,
             model,
             model_warning,
-            provider_config,
+            factory_config,
             plugin_resolution,
             #[cfg(unix)]
             permission_socket,
@@ -582,8 +592,13 @@ impl ClaudeSessionRuntime {
                 runtime.clone(),
             ),
         );
-        let harness = (self.runtime_factory)(provider_config);
-        let request = StartSessionRequest {
+        let agent_config = AgentConfig {
+            provider: Some(Provider::Anthropic),
+            model: model.clone(),
+            permission_mode: input.permission_mode.as_ref().map(core_permission_mode),
+            ..AgentConfig::default()
+        };
+        let mut request = StartSessionRequest {
             session_id: SessionId::new(backend_session_id.clone()),
             stream_id: StreamId::new(format!("local-chat:{backend_session_id}")),
             resume_id: input.provider_resume_id.clone().map(ProviderResumeId::new),
@@ -594,7 +609,25 @@ impl ClaudeSessionRuntime {
                 ..RequestConfig::default()
             },
         };
-        let handle = match harness
+        let instance = match (self.runtime_factory)(
+            factory_config,
+            HarnessRuntimeOptions {
+                agent_config,
+                request_config: request.config.clone(),
+            },
+        ) {
+            Ok(harness) => harness,
+            Err(error) => {
+                #[cfg(unix)]
+                drop(permission_socket.take());
+                reservation.abandon().await;
+                let _ = event_sink.emit_error(error.to_string());
+                return Err(start_error(error));
+            }
+        };
+        request.config = instance.request_config;
+        let handle = match instance
+            .runtime
             .start_session(request, event_sink.clone(), control_sink)
             .await
         {
@@ -778,7 +811,7 @@ struct PreparedSession {
     working_dir: PathBuf,
     model: Option<String>,
     model_warning: Option<String>,
-    provider_config: ClaudeProviderConfig,
+    factory_config: HarnessFactoryConfig,
     plugin_resolution: ClaudePluginDirResolution,
     #[cfg(unix)]
     permission_socket: Option<crate::local_chat::permissions::PermissionSocketGuard>,
@@ -824,13 +857,12 @@ impl PreparedSession {
             input.provider_resume_id.is_some(),
         );
         let root_locator_dir = claude_project_directory(&working_dir);
-        let provider_config = build_provider_config(
+        let factory_config = build_factory_config(
             claude_binary,
             &augmented_path,
             &plugin_resolution,
             gate,
             &input.backend_session_id,
-            input.permission_mode.as_ref(),
             root_locator_dir,
             #[cfg(unix)]
             Some(permission_socket.path()),
@@ -842,7 +874,7 @@ impl PreparedSession {
             working_dir,
             model: resolved_model.model_id,
             model_warning: resolved_model.warning,
-            provider_config,
+            factory_config,
             plugin_resolution,
             #[cfg(unix)]
             permission_socket: Some(permission_socket),
@@ -851,16 +883,15 @@ impl PreparedSession {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_provider_config(
+fn build_factory_config(
     claude_binary: PathBuf,
     augmented_path: &str,
     plugin_resolution: &ClaudePluginDirResolution,
     gate: PathBuf,
     backend_session_id: &str,
-    permission_mode: Option<&PermissionMode>,
     root_locator_dir: PathBuf,
     permission_socket: Option<&Path>,
-) -> ClaudeProviderConfig {
+) -> HarnessFactoryConfig {
     let mut environment = BTreeMap::from([(
         "VTB_CLAUDE_SESSION_ID".to_string(),
         backend_session_id.to_string(),
@@ -871,17 +902,16 @@ fn build_provider_config(
             permission_socket.to_string_lossy().into_owned(),
         );
     }
-    ClaudeProviderConfig {
-        executable: Some(claude_binary),
-        search_path: Some(OsString::from(augmented_path)),
+    HarnessFactoryConfig {
+        anthropic_executable: Some(claude_binary),
+        search_path: Some(augmented_path.into()),
         environment,
-        plugin_roots: plugin_resolution.plugin_root.clone().into_iter().collect(),
-        permission_mode: permission_mode.map(claude_permission_mode),
-        permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
-        mcp_config: Some(serde_json::json!({
+        claude_plugin_roots: plugin_resolution.plugin_root.clone().into_iter().collect(),
+        claude_permission_prompt_tool: Some("mcp__vtb-gate__permission_prompt".into()),
+        claude_mcp_config: Some(serde_json::json!({
             "mcpServers": { "vtb-gate": { "command": gate } }
         })),
-        root_locator_resolver: Some(Arc::new(move |session_id: &SessionId| {
+        claude_root_locator_resolver: Some(Arc::new(move |session_id: &SessionId| {
             Ok(Some(ProviderThreadRef::new(
                 root_locator_dir
                     .join(format!("{}.jsonl", session_id.as_str()))
@@ -889,7 +919,7 @@ fn build_provider_config(
                     .into_owned(),
             )))
         })),
-        ..ClaudeProviderConfig::default()
+        ..HarnessFactoryConfig::default()
     }
 }
 
@@ -938,14 +968,14 @@ fn send_error(error: HarnessError) -> LocalChatSessionError {
     LocalChatSessionError::SendFailed(error.to_string())
 }
 
-fn claude_permission_mode(mode: &PermissionMode) -> ClaudePermissionMode {
+fn core_permission_mode(mode: &PermissionMode) -> CorePermissionMode {
     match mode {
-        PermissionMode::AcceptEdits => ClaudePermissionMode::AcceptEdits,
-        PermissionMode::Auto => ClaudePermissionMode::Auto,
-        PermissionMode::BypassPermissions => ClaudePermissionMode::BypassPermissions,
-        PermissionMode::Default => ClaudePermissionMode::Default,
-        PermissionMode::DontAsk => ClaudePermissionMode::DontAsk,
-        PermissionMode::Plan => ClaudePermissionMode::Plan,
+        PermissionMode::AcceptEdits => CorePermissionMode::AcceptEdits,
+        PermissionMode::Auto => CorePermissionMode::Auto,
+        PermissionMode::BypassPermissions => CorePermissionMode::BypassPermissions,
+        PermissionMode::Default => CorePermissionMode::Default,
+        PermissionMode::DontAsk => CorePermissionMode::DontAsk,
+        PermissionMode::Plan => CorePermissionMode::Plan,
     }
 }
 
