@@ -1064,10 +1064,12 @@ name = "daemon-acceptance"
 version = "0.1.0"
 dependencies = [
  "cucumber",
+ "futures",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-tungstenite 0.24.0",
  "uuid",
  "vertebrae-core",
  "vertebrae-sacrum-client",

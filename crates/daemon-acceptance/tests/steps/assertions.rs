@@ -180,3 +180,63 @@ pub async fn session_log_count(world: &mut DaemonWorld, expected: usize) {
         );
     }
 }
+
+#[then(expr = "the execution has at least {int} session log entries")]
+pub async fn session_log_count_at_least(world: &mut DaemonWorld, expected: usize) {
+    let execution_id = world
+        .execution_id
+        .as_ref()
+        .expect("no execution id recorded")
+        .clone();
+    let client = world
+        .graphql_client
+        .as_ref()
+        .expect("graphql_client not configured")
+        .clone();
+    let resp: serde_json::Value = client
+        .execute(
+            vertebrae_sacrum_client::queries::executions::LIST_LOGS,
+            serde_json::json!({ "step_execution_id": execution_id }),
+            "session_logs",
+        )
+        .await
+        .expect("session_logs query failed");
+    let arr = resp
+        .as_array()
+        .unwrap_or_else(|| panic!("session_logs is not an array: {resp}"));
+    assert!(
+        arr.len() >= expected,
+        "expected at least {expected} session_logs, got {}: {resp}",
+        arr.len()
+    );
+}
+
+#[then(expr = "the Codex App Server request contains model {string} and reasoning effort {string}")]
+pub async fn codex_request_contains_model_and_reasoning_effort(
+    world: &mut DaemonWorld,
+    model: String,
+    reasoning_effort: String,
+) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(thread_start["params"]["model"], model);
+    assert_eq!(thread_start["params"]["effort"], reasoning_effort);
+}
+
+#[then(expr = "the Codex App Server request contains model {string} and model provider {string}")]
+pub async fn codex_request_contains_model_and_provider(
+    world: &mut DaemonWorld,
+    model: String,
+    model_provider: String,
+) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(thread_start["params"]["model"], model);
+    assert_eq!(thread_start["params"]["modelProvider"], model_provider);
+}
