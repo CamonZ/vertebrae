@@ -2,7 +2,7 @@
 //! daemon-acceptance test suite. Selected via `CLAUDE_CODE_PATH` so the daemon
 //! source is unchanged.
 //!
-//! The prompt (via `-p <envelope>`) is a JSON envelope:
+//! The prompt (via `-p <envelope>` or `--print <envelope>`) is a JSON envelope:
 //! `{ "exit_code": i32, "delay_ms": u64, "stdout_file": string|null, "stderr_file": string|null }`.
 //! Fixture paths resolve against `$MOCK_OUTPUT_DIR`; absolute paths and `..`
 //! components are rejected. Sleep is interruptible so the daemon's cancel-by-
@@ -13,7 +13,7 @@
 //! invoked the CLI. The envelope prompt is not required for capture, which lets
 //! scenarios exercise the daemon's empty-prompt fallback.
 //!
-//! When invoked without `-p` and with `--input-format stream-json`, it also
+//! When invoked without a prompt flag and with `--input-format stream-json`, it also
 //! serves the GUI local-chat acceptance path by reading stdin prompts and
 //! emitting Claude `stream-json` stdout events.
 
@@ -85,7 +85,7 @@ fn extract_prompt(args: &[String]) -> Option<&str> {
     let mut iter = args.iter();
     iter.next();
     while let Some(arg) = iter.next() {
-        if arg == "-p" || arg == "--prompt" {
+        if arg == "-p" || arg == "--prompt" || arg == "--print" {
             return Some(iter.next().expect("-p requires a value").as_str());
         }
         if let Some(rest) = arg.strip_prefix("--prompt=") {
@@ -93,6 +93,27 @@ fn extract_prompt(args: &[String]) -> Option<&str> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_prompt;
+
+    #[test]
+    fn extracts_prompt_from_claude_print_flag() {
+        let args = [
+            "mock-claude",
+            "--print",
+            "fixture prompt",
+            "--output-format",
+            "stream-json",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+        assert_eq!(extract_prompt(&args), Some("fixture prompt"));
+    }
 }
 
 /// Returns `None` if the prompt is not a JSON object (e.g. the empty-prompt

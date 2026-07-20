@@ -23,5 +23,5 @@ Feature: Codex structured-output JSON parsing
     And run_step is invoked
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
-    And the execution output contains "schema_validation_failure"
-    And the execution output contains "expected"
+    And the execution output contains "not valid JSON"
+    And the execution output contains "line 1 column 1"

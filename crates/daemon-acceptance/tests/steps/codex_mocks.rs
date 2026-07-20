@@ -14,20 +14,34 @@ fn notification(method: &str, params: serde_json::Value) -> String {
     encoded
 }
 
-fn completed_turn(input_tokens: i64, output_tokens: i64) -> String {
+fn usage_updated(input_tokens: i64, output_tokens: i64) -> String {
     notification(
-        "turn/completed",
+        "thread/tokenUsage/updated",
         serde_json::json!({
-            "turn": {"status": "completed", "durationMs": 1234},
             "tokenUsage": {
                 "total": {
                     "inputTokens": input_tokens,
                     "cachedInputTokens": 200,
                     "outputTokens": output_tokens,
                     "reasoningTokens": 0
-                }
+                },
+                "last": {
+                    "totalTokens": input_tokens + output_tokens,
+                    "inputTokens": input_tokens,
+                    "cachedInputTokens": 200,
+                    "outputTokens": output_tokens,
+                    "reasoningTokens": 0
+                },
+                "modelContextWindow": 258400
             }
         }),
+    )
+}
+
+fn completed_turn() -> String {
+    notification(
+        "turn/completed",
+        serde_json::json!({"turn": {"status": "completed", "durationMs": 1234}}),
     )
 }
 
@@ -50,7 +64,8 @@ pub async fn script_codex_success_with_metrics(world: &mut DaemonWorld) {
                 "item": {"id": "m1", "type": "agentMessage", "text": "codex-final-answer"}
             }),
         ))
-        .with_stdout_line(completed_turn(1500, 800));
+        .with_stdout_line(usage_updated(1500, 800))
+        .with_stdout_line(completed_turn());
     set_prompt(world, builder).await;
 }
 
@@ -147,7 +162,8 @@ async fn script_codex_agent_message_with_text(
                 "item": {"id": "m1", "type": "agentMessage", "text": text}
             }),
         ))
-        .with_stdout_line(completed_turn(120, 40));
+        .with_stdout_line(usage_updated(120, 40))
+        .with_stdout_line(completed_turn());
     set_prompt(world, builder).await;
 }
 
