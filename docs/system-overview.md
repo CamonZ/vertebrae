@@ -15,7 +15,7 @@ The platform has two components:
 - **Sacrum** — an Elixir/Phoenix server (GraphQL API + PostgreSQL + Phoenix Channels) that stores all state and orchestrates workflow execution
 - **Vertebrae** — a Rust client ecosystem (CLI `vtb`, desktop GUI, background daemon) that interacts with Sacrum and executes workflow steps by spawning a local harness CLI (Claude Code or Codex; see [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai))
 
-> The sections below describe the Claude-Code execution path in detail because that was the original and remains the default harness. With CLI-driven provider selection in place, a step whose `agent_config.provider` is `openai` is run through the Codex CLI instead, following the same actor/streaming model.
+> The sections below describe the Claude-Code execution path in detail because that was the original and remains the default harness. With provider selection in place, a step whose `agent_config.provider` is `openai` is run through Codex's streaming App Server instead, following the same actor/streaming model.
 
 ---
 

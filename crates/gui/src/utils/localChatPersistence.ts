@@ -81,6 +81,7 @@ export interface LocalChatSessionSummary {
   projectPath: string | null;
   providerResumeId: string | null;
   providerJsonlPath?: string | null;
+  threadTotalTokens?: number;
   messageCount: number;
   lifecycle: LocalChatLifecycle;
 }
@@ -227,7 +228,12 @@ export function normalizeLocalChatSession(
         ? {
             used: candidate.tokenUsage.used,
             max: candidate.tokenUsage.max,
-          }
+        }
+        : undefined,
+    threadTotalTokens:
+      typeof candidate.threadTotalTokens === "number" &&
+      Number.isFinite(candidate.threadTotalTokens)
+        ? Math.max(0, Math.floor(candidate.threadTotalTokens))
         : undefined,
     isDetached: options.preserveRuntimeBackendSessionId
       ? candidate.isDetached === true
@@ -353,6 +359,7 @@ function serializeSession(
     providerResumeId: session.providerResumeId ?? null,
     providerJsonlPath:
       session.providerJsonlPath ?? previous?.providerJsonlPath ?? null,
+    threadTotalTokens: session.threadTotalTokens,
     projectPath: session.projectPath ?? null,
     selectedModelId: session.selectedModelId,
     selectedReasoningEffort: session.selectedReasoningEffort,
@@ -393,6 +400,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     projectPath: session.projectPath ?? null,
     providerResumeId: session.providerResumeId ?? null,
     providerJsonlPath: session.providerJsonlPath ?? null,
+    threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
     lifecycle: session.lifecycle ?? "idle",
@@ -546,6 +554,7 @@ export function summarizeLocalChatSession(
     projectPath: session.projectPath ?? null,
     providerResumeId: session.providerResumeId,
     providerJsonlPath: session.providerJsonlPath ?? null,
+    threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
     lifecycle: session.lifecycle ?? "idle",

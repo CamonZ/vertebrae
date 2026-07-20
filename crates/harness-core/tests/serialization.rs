@@ -163,12 +163,14 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             content_semantics: UpdateSemantics::Snapshot,
         }),
         HarnessEventPayloadV1::FileChange(FileChangeEvent {
+            tool_call_id: Some(ToolCallId::from("file-tool")),
             changes: vec![FileChange {
                 path: "src/lib.rs".into(),
                 kind: FileChangeKind::Modified,
                 previous_path: None,
                 patch: Some("+line".into()),
             }],
+            status: ToolStatus::Completed,
         }),
         HarnessEventPayloadV1::Usage(UsageEvent {
             turn_delta: turn_outcome.usage.clone(),

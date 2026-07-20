@@ -58,17 +58,11 @@ pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
 
 #[given("a workflow with one execute step using openai and an output schema")]
 pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
-    // Same schema shape as the Anthropic schema_validation feature so the
-    // happy-path payload is small and obvious. The daemon does NOT validate
-    // against this schema for the Codex path -- it only verifies the final
-    // agent_message text parses as JSON -- but the schema must still be
-    // Codex strict-compatible so Sacrum accepts it and Codex receives
-    // `--output-schema`.
     let schema = serde_json::json!({
         "type": "object",
         "properties": {
             "verdict": { "type": "string" },
-            "score":   { "type": "number" }
+            "score": { "type": "number" }
         },
         "required": ["verdict", "score"],
         "additionalProperties": false

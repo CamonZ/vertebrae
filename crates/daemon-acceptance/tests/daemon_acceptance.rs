@@ -134,6 +134,16 @@ impl DaemonWorld {
             .unwrap_or_else(|e| panic!("no captured cwd at {}: {e}", path.display()))
     }
 
+    /// Read JSON-RPC requests captured by the mock Codex App Server.
+    pub fn captured_codex_requests(&self) -> Vec<serde_json::Value> {
+        let path = self.capture_dir.join("codex_requests.jsonl");
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("no captured Codex requests at {}: {e}", path.display()));
+        body.lines()
+            .map(|line| serde_json::from_str(line).expect("captured Codex request parses"))
+            .collect()
+    }
+
     /// Spawn `vtb-daemon` and wait for it to log `Joined channel for project <id>`.
     /// Uses a temp HOME so the daemon sees a scenario-specific config.toml.
     pub async fn start_daemon_for_project(&mut self, project_id: &str, project_path: &str) {

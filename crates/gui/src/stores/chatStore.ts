@@ -25,6 +25,7 @@ import {
 import {
   parseSessionLogs,
   type ConversationEvent,
+  type FileUpdateChange,
 } from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
 import type {
@@ -67,6 +68,15 @@ export type ChatMessage =
       isError: boolean;
       timestamp: string;
       /** Parent spawn `tool_use` id when this result belongs to a sub-agent. */
+      parentToolUseId?: string;
+    }
+  | {
+      kind: "file_edit";
+      toolId: string;
+      status: string;
+      changes: FileUpdateChange[];
+      timestamp: string;
+      /** Parent spawn `tool_use` id when this edit belongs to a sub-agent. */
       parentToolUseId?: string;
     }
   | {
@@ -161,6 +171,28 @@ function normalizeStoredChatMessage(value: unknown): ChatMessage | null {
                 : undefined,
           }
         : null;
+    case "file_edit":
+      return typeof record.toolId === "string" &&
+        typeof record.status === "string" &&
+        Array.isArray(record.changes)
+        ? {
+            kind: "file_edit",
+            toolId: record.toolId,
+            status: record.status,
+            changes: record.changes.filter(
+              (change): change is FileUpdateChange =>
+                !!change &&
+                typeof change === "object" &&
+                typeof (change as Record<string, unknown>).path === "string" &&
+                typeof (change as Record<string, unknown>).kind === "string"
+            ),
+            timestamp,
+            parentToolUseId:
+              typeof record.parentToolUseId === "string"
+                ? record.parentToolUseId
+                : undefined,
+          }
+        : null;
     case "warning":
       return typeof record.message === "string"
         ? { kind: "warning", message: record.message, timestamp }
@@ -242,6 +274,17 @@ function conversationEventToChatMessage(
         toolId: event.toolUseId,
         result: event.result,
         isError: event.isError,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "file_edit":
+      return {
+        kind: "file_edit",
+        toolId: event.toolId,
+        status: event.status,
+        changes: event.changes,
         timestamp: event.timestamp,
         ...(event.parentToolUseId
           ? { parentToolUseId: event.parentToolUseId }
@@ -360,12 +403,8 @@ function sanitizeSessionMessages(
   const askUserQuestionToolIds = new Set(
     messages
       .filter(
-        (message): message is Extract<
-          ChatMessage,
-          { kind: "tool_call" }
-        > =>
-          message.kind === "tool_call" &&
-          message.toolName === "AskUserQuestion"
+        (message): message is Extract<ChatMessage, { kind: "tool_call" }> =>
+          message.kind === "tool_call" && message.toolName === "AskUserQuestion"
       )
       .map((message) => message.toolId)
   );
@@ -424,6 +463,8 @@ function chatMessageKey(message: ChatMessage): string {
     case "tool_call":
     case "tool_result":
       return `${message.kind}:${message.toolId}`;
+    case "file_edit":
+      return `${message.kind}:${message.toolId}`;
     case "permission_request":
       return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
     case "user_question":
@@ -445,10 +486,42 @@ function mergeHydratedMessages(
 ): ChatMessage[] {
   if (current.length === 0) return hydrated;
   const currentKeys = new Set(current.map(chatMessageKey));
+  const hydratedByKey = new Map(
+    hydrated.map((message) => [chatMessageKey(message), message])
+  );
+  let enriched = false;
+  const mergedCurrent = current.map((currentMessage) => {
+    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
+    if (
+      currentMessage.kind !== "file_edit" ||
+      hydratedMessage?.kind !== "file_edit"
+    ) {
+      return currentMessage;
+    }
+
+    const changes =
+      hydratedMessage.changes.length > 0
+        ? hydratedMessage.changes
+        : currentMessage.changes;
+    const changesChanged =
+      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes);
+    if (hydratedMessage.status !== currentMessage.status || changesChanged) {
+      enriched = true;
+      return {
+        ...currentMessage,
+        status: hydratedMessage.status,
+        changes,
+        // Keep the live receipt time so merging hydration does not reorder the
+        // currently visible conversation.
+      };
+    }
+    return currentMessage;
+  });
   const missing = hydrated.filter(
     (message) => !currentKeys.has(chatMessageKey(message))
   );
-  return missing.length > 0 ? [...missing, ...current] : current;
+  if (missing.length > 0) return [...missing, ...mergedCurrent];
+  return enriched ? mergedCurrent : current;
 }
 
 function parseJsonObjectInput(input: string): Record<string, unknown> | null {
@@ -634,6 +707,8 @@ export interface ChatSession {
   model?: string;
   /** Latest per-turn current request input-context utilization for the badge */
   tokenUsage?: { used: number; max: number };
+  /** Cumulative token total reported for the provider thread. */
+  threadTotalTokens?: number;
   /** Whether this session is detached into a standalone pop-out window */
   isDetached?: boolean;
   /** Runtime-only local chat lifecycle state */
@@ -791,7 +866,8 @@ interface ChatStoreActions {
   setSessionUsage: (
     sessionId: string,
     model: string,
-    usage: { used: number; max: number }
+    usage: { used: number; max: number },
+    threadTotalTokens?: number
   ) => void;
   /** Mark a session as closed */
   markSessionClosed: (sessionId: string) => void;
@@ -1847,6 +1923,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
               };
             }
           }
+          if (message.kind === "file_edit" && message.toolId) {
+            const existingIndex = messages.findIndex(
+              (existing) =>
+                existing.kind === "file_edit" &&
+                existing.toolId === message.toolId
+            );
+            if (existingIndex !== -1) {
+              const existing = messages[existingIndex] as Extract<
+                ChatMessage,
+                { kind: "file_edit" }
+              >;
+              messages[existingIndex] = {
+                ...existing,
+                ...message,
+                timestamp: existing.timestamp,
+              };
+              return {
+                ...session,
+                messages,
+                updatedAt: message.timestamp,
+              };
+            }
+          }
           if (message.kind === "assistant" && message.parentToolUseId) {
             return {
               ...session,
@@ -1870,8 +1969,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.map((message) =>
-          message.kind === "user_question" &&
-          message.requestId === requestId
+          message.kind === "user_question" && message.requestId === requestId
             ? { ...message, status: "resolved" as const }
             : message
         ),
@@ -1882,8 +1980,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) => ({
         ...session,
         messages: session.messages.map((message) =>
-          message.kind === "user_question" &&
-          message.requestId === requestId
+          message.kind === "user_question" && message.requestId === requestId
             ? { ...message, status: "unavailable" as const }
             : message
         ),
@@ -2207,16 +2304,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
     },
 
-    setSessionUsage: (sessionId, model, usage) => {
+    setSessionUsage: (sessionId, model, usage, threadTotalTokens) => {
       updateSession(sessionId, (session) => {
+        const nextThreadTotalTokens =
+          threadTotalTokens ?? session.threadTotalTokens;
         if (
           session.model === model &&
           session.tokenUsage?.used === usage.used &&
-          session.tokenUsage?.max === usage.max
+          session.tokenUsage?.max === usage.max &&
+          session.threadTotalTokens === nextThreadTotalTokens
         ) {
           return session;
         }
-        return { ...session, model, tokenUsage: usage };
+        return {
+          ...session,
+          model,
+          tokenUsage: usage,
+          threadTotalTokens: nextThreadTotalTokens,
+        };
       });
     },
 

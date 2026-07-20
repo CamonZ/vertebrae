@@ -45,12 +45,32 @@ pub struct LocalChatToolResultEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatFileChange {
+    pub path: String,
+    pub kind: String,
+    pub diff: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatFileChangeEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub tool_id: String,
+    pub status: String,
+    pub changes: Vec<LocalChatFileChange>,
+    pub parent_tool_use_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
 pub struct LocalChatSessionUsageEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
     pub model: String,
     pub context_tokens: u32,
     pub context_window: u32,
+    /// Cumulative thread token total, distinct from the current request's
+    /// context utilization above.
+    pub thread_total_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
@@ -86,6 +106,7 @@ pub(crate) enum LocalChatEvent {
     Text(LocalChatTextEvent),
     ToolCall(LocalChatToolCallEvent),
     ToolResult(LocalChatToolResultEvent),
+    FileChange(LocalChatFileChangeEvent),
     Usage(LocalChatSessionUsageEvent),
     End(LocalChatSessionEndEvent),
     Error(LocalChatSessionErrorEvent),
@@ -100,6 +121,7 @@ impl LocalChatEvent {
             LocalChatEvent::Text(_) => "local-chat-text-event",
             LocalChatEvent::ToolCall(_) => "local-chat-tool-call-event",
             LocalChatEvent::ToolResult(_) => "local-chat-tool-result-event",
+            LocalChatEvent::FileChange(_) => "local-chat-file-change-event",
             LocalChatEvent::Usage(_) => "local-chat-session-usage-event",
             LocalChatEvent::End(_) => "local-chat-session-end-event",
             LocalChatEvent::Error(_) => "local-chat-session-error-event",
@@ -186,6 +208,7 @@ impl LocalChatEventSink {
             LocalChatEvent::Text(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolCall(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolResult(payload) => payload.emit(app_handle),
+            LocalChatEvent::FileChange(payload) => payload.emit(app_handle),
             LocalChatEvent::Usage(payload) => payload.emit(app_handle),
             LocalChatEvent::End(payload) => payload.emit(app_handle),
             LocalChatEvent::Error(payload) => payload.emit(app_handle),

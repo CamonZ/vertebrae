@@ -75,7 +75,7 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         LocalChatHarnessKind::Claude
     }
 
-    fn info(&self) -> LocalChatHarnessInfo {
+    async fn info(&self) -> LocalChatHarnessInfo {
         claude_local_chat_harness_info()
     }
 

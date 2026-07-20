@@ -1402,12 +1402,14 @@ fn remaining_known_payloads_update_their_canonical_state() {
             4,
             UpdateSemantics::Snapshot,
             HarnessEventPayloadV1::FileChange(FileChangeEvent {
+                tool_call_id: Some(ToolCallId::from("file")),
                 changes: vec![FileChange {
                     path: "new.rs".into(),
                     kind: FileChangeKind::Added,
                     previous_path: None,
                     patch: None,
                 }],
+                status: ToolStatus::Completed,
             }),
         ),
         event(

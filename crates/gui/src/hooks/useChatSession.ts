@@ -57,8 +57,10 @@ export function useChatSession(sessionId: string) {
     let cancelled = false;
     void commands
       .getSupportedLocalChatHarnesses()
-      .then((catalog) => {
-        if (!cancelled) setHarnessCatalog(catalog);
+      .then((result) => {
+        if (!cancelled && result.status === "ok") {
+          setHarnessCatalog(result.data);
+        }
       })
       .catch(() => {
         // The chat still works without a picker; backend validation remains.
@@ -287,8 +289,7 @@ export function useChatSession(sessionId: string) {
     (lifecycle === "starting" ||
       lifecycle === "resuming" ||
       lifecycle === "sending" ||
-      lifecycle === "streaming" ||
-      isActive);
+      lifecycle === "streaming");
 
   const handleStopGeneration = useCallback(async () => {
     if (!session?.backendSessionId) return;
@@ -436,6 +437,7 @@ export function useChatSession(sessionId: string) {
 
     // context utilization
     usage,
+    threadTotalTokens: session?.threadTotalTokens,
     ctxPct,
     ctxColor,
 

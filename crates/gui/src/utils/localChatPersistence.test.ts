@@ -205,9 +205,8 @@ describe("localChatPersistence", () => {
     };
 
     expect(
-      normalizeLocalChatSession(
-        makeSession({ messages: [pendingQuestion] })
-      )?.messages[0]
+      normalizeLocalChatSession(makeSession({ messages: [pendingQuestion] }))
+        ?.messages[0]
     ).toMatchObject({ kind: "user_question", status: "unavailable" });
     expect(
       normalizeLocalChatSession(makeSession({ messages: [pendingQuestion] }), {
@@ -421,7 +420,9 @@ describe("localChatPersistence", () => {
     persistLocalChatSession(
       makeSession({ id: "repo-b", projectPath: "/repo-b" })
     );
-    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
+    persistLocalChatSession(
+      makeSession({ id: "no-project", projectPath: null })
+    );
 
     expect(listPersistedLocalChatSessions("/repo-a").map((s) => s.id)).toEqual([
       "repo-a",
@@ -432,15 +433,18 @@ describe("localChatPersistence", () => {
   });
 
   it("does not reuse a no-project persisted session for a requested project path", () => {
-    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
+    persistLocalChatSession(
+      makeSession({ id: "no-project", projectPath: null })
+    );
 
     expect(findPersistedLocalChatSession("/repo-a")).toBeNull();
   });
 
   it("reuses a no-project persisted session when the requested project path is null", () => {
-    persistLocalChatSession(makeSession({ id: "no-project", projectPath: null }));
+    persistLocalChatSession(
+      makeSession({ id: "no-project", projectPath: null })
+    );
 
     expect(findPersistedLocalChatSession(null)?.id).toBe("no-project");
   });
-
 });

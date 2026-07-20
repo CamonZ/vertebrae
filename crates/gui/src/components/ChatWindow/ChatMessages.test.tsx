@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 
@@ -219,5 +219,63 @@ describe("ChatMessages", () => {
     );
 
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("scrolls the message container instead of scrolling ancestors for streaming updates", () => {
+    const messages: ChatMessage[] = [
+      { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+    });
+    container.scrollTop = 300;
+    fireEvent.scroll(container);
+    vi.mocked(Element.prototype.scrollIntoView).mockClear();
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: { text: "streaming", timestamp: "now" },
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(400);
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("does not steal the user's position when they scroll away from the bottom", () => {
+    const messages: ChatMessage[] = [
+      { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 1_000 },
+    });
+    container.scrollTop = 200;
+    fireEvent.scroll(container);
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: { text: "more", timestamp: "now" },
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(200);
   });
 });

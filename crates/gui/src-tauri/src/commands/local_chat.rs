@@ -24,6 +24,7 @@ pub struct LocalChatSessionIndexEntry {
     pub project_path: Option<String>,
     pub provider_resume_id: Option<String>,
     pub provider_jsonl_path: Option<String>,
+    pub thread_total_tokens: Option<u32>,
     pub message_count: u32,
     pub lifecycle: String,
     pub status: String,
@@ -230,10 +231,10 @@ fn read_jsonl_lines(path: &Path) -> Result<Vec<String>, CommandError> {
 /// List supported local chat harnesses for provider-neutral local sessions.
 #[tauri::command]
 #[specta::specta]
-pub fn get_supported_local_chat_harnesses(
+pub async fn get_supported_local_chat_harnesses(
     local_chat_manager: State<'_, LocalChatSessionManager>,
-) -> LocalChatHarnessCatalog {
-    local_chat_manager.catalog()
+) -> Result<LocalChatHarnessCatalog, CommandError> {
+    Ok(local_chat_manager.catalog().await)
 }
 
 /// Create a provider-neutral local chat session.

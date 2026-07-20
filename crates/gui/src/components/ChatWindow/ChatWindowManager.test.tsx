@@ -65,40 +65,43 @@ vi.mock("../../bindings", () => ({
       data: savedProjects,
     }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          supports_resume: true,
-          models: [
-            { id: "sonnet", label: "Sonnet" },
-            { id: "opus", label: "Opus" },
-            { id: "haiku", label: "Haiku" },
-            { id: "fable", label: "Fable" },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "gpt-5.5",
-          default_reasoning_effort: "medium",
-          reasoning_efforts: [{ id: "medium", label: "Medium" }],
-          supports_resume: true,
-          models: [
-            {
-              id: "gpt-5.5",
-              label: "GPT-5.5",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            supports_resume: true,
+            models: [
+              { id: "sonnet", label: "Sonnet" },
+              { id: "opus", label: "Opus" },
+              { id: "haiku", label: "Haiku" },
+              { id: "fable", label: "Fable" },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "gpt-5.5",
+            default_reasoning_effort: "medium",
+            reasoning_efforts: [{ id: "medium", label: "Medium" }],
+            supports_resume: true,
+            models: [
+              {
+                id: "gpt-5.5",
+                label: "GPT-5.5",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+        ],
+      },
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     loadLocalChatSessionMessages: vi.fn().mockResolvedValue({

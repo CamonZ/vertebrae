@@ -9,6 +9,10 @@ Vertebrae is a Rust workspace with interface, daemon, and test crates. The produ
 ```
 vertebrae/
 ├── crates/core/           # Shared contracts: traits + domain models
+├── crates/harness/        # Provider selection/composition for HarnessRuntime
+├── crates/harness-core/   # V1 runtime, event, and replay contracts
+├── crates/harness-claude/ # Claude streaming CLI adapter
+├── crates/harness-codex/  # Codex App Server streaming adapter
 ├── crates/sacrum-client/  # HTTP client implementing the service traits
 ├── crates/cli/            # CLI binary (vtb)
 ├── crates/daemon/         # Background step executor (vtb-daemon)
@@ -23,13 +27,17 @@ flowchart TB
         Daemon["Daemon (vtb-daemon)<br/>crates/daemon"]
     end
 
-    subgraph "Shared Contract Layer (crates/core)"
+    subgraph "Shared Contract Layer"
         TS["TaskService trait"]
         WS["WorkflowService trait"]
         ES["ExecutionService trait"]
         SS["StepService trait"]
         VSvc["VertebraeServices container"]
     end
+
+    Factory["HarnessRuntimeFactory<br/>crates/harness"]
+    Claude["Claude adapter<br/>crates/harness-claude"]
+    Codex["Codex adapter<br/>crates/harness-codex"]
 
     subgraph "Backend Client (crates/sacrum-client)"
         SC["GraphqlClient (reqwest)"]
@@ -48,6 +56,9 @@ flowchart TB
     CLI --> VSvc
     GUI --> VSvc
     Daemon --> VSvc
+    GUI --> Factory
+    Daemon --> Factory
+    Factory --> Claude & Codex
 
     VSvc --> TS & WS & ES & SS
     TS -.-> STS
@@ -161,12 +172,13 @@ DaemonSupervisor
 
 - Connects to Sacrum via Phoenix WebSocket (`client_type: "daemon"`)
 - Receives `run_step` events with prompt + agent config + output schema
-- Resolves the step's `agent_config.provider` to a built-in harness:
-  `anthropic` (default) → `claude -p "<prompt>" --output-format stream-json`,
-  `openai` → `codex exec --json "<prompt>"`. See
+- Passes `AgentConfig` and portable request options to the shared
+  `HarnessRuntimeFactory`, which resolves the step's provider to a built-in
+  harness: `anthropic` (default) → the Claude streaming harness,
+  `openai` → the Codex App Server streaming harness. See
   [vtb Guide — Provider Selection](vtb-guide/steps.md#provider-selection-anthropic--openai).
-- When a step has an `output_schema`, passes it as `--json-schema` (Claude) or
-  `--output-schema <path>` (Codex) to enforce structured output
+- When a step has an `output_schema`, passes it through the provider-neutral
+  harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
 - Streams stdout as `SessionLog` records to Sacrum
 - Reports completion/failure with token counts, cost, and the actual

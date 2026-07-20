@@ -762,8 +762,13 @@ async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
 /**
  * List supported local chat harnesses for provider-neutral local sessions.
  */
-async getSupportedLocalChatHarnesses() : Promise<LocalChatHarnessCatalog> {
-    return await TAURI_INVOKE("get_supported_local_chat_harnesses");
+async getSupportedLocalChatHarnesses() : Promise<Result<LocalChatHarnessCatalog, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_supported_local_chat_harnesses") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 },
 /**
  * Create a provider-neutral local chat session.
@@ -925,6 +930,7 @@ async installComponents(installCli: boolean, installDaemon: boolean, installGate
 
 
 export const events = __makeEvents__<{
+localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
 localChatSessionErrorEvent: LocalChatSessionErrorEvent,
 localChatSessionInitEvent: LocalChatSessionInitEvent,
@@ -948,6 +954,7 @@ taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
+localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
 localChatSessionErrorEvent: "local-chat-session-error-event",
 localChatSessionInitEvent: "local-chat-session-init-event",
@@ -1156,17 +1163,19 @@ export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 export type LoadLocalChatSessionMessagesInput = { harness: LocalChatHarnessKind; providerResumeId: string; projectPath: string | null; createdAt: string | null; providerJsonlPath: string | null }
 export type LoadLocalChatSessionMessagesOutput = { lines: string[]; providerJsonlPath: string | null }
+export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
+export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; supports_resume: boolean }
 export type LocalChatHarnessKind = "claude" | "codex"
-export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids: string[] | null }
+export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null }
 export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; error: string }
-export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; providerJsonlPath: string | null; messageCount: number; lifecycle: string; status: string }
+export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; providerJsonlPath: string | null; threadTotalTokens?: number | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[] }
-export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; model: string; context_tokens: number; context_window: number }
+export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; model: string; context_tokens: number; context_window: number; thread_total_tokens?: number }
 export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; warning: string }
 export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; text: string; is_partial: boolean; parent_tool_use_id: string | null }
 export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }

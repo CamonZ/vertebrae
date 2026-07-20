@@ -1,8 +1,7 @@
-Feature: Codex JSONL step execution
-  The daemon receives run_step for a step whose provider is openai,
-  spawns the mock codex, parses `codex exec --json` output, and reports
-  a Completed (or Failed) StepExecution in Sacrum with metrics, output,
-  and session log entries derived from the JSONL stream.
+Feature: Codex App Server step execution
+  The daemon receives run_step for a step whose provider is openai, launches
+  the configured Codex App Server, exchanges JSON-RPC messages over WebSocket,
+  and reports the normalized result in Sacrum.
 
   Scenario: Codex completed execution with metrics
     Given a configured daemon test environment
@@ -15,7 +14,7 @@ Feature: Codex JSONL step execution
     And the execution output contains "codex-final-answer"
     And the execution records input_tokens 1500 and output_tokens 800
 
-  Scenario: Codex reasoning effort reaches the CLI before the prompt
+  Scenario: Codex request carries model and reasoning effort
     Given a configured daemon test environment
     And a workflow with one execute step using openai and reasoning effort "high"
     And a task assigned to the workflow
@@ -23,9 +22,9 @@ Feature: Codex JSONL step execution
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
-    And the Codex mock argv contains model "gpt-5.5" and reasoning effort "high"
+    And the Codex App Server request contains model "gpt-5.5" and reasoning effort "high"
 
-  Scenario: Codex upstream model provider reaches the CLI before the prompt
+  Scenario: Codex request carries an upstream model provider
     Given a configured daemon test environment
     And a workflow with one execute step using openai, codex model provider "openrouter", and model "deepseek/deepseek-v4-flash"
     And a task assigned to the workflow
@@ -33,7 +32,7 @@ Feature: Codex JSONL step execution
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
-    And the Codex mock argv contains model "deepseek/deepseek-v4-flash" and model provider "openrouter"
+    And the Codex App Server request contains model "deepseek/deepseek-v4-flash" and model provider "openrouter"
 
   Scenario: Codex completed without an agent_message
     Given a configured daemon test environment
@@ -46,7 +45,7 @@ Feature: Codex JSONL step execution
     And the execution has no recorded output
     And the execution has no recorded metrics
 
-  Scenario: Codex emits multiple item events as session log entries
+  Scenario: Codex item events become session log entries
     Given a configured daemon test environment
     And a workflow with one execute step using openai
     And a task assigned to the workflow
@@ -54,7 +53,7 @@ Feature: Codex JSONL step execution
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
-    And the execution has 3 session log entries
+    And the execution has at least 3 session log entries
 
   Scenario: Codex top-level error event reports failure
     Given a configured daemon test environment
@@ -65,7 +64,7 @@ Feature: Codex JSONL step execution
     And I wait for the execution to reach status "failed"
     Then the execution status is "failed"
 
-  Scenario: Codex turn.failed event reports failure
+  Scenario: Codex failed turn reports failure
     Given a configured daemon test environment
     And a workflow with one execute step using openai
     And a task assigned to the workflow

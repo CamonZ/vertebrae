@@ -25,36 +25,39 @@ vi.mock("../../bindings", () => ({
       data: "/test/project",
     }),
     getSupportedLocalChatHarnesses: vi.fn().mockResolvedValue({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [
-            { id: "sonnet", label: "Sonnet" },
-            { id: "opus", label: "Opus" },
-            { id: "haiku", label: "Haiku" },
-            { id: "fable", label: "Fable" },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: false,
-          unavailable_reason: "Codex app-server is not installed",
-          default_model_id: null,
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [
+              { id: "sonnet", label: "Sonnet" },
+              { id: "opus", label: "Opus" },
+              { id: "haiku", label: "Haiku" },
+              { id: "fable", label: "Fable" },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: false,
+            unavailable_reason: "Codex app-server is not installed",
+            default_model_id: null,
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+        ],
+      },
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
@@ -411,37 +414,40 @@ describe("ChatWindow", () => {
 
   it("omits unavailable Codex from the provider picker", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [
-            {
-              id: "sonnet",
-              label: "Sonnet",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: false,
-          unavailable_reason: "Codex CLI not found",
-          default_model_id: null,
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [
+              {
+                id: "sonnet",
+                label: "Sonnet",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: false,
+            unavailable_reason: "Codex CLI not found",
+            default_model_id: null,
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+        ],
+      },
     });
     const session = createSession();
     useChatStore.setState({
@@ -466,37 +472,40 @@ describe("ChatWindow", () => {
   it("falls back to Codex when Claude is unavailable before starting", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "codex",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: false,
-          unavailable_reason: "Claude CLI not found",
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "default",
-          default_reasoning_effort: "medium",
-          reasoning_efforts: [{ id: "medium", label: "Medium" }],
-          supports_resume: true,
-          models: [
-            {
-              id: "default",
-              label: "Default",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "codex",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: false,
+            unavailable_reason: "Claude CLI not found",
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "default",
+            default_reasoning_effort: "medium",
+            reasoning_efforts: [{ id: "medium", label: "Medium" }],
+            supports_resume: true,
+            models: [
+              {
+                id: "default",
+                label: "Default",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+        ],
+      },
     });
     const session = createSession();
     useChatStore.setState({
@@ -538,52 +547,55 @@ describe("ChatWindow", () => {
   it("selects Codex provider models from the catalog and starts with neutral commands", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [
-            {
-              id: "sonnet",
-              label: "Sonnet",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "catalog-codex-default",
-          default_reasoning_effort: "medium",
-          reasoning_efforts: [
-            { id: "low", label: "Low" },
-            { id: "medium", label: "Medium" },
-            { id: "high", label: "High" },
-          ],
-          supports_resume: true,
-          models: [
-            {
-              id: "catalog-codex-default",
-              label: "Catalog Default",
-              supported_reasoning_effort_ids: null,
-            },
-            {
-              id: "catalog-codex-alt",
-              label: "Catalog Alt",
-              supported_reasoning_effort_ids: ["medium"],
-            },
-          ],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [
+              {
+                id: "sonnet",
+                label: "Sonnet",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "catalog-codex-default",
+            default_reasoning_effort: "medium",
+            reasoning_efforts: [
+              { id: "low", label: "Low" },
+              { id: "medium", label: "Medium" },
+              { id: "high", label: "High" },
+            ],
+            supports_resume: true,
+            models: [
+              {
+                id: "catalog-codex-default",
+                label: "Catalog Default",
+                supported_reasoning_effort_ids: null,
+              },
+              {
+                id: "catalog-codex-alt",
+                label: "Catalog Alt",
+                supported_reasoning_effort_ids: ["medium"],
+              },
+            ],
+          },
+        ],
+      },
     });
     const session = createSession();
     useChatStore.setState({
@@ -721,31 +733,34 @@ describe("ChatWindow", () => {
 
   it("blocks local chat and shows the neither-installed message", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: false,
-          unavailable_reason: "Claude CLI not found",
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: false,
-          unavailable_reason: "Codex CLI not found",
-          default_model_id: null,
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: false,
+            unavailable_reason: "Claude CLI not found",
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: false,
+            unavailable_reason: "Codex CLI not found",
+            default_model_id: null,
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+        ],
+      },
     });
     const session = createSession();
     useChatStore.setState({
@@ -773,43 +788,46 @@ describe("ChatWindow", () => {
   it("locks persisted Codex sessions and resumes with providerResumeId", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [
-            {
-              id: "sonnet",
-              label: "Sonnet",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "catalog-codex-default",
-          default_reasoning_effort: "medium",
-          reasoning_efforts: [{ id: "medium", label: "Medium" }],
-          supports_resume: true,
-          models: [
-            {
-              id: "catalog-codex-default",
-              label: "Catalog Default",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [
+              {
+                id: "sonnet",
+                label: "Sonnet",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "catalog-codex-default",
+            default_reasoning_effort: "medium",
+            reasoning_efforts: [{ id: "medium", label: "Medium" }],
+            supports_resume: true,
+            models: [
+              {
+                id: "catalog-codex-default",
+                label: "Catalog Default",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+        ],
+      },
     });
     const session = createSession({
       harness: "codex",
@@ -1046,37 +1064,40 @@ describe("ChatWindow", () => {
 
   it("clears saved model override when selected harness has no selectable models", async () => {
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
-      default_harness: "claude",
-      harnesses: [
-        {
-          harness: "claude",
-          label: "Claude",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: "sonnet",
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [
-            {
-              id: "sonnet",
-              label: "Sonnet",
-              supported_reasoning_effort_ids: null,
-            },
-          ],
-        },
-        {
-          harness: "codex",
-          label: "Codex",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: null,
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: true,
-          models: [],
-        },
-      ],
+      status: "ok",
+      data: {
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "sonnet",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [
+              {
+                id: "sonnet",
+                label: "Sonnet",
+                supported_reasoning_effort_ids: null,
+              },
+            ],
+          },
+          {
+            harness: "codex",
+            label: "Codex",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: null,
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: [],
+          },
+        ],
+      },
     });
     const session = createSession({
       harness: "codex",
@@ -1221,6 +1242,30 @@ describe("ChatWindow", () => {
         useChatStore.getState().sessions["test-session"].messages
       ).toHaveLength(1);
     });
+  });
+
+  it("disables stop after a persistent turn returns to idle", () => {
+    const session = createSession({
+      backendSessionId: "codex-idle",
+      harness: "codex",
+      lifecycle: "idle",
+      messages: [
+        {
+          kind: "assistant",
+          text: "Completed answer",
+          timestamp: "2026-07-19T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
   });
 
   it("stops an active backend session with Cmd+period", async () => {
@@ -2018,7 +2063,9 @@ describe("ChatWindow", () => {
         "Answer Claude's question above to continue..."
       )
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Submit answers" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Submit answers" })
+    ).toBeDisabled();
   });
 
   it("keeps chat errors in the transcript and allows retry text after an error", async () => {

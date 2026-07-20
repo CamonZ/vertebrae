@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Entrypoint for the daemon-acceptance test runner. Builds the binaries,
-# symlinks mock-claude / mock-codex to the paths the daemon looks up via
-# CLAUDE_CODE_PATH and CODEX_PATH, writes the Sacrum config, and hands off
-# to cargo test.
+# symlinks the provider mocks to the paths the daemon looks up,
+# writes the Sacrum config, and hands off to cargo test.
 
 set -euo pipefail
 
@@ -10,7 +9,7 @@ set -euo pipefail
 : "${VTB_TOKEN:?VTB_TOKEN must be set}"
 : "${MOCK_OUTPUT_DIR:=/mocks}"
 
-echo "==> Building vtb, vtb-daemon, mock-claude, mock-codex..."
+echo "==> Building vtb, vtb-daemon, and provider mocks..."
 cargo build --quiet --bin vtb --bin vtb-daemon
 cargo build --quiet -p daemon-acceptance --bin mock-claude --bin mock-codex
 
@@ -20,8 +19,6 @@ if [ ! -x /usr/local/bin/mock-claude ]; then
     echo "ERROR: mock-claude is not executable at /usr/local/bin/mock-claude" >&2
     exit 1
 fi
-
-echo "==> Installing mock-codex to /usr/local/bin/mock-codex..."
 ln -sf /app/target/debug/mock-codex /usr/local/bin/mock-codex
 if [ ! -x /usr/local/bin/mock-codex ]; then
     echo "ERROR: mock-codex is not executable at /usr/local/bin/mock-codex" >&2

@@ -11,12 +11,7 @@
  * tree of events without prop drilling.
  */
 
-import {
-  createContext,
-  useContext,
-  useState,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import type {
   AssistantMessageEvent,
   ConversationEvent,
@@ -205,7 +200,10 @@ export function ThinkingBlock({
         <div className="flex-1 min-w-0">
           <MarkdownContent text={event.text} />
         </div>
-        <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
+        <Timestamp
+          timestamp={event.timestamp}
+          previousTimestamp={previousTimestamp}
+        />
       </div>
     </div>
   );
@@ -268,8 +266,8 @@ export function AssistantMessageBlock({
 }
 
 /**
- * Diff-style render for a Codex `file_change` item. Lists each affected
- * file path with its change kind (add/delete/update); the unified diff
+ * Diff-style render for a normalized harness file edit. Lists each affected
+ * file path with its change kind (add/delete/update/rename); the unified diff
  * body is shown collapsed by default and expandable via per-file toggle.
  *
  * The patch status (`completed` / `failed`) tints the header so failed
@@ -283,23 +281,26 @@ export function FileEditBlock({
   previousTimestamp: string | null;
 }) {
   const [openIdx, setOpenIdx] = useState<number | null>(null);
-  const failed = event.status === "failed";
+  const normalizedStatus = event.status.toLowerCase();
+  const failed = ["failed", "declined", "cancelled", "canceled"].includes(
+    normalizedStatus
+  );
+  const pending = ["started", "running", "inprogress", "in_progress"].includes(
+    normalizedStatus
+  );
   return (
-    <div
-      data-testid="file-edit"
-      data-status={event.status}
-      className="py-2"
-    >
+    <div data-testid="file-edit" data-status={event.status} className="py-2">
       <div className="flex items-start gap-2">
         <span
-          className={`font-mono text-2xs uppercase tracking-wider mt-1 ${failed ? "text-err" : "text-ok"}`}
+          className={`font-mono text-2xs uppercase tracking-wider mt-1 ${failed ? "text-err" : pending ? "text-warn" : "text-ok"}`}
         >
-          {failed ? "patch failed" : "patch"}
+          {failed ? "patch failed" : pending ? "patching" : "patch"}
         </span>
         <div className="flex-1 min-w-0">
           {event.changes.map((change, idx) => {
             const isOpen = openIdx === idx;
-            const hasDiff = typeof change.diff === "string" && change.diff.length > 0;
+            const hasDiff =
+              typeof change.diff === "string" && change.diff.length > 0;
             return (
               <div key={`${change.path}-${idx}`} className="text-sm">
                 <button
@@ -350,6 +351,8 @@ function changeKindClass(kind: string): string {
       return "text-err";
     case "update":
       return "text-warn";
+    case "rename":
+      return "text-info";
     default:
       return "text-fg-mute";
   }
@@ -415,9 +418,7 @@ export function TodoListBlock({
               </span>
               <span
                 className={
-                  row.completed
-                    ? "text-fg-mute line-through"
-                    : "text-fg"
+                  row.completed ? "text-fg-mute line-through" : "text-fg"
                 }
               >
                 {row.text}

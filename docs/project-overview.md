@@ -24,7 +24,10 @@ vertebrae/
 │   ├── sacrum-client/      # vertebrae-sacrum-client: GraphQL client for Sacrum
 │   ├── cli/                # vertebrae-cli: CLI binary (vtb)
 │   ├── daemon/             # vertebrae-daemon: Background step executor (vtb-daemon)
+│   ├── harness/             # Provider selection/composition for HarnessRuntime
 │   ├── harness-core/        # Provider-neutral harness runtime/event contracts
+│   ├── harness-claude/      # Claude streaming CLI adapter
+│   ├── harness-codex/       # Codex App Server streaming adapter
 │   ├── installer/          # vertebrae-installer: Stages binaries + registers the daemon service
 │   ├── gui/                # Tauri + React desktop application
 │   ├── acceptance/         # Acceptance tests (Docker only)

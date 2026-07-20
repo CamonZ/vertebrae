@@ -1,65 +1,23 @@
-//! mock-codex: deterministic stand-in for the Codex CLI used by the
-//! daemon-acceptance test suite. Selected via `CODEX_PATH` so the daemon
-//! source is unchanged.
+//! Deterministic Codex App Server used by the daemon acceptance suite.
 //!
-//! The prompt is the trailing positional argument of `codex exec --json
-//! [OPTIONS] <PROMPT>` (see `crates/daemon/src/provider.rs::build_codex_command`).
-//! It is a JSON envelope:
-//! `{ "exit_code": i32, "delay_ms": u64, "stdout_file": string|null, "stderr_file": string|null }`.
-//! Fixture paths resolve against `$MOCK_OUTPUT_DIR`; absolute paths and `..`
-//! components are rejected. Sleep is interruptible so the daemon's cancel-by-
-//! SIGKILL path works.
-//!
-//! When `MOCK_CAPTURE_DIR` is set, writes `argv.json` (array of strings) and
-//! `cwd.txt` to that directory on startup so tests can assert on how the daemon
-//! invoked the CLI. The envelope prompt is not required for capture, which lets
-//! scenarios exercise the daemon's empty-prompt fallback.
+//! The daemon launches this binary as `codex app-server --listen ws://…`.
+//! It exposes the App Server readiness endpoint and a small JSON-RPC WebSocket
+//! implementation. Scenario-specific notifications are read from the fixture
+//! envelope passed as the first turn's text input.
 
-use std::io::{BufRead, BufReader, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::ExitCode;
-use std::time::{Duration, Instant};
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().collect();
+use futures::{SinkExt, StreamExt};
+use serde::Deserialize;
+use serde_json::{Value, json};
+use tokio::{
+    io::AsyncWriteExt,
+    net::{TcpListener, TcpStream},
+    time::{Duration, sleep},
+};
+use tokio_tungstenite::{accept_async, tungstenite::Message};
 
-    if let Some(dir) = std::env::var_os("MOCK_CAPTURE_DIR") {
-        capture_invocation(Path::new(&dir), &args);
-    }
-
-    let prompt = extract_prompt(&args);
-    // Empty-prompt fallback (e.g. "Execute step") is not a JSON envelope. Skip
-    // streaming and sleeping in that case; capture alone is enough.
-    if let Some(envelope) = prompt.and_then(parse_envelope) {
-        let mock_dir =
-            PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
-
-        if let Some(ref rel) = envelope.stdout_file {
-            stream_lines(&resolve_fixture(&mock_dir, rel), StreamTarget::Stdout);
-        }
-        if let Some(ref rel) = envelope.stderr_file {
-            stream_lines(&resolve_fixture(&mock_dir, rel), StreamTarget::Stderr);
-        }
-
-        if envelope.delay_ms > 0 {
-            interruptible_sleep(Duration::from_millis(envelope.delay_ms));
-        }
-
-        ExitCode::from(envelope.exit_code as u8)
-    } else {
-        ExitCode::from(0)
-    }
-}
-
-fn capture_invocation(dir: &Path, args: &[String]) {
-    std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
-    let argv_json = serde_json::to_string(args).expect("argv serialises");
-    std::fs::write(dir.join("argv.json"), argv_json).expect("write argv.json");
-    let cwd = std::env::current_dir().expect("current_dir");
-    std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone, Deserialize)]
 struct Envelope {
     exit_code: i32,
     delay_ms: u64,
@@ -67,111 +25,248 @@ struct Envelope {
     stderr_file: Option<String>,
 }
 
-/// Codex takes the prompt as the final positional argument. argv[0] is the
-/// binary, then `exec --json` plus optional flag pairs (`--model X`,
-/// `--output-schema PATH`) as built by `build_codex_command`. Returns `None`
-/// only when no positional prompt is present at all (tests that exercise the
-/// empty-prompt path).
-fn extract_prompt(args: &[String]) -> Option<&str> {
-    args.last().map(String::as_str).filter(|last| {
-        // Guard against pathological argv where the last token is itself a
-        // flag value we already consumed (e.g. `--output-schema /tmp/x`).
-        // build_codex_command always puts the prompt last, but bail out if
-        // the trailing token starts with `--` so capture-only tests still
-        // work and we don't mis-parse a flag value as a prompt.
-        !last.starts_with("--")
-    })
-}
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    capture_invocation(&args);
 
-/// Returns `None` if the prompt is not a JSON object (e.g. the empty-prompt
-/// fallback string "Execute step"). Returns `Some(envelope)` for a valid
-/// fixture envelope. Panics on malformed envelopes.
-fn parse_envelope(raw: &str) -> Option<Envelope> {
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
-    let obj = value.as_object()?;
+    let address = listen_address(&args);
+    let listener = TcpListener::bind(address)
+        .await
+        .unwrap_or_else(|error| panic!("mock-codex failed to bind {address}: {error}"));
 
-    let exit_code = obj["exit_code"]
-        .as_i64()
-        .expect("'exit_code' must be an integer");
-    let exit_code = i32::try_from(exit_code).expect("'exit_code' does not fit in i32");
-
-    let delay_ms = obj["delay_ms"]
-        .as_i64()
-        .expect("'delay_ms' must be an integer");
-    assert!(delay_ms >= 0, "'delay_ms' must be >= 0, got {delay_ms}");
-
-    Some(Envelope {
-        exit_code,
-        delay_ms: delay_ms as u64,
-        stdout_file: optional_string(obj, "stdout_file"),
-        stderr_file: optional_string(obj, "stderr_file"),
-    })
-}
-
-fn optional_string(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Option<String> {
-    match &obj[key] {
-        serde_json::Value::Null => None,
-        serde_json::Value::String(s) => Some(s.clone()),
-        other => panic!("'{key}' must be a string or null, got {other}"),
+    loop {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("mock-codex failed to accept connection");
+        tokio::spawn(async move {
+            if is_readiness_probe(&stream).await {
+                respond_ready(stream).await;
+            } else if let Err(error) = serve_websocket(stream).await {
+                eprintln!("mock-codex WebSocket failed: {error}");
+            }
+        });
     }
 }
 
-fn resolve_fixture(base: &Path, rel: &str) -> PathBuf {
-    assert!(!rel.is_empty(), "fixture path is empty");
-    let candidate = Path::new(rel);
+fn listen_address(args: &[String]) -> std::net::SocketAddr {
+    let raw = args
+        .windows(2)
+        .find(|pair| pair[0] == "--listen")
+        .map(|pair| pair[1].as_str())
+        .or_else(|| args.iter().find_map(|arg| arg.strip_prefix("--listen=")))
+        .expect("mock-codex requires --listen");
+    raw.strip_prefix("ws://")
+        .or_else(|| raw.strip_prefix("wss://"))
+        .unwrap_or(raw)
+        .parse()
+        .unwrap_or_else(|error| panic!("invalid Codex App Server listen address {raw:?}: {error}"))
+}
+
+fn capture_invocation(args: &[String]) {
+    let Some(dir) = std::env::var_os("MOCK_CAPTURE_DIR") else {
+        return;
+    };
+    let dir = Path::new(&dir);
+    std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
+    let argv_json = serde_json::to_string(args).expect("argv serialises");
+    std::fs::write(dir.join("argv.json"), argv_json).expect("write argv.json");
+    let cwd = std::env::current_dir().expect("current_dir");
+    std::fs::write(dir.join("cwd.txt"), cwd.to_string_lossy().as_bytes()).expect("write cwd.txt");
+}
+
+async fn is_readiness_probe(stream: &TcpStream) -> bool {
+    let mut probe = [0_u8; 64];
+    let count = stream.peek(&mut probe).await.unwrap_or(0);
+    probe[..count].starts_with(b"GET /readyz")
+}
+
+async fn respond_ready(mut stream: TcpStream) {
+    let response = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK";
+    let _ = stream.write_all(response).await;
+    let _ = stream.shutdown().await;
+}
+
+async fn serve_websocket(stream: TcpStream) -> Result<(), String> {
+    let mut socket = accept_async(stream)
+        .await
+        .map_err(|error| format!("WebSocket handshake failed: {error}"))?;
+    let mut turn_number = 0_u64;
+
+    while let Some(frame) = socket.next().await {
+        let frame = frame.map_err(|error| format!("WebSocket read failed: {error}"))?;
+        let Message::Text(text) = frame else {
+            continue;
+        };
+        let request: Value = serde_json::from_str(&text)
+            .map_err(|error| format!("invalid JSON-RPC request {text:?}: {error}"))?;
+        capture_request(&request);
+
+        let Some(method) = request.get("method").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(id) = request.get("id").cloned() else {
+            continue;
+        };
+
+        match method {
+            "initialize" => {
+                send_response(&mut socket, id, json!({"capabilities": {}})).await?;
+            }
+            "thread/start" | "thread/resume" => {
+                send_response(
+                    &mut socket,
+                    id,
+                    json!({"thread":{"id":"mock-codex-thread"},"model":"gpt-5.5"}),
+                )
+                .await?;
+            }
+            "skills/extraRoots/set" => {
+                send_response(&mut socket, id, json!({})).await?;
+            }
+            "turn/start" => {
+                turn_number += 1;
+                let turn_id = format!("mock-codex-turn-{turn_number}");
+                send_response(&mut socket, id, json!({"turn":{"id":turn_id}})).await?;
+                let envelope = request
+                    .get("params")
+                    .and_then(|params| params.get("input"))
+                    .and_then(Value::as_array)
+                    .and_then(|input| input.first())
+                    .and_then(|input| input.get("text"))
+                    .and_then(Value::as_str)
+                    .and_then(parse_envelope)
+                    .unwrap_or(Envelope {
+                        exit_code: 0,
+                        delay_ms: 0,
+                        stdout_file: None,
+                        stderr_file: None,
+                    });
+                emit_script(&mut socket, &envelope).await?;
+            }
+            "turn/interrupt" => {
+                send_response(&mut socket, id, json!({})).await?;
+            }
+            _ => {
+                send_response(&mut socket, id, json!({})).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn send_response(
+    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+    id: Value,
+    result: Value,
+) -> Result<(), String> {
+    socket
+        .send(Message::Text(
+            json!({"id": id, "result": result}).to_string(),
+        ))
+        .await
+        .map_err(|error| format!("WebSocket response failed: {error}"))
+}
+
+async fn emit_script(
+    socket: &mut tokio_tungstenite::WebSocketStream<TcpStream>,
+    envelope: &Envelope,
+) -> Result<(), String> {
+    if envelope.delay_ms > 0 {
+        sleep(Duration::from_millis(envelope.delay_ms)).await;
+    }
+
+    let mut completed = false;
+    if let Some(relative) = &envelope.stdout_file {
+        let base =
+            PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
+        let path = resolve_fixture(&base, relative);
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read Codex fixture {}: {error}", path.display()));
+        for line in body.lines().filter(|line| !line.is_empty()) {
+            let notification: Value = serde_json::from_str(line)
+                .unwrap_or_else(|error| panic!("parse Codex fixture line {line:?}: {error}"));
+            if notification.get("method").and_then(Value::as_str) == Some("turn/completed") {
+                completed = true;
+            }
+            socket
+                .send(Message::Text(notification.to_string()))
+                .await
+                .map_err(|error| format!("WebSocket notification failed: {error}"))?;
+        }
+    }
+    if let Some(relative) = &envelope.stderr_file {
+        let base =
+            PathBuf::from(std::env::var_os("MOCK_OUTPUT_DIR").expect("MOCK_OUTPUT_DIR env var"));
+        let path = resolve_fixture(&base, relative);
+        let body = std::fs::read_to_string(&path).unwrap_or_else(|error| {
+            panic!("read Codex stderr fixture {}: {error}", path.display())
+        });
+        for line in body.lines() {
+            eprintln!("{line}");
+        }
+    }
+
+    if !completed {
+        let params = if envelope.exit_code == 0 {
+            json!({"turn":{"status":"completed"}})
+        } else {
+            json!({
+                "turn": {
+                    "status": "failed",
+                    "error": {"message": format!("mock-codex exited with code {}", envelope.exit_code)}
+                }
+            })
+        };
+        socket
+            .send(Message::Text(
+                json!({"method":"turn/completed","params":params}).to_string(),
+            ))
+            .await
+            .map_err(|error| format!("WebSocket completion failed: {error}"))?;
+    }
+    Ok(())
+}
+
+fn capture_request(request: &Value) {
+    let Some(dir) = std::env::var_os("MOCK_CAPTURE_DIR") else {
+        return;
+    };
+    let dir = Path::new(&dir);
+    std::fs::create_dir_all(dir).expect("create MOCK_CAPTURE_DIR");
+    let path = dir.join("codex_requests.jsonl");
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .unwrap_or_else(|error| panic!("open {}: {error}", path.display()));
+    writeln!(file, "{request}").expect("write Codex request capture");
+}
+
+fn parse_envelope(raw: &str) -> Option<Envelope> {
+    let value: Value = serde_json::from_str(raw).ok()?;
+    value.as_object()?;
+    Some(serde_json::from_value(value).expect("Codex fixture envelope has valid fields"))
+}
+
+fn resolve_fixture(base: &Path, relative: &str) -> PathBuf {
+    assert!(!relative.is_empty(), "Codex fixture path is empty");
+    let candidate = Path::new(relative);
     assert!(
         !candidate.is_absolute(),
-        "fixture path must be relative: {rel:?}"
+        "Codex fixture path must be relative"
     );
     for component in candidate.components() {
         match component {
-            Component::ParentDir => panic!("fixture path must not contain '..': {rel:?}"),
+            Component::ParentDir => panic!("Codex fixture path must not contain '..'"),
             Component::Prefix(_) | Component::RootDir => {
-                panic!("fixture path must be relative: {rel:?}")
+                panic!("Codex fixture path must be relative")
             }
             Component::CurDir | Component::Normal(_) => {}
         }
     }
     base.join(candidate)
-}
-
-enum StreamTarget {
-    Stdout,
-    Stderr,
-}
-
-fn stream_lines(path: &Path, target: StreamTarget) {
-    let file = std::fs::File::open(path)
-        .unwrap_or_else(|e| panic!("failed to open fixture {}: {e}", path.display()));
-    let reader = BufReader::new(file);
-    let mut stdout;
-    let mut stderr;
-    let writer: &mut dyn Write = match target {
-        StreamTarget::Stdout => {
-            stdout = std::io::stdout().lock();
-            &mut stdout
-        }
-        StreamTarget::Stderr => {
-            stderr = std::io::stderr().lock();
-            &mut stderr
-        }
-    };
-    for line in reader.lines() {
-        let line = line.expect("fixture read");
-        writer.write_all(line.as_bytes()).expect("fixture write");
-        writer.write_all(b"\n").expect("fixture write");
-    }
-    writer.flush().expect("fixture flush");
-}
-
-// Poll in short slices so SIGKILL from the daemon's cancel path terminates us
-// promptly even mid-sleep. (SIGKILL bypasses user-space; std::thread::sleep
-// loops on EINTR, so we wake ourselves to let the signal land.)
-fn interruptible_sleep(total: Duration) {
-    let start = Instant::now();
-    let slice = Duration::from_millis(50);
-    while Instant::now().duration_since(start) < total {
-        let remaining = total - Instant::now().duration_since(start);
-        std::thread::sleep(remaining.min(slice));
-    }
 }

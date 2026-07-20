@@ -58,7 +58,7 @@ export function ChatWindow({
   const isEmpty = chat.session.messages.length === 0;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <ChatHeader
         label={chat.session.title?.trim() || chat.session.label}
         lifecycle={chat.lifecycle}
@@ -110,6 +110,7 @@ export function ChatWindow({
         ctxPct={chat.ctxPct}
         ctxColor={chat.ctxColor}
         usage={chat.usage}
+        threadTotalTokens={chat.threadTotalTokens}
         onSend={chat.handleSend}
         onStartSession={chat.handleStartSession}
         onHarnessChange={chat.handleHarnessChange}

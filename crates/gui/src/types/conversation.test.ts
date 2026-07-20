@@ -93,6 +93,76 @@ describe("parseClaudeMessage", () => {
       });
     });
 
+    it("normalizes Claude Edit and Write tool lifecycles into file_edit events", () => {
+      const logs: SessionLog[] = [
+        {
+          id: "claude-edit",
+          step_execution_id: "claude-exec",
+          content: JSON.stringify({
+            type: "assistant",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "edit-1",
+                  name: "Edit",
+                  input: {
+                    file_path: "src/lib.ts",
+                    old_string: "old",
+                    new_string: "new",
+                  },
+                },
+                {
+                  type: "tool_use",
+                  id: "write-1",
+                  name: "Write",
+                  input: { file_path: "src/new.ts", content: "export {}" },
+                },
+              ],
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "claude-results",
+          step_execution_id: "claude-exec",
+          content: JSON.stringify({
+            type: "user",
+            message: {
+              content: [
+                { type: "tool_result", tool_use_id: "edit-1", content: "ok" },
+                { type: "tool_result", tool_use_id: "write-1", content: "ok" },
+              ],
+            },
+          }),
+          created_at: timestamp,
+        },
+      ];
+
+      const edits = parseSessionLogs(logs).filter(
+        (event) => event.kind === "file_edit"
+      );
+      expect(edits).toHaveLength(2);
+      expect(edits).toMatchObject([
+        {
+          toolId: "edit-1",
+          status: "completed",
+          changes: [
+            {
+              path: "src/lib.ts",
+              kind: "update",
+              diff: expect.stringContaining("+new"),
+            },
+          ],
+        },
+        {
+          toolId: "write-1",
+          status: "completed",
+          changes: [{ path: "src/new.ts", kind: "add" }],
+        },
+      ]);
+    });
+
     it("parses multiple content items", () => {
       const raw: ClaudeRawMessage = {
         type: "assistant",
@@ -694,6 +764,7 @@ describe("parseCodexMessage", () => {
   const newState = (): CodexParseState => ({
     turnCount: 0,
     todoListByItemId: new Map(),
+    fileEditByItemId: new Map(),
   });
 
   it("maps thread.started to a session_start event with the thread_id and a 'codex' model", () => {
@@ -929,6 +1000,49 @@ describe("parseCodexMessage", () => {
           },
           { path: "src/bar.rs", kind: "add", diff: "+++ b/src/bar.rs" },
         ],
+      },
+    ]);
+  });
+
+  it("replaces a started file_change item with its completed snapshot", () => {
+    const logs: SessionLog[] = [
+      {
+        id: "codex-file-start",
+        step_execution_id: "codex-file-exec",
+        content: JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "fc-live",
+            type: "fileChange",
+            status: "inProgress",
+            changes: [{ path: "src/live.ts", kind: "update", diff: "@@" }],
+          },
+        }),
+        created_at: timestamp,
+      },
+      {
+        id: "codex-file-complete",
+        step_execution_id: "codex-file-exec",
+        content: JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "fc-live",
+            type: "fileChange",
+            status: "completed",
+            changes: [
+              { path: "src/live.ts", kind: "update", diff: "@@\n-old\n+new" },
+            ],
+          },
+        }),
+        created_at: timestamp,
+      },
+    ];
+    expect(parseSessionLogs(logs)).toMatchObject([
+      {
+        kind: "file_edit",
+        toolId: "fc-live",
+        status: "completed",
+        changes: [{ path: "src/live.ts", diff: "@@\n-old\n+new" }],
       },
     ]);
   });
@@ -1304,9 +1418,9 @@ describe("parseCodexRolloutMessage", () => {
       toolName: "Bash",
       summary: "cargo test --quiet",
     });
-    expect(
-      event.kind === "tool_call" ? event.input.command : undefined
-    ).toBe("cargo test --quiet");
+    expect(event.kind === "tool_call" ? event.input.command : undefined).toBe(
+      "cargo test --quiet"
+    );
   });
 
   it("maps assistant messages and function calls from Codex rollout JSONL", () => {
@@ -1409,9 +1523,7 @@ describe("parseCodexRolloutMessage", () => {
       ];
 
       const events = parseSessionLogs(logs);
-      expect(events.filter((e) => e.kind === "session_start")).toHaveLength(
-        1
-      );
+      expect(events.filter((e) => e.kind === "session_start")).toHaveLength(1);
     });
   });
 
@@ -1491,7 +1603,7 @@ describe("parseCodexRolloutMessage", () => {
       ]);
     });
 
-    it("maps patch_apply_end to a file_edit event, distinguishing update (diff) from add/delete (no diff)", () => {
+    it("maps patch_apply_end content for added and deleted files into diff bodies", () => {
       const raw: CodexRolloutRawMessage = {
         type: "event_msg",
         payload: {
@@ -1528,11 +1640,130 @@ describe("parseCodexRolloutMessage", () => {
               kind: "update",
               diff: "@@ -1 +1 @@\n-old\n+new",
             },
-            { path: "/repo/src/added.rs", kind: "add", diff: undefined },
-            { path: "/repo/src/removed.rs", kind: "delete", diff: undefined },
+            { path: "/repo/src/added.rs", kind: "add", diff: "+fn added() {}" },
+            {
+              path: "/repo/src/removed.rs",
+              kind: "delete",
+              diff: "-fn removed() {}",
+            },
           ],
         },
       ]);
+    });
+
+    it("restores an apply_patch diff from Codex exec transcript records", () => {
+      const logs: SessionLog[] = [
+        {
+          id: "exec-call",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "exec",
+              call_id: "call-wrapper",
+              input:
+                'const patch = "*** Begin Patch\\n*** Update File: patch-demo.txt\\n@@\\n-This file was added\\n+This file was created\\n*** End Patch";',
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "patch-result",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "event_msg",
+            payload: {
+              type: "patch_apply_end",
+              call_id: "exec-patch",
+              success: true,
+              changes: {
+                "/repo/patch-demo.txt": {
+                  type: "update",
+                  unified_diff:
+                    "@@ -1,1 +1,1 @@\\n-This file was added\\n+This file was created\\n",
+                },
+              },
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "exec-wrapper-output",
+          step_execution_id: "codex-session",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call_output",
+              call_id: "call-wrapper",
+              output: [{ type: "input_text", text: "{}" }],
+            },
+          }),
+          created_at: timestamp,
+        },
+      ];
+
+      const events = parseSessionLogs(logs);
+      expect(events.filter((event) => event.kind === "file_edit")).toHaveLength(
+        1
+      );
+      expect(events).toContainEqual({
+        kind: "file_edit",
+        timestamp,
+        toolId: "exec-patch",
+        status: "completed",
+        changes: [
+          {
+            path: "/repo/patch-demo.txt",
+            kind: "update",
+            diff: "@@ -1,1 +1,1 @@\\n-This file was added\\n+This file was created\\n",
+          },
+        ],
+      });
+    });
+
+    it("skips Codex bootstrap context stored as a user-role response item", () => {
+      const injectedContext: CodexRolloutRawMessage = {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "<recommended_plugins>\n- GitHub\n</recommended_plugins>",
+            },
+            {
+              type: "input_text",
+              text: "# AGENTS.md instructions for /repo\n<INSTRUCTIONS>Do things</INSTRUCTIONS>",
+            },
+            {
+              type: "input_text",
+              text: "<environment_context><cwd>/repo</cwd></environment_context>",
+            },
+          ],
+        },
+      };
+
+      const actualUserMessage: CodexRolloutRawMessage = {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Hey there" }],
+        },
+      };
+
+      expect(
+        parseCodexRolloutMessage(injectedContext, timestamp, {
+          includeUserMessages: true,
+        })
+      ).toEqual([]);
+      expect(
+        parseCodexRolloutMessage(actualUserMessage, timestamp, {
+          includeUserMessages: true,
+        })
+      ).toEqual([{ kind: "user_message", timestamp, text: "Hey there" }]);
     });
 
     it("marks patch_apply_end as failed when success is false", () => {
@@ -1543,13 +1774,64 @@ describe("parseCodexRolloutMessage", () => {
           call_id: "call-patch-2",
           success: false,
           changes: {
-            "/repo/src/broken.rs": { type: "update", unified_diff: "@@ -1 +1 @@" },
+            "/repo/src/broken.rs": {
+              type: "update",
+              unified_diff: "@@ -1 +1 @@",
+            },
           },
         } as CodexRolloutRawMessage["payload"],
       };
 
       const [event] = parseCodexRolloutMessage(raw, timestamp);
       expect(event).toMatchObject({ kind: "file_edit", status: "failed" });
+    });
+
+    it("renders rollout apply_patch custom tool calls with their terminal status", () => {
+      const logs: SessionLog[] = [
+        {
+          id: "patch-start",
+          step_execution_id: "rollout-file-exec",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call",
+              name: "apply_patch",
+              call_id: "patch-1",
+              input:
+                "*** Begin Patch\n*** Add File: src/new.ts\n+export {}\n*** Update File: src/lib.ts\n@@\n-old\n+new\n*** End Patch",
+            },
+          }),
+          created_at: timestamp,
+        },
+        {
+          id: "patch-output",
+          step_execution_id: "rollout-file-exec",
+          content: JSON.stringify({
+            type: "response_item",
+            payload: {
+              type: "custom_tool_call_output",
+              call_id: "patch-1",
+              output: "applied",
+            },
+          }),
+          created_at: timestamp,
+        },
+      ];
+      expect(parseSessionLogs(logs)).toMatchObject([
+        {
+          kind: "file_edit",
+          toolId: "patch-1",
+          status: "completed",
+          changes: [
+            { path: "src/new.ts", kind: "add" },
+            {
+              path: "src/lib.ts",
+              kind: "update",
+              diff: expect.stringContaining("+new"),
+            },
+          ],
+        },
+      ]);
     });
   });
 
@@ -1598,7 +1880,10 @@ describe("parseCodexRolloutMessage", () => {
 
       const logs: SessionLog[] = lines.map(
         (raw) =>
-          ({ content: JSON.stringify(raw), created_at: timestamp }) as SessionLog
+          ({
+            content: JSON.stringify(raw),
+            created_at: timestamp,
+          }) as SessionLog
       );
 
       const events = parseSessionLogs(logs, { includeUserMessages: true });
@@ -1753,7 +2038,11 @@ describe("parseSessionLogs provider dispatch", () => {
       harnessLog(
         harness(
           "tool_call",
-          { tool_call_id: "spawn-1", name: "Task", input: { prompt: "Inspect" } },
+          {
+            tool_call_id: "spawn-1",
+            name: "Task",
+            input: { prompt: "Inspect" },
+          },
           2
         ),
         "2024-01-02T08:00:02Z",
@@ -1762,7 +2051,11 @@ describe("parseSessionLogs provider dispatch", () => {
       harnessLog(
         harness(
           "turn_input",
-          { thread_id: "child-thread", content: "Inspect", provenance: "agent" },
+          {
+            thread_id: "child-thread",
+            content: "Inspect",
+            provenance: "agent",
+          },
           3,
           "child"
         ),
@@ -1792,7 +2085,11 @@ describe("parseSessionLogs provider dispatch", () => {
       harnessLog(
         harness(
           "tool_output",
-          { tool_call_id: "bash-1", output: { stdout: "/repo" }, status: "completed" },
+          {
+            tool_call_id: "bash-1",
+            output: { stdout: "/repo" },
+            status: "completed",
+          },
           7,
           "child"
         ),
@@ -1809,7 +2106,11 @@ describe("parseSessionLogs provider dispatch", () => {
           "run_finished",
           {
             status: "completed",
-            metrics: { duration_ms: 1200, turn_count: 1, total_cost_usd: 0.042 },
+            metrics: {
+              duration_ms: 1200,
+              turn_count: 1,
+              total_cost_usd: 0.042,
+            },
           },
           9
         ),
@@ -1879,8 +2180,18 @@ describe("parseSessionLogs provider dispatch", () => {
     const events = parseSessionLogs([
       log(1, "text", { text: "turn one delta" }, "turn-1"),
       log(2, "text", { text: "turn one snapshot" }, "turn-1"),
-      log(3, "turn_finished", { status: "completed", result_text: "turn one result" }, "turn-1"),
-      log(4, "turn_finished", { status: "completed", result_text: "turn two result" }, "turn-2"),
+      log(
+        3,
+        "turn_finished",
+        { status: "completed", result_text: "turn one result" },
+        "turn-1"
+      ),
+      log(
+        4,
+        "turn_finished",
+        { status: "completed", result_text: "turn two result" },
+        "turn-2"
+      ),
       log(
         5,
         "plan",
@@ -1907,18 +2218,20 @@ describe("parseSessionLogs provider dispatch", () => {
       ),
     ]);
 
-    expect(events.filter((event) => event.kind === "assistant_message")).toMatchObject([
-      { text: "turn one delta" },
-      { text: "turn two result" },
-    ]);
+    expect(
+      events.filter((event) => event.kind === "assistant_message")
+    ).toMatchObject([{ text: "turn one delta" }, { text: "turn two result" }]);
     expect(events.filter((event) => event.kind === "todo_list")).toMatchObject([
-      { itemId: "harness-plan:root-thread", items: [{ text: "Review", completed: true }] },
+      {
+        itemId: "harness-plan:root-thread",
+        items: [{ text: "Review", completed: true }],
+      },
     ]);
     expect(events.find((event) => event.kind === "file_edit")).toMatchObject({
       changes: [
         { path: "new.rs", kind: "add" },
         { path: "old.rs", kind: "delete" },
-        { path: "renamed.rs", kind: "update" },
+        { path: "renamed.rs", kind: "rename" },
       ],
     });
   });

@@ -164,7 +164,7 @@ impl LocalChatRuntime {
 pub(crate) trait LocalChatHarness: Send + Sync {
     fn kind(&self) -> LocalChatHarnessKind;
 
-    fn info(&self) -> LocalChatHarnessInfo;
+    async fn info(&self) -> LocalChatHarnessInfo;
 
     async fn create_session(
         &self,

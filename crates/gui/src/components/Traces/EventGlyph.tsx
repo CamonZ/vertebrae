@@ -60,17 +60,33 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
     if (input.lane === "threshold") {
       switch (input.kind) {
         case "transition":
-          return { glyph: "arrow-right", variant: "default", label: "transition" };
+          return {
+            glyph: "arrow-right",
+            variant: "default",
+            label: "transition",
+          };
         case "retry":
           return { glyph: "rotate-cw", variant: "default", label: "retry" };
         case "rejection":
           return { glyph: "x-circle", variant: "error", label: "rejection" };
         case "approval":
-          return { glyph: "check-circle", variant: "default", label: "approval" };
+          return {
+            glyph: "check-circle",
+            variant: "default",
+            label: "approval",
+          };
         case "model_fallback":
-          return { glyph: "shuffle", variant: "default", label: "model fallback" };
+          return {
+            glyph: "shuffle",
+            variant: "default",
+            label: "model fallback",
+          };
         case "execution_start":
-          return { glyph: "play-circle", variant: "default", label: "execution start" };
+          return {
+            glyph: "play-circle",
+            variant: "default",
+            label: "execution start",
+          };
         case "execution_end":
           return { glyph: "flag", variant: "default", label: "execution end" };
       }
@@ -123,19 +139,31 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
         variant: ev.isError ? "error" : "filled",
         label: ev.isError ? "tool error" : "tool result",
       };
-    case "file_edit":
+    case "file_edit": {
+      const failed = ["failed", "declined", "cancelled", "canceled"].includes(
+        ev.status.toLowerCase()
+      );
       return {
         glyph: "edit",
-        variant: ev.status === "failed" ? "error" : "default",
-        label: ev.status === "failed" ? "patch failed" : "file edit",
+        variant: failed ? "error" : "default",
+        label: failed ? "patch failed" : "file edit",
       };
+    }
     case "todo_list":
       return { glyph: "file-text", variant: "default", label: "plan" };
     case "thinking_heartbeat":
-      return { glyph: "brain", variant: "default", label: "thinking heartbeat" };
+      return {
+        glyph: "brain",
+        variant: "default",
+        label: "thinking heartbeat",
+      };
     case "task_progress":
     case "task_started":
-      return { glyph: "git-branch", variant: "default", label: "subagent activity" };
+      return {
+        glyph: "git-branch",
+        variant: "default",
+        label: "subagent activity",
+      };
     case "task_notification":
       return { glyph: "flag", variant: "default", label: "task notification" };
     case "rate_limit":
@@ -156,7 +184,10 @@ interface GlyphDef {
 
 const GLYPHS: Record<GlyphName, GlyphDef> = {
   play: { stroke: 1.75, body: <polygon points="6 4 20 12 6 20 6 4" /> },
-  stop: { stroke: 1.75, body: <rect x="5" y="5" width="14" height="14" rx="1" /> },
+  stop: {
+    stroke: 1.75,
+    body: <rect x="5" y="5" width="14" height="14" rx="1" />,
+  },
   brain: {
     stroke: 1.5,
     body: (

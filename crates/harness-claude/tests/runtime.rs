@@ -215,6 +215,39 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"hello","structured
 }
 
 #[tokio::test]
+async fn one_shot_clean_exit_without_result_is_completed_without_output_or_metrics() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "clean-exit",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-session"}'
+"#,
+    );
+    let handle = runtime(executable)
+        .run_once(
+            RunRequest {
+                run_id: RunId::from("clean-exit-run"),
+                stream_id: StreamId::from("clean-exit-stream"),
+                prompt: "finish quietly".into(),
+                config: RequestConfig::default(),
+            },
+            Arc::new(CollectSink::default()),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+
+    let outcome = handle.await_outcome().await.unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Completed);
+    assert_eq!(outcome.result_text, None);
+    assert_eq!(outcome.structured_output, None);
+    assert_eq!(outcome.usage, None);
+    assert_eq!(outcome.metrics, Default::default());
+    assert_eq!(outcome.error, None);
+}
+
+#[tokio::test]
 async fn nested_agents_keep_independent_sequences_and_canonical_correlations() {
     let temp = TempDir::new().unwrap();
     let executable = script(

@@ -33,12 +33,25 @@ fn local_chat_event_names_match_public_contract() {
             is_error: false,
             parent_tool_use_id: Some("parent-1".to_string()),
         }),
+        LocalChatEvent::FileChange(LocalChatFileChangeEvent {
+            backend_session_id: "session-1".to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            tool_id: "file-1".to_string(),
+            status: "completed".to_string(),
+            changes: vec![LocalChatFileChange {
+                path: "src/lib.rs".to_string(),
+                kind: "update".to_string(),
+                diff: Some("@@".to_string()),
+            }],
+            parent_tool_use_id: None,
+        }),
         LocalChatEvent::Usage(LocalChatSessionUsageEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
             model: "sonnet".to_string(),
             context_tokens: 42,
             context_window: 200_000,
+            thread_total_tokens: 100,
         }),
         LocalChatEvent::End(LocalChatSessionEndEvent {
             backend_session_id: "session-1".to_string(),
@@ -74,6 +87,7 @@ fn local_chat_event_names_match_public_contract() {
             "local-chat-text-event",
             "local-chat-tool-call-event",
             "local-chat-tool-result-event",
+            "local-chat-file-change-event",
             "local-chat-session-usage-event",
             "local-chat-session-end-event",
             "local-chat-session-error-event",

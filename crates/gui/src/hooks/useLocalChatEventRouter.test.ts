@@ -163,6 +163,46 @@ describe("useLocalChatEventRouter route functions", () => {
     ]);
   });
 
+  it("settles a Codex turn through the shared local-chat end event", () => {
+    resetChatStore({
+      codex: makeSession({
+        id: "codex",
+        harness: "codex",
+        backendSessionId: "backend-codex",
+        lifecycle: "streaming",
+        streamingAssistant: {
+          text: "Codex answer",
+          timestamp: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    });
+
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-codex",
+        harness: "codex",
+        duration_ms: 120,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "Codex answer",
+        is_error: false,
+        context_tokens: 12,
+        context_window: 200,
+      })
+    ).toBe(true);
+
+    const codex = useChatStore.getState().sessions.codex;
+    expect(codex.lifecycle).toBe("idle");
+    expect(codex.streamingAssistant).toBeNull();
+    expect(codex.messages).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "Codex answer",
+        isPartial: false,
+      }),
+    ]);
+  });
+
   it("flushes a queued follow-up when a hidden session receives End", async () => {
     resetChatStore({
       hidden: makeSession({

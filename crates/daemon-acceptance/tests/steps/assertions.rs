@@ -127,83 +127,6 @@ pub async fn argv_contains_managed_plugin_root_once(world: &mut DaemonWorld) {
     );
 }
 
-#[then(expr = "the Codex mock argv contains model {string} and reasoning effort {string}")]
-pub async fn codex_argv_contains_model_and_reasoning_effort(
-    world: &mut DaemonWorld,
-    model: String,
-    reasoning_effort: String,
-) {
-    let argv = world.captured_argv();
-
-    let model_idx = argv
-        .iter()
-        .position(|a| a == "--model")
-        .unwrap_or_else(|| panic!("--model not in argv: {argv:?}"));
-    assert_eq!(
-        argv.get(model_idx + 1),
-        Some(&model),
-        "expected model {model:?} after --model in argv: {argv:?}"
-    );
-
-    let config_value = format!("model_reasoning_effort=\"{reasoning_effort}\"");
-    let config_idx = argv
-        .iter()
-        .position(|a| a == "-c")
-        .unwrap_or_else(|| panic!("-c not in argv: {argv:?}"));
-    assert_eq!(
-        argv.get(config_idx + 1),
-        Some(&config_value),
-        "expected {config_value:?} after -c in argv: {argv:?}"
-    );
-
-    let prompt_idx = argv
-        .len()
-        .checked_sub(1)
-        .expect("mock argv should include program name and prompt");
-    assert!(
-        config_idx + 1 < prompt_idx,
-        "expected {config_value:?} before trailing prompt, got config_idx={config_idx}, prompt_idx={prompt_idx}, argv={argv:?}"
-    );
-}
-
-#[then(expr = "the Codex mock argv contains model {string} and model provider {string}")]
-pub async fn codex_argv_contains_model_and_model_provider(
-    world: &mut DaemonWorld,
-    model: String,
-    model_provider: String,
-) {
-    let argv = world.captured_argv();
-
-    let model_idx = argv
-        .iter()
-        .position(|a| a == "--model")
-        .unwrap_or_else(|| panic!("--model not in argv: {argv:?}"));
-    assert_eq!(
-        argv.get(model_idx + 1),
-        Some(&model),
-        "expected model {model:?} after --model in argv: {argv:?}"
-    );
-
-    let config_value = format!("model_provider=\"{model_provider}\"");
-    let provider_config_idx = argv
-        .windows(2)
-        .position(|pair| pair[0] == "-c" && pair[1] == config_value)
-        .unwrap_or_else(|| panic!("model_provider config not in argv: {argv:?}"));
-
-    let prompt_idx = argv
-        .len()
-        .checked_sub(1)
-        .expect("mock argv should include program name and prompt");
-    assert!(
-        model_idx < provider_config_idx,
-        "expected --model before model_provider config, got model_idx={model_idx}, provider_config_idx={provider_config_idx}, argv={argv:?}"
-    );
-    assert!(
-        provider_config_idx + 1 < prompt_idx,
-        "expected model_provider config before trailing prompt, got provider_config_idx={provider_config_idx}, prompt_idx={prompt_idx}, argv={argv:?}"
-    );
-}
-
 #[then(expr = "the mock argv contains {string} exactly {int} time(s)")]
 pub async fn argv_contains_n(world: &mut DaemonWorld, needle: String, expected: usize) {
     let argv = world.captured_argv();
@@ -256,4 +179,64 @@ pub async fn session_log_count(world: &mut DaemonWorld, expected: usize) {
             "session log has wrong step_execution_id: {entry}"
         );
     }
+}
+
+#[then(expr = "the execution has at least {int} session log entries")]
+pub async fn session_log_count_at_least(world: &mut DaemonWorld, expected: usize) {
+    let execution_id = world
+        .execution_id
+        .as_ref()
+        .expect("no execution id recorded")
+        .clone();
+    let client = world
+        .graphql_client
+        .as_ref()
+        .expect("graphql_client not configured")
+        .clone();
+    let resp: serde_json::Value = client
+        .execute(
+            vertebrae_sacrum_client::queries::executions::LIST_LOGS,
+            serde_json::json!({ "step_execution_id": execution_id }),
+            "session_logs",
+        )
+        .await
+        .expect("session_logs query failed");
+    let arr = resp
+        .as_array()
+        .unwrap_or_else(|| panic!("session_logs is not an array: {resp}"));
+    assert!(
+        arr.len() >= expected,
+        "expected at least {expected} session_logs, got {}: {resp}",
+        arr.len()
+    );
+}
+
+#[then(expr = "the Codex App Server request contains model {string} and reasoning effort {string}")]
+pub async fn codex_request_contains_model_and_reasoning_effort(
+    world: &mut DaemonWorld,
+    model: String,
+    reasoning_effort: String,
+) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(thread_start["params"]["model"], model);
+    assert_eq!(thread_start["params"]["effort"], reasoning_effort);
+}
+
+#[then(expr = "the Codex App Server request contains model {string} and model provider {string}")]
+pub async fn codex_request_contains_model_and_provider(
+    world: &mut DaemonWorld,
+    model: String,
+    model_provider: String,
+) {
+    let requests = world.captured_codex_requests();
+    let thread_start = requests
+        .iter()
+        .find(|request| request["method"] == "thread/start")
+        .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
+    assert_eq!(thread_start["params"]["model"], model);
+    assert_eq!(thread_start["params"]["modelProvider"], model_provider);
 }

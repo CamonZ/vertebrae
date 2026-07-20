@@ -51,4 +51,4 @@ Feature: Daemon translates step config into Claude CLI invocation
     And a task assigned to the workflow
     When run_step is invoked
     And I wait for the execution to reach status "completed"
-    Then the mock argv contains "-p" followed by "Execute step"
+    Then the mock argv contains "--print" followed by "Execute step"

@@ -1,5 +1,5 @@
 //! MockResponse: builder that produces the prompt-as-JSON envelope read by the
-//! mock claude binary.
+//! daemon acceptance provider mocks.
 //!
 //! Scenarios call `MockResponse::new(...).with_stdout_lines(...).build()` to
 //! materialise the per-scenario stdout/stderr fixture files under
@@ -43,7 +43,7 @@ pub enum MockResponseError {
     },
 }
 
-/// Builder for the mock claude prompt envelope.
+/// Builder for the provider mock prompt envelope.
 ///
 /// See the crate-level docs for the schema the mock enforces.
 #[derive(Debug, Clone)]

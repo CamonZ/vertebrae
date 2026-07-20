@@ -126,6 +126,7 @@ interface ChatComposerProps {
   ctxPct: number;
   ctxColor: string;
   usage: { used: number; max: number } | null;
+  threadTotalTokens?: number;
   onSend: () => void;
   onStartSession: () => void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -160,6 +161,7 @@ export function ChatComposer({
   ctxPct,
   ctxColor,
   usage,
+  threadTotalTokens,
   onSend,
   onStartSession,
   onHarnessChange,
@@ -320,11 +322,14 @@ export function ChatComposer({
         {usage && usage.max > 0 ? (
           <span
             className="ctx-lbl"
-            title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} current request input context tokens`}
+            title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} current request input context tokens${threadTotalTokens !== undefined ? ` · ${threadTotalTokens.toLocaleString()} total thread tokens` : ""}`}
           >
             context <b>{ctxPct}%</b>
             {session.model
               ? ` · ${session.model.replace(/^claude-/i, "")} · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.max)}`
+              : ""}
+            {threadTotalTokens !== undefined
+              ? ` · thread ${formatTokenCount(threadTotalTokens)}`
               : ""}
           </span>
         ) : (

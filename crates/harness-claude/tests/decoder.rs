@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use vertebrae_harness_claude::{ClaudeDecodeContext, ClaudeStreamDecoder};
 use vertebrae_harness_core::{
-    CompletionStatus, ControlDecision, ControlRequest, HarnessEventPayloadV1, ProviderThreadRef,
-    RunId, SessionId, StreamId, ThreadKind, TurnInputProvenance, UpdateSemantics,
+    CompletionStatus, ControlDecision, ControlRequest, FileChangeKind, HarnessEventPayloadV1,
+    ProviderThreadRef, RunId, SessionId, StreamId, ThreadKind, ToolStatus, TurnInputProvenance,
+    UpdateSemantics,
 };
 
 #[test]
@@ -25,6 +26,57 @@ fn init_preserves_advertised_string_and_object_tool_names() {
         })
         .unwrap();
     assert_eq!(started.tools, ["Read", "Bash"]);
+}
+
+#[test]
+fn file_tools_emit_a_terminal_structured_file_change() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run-file-change"),
+        StreamId::from("stream-file-change"),
+    ));
+
+    let started = decoder
+        .decode_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"edit-1","name":"Edit","input":{"file_path":"src/lib.rs","old_string":"old","new_string":"new"}},{"type":"tool_use","id":"write-1","name":"Write","input":{"file_path":"src/new.rs","content":"fn new() {}\n"}}]}}"#,
+        )
+        .unwrap();
+    assert_eq!(
+        started
+            .iter()
+            .filter(|draft| matches!(draft.payload, HarnessEventPayloadV1::ToolCall(_)))
+            .count(),
+        2
+    );
+
+    let completed = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"edit-1","content":"ok"},{"type":"tool_result","tool_use_id":"write-1","content":"ok"}]}}"#,
+        )
+        .unwrap();
+    let changes = completed
+        .iter()
+        .filter_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::FileChange(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(changes.len(), 2);
+    assert!(
+        changes
+            .iter()
+            .all(|change| change.status == ToolStatus::Completed)
+    );
+    assert_eq!(changes[0].tool_call_id.as_ref().unwrap().as_str(), "edit-1");
+    assert_eq!(changes[0].changes[0].kind, FileChangeKind::Modified);
+    assert_eq!(changes[0].changes[0].path, "src/lib.rs");
+    assert!(
+        changes[0].changes[0]
+            .patch
+            .as_deref()
+            .is_some_and(|patch| patch.contains("-old") && patch.contains("+new"))
+    );
+    assert_eq!(changes[1].changes[0].kind, FileChangeKind::Added);
+    assert_eq!(changes[1].changes[0].path, "src/new.rs");
 }
 
 #[test]

@@ -108,11 +108,13 @@ describe("ChatComposer", () => {
         {...defaultProps({
           ctxPct: 50,
           usage: { used: 100, max: 200 },
+          threadTotalTokens: 900,
         })}
       />
     );
-    expect(screen.getByText("context")).toBeInTheDocument();
+    expect(screen.getByText(/context/)).toBeInTheDocument();
     expect(screen.getByText("50%")).toBeInTheDocument();
+    expect(screen.getByText(/thread 900/)).toBeInTheDocument();
   });
 
   it("renders non-breaking space when usage is null", () => {

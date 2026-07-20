@@ -6,8 +6,8 @@ use vertebrae_core::Provider;
 ///
 /// Each entry is `Some` when the binary was found at daemon-startup PATH /
 /// env-override resolution, `None` otherwise. A missing binary does not
-/// prevent the daemon from starting — only steps that request that
-/// provider will fail with `MissingProviderBinary` before spawn.
+/// prevent the daemon from starting — only steps that request that provider
+/// will fail during shared harness construction before spawn.
 #[derive(Debug, Clone, Default)]
 pub struct ProviderBinaries {
     pub anthropic: Option<PathBuf>,

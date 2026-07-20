@@ -278,10 +278,10 @@ vtb step update <step-id> --clear-output-schema
 Each step picks the harness (the local CLI) that will run its prompt via
 `agent_config.provider`. The MVP ships with two built-in providers:
 
-| Provider | Harness CLI | Binary | Stream parser | Provider-binary lookup env var |
-|----------|-------------|--------|---------------|--------------------------------|
-| `anthropic` (default) | Claude Code | `claude` | `--output-format stream-json` JSONL | `CLAUDE_CODE_PATH` |
-| `openai` | Codex CLI | `codex` | `codex exec --json` JSONL | `CODEX_PATH` |
+| Provider | Harness | Binary | Transport | Provider-binary lookup env var |
+|----------|---------|--------|-----------|--------------------------------|
+| `anthropic` (default) | Claude Code streaming harness | `claude` | persistent stream-json session | `CLAUDE_CODE_PATH` |
+| `openai` | Codex App Server streaming harness | `codex` | App Server WebSocket | `CODEX_PATH` |
 
 When `provider` is unset on a step, the daemon defaults to **Anthropic** to
 preserve pre-refactor behavior. The daemon resolves the harness binary by
@@ -345,8 +345,9 @@ For Codex steps, `provider=openai` selects the local Codex harness. It does not
 necessarily mean the upstream model API is OpenAI. Set
 `codex_model_provider` with `--codex-model-provider` when Codex should use a
 custom upstream provider from `~/.codex/config.toml`; Vertebrae passes it as
-`codex exec -c model_provider="<value>" ...`. Keep API keys and bearer tokens
-in Codex config or environment, not in Vertebrae task data.
+The daemon sends `model_provider` through the Codex App Server initialization
+request. Keep API keys and bearer tokens in Codex config or environment, not
+in Vertebrae task data.
 
 Reasoning effort is OpenAI/Codex-only. Valid values are `low`, `medium`,
 `high`, and `xhigh`; unsupported values such as `minimal` are rejected. A step
