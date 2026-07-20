@@ -289,9 +289,15 @@ impl EventSink for LocalChatHarnessEventSink {
                 }
             }
             HarnessEventPayloadV1::TurnFinished(outcome) => {
+                if !is_root_stream {
+                    return Ok(());
+                }
                 self.emit_end(outcome.status, outcome.result_text, &outcome.metrics)?;
             }
             HarnessEventPayloadV1::RunFinished(outcome) => {
+                if !is_root_stream {
+                    return Ok(());
+                }
                 self.emit_end(outcome.status, outcome.result_text, &outcome.metrics)?;
             }
             HarnessEventPayloadV1::Warning(value) => {
@@ -410,5 +416,44 @@ mod tests {
                     && event.status == "completed"
                     && event.changes[0].kind == "add"
         ));
+    }
+
+    #[tokio::test]
+    async fn ignores_child_turn_finished_for_local_chat_lifecycle() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Codex,
+            event_sink,
+            Some("gpt".into()),
+            1_000,
+            false,
+        );
+
+        sink.emit(HarnessEventV1 {
+            event_id: EventId::new("child-turn-finished"),
+            stream_id: StreamId::new("local-chat:backend-1:thread:child-1"),
+            sequence: 1,
+            correlation: EventCorrelation {
+                thread_id: Some(vertebrae_harness_core::ThreadId::new("child-1")),
+                parent_tool_call_id: Some(ToolCallId::new("spawn-1")),
+                ..EventCorrelation::default()
+            },
+            timestamp: chrono::Utc::now(),
+            semantics: UpdateSemantics::Snapshot,
+            provider_sequence: None,
+            payload: HarnessEventPayloadV1::TurnFinished(vertebrae_harness_core::TurnOutcome {
+                status: CompletionStatus::Completed,
+                result_text: Some("child result".into()),
+                structured_output: None,
+                usage: None,
+                metrics: Default::default(),
+                error: None,
+            }),
+        })
+        .await
+        .unwrap();
+
+        assert!(captured.lock().unwrap().is_empty());
     }
 }

@@ -381,6 +381,21 @@ impl SessionState {
         }
     }
 
+    fn child_correlation(
+        session_id: &SessionId,
+        thread_id: ThreadId,
+        turn_id: Option<TurnId>,
+        parent_tool_call_id: Option<ToolCallId>,
+    ) -> EventCorrelation {
+        EventCorrelation {
+            session_id: Some(session_id.clone()),
+            thread_id: Some(thread_id),
+            turn_id,
+            parent_tool_call_id,
+            ..EventCorrelation::default()
+        }
+    }
+
     async fn declare_child(
         &self,
         params: &Value,
@@ -409,12 +424,12 @@ impl SessionState {
             .insert(thread_id.clone());
         let thread = ThreadId::new(thread_id.clone());
         let stream = StreamId::new(format!("{}:thread:{}", self.root_stream_id, thread_id));
-        let correlation = EventCorrelation {
-            session_id: Some(self.root_session_id.clone()),
-            thread_id: Some(thread.clone()),
-            turn_id: optional_string(params, &["/turnId", "/turn/id"]).map(TurnId::new),
-            ..EventCorrelation::default()
-        };
+        let correlation = Self::child_correlation(
+            &self.root_session_id,
+            thread.clone(),
+            optional_string(params, &["/turnId", "/turn/id"]).map(TurnId::new),
+            caused_by.clone(),
+        );
         if is_new {
             self.emit(
                 stream.clone(),
@@ -1548,8 +1563,25 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        FileChangeKind, ToolStatus, file_change_event, parse_usage, tool_call, tool_output,
+        FileChangeKind, SessionState, ToolStatus, file_change_event, parse_usage, tool_call,
+        tool_output,
     };
+    use vertebrae_harness_core::{SessionId, ThreadId, ToolCallId, TurnId};
+
+    #[test]
+    fn child_correlation_preserves_parent_tool_call() {
+        let correlation = SessionState::child_correlation(
+            &SessionId::new("root-session"),
+            ThreadId::new("child-thread"),
+            Some(TurnId::new("child-turn")),
+            Some(ToolCallId::new("spawn-tool")),
+        );
+
+        assert_eq!(
+            correlation.parent_tool_call_id,
+            Some(ToolCallId::new("spawn-tool"))
+        );
+    }
 
     #[test]
     fn maps_command_execution_start_and_completion_to_one_tool_lifecycle() {
