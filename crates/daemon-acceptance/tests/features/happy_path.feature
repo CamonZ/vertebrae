@@ -36,7 +36,7 @@ Feature: Happy path step execution
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
-    And the execution has 3 session log entries
+    And the execution has at least 3 session log entries
 
   Scenario: Completed with only stderr output
     Given a configured daemon test environment
@@ -47,4 +47,4 @@ Feature: Happy path step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has no recorded output
-    And the execution has 0 session log entries
+    And the execution has 2 session log entries

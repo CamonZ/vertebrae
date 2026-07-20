@@ -265,6 +265,15 @@ pub(super) async fn run_one_shot_process_v2(
         }
     } else if let Some(outcome) = terminal {
         outcome
+    } else if status.is_some_and(|status| status.success()) {
+        RunOutcome {
+            status: CompletionStatus::Completed,
+            result_text: None,
+            structured_output: None,
+            usage: None,
+            metrics: vertebrae_harness_core::OutcomeMetrics::default(),
+            error: None,
+        }
     } else {
         RunOutcome {
             status: CompletionStatus::Failed,

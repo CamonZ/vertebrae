@@ -42,7 +42,9 @@ pub async fn script_three_lines(world: &mut DaemonWorld) {
         .mock_response("three-lines")
         .with_exit_code(0)
         .with_stdout_line(r#"{"type":"system","subtype":"init","session_id":"sess-3"}"#)
-        .with_stdout_line(r#"{"type":"assistant","session_id":"sess-3"}"#)
+        .with_stdout_line(
+            r#"{"type":"assistant","session_id":"sess-3","message":{"content":[{"type":"text","text":"intermediate"}] } }"#,
+        )
         .with_stdout_line(result_line);
     set_prompt(world, builder).await;
 }

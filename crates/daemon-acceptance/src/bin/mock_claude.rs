@@ -82,11 +82,17 @@ struct Envelope {
 }
 
 fn extract_prompt(args: &[String]) -> Option<&str> {
-    let mut iter = args.iter();
-    iter.next();
-    while let Some(arg) = iter.next() {
-        if arg == "-p" || arg == "--prompt" || arg == "--print" {
-            return Some(iter.next().expect("-p requires a value").as_str());
+    for index in 1..args.len() {
+        let arg = &args[index];
+        if arg == "-p" || arg == "--prompt" {
+            return Some(args.get(index + 1).expect("-p requires a value").as_str());
+        }
+        if arg == "--print"
+            && args
+                .get(index + 1)
+                .is_some_and(|next| !next.starts_with('-'))
+        {
+            return Some(args[index + 1].as_str());
         }
         if let Some(rest) = arg.strip_prefix("--prompt=") {
             return Some(rest);
@@ -113,6 +119,23 @@ mod tests {
         .collect::<Vec<_>>();
 
         assert_eq!(extract_prompt(&args), Some("fixture prompt"));
+    }
+
+    #[test]
+    fn does_not_treat_standalone_print_flag_as_a_prompt() {
+        let args = [
+            "mock-claude",
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--input-format",
+            "stream-json",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+        assert_eq!(extract_prompt(&args), None);
     }
 }
 
