@@ -285,6 +285,17 @@ fn event(
     }
 }
 
+fn root_event(
+    backend_session_id: &str,
+    sequence: u64,
+    semantics: UpdateSemantics,
+    payload: HarnessEventPayloadV1,
+) -> HarnessEventV1 {
+    let mut event = event(sequence, semantics, payload);
+    event.stream_id = StreamId::new(format!("local-chat:{backend_session_id}"));
+    event
+}
+
 fn captured_event_sink(state: &MockRuntimeState) -> Arc<dyn EventSink> {
     state
         .event_sink
@@ -617,7 +628,8 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
     agent_usage.stream_id = StreamId::new("local-chat:backend-events/agent/agent-1");
     agent_usage.correlation.parent_tool_call_id = None;
     sink.emit(agent_usage).await.unwrap();
-    sink.emit(event(
+    sink.emit(root_event(
+        "backend-events",
         7,
         UpdateSemantics::Snapshot,
         HarnessEventPayloadV1::TurnFinished(TurnOutcome {
@@ -716,7 +728,8 @@ async fn missing_terminal_metadata_uses_legacy_defaults_instead_of_usage_state()
     );
     usage.stream_id = StreamId::new("local-chat:backend-terminal-defaults");
     sink.emit(usage).await.unwrap();
-    sink.emit(event(
+    sink.emit(root_event(
+        "backend-terminal-defaults",
         2,
         UpdateSemantics::Snapshot,
         HarnessEventPayloadV1::TurnFinished(TurnOutcome {
