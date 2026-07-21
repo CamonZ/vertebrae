@@ -348,6 +348,27 @@ mod tests {
     }
 
     #[test]
+    fn accepts_fable_as_an_anthropic_model() {
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            anthropic_executable: Some(executable()),
+            search_path: Some(OsString::new()),
+            ..HarnessFactoryConfig::default()
+        });
+
+        let claude = factory
+            .create(HarnessRuntimeOptions {
+                agent_config: AgentConfig::new()
+                    .with_provider(Provider::Anthropic)
+                    .with_model("fable"),
+                request_config: RequestConfig::default(),
+            })
+            .expect("Fable should be accepted by the Anthropic harness");
+
+        assert_eq!(claude.provider, Provider::Anthropic);
+        assert_eq!(claude.request_config.model.as_deref(), Some("fable"));
+    }
+
+    #[test]
     fn reports_unavailable_provider_from_factory_configuration() {
         let result = HarnessRuntimeFactory::new(HarnessFactoryConfig {
             openai_executable: Some(PathBuf::from("/definitely/missing/codex")),

@@ -10,7 +10,7 @@
 //!
 //! MVP providers:
 //! - `anthropic` (Claude Code): `claude-*` prefix and the bare aliases
-//!   `opus`, `sonnet`, `haiku`.
+//!   `opus`, `sonnet`, `haiku`, `fable`.
 //! - `openai` (Codex / GPT): `gpt-*` prefix, `o*` reasoning models
 //!   (e.g. `o1`, `o3`, `o4-mini`), and `codex-*`.
 
@@ -74,7 +74,7 @@ pub fn classify_model(model: &str) -> Option<Provider> {
     let normalized = trimmed.to_ascii_lowercase();
 
     // Anthropic: bare aliases and `claude-*` prefix.
-    if matches!(normalized.as_str(), "opus" | "sonnet" | "haiku")
+    if matches!(normalized.as_str(), "opus" | "sonnet" | "haiku" | "fable")
         || normalized.starts_with("claude-")
         || normalized == "claude"
     {
@@ -308,6 +308,7 @@ mod tests {
         assert_eq!(classify_model("opus"), Some(Provider::Anthropic));
         assert_eq!(classify_model("sonnet"), Some(Provider::Anthropic));
         assert_eq!(classify_model("haiku"), Some(Provider::Anthropic));
+        assert_eq!(classify_model("fable"), Some(Provider::Anthropic));
         assert_eq!(classify_model("Opus"), Some(Provider::Anthropic));
     }
 
@@ -391,6 +392,7 @@ mod tests {
     fn validate_accepts_matching_pair() {
         assert!(validate_provider_model(Provider::Anthropic, Some("opus")).is_ok());
         assert!(validate_provider_model(Provider::Anthropic, Some("claude-opus-4-5")).is_ok());
+        assert!(validate_provider_model(Provider::Anthropic, Some("fable")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("gpt-4o")).is_ok());
         assert!(validate_provider_model(Provider::Openai, Some("o3-mini")).is_ok());
     }
