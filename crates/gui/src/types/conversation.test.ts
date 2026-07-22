@@ -2147,7 +2147,7 @@ describe("parseSessionLogs provider dispatch", () => {
     });
   });
 
-  it("keeps harness dedupe within a turn and replaces harness plan snapshots", () => {
+  it("accumulates harness deltas until the completed item snapshot", () => {
     const log = (
       sequence: number,
       type: string,
@@ -2166,7 +2166,10 @@ describe("parseSessionLogs provider dispatch", () => {
             ...(turnId ? { turn_id: turnId } : {}),
           },
           timestamp: `2024-01-03T08:00:0${sequence}Z`,
-          semantics: type === "text" && sequence === 1 ? "delta" : "snapshot",
+          semantics:
+            type === "text" && (sequence === 1 || sequence === 2)
+              ? "delta"
+              : "snapshot",
           type,
           data,
         }),
@@ -2178,34 +2181,40 @@ describe("parseSessionLogs provider dispatch", () => {
     });
 
     const events = parseSessionLogs([
-      log(1, "text", { text: "turn one delta" }, "turn-1"),
-      log(2, "text", { text: "turn one snapshot" }, "turn-1"),
+      log(1, "text", { text: "turn one " }, "turn-1"),
+      log(2, "text", { text: "delta" }, "turn-1"),
       log(
         3,
-        "turn_finished",
-        { status: "completed", result_text: "turn one result" },
+        "text",
+        { text: "turn one delta" },
         "turn-1"
       ),
       log(
         4,
         "turn_finished",
-        { status: "completed", result_text: "turn two result" },
-        "turn-2"
+        { status: "completed", result_text: "turn one delta" },
+        "turn-1"
       ),
       log(
         5,
-        "plan",
-        { entries: [{ id: "plan-1", text: "Review", status: "pending" }] },
+        "turn_finished",
+        { status: "completed", result_text: "turn two result" },
         "turn-2"
       ),
       log(
         6,
         "plan",
-        { entries: [{ id: "plan-1", text: "Review", status: "completed" }] },
+        { entries: [{ id: "plan-1", text: "Review", status: "pending" }] },
         "turn-2"
       ),
       log(
         7,
+        "plan",
+        { entries: [{ id: "plan-1", text: "Review", status: "completed" }] },
+        "turn-2"
+      ),
+      log(
+        8,
         "file_change",
         {
           changes: [
