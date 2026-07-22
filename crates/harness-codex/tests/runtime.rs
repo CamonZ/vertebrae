@@ -65,9 +65,11 @@ impl ControlSink for AutomaticControl {
     }
 }
 
-async fn mock_server() -> (String, tokio::task::JoinHandle<()>) {
+async fn mock_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let captured_requests = Arc::clone(&requests);
     let task = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut socket = accept_async(stream).await.unwrap();
@@ -79,6 +81,7 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>) {
             let Some(method) = request.get("method").and_then(Value::as_str) else {
                 continue;
             };
+            captured_requests.lock().unwrap().push(method.to_string());
             let Some(id) = request.get("id") else {
                 continue;
             };
@@ -99,7 +102,7 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>) {
             }
         }
     });
-    (format!("ws://{address}"), task)
+    (format!("ws://{address}"), task, requests)
 }
 
 fn runtime(url: String) -> CodexRuntime {
@@ -111,7 +114,7 @@ fn runtime(url: String) -> CodexRuntime {
 
 #[tokio::test]
 async fn persistent_session_emits_normalized_turn_and_human_input() {
-    let (url, server) = mock_server().await;
+    let (url, server, requests) = mock_server().await;
     let runtime = runtime(url);
     let events = Arc::new(CapturingSink::default());
     let session = runtime
@@ -154,6 +157,10 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
     );
     drop(events);
     session.close().await.unwrap();
+    assert_eq!(
+        requests.lock().unwrap().as_slice(),
+        ["initialize", "initialized", "thread/start", "turn/start"]
+    );
     tokio::time::timeout(Duration::from_secs(2), server)
         .await
         .unwrap()
@@ -162,7 +169,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
 
 #[tokio::test]
 async fn one_shot_emits_run_finished_and_cleans_up() {
-    let (url, server) = mock_server().await;
+    let (url, server, _) = mock_server().await;
     let runtime = runtime(url);
     let events = Arc::new(CapturingSink::default());
     let run = runtime

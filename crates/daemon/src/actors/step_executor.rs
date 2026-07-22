@@ -22,7 +22,8 @@ use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRunt
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
-    RequestConfig, ResolutionSource, RunHandle, RunOutcome, SessionUsage, StreamId,
+    RequestConfig, ResolutionSource, RunHandle, RunOutcome, SendTurnRequest, SessionCloseStatus,
+    SessionHandle, SessionUsage, StartSessionRequest, StreamId, TurnHandle, TurnId, TurnOutcome,
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
@@ -206,7 +207,12 @@ impl EventSink for DaemonHarnessEventSink {
         };
         let mut cancel_rx = self.cancel_rx.clone();
         if *cancel_rx.borrow() {
-            if matches!(&event.payload, HarnessEventPayloadV1::RunFinished(_)) {
+            if matches!(
+                &event.payload,
+                HarnessEventPayloadV1::RunFinished(_)
+                    | HarnessEventPayloadV1::TurnFinished(_)
+                    | HarnessEventPayloadV1::SessionClosed(_)
+            ) {
                 return tokio::time::timeout(
                     CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT,
                     self.persistence.emit(event),
@@ -310,6 +316,8 @@ pub struct StepExecutorState {
     config: StepExecutorConfig,
     parent: ActorRef<ProjectMessage>,
     harness_run: Option<Arc<dyn RunHandle>>,
+    harness_session: Option<Arc<dyn SessionHandle>>,
+    harness_turn: Option<Arc<dyn TurnHandle>>,
     harness_outcome_handle: Option<tokio::task::JoinHandle<()>>,
     harness_usage: Arc<std::sync::Mutex<HarnessUsageMetrics>>,
     harness_cancel_tx: tokio::sync::watch::Sender<bool>,
@@ -360,6 +368,8 @@ impl Actor for StepExecutor {
             config,
             parent,
             harness_run: None,
+            harness_session: None,
+            harness_turn: None,
             harness_outcome_handle: None,
             harness_usage: Arc::new(std::sync::Mutex::new(HarnessUsageMetrics::default())),
             harness_cancel_tx,
@@ -396,6 +406,28 @@ impl Actor for StepExecutor {
         tracing::info!("StepExecutor stopping for execution {}", state.execution_id);
 
         let _ = state.harness_cancel_tx.send(true);
+        if let Some(turn) = state.harness_turn.take() {
+            let _ = turn.interrupt().await;
+            if tokio::time::timeout(std::time::Duration::from_secs(10), turn.await_outcome())
+                .await
+                .is_err()
+            {
+                tracing::error!(
+                    "Timed out awaiting Codex turn cleanup for execution {}",
+                    state.execution_id
+                );
+            }
+        }
+        if let Some(session) = state.harness_session.take()
+            && tokio::time::timeout(std::time::Duration::from_secs(10), session.close())
+                .await
+                .is_err()
+        {
+            tracing::error!(
+                "Timed out closing Codex App Server session for execution {}",
+                state.execution_id
+            );
+        }
         if let Some(run) = state.harness_run.take() {
             let _ = run.cancel().await;
             if tokio::time::timeout(std::time::Duration::from_secs(10), run.await_outcome())
@@ -403,7 +435,7 @@ impl Actor for StepExecutor {
                 .is_err()
             {
                 tracing::error!(
-                    "Timed out awaiting Claude harness cleanup for execution {}",
+                    "Timed out awaiting provider harness cleanup for execution {}",
                     state.execution_id
                 );
             }
@@ -429,6 +461,27 @@ pub(crate) fn step_result_for_schema_error(err: SchemaError) -> StepResult {
     }
 }
 
+fn persistent_turn_result(
+    turn_result: Result<TurnOutcome, HarnessError>,
+    close_result: Result<vertebrae_harness_core::SessionCloseOutcome, HarnessError>,
+) -> Result<RunOutcome, String> {
+    let turn = turn_result.map_err(|error| error.to_string())?;
+    let close = close_result.map_err(|error| error.to_string())?;
+    if close.status != SessionCloseStatus::Closed {
+        return Err(close
+            .error
+            .unwrap_or_else(|| format!("Codex session closed with status {:?}", close.status)));
+    }
+    Ok(RunOutcome {
+        status: turn.status,
+        result_text: turn.result_text,
+        structured_output: turn.structured_output,
+        usage: turn.usage,
+        metrics: turn.metrics,
+        error: turn.error,
+    })
+}
+
 impl StepExecutor {
     fn validate_output(
         &self,
@@ -448,7 +501,7 @@ impl StepExecutor {
         myself: ActorRef<StepExecutorMessage>,
         state: &mut StepExecutorState,
     ) -> Result<(), ActorProcessingErr> {
-        if state.harness_run.is_some() {
+        if state.harness_run.is_some() || state.harness_session.is_some() {
             tracing::warn!(
                 "Execute received but harness already running for execution {}",
                 state.execution_id
@@ -560,12 +613,8 @@ impl StepExecutor {
                     return Ok(());
                 }
             };
-        let request = vertebrae_harness_core::RunRequest {
-            run_id: vertebrae_harness_core::RunId::new(state.execution_id.clone()),
-            stream_id: vertebrae_harness_core::StreamId::new(state.execution_id.clone()),
-            prompt: state.config.step_config.prompt.clone(),
-            config: instance.request_config,
-        };
+        let stream_id = vertebrae_harness_core::StreamId::new(state.execution_id.clone());
+        let request_config = instance.request_config;
         if state.config.step_config.verbose_daemon_logging {
             tracing::info!(
                 target: VERBOSE_LOG_TARGET,
@@ -582,7 +631,7 @@ impl StepExecutor {
                 &state.execution_id,
                 Arc::clone(&state.config.execution_service),
             )),
-            root_stream_id: request.stream_id.clone(),
+            root_stream_id: stream_id.clone(),
             usage: Arc::clone(&state.harness_usage),
             cancel_rx: state.harness_cancel_tx.subscribe(),
             execution_id: state.execution_id.clone(),
@@ -591,9 +640,86 @@ impl StepExecutor {
         });
         let control_sink: Arc<dyn ControlSink> =
             Arc::new(DaemonControlSink::from_agent_config(&agent_config));
+        let prompt = state.config.step_config.prompt.clone();
+        let actor_ref = myself.clone();
+        if provider == Provider::Openai {
+            let session = match instance
+                .runtime
+                .start_session(
+                    StartSessionRequest {
+                        session_id: vertebrae_harness_core::SessionId::new(
+                            state.execution_id.clone(),
+                        ),
+                        stream_id,
+                        resume_id: None,
+                        config: request_config.clone(),
+                    },
+                    event_sink,
+                    control_sink,
+                )
+                .await
+            {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Failed to start harness session: {error}"),
+                        ),
+                    });
+                    myself.stop(Some("harness session start failed".into()));
+                    return Ok(());
+                }
+            };
+            let turn = match session
+                .send(SendTurnRequest {
+                    turn_id: TurnId::new(format!("{}:turn", state.execution_id)),
+                    content: prompt,
+                    output_schema: request_config.output_schema.clone(),
+                })
+                .await
+            {
+                Ok(turn) => turn,
+                Err(error) => {
+                    let _ = session.close().await;
+                    let _ = state.parent.cast(ProjectMessage::StepFinished {
+                        execution_id: state.execution_id.clone(),
+                        task_id: state.task_id.clone(),
+                        result: StepResult::failed(
+                            None,
+                            format!("Failed to start harness turn: {error}"),
+                        ),
+                    });
+                    myself.stop(Some("harness turn start failed".into()));
+                    return Ok(());
+                }
+            };
+            state.settings_guard = settings_guard;
+            state.harness_session = Some(Arc::clone(&session));
+            state.harness_turn = Some(Arc::clone(&turn));
+            state.harness_outcome_handle = Some(tokio::spawn(async move {
+                let turn_result = turn.await_outcome().await;
+                let close_result = session.close().await;
+                let result = persistent_turn_result(turn_result, close_result);
+                let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
+            }));
+            return Ok(());
+        }
+
         let run = match instance
             .runtime
-            .run_once(request, event_sink, control_sink)
+            .run_once(
+                vertebrae_harness_core::RunRequest {
+                    run_id: vertebrae_harness_core::RunId::new(state.execution_id.clone()),
+                    stream_id,
+                    prompt,
+                    config: request_config,
+                },
+                event_sink,
+                control_sink,
+            )
             .await
         {
             Ok(run) => run,
@@ -609,7 +735,6 @@ impl StepExecutor {
         };
         state.settings_guard = settings_guard;
         state.harness_run = Some(Arc::clone(&run));
-        let actor_ref = myself;
         state.harness_outcome_handle = Some(tokio::spawn(async move {
             let result = run.await_outcome().await.map_err(|error| error.to_string());
             let _ = actor_ref.cast(StepExecutorMessage::HarnessSettled(Box::new(result)));
@@ -624,6 +749,18 @@ impl StepExecutor {
     ) {
         tracing::info!("Cancel requested for execution {}", state.execution_id);
 
+        if let Some(turn) = state.harness_turn.as_ref() {
+            if let Err(error) = turn.interrupt().await {
+                tracing::warn!(
+                    "Failed to interrupt Codex turn for execution {}: {}",
+                    state.execution_id,
+                    error
+                );
+            }
+            let _ = state.harness_cancel_tx.send(true);
+            return;
+        }
+
         if let Some(run) = state.harness_run.as_ref() {
             match run.cancel().await {
                 Ok(()) => {
@@ -633,7 +770,7 @@ impl StepExecutor {
                 }
                 Err(error) => {
                     tracing::warn!(
-                        "Failed to cancel Claude harness for execution {}: {}",
+                        "Failed to cancel provider harness for execution {}: {}",
                         state.execution_id,
                         error
                     );
@@ -660,6 +797,8 @@ impl StepExecutor {
         state: &mut StepExecutorState,
     ) {
         state.harness_run.take();
+        state.harness_session.take();
+        state.harness_turn.take();
         state.harness_outcome_handle.take();
 
         let step_result = match result {
@@ -735,5 +874,49 @@ impl StepExecutor {
             result: step_result,
         });
         myself.stop(Some("harness settled".into()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_turn_result_maps_turn_and_requires_clean_session_close() {
+        let result = persistent_turn_result(
+            Ok(TurnOutcome {
+                status: CompletionStatus::Failed,
+                result_text: Some("turn output".into()),
+                structured_output: None,
+                usage: None,
+                metrics: Default::default(),
+                error: Some("turn failed".into()),
+            }),
+            Ok(vertebrae_harness_core::SessionCloseOutcome {
+                status: SessionCloseStatus::Closed,
+                error: None,
+            }),
+        )
+        .expect("a cleanly closed session should map its turn outcome");
+        assert_eq!(result.status, CompletionStatus::Failed);
+        assert_eq!(result.result_text.as_deref(), Some("turn output"));
+        assert_eq!(result.error.as_deref(), Some("turn failed"));
+
+        let error = persistent_turn_result(
+            Ok(TurnOutcome {
+                status: CompletionStatus::Completed,
+                result_text: Some("output".into()),
+                structured_output: None,
+                usage: None,
+                metrics: Default::default(),
+                error: None,
+            }),
+            Ok(vertebrae_harness_core::SessionCloseOutcome {
+                status: SessionCloseStatus::ProcessLost,
+                error: Some("transport lost".into()),
+            }),
+        )
+        .expect_err("a lost session must fail the daemon execution");
+        assert_eq!(error, "transport lost");
     }
 }

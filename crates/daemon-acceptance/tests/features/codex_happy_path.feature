@@ -11,6 +11,7 @@ Feature: Codex App Server step execution
     And run_step is invoked
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
+    And the Codex App Server uses the persistent session RPC flow
     And the execution output contains "codex-final-answer"
     And the execution records input_tokens 1500 and output_tokens 800
 
@@ -54,6 +55,7 @@ Feature: Codex App Server step execution
     And I wait for the execution to reach status "completed"
     Then the execution status is "completed"
     And the execution has at least 3 session log entries
+    And the execution session logs contain normalized harness events only
 
   Scenario: Codex top-level error event reports failure
     Given a configured daemon test environment

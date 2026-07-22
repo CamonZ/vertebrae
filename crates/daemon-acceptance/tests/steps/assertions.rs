@@ -211,6 +211,74 @@ pub async fn session_log_count_at_least(world: &mut DaemonWorld, expected: usize
     );
 }
 
+#[then("the execution session logs contain normalized harness events only")]
+pub async fn session_logs_are_normalized_harness_events(world: &mut DaemonWorld) {
+    let execution_id = world
+        .execution_id
+        .as_ref()
+        .expect("no execution id recorded")
+        .clone();
+    let client = world
+        .graphql_client
+        .as_ref()
+        .expect("graphql_client not configured")
+        .clone();
+    let resp: serde_json::Value = client
+        .execute(
+            vertebrae_sacrum_client::queries::executions::LIST_LOGS,
+            serde_json::json!({ "step_execution_id": execution_id }),
+            "session_logs",
+        )
+        .await
+        .expect("session_logs query failed");
+    let entries = resp
+        .as_array()
+        .unwrap_or_else(|| panic!("session_logs is not an array: {resp}"));
+    assert!(!entries.is_empty(), "expected normalized harness events");
+    for entry in entries {
+        assert_eq!(entry["format"].as_str(), Some("harness"), "entry: {entry}");
+        let logical_key = entry["logical_key"]
+            .as_str()
+            .unwrap_or_else(|| panic!("missing logical_key: {entry}"));
+        assert!(
+            logical_key.starts_with("harness:"),
+            "unexpected logical_key: {logical_key}"
+        );
+        let event: serde_json::Value = serde_json::from_str(
+            entry["content"]
+                .as_str()
+                .unwrap_or_else(|| panic!("missing event content: {entry}")),
+        )
+        .unwrap_or_else(|error| panic!("event content is not JSON: {error}; entry: {entry}"));
+        assert_eq!(event["version"].as_i64(), Some(1), "entry: {entry}");
+        assert_eq!(
+            logical_key,
+            format!("harness:{}", event["event_id"].as_str().unwrap()),
+            "logical key must identify the normalized event"
+        );
+    }
+    let event_types: Vec<String> = entries
+        .iter()
+        .filter_map(|entry| {
+            serde_json::from_str::<serde_json::Value>(entry["content"].as_str()?)
+                .ok()
+                .and_then(|event| event["type"].as_str().map(str::to_owned))
+        })
+        .collect();
+    assert!(
+        event_types
+            .iter()
+            .any(|event_type| event_type == "turn_finished"),
+        "persistent Codex execution should persist turn_finished: {event_types:?}"
+    );
+    assert!(
+        event_types
+            .iter()
+            .all(|event_type| event_type != "run_finished"),
+        "persistent Codex execution must not persist run_finished: {event_types:?}"
+    );
+}
+
 #[then(expr = "the Codex App Server request contains model {string} and reasoning effort {string}")]
 pub async fn codex_request_contains_model_and_reasoning_effort(
     world: &mut DaemonWorld,
@@ -239,4 +307,32 @@ pub async fn codex_request_contains_model_and_provider(
         .unwrap_or_else(|| panic!("no thread/start request captured: {requests:?}"));
     assert_eq!(thread_start["params"]["model"], model);
     assert_eq!(thread_start["params"]["modelProvider"], model_provider);
+}
+
+#[then("the Codex App Server uses the persistent session RPC flow")]
+pub async fn codex_uses_persistent_session_rpc_flow(world: &mut DaemonWorld) {
+    let requests = world.captured_codex_requests();
+    let methods: Vec<&str> = requests
+        .iter()
+        .filter_map(|request| request["method"].as_str())
+        .collect();
+    for method in ["initialize", "initialized", "thread/start", "turn/start"] {
+        assert_eq!(
+            methods.iter().filter(|actual| **actual == method).count(),
+            1,
+            "expected one {method} request, got {methods:?}"
+        );
+    }
+    let thread_start = methods
+        .iter()
+        .position(|method| *method == "thread/start")
+        .expect("thread/start request missing");
+    let turn_start = methods
+        .iter()
+        .position(|method| *method == "turn/start")
+        .expect("turn/start request missing");
+    assert!(
+        thread_start < turn_start,
+        "thread must start before the turn"
+    );
 }
