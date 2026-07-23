@@ -886,7 +886,6 @@ function parseHarnessEvent(
   const data = raw.data;
   const correlation = readRecord(raw.correlation);
   const turnKey = harnessTurnKey(raw);
-  const turnPayloadKey = turnKey ? `${turnKey}:${raw.type}` : undefined;
   const events: ConversationEvent[] = [];
 
   switch (raw.type) {
@@ -910,15 +909,6 @@ function parseHarnessEvent(
     case "text": {
       const text = readString(data.text);
       if (text) {
-        if (
-          raw.semantics === "snapshot" &&
-          turnPayloadKey &&
-          state.deltaPayloads.has(turnPayloadKey)
-        ) {
-          break;
-        }
-        if (raw.semantics === "delta" && turnPayloadKey)
-          state.deltaPayloads.add(turnPayloadKey);
         if (turnKey) state.turnsWithText.add(turnKey);
         events.push({ kind: "assistant_message", timestamp, text });
       }
@@ -927,15 +917,6 @@ function parseHarnessEvent(
     case "reasoning": {
       const text = readString(data.text);
       if (text) {
-        if (
-          raw.semantics === "snapshot" &&
-          turnPayloadKey &&
-          state.deltaPayloads.has(turnPayloadKey)
-        ) {
-          break;
-        }
-        if (raw.semantics === "delta" && turnPayloadKey)
-          state.deltaPayloads.add(turnPayloadKey);
         events.push({ kind: "thinking", timestamp, text });
       }
       break;
@@ -2245,13 +2226,63 @@ interface ClaudeParseState {
 }
 
 interface HarnessParseState {
-  /** Streaming deltas supersede the equivalent completed snapshot. */
-  deltaPayloads: Set<string>;
+  /** Current text/reasoning delta row, keyed by turn and payload type. */
+  activeDeltaByPayloadKey: Map<string, number>;
   /** Avoid duplicating a terminal result after provider text was already shown. */
   turnsWithText: Set<string>;
   /** Snapshot plans replace their prior version instead of growing the trace. */
   todoListByItemId: Map<string, number>;
   fileEditByToolId: Map<string, number>;
+}
+
+function harnessDeltaPayloadKey(raw: HarnessRawEvent): string | undefined {
+  if (raw.type !== "text" && raw.type !== "reasoning") return undefined;
+  const turnKey = harnessTurnKey(raw);
+  return turnKey ? `${turnKey}:${raw.type}` : undefined;
+}
+
+function mergeHarnessDeltaEvent(
+  events: ConversationEvent[],
+  event: ConversationEvent,
+  raw: HarnessRawEvent,
+  state: HarnessParseState
+): boolean {
+  const payloadKey = harnessDeltaPayloadKey(raw);
+  const isDelta = raw.semantics === "delta";
+  const isSnapshot = raw.semantics === "snapshot";
+
+  if (
+    !payloadKey ||
+    (event.kind !== "assistant_message" && event.kind !== "thinking") ||
+    (!isDelta && !isSnapshot)
+  ) {
+    return false;
+  }
+
+  const activeIndex = state.activeDeltaByPayloadKey.get(payloadKey);
+  if (isDelta && activeIndex !== undefined) {
+    const previous = events[activeIndex];
+    if (previous?.kind === event.kind) {
+      events[activeIndex] = {
+        ...previous,
+        text: previous.text + event.text,
+        timestamp: event.timestamp,
+      };
+      return true;
+    }
+  }
+
+  if (isSnapshot && activeIndex !== undefined) {
+    const previous = events[activeIndex];
+    if (previous?.kind === event.kind) {
+      events[activeIndex] = event;
+      state.activeDeltaByPayloadKey.delete(payloadKey);
+      return true;
+    }
+  }
+
+  if (isDelta) state.activeDeltaByPayloadKey.set(payloadKey, events.length);
+  return false;
 }
 
 function claudeSnapshotKey(
@@ -2308,14 +2339,16 @@ export function parseSessionLogs(
       let state = harnessStateByExecution.get(execId);
       if (!state) {
         state = {
-          deltaPayloads: new Set(),
+          activeDeltaByPayloadKey: new Map(),
           turnsWithText: new Set(),
           todoListByItemId: new Map(),
           fileEditByToolId: new Map(),
         };
         harnessStateByExecution.set(execId, state);
       }
-      for (const ev of parseHarnessEvent(raw, ts, state)) {
+      const parsedHarnessEvents = parseHarnessEvent(raw, ts, state);
+      for (const ev of parsedHarnessEvents) {
+        if (mergeHarnessDeltaEvent(events, ev, raw, state)) continue;
         if (ev.kind === "todo_list") {
           const priorIndex = state.todoListByItemId.get(ev.itemId);
           if (priorIndex !== undefined) {
@@ -2337,6 +2370,17 @@ export function parseSessionLogs(
           state.fileEditByToolId.set(ev.toolId, events.length);
         }
         events.push(ev);
+      }
+      const turnKey = harnessTurnKey(raw);
+      if (
+        turnKey &&
+        (raw.type === "turn_finished" || raw.type === "run_finished")
+      ) {
+        for (const payloadKey of state.activeDeltaByPayloadKey.keys()) {
+          if (payloadKey.startsWith(`${turnKey}:`)) {
+            state.activeDeltaByPayloadKey.delete(payloadKey);
+          }
+        }
       }
     } else if (isCodexRawMessage(raw)) {
       const execId = log.step_execution_id ?? "";
