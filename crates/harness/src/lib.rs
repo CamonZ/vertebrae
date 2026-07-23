@@ -32,6 +32,13 @@ use vertebrae_harness_core::{
 pub struct HarnessFactoryConfig {
     pub anthropic_executable: Option<PathBuf>,
     pub openai_executable: Option<PathBuf>,
+    /// Startup discovery diagnostics. When present with a missing executable,
+    /// the factory returns that cached error without probing PATH again.
+    pub anthropic_executable_diagnostic: Option<String>,
+    pub openai_executable_diagnostic: Option<String>,
+    /// Whether executable resolution was completed by a startup snapshot.
+    /// When false, preserve the factory's legacy eager validation behavior.
+    pub provider_resolution_cached: bool,
     pub search_path: Option<OsString>,
     pub environment: BTreeMap<String, String>,
     pub installed_skills_roots: Vec<PathBuf>,
@@ -41,6 +48,9 @@ pub struct HarnessFactoryConfig {
     pub claude_mcp_config: Option<Value>,
     pub claude_root_locator_resolver: Option<Arc<dyn ClaudeRootLocatorResolver>>,
     pub claude_plugin_roots: Vec<PathBuf>,
+    /// Cached daemon compatibility root to merge into AgentConfig exactly
+    /// once, preserving the daemon's pre-snapshot argv behavior.
+    pub claude_managed_plugin_root: Option<PathBuf>,
     pub default_permission_mode: Option<PermissionMode>,
 }
 
@@ -134,7 +144,19 @@ impl HarnessRuntimeFactory {
             ..ClaudeProviderConfig::default()
         };
 
-        let binary = provider.resolve_executable()?;
+        if !self.config.provider_resolution_cached && provider.executable.is_some() {
+            provider.resolve_executable()?;
+        } else if provider.executable.is_none() {
+            if let Some(diagnostic) = &self.config.anthropic_executable_diagnostic {
+                return Err(HarnessError::Unavailable(diagnostic.clone()));
+            }
+            if self.config.provider_resolution_cached {
+                return Err(HarnessError::Unavailable(
+                    "Anthropic provider executable was not resolved at startup".into(),
+                ));
+            }
+            provider.resolve_executable()?;
+        }
         if let Some(working_directory) = request_config.working_directory.as_deref() {
             if !working_directory.is_dir() {
                 return Err(HarnessError::InvalidRequest(format!(
@@ -142,22 +164,12 @@ impl HarnessRuntimeFactory {
                     working_directory.display()
                 )));
             }
-            if provider.plugin_roots.is_empty()
-                && let Some(plugin_root) = vertebrae_installer::resolve_claude_plugin_dir(
-                    &binary,
-                    working_directory,
-                    provider
-                        .search_path
-                        .as_deref()
-                        .and_then(|path| path.to_str())
-                        .unwrap_or_default(),
-                )
-                .plugin_root
-            {
-                // Managed plugin roots use the same AgentConfig path as
-                // caller-provided Claude flags. The adapter then owns
-                // their provider-specific command-line representation.
-                merge_plugin_root(&mut agent_config, &plugin_root);
+            // The daemon's cached managed root follows the same AgentConfig
+            // path as the former lazy resolver. Provider-owned plugin roots
+            // remain provider-specific flags and are not copied into the
+            // persisted AgentConfig list.
+            if let Some(plugin_root) = &self.config.claude_managed_plugin_root {
+                merge_plugin_root(&mut agent_config, plugin_root);
             }
         }
         agent_config.json_schema = None;
@@ -193,7 +205,19 @@ impl HarnessRuntimeFactory {
             installed_skills_roots: self.config.installed_skills_roots.clone(),
             ..CodexProviderConfig::default()
         };
-        provider.resolve_executable()?;
+        if !self.config.provider_resolution_cached && provider.executable.is_some() {
+            provider.resolve_executable()?;
+        } else if provider.executable.is_none() {
+            if let Some(diagnostic) = &self.config.openai_executable_diagnostic {
+                return Err(HarnessError::Unavailable(diagnostic.clone()));
+            }
+            if self.config.provider_resolution_cached {
+                return Err(HarnessError::Unavailable(
+                    "OpenAI provider executable was not resolved at startup".into(),
+                ));
+            }
+            provider.resolve_executable()?;
+        }
         Ok(CodexRuntime::new(provider))
     }
 }
@@ -380,5 +404,25 @@ mod tests {
         });
 
         assert!(matches!(result, Err(HarnessError::Unavailable(_))));
+    }
+
+    #[test]
+    fn cached_provider_resolution_does_not_reprobe_executable_path() {
+        let result = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            anthropic_executable: Some(PathBuf::from("/definitely/missing/claude")),
+            provider_resolution_cached: true,
+            ..HarnessFactoryConfig::default()
+        })
+        .create(HarnessRuntimeOptions {
+            agent_config: AgentConfig::new()
+                .with_provider(Provider::Anthropic)
+                .with_model("sonnet"),
+            request_config: RequestConfig::default(),
+        });
+
+        assert!(
+            result.is_ok(),
+            "cached construction must not re-probe the path"
+        );
     }
 }

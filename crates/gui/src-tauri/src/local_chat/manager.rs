@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::RwLock;
 
-use crate::local_chat::harnesses::claude::ClaudeLocalChatHarness;
+use crate::local_chat::harnesses::claude::{ClaudeLocalChatHarness, ClaudeStartupCapabilities};
 use crate::local_chat::harnesses::codex::CodexLocalChatHarness;
 use crate::local_chat::permissions::{
     LocalPermissionDecision, PermissionBridge, PermissionBridgeError,
@@ -24,6 +24,20 @@ impl LocalChatSessionManager {
         Self::with_harnesses_and_permission_bridge(
             vec![
                 Arc::new(ClaudeLocalChatHarness::new()),
+                Arc::new(CodexLocalChatHarness::new()),
+            ],
+            PermissionBridge::new(),
+        )
+    }
+
+    pub(crate) fn with_claude_startup_capabilities(
+        startup_capabilities: ClaudeStartupCapabilities,
+    ) -> Self {
+        Self::with_harnesses_and_permission_bridge(
+            vec![
+                Arc::new(ClaudeLocalChatHarness::with_startup_capabilities(
+                    startup_capabilities,
+                )),
                 Arc::new(CodexLocalChatHarness::new()),
             ],
             PermissionBridge::new(),

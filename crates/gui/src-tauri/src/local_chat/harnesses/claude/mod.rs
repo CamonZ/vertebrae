@@ -3,13 +3,12 @@ use async_trait::async_trait;
 pub(crate) mod args;
 pub(crate) mod session;
 
-use crate::helpers::find_claude_binary;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
     LocalChatModelOption, LocalChatRuntime, LocalChatSessionError,
 };
 
-pub(crate) use session::ClaudeSessionRuntime;
+pub(crate) use session::{ClaudeSessionRuntime, ClaudeStartupCapabilities};
 
 use self::args::supported_claude_model_catalog;
 
@@ -28,16 +27,20 @@ impl ClaudeLocalChatHarness {
             runtime: ClaudeSessionRuntime::new(),
         }
     }
+
+    pub(crate) fn with_startup_capabilities(
+        startup_capabilities: ClaudeStartupCapabilities,
+    ) -> Self {
+        Self {
+            runtime: ClaudeSessionRuntime::with_startup_capabilities(startup_capabilities),
+        }
+    }
 }
 
 impl Default for ClaudeLocalChatHarness {
     fn default() -> Self {
         Self::new()
     }
-}
-
-pub(crate) fn claude_local_chat_harness_info() -> LocalChatHarnessInfo {
-    claude_local_chat_harness_info_from_resolution(find_claude_binary().map(|_| ()))
 }
 
 fn claude_local_chat_harness_info_from_resolution(
@@ -76,7 +79,7 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
     }
 
     async fn info(&self) -> LocalChatHarnessInfo {
-        claude_local_chat_harness_info()
+        claude_local_chat_harness_info_from_resolution(self.runtime.startup_binary_resolution())
     }
 
     async fn create_session(

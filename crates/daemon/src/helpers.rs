@@ -14,6 +14,13 @@ pub struct ProviderBinaries {
     pub openai: Option<PathBuf>,
 }
 
+/// Best-effort diagnostics captured alongside [`ProviderBinaries`].
+#[derive(Debug, Clone, Default)]
+pub struct ProviderDiscoveryDiagnostics {
+    pub anthropic: Option<String>,
+    pub openai: Option<String>,
+}
+
 impl ProviderBinaries {
     /// Return the resolved binary for `provider`, or `None` if it was not
     /// found at daemon startup.
@@ -32,29 +39,43 @@ impl ProviderBinaries {
 /// is logged at WARN with the underlying resolution error so operators get
 /// a clear hint.
 pub fn resolve_all_provider_binaries(shell_path: &str) -> ProviderBinaries {
-    let anthropic = match find_claude_binary(shell_path) {
-        Ok(path) => Some(path),
+    resolve_all_provider_binaries_with_diagnostics(shell_path).0
+}
+
+/// Resolve every built-in provider and retain the failure diagnostics for the
+/// daemon startup capability snapshot.
+pub fn resolve_all_provider_binaries_with_diagnostics(
+    shell_path: &str,
+) -> (ProviderBinaries, ProviderDiscoveryDiagnostics) {
+    let (anthropic, anthropic_diagnostic) = match find_claude_binary(shell_path) {
+        Ok(path) => (Some(path), None),
         Err(err) => {
             tracing::warn!(
                 provider = %Provider::Anthropic,
                 error = %err,
                 "Anthropic provider binary not resolved at startup; steps requesting it will fail"
             );
-            None
+            (None, Some(err))
         }
     };
-    let openai = match find_codex_binary(shell_path) {
-        Ok(path) => Some(path),
+    let (openai, openai_diagnostic) = match find_codex_binary(shell_path) {
+        Ok(path) => (Some(path), None),
         Err(err) => {
             tracing::warn!(
                 provider = %Provider::Openai,
                 error = %err,
                 "OpenAI provider binary not resolved at startup; steps requesting it will fail"
             );
-            None
+            (None, Some(err))
         }
     };
-    ProviderBinaries { anthropic, openai }
+    (
+        ProviderBinaries { anthropic, openai },
+        ProviderDiscoveryDiagnostics {
+            anthropic: anthropic_diagnostic,
+            openai: openai_diagnostic,
+        },
+    )
 }
 
 /// Resolve the user's login shell PATH.

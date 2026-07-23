@@ -18,7 +18,7 @@ const MINIMUM_CLAUDE_VERSION: Version = Version::new(2, 0, 25);
 
 /// Result of checking whether Vertebrae's managed skill bundle can be exposed
 /// to a particular Claude Code process.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudePluginDirResolution {
     /// Absolute app-data root to pass as `--plugin-dir`, when compatible.
     pub plugin_root: Option<PathBuf>,
@@ -41,15 +41,40 @@ pub fn resolve_claude_plugin_dir(
     let installed_skills_is_dir = installed_skills
         .as_ref()
         .is_ok_and(|installed_skills| installed_skills.is_dir());
-    let version_output = query_claude_version(claude_binary, augmented_path);
 
-    resolve_claude_plugin_dir_from_checks(
+    resolve_claude_plugin_dir_with_probe(
         data_root,
         installed_skills,
         installed_skills_is_dir,
-        version_output,
         working_dir,
+        || query_claude_version(claude_binary, augmented_path),
     )
+}
+
+/// Resolve the path contract before invoking the version probe.
+///
+/// Keeping the probe behind a closure is intentional: invalid installer paths
+/// can produce a useful diagnostic without spawning an unrelated Claude
+/// process. The closure is invoked exactly once only after all path checks
+/// succeed.
+fn resolve_claude_plugin_dir_with_probe(
+    data_root: Result<PathBuf, String>,
+    installed_skills: Result<PathBuf, String>,
+    installed_skills_is_dir: bool,
+    working_dir: &Path,
+    probe: impl FnOnce() -> Result<String, String>,
+) -> ClaudePluginDirResolution {
+    let (data_root, installed_skills) = match validate_plugin_paths(
+        data_root,
+        installed_skills,
+        installed_skills_is_dir,
+        working_dir,
+    ) {
+        Ok(paths) => paths,
+        Err(resolution) => return resolution,
+    };
+
+    resolve_claude_plugin_dir_for_validated_paths(data_root, installed_skills, probe(), working_dir)
 }
 
 fn query_claude_version(claude_binary: &Path, augmented_path: &str) -> Result<String, String> {
@@ -130,6 +155,7 @@ fn query_claude_version_with_timeout(
         .map_err(|error| format!("Claude Code version output was not UTF-8: {error}"))
 }
 
+#[cfg(test)]
 fn resolve_claude_plugin_dir_from_checks(
     data_root: Result<PathBuf, String>,
     installed_skills: Result<PathBuf, String>,
@@ -137,41 +163,56 @@ fn resolve_claude_plugin_dir_from_checks(
     version_output: Result<String, String>,
     working_dir: &Path,
 ) -> ClaudePluginDirResolution {
+    resolve_claude_plugin_dir_with_probe(
+        data_root,
+        installed_skills,
+        installed_skills_is_dir,
+        working_dir,
+        || version_output,
+    )
+}
+
+fn validate_plugin_paths(
+    data_root: Result<PathBuf, String>,
+    installed_skills: Result<PathBuf, String>,
+    installed_skills_is_dir: bool,
+    working_dir: &Path,
+) -> Result<(PathBuf, PathBuf), ClaudePluginDirResolution> {
     let data_root = match data_root {
         Ok(path) if path.is_absolute() => path,
         Ok(path) => {
-            return skipped_resolution(
+            return Err(skipped_resolution(
                 format!(
                     "the resolved Vertebrae app-data root is not absolute: {}",
                     path.display()
                 ),
                 None,
                 working_dir,
-            );
+            ));
         }
         Err(error) => {
-            return skipped_resolution(
+            return Err(skipped_resolution(
                 format!("the Vertebrae app-data root could not be resolved: {error}"),
                 None,
                 working_dir,
-            );
+            ));
         }
     };
 
     let installed_skills = match installed_skills {
         Ok(path) => path,
         Err(error) => {
-            return skipped_resolution(
+            return Err(skipped_resolution(
                 format!("the installed-skills directory could not be resolved: {error}"),
                 None,
                 working_dir,
-            );
+            ));
         }
     };
 
     let expected_skills = data_root.join("skills");
     if installed_skills != expected_skills {
-        return skipped_resolution(
+        return Err(skipped_resolution(
             format!(
                 "the installed-skills directory ({}) is inconsistent with the app-data root ({})",
                 installed_skills.display(),
@@ -179,20 +220,29 @@ fn resolve_claude_plugin_dir_from_checks(
             ),
             None,
             working_dir,
-        );
+        ));
     }
 
     if !installed_skills_is_dir {
-        return skipped_resolution(
+        return Err(skipped_resolution(
             format!(
                 "the installed-skills path is missing or is not a directory: {}",
                 installed_skills.display()
             ),
             Some(&installed_skills),
             working_dir,
-        );
+        ));
     }
 
+    Ok((data_root, installed_skills))
+}
+
+fn resolve_claude_plugin_dir_for_validated_paths(
+    data_root: PathBuf,
+    installed_skills: PathBuf,
+    version_output: Result<String, String>,
+    working_dir: &Path,
+) -> ClaudePluginDirResolution {
     let version_output = match version_output {
         Ok(output) => output,
         Err(error) => {
@@ -403,6 +453,30 @@ mod tests {
             let warning = resolution.warning.expect("skip should warn");
             assert!(warning.contains("/absolute/project/.claude/skills/"));
         }
+    }
+
+    #[test]
+    fn invalid_paths_short_circuit_before_version_probe() {
+        let (_, _, working_dir) = paths();
+        let mut probe_called = false;
+
+        let resolution = resolve_claude_plugin_dir_with_probe(
+            Ok(PathBuf::from("relative/data")),
+            Ok(PathBuf::from("relative/data/skills")),
+            true,
+            &working_dir,
+            || {
+                probe_called = true;
+                Ok("2.0.25 (Claude Code)".to_string())
+            },
+        );
+
+        assert!(resolution.plugin_root.is_none());
+        assert!(resolution.warning.is_some());
+        assert!(
+            !probe_called,
+            "path failures must not spawn a version probe"
+        );
     }
 
     #[cfg(unix)]

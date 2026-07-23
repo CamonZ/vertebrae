@@ -240,6 +240,12 @@ create `.claude`, `.agents`, or `.codex` directories or change the active
 project to expose it. On Linux this is application data under `.local/share`,
 not configuration under `.config`.
 
+The Tauri setup hook resolves Claude's executable, PATH, and installed-skill
+compatibility once and shares that immutable result with local-chat sessions.
+Installing or updating Claude Code or managed skills while the GUI remains
+open takes effect after restarting the application; the cached warning and
+fallback guidance are still delivered to each affected session.
+
 ### Uninstalling
 
 There is no GUI uninstall flow. Undo an install from the terminal:

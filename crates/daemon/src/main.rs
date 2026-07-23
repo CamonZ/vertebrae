@@ -10,12 +10,14 @@
 //! for background operation.
 
 use ractor::Actor;
-use std::process;
+use std::{path::PathBuf, process, sync::Arc};
 use tracing_subscriber::EnvFilter;
 
-use vertebrae_daemon::helpers::{resolve_all_provider_binaries, resolve_shell_path};
+use vertebrae_daemon::helpers::{
+    resolve_all_provider_binaries_with_diagnostics, resolve_shell_path,
+};
 use vertebrae_daemon::{
-    DaemonConfig, DaemonMessage, DaemonSupervisor, ProjectEntry, ResolvedConfig,
+    DaemonCapabilities, DaemonConfig, DaemonMessage, DaemonSupervisor, ProjectEntry, ResolvedConfig,
 };
 
 /// Initialize structured logging using tracing-subscriber.
@@ -60,18 +62,31 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Best-effort: resolve binaries for every known provider so each step
     // can pick the right one. A missing binary only fails the steps that
     // request that provider; the daemon stays up for the others.
-    let provider_binaries = resolve_all_provider_binaries(&shell_path);
+    let (provider_binaries, provider_diagnostics) =
+        resolve_all_provider_binaries_with_diagnostics(&shell_path);
     tracing::info!(
         anthropic_binary = ?provider_binaries.anthropic,
         openai_binary = ?provider_binaries.openai,
         "Resolved provider CLI binaries"
     );
 
+    let compatibility_working_dir = projects
+        .first()
+        .map(|project| PathBuf::from(&project.path))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let capabilities = Arc::new(DaemonCapabilities::new(
+        shell_path,
+        provider_binaries,
+        provider_diagnostics,
+        &compatibility_working_dir,
+    ));
+    capabilities.log_startup_diagnostics();
+
     let daemon_config = DaemonConfig {
         base_url: sacrum_url,
         api_token,
-        provider_binaries,
-        shell_path,
+        capabilities,
     };
 
     let (actor_ref, actor_handle) = Actor::spawn(

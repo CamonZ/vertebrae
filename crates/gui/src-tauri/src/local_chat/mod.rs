@@ -16,6 +16,7 @@ pub(crate) use harness::{
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
     LocalChatReasoningEffortOption, LocalChatRuntime, LocalChatSessionError,
 };
+pub(crate) use harnesses::claude::ClaudeStartupCapabilities;
 pub(crate) use manager::LocalChatSessionManager;
 pub use title_inference::{
     infer_session_title, InferLocalChatSessionTitleInput, InferLocalChatSessionTitleOutput,

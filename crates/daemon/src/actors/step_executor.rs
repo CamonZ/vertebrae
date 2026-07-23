@@ -27,7 +27,7 @@ use vertebrae_harness_core::{
 };
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
-use crate::helpers::ProviderBinaries;
+use crate::capabilities::SharedDaemonCapabilities;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
 use crate::session_log_event_sink::SessionLogEventSink;
 use crate::settings_synthesis::SyntheticSettings;
@@ -99,13 +99,8 @@ pub struct StepExecutorConfig {
     pub project_root: PathBuf,
     /// Optional worktree path override. When set, used as current_dir instead of project_root.
     pub worktree: Option<PathBuf>,
-    /// Provider CLI binaries resolved at daemon startup. Each entry is
-    /// `Some` when the binary was found; `None` when it was not. The shared
-    /// runtime factory receives these deployment hints and reports an
-    /// unavailable provider before attempting to start a process.
-    pub provider_binaries: ProviderBinaries,
-    /// The user's full login shell PATH for the child process.
-    pub shell_path: String,
+    /// Immutable daemon-startup discovery consumed without re-probing.
+    pub capabilities: SharedDaemonCapabilities,
     pub execution_service: Arc<dyn ExecutionService>,
 }
 
@@ -124,7 +119,7 @@ impl std::fmt::Debug for StepExecutorConfig {
             .field("step_config", &self.step_config)
             .field("project_root", &self.project_root)
             .field("worktree", &self.worktree)
-            .field("provider_binaries", &self.provider_binaries)
+            .field("capabilities", &self.capabilities)
             .field("execution_service", &"<ExecutionService>")
             .finish()
     }
@@ -563,13 +558,34 @@ impl StepExecutor {
         }
 
         let factory_config = HarnessFactoryConfig {
-            anthropic_executable: state.config.provider_binaries.anthropic.clone(),
-            openai_executable: state.config.provider_binaries.openai.clone(),
-            search_path: Some(state.config.shell_path.clone().into()),
-            installed_skills_roots: vertebrae_installer::installed_skills_dir()
-                .ok()
-                .into_iter()
-                .collect(),
+            anthropic_executable: state
+                .config
+                .capabilities
+                .provider_binaries
+                .anthropic
+                .clone(),
+            openai_executable: state.config.capabilities.provider_binaries.openai.clone(),
+            anthropic_executable_diagnostic: state
+                .config
+                .capabilities
+                .harnesses
+                .get(&Provider::Anthropic)
+                .and_then(|capability| capability.discovery_diagnostic.clone()),
+            openai_executable_diagnostic: state
+                .config
+                .capabilities
+                .harnesses
+                .get(&Provider::Openai)
+                .and_then(|capability| capability.discovery_diagnostic.clone()),
+            provider_resolution_cached: true,
+            search_path: Some(state.config.capabilities.shell_path.clone().into()),
+            installed_skills_roots: state.config.capabilities.installed_skills_roots.clone(),
+            claude_managed_plugin_root: state
+                .config
+                .capabilities
+                .claude_plugin_dir
+                .plugin_root
+                .clone(),
             claude_settings_path: settings_guard
                 .as_ref()
                 .map(SyntheticSettings::settings_path),
@@ -591,8 +607,11 @@ impl StepExecutor {
             model: agent_config.model.clone(),
             reasoning_effort: agent_config.reasoning_effort.clone(),
             output_schema: agent_config.json_schema.clone(),
-            environment: std::iter::once(("PATH".into(), state.config.shell_path.clone()))
-                .collect(),
+            environment: std::iter::once((
+                "PATH".into(),
+                state.config.capabilities.shell_path.clone(),
+            ))
+            .collect(),
         };
         let instance =
             match HarnessRuntimeFactory::new(factory_config).create(HarnessRuntimeOptions {
