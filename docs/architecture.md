@@ -186,6 +186,14 @@ DaemonSupervisor
 - Handles step types: `execute` (run prompt), `evaluate` (assess output for routing), `route` (branch logic)
 - Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow
 
+At daemon boot, shell PATH, provider executable discovery, managed skill roots,
+and Claude installed-skill compatibility are captured in one immutable,
+process-local capability snapshot shared by all project and step actors. The
+snapshot is observational: a missing provider remains present with its
+diagnostic, and the requested step retains the existing provider error path.
+Installing or updating Claude Code, providers, or skills while the daemon is
+running takes effect after restart.
+
 ## GUI (`crates/gui`)
 
 Tauri 2 + React 19 desktop application.

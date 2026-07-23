@@ -1,4 +1,5 @@
 pub mod actors;
+pub mod capabilities;
 pub mod config;
 pub mod helpers;
 pub mod output_validator;
@@ -15,6 +16,7 @@ pub use actors::project_supervisor::{
 pub use actors::{DaemonConfig, DaemonMessage, DaemonSupervisor};
 pub use actors::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 pub use actors::{StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult};
+pub use capabilities::{DaemonCapabilities, HarnessCapability, SharedDaemonCapabilities};
 pub use config::{ConfigError, ProjectEntry, ResolvedConfig};
 pub use provider::{ProviderResolutionError, resolve_provider, resolve_provider_from_agent_config};
 pub use session_log_event_sink::SessionLogEventSink;

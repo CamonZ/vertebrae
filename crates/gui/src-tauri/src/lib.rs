@@ -12,6 +12,7 @@ pub mod websocket_client;
 #[cfg(test)]
 pub mod mock;
 
+use std::path::PathBuf;
 use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
@@ -28,10 +29,10 @@ use events::{
     TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use local_chat::{
-    LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionManager, LocalChatSessionUsageEvent,
-    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
-    LocalChatToolResultEvent,
+    ClaudeStartupCapabilities, LocalChatFileChangeEvent, LocalChatSessionEndEvent,
+    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionManager,
+    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
+    LocalChatToolCallEvent, LocalChatToolResultEvent,
 };
 use project_config::ProjectConfig;
 
@@ -205,6 +206,37 @@ pub fn run() {
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
             let current_slug = project_config.get_current_project();
+            let compatibility_working_dir = current_slug
+                .as_deref()
+                .and_then(|slug| {
+                    project_config
+                        .get_projects()
+                        .into_iter()
+                        .find(|project| project.slug == slug)
+                })
+                .map(|project| PathBuf::from(project.path))
+                .or_else(|| std::env::current_dir().ok())
+                .unwrap_or_else(|| PathBuf::from("."));
+            let claude_startup_capabilities =
+                ClaudeStartupCapabilities::resolve(&compatibility_working_dir);
+            match (
+                &claude_startup_capabilities.plugin_resolution.plugin_root,
+                &claude_startup_capabilities.plugin_resolution.warning,
+            ) {
+                (Some(plugin_root), _) => log::info!(
+                    "[STARTUP] Cached Claude installed-skill compatibility: {}",
+                    plugin_root.display()
+                ),
+                (None, Some(warning)) => {
+                    log::warn!("[STARTUP] Cached Claude installed-skill compatibility: {warning}")
+                }
+                (None, None) => {
+                    log::info!("[STARTUP] Cached Claude installed-skill compatibility: unavailable")
+                }
+            }
+            log::info!(
+                "[STARTUP] Claude provider, compatibility, and skill discovery are cached until restart"
+            );
 
             // Try to load Sacrum config for the current project from global config
             let sacrum_config = current_slug.as_deref().and_then(|slug| {
@@ -242,7 +274,10 @@ pub fn run() {
             });
 
             // Initialize local chat session manager (owns Claude + Codex harnesses)
-            let local_chat_manager = LocalChatSessionManager::new();
+            let local_chat_manager =
+                LocalChatSessionManager::with_claude_startup_capabilities(
+                    claude_startup_capabilities,
+                );
             app.manage(local_chat_manager);
             log::info!("[STARTUP] Local chat session manager initialized");
 

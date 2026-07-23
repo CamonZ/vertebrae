@@ -41,6 +41,61 @@ type RuntimeFactory = dyn Fn(
 
 const DEFAULT_CLAUDE_CONTEXT_WINDOW: u32 = 200_000;
 
+/// GUI startup discovery shared by every Claude local-chat session.
+#[derive(Debug, Clone)]
+pub(crate) struct ClaudeStartupCapabilities {
+    pub(crate) binary: Option<PathBuf>,
+    pub(crate) binary_diagnostic: Option<String>,
+    pub(crate) augmented_path: String,
+    pub(crate) plugin_resolution: ClaudePluginDirResolution,
+}
+
+impl ClaudeStartupCapabilities {
+    /// Resolve Claude and its managed-skill compatibility once from the Tauri
+    /// setup hook. A missing executable is retained as a diagnostic without
+    /// preventing the GUI from launching.
+    pub(crate) fn resolve(working_dir: &Path) -> Self {
+        let augmented_path = build_augmented_path();
+        let (binary, binary_diagnostic) = match find_claude_binary() {
+            Ok(binary) => (Some(binary), None),
+            Err(error) => (None, Some(error)),
+        };
+        let plugin_resolution = binary.as_deref().map_or(
+            ClaudePluginDirResolution {
+                plugin_root: None,
+                warning: None,
+            },
+            |binary| resolve_claude_plugin_dir(binary, working_dir, &augmented_path),
+        );
+
+        Self {
+            binary,
+            binary_diagnostic,
+            augmented_path,
+            plugin_resolution,
+        }
+    }
+
+    /// Build the compatibility-free default used by unit-test adapters. The
+    /// production Tauri path always uses [`Self::resolve`] during setup.
+    fn without_compatibility_probe() -> Self {
+        let augmented_path = build_augmented_path();
+        let (binary, binary_diagnostic) = match find_claude_binary() {
+            Ok(binary) => (Some(binary), None),
+            Err(error) => (None, Some(error)),
+        };
+        Self {
+            binary,
+            binary_diagnostic,
+            augmented_path,
+            plugin_resolution: ClaudePluginDirResolution {
+                plugin_root: None,
+                warning: None,
+            },
+        }
+    }
+}
+
 struct ActiveSession {
     generation: u64,
     handle: Arc<dyn SessionHandle>,
@@ -457,6 +512,7 @@ impl EventSink for ClaudeGuiEventSink {
 pub(crate) struct ClaudeSessionRuntime {
     sessions: Arc<RwLock<SessionRegistry>>,
     runtime_factory: Arc<RuntimeFactory>,
+    pub(crate) startup_capabilities: Arc<ClaudeStartupCapabilities>,
     #[cfg(test)]
     registry_insert_hook: Option<RegistryInsertHook>,
 }
@@ -470,12 +526,49 @@ struct RegistryInsertHook {
 
 impl ClaudeSessionRuntime {
     pub(crate) fn new() -> Self {
-        Self::with_runtime_factory(|config, options| {
+        Self::with_startup_capabilities_and_factory(
+            ClaudeStartupCapabilities::without_compatibility_probe(),
+            |config, options| HarnessRuntimeFactory::new(config).create(options),
+        )
+    }
+
+    pub(crate) fn with_startup_capabilities(
+        startup_capabilities: ClaudeStartupCapabilities,
+    ) -> Self {
+        Self::with_startup_capabilities_and_factory(startup_capabilities, |config, options| {
             HarnessRuntimeFactory::new(config).create(options)
         })
     }
 
+    pub(crate) fn startup_binary_resolution(&self) -> Result<(), String> {
+        match (
+            &self.startup_capabilities.binary,
+            &self.startup_capabilities.binary_diagnostic,
+        ) {
+            (Some(_), _) => Ok(()),
+            (None, Some(error)) => Err(error.clone()),
+            (None, None) => Err("Claude Code CLI was not resolved at startup".into()),
+        }
+    }
+
+    #[cfg(test)]
     fn with_runtime_factory(
+        runtime_factory: impl Fn(
+                HarnessFactoryConfig,
+                HarnessRuntimeOptions,
+            ) -> Result<vertebrae_harness::HarnessRuntimeInstance, HarnessError>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self::with_startup_capabilities_and_factory(
+            ClaudeStartupCapabilities::without_compatibility_probe(),
+            runtime_factory,
+        )
+    }
+
+    fn with_startup_capabilities_and_factory(
+        startup_capabilities: ClaudeStartupCapabilities,
         runtime_factory: impl Fn(
                 HarnessFactoryConfig,
                 HarnessRuntimeOptions,
@@ -487,6 +580,7 @@ impl ClaudeSessionRuntime {
         Self {
             sessions: Arc::new(RwLock::new(SessionRegistry::default())),
             runtime_factory: Arc::new(runtime_factory),
+            startup_capabilities: Arc::new(startup_capabilities),
             #[cfg(test)]
             registry_insert_hook: None,
         }
@@ -513,7 +607,7 @@ impl ClaudeSessionRuntime {
         let backend_session_id = input.backend_session_id.clone();
         let reservation = self.reserve_session(&backend_session_id).await?;
 
-        let prepared = match PreparedSession::new(&input, &runtime) {
+        let prepared = match PreparedSession::new(&input, &runtime, &self.startup_capabilities) {
             Ok(prepared) => prepared,
             Err(error) => {
                 reservation.release().await;
@@ -816,6 +910,7 @@ impl PreparedSession {
     fn new(
         input: &HarnessCreateSessionInput,
         runtime: &LocalChatRuntime,
+        startup_capabilities: &ClaudeStartupCapabilities,
     ) -> Result<Self, LocalChatSessionError> {
         let app_handle = runtime.app_handle().ok_or_else(|| {
             LocalChatSessionError::SpawnFailed(
@@ -836,10 +931,16 @@ impl PreparedSession {
             )));
         }
 
-        let claude_binary = find_claude_binary().map_err(LocalChatSessionError::SpawnFailed)?;
-        let augmented_path = build_augmented_path();
-        let plugin_resolution =
-            resolve_claude_plugin_dir(&claude_binary, &working_dir, &augmented_path);
+        let claude_binary = startup_capabilities.binary.clone().ok_or_else(|| {
+            LocalChatSessionError::SpawnFailed(
+                startup_capabilities
+                    .binary_diagnostic
+                    .clone()
+                    .unwrap_or_else(|| "Claude Code CLI was not resolved at startup".into()),
+            )
+        })?;
+        let augmented_path = startup_capabilities.augmented_path.clone();
+        let plugin_resolution = startup_capabilities.plugin_resolution.clone();
         let gate = find_vtb_gate_binary().map_err(LocalChatSessionError::StartFailed)?;
         #[cfg(unix)]
         let permission_socket = runtime
@@ -899,6 +1000,7 @@ fn build_factory_config(
     }
     HarnessFactoryConfig {
         anthropic_executable: Some(claude_binary),
+        provider_resolution_cached: true,
         search_path: Some(augmented_path.into()),
         environment,
         claude_plugin_roots: plugin_resolution.plugin_root.clone().into_iter().collect(),
