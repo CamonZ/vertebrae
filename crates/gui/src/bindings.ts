@@ -26,28 +26,6 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 }
 },
 /**
- * List all embedded skills available for GUI project initialization.
- */
-async listEmbeddedSkills() : Promise<Result<string[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("list_embedded_skills") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Preview the backend-derived slug for a project name.
- */
-async previewProjectSlug(name: string) : Promise<Result<string, CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("preview_project_slug", { name }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Read the shared Sacrum settings state without exposing the API token.
  */
 async sacrumConfigStatus() : Promise<Result<SacrumConfigStatus, CommandError>> {
@@ -940,7 +918,6 @@ localChatTextEvent: LocalChatTextEvent,
 localChatToolCallEvent: LocalChatToolCallEvent,
 localChatToolResultEvent: LocalChatToolResultEvent,
 permissionRequestEvent: PermissionRequestEvent,
-projectInitProgressEvent: ProjectInitProgressEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 sessionLogUpdatedEvent: SessionLogUpdatedEvent,
@@ -964,7 +941,6 @@ localChatTextEvent: "local-chat-text-event",
 localChatToolCallEvent: "local-chat-tool-call-event",
 localChatToolResultEvent: "local-chat-tool-result-event",
 permissionRequestEvent: "permission-request-event",
-projectInitProgressEvent: "project-init-progress-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 sessionLogUpdatedEvent: "session-log-updated-event",
@@ -1145,16 +1121,7 @@ path: string;
 /**
  * Whether this call created the project on Sacrum.
  */
-project_created: boolean; 
-/**
- * Number of embedded skill files linked into project skill roots.
- */
-skills_copied: number; 
-/**
- * Project skill roots where embedded skills were linked, or staging info
- * when no supported project skill root exists.
- */
-skills_target: string }
+project_created: boolean }
 /**
  * Aggregate snapshot of installation state returned from both
  * `installation_status()` and `install_components()`.
@@ -1235,11 +1202,6 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
-/**
- * Progress emitted while the GUI initializes a local project.
- */
-export type ProjectInitProgressEvent = { project_slug: string; kind: ProjectInitProgressKind; files_copied: number; relative_path: string | null; target_path: string | null }
-export type ProjectInitProgressKind = "SkillFileInstalled" | "Completed"
 export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }

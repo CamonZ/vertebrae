@@ -1,30 +1,21 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   commands,
-  events,
   InitializeProjectResult,
-  ProjectInitProgressEvent,
   SavedProject,
   SacrumConfigStatus,
 } from "../bindings";
 import { open } from "@tauri-apps/plugin-dialog";
 import { resetProjectScopedStores } from "../stores";
 import { FirstRunShell, type FirstRunPhase } from "../components";
-import { useSkillFileStates } from "../hooks/useSkillFileStates";
 
 const SETUP_PHASES: FirstRunPhase[] = [
   { kind: "Phase 01", name: "Project" },
-  { kind: "Phase 02", name: "Skills & Docs" },
-  { kind: "Phase 03", name: "Ready" },
+  { kind: "Phase 02", name: "Ready" },
 ];
 
-type SetupView = "saved" | "project" | "skills" | "ignition";
-
-interface ProjectDraft {
-  path: string;
-  name: string;
-}
+type SetupView = "saved" | "project" | "ignition";
 
 const secondaryButtonClass =
   "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-sm font-medium text-[var(--fg)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
@@ -57,17 +48,7 @@ export function ProjectSetupPage() {
   const [sacrumToken, setSacrumToken] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [sacrumStatusRetryKey, setSacrumStatusRetryKey] = useState(0);
-  const [projectDraft, setProjectDraft] = useState<ProjectDraft | null>(null);
-  const [embeddedSkills, setEmbeddedSkills] = useState<string[]>([]);
-  const [isLoadingSkills, setIsLoadingSkills] = useState(true);
   const [isInitializing, setIsInitializing] = useState(false);
-  const {
-    fileStates,
-    queueFiles,
-    markFileLinking,
-    markAllLinked,
-    resetFileStates,
-  } = useSkillFileStates();
   const [initializeResult, setInitializeResult] =
     useState<InitializeProjectResult | null>(null);
 
@@ -95,35 +76,6 @@ export function ProjectSetupPage() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadSkills() {
-      setIsLoadingSkills(true);
-      try {
-        const result = await commands.listEmbeddedSkills();
-        if (cancelled) return;
-        if (result.status === "ok") {
-          setEmbeddedSkills(result.data);
-        } else {
-          setError(result.error.message);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(`Failed to load embedded skills: ${e}`);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoadingSkills(false);
-        }
-      }
-    }
-
-    loadSkills();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (setupView !== "project" || sacrumStatus) return;
@@ -205,14 +157,6 @@ export function ProjectSetupPage() {
   const needsSacrumSettings =
     sacrumStatus !== null &&
     (!sacrumStatus.config_exists || !sacrumStatus.has_token);
-  const skillFilePaths = useMemo(
-    () => embeddedSkills.map((skill) => `${skill}/SKILL.md`),
-    [embeddedSkills]
-  );
-
-  const markAllFilesLinked = useCallback(() => {
-    markAllLinked(skillFilePaths);
-  }, [markAllLinked, skillFilePaths]);
 
   const handleProjectContinue = async () => {
     const trimmedName = projectName.trim();
@@ -236,6 +180,7 @@ export function ProjectSetupPage() {
     }
 
     setIsSavingSettings(true);
+    setIsInitializing(true);
     setFormError(null);
     try {
       if (needsSacrumSettings) {
@@ -249,48 +194,10 @@ export function ProjectSetupPage() {
         }
       }
 
-      setProjectDraft({ path: selectedPath, name: trimmedName });
-      resetFileStates();
-      setSetupView("skills");
-    } catch (e) {
-      setFormError(`Failed to save project settings: ${e}`);
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
-
-  const handleInitializeProject = async () => {
-    if (!projectDraft || isInitializing) return;
-
-    setFormError(null);
-    setIsInitializing(true);
-
-    let unlisten: (() => void) | null = null;
-    try {
-      const slugResult = await commands.previewProjectSlug(projectDraft.name);
-      if (slugResult.status === "error") {
-        setFormError(slugResult.error.message);
-        return;
-      }
-
-      const expectedSlug = slugResult.data;
       setInitializeResult(null);
-      queueFiles(skillFilePaths);
-
-      unlisten = await events.projectInitProgressEvent.listen((event) => {
-        const payload = event.payload as ProjectInitProgressEvent;
-        if (payload.project_slug !== expectedSlug) return;
-        if (payload.kind === "SkillFileInstalled" && payload.relative_path) {
-          markFileLinking(payload.relative_path);
-        }
-        if (payload.kind === "Completed" && payload.files_copied > 0) {
-          markAllFilesLinked();
-        }
-      });
-
       const result = await commands.initializeProject(
-        projectDraft.path,
-        projectDraft.name
+        selectedPath,
+        trimmedName
       );
       if (result.status === "error") {
         if (isLikelyTokenError(result.error.message)) {
@@ -303,8 +210,6 @@ export function ProjectSetupPage() {
               : current
           );
           setSacrumToken("");
-          resetFileStates();
-          setSetupView("project");
           setFormError(
             "Sacrum rejected the API token. Enter a valid token and try again."
           );
@@ -315,9 +220,6 @@ export function ProjectSetupPage() {
       }
 
       setInitializeResult(result.data);
-      if (result.data.skills_copied > 0) {
-        markAllFilesLinked();
-      }
       const selectResult = await commands.setCurrentProject(result.data.slug);
       if (selectResult.status === "error") {
         setFormError(selectResult.error.message);
@@ -328,7 +230,7 @@ export function ProjectSetupPage() {
     } catch (e) {
       setFormError(`Failed to initialize project: ${e}`);
     } finally {
-      unlisten?.();
+      setIsSavingSettings(false);
       setIsInitializing(false);
     }
   };
@@ -365,40 +267,28 @@ export function ProjectSetupPage() {
     projects.length === 1
       ? "1 saved project"
       : `${projects.length} saved projects`;
-  const activeIndex =
-    setupView === "ignition" ? 2 : setupView === "skills" ? 1 : 0;
+  const activeIndex = setupView === "ignition" ? 1 : 0;
   const isProjectForm = setupView === "project";
-  const linkedFileCount = skillFilePaths.filter(
-    (path) => fileStates[path] === "linked"
-  ).length;
   const title =
     setupView === "ignition"
       ? "Project ready"
-      : setupView === "skills"
-        ? `Equip ${projectDraft?.name ?? "the project"}`
-        : isProjectForm
-          ? projects.length === 0
-            ? "Add your first project"
-            : "Add a project"
-          : "Choose a project";
+      : isProjectForm
+        ? projects.length === 0
+          ? "Add your first project"
+          : "Add a project"
+        : "Choose a project";
   const lede =
     setupView === "ignition"
-      ? "Project setup is complete. Vertebrae selected the project and linked the local skill files."
-      : setupView === "skills"
-        ? "Embedded skills are staged in the Vertebrae app directory and linked into existing project skill directories."
-        : isProjectForm
-          ? "Point Vertebrae at a folder and confirm the name it should use."
-          : "Select a saved project or add a new one to prepare its local agent kit.";
+      ? "Project setup is complete. Vertebrae registered and selected the project."
+      : isProjectForm
+        ? "Point Vertebrae at a folder and confirm the name it should use."
+        : "Select a saved project or add a new one.";
   const footerLeft =
     setupView === "ignition" && initializeResult
-      ? `${initializeResult.skills_copied} skill links created`
-      : setupView === "skills"
-        ? isInitializing
-          ? `${linkedFileCount} / ${skillFilePaths.length} skill files linked`
-          : `Links ${skillFilePaths.length} skill files`
-        : isLoading
-          ? "Loading projects..."
-          : projectCountLabel;
+      ? "Project registered and selected"
+      : isLoading
+        ? "Loading projects..."
+        : projectCountLabel;
   const footerRight = isProjectForm ? (
     <>
       {projects.length > 0 && (
@@ -413,29 +303,10 @@ export function ProjectSetupPage() {
       <button
         onClick={handleProjectContinue}
         className={primaryButtonClass}
-        disabled={isLoadingSacrumStatus || isSavingSettings}
+        disabled={isLoadingSacrumStatus || isSavingSettings || isInitializing}
         data-testid="project-phase-continue"
       >
-        {isSavingSettings ? "Saving..." : "Continue"}
-      </button>
-    </>
-  ) : setupView === "skills" ? (
-    <>
-      <button
-        onClick={() => setSetupView("project")}
-        className={secondaryButtonClass}
-        data-testid="project-phase-back"
-        disabled={isInitializing}
-      >
-        Edit Project
-      </button>
-      <button
-        onClick={handleInitializeProject}
-        className={primaryButtonClass}
-        data-testid="skills-install"
-        disabled={isLoadingSkills || isInitializing || !projectDraft}
-      >
-        {isInitializing ? "Linking..." : "Install skills"}
+        {isSavingSettings || isInitializing ? "Creating..." : "Create project"}
       </button>
     </>
   ) : setupView === "ignition" ? (
@@ -474,13 +345,7 @@ export function ProjectSetupPage() {
     <FirstRunShell
       phases={SETUP_PHASES}
       activeIndex={activeIndex}
-      eyebrow={
-        setupView === "ignition"
-          ? "Initialized"
-          : setupView === "skills"
-            ? "Phase 02 · Skills & Docs"
-            : "Phase 01 · Project"
-      }
+      eyebrow={setupView === "ignition" ? "Initialized" : "Phase 01 · Project"}
       title={title}
       lede={lede}
       footerLeft={footerLeft}
@@ -632,91 +497,10 @@ export function ProjectSetupPage() {
         </div>
       )}
 
-      {!isLoading && setupView === "skills" && projectDraft && (
-        <div className="space-y-5" data-testid="skills-phase">
-          {isLoadingSkills ? (
-            <div className="fr-callout">
-              <span>Loading embedded skills...</span>
-            </div>
-          ) : (
-            <>
-              <div className="fr-sec-lbl">
-                <span className="t">Skills to install</span>
-                <span className="n">{embeddedSkills.length} skills</span>
-              </div>
-              <div className="fr-skills">
-                {embeddedSkills.map((skill) => (
-                  <div
-                    className="fr-skill on"
-                    key={skill}
-                    data-testid={`skill-${skill}`}
-                  >
-                    <div className="si">
-                      <div className="sn">
-                        <span className="glyph" aria-hidden>
-                          +
-                        </span>
-                        {skill}
-                      </div>
-                      <div className="sd">Embedded Vertebrae skill</div>
-                    </div>
-                    <span className="fr-lock">included</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="fr-sec-lbl">
-                <span className="t">Files it links</span>
-                <span className="n">{skillFilePaths.length} files</span>
-              </div>
-              <div className="fr-tree" data-testid="skills-file-tree">
-                <div className="fr-tr">
-                  <span className="nm dir">
-                    .claude/skills/ or .agents/skills/
-                  </span>
-                  <span className="ds">existing project skill roots</span>
-                </div>
-                {skillFilePaths.map((path) => {
-                  const state =
-                    fileStates[path] ?? (isInitializing ? "queued" : "idle");
-                  return (
-                    <div
-                      className={`fr-tr ind${state === "queued" ? " queued" : ""}`}
-                      key={path}
-                    >
-                      <span className="nm">{path}</span>
-                      <span className="ds">skill</span>
-                      {state !== "idle" && (
-                        <span
-                          className={`fstate ${
-                            state === "linked"
-                              ? "done"
-                              : state === "linking"
-                                ? "work"
-                                : "queued"
-                          }`}
-                          data-testid={`file-state-${path}`}
-                        >
-                          {state}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       {!isLoading && setupView === "ignition" && initializeResult && (
         <div className="fr-ignite" data-testid="ignition-screen">
           <div className="fr-flame" aria-hidden />
           <div className="fr-summary">
-            <div className="fr-sum">
-              <div className="v">{initializeResult.skills_copied}</div>
-              <div className="l">skill links</div>
-            </div>
             <div className="fr-sum">
               <div className="v">{initializeResult.project_name}</div>
               <div className="l">project</div>
@@ -729,7 +513,7 @@ export function ProjectSetupPage() {
             </div>
           </div>
           <div className="fr-callout">
-            <span>Linked into {initializeResult.skills_target}</span>
+            <span>{initializeResult.path}</span>
           </div>
         </div>
       )}

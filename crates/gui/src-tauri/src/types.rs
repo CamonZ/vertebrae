@@ -31,11 +31,6 @@ pub struct InitializeProjectResult {
     pub path: String,
     /// Whether this call created the project on Sacrum.
     pub project_created: bool,
-    /// Number of embedded skill files linked into project skill roots.
-    pub skills_copied: u32,
-    /// Project skill roots where embedded skills were linked, or staging info
-    /// when no supported project skill root exists.
-    pub skills_target: String,
 }
 
 /// Task hierarchy level - mirrors db::Level

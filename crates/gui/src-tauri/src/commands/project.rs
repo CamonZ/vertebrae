@@ -12,20 +12,6 @@ pub async fn get_projects(state: State<'_, AppState>) -> Result<Vec<SavedProject
     Ok(state.project_config.get_projects())
 }
 
-/// List all embedded skills available for GUI project initialization.
-#[tauri::command]
-#[specta::specta]
-pub async fn list_embedded_skills() -> Result<Vec<String>, CommandError> {
-    Ok(vertebrae_skills_assets::list_embedded_skills())
-}
-
-/// Preview the backend-derived slug for a project name.
-#[tauri::command]
-#[specta::specta]
-pub async fn preview_project_slug(name: String) -> Result<String, CommandError> {
-    derive_project_slug(&name)
-}
-
 /// Read the shared Sacrum settings state without exposing the API token.
 #[tauri::command]
 #[specta::specta]
@@ -84,15 +70,13 @@ pub async fn save_sacrum_settings(token: String) -> Result<SacrumConfigStatus, C
 #[tauri::command]
 #[specta::specta]
 pub async fn initialize_project(
-    app_handle: tauri::AppHandle,
     path: String,
     name: Option<String>,
 ) -> Result<InitializeProjectResult, CommandError> {
-    initialize_project_inner(&app_handle, path, name).await
+    initialize_project_inner(path, name).await
 }
 
-pub(crate) async fn initialize_project_inner<R: tauri::Runtime>(
-    app_handle: &tauri::AppHandle<R>,
+pub(crate) async fn initialize_project_inner(
     path: String,
     name: Option<String>,
 ) -> Result<InitializeProjectResult, CommandError> {
@@ -143,55 +127,12 @@ pub(crate) async fn initialize_project_inner<R: tauri::Runtime>(
         },
     )?;
 
-    let app_skills_dir =
-        vertebrae_installer::provision_installed_skills_dir().map_err(|e| CommandError {
-            message: format!("Failed to provision installed skills directory: {}", e),
-        })?;
-    let mut progress_files_copied = 0_u32;
-    let progress_slug = project_slug.clone();
-    let skill_install = vertebrae_skills_assets::link_embedded_skills_for_project_with_progress(
-        &app_skills_dir,
-        &project_root,
-        |file| {
-            progress_files_copied = progress_files_copied.saturating_add(1);
-            let _ = app_handle.emit(
-                "project-init-progress-event",
-                crate::events::ProjectInitProgressEvent {
-                    project_slug: progress_slug.clone(),
-                    kind: crate::events::ProjectInitProgressKind::SkillFileInstalled,
-                    files_copied: progress_files_copied,
-                    relative_path: Some(file.relative_path.to_string_lossy().to_string()),
-                    target_path: Some(file.target_path.to_string_lossy().to_string()),
-                },
-            );
-        },
-    )
-    .map_err(|e| CommandError {
-        message: format!("Failed to install embedded skills: {}", e),
-    })?;
-    let skills_copied = u32::try_from(skill_install.files_linked).map_err(|_| CommandError {
-        message: "Installed skill file count exceeded supported range".to_string(),
-    })?;
-    let skills_target = format_skill_targets(&skill_install);
-    let _ = app_handle.emit(
-        "project-init-progress-event",
-        crate::events::ProjectInitProgressEvent {
-            project_slug: project_slug.clone(),
-            kind: crate::events::ProjectInitProgressKind::Completed,
-            files_copied: skills_copied,
-            relative_path: None,
-            target_path: None,
-        },
-    );
-
     Ok(InitializeProjectResult {
         slug: project_slug,
         project_id: project.id,
         project_name: project.name,
         path: project_path,
         project_created,
-        skills_copied,
-        skills_target,
     })
 }
 
@@ -201,12 +142,9 @@ pub(crate) async fn initialize_project_inner<R: tauri::Runtime>(
 /// creates the project in Sacrum API if needed, and registers in global config.
 #[tauri::command]
 #[specta::specta]
-pub async fn add_project(
-    app_handle: tauri::AppHandle,
-    path: String,
-) -> Result<SavedProject, CommandError> {
+pub async fn add_project(path: String) -> Result<SavedProject, CommandError> {
     log::info!("add_project called with path: {}", path);
-    let result = initialize_project_inner(&app_handle, path, None).await?;
+    let result = initialize_project_inner(path, None).await?;
 
     Ok(SavedProject {
         slug: result.slug,
@@ -286,22 +224,6 @@ fn paths_refer_to_same_directory(configured_path: &str, project_root: &Path) -> 
         .unwrap_or_else(|_| project_root.to_path_buf());
 
     configured == project_root
-}
-
-fn format_skill_targets(install: &vertebrae_skills_assets::LinkedSkillInstall) -> String {
-    if install.target_roots.is_empty() {
-        return format!(
-            "Staged in {}; no existing .claude/skills or .agents/skills directory found",
-            install.app_skills_dir.to_string_lossy()
-        );
-    }
-
-    install
-        .target_roots
-        .iter()
-        .map(|target| target.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 async fn get_or_create_project(
@@ -533,27 +455,7 @@ mod tests {
     use std::sync::mpsc;
     use std::thread;
     use std::time::Duration;
-    use tauri::{Listener, Manager};
-
-    #[tokio::test]
-    async fn list_embedded_skills_returns_sorted_manifest() {
-        let skills = list_embedded_skills().await.unwrap();
-        let expected = vertebrae_skills_assets::list_embedded_skills();
-
-        assert!(!skills.is_empty());
-        assert_eq!(skills, expected);
-        assert!(skills.contains(&"vtb-add".to_string()));
-    }
-
-    #[tokio::test]
-    async fn preview_project_slug_uses_backend_slugifier() {
-        assert_eq!(
-            preview_project_slug("Ørsted Project".to_string())
-                .await
-                .unwrap(),
-            "orsted-project"
-        );
-    }
+    use tauri::Manager;
 
     struct EnvGuard {
         previous_home: Option<std::ffi::OsString>,
@@ -837,9 +739,7 @@ mod tests {
         })
         .unwrap();
 
-        let app = build_app_without_services();
         let err = initialize_project_inner(
-            app.handle(),
             other.to_string_lossy().to_string(),
             Some("Duplicate".to_string()),
         )
@@ -851,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn initialize_project_registers_skill_links_and_emits_progress() {
+    async fn initialize_project_registers_without_modifying_existing_project_skill_roots() {
         let temp_home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::new(temp_home.path());
         let project_parent = tempfile::tempdir().unwrap();
@@ -861,6 +761,10 @@ mod tests {
         let agents_skills = project_path.join(".agents/skills");
         fs::create_dir_all(&claude_skills).unwrap();
         fs::create_dir_all(&agents_skills).unwrap();
+        fs::write(claude_skills.join("custom.md"), "claude custom").unwrap();
+        fs::write(agents_skills.join("custom.md"), "agents custom").unwrap();
+        let obstructed_skill = claude_skills.join("vtb-add/SKILL.md");
+        fs::create_dir_all(&obstructed_skill).unwrap();
         let server = start_mock_sacrum_server();
 
         vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
@@ -872,20 +776,9 @@ mod tests {
         })
         .unwrap();
 
-        let app = build_app_without_services();
-        let (tx, rx) = mpsc::channel();
-        let _listener = app.listen("project-init-progress-event", move |event| {
-            tx.send(event.payload().to_string())
-                .expect("record progress event");
-        });
-
-        let result = initialize_project_inner(
-            app.handle(),
-            project_path.to_string_lossy().to_string(),
-            None,
-        )
-        .await
-        .unwrap();
+        let result = initialize_project_inner(project_path.to_string_lossy().to_string(), None)
+            .await
+            .unwrap();
         server.stop();
         server.join();
 
@@ -893,54 +786,32 @@ mod tests {
         assert_eq!(result.project_id, "proj-123");
         assert_eq!(result.project_name, "Temp Project");
         assert!(result.project_created);
-        assert!(result.skills_copied > 0);
-        assert!(result.skills_target.contains(".claude/skills"));
-        assert!(result.skills_target.contains(".agents/skills"));
-
-        let staged_skill = vertebrae_installer::installed_skills_dir()
-            .unwrap()
-            .join("vtb-add/SKILL.md");
-        assert!(staged_skill.exists());
-        for link in [
-            project_path.join(".claude/skills/vtb-add/SKILL.md"),
-            project_path.join(".agents/skills/vtb-add/SKILL.md"),
-        ] {
-            let metadata = fs::symlink_metadata(&link).unwrap();
-            assert!(metadata.file_type().is_symlink());
-            assert_eq!(fs::read_link(&link).unwrap(), staged_skill);
-        }
+        assert_eq!(
+            fs::read_to_string(claude_skills.join("custom.md")).unwrap(),
+            "claude custom"
+        );
+        assert_eq!(
+            fs::read_to_string(agents_skills.join("custom.md")).unwrap(),
+            "agents custom"
+        );
+        assert!(obstructed_skill.is_dir());
+        assert!(!agents_skills.join("vtb-add").exists());
+        assert!(
+            !vertebrae_installer::installed_skills_dir()
+                .unwrap()
+                .exists(),
+            "project initialization must not stage the managed bundle"
+        );
 
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         let registered = config.projects.get("temp-project").unwrap();
         assert_eq!(registered.id, "proj-123");
         assert_eq!(registered.path, result.path);
-
-        let events = rx
-            .try_iter()
-            .map(|payload| {
-                serde_json::from_str::<crate::events::ProjectInitProgressEvent>(&payload)
-                    .expect("progress event payload")
-            })
-            .collect::<Vec<_>>();
-        let skill_events = events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event.kind,
-                    crate::events::ProjectInitProgressKind::SkillFileInstalled
-                )
-            })
-            .count();
-        assert_eq!(skill_events, result.skills_copied as usize);
-        assert!(matches!(
-            events.last().map(|event| &event.kind),
-            Some(crate::events::ProjectInitProgressKind::Completed)
-        ));
     }
 
     #[tokio::test]
     #[serial]
-    async fn initialize_project_stages_skills_without_creating_missing_skill_roots() {
+    async fn initialize_project_does_not_create_project_skill_roots() {
         let temp_home = tempfile::tempdir().unwrap();
         let _env = EnvGuard::new(temp_home.path());
         let project_parent = tempfile::tempdir().unwrap();
@@ -957,86 +828,26 @@ mod tests {
         })
         .unwrap();
 
-        let app = build_app_without_services();
-        let result = initialize_project_inner(
-            app.handle(),
-            project_path.to_string_lossy().to_string(),
-            None,
-        )
-        .await
-        .unwrap();
+        let result = initialize_project_inner(project_path.to_string_lossy().to_string(), None)
+            .await
+            .unwrap();
         server.stop();
         server.join();
 
-        assert_eq!(result.skills_copied, 0);
-        assert!(result.skills_target.contains("no existing .claude/skills"));
-        assert!(vertebrae_installer::installed_skills_dir()
-            .unwrap()
-            .join("vtb-add/SKILL.md")
-            .exists());
+        assert_eq!(result.slug, "temp-project");
+        assert_eq!(
+            result.path,
+            project_path
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .to_string()
+        );
         assert!(!project_path.join(".claude").exists());
         assert!(!project_path.join(".agents").exists());
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn initialize_project_reports_link_obstruction_and_allows_retry() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::new(temp_home.path());
-        let project_parent = tempfile::tempdir().unwrap();
-        let project_path = project_parent.path().join("Temp Project");
-        let obstructed_link = project_path.join(".claude/skills/vtb-add/SKILL.md");
-        fs::create_dir_all(&obstructed_link).unwrap();
-        let server = start_mock_sacrum_server();
-
-        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
-            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
-                url: server.url.clone(),
-                token: Some("sac_valid-token".to_string()),
-            },
-            projects: BTreeMap::new(),
-        })
-        .unwrap();
-
-        let app = build_app_without_services();
-        let error = initialize_project_inner(
-            app.handle(),
-            project_path.to_string_lossy().to_string(),
-            None,
-        )
-        .await
-        .unwrap_err();
-        server.stop();
-        server.join();
-
-        assert!(error.message.contains("Failed to install embedded skills"));
-        assert!(error.message.contains("existing path is a directory"));
-
-        fs::remove_dir(&obstructed_link).unwrap();
-        let retry_server = start_mock_sacrum_server();
-        let mut config = vertebrae_sacrum_client::load_config_file().unwrap();
-        config.sacrum.url = retry_server.url.clone();
-        vertebrae_sacrum_client::save_config_file(&config).unwrap();
-
-        let result = initialize_project_inner(
-            app.handle(),
-            project_path.to_string_lossy().to_string(),
-            None,
-        )
-        .await
-        .unwrap();
-        retry_server.stop();
-        retry_server.join();
-
-        assert!(result.skills_copied > 0);
-        let metadata = fs::symlink_metadata(&obstructed_link).unwrap();
-        assert!(metadata.file_type().is_symlink());
-        assert_eq!(
-            fs::read_link(&obstructed_link).unwrap(),
-            vertebrae_installer::installed_skills_dir()
-                .unwrap()
-                .join("vtb-add/SKILL.md")
-        );
+        assert!(!vertebrae_installer::installed_skills_dir()
+            .unwrap()
+            .exists());
     }
 
     #[tokio::test]

@@ -8,9 +8,6 @@ const mockGetCurrentProject = vi.fn();
 const mockGetProjects = vi.fn();
 const mockSetCurrentProject = vi.fn();
 const mockInitializeProject = vi.fn();
-const mockPreviewProjectSlug = vi.fn();
-const mockListEmbeddedSkills = vi.fn();
-const mockProjectInitListen = vi.fn();
 
 vi.mock("../bindings", () => ({
   commands: {
@@ -18,13 +15,6 @@ vi.mock("../bindings", () => ({
     getProjects: (...args: unknown[]) => mockGetProjects(...args),
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
-    previewProjectSlug: (...args: unknown[]) => mockPreviewProjectSlug(...args),
-    listEmbeddedSkills: (...args: unknown[]) => mockListEmbeddedSkills(...args),
-  },
-  events: {
-    projectInitProgressEvent: {
-      listen: (...args: unknown[]) => mockProjectInitListen(...args),
-    },
   },
 }));
 
@@ -119,8 +109,6 @@ describe("Sidebar Traces nav", () => {
 });
 
 describe("Sidebar project switcher", () => {
-  let progressHandler: ((event: { payload: unknown }) => void) | null = null;
-
   const gammaResult = {
     status: "ok",
     data: {
@@ -129,15 +117,12 @@ describe("Sidebar project switcher", () => {
       project_name: "gamma",
       path: "/Users/dev/code/gamma",
       project_created: true,
-      skills_copied: 2,
-      skills_target: "/Users/dev/code/gamma/.claude/skills",
     },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
-    progressHandler = null;
     mockUseWebSocketStatus.mockReturnValue("connected");
     // A project is loaded so the avatar (and switcher) renders.
     mockGetCurrentProject.mockResolvedValue({
@@ -153,17 +138,6 @@ describe("Sidebar project switcher", () => {
     });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockInitializeProject.mockResolvedValue(gammaResult);
-    mockPreviewProjectSlug.mockResolvedValue({ status: "ok", data: "gamma" });
-    mockListEmbeddedSkills.mockResolvedValue({
-      status: "ok",
-      data: ["vtb-add", "vtb-ready"],
-    });
-    mockProjectInitListen.mockImplementation(
-      async (handler: (event: { payload: unknown }) => void) => {
-        progressHandler = handler;
-        return vi.fn();
-      }
-    );
   });
 
   async function openSwitcher(user: ReturnType<typeof userEvent.setup>) {
@@ -244,7 +218,13 @@ describe("Sidebar project switcher", () => {
     expect(screen.getByTestId("loc")).toHaveTextContent("/tasks");
   });
 
-  it("shows the linking dialog with per-file progress and resets project state after success", async () => {
+  it("initializes and selects an added project without a linking dialog or progress UI", async () => {
+    const originalLocation = window.location;
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, assign: assignSpy },
+    });
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
     let resolveInitialization!: (value: unknown) => void;
@@ -253,134 +233,112 @@ describe("Sidebar project switcher", () => {
         resolveInitialization = resolve;
       })
     );
-    renderSidebar();
-    await openSwitcher(user);
+    try {
+      renderSidebar();
+      await openSwitcher(user);
 
-    await user.click(await screen.findByTestId("sidebar-add-project"));
+      await user.click(await screen.findByTestId("sidebar-add-project"));
 
-    expect(mockOpenDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ directory: true, multiple: false })
-    );
-    // The popover closes and the linking dialog opens with the files queued.
-    const dialog = await screen.findByRole("dialog", { name: "Adding gamma…" });
-    expect(dialog).toBeInTheDocument();
-    expect(
-      screen.queryByRole("dialog", { name: "Switch project" })
-    ).not.toBeInTheDocument();
-    expect(
-      await screen.findByTestId("add-project-file-state-vtb-add/SKILL.md")
-    ).toHaveTextContent("queued");
-    await waitFor(() => {
-      expect(mockInitializeProject).toHaveBeenCalledWith(
-        "/Users/dev/code/gamma",
-        null
+      expect(mockOpenDialog).toHaveBeenCalledWith(
+        expect.objectContaining({ directory: true, multiple: false })
       );
-    });
-
-    // A backend progress event moves the file into the linking state.
-    act(() => {
-      progressHandler?.({
-        payload: {
-          project_slug: "gamma",
-          kind: "SkillFileInstalled",
-          files_copied: 1,
-          relative_path: "vtb-add/SKILL.md",
-          target_path: "/Users/dev/code/gamma/.claude/skills/vtb-add/SKILL.md",
-        },
-      });
-    });
-    expect(
-      screen.getByTestId("add-project-file-state-vtb-add/SKILL.md")
-    ).toHaveTextContent("linking");
-    expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
-
-    await act(async () => {
-      resolveInitialization(gammaResult);
-    });
-
-    await screen.findByRole("dialog", { name: "Project added" });
-    expect(screen.getByText(/2 skill links created/)).toBeInTheDocument();
-    expect(
-      screen.getByTestId("add-project-file-state-vtb-add/SKILL.md")
-    ).toHaveTextContent("linked");
-    expect(
-      screen.getByTestId("add-project-file-state-vtb-ready/SKILL.md")
-    ).toHaveTextContent("linked");
-    expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
-
-    await user.click(screen.getByTestId("add-project-done"));
-    await waitFor(() => {
+      expect(
+        screen.getByRole("dialog", { name: "Switch project" })
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("sidebar-add-project")).toHaveTextContent(
+        "Adding project…"
+      );
       expect(
         screen.queryByTestId("add-project-dialog")
       ).not.toBeInTheDocument();
-    });
+      expect(screen.queryByText(/skill/i)).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockInitializeProject).toHaveBeenCalledWith(
+          "/Users/dev/code/gamma",
+          null
+        );
+      });
+
+      await act(async () => {
+        resolveInitialization(gammaResult);
+      });
+
+      expect(mockSetCurrentProject).toHaveBeenCalledWith("gamma");
+      expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
+      expect(assignSpy).toHaveBeenCalledWith("/");
+      expect(
+        screen.queryByRole("dialog", { name: "Switch project" })
+      ).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
-  it("shows initialization errors in the dialog without resetting and allows retry", async () => {
+  it("shows initialization errors inline without selecting and allows retry", async () => {
+    const originalLocation = window.location;
+    const assignSpy = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, assign: assignSpy },
+    });
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
     mockInitializeProject
       .mockResolvedValueOnce({
         status: "error",
-        error: { message: "Failed to install embedded skills: link denied" },
+        error: { message: "Sacrum is unavailable" },
       })
       .mockResolvedValueOnce(gammaResult);
-    renderSidebar();
-    await openSwitcher(user);
+    try {
+      renderSidebar();
+      await openSwitcher(user);
 
-    await user.click(await screen.findByTestId("sidebar-add-project"));
+      await user.click(await screen.findByTestId("sidebar-add-project"));
 
-    await screen.findByRole("dialog", { name: "Failed to add project" });
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Failed to install embedded skills: link denied"
-    );
-    expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
+      expect(
+        await screen.findByTestId("sidebar-add-project-error")
+      ).toHaveTextContent("Sacrum is unavailable");
+      expect(mockSetCurrentProject).not.toHaveBeenCalled();
+      expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
+      expect(assignSpy).not.toHaveBeenCalled();
 
-    await user.click(screen.getByTestId("add-project-retry"));
+      await user.click(screen.getByTestId("sidebar-add-project-retry"));
 
-    await screen.findByRole("dialog", { name: "Project added" });
-    expect(mockInitializeProject).toHaveBeenCalledTimes(2);
-    expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(mockInitializeProject).toHaveBeenCalledTimes(2);
+        expect(mockSetCurrentProject).toHaveBeenCalledWith("gamma");
+      });
+      expect(mockResetProjectScopedStores).toHaveBeenCalledTimes(1);
+      expect(assignSpy).toHaveBeenCalledWith("/");
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
-  it("cannot be dismissed while initialization is in flight", async () => {
+  it("surfaces project selection failures without resetting or reloading", async () => {
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/dev/code/gamma");
-    let resolveInitialization!: (value: unknown) => void;
-    mockInitializeProject.mockReturnValue(
-      new Promise((resolve) => {
-        resolveInitialization = resolve;
-      })
-    );
+    mockSetCurrentProject.mockResolvedValue({
+      status: "error",
+      error: { message: "Could not select gamma" },
+    });
     renderSidebar();
     await openSwitcher(user);
 
     await user.click(await screen.findByTestId("sidebar-add-project"));
-    await screen.findByRole("dialog", { name: "Adding gamma…" });
 
-    // No close affordance and Escape is ignored while linking.
     expect(
-      screen.queryByRole("button", { name: "Close" })
-    ).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
-    expect(
-      screen.getByRole("dialog", { name: "Adding gamma…" })
-    ).toBeInTheDocument();
+      await screen.findByTestId("sidebar-add-project-error")
+    ).toHaveTextContent("Could not select gamma");
     expect(mockInitializeProject).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      resolveInitialization(gammaResult);
-    });
-    await screen.findByRole("dialog", { name: "Project added" });
-
-    // Once finished the dialog dismisses normally.
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("add-project-dialog")
-      ).not.toBeInTheDocument();
-    });
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("gamma");
+    expect(mockResetProjectScopedStores).not.toHaveBeenCalled();
   });
 
   it("clicking the avatar while the switcher is open closes it (toggle)", async () => {
