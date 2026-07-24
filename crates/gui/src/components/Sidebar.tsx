@@ -10,7 +10,6 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Tooltip } from "./atoms/Tooltip";
 import { Icon } from "./atoms/Icon";
 import { ThemeToggle } from "./ThemeToggle";
-import { AddProjectDialog, useAddProjectFlow } from "./AddProjectDialog";
 import {
   useWebSocketStatus,
   type WebSocketStatus,
@@ -132,6 +131,11 @@ interface ProjectListEntry {
   path: string;
 }
 
+type AddProjectState =
+  | { status: "idle" }
+  | { status: "adding"; path: string }
+  | { status: "error"; path: string | null; message: string };
+
 /**
  * Popover anchored to the project avatar. Lists known projects — clicking an
  * entry switches the active project — and offers a "+" affordance to add a new
@@ -144,6 +148,8 @@ function ProjectPopover({
   onSwitched,
   onAddProject,
   onAddProjectFailed,
+  addProjectState,
+  onRetryAddProject,
 }: {
   current: string | null;
   /** Anchor (the project avatar) — clicks on it are ignored so it can toggle. */
@@ -152,9 +158,11 @@ function ProjectPopover({
   /** Called after the active project changed, so the host can refresh + close. */
   onSwitched: () => void;
   /** Called with the picked directory so the host can run initialization. */
-  onAddProject: (path: string) => void;
+  onAddProject: (path: string) => Promise<void>;
   /** Called when the directory picker itself fails. */
   onAddProjectFailed: (message: string) => void;
+  addProjectState: AddProjectState;
+  onRetryAddProject: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const pickerBusy = useRef(false);
@@ -225,7 +233,7 @@ function ProjectPopover({
         title: "Select Project Directory",
       });
       if (selected && typeof selected === "string") {
-        onAddProject(selected);
+        await onAddProject(selected);
       }
     } catch (error) {
       onAddProjectFailed(
@@ -282,12 +290,32 @@ function ProjectPopover({
         })
       )}
       <div className="my-1 h-px bg-[var(--color-line)]" />
+      {addProjectState.status === "error" && (
+        <div
+          role="alert"
+          data-testid="sidebar-add-project-error"
+          className="space-y-2 px-3 py-2 text-xs text-[var(--color-err)]"
+        >
+          <p>{addProjectState.message}</p>
+          {addProjectState.path && (
+            <button
+              type="button"
+              onClick={onRetryAddProject}
+              data-testid="sidebar-add-project-retry"
+              className="font-medium text-[var(--color-accent)] hover:underline"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
       <button
         type="button"
         onClick={handleAddProject}
+        disabled={addProjectState.status === "adding"}
         aria-label="Add a project"
         data-testid="sidebar-add-project"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)]"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)] disabled:cursor-wait disabled:opacity-60"
       >
         <span
           aria-hidden
@@ -295,7 +323,9 @@ function ProjectPopover({
         >
           +
         </span>
-        Add project…
+        {addProjectState.status === "adding"
+          ? "Adding project…"
+          : "Add project…"}
       </button>
     </div>
   );
@@ -423,8 +453,11 @@ export function Sidebar() {
   const project = useCurrentProject();
   const navigate = useNavigate();
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [addProjectState, setAddProjectState] = useState<AddProjectState>({
+    status: "idle",
+  });
   const avatarRef = useRef<HTMLButtonElement | null>(null);
-  const addFlow = useAddProjectFlow(resetProjectScopedStores);
+  const addProjectInFlight = useRef(false);
 
   function handleSwitched() {
     setSwitcherOpen(false);
@@ -436,6 +469,55 @@ export function Sidebar() {
     // navigate("/") would leave the avatar stuck on the previous project.
     // Force a full reload to the root instead.
     window.location.assign("/");
+  }
+
+  async function addProject(path: string) {
+    if (addProjectInFlight.current) return;
+
+    addProjectInFlight.current = true;
+    setAddProjectState({ status: "adding", path });
+    try {
+      const initializeResult = await commands.initializeProject(path, null);
+      if (initializeResult.status === "error") {
+        setAddProjectState({
+          status: "error",
+          path,
+          message: initializeResult.error.message,
+        });
+        return;
+      }
+
+      const selectResult = await commands.setCurrentProject(
+        initializeResult.data.slug
+      );
+      if (selectResult.status === "error") {
+        setAddProjectState({
+          status: "error",
+          path,
+          message: selectResult.error.message,
+        });
+        return;
+      }
+
+      resetProjectScopedStores();
+      setAddProjectState({ status: "idle" });
+      handleSwitched();
+    } catch (error) {
+      setAddProjectState({
+        status: "error",
+        path,
+        message:
+          error instanceof Error ? error.message : "Failed to add project",
+      });
+    } finally {
+      addProjectInFlight.current = false;
+    }
+  }
+
+  function retryAddProject() {
+    if (addProjectState.status === "error" && addProjectState.path) {
+      void addProject(addProjectState.path);
+    }
   }
 
   return (
@@ -452,7 +534,11 @@ export function Sidebar() {
           <ProjectAvatar
             name={project.name}
             path={project.path ?? project.name}
-            onClick={() => setSwitcherOpen((v) => !v)}
+            onClick={() => {
+              if (addProjectState.status !== "adding") {
+                setSwitcherOpen((value) => !value);
+              }
+            }}
             buttonRef={avatarRef}
           />
         ) : (
@@ -469,25 +555,20 @@ export function Sidebar() {
           <ProjectPopover
             current={project.name}
             anchorRef={avatarRef}
-            onClose={() => setSwitcherOpen(false)}
+            onClose={() => {
+              if (addProjectState.status !== "adding") {
+                setSwitcherOpen(false);
+              }
+            }}
             onSwitched={handleSwitched}
-            onAddProject={(path) => {
-              setSwitcherOpen(false);
-              void addFlow.start(path);
-            }}
+            onAddProject={addProject}
             onAddProjectFailed={(message) => {
-              setSwitcherOpen(false);
-              addFlow.fail(message);
+              setAddProjectState({ status: "error", path: null, message });
             }}
+            addProjectState={addProjectState}
+            onRetryAddProject={retryAddProject}
           />
         )}
-        <AddProjectDialog
-          phase={addFlow.phase}
-          skillFilePaths={addFlow.skillFilePaths}
-          fileStates={addFlow.fileStates}
-          onRetry={addFlow.retry}
-          onClose={addFlow.close}
-        />
       </div>
       {/* Thin 20px rule between the project monogram and the nav icons —
           the design rail's `.app-rail hr` (1px, --color-line, 20px wide). */}

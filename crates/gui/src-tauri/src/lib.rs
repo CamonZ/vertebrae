@@ -23,10 +23,10 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    PermissionRequestEvent, ProjectInitProgressEvent, SectionChangedEvent, SessionLogCreatedEvent,
-    SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
-    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
+    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
+    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
+    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    WorkflowTransitionChangedEvent,
 };
 use local_chat::{
     ClaudeStartupCapabilities, LocalChatFileChangeEvent, LocalChatSessionEndEvent,
@@ -63,8 +63,6 @@ fn create_builder() -> Builder {
             greet,
             // Project management commands
             commands::get_projects,
-            commands::list_embedded_skills,
-            commands::preview_project_slug,
             commands::sacrum_config_status,
             commands::save_sacrum_settings,
             commands::initialize_project,
@@ -148,7 +146,6 @@ fn create_builder() -> Builder {
             install::install_components,
         ])
         .events(collect_events![
-            ProjectInitProgressEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,
@@ -197,6 +194,17 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+
+            // Keep the provider-neutral managed skill bundle outside project
+            // initialization. Provider integrations discover this app-data
+            // root directly and never need project-local skill links.
+            match provision_managed_skills() {
+                Ok((root, installed)) => log::info!(
+                    "[STARTUP] Staged {installed} managed skill files in {}",
+                    root.display()
+                ),
+                Err(error) => log::warn!("[STARTUP] Failed to stage managed skills: {error}"),
+            }
 
             // Bring managed binary installs up to date with the sidecars
             // bundled in this build. Off the main thread so disk I/O never
@@ -304,6 +312,14 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn provision_managed_skills() -> Result<(PathBuf, usize), String> {
+    let root =
+        vertebrae_installer::provision_installed_skills_dir().map_err(|error| error.to_string())?;
+    let installed = vertebrae_skills_assets::install_embedded_skills(&root)
+        .map_err(|error| error.to_string())?;
+    Ok((root, installed))
 }
 
 #[cfg(test)]

@@ -174,21 +174,6 @@ impl From<SkillsAssetError> for InitError {
                 target,
                 reason,
             },
-            SkillsAssetError::ReplaceExisting { target, reason } => InitError::CopyFile {
-                source: PathBuf::from("embedded skill symlink"),
-                target,
-                reason,
-            },
-            SkillsAssetError::SymlinkFile {
-                relative_path,
-                target,
-                reason,
-                ..
-            } => InitError::CopyFile {
-                source: relative_path,
-                target,
-                reason,
-            },
         }
     }
 }

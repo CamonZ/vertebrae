@@ -19,32 +19,19 @@ const {
   mockSetCurrentProject,
   mockSacrumConfigStatus,
   mockSaveSacrumSettings,
-  mockListEmbeddedSkills,
-  mockPreviewProjectSlug,
   mockInitializeProject,
-  mockProjectInitListen,
-  mockAddProject,
   mockRemoveProject,
   mockNavigate,
   mockOpen,
-  projectInitProgress,
 } = vi.hoisted(() => ({
   mockGetProjects: vi.fn(),
   mockSetCurrentProject: vi.fn(),
   mockSacrumConfigStatus: vi.fn(),
   mockSaveSacrumSettings: vi.fn(),
-  mockListEmbeddedSkills: vi.fn(),
-  mockPreviewProjectSlug: vi.fn(),
   mockInitializeProject: vi.fn(),
-  mockProjectInitListen: vi.fn(),
-  mockAddProject: vi.fn(),
   mockRemoveProject: vi.fn(),
   mockNavigate: vi.fn(),
   mockOpen: vi.fn(),
-  projectInitProgress: {
-    handler: null as null | ((event: { payload: unknown }) => void),
-    unlisten: vi.fn(),
-  },
 }));
 
 vi.mock("react-router-dom", async (importOriginal) => {
@@ -65,26 +52,28 @@ vi.mock("../bindings", () => ({
     setCurrentProject: (...args: unknown[]) => mockSetCurrentProject(...args),
     sacrumConfigStatus: (...args: unknown[]) => mockSacrumConfigStatus(...args),
     saveSacrumSettings: (...args: unknown[]) => mockSaveSacrumSettings(...args),
-    listEmbeddedSkills: (...args: unknown[]) => mockListEmbeddedSkills(...args),
-    previewProjectSlug: (...args: unknown[]) => mockPreviewProjectSlug(...args),
     initializeProject: (...args: unknown[]) => mockInitializeProject(...args),
-    addProject: (...args: unknown[]) => mockAddProject(...args),
     removeProject: (...args: unknown[]) => mockRemoveProject(...args),
-  },
-  events: {
-    projectInitProgressEvent: {
-      listen: (...args: unknown[]) => mockProjectInitListen(...args),
-    },
   },
 }));
 
 import { ProjectSetupPage } from "./ProjectSetupPage";
 
+const initializedProject = {
+  status: "ok" as const,
+  data: {
+    slug: "new-project",
+    project_id: "project-new",
+    project_name: "new-project",
+    path: "/tmp/new-project",
+    project_created: true,
+  },
+};
+
 describe("ProjectSetupPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProjectScopedStores();
-    projectInitProgress.handler = null;
 
     mockGetProjects.mockResolvedValue({
       status: "ok",
@@ -115,31 +104,7 @@ describe("ProjectSetupPage", () => {
         has_token: true,
       },
     });
-    mockListEmbeddedSkills.mockResolvedValue({
-      status: "ok",
-      data: ["vtb-add", "vtb-ready"],
-    });
-    mockPreviewProjectSlug.mockResolvedValue({
-      status: "ok",
-      data: "new-project",
-    });
-    mockInitializeProject.mockResolvedValue({
-      status: "ok",
-      data: {
-        slug: "new-project",
-        project_id: "project-new",
-        project_name: "new-project",
-        path: "/tmp/new-project",
-        project_created: true,
-        skills_copied: 2,
-        skills_target: "/tmp/new-project/.claude/skills",
-      },
-    });
-    mockProjectInitListen.mockImplementation(async (handler) => {
-      projectInitProgress.handler = handler;
-      return projectInitProgress.unlisten;
-    });
-    mockAddProject.mockResolvedValue({ status: "ok", data: null });
+    mockInitializeProject.mockResolvedValue(initializedProject);
     mockRemoveProject.mockResolvedValue({ status: "ok", data: null });
     mockOpen.mockResolvedValue("/tmp/new-project");
   });
@@ -168,13 +133,10 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Project");
     expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Ready");
     expect(screen.getByTestId("first-run-spine")).not.toHaveTextContent(
-      "Ignition"
-    );
-    expect(screen.getByTestId("first-run-spine")).not.toHaveTextContent(
-      "Local runtime"
+      "Skills & Docs"
     );
     expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
-      "Step 1 of 3"
+      "Step 1 of 2"
     );
 
     await userEvent.click(await screen.findByText("new-project"));
@@ -187,7 +149,7 @@ describe("ProjectSetupPage", () => {
     expect(workflowCacheClearedWhenNavigating).toBe(true);
   });
 
-  it("keeps returning users on the saved-project list and opens the wizard from Add Project", async () => {
+  it("keeps returning users on the saved-project list and opens the project form", async () => {
     render(<ProjectSetupPage />);
 
     expect(await screen.findByTestId("setup-project-list")).toHaveTextContent(
@@ -197,7 +159,7 @@ describe("ProjectSetupPage", () => {
     await userEvent.click(screen.getByTestId("setup-add-project"));
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
-    expect(mockAddProject).not.toHaveBeenCalled();
+    expect(mockInitializeProject).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole("button", { name: "Back" }));
 
@@ -254,11 +216,8 @@ describe("ProjectSetupPage", () => {
     expect(screen.getByText("/tmp/new-project")).toBeInTheDocument();
   });
 
-  it("requires and saves Sacrum settings when config is missing", async () => {
-    mockGetProjects.mockResolvedValue({
-      status: "ok",
-      data: [],
-    });
+  it("saves missing Sacrum settings and initializes directly into the ready state", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus.mockResolvedValue({
       status: "ok",
       data: {
@@ -272,20 +231,14 @@ describe("ProjectSetupPage", () => {
     render(<ProjectSetupPage />);
 
     expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
-    expect(screen.getByTestId("first-run-shell")).toBeInTheDocument();
-    expect(screen.getByTestId("first-run-spine")).toHaveTextContent("Project");
     expect(screen.getByTestId("first-run-progress")).toHaveTextContent(
-      "Step 1 of 3"
+      "Step 1 of 2"
     );
     await userEvent.click(screen.getByTestId("project-folder-choose"));
 
     expect(
       await screen.findByLabelText("Sacrum API token")
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("Sacrum URL")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(/Sacrum settings are missing or incomplete/)
-    ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("project-phase-continue"));
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
@@ -296,20 +249,20 @@ describe("ProjectSetupPage", () => {
     await userEvent.type(screen.getByLabelText("Sacrum API token"), "sac_test");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
-    await waitFor(() => {
-      expect(mockSaveSacrumSettings).toHaveBeenCalledWith("sac_test");
-    });
-    expect(await screen.findByTestId("skills-phase")).toHaveTextContent(
-      "vtb-add"
+    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
+      "/tmp/new-project"
     );
-    expect(screen.getByTestId("skills-phase")).toHaveTextContent("vtb-ready");
+    expect(mockSaveSacrumSettings).toHaveBeenCalledWith("sac_test");
+    expect(mockInitializeProject).toHaveBeenCalledWith(
+      "/tmp/new-project",
+      "new-project"
+    );
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
+    expect(screen.queryByText("Skills & Docs")).not.toBeInTheDocument();
   });
 
   it("retries Sacrum status loading after a transient failure", async () => {
-    mockGetProjects.mockResolvedValue({
-      status: "ok",
-      data: [],
-    });
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus
       .mockResolvedValueOnce({
         status: "error",
@@ -338,14 +291,11 @@ describe("ProjectSetupPage", () => {
     });
     await userEvent.click(screen.getByTestId("project-folder-choose"));
     await userEvent.click(screen.getByTestId("project-phase-continue"));
-    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
   });
 
   it("returns to token entry when Sacrum rejects the saved API token", async () => {
-    mockGetProjects.mockResolvedValue({
-      status: "ok",
-      data: [],
-    });
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSacrumConfigStatus.mockResolvedValue({
       status: "ok",
       data: {
@@ -355,29 +305,12 @@ describe("ProjectSetupPage", () => {
         has_token: false,
       },
     });
-    mockSaveSacrumSettings
+    mockInitializeProject
       .mockResolvedValueOnce({
-        status: "ok",
-        data: {
-          config_path: "/tmp/config.toml",
-          config_exists: true,
-          url: "http://localhost:4000",
-          has_token: true,
-        },
+        status: "error",
+        error: { message: "Unauthorized" },
       })
-      .mockResolvedValueOnce({
-        status: "ok",
-        data: {
-          config_path: "/tmp/config.toml",
-          config_exists: true,
-          url: "http://localhost:4000",
-          has_token: true,
-        },
-      });
-    mockInitializeProject.mockResolvedValueOnce({
-      status: "error",
-      error: { message: "Unauthorized" },
-    });
+      .mockResolvedValueOnce(initializedProject);
 
     render(<ProjectSetupPage />);
 
@@ -389,14 +322,11 @@ describe("ProjectSetupPage", () => {
     );
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
-    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("skills-install"));
-
-    expect(await screen.findByTestId("project-phase-form")).toBeInTheDocument();
     expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
       "Sacrum rejected the API token"
     );
     expect(screen.getByLabelText("Sacrum API token")).toHaveValue("");
+    expect(mockSetCurrentProject).not.toHaveBeenCalled();
 
     await userEvent.type(
       screen.getByLabelText("Sacrum API token"),
@@ -404,30 +334,42 @@ describe("ProjectSetupPage", () => {
     );
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
-    await waitFor(() => {
-      expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith(
-        "sac_valid-token"
-      );
-    });
-    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("file-state-vtb-add/SKILL.md")
-    ).not.toBeInTheDocument();
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockSaveSacrumSettings).toHaveBeenLastCalledWith("sac_valid-token");
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
   });
 
-  it("streams skill progress, selects the initialized project, and enters the app", async () => {
-    mockGetProjects.mockResolvedValue({
-      status: "ok",
-      data: [],
-    });
-    mockPreviewProjectSlug.mockResolvedValue({
-      status: "ok",
-      data: "orsted",
-    });
+  it("surfaces initialization failures without selecting and allows retry", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    mockInitializeProject
+      .mockResolvedValueOnce({
+        status: "error",
+        error: { message: "Sacrum is unavailable" },
+      })
+      .mockResolvedValueOnce(initializedProject);
 
-    let resolveInitialize:
-      | ((value: Awaited<ReturnType<typeof mockInitializeProject>>) => void)
-      | null = null;
+    render(<ProjectSetupPage />);
+    await screen.findByTestId("project-phase-form");
+    await userEvent.click(screen.getByTestId("project-folder-choose"));
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("project-phase-error")).toHaveTextContent(
+      "Sacrum is unavailable"
+    );
+    expect(mockSetCurrentProject).not.toHaveBeenCalled();
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByTestId("project-phase-continue"));
+
+    expect(await screen.findByTestId("ignition-screen")).toBeInTheDocument();
+    expect(mockInitializeProject).toHaveBeenCalledTimes(2);
+    expect(mockSetCurrentProject).toHaveBeenCalledWith("new-project");
+  });
+
+  it("initializes, selects, and reaches ready without rendering a skill phase", async () => {
+    mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
+    let resolveInitialize: ((value: typeof initializedProject) => void) | null =
+      null;
     mockInitializeProject.mockReturnValue(
       new Promise((resolve) => {
         resolveInitialize = resolve;
@@ -442,88 +384,33 @@ describe("ProjectSetupPage", () => {
     await userEvent.type(screen.getByLabelText("Project name"), "Ørsted");
     await userEvent.click(screen.getByTestId("project-phase-continue"));
 
-    expect(await screen.findByTestId("skills-phase")).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("skills-install"));
-
     await waitFor(() => {
       expect(mockInitializeProject).toHaveBeenCalledWith(
         "/tmp/new-project",
         "Ørsted"
       );
-      expect(mockPreviewProjectSlug).toHaveBeenCalledWith("Ørsted");
-      expect(projectInitProgress.handler).not.toBeNull();
     });
-
-    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "queued"
+    expect(screen.getByTestId("project-phase-continue")).toHaveTextContent(
+      "Creating..."
     );
+    expect(screen.queryByText("Skills & Docs")).not.toBeInTheDocument();
+    expect(screen.queryByText(/skill files linked/i)).not.toBeInTheDocument();
 
-    act(() => {
-      projectInitProgress.handler?.({
-        payload: {
-          project_slug: "rsted",
-          kind: "SkillFileInstalled",
-          files_copied: 1,
-          relative_path: "vtb-add/SKILL.md",
-          target_path: "/tmp/other/.claude/skills/vtb-add/SKILL.md",
-        },
-      });
-    });
-    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "queued"
-    );
-
-    act(() => {
-      projectInitProgress.handler?.({
-        payload: {
-          project_slug: "orsted",
-          kind: "SkillFileInstalled",
-          files_copied: 1,
-          relative_path: "vtb-add/SKILL.md",
-          target_path: "/tmp/new-project/.claude/skills/vtb-add/SKILL.md",
-        },
-      });
-    });
-    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "linking"
-    );
-
-    act(() => {
-      projectInitProgress.handler?.({
-        payload: {
-          project_slug: "orsted",
-          kind: "Completed",
-          files_copied: 2,
-          relative_path: null,
-          target_path: null,
-        },
-      });
-    });
-    expect(screen.getByTestId("file-state-vtb-add/SKILL.md")).toHaveTextContent(
-      "linked"
-    );
-
-    act(() => {
+    await act(async () => {
       resolveInitialize?.({
         status: "ok",
         data: {
+          ...initializedProject.data,
           slug: "orsted",
-          project_id: "project-new",
           project_name: "Ørsted",
-          path: "/tmp/new-project",
-          project_created: true,
-          skills_copied: 2,
-          skills_target: "/tmp/new-project/.claude/skills",
         },
       });
     });
 
-    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent("2");
-    expect(screen.getByTestId("ignition-screen")).toHaveTextContent(
-      "/tmp/new-project/.claude/skills"
+    expect(await screen.findByTestId("ignition-screen")).toHaveTextContent(
+      "Ørsted"
     );
     expect(mockSetCurrentProject).toHaveBeenCalledWith("orsted");
-    expect(projectInitProgress.unlisten).toHaveBeenCalled();
 
     await userEvent.click(screen.getByTestId("ignition-enter"));
     expect(mockNavigate).toHaveBeenCalledWith("/");

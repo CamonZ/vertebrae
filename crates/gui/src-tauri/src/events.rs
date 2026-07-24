@@ -4,22 +4,6 @@ use tauri_specta::Event;
 
 use crate::types;
 
-/// Progress emitted while the GUI initializes a local project.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct ProjectInitProgressEvent {
-    pub project_slug: String,
-    pub kind: ProjectInitProgressKind,
-    pub files_copied: u32,
-    pub relative_path: Option<String>,
-    pub target_path: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub enum ProjectInitProgressKind {
-    SkillFileInstalled,
-    Completed,
-}
-
 /// Event payload for task changes.
 /// Emitted when a task is created, updated, deleted, or its status changes.
 /// For create/update events, `task` carries the full deserialized entity.

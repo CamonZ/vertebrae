@@ -234,11 +234,13 @@ Vertebrae-installed skills use the provider-neutral
 `vertebrae_installer::installed_skills_dir()` contract. Each bundle is stored
 as `<installed skills root>/<name>/SKILL.md`. The installer owns idempotent
 creation of the root through `provision_installed_skills_dir()` and preserves
-existing contents; the skills-assets layer owns files below it. Provider
-integrations append this absolute root to their normal discovery and must not
-create `.claude`, `.agents`, or `.codex` directories or change the active
-project to expose it. On Linux this is application data under `.local/share`,
-not configuration under `.config`.
+existing contents; the skills-assets layer owns files below it. The GUI stages
+this bundle in its application setup hook before provider capability discovery,
+independently of project registration. Provider integrations append this
+absolute root to their normal discovery and must not create `.claude`,
+`.agents`, or `.codex` directories or change the active project to expose it.
+On Linux this is application data under `.local/share`, not configuration under
+`.config`.
 
 The Tauri setup hook resolves Claude's executable, PATH, and installed-skill
 compatibility once and shares that immutable result with local-chat sessions.
