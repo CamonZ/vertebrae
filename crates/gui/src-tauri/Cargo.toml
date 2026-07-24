@@ -51,8 +51,6 @@ vertebrae-sacrum-client = { path = "../../sacrum-client" }
 vertebrae-installer = { path = "../../installer" }
 vertebrae-skills-assets = { path = "../../skills-assets" }
 vertebrae-harness-core = { path = "../../harness-core" }
-vertebrae-harness-claude = { path = "../../harness-claude" }
-vertebrae-harness-codex = { path = "../../harness-codex" }
 slug = "0.1"
 
 # Async trait support for testing

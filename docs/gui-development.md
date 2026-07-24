@@ -67,8 +67,45 @@ The Rust backend in `src-tauri/src/` provides:
 
 - **~34 Tauri commands** (`commands.rs`) — each acquires `RwLock<Option<VertebraeServices>>`, calls service method, converts to GUI type
 - **WebSocket client** (`websocket_client.rs`) — Phoenix channel for real-time sync
-- **Claude session manager** (`claude_session.rs`) — JSONL chat/session streaming
+- **Local chat harness manager** (`local_chat/`) — shared Claude/Codex runtime
+  adapters and normalized live event delivery
 - **Project config** (`project_config.rs`) — multi-project management
+
+### Local Chat Harnesses (`src-tauri/src/local_chat/`)
+
+Local chat owns session lifecycle and UI options; it owns no provider wire
+protocol. Both providers are built through the shared `HarnessRuntimeFactory`
+from `vertebrae-harness` (see
+[Architecture — Harness Crates](architecture.md#harness-crates)), so
+`src-tauri` depends on `vertebrae-harness` and `vertebrae-harness-core` and
+never on the adapter crates directly.
+
+| Module | Responsibility |
+|--------|----------------|
+| `harness.rs` | `LocalChatHarness` trait, catalog, model/reasoning options |
+| `harnesses/claude/` | Claude startup capabilities, model catalog, session creation |
+| `harnesses/codex/` | Codex model catalog and session creation |
+| `harnesses/shared.rs` | `LocalChatHarnessEventSink` — translates `HarnessEventV1` into local-chat events; `LocalChatControlSink` for approvals |
+| `permissions.rs` | Permission-mode translation and the `vtb-gate` prompt bridge |
+| `manager.rs` | Session registry and pane/session bookkeeping |
+
+Adding a provider therefore means adding a `harnesses/<provider>/` module that
+supplies the model catalog and session creation. Event translation stays in
+`harnesses/shared.rs` because it works on the neutral `HarnessEventV1` stream.
+
+### Chat event delivery and replay
+
+Live chat and trace replay share one normalized stream:
+
+- **Live** — the harness event sink emits `LocalChatEvent`s over Tauri; the
+  frontend reduces them in `src/stores/chatStore.ts` and `src/hooks/useLocalChat.ts`
+- **Replay** — `SessionLog` rows with `format=harness` are projected by
+  `src/types/conversation.ts` (`parseSessionLogs`) through the canonical
+  harness projection, producing the same events the live trace showed
+- **Compatibility** — raw `anthropic`/`openai` `SessionLog` rows predating the
+  harness cutover are read by the provider-specific branches of the same
+  parser. Provider transcript-file (JSONL) discovery and replay are not
+  supported; the frontend never reads provider session files from disk.
 
 ## First-Run Installer
 

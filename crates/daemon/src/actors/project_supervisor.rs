@@ -203,7 +203,7 @@ pub struct RunStepPayload {
     pub output_schema: Option<serde_json::Value>,
     /// When true, the daemon emits detailed diagnostic logs for this step
     /// execution at well-known checkpoints (raw payload, resolved agent_config,
-    /// final claude argv, claude stderr, stream-json system/init line).
+    /// final provider argv, provider stderr, harness session init).
     ///
     /// Defaults to false. Sacrum omits this field from the broadcast payload
     /// when false, so older daemons (and the non-verbose path) see no change.

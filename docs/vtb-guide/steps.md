@@ -283,6 +283,13 @@ Each step picks the harness (the local CLI) that will run its prompt via
 | `anthropic` (default) | Claude Code streaming harness | `claude` | persistent stream-json session | `CLAUDE_CODE_PATH` |
 | `openai` | Codex App Server streaming harness | `codex` | App Server WebSocket | `CODEX_PATH` |
 
+Both harnesses emit the same normalized `HarnessEventV1` stream, which the
+daemon persists as `format=harness` session logs and the GUI replays through
+one projection — so a step's provider changes which CLI runs, not how its
+output is stored or rendered. See
+[Architecture — Harness Crates](../architecture.md#harness-crates) for crate
+ownership and how to add a third provider.
+
 When `provider` is unset on a step, the daemon defaults to **Anthropic** to
 preserve pre-refactor behavior. The daemon resolves the harness binary by
 checking the provider-specific env var first, then the user's login-shell

@@ -2189,8 +2189,6 @@ dependencies = [
  "uuid",
  "vertebrae-core",
  "vertebrae-harness",
- "vertebrae-harness-claude",
- "vertebrae-harness-codex",
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
@@ -6748,8 +6746,6 @@ dependencies = [
  "url",
  "vertebrae-core",
  "vertebrae-harness",
- "vertebrae-harness-claude",
- "vertebrae-harness-codex",
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
@@ -6764,7 +6760,6 @@ dependencies = [
  "vertebrae-harness-claude",
  "vertebrae-harness-codex",
  "vertebrae-harness-core",
- "vertebrae-installer",
 ]
 
 [[package]]
@@ -6792,7 +6787,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tungstenite 0.24.0",
