@@ -10,7 +10,7 @@ pub mod settings_synthesis;
 
 pub use actors::project_supervisor::{
     CancelStepPayload, RunStepPayload, build_step_config_from_payload, parse_cancel_step_payload,
-    parse_run_step_payload,
+    parse_run_step_payload, should_dispatch_run_step,
 };
 pub use actors::{DaemonConfig, DaemonMessage, DaemonSupervisor};
 pub use actors::{ProjectConfig, ProjectMessage, ProjectSupervisor};
