@@ -3,55 +3,73 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { ConversationLogViewer } from "./ConversationLogViewer";
 import type { SessionLog } from "../../bindings";
 
-const createLog = (content: string, createdAt: string): SessionLog => ({
-  id: `log-${createdAt}`,
-  step_execution_id: "exec-1",
-  content,
-  created_at: createdAt,
-});
+let nextEventId = 0;
+
+const createLog = (
+  type: string,
+  data: Record<string, unknown>,
+  createdAt: string
+): SessionLog => {
+  const eventId = `viewer-event-${nextEventId++}`;
+  return {
+    id: `log-${eventId}`,
+    step_execution_id: "exec-1",
+    format: "harness",
+    content: JSON.stringify({
+      version: 1,
+      event_id: eventId,
+      stream_id: "viewer-stream",
+      correlation: {
+        session_id: "session-123",
+        thread_id: "viewer-thread",
+        turn_id: `turn-${eventId}`,
+      },
+      timestamp: createdAt,
+      semantics: "snapshot",
+      type,
+      data,
+    }),
+    created_at: createdAt,
+  };
+};
 
 const createThinkingLog = (text: string, createdAt: string) =>
-  createLog(
-    JSON.stringify({
-      type: "assistant",
-      message: { content: [{ type: "text", text }] },
-    }),
-    createdAt
-  );
+  createLog("reasoning", { text }, createdAt);
 
-const createToolCallLog = (name: string, input: Record<string, unknown>, createdAt: string) =>
+const createToolCallLog = (
+  name: string,
+  input: Record<string, unknown>,
+  createdAt: string
+) =>
   createLog(
-    JSON.stringify({
-      type: "assistant",
-      message: {
-        content: [
-          { type: "tool_use", id: "tool-1", name, input },
-        ],
-      },
-    }),
+    "tool_call",
+    { tool_call_id: `tool-${name}-${createdAt}`, name, input },
     createdAt
   );
 
 const createSessionStartLog = (model: string, createdAt: string) =>
   createLog(
-    JSON.stringify({
-      type: "system",
-      subtype: "init",
-      model,
-      session_id: "sess-123",
-    }),
+    "session_started",
+    { model, provider_resume_id: "sess-123" },
     createdAt
   );
 
-const createSessionEndLog = (durationMs: number, numTurns: number, costUsd: number, createdAt: string) =>
+const createSessionEndLog = (
+  durationMs: number,
+  numTurns: number,
+  costUsd: number,
+  createdAt: string
+) =>
   createLog(
-    JSON.stringify({
-      type: "result",
-      subtype: "success",
-      duration_ms: durationMs,
-      num_turns: numTurns,
-      total_cost_usd: costUsd,
-    }),
+    "run_finished",
+    {
+      status: "completed",
+      metrics: {
+        duration_ms: durationMs,
+        turn_count: numTurns,
+        total_cost_usd: costUsd,
+      },
+    },
     createdAt
   );
 
@@ -59,19 +77,33 @@ describe("ConversationLogViewer", () => {
   describe("empty state", () => {
     it("shows message when no logs provided", () => {
       render(<ConversationLogViewer logs={[]} />);
-      expect(screen.getByText("No conversation data available")).toBeInTheDocument();
+      expect(
+        screen.getByText("No conversation data available")
+      ).toBeInTheDocument();
     });
 
     it("shows message when logs cannot be parsed", () => {
-      const logs = [createLog("not valid json", "2024-01-01T10:00:00Z")];
+      const logs = [
+        {
+          id: "invalid-log",
+          step_execution_id: "exec-1",
+          format: "harness" as const,
+          content: "not valid json",
+          created_at: "2024-01-01T10:00:00Z",
+        },
+      ];
       render(<ConversationLogViewer logs={logs} />);
-      expect(screen.getByText("No conversation data available")).toBeInTheDocument();
+      expect(
+        screen.getByText("No conversation data available")
+      ).toBeInTheDocument();
     });
   });
 
   describe("session events", () => {
     it("does NOT render a Session Started banner — facts fold into the boundary header in the unified view", () => {
-      const logs = [createSessionStartLog("claude-3-opus", "2024-01-01T10:00:00Z")];
+      const logs = [
+        createSessionStartLog("claude-3-opus", "2024-01-01T10:00:00Z"),
+      ];
       render(<ConversationLogViewer logs={logs} />);
 
       expect(screen.queryByText("Session Started")).toBeNull();
@@ -79,7 +111,9 @@ describe("ConversationLogViewer", () => {
     });
 
     it("does NOT render a Session Complete banner — facts fold into the boundary header in the unified view", () => {
-      const logs = [createSessionEndLog(5000, 10, 0.05, "2024-01-01T10:00:00Z")];
+      const logs = [
+        createSessionEndLog(5000, 10, 0.05, "2024-01-01T10:00:00Z"),
+      ];
       render(<ConversationLogViewer logs={logs} />);
 
       expect(screen.queryByText("Session Complete")).toBeNull();
@@ -90,7 +124,9 @@ describe("ConversationLogViewer", () => {
 
   describe("thinking events", () => {
     it("displays thinking text", () => {
-      const logs = [createThinkingLog("Let me analyze this...", "2024-01-01T10:00:00Z")];
+      const logs = [
+        createThinkingLog("Let me analyze this...", "2024-01-01T10:00:00Z"),
+      ];
       render(<ConversationLogViewer logs={logs} />);
 
       expect(screen.getByText("Let me analyze this...")).toBeInTheDocument();
@@ -113,7 +149,11 @@ describe("ConversationLogViewer", () => {
   describe("tool call events", () => {
     it("displays Bash tool calls with command", () => {
       const logs = [
-        createToolCallLog("Bash", { command: "ls -la" }, "2024-01-01T10:00:00Z"),
+        createToolCallLog(
+          "Bash",
+          { command: "ls -la" },
+          "2024-01-01T10:00:00Z"
+        ),
       ];
       render(<ConversationLogViewer logs={logs} />);
 
@@ -123,7 +163,11 @@ describe("ConversationLogViewer", () => {
 
     it("displays Read tool calls with filename", () => {
       const logs = [
-        createToolCallLog("Read", { file_path: "/path/to/file.ts" }, "2024-01-01T10:00:00Z"),
+        createToolCallLog(
+          "Read",
+          { file_path: "/path/to/file.ts" },
+          "2024-01-01T10:00:00Z"
+        ),
       ];
       render(<ConversationLogViewer logs={logs} />);
 
@@ -133,7 +177,11 @@ describe("ConversationLogViewer", () => {
 
     it("expands tool input on click", () => {
       const logs = [
-        createToolCallLog("Bash", { command: "ls -la", timeout: 5000 }, "2024-01-01T10:00:00Z"),
+        createToolCallLog(
+          "Bash",
+          { command: "ls -la", timeout: 5000 },
+          "2024-01-01T10:00:00Z"
+        ),
       ];
       render(<ConversationLogViewer logs={logs} />);
 
@@ -149,7 +197,10 @@ describe("ConversationLogViewer", () => {
   describe("pagination", () => {
     it("limits displayed events", () => {
       const logs = Array.from({ length: 60 }, (_, i) =>
-        createThinkingLog(`Message ${i}`, `2024-01-01T10:00:${String(i).padStart(2, "0")}Z`)
+        createThinkingLog(
+          `Message ${i}`,
+          `2024-01-01T10:00:${String(i).padStart(2, "0")}Z`
+        )
       );
       render(<ConversationLogViewer logs={logs} initialLimit={10} />);
 
@@ -162,7 +213,10 @@ describe("ConversationLogViewer", () => {
 
     it("loads more events on click", () => {
       const logs = Array.from({ length: 60 }, (_, i) =>
-        createThinkingLog(`Message ${i}`, `2024-01-01T10:00:${String(i).padStart(2, "0")}Z`)
+        createThinkingLog(
+          `Message ${i}`,
+          `2024-01-01T10:00:${String(i).padStart(2, "0")}Z`
+        )
       );
       render(<ConversationLogViewer logs={logs} initialLimit={10} />);
 
@@ -178,7 +232,11 @@ describe("ConversationLogViewer", () => {
       const logs = [
         createSessionStartLog("claude-3-opus", "2024-01-01T10:00:00Z"),
         createThinkingLog("Let me check that file...", "2024-01-01T10:00:01Z"),
-        createToolCallLog("Read", { file_path: "/src/main.ts" }, "2024-01-01T10:00:02Z"),
+        createToolCallLog(
+          "Read",
+          { file_path: "/src/main.ts" },
+          "2024-01-01T10:00:02Z"
+        ),
         createSessionEndLog(3000, 5, 0.02, "2024-01-01T10:00:03Z"),
       ];
 

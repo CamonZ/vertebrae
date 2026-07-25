@@ -18,19 +18,16 @@
  *      → a `SpawnMessage` carrying a child Thread.
  *   3. `wait_for_children` is a STEP (a root thread whose body is one terminal
  *      `WaitMessage`), never an inlined subtree.
- *   5. Both anthropic (claude) and openai (codex) shapes are supported — the
- *      existing parser (`parseSessionLogs`) already normalises both into the
- *      same `ConversationEvent` union, so this layer is provider-agnostic.
+ *   5. Both providers emit the same normalized `harness` SessionLog shape —
+ *      `parseSessionLogs` projects it into the provider-agnostic
+ *      `ConversationEvent` union.
  *
  * ──────────────────────────────────────────────────────────────────────────
  * Subagent linkage (constraint #2). The parser now threads the spawn linkage
  * onto every `ConversationEvent` as `parentToolUseId`:
- *     · Anthropic: `parseClaudeMessage` reads the message's top-level
- *       `parent_tool_use_id` and tags every emitted event with it.
- *     · Codex: `parseCodexMessage` emits a `tool_call` for `collab_tool_call`
- *       (the parent spawn tool). Child-linkage for Codex is NOT yet wired —
- *       the upstream shape is unverified — so Codex subagent events stay flat
- *       for now (see the TODO in conversation.ts).
+ *     · Both providers carry the parent tool-call identity in the normalized
+ *       harness event correlation, and `parseSessionLogs` tags the projected
+ *       events with it.
  *
  * {@link groupBySpawn} reads `parentToolUseId` via {@link readParentToolUseId}
  * and lifts tagged events into a nested child {@link Thread}, replacing the
@@ -184,7 +181,7 @@ export function humanDuration(deltaMs: number): string {
 
 /**
  * Read the parent spawn tool-use id off a parsed event. Set by the parser on
- * every event a spawned subagent emitted (Anthropic `parent_tool_use_id`);
+ * every event a spawned subagent emitted from normalized harness correlation;
  * undefined on the main agent's own events. {@link groupBySpawn} uses it to
  * lift the event into a nested child Thread.
  */
@@ -197,7 +194,7 @@ function readParentToolUseId(ev: ConversationEvent): string | undefined {
 // Event → Message mapping.
 // ===========================================================================
 
-/** Detect the Codex `[error] …` thinking encoding (constraint #5 / contract). */
+/** Detect the normalized `[error] …` thinking encoding. */
 const ERROR_PREFIX = "[error] ";
 
 let EVT_SEQ = 0;
@@ -252,7 +249,10 @@ function toolMessage(
 }
 
 function isAgentSpawnCall(call: ToolCallEvent): boolean {
-  const collabTool = inputStringField(call.input, ["collab_tool", "collabTool"]);
+  const collabTool = inputStringField(call.input, [
+    "collab_tool",
+    "collabTool",
+  ]);
   if (collabTool === "spawnAgent") return true;
   const displayName = `${call.toolName} ${call.displayName}`.toLowerCase();
   if (!displayName.includes("agent")) return false;
@@ -317,7 +317,7 @@ function fileEditMessageStatus(status: string): ToolMessage["status"] {
 }
 
 /**
- * Build a ToolMessage representing a Codex todo_list.
+ * Build a ToolMessage representing a normalized todo_list.
  *
  * The Message union has no `todo` kind (open question in the contract); we
  * render it via a ToolMessage with a checklist body — the smallest change that
@@ -452,7 +452,7 @@ function agentMessage(
   };
 }
 
-/** Build an ErrorMessage from a Codex `[error] …` thinking event. */
+/** Build an ErrorMessage from a normalized `[error] …` thinking event. */
 function errorMessage(
   text: string,
   timestamp: string,
@@ -844,8 +844,8 @@ function eventsToMessages(
  * the only nesting axis).
  *
  * An event carrying a {@link readParentToolUseId} was emitted BY a spawned
- * subagent; the id points at the PARENT spawn tool's `tool_call` (Anthropic's
- * `parent_tool_use_id`). We:
+ * subagent; the id points at the PARENT spawn tool's `tool_call` through the
+ * normalized harness correlation. We:
  *   1. partition events into the main agent's events (no parentToolUseId) and
  *      one group per parent tool id (the subagent's events);
  *   2. build the main agent's flat message series;
@@ -1024,7 +1024,9 @@ function spawnStatus(
 ): ThreadSummary["status"] | undefined {
   if (!parentCall) return undefined;
   const statuses = agentStatusValues(parentCall.input);
-  if (statuses.some((status) => /^(failed|error|system_?error)$/i.test(status))) {
+  if (
+    statuses.some((status) => /^(failed|error|system_?error)$/i.test(status))
+  ) {
     return "err";
   }
   if (

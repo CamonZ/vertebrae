@@ -73,8 +73,6 @@ export type {
 
 // Conversation log types
 export type {
-  ClaudeRawMessage,
-  ClaudeContentItem,
   ConversationEvent,
   SessionStartEvent,
   SessionEndEvent,
@@ -83,9 +81,4 @@ export type {
   ToolResultEvent,
 } from "./conversation";
 
-export {
-  parseClaudeMessage,
-  parseSessionLogs,
-  getToolIcon,
-  TOOL_ICONS,
-} from "./conversation";
+export { parseSessionLogs, getToolIcon } from "./conversation";

@@ -101,11 +101,10 @@ Live chat and trace replay share one normalized stream:
   frontend reduces them in `src/stores/chatStore.ts` and `src/hooks/useLocalChat.ts`
 - **Replay** — `SessionLog` rows with `format=harness` are projected by
   `src/types/conversation.ts` (`parseSessionLogs`) through the canonical
-  harness projection, producing the same events the live trace showed
-- **Compatibility** — raw `anthropic`/`openai` `SessionLog` rows predating the
-  harness cutover are read by the provider-specific branches of the same
-  parser. Provider transcript-file (JSONL) discovery and replay are not
-  supported; the frontend never reads provider session files from disk.
+  harness projection, producing the same events the live trace showed. Local-
+  chat transcript replay is requested through the neutral Tauri command and is
+  discovered/parsed by the provider harness crate; the frontend receives only
+  serialized `HarnessEventV1` records.
 
 ## First-Run Installer
 

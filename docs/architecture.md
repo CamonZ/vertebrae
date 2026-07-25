@@ -127,8 +127,8 @@ both live delivery and `format=harness` `SessionLog` replay.
 | Crate | Owns | Must not contain |
 |-------|------|------------------|
 | `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
-| `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness-codex` | Codex App Server launch/readiness, WebSocket JSON-RPC, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness-codex` | Codex App Server launch/readiness, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
 | `crates/harness` | Provider **selection** only: `HarnessRuntimeFactory` maps `AgentConfig.provider` to an adapter and normalizes `RequestConfig` | Wire protocols, event decoding |
 
 Only `crates/harness` depends on the adapter crates. Surfaces depend on
@@ -153,13 +153,14 @@ sequence numbers and produces `HarnessEventV1`. That single stream feeds:
   `HarnessEventV1` into local-chat Tauri events
 - **Persistence** — the daemon's `SessionLogEventSink` writes serialized
   `HarnessEventV1` payloads as `format=harness` `SessionLog` records
-- **Replay** — the GUI projects those same `format=harness` records through the
-  canonical projection, so replayed traces match what was shown live
+- **Replay** — provider adapters discover their own durable JSONL and normalize
+  it into those same `format=harness` events; the GUI projects the neutral
+  records through the canonical parser, so replayed chat matches what was
+  shown live
 
-Raw `anthropic`/`openai` `SessionLog` rows written before the harness cutover
-are still readable through isolated compatibility readers in the GUI. Provider
-transcript-file (JSONL) discovery and replay are **not** supported and must not
-be reintroduced.
+Provider transcript files are discovered and parsed only by their individual
+harness crates; the GUI receives normalized V1 events through
+`HarnessRuntimeFactory`.
 
 ### Adding a provider
 
