@@ -161,6 +161,7 @@ pub enum StepType {
     Route,
     WaitChildren,
     HumanInput,
+    Finish,
     Unsupported(String),
 }
 
@@ -172,6 +173,7 @@ impl StepType {
             "route" => StepType::Route,
             "wait_children" => StepType::WaitChildren,
             "human_input" => StepType::HumanInput,
+            "finish" => StepType::Finish,
             _ => StepType::Unsupported(value.to_string()),
         }
     }
@@ -183,6 +185,7 @@ impl StepType {
             StepType::Route => "route",
             StepType::WaitChildren => "wait_children",
             StepType::HumanInput => "human_input",
+            StepType::Finish => "finish",
             StepType::Unsupported(value) => value.as_str(),
         }
     }
@@ -1255,7 +1258,8 @@ pub struct Step {
     #[serde(default)]
     pub agent_config: AgentConfig,
 
-    /// The type of this step (execute, evaluate, route)
+    /// The type of this step (execute, evaluate, route, wait_children,
+    /// human_input, or finish)
     #[serde(default)]
     pub step_type: StepType,
 
@@ -2658,6 +2662,7 @@ mod tests {
         assert_eq!(StepType::Route.as_str(), "route");
         assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
         assert_eq!(StepType::HumanInput.as_str(), "human_input");
+        assert_eq!(StepType::Finish.as_str(), "finish");
         assert_eq!(
             StepType::Unsupported("manual_gate".to_string()).as_str(),
             "manual_gate"
@@ -2671,6 +2676,7 @@ mod tests {
         assert_eq!(StepType::Route.to_string(), "route");
         assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
         assert_eq!(StepType::HumanInput.to_string(), "human_input");
+        assert_eq!(StepType::Finish.to_string(), "finish");
         assert_eq!(
             StepType::Unsupported("manual_gate".to_string()).to_string(),
             "manual_gate"
@@ -2721,6 +2727,7 @@ mod tests {
             (StepType::Route, "\"route\""),
             (StepType::WaitChildren, "\"wait_children\""),
             (StepType::HumanInput, "\"human_input\""),
+            (StepType::Finish, "\"finish\""),
         ] {
             let serialized = serde_json::to_string(&variant).unwrap();
             assert_eq!(serialized, expected_json);

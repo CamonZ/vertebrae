@@ -509,6 +509,7 @@ mod tests {
             ("route", StepType::Route),
             ("wait_children", StepType::WaitChildren),
             ("human_input", StepType::HumanInput),
+            ("finish", StepType::Finish),
         ] {
             let response = WorkflowStepResponse {
                 id: "step-x".to_string(),
@@ -674,6 +675,30 @@ mod tests {
         let step = service.get_step("step-1").await.unwrap().unwrap();
 
         assert_eq!(step.step_type, StepType::HumanInput);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_maps_finish_step_type() {
+        let server = MockServer::start().await;
+
+        let mut response = make_step_response("step-1", "Finish", "wf-1", 0);
+        response["step_type"] = json!("finish");
+        response["is_final"] = json!(false);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(graphql_response("workflow_step", response)),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let step = service.get_step("step-1").await.unwrap().unwrap();
+
+        assert_eq!(step.step_type, StepType::Finish);
+        assert!(!step.is_final);
     }
 
     #[tokio::test]

@@ -764,6 +764,7 @@ mod tests {
             "agents": ["claude"],
             "skills": ["code-review"],
             "agent_config": {"model": "opus"},
+            "step_type": "finish",
             "is_final": false,
             "step_order": 0,
             "workflow_id": "wf-1",
@@ -778,6 +779,7 @@ mod tests {
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.skills, vec!["code-review"]);
+        assert_eq!(step.step_type.as_deref(), Some("finish"));
         assert!(!step.is_final);
         assert_eq!(step.step_order, 0);
         assert_eq!(step.workflow_id, "wf-1");
