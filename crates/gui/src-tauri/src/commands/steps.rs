@@ -269,6 +269,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_finish_step_preserves_terminal_type_without_legacy_final_flag() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let step = create_step(
+            state,
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-finish".to_string(),
+                name: "Finish".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 0,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: crate::types::StepType::Finish,
+                output_schema: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(step.step_type, crate::types::StepType::Finish);
+        assert!(!step.is_final);
+        assert!(step.transitions_to.is_empty());
+    }
+
+    #[tokio::test]
     async fn get_step_nonexistent_returns_none() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
