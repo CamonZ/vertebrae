@@ -15,6 +15,7 @@ const KINDS: ReadonlyArray<Kind> = [
   "route",
   "wait",
   "human",
+  "finish",
 ];
 
 export function KindLegend() {

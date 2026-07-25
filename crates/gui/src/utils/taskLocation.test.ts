@@ -85,4 +85,20 @@ describe("resolveTaskLocation", () => {
       stepName: null,
     });
   });
+
+  it("preserves finish as the task location step type", () => {
+    const finish = createMockStep({
+      id: "finish-1",
+      workflow_id: workflow.id,
+      name: "Finish",
+      step_type: "finish",
+    });
+    const location = resolveTaskLocation(
+      createMockTask({ workflow_id: workflow.id, current_step_id: finish.id }),
+      finish,
+      workflow
+    );
+
+    expect(location).toMatchObject({ status: "assigned", stepType: "finish" });
+  });
 });

@@ -69,6 +69,9 @@
 .flight-strip .mk.kind-wait {
   background: var(--color-step-wait, var(--color-fg-mute));
 }
+.flight-strip .mk.kind-finish {
+  background: var(--color-step-finish, var(--color-ok));
+}
 .flight-strip .mk.live {
   box-shadow: 0 0 8px var(--color-accent-glow, var(--color-accent));
   border: 1px solid var(--color-accent);

@@ -11,6 +11,7 @@ export type StepKind =
   | "route"
   | "human_input"
   | "wait_children"
+  | "finish"
   | "unknown";
 
 export type HearthStepKind =
@@ -19,6 +20,7 @@ export type HearthStepKind =
   | "route"
   | "human"
   | "wait"
+  | "finish"
   | "unknown";
 
 export interface StepTypeStyle {
@@ -98,6 +100,15 @@ const styles: Record<StepKind, StepTypeStyle> = {
     barVar: "--color-step-wait",
     washVar: "--color-step-wait-wash",
     fgVar: "--color-step-wait-fg",
+  },
+  finish: {
+    kind: "finish",
+    hearthKind: "finish",
+    label: "Finish",
+    icon: "✓",
+    barVar: "--color-step-finish",
+    washVar: "--color-step-finish-wash",
+    fgVar: "--color-step-finish-fg",
   },
   unknown: {
     kind: "unknown",

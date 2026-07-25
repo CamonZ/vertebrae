@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { StepStrip } from "./StepStrip";
 import type { Kind } from "./layout/types";
 
-const SHAPE: Kind[] = ["execute", "execute", "eval", "route", "wait", "human"];
+const SHAPE: Kind[] = ["execute", "execute", "eval", "route", "wait", "human", "finish"];
 
 describe("StepStrip", () => {
   it("renders the ribbon with one segment per step", () => {

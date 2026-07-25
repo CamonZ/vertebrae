@@ -38,9 +38,10 @@ export function stepRef(workflowId: string, stepId: string): string {
  *  - `final`  if `step.is_final`.
  *  Maps the REAL backend `StepType` via `hearthStepKind`, renaming the Hearth
  *  kinds to the Atlas vocabulary: `eval` (evaluate), `wait` (wait_children),
- *  `human` (human_input). `execute`/`route` pass through. `unknown` collapses to
- *  `execute` (a generic process box). There is no synthetic entry/final kind —
- *  the backend has no such types; position is `Role`, terminality is `is_final`.
+ *  `human` (human_input). `execute`/`route`/`finish` pass through. `unknown`
+ *  collapses to `execute` (a generic process box). There is no synthetic
+ *  entry/final kind — the backend has no such types; position is `Role`,
+ *  terminality is `is_final` or the finish type.
  */
 export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   // PipelineStep.step_type is `string | null`. hearthStepKind only recognises
@@ -52,6 +53,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
     "route",
     "human_input",
     "wait_children",
+    "finish",
   ]);
   const raw = step.step_type;
   if (raw === null || !known.has(raw)) return "execute";
@@ -66,6 +68,8 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
       return "human";
     case "route":
       return "route";
+    case "finish":
+      return "finish";
     case "execute":
     case "unknown":
     default:
@@ -76,7 +80,7 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
 /** Derive the cosmetic foot `Role` of a step (flow position, not the type). */
 export function roleFor(kind: Kind, isFirst: boolean, isFinal: boolean): Role {
   if (isFirst) return "entry";
-  if (isFinal || kind === "route") return "exit";
+  if (isFinal || kind === "route" || kind === "finish") return "exit";
   return "process";
 }
 
@@ -122,7 +126,7 @@ function orderPhases(
 /**
  * Resolve a cross-workflow transition's source step ref. There is no source
  * step on the backend payload, so we synthesise a plausible terminal step:
- * the last `route` step if one exists, else the last `final` step, else the
+ * the last `finish` step if one exists, else the last `route` step, else the last `final` step, else the
  * last step by order, else the initial step.
  */
 function resolveSourceStep(wf: PipelineWorkflow): string | null {
@@ -130,6 +134,8 @@ function resolveSourceStep(wf: PipelineWorkflow): string | null {
   if (steps.length === 0) return wf.initial_step_id;
 
   const ordered = steps.slice().sort((a, b) => a.step_order - b.step_order);
+  const lastFinish = [...ordered].reverse().find((s) => kindFor(s) === "finish");
+  if (lastFinish) return lastFinish.id;
   const lastRoute = [...ordered].reverse().find((s) => kindFor(s) === "route");
   if (lastRoute) return lastRoute.id;
 

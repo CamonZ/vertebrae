@@ -13,6 +13,7 @@ describe("normalizeStepType", () => {
     ["route", "route"],
     ["human_input", "human_input"],
     ["wait_children", "wait_children"],
+    ["finish", "finish"],
   ] as const)("passes %s through", (input, expected) => {
     expect(normalizeStepType(input)).toBe(expected);
   });
@@ -31,6 +32,7 @@ describe("stepTypeStyle", () => {
     expect(stepTypeStyle("route").barVar).toBe("--color-step-route");
     expect(stepTypeStyle("human_input").barVar).toBe("--color-step-human");
     expect(stepTypeStyle("wait_children").barVar).toBe("--color-step-wait");
+    expect(stepTypeStyle("finish").barVar).toBe("--color-step-finish");
   });
 
   it("falls back to a neutral style for unknown kinds", () => {
@@ -48,6 +50,7 @@ describe("hearthStepKind", () => {
     ["route", "route"],
     ["human_input", "human"],
     ["wait_children", "wait"],
+    ["finish", "finish"],
   ] as const)("maps production %s to Hearth %s", (input, expected) => {
     expect(hearthStepKind(input)).toBe(expected);
   });

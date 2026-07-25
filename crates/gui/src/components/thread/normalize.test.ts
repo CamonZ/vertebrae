@@ -159,14 +159,50 @@ function harnessConversationLogs(execId: string, model: string): SessionLog[] {
 // ===========================================================================
 
 describe("stepKindFromStepType", () => {
-  it("maps the five known step types and falls back to execute", () => {
+  it("maps the six known step types and falls back to execute", () => {
     expect(stepKindFromStepType("execute")).toBe("execute");
     expect(stepKindFromStepType("evaluate")).toBe("eval");
     expect(stepKindFromStepType("route")).toBe("route");
     expect(stepKindFromStepType("human_input")).toBe("human");
     expect(stepKindFromStepType("wait_children")).toBe("wait");
+    expect(stepKindFromStepType("finish")).toBe("finish");
     expect(stepKindFromStepType(null)).toBe("execute");
     expect(stepKindFromStepType({ unsupported: "x" })).toBe("execute");
+  });
+});
+
+describe("runToThreads — finish step", () => {
+  it("renders finish as a terminal result without parsing provider logs", () => {
+    const input: RunInput = {
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [
+        exec({
+          id: "finish-1",
+          step_name: "Complete",
+          step_type: "finish",
+          output: null,
+        }),
+      ],
+      logsByExecutionId: {
+        "finish-1": [
+          {
+            ...harnessLog("finish-1", "text", {}, "not-a-date"),
+            content: "not a session log",
+          },
+        ],
+      },
+    };
+
+    const [thread] = runToThreads(input);
+    expect(thread.kind).toBe("finish");
+    expect(thread.turns).toHaveLength(1);
+    expect(thread.turns[0].messages).toEqual([
+      expect.objectContaining({
+        type: "result",
+        label: "finish",
+        body: "Task completed by finish step",
+      }),
+    ]);
   });
 });
 

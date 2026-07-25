@@ -14,9 +14,15 @@
  * from `StepType` via `hearthStepKind` (renaming `eval`/`wait`/`human`). Drives
  * `k-<kind>` token classes. NOTE: there is no synthetic `entry`/`final` kind —
  * the backend has no such step types; flow position is carried by `Role`, and
- * terminality by `AtlasStep.isFinal`.
+ * terminality by `AtlasStep.isFinal` or the finish type.
  */
-export type Kind = "execute" | "eval" | "route" | "wait" | "human";
+export type Kind =
+  | "execute"
+  | "eval"
+  | "route"
+  | "wait"
+  | "human"
+  | "finish";
 
 /** Cosmetic foot label on a step node — flow position, not the step type. */
 export type Role = "entry" | "process" | "exit";
