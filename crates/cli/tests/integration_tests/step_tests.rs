@@ -54,6 +54,82 @@ mod step_create_tests {
     }
 
     #[tokio::test]
+    async fn test_create_finish_step_is_terminal_without_is_final() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Finish".to_string(),
+            workflow: workflow_id,
+            id: Some("finish-step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+            step_type: CliStepType::Finish,
+            output_schema: None,
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+        let step = services
+            .steps()
+            .get_step("finish-step")
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(step.step_type, vertebrae_core::StepType::Finish);
+        assert!(!step.is_final);
+        assert!(step.prompt.is_none());
+        assert!(step.transitions_to.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_finish_step_rejects_prompt_and_transitions() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Invalid Finish".to_string(),
+            workflow: workflow_id,
+            id: Some("invalid-finish".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: Some("This must not run".to_string()),
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec!["next-step".to_string()],
+            step_type: CliStepType::Finish,
+            output_schema: None,
+        };
+
+        let error = cmd.execute(services.steps()).await.unwrap_err();
+        assert!(error.to_string().contains("Finish steps"));
+    }
+
+    #[tokio::test]
     async fn test_create_step_with_id() {
         let services = mock_services();
 
@@ -929,6 +1005,67 @@ mod step_update_tests {
         let result = update_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Updated step: step1"));
+    }
+
+    #[tokio::test]
+    async fn test_update_step_to_finish_rejects_existing_prompt() {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+
+        StepAddCommand {
+            name: "Prompted".to_string(),
+            workflow: workflow_id,
+            id: Some("prompted".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: Some("Run this".to_string()),
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
+        }
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let error = StepUpdateCommand {
+            id: "prompted".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config: None,
+            model: None,
+            provider: None,
+            reasoning_effort: None,
+            codex_model_provider: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: Some(CliStepType::Finish),
+            output_schema: None,
+            clear_output_schema: false,
+        }
+        .execute(services.steps())
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Finish steps"));
     }
 
     #[tokio::test]

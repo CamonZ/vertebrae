@@ -19,6 +19,7 @@ pub enum CliStepType {
     WaitChildren,
     #[value(name = "human_input")]
     HumanInput,
+    Finish,
 }
 
 impl From<CliStepType> for StepType {
@@ -29,8 +30,23 @@ impl From<CliStepType> for StepType {
             CliStepType::Route => StepType::Route,
             CliStepType::WaitChildren => StepType::WaitChildren,
             CliStepType::HumanInput => StepType::HumanInput,
+            CliStepType::Finish => StepType::Finish,
         }
     }
+}
+
+fn validate_finish_constraints(
+    step_type: &StepType,
+    prompt: Option<&str>,
+    transitions_to: &[String],
+) -> Result<(), ServiceError> {
+    if matches!(step_type, StepType::Finish) && (prompt.is_some() || !transitions_to.is_empty()) {
+        return Err(ServiceError::validation_failed(
+            "Finish steps cannot define a prompt or outgoing transitions",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Step management commands
@@ -130,7 +146,7 @@ pub struct StepAddCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// Type of this step (execute, evaluate, route, wait_children, human_input)
+    /// Type of this step (execute, evaluate, route, wait_children, human_input, finish)
     #[arg(long, value_enum, default_value = "execute")]
     pub step_type: CliStepType,
 
@@ -232,6 +248,7 @@ impl StepAddCommand {
             .transpose()?;
 
         let step_type: StepType = self.step_type.clone().into();
+        validate_finish_constraints(&step_type, self.prompt.as_deref(), &transitions_to)?;
 
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
@@ -524,7 +541,7 @@ pub struct StepUpdateCommand {
     #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
     pub provider: Option<Provider>,
 
-    /// New step type (execute, evaluate, route, wait_children, human_input)
+    /// New step type (execute, evaluate, route, wait_children, human_input, finish)
     #[arg(long, value_enum)]
     pub step_type: Option<CliStepType>,
 
@@ -573,6 +590,28 @@ impl StepUpdateCommand {
                 self.id
             )));
         }
+
+        let existing = existing.unwrap();
+        let resulting_step_type = self
+            .step_type
+            .as_ref()
+            .map(|step_type| StepType::from(step_type.clone()))
+            .unwrap_or_else(|| existing.step_type.clone());
+        let resulting_prompt = self.prompt.as_deref().or(existing.prompt.as_deref());
+        let resulting_transitions = if self.clear_transitions || !self.transitions_to.is_empty() {
+            if self.clear_transitions {
+                Vec::new()
+            } else {
+                self.transitions_to.clone()
+            }
+        } else {
+            existing.transitions_to.clone()
+        };
+        validate_finish_constraints(
+            &resulting_step_type,
+            resulting_prompt,
+            &resulting_transitions,
+        )?;
 
         let mut updates = StepUpdate::new();
 
@@ -628,7 +667,7 @@ impl StepUpdateCommand {
             || self.reasoning_effort.is_some()
         {
             let agent_config = build_overlayed_agent_config(
-                existing.as_ref().unwrap().agent_config.clone(),
+                existing.agent_config.clone(),
                 self.agent_config.as_deref(),
                 self.provider,
                 self.model.as_deref(),
@@ -1329,6 +1368,27 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_step_type_finish() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Finish",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "finish",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Finish);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_update_with_step_type_wait_children() {
         let cli = TestCli::try_parse_from([
             "test",
@@ -1361,6 +1421,25 @@ mod tests {
             StepCommand::Update(cmd) => {
                 let core_type: StepType = cmd.step_type.unwrap().into();
                 assert_eq!(core_type, StepType::HumanInput);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_step_type_finish() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--step-type",
+            "finish",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                let core_type: StepType = cmd.step_type.unwrap().into();
+                assert_eq!(core_type, StepType::Finish);
             }
             _ => panic!("Expected Update command"),
         }
