@@ -35,7 +35,7 @@ impl ClaudeStreamDecoder {
                 },
                 ..EventCorrelation::default()
             },
-            timestamp: Utc::now(),
+            timestamp: self.event_timestamp.unwrap_or_else(Utc::now),
             semantics,
             provider_sequence: Some(self.provider_sequence),
             payload,

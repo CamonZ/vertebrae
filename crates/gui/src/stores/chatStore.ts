@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { commands } from "../bindings";
 import { popOut } from "../utils/popOut";
 import {
   discardStashedChatSession,
@@ -32,9 +31,9 @@ import type {
   JsonValue,
   LocalChatHarnessKind,
   PermissionMode,
-  SessionLog,
   UserQuestion,
 } from "../bindings";
+import { commands } from "../bindings";
 
 /**
  * Message types for the Claude chat
@@ -109,234 +108,6 @@ export type ChatMessage =
       timestamp: string;
     }
   | { kind: "error"; message: string; timestamp: string };
-
-function normalizeStoredChatMessage(value: unknown): ChatMessage | null {
-  if (!value || typeof value !== "object") return null;
-  const record = value as Record<string, unknown>;
-  const kind = record.kind;
-  const timestamp =
-    typeof record.timestamp === "string"
-      ? record.timestamp
-      : new Date().toISOString();
-  switch (kind) {
-    case "user":
-      return typeof record.text === "string"
-        ? { kind: "user", text: record.text, timestamp }
-        : null;
-    case "assistant":
-      return typeof record.text === "string"
-        ? {
-            kind: "assistant",
-            text: record.text,
-            timestamp,
-            isPartial:
-              typeof record.isPartial === "boolean"
-                ? record.isPartial
-                : undefined,
-            parentToolUseId:
-              typeof record.parentToolUseId === "string"
-                ? record.parentToolUseId
-                : undefined,
-          }
-        : null;
-    case "tool_call":
-      return typeof record.toolName === "string" &&
-        typeof record.toolId === "string" &&
-        typeof record.input === "string"
-        ? {
-            kind: "tool_call",
-            toolName: record.toolName,
-            toolId: record.toolId,
-            input: record.input,
-            timestamp,
-            parentToolUseId:
-              typeof record.parentToolUseId === "string"
-                ? record.parentToolUseId
-                : undefined,
-          }
-        : null;
-    case "tool_result":
-      return typeof record.toolId === "string" &&
-        typeof record.result === "string"
-        ? {
-            kind: "tool_result",
-            toolId: record.toolId,
-            result: record.result,
-            isError:
-              typeof record.isError === "boolean" ? record.isError : false,
-            timestamp,
-            parentToolUseId:
-              typeof record.parentToolUseId === "string"
-                ? record.parentToolUseId
-                : undefined,
-          }
-        : null;
-    case "file_edit":
-      return typeof record.toolId === "string" &&
-        typeof record.status === "string" &&
-        Array.isArray(record.changes)
-        ? {
-            kind: "file_edit",
-            toolId: record.toolId,
-            status: record.status,
-            changes: record.changes.filter(
-              (change): change is FileUpdateChange =>
-                !!change &&
-                typeof change === "object" &&
-                typeof (change as Record<string, unknown>).path === "string" &&
-                typeof (change as Record<string, unknown>).kind === "string"
-            ),
-            timestamp,
-            parentToolUseId:
-              typeof record.parentToolUseId === "string"
-                ? record.parentToolUseId
-                : undefined,
-          }
-        : null;
-    case "warning":
-      return typeof record.message === "string"
-        ? { kind: "warning", message: record.message, timestamp }
-        : null;
-    case "task_notification":
-      return typeof record.message === "string"
-        ? { kind: "task_notification", message: record.message, timestamp }
-        : null;
-    case "error":
-      return typeof record.message === "string"
-        ? { kind: "error", message: record.message, timestamp }
-        : null;
-    default:
-      return null;
-  }
-}
-
-function jsonlLineTimestamp(line: string, fallback: string): string {
-  try {
-    const parsed = JSON.parse(line) as unknown;
-    if (parsed && typeof parsed === "object") {
-      const timestamp = (parsed as { timestamp?: unknown }).timestamp;
-      if (typeof timestamp === "string" && timestamp.length > 0) {
-        return timestamp;
-      }
-    }
-  } catch {
-    // Invalid provider lines are ignored by parseSessionLogs; keep the fallback.
-  }
-  return fallback;
-}
-
-function providerJsonlLinesToSessionLogs(
-  lines: string[],
-  session: ChatSession
-): SessionLog[] {
-  const fallbackTimestamp = session.createdAt ?? new Date(0).toISOString();
-  return lines.map((line, index) => ({
-    id: `${session.id}:provider-jsonl:${index}`,
-    step_execution_id: session.id,
-    content: line,
-    created_at: jsonlLineTimestamp(line, fallbackTimestamp),
-  }));
-}
-
-function conversationEventToChatMessage(
-  event: ConversationEvent
-): ChatMessage | null {
-  switch (event.kind) {
-    case "user_message":
-      return {
-        kind: "user",
-        text: event.text,
-        timestamp: event.timestamp,
-      };
-    case "assistant_message":
-      return {
-        kind: "assistant",
-        text: event.text,
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "tool_call":
-      return {
-        kind: "tool_call",
-        toolName: event.toolName,
-        toolId: event.toolId,
-        input: JSON.stringify(event.input ?? {}),
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "tool_result":
-      return {
-        kind: "tool_result",
-        toolId: event.toolUseId,
-        result: event.result,
-        isError: event.isError,
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "file_edit":
-      return {
-        kind: "file_edit",
-        toolId: event.toolId,
-        status: event.status,
-        changes: event.changes,
-        timestamp: event.timestamp,
-        ...(event.parentToolUseId
-          ? { parentToolUseId: event.parentToolUseId }
-          : {}),
-      };
-    case "session_start":
-      return {
-        kind: "session_start",
-        model: event.model,
-        timestamp: event.timestamp,
-      };
-    case "session_end":
-      return {
-        kind: "session_end",
-        durationMs: event.durationMs,
-        costUsd: event.costUsd,
-        numTurns: event.numTurns,
-        timestamp: event.timestamp,
-      };
-    case "task_notification":
-      return {
-        kind: "task_notification",
-        message: event.message,
-        timestamp: event.timestamp,
-      };
-    case "thinking":
-      return event.text.startsWith("[error]")
-        ? {
-            kind: "error",
-            message: event.text.replace(/^\[error\]\s*/, ""),
-            timestamp: event.timestamp,
-          }
-        : null;
-    default:
-      return null;
-  }
-}
-
-function providerJsonlLinesToChatMessages(
-  lines: string[],
-  session: ChatSession
-): ChatMessage[] {
-  const messages = parseSessionLogs(
-    providerJsonlLinesToSessionLogs(lines, session),
-    {
-      includeUserMessages: true,
-    }
-  )
-    .map(conversationEventToChatMessage)
-    .filter((message): message is ChatMessage => message !== null);
-  return sanitizeSessionMessages(messages, session.providerResumeId);
-}
 
 function stringArrayValue(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -442,86 +213,6 @@ function sanitizeSessionMessages(
     return true;
   });
   return filtered.length === messages.length ? messages : filtered;
-}
-
-/**
- * Content/identity key for de-duplicating a message across live vs hydrated
- * copies of the SAME event. Deliberately excludes `timestamp`: live messages
- * are stamped at receipt time (`new Date().toISOString()`), while hydrated
- * messages carry the JSONL line's recorded time, so the two copies of one
- * event essentially never share a timestamp. `tool_call`/`tool_result` key on
- * `toolId` alone (globally unique per call, and stable across the live vs
- * hydrated Codex/Claude parsing paths) rather than on `input`/`toolName`,
- * which can differ across those paths for the same call.
- */
-function chatMessageKey(message: ChatMessage): string {
-  switch (message.kind) {
-    case "user":
-      return `${message.kind}:${message.text}`;
-    case "assistant":
-      return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
-    case "tool_call":
-    case "tool_result":
-      return `${message.kind}:${message.toolId}`;
-    case "file_edit":
-      return `${message.kind}:${message.toolId}`;
-    case "permission_request":
-      return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
-    case "user_question":
-      return `${message.kind}:${message.requestId}:${message.toolUseId}`;
-    case "session_start":
-      return `${message.kind}:${message.model}`;
-    case "session_end":
-      return `${message.kind}:${message.durationMs}:${message.numTurns}`;
-    case "warning":
-    case "error":
-    case "task_notification":
-      return `${message.kind}:${message.message}`;
-  }
-}
-
-function mergeHydratedMessages(
-  hydrated: ChatMessage[],
-  current: ChatMessage[]
-): ChatMessage[] {
-  if (current.length === 0) return hydrated;
-  const currentKeys = new Set(current.map(chatMessageKey));
-  const hydratedByKey = new Map(
-    hydrated.map((message) => [chatMessageKey(message), message])
-  );
-  let enriched = false;
-  const mergedCurrent = current.map((currentMessage) => {
-    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
-    if (
-      currentMessage.kind !== "file_edit" ||
-      hydratedMessage?.kind !== "file_edit"
-    ) {
-      return currentMessage;
-    }
-
-    const changes =
-      hydratedMessage.changes.length > 0
-        ? hydratedMessage.changes
-        : currentMessage.changes;
-    const changesChanged =
-      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes);
-    if (hydratedMessage.status !== currentMessage.status || changesChanged) {
-      enriched = true;
-      return {
-        ...currentMessage,
-        status: hydratedMessage.status,
-        changes,
-        // Keep the live receipt time so merging hydration does not reorder the
-        // currently visible conversation.
-      };
-    }
-    return currentMessage;
-  });
-  const missing = hydrated.filter(
-    (message) => !currentKeys.has(chatMessageKey(message))
-  );
-  if (missing.length > 0) return [...missing, ...mergedCurrent];
-  return enriched ? mergedCurrent : current;
 }
 
 function parseJsonObjectInput(input: string): Record<string, unknown> | null {
@@ -693,8 +384,6 @@ export interface ChatSession {
   backendSessionId: string | null;
   /** Provider-specific durable resume ID for this conversation. */
   providerResumeId: string | null;
-  /** Resolved provider JSONL path for direct transcript hydration. */
-  providerJsonlPath?: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected provider model alias for session startup overrides. */
@@ -1012,6 +701,179 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     streamingAssistant: null,
     messageCount: session.messageCount ?? messages.length,
   };
+}
+
+function conversationEventToChatMessage(
+  event: ConversationEvent
+): ChatMessage | null {
+  switch (event.kind) {
+    case "user_message":
+      return { kind: "user", text: event.text, timestamp: event.timestamp };
+    case "assistant_message":
+      return {
+        kind: "assistant",
+        text: event.text,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_call":
+      return {
+        kind: "tool_call",
+        toolName: event.toolName,
+        toolId: event.toolId,
+        input: JSON.stringify(event.input ?? {}),
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_result":
+      return {
+        kind: "tool_result",
+        toolId: event.toolUseId,
+        result: event.result,
+        isError: event.isError,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "file_edit":
+      return {
+        kind: "file_edit",
+        toolId: event.toolId,
+        status: event.status,
+        changes: event.changes,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "session_start":
+      return {
+        kind: "session_start",
+        model: event.model,
+        timestamp: event.timestamp,
+      };
+    case "session_end":
+      return {
+        kind: "session_end",
+        durationMs: event.durationMs,
+        costUsd: event.costUsd,
+        numTurns: event.numTurns,
+        timestamp: event.timestamp,
+      };
+    case "task_notification":
+      return {
+        kind: "task_notification",
+        message: event.message,
+        timestamp: event.timestamp,
+      };
+    case "thinking":
+      return event.text.startsWith("[error]")
+        ? {
+            kind: "error",
+            message: event.text.replace(/^\[error\]\s*/, ""),
+            timestamp: event.timestamp,
+          }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function replayLinesToChatMessages(
+  lines: string[],
+  session: ChatSession
+): ChatMessage[] {
+  const logs = lines.map((content, index) => {
+    let createdAt = session.createdAt ?? "";
+    try {
+      const raw = JSON.parse(content) as { timestamp?: unknown };
+      if (typeof raw.timestamp === "string") createdAt = raw.timestamp;
+    } catch {
+      // The backend already validated event JSON; retain the session fallback.
+    }
+    return {
+      id: `local-replay-${session.id}-${index}`,
+      step_execution_id: session.id,
+      content,
+      format: "harness",
+      created_at: createdAt,
+    };
+  });
+  return sanitizeSessionMessages(
+    parseSessionLogs(logs)
+      .map(conversationEventToChatMessage)
+      .filter((message): message is ChatMessage => message !== null),
+    session.providerResumeId
+  );
+}
+
+function chatMessageKey(message: ChatMessage): string {
+  switch (message.kind) {
+    case "user":
+      return `${message.kind}:${message.text}`;
+    case "assistant":
+      return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
+    case "tool_call":
+    case "tool_result":
+      return `${message.kind}:${message.toolId}`;
+    case "file_edit":
+      return `${message.kind}:${message.toolId}`;
+    case "permission_request":
+      return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
+    case "user_question":
+      return `${message.kind}:${message.requestId}:${message.toolUseId}`;
+    case "session_start":
+      return `${message.kind}:${message.model}`;
+    case "session_end":
+      return `${message.kind}:${message.durationMs}:${message.numTurns}`;
+    case "warning":
+    case "error":
+    case "task_notification":
+      return `${message.kind}:${message.message}`;
+  }
+}
+
+function mergeHydratedMessages(
+  hydrated: ChatMessage[],
+  current: ChatMessage[]
+): ChatMessage[] {
+  if (current.length === 0) return hydrated;
+  const currentKeys = new Set(current.map(chatMessageKey));
+  const hydratedByKey = new Map(
+    hydrated.map((message) => [chatMessageKey(message), message])
+  );
+  let enriched = false;
+  const mergedCurrent = current.map((currentMessage) => {
+    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
+    if (
+      currentMessage.kind !== "file_edit" ||
+      hydratedMessage?.kind !== "file_edit"
+    ) {
+      return currentMessage;
+    }
+    const changes =
+      hydratedMessage.changes.length > 0
+        ? hydratedMessage.changes
+        : currentMessage.changes;
+    if (
+      hydratedMessage.status !== currentMessage.status ||
+      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes)
+    ) {
+      enriched = true;
+      return { ...currentMessage, status: hydratedMessage.status, changes };
+    }
+    return currentMessage;
+  });
+  const missing = hydrated.filter(
+    (message) => !currentKeys.has(chatMessageKey(message))
+  );
+  if (missing.length > 0) return [...missing, ...mergedCurrent];
+  return enriched ? mergedCurrent : current;
 }
 
 function localSessionSummaryFor(
@@ -1352,68 +1214,38 @@ function collapsePaneLayout(
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
-  const loadStoredProviderMessages = async (
+  const loadReplayedProviderMessages = async (
     session: ChatSession
-  ): Promise<{ messages: ChatMessage[]; providerJsonlPath: string | null }> => {
-    if (!session.providerResumeId) {
-      return { messages: [], providerJsonlPath: null };
-    }
-    if (typeof commands.loadLocalChatSessionMessages !== "function") {
-      return { messages: [], providerJsonlPath: null };
-    }
+  ): Promise<ChatMessage[]> => {
+    if (!session.providerResumeId) return [];
+    if (typeof commands.loadLocalChatSessionReplay !== "function") return [];
     try {
-      const result = await commands.loadLocalChatSessionMessages({
+      const result = await commands.loadLocalChatSessionReplay({
+        session_id: session.id,
         harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
-        providerResumeId: session.providerResumeId,
-        projectPath: session.projectPath ?? null,
-        createdAt: session.createdAt ?? null,
-        providerJsonlPath: session.providerJsonlPath ?? null,
+        provider_resume_id: session.providerResumeId,
+        project_path: session.projectPath ?? null,
+        created_at: session.createdAt ?? null,
       });
-      if (result.status !== "ok") {
-        if (result.status === "error") {
+      if (!result || result.status !== "ok") {
+        if (result?.status === "error") {
           console.warn(
-            "Failed to load local chat provider transcript",
+            "Failed to replay local chat provider transcript",
             result.error
           );
         }
-        return { messages: [], providerJsonlPath: null };
+        return [];
       }
-      const data = result.data as unknown;
-      const rawLines =
-        data &&
-        typeof data === "object" &&
-        Array.isArray((data as { lines?: unknown }).lines)
-          ? (data as { lines: unknown[] }).lines.filter(
+      const lines =
+        result.data && Array.isArray(result.data.events)
+          ? result.data.events.filter(
               (line): line is string => typeof line === "string"
             )
           : [];
-      const legacyRawMessages = Array.isArray(data)
-        ? data
-        : data &&
-            typeof data === "object" &&
-            Array.isArray((data as { messages?: unknown }).messages)
-          ? (data as { messages: unknown[] }).messages
-          : [];
-      const providerJsonlPath =
-        data &&
-        typeof data === "object" &&
-        typeof (data as { providerJsonlPath?: unknown }).providerJsonlPath ===
-          "string"
-          ? (data as { providerJsonlPath: string }).providerJsonlPath
-          : null;
-      const messages =
-        rawLines.length > 0
-          ? providerJsonlLinesToChatMessages(rawLines, session)
-          : legacyRawMessages
-              .map(normalizeStoredChatMessage)
-              .filter((message): message is ChatMessage => message !== null);
-      return {
-        messages: sanitizeSessionMessages(messages, session.providerResumeId),
-        providerJsonlPath,
-      };
+      return replayLinesToChatMessages(lines, session);
     } catch (error) {
-      console.warn("Failed to load local chat provider transcript", error);
-      return { messages: [], providerJsonlPath: null };
+      console.warn("Failed to replay local chat provider transcript", error);
+      return [];
     }
   };
 
@@ -1421,54 +1253,25 @@ export const useChatStore = create<ChatStore>((set, get) => {
     sessionId: string,
     session: ChatSession
   ) => {
-    if (!session.providerResumeId) return;
-    void loadStoredProviderMessages(session).then(
-      ({ messages, providerJsonlPath }) => {
-        if (messages.length === 0 && !providerJsonlPath) {
-          return;
-        }
-        set((state) => {
-          const current = state.sessions[sessionId];
-          if (!current) {
-            return state;
-          }
-          const merged = mergeHydratedMessages(messages, current.messages);
-          const nextProviderJsonlPath =
-            providerJsonlPath ?? current.providerJsonlPath ?? null;
-          if (
-            merged === current.messages &&
-            nextProviderJsonlPath === (current.providerJsonlPath ?? null)
-          ) {
-            return state;
-          }
-          const hydrated = {
-            ...current,
-            messages: merged,
-            messageCount: Math.max(merged.length, current.messageCount ?? 0),
-            providerJsonlPath: nextProviderJsonlPath,
-          };
-          if (
-            providerJsonlPath &&
-            providerJsonlPath !== current.providerJsonlPath
-          ) {
-            persistLocalChatSession(hydrated);
-          }
-          return {
-            sessions: {
-              ...state.sessions,
-              [sessionId]: hydrated,
+    void loadReplayedProviderMessages(session).then((messages) => {
+      if (messages.length === 0) return;
+      set((state) => {
+        const current = state.sessions[sessionId];
+        if (!current) return state;
+        const merged = mergeHydratedMessages(messages, current.messages);
+        if (merged === current.messages) return state;
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...current,
+              messages: merged,
+              messageCount: Math.max(merged.length, current.messageCount ?? 0),
             },
-          };
-        });
-      }
-    );
-  };
-
-  const hydrateSessionIfAvailable = (sessionId: string) => {
-    const session = get().sessions[sessionId];
-    if (session) {
-      hydrateProviderMessagesInPlace(sessionId, session);
-    }
+          },
+        };
+      });
+    });
   };
 
   const updateSession = (
@@ -1513,7 +1316,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     openSession: (label, projectPath) => {
       const existing = findMatchingSession(get().sessions, projectPath);
       if (existing) {
-        hydrateSessionIfAvailable(existing);
         set((state) => ({
           ...focusSessionInPaneLayout(state, existing),
           panelOpen: true,
@@ -1577,7 +1379,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     focusSession: (sessionId) => {
-      hydrateSessionIfAvailable(sessionId);
       set((state) => focusSessionInPaneLayout(state, sessionId));
     },
 
@@ -1600,7 +1401,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     bindPaneToSession: (paneId, sessionId) => {
-      hydrateSessionIfAvailable(sessionId);
       let bound = false;
       set((state) => {
         const session = state.sessions[sessionId];
@@ -1738,19 +1538,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!persisted || persisted.status !== "open") {
         return false;
       }
-      const { messages, providerJsonlPath } =
-        await loadStoredProviderMessages(persisted);
-      const hydrated = hydrateLocalSession({
-        ...persisted,
-        messages,
-        providerJsonlPath:
-          providerJsonlPath ?? persisted.providerJsonlPath ?? null,
-      });
-      if (
-        (providerJsonlPath &&
-          providerJsonlPath !== persisted.providerJsonlPath) ||
-        hydrated.permissionMode !== persisted.permissionMode
-      ) {
+      const hydrated = hydrateLocalSession(persisted);
+      if (hydrated.permissionMode !== persisted.permissionMode) {
         persistLocalChatSession(hydrated);
       }
       set((state) => {
@@ -1767,6 +1556,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           panelOpen: true,
         };
       });
+      hydrateProviderMessagesInPlace(hydrated.id, hydrated);
       return true;
     },
 
@@ -1780,7 +1570,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
       const matchingRuntime = get().sessions[runtimeSessionId];
       if (matchingRuntime) {
-        hydrateProviderMessagesInPlace(matchingRuntime.id, matchingRuntime);
         set((state) => ({
           ...focusSessionInPaneLayout(state, matchingRuntime.id),
           panelOpen: true,
@@ -1788,35 +1577,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return matchingRuntime.id;
       }
 
-      const matchingPersisted = listPersistedLocalChatSessions(
-        projectPath
-      ).find(
-        (session) =>
-          session.harness === input.harness &&
-          session.providerResumeId === providerResumeId &&
-          projectPathMatches(session.projectPath, projectPath)
-      );
-
       const session = createProviderThreadSession({
         ...input,
         providerResumeId,
         projectPath,
       });
-      const { messages, providerJsonlPath } = await loadStoredProviderMessages({
-        ...session,
-        providerJsonlPath: matchingPersisted?.providerJsonlPath ?? null,
-        createdAt: matchingPersisted?.createdAt ?? session.createdAt,
-      });
-      const hydrated = hydrateLocalSession({
-        ...session,
-        messages,
-        providerJsonlPath:
-          providerJsonlPath ??
-          matchingPersisted?.providerJsonlPath ??
-          session.providerJsonlPath ??
-          null,
-        messageCount: Math.max(messages.length, session.messageCount ?? 0),
-      });
+      const hydrated = hydrateLocalSession(session);
       set((state) => {
         const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
         return {
@@ -2401,12 +2167,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setPanelOpen: (open) => {
-      if (open) {
-        const activeSessionId = get().activeSessionId;
-        if (activeSessionId) {
-          hydrateSessionIfAvailable(activeSessionId);
-        }
-      }
       set({ panelOpen: open });
     },
 

@@ -6,8 +6,10 @@
 
 mod config;
 mod decoder;
+mod replay;
 mod runtime;
 
 pub use config::*;
 pub use decoder::*;
+pub use replay::*;
 pub use runtime::*;

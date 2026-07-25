@@ -1,7 +1,7 @@
 /**
- * ConversationLogViewer - Displays Claude session logs as a conversation timeline.
+ * ConversationLogViewer - Displays normalized harness logs as a conversation timeline.
  *
- * Transforms raw SessionLog entries into a readable conversation view showing:
+ * Transforms normalized harness SessionLog entries into a readable conversation view showing:
  * - Session boundaries (start/end with model info, duration, cost)
  * - Agent thinking (collapsible text blocks)
  * - Tool calls with icons and summaries
@@ -50,7 +50,9 @@ export function ConversationLogViewer({
   }
 
   return (
-    <TimeModeContext.Provider value={{ mode: timeMode, toggle: toggleTimeMode }}>
+    <TimeModeContext.Provider
+      value={{ mode: timeMode, toggle: toggleTimeMode }}
+    >
       <div className="space-y-1">
         <div className="flex justify-end mb-2">
           <span className="text-2xs text-fg-mute">

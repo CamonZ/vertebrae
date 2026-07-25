@@ -89,9 +89,7 @@ function execOrder(execution: StepExecution): number {
  * the newest attempt in a run already reflects that run's full cache reads;
  * summing every attempt would multiply-count it.
  */
-function cacheReadByLatestPerRun(
-  executions: readonly StepExecution[]
-): number {
+function cacheReadByLatestPerRun(executions: readonly StepExecution[]): number {
   const latest = new Map<string | null, StepExecution>();
   for (const exec of executions) {
     const key = exec.task_run_id ?? null;
@@ -100,14 +98,15 @@ function cacheReadByLatestPerRun(
   }
   let sum = 0;
   for (const exec of latest.values()) {
-    if (typeof exec.cache_read_tokens === "number") sum += exec.cache_read_tokens;
+    if (typeof exec.cache_read_tokens === "number")
+      sum += exec.cache_read_tokens;
   }
   return sum;
 }
 
 /**
- * Sum `costUsd` across all `session_end` events in the given session logs.
- * Returns 0 when no parseable session_end entries exist.
+ * Sum `costUsd` across all normalized harness `session_end` events in the
+ * given session logs. Returns 0 when no parseable session_end entries exist.
  */
 export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
   if (!logs || logs.length === 0) return 0;
@@ -124,13 +123,10 @@ export function costFromSessionLogs(logs: SessionLog[] | undefined): number {
  * Compute rollup metrics across an execution set.
  *
  * Cost source preference:
- *   1. `StepExecution.cost` when present (canonical, populated by the daemon
- *      from Claude's `result` event).
+ *   1. `StepExecution.cost` when present (canonical).
  *   2. Otherwise, when `logsByExecutionId` is provided, fall back to summing
- *      `cost_usd` from `session_end` log entries for that execution. This
- *      keeps the Σ COST rollup honest for runs where the backend never
- *      persisted `StepExecution.cost` (e.g. older completed runs, or runs
- *      whose result event arrived before the cost-write codepath landed).
+ *      `cost_usd` from normalized harness `session_end` log entries for that
+ *      execution.
  */
 export function computeExecutionRollups(
   executions: readonly StepExecution[],
@@ -151,7 +147,8 @@ export function computeExecutionRollups(
     } else if (logsByExecutionId && exec.id) {
       totalCost += costFromSessionLogs(logsByExecutionId[exec.id]);
     }
-    if (typeof exec.input_tokens === "number") rawInputTokens += exec.input_tokens;
+    if (typeof exec.input_tokens === "number")
+      rawInputTokens += exec.input_tokens;
     if (typeof exec.output_tokens === "number")
       outputTokens += exec.output_tokens;
     totalWallTimeMs += durationMs(exec);

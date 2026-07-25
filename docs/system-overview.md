@@ -197,15 +197,17 @@ An audit record of a single step execution run.
 | `output_tokens` | Output token count |
 | `cost` | USD cost of this execution |
 | `duration_ms` | Wall-clock execution time |
-| `session_id` | Claude Code session ID |
+| `session_id` | Provider session ID |
 
-Each execution also has many `SessionLog` records — individual lines of streaming output from the Claude subprocess, captured in real-time.
+Each execution also has `SessionLog` records containing serialized `HarnessEventV1`
+events (`format=harness`). The GUI replays those normalized events through the
+same projection used by the live trace.
 
 ---
 
 ## Workflow Execution: End-to-End
 
-This is the core loop: a task moves through a workflow, and each step is executed by Claude Code autonomously.
+This is the core loop: a task moves through a workflow, and each step is executed by its selected provider harness.
 
 ```
 1. Task assigned to workflow
@@ -226,18 +228,18 @@ This is the core loop: a task moves through a workflow, and each step is execute
 
 5. Daemon (vtb-daemon) receives "run_step"
    ├── DaemonSupervisor → ProjectSupervisor → StepExecutor (actor)
-   ├── Builds: claude -p "<prompt>" --output-format stream-json
+   ├── Builds a provider-neutral request for the selected shared harness
    ├── Runs in: project root or task.worktree (git worktree)
-   └── Streams stdout line-by-line as SessionLog records
+   └── Persists normalized HarnessEventV1 payloads as SessionLog records
 
-6. Claude Code executes
+6. The selected provider harness executes
    ├── Reads task via vtb show <task_id>
    ├── Uses allowed tools (Bash, Edit, Read, Write, Glob, Grep, etc.)
    ├── Runs skills defined in step.skills
-   └── Outputs final result as stream-json
+   └── Emits normalized harness events and a structured outcome
 
 7. StepExecutor processes completion
-   ├── Parses stream-json metrics (tokens, cost, model)
+   ├── Derives metrics from normalized harness usage/outcome data
    ├── Calls update_execution_status (Completed or Failed)
    └── Publishes result to Sacrum via GraphQL
 
@@ -310,7 +312,7 @@ The GUI maintains a WebSocket connection with 30-second heartbeats and exponenti
 
 ## The Daemon: AI Execution Engine
 
-The daemon (`vtb-daemon`) is the bridge between the task management system and Claude Code. It is an actor-based system (using the Ractor framework in Rust) with three actor types:
+The daemon (`vtb-daemon`) is the bridge between the task management system and the provider harnesses. It is an actor-based system (using the Ractor framework in Rust) with three actor types:
 
 ```
 DaemonSupervisor
@@ -320,10 +322,10 @@ DaemonSupervisor
 
 When the daemon receives a `run_step` event, `StepExecutor`:
 
-1. Builds the Claude command from the step's `prompt` and `agent_config`
-2. Spawns `claude -p "<rendered_prompt>" --output-format stream-json` as a subprocess
-3. Streams each line of stdout to Sacrum as a `SessionLog`
-4. On exit, parses the stream-json metadata for token counts, cost, model used
+1. Builds a provider-neutral harness request from the step's `prompt` and `agent_config`
+2. Starts the selected Claude or Codex shared harness
+3. Persists normalized `HarnessEventV1` payloads to Sacrum as `format=harness` `SessionLog`s
+4. On exit, derives token counts, cost, and model from normalized harness data
 5. Reports `StepCompleted` or `StepFailed` back to `ProjectSupervisor`
 6. `ProjectSupervisor` calls Sacrum's `update_execution_status` GraphQL mutation
 

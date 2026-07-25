@@ -7,7 +7,6 @@ pub mod phoenix;
 pub mod provider;
 pub mod session_log_event_sink;
 pub mod settings_synthesis;
-pub mod stream_json;
 
 pub use actors::project_supervisor::{
     CancelStepPayload, RunStepPayload, build_step_config_from_payload, parse_cancel_step_payload,

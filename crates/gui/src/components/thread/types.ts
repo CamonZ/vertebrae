@@ -20,9 +20,9 @@
  *      are its `step_executions`. There is NO cross-run recursion in this
  *      tree — the recursive TaskRunTrace / DelegationBlock machinery is gone.
  *
- *   2. The ONLY nesting axis is intra-run subagents, linked by Anthropic's
- *      `parent_tool_use_id`. A subagent surfaces as a `SpawnMessage` carrying
- *      a child `Thread`. Within one step execution several agents may run in
+ *   2. The ONLY nesting axis is intra-run subagents, linked by the normalized
+ *      harness parent-tool correlation. A subagent surfaces as a `SpawnMessage`
+ *      carrying a child `Thread`. Within one step execution several agents run in
  *      parallel; the parent turn completes only when all children finish.
  *
  *   3. `wait_for_children` is a step→step relationship, NOT intra-step. It is

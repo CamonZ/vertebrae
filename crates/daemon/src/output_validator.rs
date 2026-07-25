@@ -70,8 +70,8 @@ impl CompiledSchema {
 
     /// Validate a step's output against the compiled schema.
     ///
-    /// Prefers `structured_output` (the SDK's native structured output field
-    /// from a stream-json result line) when it is `Some`. Falls back to
+    /// Prefers `structured_output` (the shared harness outcome field) when it
+    /// is `Some`. Falls back to
     /// scanning `output` for the last ```` ```json ``` ```` fenced block when
     /// `structured_output` is `None` — used for older CLI versions or steps
     /// that still embed JSON inside prose.

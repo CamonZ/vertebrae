@@ -46,8 +46,8 @@ impl ClaudePermissionMode {
 /// Claude-only construction policy. Portable per-request values remain in
 /// `harness_core::RequestConfig`.
 /// Resolves the canonical opaque root transcript locator after Claude reveals
-/// its conversation id. Surface crates own discovery policy; the live harness
-/// never guesses Claude's on-disk project encoding or performs replay.
+/// its conversation id. Surface crates own live-session locator resolution;
+/// the replay adapter owns durable transcript discovery and decoding.
 pub trait ClaudeRootLocatorResolver: Send + Sync {
     fn resolve(&self, session_id: &SessionId) -> Result<Option<ProviderThreadRef>, String>;
 }

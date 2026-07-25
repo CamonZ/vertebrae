@@ -104,10 +104,6 @@ vi.mock("../../bindings", () => ({
       },
     }),
     createLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
-    loadLocalChatSessionMessages: vi.fn().mockResolvedValue({
-      status: "ok",
-      data: { lines: [], providerJsonlPath: null },
-    }),
     inferLocalChatSessionTitle: vi.fn().mockResolvedValue({
       status: "ok",
       data: {
@@ -179,10 +175,6 @@ describe("ChatWindowManager", () => {
     vi.mocked(commands.createLocalChatSession).mockResolvedValue({
       status: "ok",
       data: null,
-    });
-    vi.mocked(commands.loadLocalChatSessionMessages).mockResolvedValue({
-      status: "ok",
-      data: { lines: [], providerJsonlPath: null },
     });
     vi.mocked(commands.sendLocalChatMessage).mockResolvedValue({
       status: "ok",
@@ -406,21 +398,6 @@ describe("ChatWindowManager", () => {
 
   it("opens spawned agent rows as provider thread sessions", async () => {
     const user = userEvent.setup();
-    vi.mocked(commands.loadLocalChatSessionMessages).mockResolvedValue({
-      status: "ok",
-      data: {
-        lines: [
-          JSON.stringify({
-            type: "item.completed",
-            item: {
-              type: "agent_message",
-              text: "agent transcript",
-            },
-          }),
-        ],
-        providerJsonlPath: "/tmp/agent-thread-1.jsonl",
-      },
-    });
 
     const parent = createSession({
       id: "parent",
@@ -492,28 +469,13 @@ describe("ChatWindowManager", () => {
       title: "Pasteur",
       harness: "codex",
       providerResumeId: "agent-thread-1",
-      providerJsonlPath: "/tmp/agent-thread-1.jsonl",
     });
     expect(
       miniPanel.getByRole("button", {
         name: "Open spawned agent Pasteur from Inspect Repo",
       })
     ).toHaveAttribute("aria-current", "true");
-    expect(selected?.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          kind: "assistant",
-          text: "agent transcript",
-        }),
-      ])
-    );
-    expect(commands.loadLocalChatSessionMessages).toHaveBeenCalledWith({
-      harness: "codex",
-      providerResumeId: "agent-thread-1",
-      projectPath: "/test/project",
-      createdAt: expect.any(String),
-      providerJsonlPath: null,
-    });
+    expect(selected?.messages).toEqual([]);
     expect(
       loadPersistedLocalChatSession("local-chat-codex-agent-thread-1")
     ).toBeNull();

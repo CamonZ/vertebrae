@@ -10,6 +10,7 @@ mod control;
 mod event;
 mod lifecycle;
 mod projection;
+mod replay;
 mod runtime;
 
 pub use capabilities::*;
@@ -17,4 +18,5 @@ pub use control::*;
 pub use event::*;
 pub use lifecycle::*;
 pub use projection::*;
+pub use replay::*;
 pub use runtime::*;

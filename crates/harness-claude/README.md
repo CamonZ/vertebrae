@@ -29,5 +29,8 @@ The runtime supports:
 - partial text/reasoning, plans, tools, controls, usage, diagnostics, and
   terminal outcomes on independently sequenced root/subagent streams.
 
-Durable transcript-file discovery and replay do not belong to this crate's
-live decoder and are intentionally deferred to the provider replay adapter.
+The crate also owns durable Claude transcript discovery and replay through
+`ClaudeTranscriptReplay`. It searches the Claude project store, feeds each
+JSONL record through the same neutral decoder used by the live runtime, and
+returns sequenced `HarnessEventV1` events. The home directory is injectable for
+tests and alternate deployments; the GUI never parses or locates these files.

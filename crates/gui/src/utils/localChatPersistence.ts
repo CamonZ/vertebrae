@@ -80,7 +80,6 @@ export interface LocalChatSessionSummary {
   updatedAt: string;
   projectPath: string | null;
   providerResumeId: string | null;
-  providerJsonlPath?: string | null;
   threadTotalTokens?: number;
   messageCount: number;
   lifecycle: LocalChatLifecycle;
@@ -160,11 +159,6 @@ export function normalizeLocalChatSession(
     typeof candidate.providerResumeId === "string"
       ? candidate.providerResumeId
       : null;
-  const providerJsonlPath =
-    typeof candidate.providerJsonlPath === "string" &&
-    candidate.providerJsonlPath.trim().length > 0
-      ? candidate.providerJsonlPath
-      : null;
   const title = typeof candidate.title === "string" ? candidate.title : null;
   const titleStatus =
     typeof candidate.titleStatus === "string" &&
@@ -198,7 +192,6 @@ export function normalizeLocalChatSession(
     harness: normalizeHarness(candidate.harness),
     backendSessionId: normalizeRuntimeBackendSessionId(candidate, options),
     providerResumeId,
-    providerJsonlPath,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
     selectedModelId:
@@ -357,8 +350,6 @@ function serializeSession(
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
     providerResumeId: session.providerResumeId ?? null,
-    providerJsonlPath:
-      session.providerJsonlPath ?? previous?.providerJsonlPath ?? null,
     threadTotalTokens: session.threadTotalTokens,
     projectPath: session.projectPath ?? null,
     selectedModelId: session.selectedModelId,
@@ -399,7 +390,6 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
     providerResumeId: session.providerResumeId ?? null,
-    providerJsonlPath: session.providerJsonlPath ?? null,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
@@ -553,7 +543,6 @@ export function summarizeLocalChatSession(
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
     providerResumeId: session.providerResumeId,
-    providerJsonlPath: session.providerJsonlPath ?? null,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,

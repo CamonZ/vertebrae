@@ -815,11 +815,11 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
 }
 },
 /**
- * Load durable transcript messages from the owning harness JSONL store.
+ * Replay a durable local chat transcript through the provider-owned harness adapter.
  */
-async loadLocalChatSessionMessages(input: LoadLocalChatSessionMessagesInput) : Promise<Result<LoadLocalChatSessionMessagesOutput, CommandError>> {
+async loadLocalChatSessionReplay(input: LoadLocalChatSessionReplayInput) : Promise<Result<LoadLocalChatSessionReplayOutput, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_messages", { input }) };
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_replay", { input }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1098,6 +1098,8 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null }
 export type InferLocalChatSessionTitleOutput = { title: string | null; confidence: number; sufficient_signal: boolean }
+export type LoadLocalChatSessionReplayInput = { session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; project_path: string | null; created_at: string | null }
+export type LoadLocalChatSessionReplayOutput = { events: string[] }
 /**
  * Result returned after GUI-native project initialization.
  */
@@ -1128,8 +1130,6 @@ project_created: boolean }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
-export type LoadLocalChatSessionMessagesInput = { harness: LocalChatHarnessKind; providerResumeId: string; projectPath: string | null; createdAt: string | null; providerJsonlPath: string | null }
-export type LoadLocalChatSessionMessagesOutput = { lines: string[]; providerJsonlPath: string | null }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[] }
@@ -1140,7 +1140,7 @@ export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; error: string }
-export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; providerJsonlPath: string | null; threadTotalTokens?: number | null; messageCount: number; lifecycle: string; status: string }
+export type LocalChatSessionIndexEntry = { id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null; threadTotalTokens?: number | null; messageCount: number; lifecycle: string; status: string }
 export type LocalChatSessionInitEvent = { backend_session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; model: string; tools: string[] }
 export type LocalChatSessionUsageEvent = { backend_session_id: string; harness: LocalChatHarnessKind; model: string; context_tokens: number; context_window: number; thread_total_tokens?: number }
 export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; warning: string }

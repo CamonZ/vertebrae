@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
     AgentMetadata, ControlRequestId, FileChange, HarnessEventDraftV1, ProviderResumeId,
@@ -105,6 +106,7 @@ pub struct ClaudeStreamDecoder {
     agent_spawn_tools: HashMap<String, ToolCallId>,
     provider_control_inputs: HashMap<ControlRequestId, Value>,
     pending_file_changes: HashMap<ToolCallId, Vec<FileChange>>,
+    event_timestamp: Option<DateTime<Utc>>,
 }
 
 impl ClaudeStreamDecoder {
@@ -132,6 +134,7 @@ impl ClaudeStreamDecoder {
             agent_spawn_tools: HashMap::new(),
             provider_control_inputs: HashMap::new(),
             pending_file_changes: HashMap::new(),
+            event_timestamp: None,
         }
     }
 
@@ -179,10 +182,51 @@ impl ClaudeStreamDecoder {
         &mut self,
         line: &str,
     ) -> Result<Vec<HarnessEventDraftV1>, ClaudeDecodeError> {
+        self.decode_line_at(line, Utc::now())
+    }
+
+    /// Decode one transcript line while preserving its durable timestamp.
+    /// Live callers use `decode_line`, which timestamps events at receipt.
+    pub fn decode_line_at(
+        &mut self,
+        line: &str,
+        timestamp: DateTime<Utc>,
+    ) -> Result<Vec<HarnessEventDraftV1>, ClaudeDecodeError> {
         let value: Value = serde_json::from_str(line)
             .map_err(|error| ClaudeDecodeError::Malformed(error.to_string()))?;
         self.provider_sequence = self.provider_sequence.saturating_add(1);
-        self.decode_value(value, self.provider_sequence)
+        self.event_timestamp = Some(timestamp);
+        let result = self.decode_value(value, self.provider_sequence);
+        self.event_timestamp = None;
+        result
+    }
+
+    pub(crate) fn replay_user_input_draft(
+        &self,
+        content: String,
+        timestamp: DateTime<Utc>,
+    ) -> HarnessEventDraftV1 {
+        let thread_id = self.context.root_thread_id.clone();
+        HarnessEventDraftV1 {
+            stream_id: self.context.root_stream_id.clone(),
+            correlation: vertebrae_harness_core::EventCorrelation {
+                session_id: self.context.session_id.clone(),
+                thread_id: Some(thread_id.clone()),
+                provider_resume_id: self.context.provider_resume_id.clone(),
+                ..Default::default()
+            },
+            timestamp,
+            semantics: vertebrae_harness_core::UpdateSemantics::Snapshot,
+            provider_sequence: Some(self.provider_sequence),
+            payload: vertebrae_harness_core::HarnessEventPayloadV1::TurnInput(
+                vertebrae_harness_core::TurnInput {
+                    thread_id,
+                    run_id: self.context.run_id.clone(),
+                    content,
+                    provenance: vertebrae_harness_core::TurnInputProvenance::Human,
+                },
+            ),
+        }
     }
 
     fn decode_value(

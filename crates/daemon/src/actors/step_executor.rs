@@ -37,7 +37,7 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 
 pub const CHECKPOINT_CLAUDE_ARGV: &str = "claude_argv";
 pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
-pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
+pub const CHECKPOINT_HARNESS_SESSION_INIT: &str = "harness_session_init";
 const CANCELLED_TERMINAL_PERSISTENCE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(250);
 
@@ -56,11 +56,24 @@ pub struct StepConfig {
     pub verbose_daemon_logging: bool,
 }
 
+/// Metrics reported with a completed workflow step.
+///
+/// Harness runtimes now emit normalized events; this is the daemon's compact
+/// result summary and is intentionally independent of any provider wire
+/// format.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepMetrics {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cost_usd: f64,
+    pub duration_ms: i64,
+}
+
 #[derive(Debug, Clone)]
 pub enum StepResult {
     Completed {
         exit_code: i32,
-        metrics: Option<crate::stream_json::StreamMetrics>,
+        metrics: Option<StepMetrics>,
         output: Option<String>,
     },
     Failed {
@@ -169,11 +182,11 @@ impl EventSink for DaemonHarnessEventSink {
                     target: VERBOSE_LOG_TARGET,
                     execution_id = %self.execution_id,
                     task_id = %self.task_id,
-                    checkpoint = CHECKPOINT_STREAM_JSON_INIT,
+                    checkpoint = CHECKPOINT_HARNESS_SESSION_INIT,
                     session_id = ?started.provider_resume_id,
                     tools = ?started.tools,
                     structured_output_advertised = started.tools.iter().any(|tool| tool == "StructuredOutput"),
-                    "verbose: Claude harness session started"
+                    "verbose: harness session started"
                 ),
                 HarnessEventPayloadV1::Warning(diagnostic)
                 | HarnessEventPayloadV1::Error(diagnostic)
@@ -191,7 +204,7 @@ impl EventSink for DaemonHarnessEventSink {
                 _ => {}
             }
         }
-        // Only durable normalized events contribute to the daemon's legacy
+        // Only durable normalized events contribute to the daemon's compact
         // StepResult metrics. Terminal RunOutcome.usage is informational and
         // intentionally ignored to avoid counting the same turn twice.
         let normalized_usage = match &event.payload {
@@ -846,20 +859,18 @@ impl StepExecutor {
                                     )
                                 })
                             };
-                            let metrics = normalized.map(|(input, output, cost)| {
-                                crate::stream_json::StreamMetrics {
-                                    input_tokens: i64::try_from(input).unwrap_or(i64::MAX),
-                                    output_tokens: i64::try_from(output).unwrap_or(i64::MAX),
-                                    cost_usd: outcome
-                                        .metrics
-                                        .total_cost_usd
-                                        .unwrap_or(cost as f64 / 1_000_000.0),
-                                    duration_ms: outcome
-                                        .metrics
-                                        .duration_ms
-                                        .map(|value| i64::try_from(value).unwrap_or(i64::MAX))
-                                        .unwrap_or_default(),
-                                }
+                            let metrics = normalized.map(|(input, output, cost)| StepMetrics {
+                                input_tokens: i64::try_from(input).unwrap_or(i64::MAX),
+                                output_tokens: i64::try_from(output).unwrap_or(i64::MAX),
+                                cost_usd: outcome
+                                    .metrics
+                                    .total_cost_usd
+                                    .unwrap_or(cost as f64 / 1_000_000.0),
+                                duration_ms: outcome
+                                    .metrics
+                                    .duration_ms
+                                    .map(|value| i64::try_from(value).unwrap_or(i64::MAX))
+                                    .unwrap_or_default(),
                             });
                             drop(usage);
                             let output = outcome

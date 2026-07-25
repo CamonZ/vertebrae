@@ -3,15 +3,27 @@ import { computeExecutionRollups } from "./computeExecutionRollups";
 import type { SessionLog, StepExecution } from "../bindings";
 
 function sessionEndLog(execId: string, costUsd: number, idx = 0): SessionLog {
+  const eventId = `event-${execId}-${idx}`;
   return {
     id: `log-${execId}-${idx}`,
     step_execution_id: execId,
+    format: "harness",
     content: JSON.stringify({
-      type: "result",
-      subtype: "success",
-      duration_ms: 1234,
-      num_turns: 3,
-      total_cost_usd: costUsd,
+      version: 1,
+      event_id: eventId,
+      stream_id: "stream-1",
+      correlation: { session_id: "session-1", thread_id: "thread-1" },
+      timestamp: "2026-01-01T00:00:00.000Z",
+      semantics: "snapshot",
+      type: "run_finished",
+      data: {
+        status: "completed",
+        metrics: {
+          duration_ms: 1234,
+          turn_count: 3,
+          total_cost_usd: costUsd,
+        },
+      },
     }),
     created_at: "2026-01-01T00:00:00.000Z",
   };
@@ -46,9 +58,24 @@ describe("computeExecutionRollups", () => {
 
   it("sums cost, tokens (input + output), and duration_ms across executions", () => {
     const rollups = computeExecutionRollups([
-      exec({ cost: "0.25", input_tokens: 100, output_tokens: 50, duration_ms: 1200 }),
-      exec({ cost: "0.5", input_tokens: 200, output_tokens: 75, duration_ms: 800 }),
-      exec({ cost: "0.1", input_tokens: 10, output_tokens: 5, duration_ms: 100 }),
+      exec({
+        cost: "0.25",
+        input_tokens: 100,
+        output_tokens: 50,
+        duration_ms: 1200,
+      }),
+      exec({
+        cost: "0.5",
+        input_tokens: 200,
+        output_tokens: 75,
+        duration_ms: 800,
+      }),
+      exec({
+        cost: "0.1",
+        input_tokens: 10,
+        output_tokens: 5,
+        duration_ms: 100,
+      }),
     ]);
     // Unattributed executions collapse into a single pseudo-run so the count
     // reflects "runs we know about", not raw attempt density.
@@ -172,8 +199,18 @@ describe("computeExecutionRollups", () => {
 
   it("treats missing fields as zero contribution", () => {
     const rollups = computeExecutionRollups([
-      exec({ cost: null, input_tokens: null, output_tokens: null, duration_ms: null }),
-      exec({ cost: "0.4", input_tokens: 10, output_tokens: 20, duration_ms: 500 }),
+      exec({
+        cost: null,
+        input_tokens: null,
+        output_tokens: null,
+        duration_ms: null,
+      }),
+      exec({
+        cost: "0.4",
+        input_tokens: 10,
+        output_tokens: 20,
+        duration_ms: 500,
+      }),
     ]);
     // Both executions lack task_run_id, so they collapse into one pseudo-run.
     expect(rollups.totalRuns).toBe(1);
@@ -232,8 +269,6 @@ describe("computeExecutionRollups", () => {
     const logsByExecutionId = {
       "exec-1": [sessionEndLog("exec-1", 0.5)],
     };
-    expect(
-      computeExecutionRollups([e], logsByExecutionId).totalCost
-    ).toBe(0);
+    expect(computeExecutionRollups([e], logsByExecutionId).totalCost).toBe(0);
   });
 });

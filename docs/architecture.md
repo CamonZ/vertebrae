@@ -115,6 +115,66 @@ DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `StepUp
 
 Error types: `ServiceError`, `ServiceResult`
 
+## Harness Crates
+
+The harness crates are the only place provider wire protocols live. Every
+surface — GUI local chat and daemon step execution — talks to them through one
+provider-neutral contract, so there is a single normalized event stream for
+both live delivery and `format=harness` `SessionLog` replay.
+
+### Crate ownership
+
+| Crate | Owns | Must not contain |
+|-------|------|------------------|
+| `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
+| `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness-codex` | Codex App Server launch/readiness, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness` | Provider **selection** only: `HarnessRuntimeFactory` maps `AgentConfig.provider` to an adapter and normalizes `RequestConfig` | Wire protocols, event decoding |
+
+Only `crates/harness` depends on the adapter crates. Surfaces depend on
+`vertebrae-harness` (construction) and `vertebrae-harness-core` (contract), and
+never on `vertebrae-harness-claude` or `vertebrae-harness-codex` directly —
+that is what keeps provider knowledge out of the daemon and the GUI.
+
+```
+crates/daemon ──┐                  ┌── crates/harness-claude
+                ├── crates/harness ┤
+crates/gui ─────┘        │         └── crates/harness-codex
+                         │                     │
+                         └──── crates/harness-core ────┘
+```
+
+### Event flow
+
+Adapters emit `HarnessEventDraftV1`; `EventSequencer` assigns per-stream
+sequence numbers and produces `HarnessEventV1`. That single stream feeds:
+
+- **Live delivery** — the GUI's local-chat event sink translates
+  `HarnessEventV1` into local-chat Tauri events
+- **Persistence** — the daemon's `SessionLogEventSink` writes serialized
+  `HarnessEventV1` payloads as `format=harness` `SessionLog` records
+- **Replay** — provider adapters discover their own durable JSONL and normalize
+  it into those same `format=harness` events; the GUI projects the neutral
+  records through the canonical parser, so replayed chat matches what was
+  shown live
+
+Provider transcript files are discovered and parsed only by their individual
+harness crates; the GUI receives normalized V1 events through
+`HarnessRuntimeFactory`.
+
+### Adding a provider
+
+1. Add the variant to `Provider` in `crates/core/src/model_catalog.rs` and its
+   models to the catalog.
+2. Create `crates/harness-<provider>` implementing `HarnessRuntime` from
+   `harness-core`. Emit `HarnessEventDraftV1` — never a provider-shaped event —
+   and map provider approvals onto `ControlRequestEnvelope`.
+3. Add the crate as a dependency of `crates/harness` only, and extend
+   `HarnessRuntimeFactory::create` plus `normalized_request_config` with the
+   new match arm.
+4. Surfaces need no provider-specific code: the daemon persists the normalized
+   events unchanged, and the GUI renders them through the existing projection.
+
 ## Sacrum Client (`crates/sacrum-client`)
 
 Concrete implementations of all service traits via GraphQL.
@@ -180,9 +240,10 @@ DaemonSupervisor
 - When a step has an `output_schema`, passes it through the provider-neutral
   harness request to enforce structured output
 - Step-level `output_schema` takes precedence over `agent_config.json_schema`
-- Streams stdout as `SessionLog` records to Sacrum
+- Persists the harness's normalized `HarnessEventV1` stream to Sacrum as
+  `format=harness` `SessionLog` records via `SessionLogEventSink`
 - Reports completion/failure with token counts, cost, and the actual
-  provider/model used
+  provider/model used, derived from the normalized usage and outcome events
 - Handles step types: `execute` (run prompt), `evaluate` (assess output for routing), `route` (branch logic)
 - Runs as a macOS launchd or Linux systemd user service installed by the GUI onboarding flow
 
@@ -202,5 +263,6 @@ See [GUI Development](gui-development.md) for dev setup and frontend details.
 
 - **~34 Tauri commands** wrapping `VertebraeServices`
 - **WebSocket real-time sync** via Phoenix channels
-- **Claude session manager** for JSONL chat sessions
+- **Provider-neutral local chat harnesses** for Claude and Codex sessions,
+  built through the shared `HarnessRuntimeFactory` (see [Harness Crates](#harness-crates))
 - Workflow execution commands delegate to Sacrum; daemon clients pick up execution events
