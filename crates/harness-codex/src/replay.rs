@@ -331,8 +331,8 @@ fn parse_response_item(
             if text.is_empty() {
                 return Vec::new();
             }
-            if string(payload, "role").as_deref() == Some("user") {
-                vec![state.draft(
+            match string(payload, "role").as_deref() {
+                Some("user") => vec![state.draft(
                     timestamp,
                     provider_sequence,
                     HarnessEventPayloadV1::TurnInput(TurnInput {
@@ -341,13 +341,17 @@ fn parse_response_item(
                         content: text,
                         provenance: TurnInputProvenance::Human,
                     }),
-                )]
-            } else {
-                vec![state.draft(
+                )],
+                // Codex seeds every rollout with `developer` messages carrying
+                // the sandbox permissions, app, plugin, and skill instructions.
+                // They are provider-injected context, not model output, and
+                // replaying them renders the system prompt as a first turn.
+                Some("developer" | "system") => Vec::new(),
+                _ => vec![state.draft(
                     timestamp,
                     provider_sequence,
                     HarnessEventPayloadV1::Text(TextEvent { text }),
-                )]
+                )],
             }
         }
         "reasoning" => content_text(payload.get("summary").or_else(|| payload.get("text")))
@@ -914,5 +918,39 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+    }
+
+    #[test]
+    fn skips_provider_injected_developer_context() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("rollout-session-2.jsonl"),
+            concat!(
+                "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"session-2\"}}\n",
+                "{\"timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"developer\",\"content\":[{\"type\":\"input_text\",\"text\":\"<permissions instructions>\\nsandbox_mode is danger-full-access.\\n</permissions instructions>\"}]}}\n",
+                "{\"timestamp\":\"2026-01-01T00:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n"
+            ),
+        )
+        .unwrap();
+        let replay = CodexTranscriptReplay::new(Some(home.path().to_path_buf()))
+            .replay(&TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("session-2"),
+                stream_id: StreamId::new("replay/session-2"),
+                project_path: None,
+                created_at: Some("2026-01-01T00:00:00Z".into()),
+            })
+            .unwrap()
+            .unwrap();
+        let texts = replay
+            .events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                HarnessEventPayloadV1::Text(text) => Some(text.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(texts, vec!["hi"]);
     }
 }
