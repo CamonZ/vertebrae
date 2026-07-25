@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Serialize;
-use vertebrae_core::{ServiceError, VertebraeServices};
+use vertebrae_core::{ServiceError, StepType, VertebraeServices};
 
 /// Transition a task to a specific workflow step
 ///
@@ -279,9 +279,11 @@ impl TransitionToCommand {
             None
         };
 
-        // Get unblocked tasks (for done/terminal steps)
+        // Get unblocked tasks when a completion boundary is reached. Keep the
+        // legacy final marker for older workflows, but use the explicit finish
+        // step type for new workflows.
         let mut unblocked_tasks = vec![];
-        if target_step.is_final {
+        if target_step.is_final || matches!(&target_step.step_type, StepType::Finish) {
             let dependents = services.tasks().get_dependents(&id).await?;
 
             for dependent_id in dependents {

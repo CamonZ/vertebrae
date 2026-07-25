@@ -57,7 +57,7 @@ Feature: Show task details
     And the output should contain "<blocker_id>"
 
   Scenario: Show task keeps a blocker visible when a done-named step has no completion timestamp
-    Given a workflow "nonterminal-show-wf" with steps "backlog, done"
+    Given a workflow "nonterminal-show-wf" with steps "backlog:execute, done:execute"
     And I create a task with:
       | title | Nonterminal done blocker |
     And I assign the workflow to the task
@@ -72,8 +72,7 @@ Feature: Show task details
     And the output should contain "<blocker_id>"
 
   Scenario: Show task hides a blocker after completed_at is set
-    Given a workflow "terminal-show-wf" with steps "backlog, done"
-    And the workflow is final
+    Given a workflow "terminal-show-wf" with steps "backlog:execute, done:finish"
     And I create a task with:
       | title | Completed blocker |
     And I assign the workflow to the task

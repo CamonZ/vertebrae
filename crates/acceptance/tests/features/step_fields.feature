@@ -85,6 +85,19 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Barrier" in the workflow should have step_type "wait_children"
 
+  Scenario: Create a finish step without the legacy final marker
+    When I add a step "Complete" to the workflow with flag "--step-type" and value "finish"
+    Then the command should succeed
+    And the step "Complete" in the workflow should have step_type "finish"
+    When I show the step "Complete"
+    Then the output should contain "Step Type:     finish"
+    And the output should contain "Is Final:      No"
+
+  Scenario: Step show JSON preserves finish step type
+    When I add a step "JsonComplete" to the workflow with flag "--step-type" and value "finish"
+    And I show the step "JsonComplete" as JSON
+    Then the step show JSON should have step_type "finish"
+
   Scenario: Step show displays human_input step type
     When I add a step "Gate" to the workflow with flag "--step-type" and value "human_input"
     And I show the step "Gate"

@@ -37,6 +37,9 @@ vtb step add "Needs Input" -w <workflow-id> --step-type human_input
 # Add a routing step
 vtb step add "Router" -w <workflow-id> --step-type route
 
+# Add a promptless terminal step
+vtb step add "Complete" -w <workflow-id> --step-type finish
+
 # Machine-readable creation result
 vtb --json step add "Review" -w <workflow-id>
 
@@ -142,7 +145,7 @@ request with no property changes before reporting success.
 | `--provider <PROVIDER>` | | Set `agent_config.provider`; accepts `anthropic`/`claude` or `openai`/`codex`; alias `--model-provider` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
 | `--reasoning-effort <EFFORT>` | | Set `agent_config.reasoning_effort`; valid values are `low`, `medium`, `high`, and `xhigh`; only valid when the resulting provider is OpenAI/Codex |
-| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, and `human_input` |
+| `--step-type <STEP_TYPE>` | | Set the step type; values are `execute`, `evaluate`, `route`, `wait_children`, `human_input`, and `finish` |
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
@@ -225,7 +228,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (see below) |
+| `step-type` | Type of step: `execute`, `evaluate`, `route`, `wait_children`, `human_input`, or `finish` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 
 ### Step Types
@@ -239,6 +242,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 | `route` | Directs work to different paths based on conditions. Uses a fixed routing contract schema. |
 | `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 | `human_input` | Human review/input gate. The workflow pauses for external input instead of dispatching a daemon execution. |
+| `finish` | Promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to a daemon executor. |
 
 ```bash
 # Set step type on creation
@@ -247,11 +251,26 @@ vtb step add "Eval" -w <wf-id> --step-type evaluate
 # Create a human-input gate
 vtb step add "Needs Input" -w <wf-id> --step-type human_input
 
+# Create a promptless terminal step
+vtb step add "Complete" -w <wf-id> --step-type finish
+
 # Change step type later
 vtb step update <step-id> --step-type route
 ```
 
 When a step has type `evaluate` and multiple outgoing transitions, the daemon runs a separate evaluation execution whose output is matched against transition labels to determine the next step — creating a **branching state machine** driven by AI judgment.
+
+`finish` is the explicit terminal step type introduced by Sacrum. It supersedes
+the legacy `is_final` marker for new workflows: a finish step is terminal even
+when `is_final` is `false`, and its prompt, agent configuration, output schema,
+and outgoing transitions must be empty. The daemon and GUI treat it as a
+completion event rather than an AI execution. Existing `is_final` steps remain
+wire-compatible and continue to render as terminal steps.
+
+The six step types are carried unchanged through the Sacrum API, core models,
+CLI JSON output, Tauri bindings, Atlas/task-location surfaces, and trace
+normalization. Unknown future wire values remain available through the
+`unsupported` compatibility variant.
 
 ### Output Schemas
 
