@@ -815,6 +815,17 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
 }
 },
 /**
+ * Replay a durable local chat transcript through the provider-owned harness adapter.
+ */
+async loadLocalChatSessionReplay(input: LoadLocalChatSessionReplayInput) : Promise<Result<LoadLocalChatSessionReplayOutput, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_replay", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Resolve a local chat permission request shown in the GUI.
  */
 async resolvePermissionRequest(input: ResolvePermissionRequestInput) : Promise<Result<JsonValue, ResolvePermissionRequestError>> {
@@ -1087,6 +1098,8 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null }
 export type InferLocalChatSessionTitleOutput = { title: string | null; confidence: number; sufficient_signal: boolean }
+export type LoadLocalChatSessionReplayInput = { session_id: string; harness: LocalChatHarnessKind; provider_resume_id: string | null; project_path: string | null; created_at: string | null }
+export type LoadLocalChatSessionReplayOutput = { events: string[] }
 /**
  * Result returned after GUI-native project initialization.
  */

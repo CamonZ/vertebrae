@@ -39,6 +39,12 @@ thread catalog exposes every stream observed for a logical thread; a surface
 that needs a total presentation order across resume epochs must retain that
 external persistence metadata separately from `HarnessEventV1`.
 
+`TranscriptReplayRequest`, `TranscriptReplay`, and
+`TranscriptReplayAdapter` provide the provider-neutral boundary for durable
+transcript restoration. Adapters own file discovery and native JSONL parsing;
+they return normalized events after sequencing, so surfaces can replay a
+conversation without depending on provider storage layouts.
+
 ## Input authorship
 
 `turn_input` stores exact, unabridged input. `turn_started.input_summary` is

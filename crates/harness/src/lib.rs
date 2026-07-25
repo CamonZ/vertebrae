@@ -17,11 +17,14 @@ use serde_json::{Value, json};
 use vertebrae_core::{AgentConfig, PermissionMode, Provider};
 use vertebrae_harness_claude::{
     ClaudePermissionMode, ClaudeProviderConfig, ClaudeProviderPrelude, ClaudeRootLocatorResolver,
-    ClaudeRuntime,
+    ClaudeRuntime, ClaudeTranscriptReplay,
 };
-use vertebrae_harness_codex::{CodexPermissionConfig, CodexProviderConfig, CodexRuntime};
+use vertebrae_harness_codex::{
+    CodexPermissionConfig, CodexProviderConfig, CodexRuntime, CodexTranscriptReplay,
+};
 use vertebrae_harness_core::{
-    HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId,
+    HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
+    TranscriptReplayRequest,
 };
 
 /// Construction inputs owned by the surface or deployment environment.
@@ -51,6 +54,9 @@ pub struct HarnessFactoryConfig {
     /// Cached daemon compatibility root to merge into AgentConfig exactly
     /// once, preserving the daemon's pre-snapshot argv behavior.
     pub claude_managed_plugin_root: Option<PathBuf>,
+    /// Optional home directory override for provider-owned transcript replay.
+    /// Runtime launch still uses the process environment as before.
+    pub transcript_home_dir: Option<PathBuf>,
     pub default_permission_mode: Option<PermissionMode>,
 }
 
@@ -103,6 +109,23 @@ impl HarnessRuntimeFactory {
             runtime,
             request_config,
         })
+    }
+
+    /// Discover and replay a durable provider transcript without exposing
+    /// provider-specific JSONL formats to the caller.
+    pub fn replay_transcript(
+        &self,
+        provider: Provider,
+        request: &TranscriptReplayRequest,
+    ) -> Result<Option<TranscriptReplay>, HarnessError> {
+        match provider {
+            Provider::Anthropic => {
+                ClaudeTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
+            }
+            Provider::Openai => {
+                CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
+            }
+        }
     }
 
     fn build_claude(

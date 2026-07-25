@@ -44,7 +44,8 @@ impl EventSequencer {
         }
     }
 
-    fn sequence(&self, draft: HarnessEventDraftV1) -> HarnessEventV1 {
+    /// Assign canonical identity and ordering to one event draft.
+    pub fn sequence_draft(&self, draft: HarnessEventDraftV1) -> HarnessEventV1 {
         let mut sequences = self
             .next_sequences
             .lock()
@@ -62,6 +63,17 @@ impl EventSequencer {
         };
         *sequence = sequence.saturating_add(1);
         event
+    }
+
+    /// Sequence a complete replay in provider-file order.
+    pub fn sequence_drafts(
+        &self,
+        drafts: impl IntoIterator<Item = HarnessEventDraftV1>,
+    ) -> Vec<HarnessEventV1> {
+        drafts
+            .into_iter()
+            .map(|draft| self.sequence_draft(draft))
+            .collect()
     }
 
     fn stream_failed(&self, stream_id: &StreamId) -> bool {
@@ -120,7 +132,7 @@ impl SequencedEventSink {
                 draft.stream_id
             )));
         }
-        let event = self.sequencer.sequence(draft);
+        let event = self.sequencer.sequence_draft(draft);
         // Delivery errors are not transactional: the sink may have accepted
         // the event before reporting failure. The guard also handles task
         // cancellation or panic while dispatch is awaiting the sink.

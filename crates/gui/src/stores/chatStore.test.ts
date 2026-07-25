@@ -6,6 +6,7 @@ import {
   loadPersistedLocalChatSession,
   persistLocalChatSession,
 } from "../utils/localChatPersistence";
+import { commands } from "../bindings";
 
 describe("chatStore", () => {
   beforeEach(() => {
@@ -197,6 +198,98 @@ describe("chatStore", () => {
         tokenUsage: { used: 50, max: 200000 },
       });
       expect(useChatStore.getState().sessions[id].messages).toEqual([]);
+    });
+
+    it("replays normalized provider events when reopening a persisted session", async () => {
+      const id = useChatStore.getState().openSession("Task Replay", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-replay");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValue({
+          status: "ok",
+          data: {
+            events: [
+              JSON.stringify({
+                version: 1,
+                event_id: "event-1",
+                stream_id: "local-replay/session",
+                sequence: 1,
+                correlation: { session_id: "conv-replay" },
+                timestamp: "2026-01-01T00:00:00Z",
+                semantics: "snapshot",
+                type: "session_started",
+                data: {
+                  provider: "anthropic",
+                  model: "sonnet",
+                  provider_resume_id: "conv-replay",
+                  tools: [],
+                },
+              }),
+              JSON.stringify({
+                version: 1,
+                event_id: "event-2",
+                stream_id: "local-replay/session",
+                sequence: 2,
+                correlation: { session_id: "conv-replay", thread_id: "conv-replay" },
+                timestamp: "2026-01-01T00:00:01Z",
+                semantics: "snapshot",
+                type: "turn_input",
+                data: {
+                  thread_id: "conv-replay",
+                  content: "remember this",
+                  provenance: "human",
+                },
+              }),
+              JSON.stringify({
+                version: 1,
+                event_id: "event-3",
+                stream_id: "local-replay/session",
+                sequence: 3,
+                correlation: { session_id: "conv-replay", thread_id: "conv-replay" },
+                timestamp: "2026-01-01T00:00:02Z",
+                semantics: "snapshot",
+                type: "text",
+                data: { text: "welcome back" },
+              }),
+            ],
+          },
+        });
+
+      const reopened = useChatStore
+        .getState()
+        .openSession("Replacement Label", "/repo/root");
+      expect(reopened).toBe(id);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(replay).toHaveBeenCalledWith({
+        session_id: id,
+        harness: "claude",
+        provider_resume_id: "conv-replay",
+        project_path: "/repo/root",
+        created_at: expect.any(String),
+      });
+      expect(useChatStore.getState().sessions[id].messages).toEqual([
+        {
+          kind: "session_start",
+          model: "sonnet",
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+        {
+          kind: "user",
+          text: "remember this",
+          timestamp: "2026-01-01T00:00:01Z",
+        },
+        {
+          kind: "assistant",
+          text: "welcome back",
+          timestamp: "2026-01-01T00:00:02Z",
+        },
+      ]);
     });
 
     it("persists selected model and records it as the last used model", () => {

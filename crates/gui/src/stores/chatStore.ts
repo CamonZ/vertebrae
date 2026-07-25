@@ -22,6 +22,8 @@ import {
   summarizeLocalChatSession,
 } from "../utils/localChatPersistence";
 import {
+  parseSessionLogs,
+  type ConversationEvent,
   type FileUpdateChange,
 } from "../types/conversation";
 import type { LocalChatSessionSummary } from "../utils/localChatPersistence";
@@ -31,6 +33,7 @@ import type {
   PermissionMode,
   UserQuestion,
 } from "../bindings";
+import { commands } from "../bindings";
 
 /**
  * Message types for the Claude chat
@@ -700,6 +703,179 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
   };
 }
 
+function conversationEventToChatMessage(
+  event: ConversationEvent
+): ChatMessage | null {
+  switch (event.kind) {
+    case "user_message":
+      return { kind: "user", text: event.text, timestamp: event.timestamp };
+    case "assistant_message":
+      return {
+        kind: "assistant",
+        text: event.text,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_call":
+      return {
+        kind: "tool_call",
+        toolName: event.toolName,
+        toolId: event.toolId,
+        input: JSON.stringify(event.input ?? {}),
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "tool_result":
+      return {
+        kind: "tool_result",
+        toolId: event.toolUseId,
+        result: event.result,
+        isError: event.isError,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "file_edit":
+      return {
+        kind: "file_edit",
+        toolId: event.toolId,
+        status: event.status,
+        changes: event.changes,
+        timestamp: event.timestamp,
+        ...(event.parentToolUseId
+          ? { parentToolUseId: event.parentToolUseId }
+          : {}),
+      };
+    case "session_start":
+      return {
+        kind: "session_start",
+        model: event.model,
+        timestamp: event.timestamp,
+      };
+    case "session_end":
+      return {
+        kind: "session_end",
+        durationMs: event.durationMs,
+        costUsd: event.costUsd,
+        numTurns: event.numTurns,
+        timestamp: event.timestamp,
+      };
+    case "task_notification":
+      return {
+        kind: "task_notification",
+        message: event.message,
+        timestamp: event.timestamp,
+      };
+    case "thinking":
+      return event.text.startsWith("[error]")
+        ? {
+            kind: "error",
+            message: event.text.replace(/^\[error\]\s*/, ""),
+            timestamp: event.timestamp,
+          }
+        : null;
+    default:
+      return null;
+  }
+}
+
+function replayLinesToChatMessages(
+  lines: string[],
+  session: ChatSession
+): ChatMessage[] {
+  const logs = lines.map((content, index) => {
+    let createdAt = session.createdAt ?? "";
+    try {
+      const raw = JSON.parse(content) as { timestamp?: unknown };
+      if (typeof raw.timestamp === "string") createdAt = raw.timestamp;
+    } catch {
+      // The backend already validated event JSON; retain the session fallback.
+    }
+    return {
+      id: `local-replay-${session.id}-${index}`,
+      step_execution_id: session.id,
+      content,
+      format: "harness",
+      created_at: createdAt,
+    };
+  });
+  return sanitizeSessionMessages(
+    parseSessionLogs(logs)
+      .map(conversationEventToChatMessage)
+      .filter((message): message is ChatMessage => message !== null),
+    session.providerResumeId
+  );
+}
+
+function chatMessageKey(message: ChatMessage): string {
+  switch (message.kind) {
+    case "user":
+      return `${message.kind}:${message.text}`;
+    case "assistant":
+      return `${message.kind}:${message.text}:${message.parentToolUseId ?? ""}`;
+    case "tool_call":
+    case "tool_result":
+      return `${message.kind}:${message.toolId}`;
+    case "file_edit":
+      return `${message.kind}:${message.toolId}`;
+    case "permission_request":
+      return `${message.kind}:${message.requestId ?? ""}:${message.toolName}:${message.message}`;
+    case "user_question":
+      return `${message.kind}:${message.requestId}:${message.toolUseId}`;
+    case "session_start":
+      return `${message.kind}:${message.model}`;
+    case "session_end":
+      return `${message.kind}:${message.durationMs}:${message.numTurns}`;
+    case "warning":
+    case "error":
+    case "task_notification":
+      return `${message.kind}:${message.message}`;
+  }
+}
+
+function mergeHydratedMessages(
+  hydrated: ChatMessage[],
+  current: ChatMessage[]
+): ChatMessage[] {
+  if (current.length === 0) return hydrated;
+  const currentKeys = new Set(current.map(chatMessageKey));
+  const hydratedByKey = new Map(
+    hydrated.map((message) => [chatMessageKey(message), message])
+  );
+  let enriched = false;
+  const mergedCurrent = current.map((currentMessage) => {
+    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
+    if (
+      currentMessage.kind !== "file_edit" ||
+      hydratedMessage?.kind !== "file_edit"
+    ) {
+      return currentMessage;
+    }
+    const changes =
+      hydratedMessage.changes.length > 0
+        ? hydratedMessage.changes
+        : currentMessage.changes;
+    if (
+      hydratedMessage.status !== currentMessage.status ||
+      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes)
+    ) {
+      enriched = true;
+      return { ...currentMessage, status: hydratedMessage.status, changes };
+    }
+    return currentMessage;
+  });
+  const missing = hydrated.filter(
+    (message) => !currentKeys.has(chatMessageKey(message))
+  );
+  if (missing.length > 0) return [...missing, ...mergedCurrent];
+  return enriched ? mergedCurrent : current;
+}
+
 function localSessionSummaryFor(
   session: ChatSession
 ): LocalChatSessionSummary | null {
@@ -1038,6 +1214,66 @@ function collapsePaneLayout(
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
+  const loadReplayedProviderMessages = async (
+    session: ChatSession
+  ): Promise<ChatMessage[]> => {
+    if (!session.providerResumeId) return [];
+    if (typeof commands.loadLocalChatSessionReplay !== "function") return [];
+    try {
+      const result = await commands.loadLocalChatSessionReplay({
+        session_id: session.id,
+        harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+        provider_resume_id: session.providerResumeId,
+        project_path: session.projectPath ?? null,
+        created_at: session.createdAt ?? null,
+      });
+      if (!result || result.status !== "ok") {
+        if (result?.status === "error") {
+          console.warn(
+            "Failed to replay local chat provider transcript",
+            result.error
+          );
+        }
+        return [];
+      }
+      const lines =
+        result.data && Array.isArray(result.data.events)
+          ? result.data.events.filter(
+              (line): line is string => typeof line === "string"
+            )
+          : [];
+      return replayLinesToChatMessages(lines, session);
+    } catch (error) {
+      console.warn("Failed to replay local chat provider transcript", error);
+      return [];
+    }
+  };
+
+  const hydrateProviderMessagesInPlace = (
+    sessionId: string,
+    session: ChatSession
+  ) => {
+    void loadReplayedProviderMessages(session).then((messages) => {
+      if (messages.length === 0) return;
+      set((state) => {
+        const current = state.sessions[sessionId];
+        if (!current) return state;
+        const merged = mergeHydratedMessages(messages, current.messages);
+        if (merged === current.messages) return state;
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: {
+              ...current,
+              messages: merged,
+              messageCount: Math.max(merged.length, current.messageCount ?? 0),
+            },
+          },
+        };
+      });
+    });
+  };
+
   const updateSession = (
     sessionId: string,
     updater: (session: ChatSession) => ChatSession,
@@ -1110,6 +1346,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             panelOpen: true,
           };
         });
+        hydrateProviderMessagesInPlace(hydrated.id, hydrated);
         return hydrated.id;
       }
 
@@ -1261,6 +1498,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectPersistedSession: async (sessionId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
+        hydrateProviderMessagesInPlace(sessionId, existing);
         let reattached: ChatSession | null = null;
         set((state) => {
           const current = state.sessions[sessionId];
@@ -1318,6 +1556,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           panelOpen: true,
         };
       });
+      hydrateProviderMessagesInPlace(hydrated.id, hydrated);
       return true;
     },
 

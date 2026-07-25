@@ -4,9 +4,11 @@ mod config;
 mod launcher;
 mod models;
 mod protocol;
+mod replay;
 mod runtime;
 
 pub use config::*;
 pub use launcher::*;
 pub use protocol::*;
+pub use replay::*;
 pub use runtime::CodexRuntime;

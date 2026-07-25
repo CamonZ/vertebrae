@@ -3,6 +3,9 @@ use crate::local_chat::LocalChatHarnessKind;
 use crate::types::PermissionMode;
 use std::fs;
 use std::path::PathBuf;
+use vertebrae_core::Provider;
+use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
+use vertebrae_harness_core::{ProviderResumeId, StreamId, TranscriptReplayRequest};
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +35,21 @@ pub struct LocalChatSessionIndexEntry {
 #[serde(rename_all = "camelCase")]
 pub struct SaveLocalChatSessionIndexInput {
     pub sessions: Vec<LocalChatSessionIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LoadLocalChatSessionReplayInput {
+    pub session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub provider_resume_id: Option<String>,
+    pub project_path: Option<String>,
+    pub created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct LoadLocalChatSessionReplayOutput {
+    /// Each entry is one serialized, normalized HarnessEventV1 JSON object.
+    pub events: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +229,51 @@ pub async fn save_local_chat_session_index(
         message: format!("Failed to replace local chat session index: {}", error),
     })?;
     Ok(())
+}
+
+/// Discover and replay a persisted provider transcript through the
+/// provider-owned harness adapter. The GUI receives only normalized V1 event
+/// JSON and never needs to know the Claude or Codex file layout.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_local_chat_session_replay(
+    input: LoadLocalChatSessionReplayInput,
+) -> Result<LoadLocalChatSessionReplayOutput, CommandError> {
+    let Some(provider_resume_id) = input
+        .provider_resume_id
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return Ok(LoadLocalChatSessionReplayOutput { events: Vec::new() });
+    };
+    let provider = match input.harness {
+        LocalChatHarnessKind::Claude => Provider::Anthropic,
+        LocalChatHarnessKind::Codex => Provider::Openai,
+    };
+    let request = TranscriptReplayRequest {
+        provider_resume_id: ProviderResumeId::new(provider_resume_id.clone()),
+        stream_id: StreamId::new(format!("local-replay/{}", input.session_id)),
+        project_path: input.project_path.map(PathBuf::from),
+        created_at: input.created_at,
+    };
+    let replay = HarnessRuntimeFactory::new(HarnessFactoryConfig::default())
+        .replay_transcript(provider, &request)
+        .map_err(|error| CommandError {
+            message: format!("Failed to replay local chat transcript: {error}"),
+        })?;
+    let events = replay
+        .map(|replay| {
+            replay
+                .events
+                .iter()
+                .map(serde_json::to_string)
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(|error| CommandError {
+            message: format!("Failed to serialize local chat replay: {error}"),
+        })?
+        .unwrap_or_default();
+    Ok(LoadLocalChatSessionReplayOutput { events })
 }
 
 /// Resolve a local chat permission request shown in the GUI.
