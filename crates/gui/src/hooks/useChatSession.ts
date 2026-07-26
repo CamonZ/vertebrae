@@ -272,13 +272,10 @@ export function useChatSession(sessionId: string) {
   }, [sessionMessages, streamingAssistant]);
 
   const hasStreamingOverlay = !!streamingAssistant;
-  const isWaiting =
-    (lifecycle === "sending" ||
-      lifecycle === "streaming" ||
-      (isActive && lifecycle !== "error")) &&
-    !hasStreamingOverlay &&
-    messages.length > 0 &&
-    messages[messages.length - 1].kind === "user";
+  const activeTurn = session?.activeTurn ?? null;
+  const isWaiting = activeTurn !== null;
+  const activityLabel =
+    activeTurn?.phase === "stopping" ? "Stopping..." : "Thinking...";
 
   const assistantLabel = session
     ? harnessDisplayName(session.harness)
@@ -287,10 +284,8 @@ export function useChatSession(sessionId: string) {
   // --- Stop generation ---
   const canStopGeneration =
     !!session?.backendSessionId &&
-    (lifecycle === "starting" ||
-      lifecycle === "resuming" ||
-      lifecycle === "sending" ||
-      lifecycle === "streaming");
+    activeTurn !== null &&
+    activeTurn.phase !== "stopping";
 
   const handleStopGeneration = useCallback(async () => {
     await stopActiveTurn();
@@ -417,6 +412,7 @@ export function useChatSession(sessionId: string) {
     canStopGeneration,
     hasStreamingOverlay,
     isWaiting,
+    activityLabel,
     hasPendingUserQuestion,
 
     // harness catalog

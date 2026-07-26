@@ -13,6 +13,7 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
     isEmpty: true,
     isActive: false,
     isWaiting: false,
+    activityLabel: null,
     streamingAssistant: null,
     ...overrides,
   };
@@ -169,6 +170,19 @@ describe("ChatMessages", () => {
       />
     );
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+  });
+
+  it("shows a stopping label for a stopping active turn", () => {
+    render(
+      <ChatMessages
+        {...defaultProps({
+          isEmpty: false,
+          isWaiting: true,
+          activityLabel: "Stopping...",
+        })}
+      />
+    );
+    expect(screen.getByText("Stopping...")).toBeInTheDocument();
   });
 
   // --- Scroll-to-spawn event ---

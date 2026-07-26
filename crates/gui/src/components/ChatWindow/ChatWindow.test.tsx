@@ -1272,6 +1272,8 @@ describe("ChatWindow", () => {
       turnId: "root-turn-stopping",
       phase: "stopping",
     });
+    expect(stop).toBeDisabled();
+    expect(screen.getByText("Stopping...")).toBeInTheDocument();
 
     await act(async () => resolveClose({ status: "ok", data: null }));
     await waitFor(() => {
@@ -1748,6 +1750,11 @@ describe("ChatWindow", () => {
   it("shows thinking indicator when waiting for response", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
+      activeTurn: {
+        localId: "local-turn-waiting",
+        turnId: null,
+        phase: "starting",
+      },
       messages: [
         {
           kind: "user",
@@ -1771,6 +1778,11 @@ describe("ChatWindow", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-streaming",
+        turnId: "root-turn-streaming",
+        phase: "active",
+      },
       messages: [
         {
           kind: "user",
@@ -1790,9 +1802,14 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
-  it("does not show thinking indicator when last message is from assistant", () => {
+  it("keeps showing activity after an assistant snapshot", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
+      activeTurn: {
+        localId: "local-turn-snapshot",
+        turnId: "root-turn-snapshot",
+        phase: "active",
+      },
       messages: [
         {
           kind: "user",
@@ -1815,7 +1832,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
   it("does not show thinking indicator when session is not active", () => {
@@ -2024,6 +2041,11 @@ describe("ChatWindow", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       lifecycle: "sending",
+      activeTurn: {
+        localId: "local-turn-sending",
+        turnId: null,
+        phase: "starting",
+      },
       messages: [
         {
           kind: "user",
@@ -2054,6 +2076,11 @@ describe("ChatWindow", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-overlay",
+        turnId: "root-turn-overlay",
+        phase: "active",
+      },
       streamingAssistant: {
         text: "Streaming now",
         timestamp: "2024-01-01T12:00:01Z",
@@ -2074,6 +2101,7 @@ describe("ChatWindow", () => {
       screen.getByPlaceholderText("Type a message to queue...")
     ).toBeEnabled();
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
   it("disables ordinary composer sends while a user question is pending", () => {

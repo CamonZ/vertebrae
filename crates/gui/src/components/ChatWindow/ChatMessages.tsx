@@ -85,6 +85,7 @@ interface ChatMessagesProps {
   isEmpty: boolean;
   isActive: boolean;
   isWaiting: boolean;
+  activityLabel?: string | null;
   streamingAssistant: unknown;
 }
 
@@ -95,6 +96,7 @@ export function ChatMessages({
   isEmpty,
   isActive,
   isWaiting,
+  activityLabel,
   streamingAssistant,
 }: ChatMessagesProps) {
   const resolveUserQuestion = useChatStore(
@@ -218,7 +220,7 @@ export function ChatMessages({
             />
           )
         )}
-        {isWaiting && <ThinkingIndicator />}
+        {isWaiting && <ThinkingIndicator label={activityLabel ?? undefined} />}
         <div ref={messagesEndRef} />
       </div>
     </div>
