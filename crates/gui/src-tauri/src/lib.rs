@@ -32,7 +32,7 @@ use local_chat::{
     ClaudeStartupCapabilities, LocalChatFileChangeEvent, LocalChatSessionEndEvent,
     LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionManager,
     LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -161,6 +161,7 @@ fn create_builder() -> Builder {
             PermissionRequestEvent,
             // Provider-neutral local chat events
             LocalChatSessionInitEvent,
+            LocalChatTurnStartedEvent,
             LocalChatTextEvent,
             LocalChatToolCallEvent,
             LocalChatToolResultEvent,

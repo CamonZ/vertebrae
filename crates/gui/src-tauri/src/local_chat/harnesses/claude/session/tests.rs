@@ -293,6 +293,8 @@ fn root_event(
 ) -> HarnessEventV1 {
     let mut event = event(sequence, semantics, payload);
     event.stream_id = StreamId::new(format!("local-chat:{backend_session_id}"));
+    event.correlation.thread_id = Some(vertebrae_harness_core::ThreadId::new(backend_session_id));
+    event.correlation.turn_id = Some(TurnId::new(format!("{backend_session_id}:turn")));
     event
 }
 

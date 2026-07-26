@@ -26,6 +26,9 @@ fn harness_control_allow_and_deny_preserve_gui_and_neutral_shapes() {
     let request = harness_approval_request("allow-control");
     let event = harness_permission_event("backend-control", &request).unwrap();
     assert_eq!(event.session_id.as_deref(), Some("backend-control"));
+    assert_eq!(event.turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(event.thread_id, None);
+    assert!(event.is_root);
     assert_eq!(event.tool_name, "Bash");
     assert_eq!(event.tool_use_id, "tool-control");
     assert_eq!(event.input, serde_json::json!({"command": "pwd"}));

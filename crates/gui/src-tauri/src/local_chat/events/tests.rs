@@ -13,13 +13,26 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::Text(LocalChatTextEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             text: "hello".to_string(),
             is_partial: true,
             parent_tool_use_id: None,
         }),
+        LocalChatEvent::TurnStarted(LocalChatTurnStartedEvent {
+            backend_session_id: "session-1".to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            turn_id: "turn-1".to_string(),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
+        }),
         LocalChatEvent::ToolCall(LocalChatToolCallEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             tool_id: "tool-1".to_string(),
             tool_name: "Read".to_string(),
             input: "{}".to_string(),
@@ -28,6 +41,9 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::ToolResult(LocalChatToolResultEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             tool_id: "tool-1".to_string(),
             result: "ok".to_string(),
             is_error: false,
@@ -36,6 +52,9 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::FileChange(LocalChatFileChangeEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             tool_id: "file-1".to_string(),
             status: "completed".to_string(),
             changes: vec![LocalChatFileChange {
@@ -48,6 +67,9 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::Usage(LocalChatSessionUsageEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             model: "sonnet".to_string(),
             context_tokens: 42,
             context_window: 200_000,
@@ -56,6 +78,9 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::End(LocalChatSessionEndEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: "turn-1".to_string(),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             duration_ms: 123,
             cost_usd: 0.25,
             num_turns: 2,
@@ -67,11 +92,17 @@ fn local_chat_event_names_match_public_contract() {
         LocalChatEvent::Error(LocalChatSessionErrorEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             error: "boom".to_string(),
         }),
         LocalChatEvent::Warning(LocalChatSessionWarningEvent {
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
             warning: "careful".to_string(),
         }),
     ];
@@ -85,6 +116,7 @@ fn local_chat_event_names_match_public_contract() {
         vec![
             "local-chat-session-init-event",
             "local-chat-text-event",
+            "local-chat-turn-started-event",
             "local-chat-tool-call-event",
             "local-chat-tool-result-event",
             "local-chat-file-change-event",

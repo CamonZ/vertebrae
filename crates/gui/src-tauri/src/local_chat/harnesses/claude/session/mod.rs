@@ -1137,6 +1137,9 @@ fn emit_start_error(event_sink: &LocalChatEventSink, session_id: &str, error: St
     event_sink.emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
         backend_session_id: session_id.to_string(),
         harness: LocalChatHarnessKind::Claude,
+        turn_id: None,
+        thread_id: None,
+        is_root: true,
         error,
     }));
 }
@@ -1145,6 +1148,9 @@ fn emit_warning(event_sink: &LocalChatEventSink, session_id: &str, warning: Stri
     event_sink.emit(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
         backend_session_id: session_id.to_string(),
         harness: LocalChatHarnessKind::Claude,
+        turn_id: None,
+        thread_id: None,
+        is_root: true,
         warning,
     }));
 }

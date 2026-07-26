@@ -19,15 +19,44 @@ pub struct LocalChatSessionInitEvent {
 pub struct LocalChatTextEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub text: String,
     pub is_partial: bool,
     pub parent_tool_use_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatTurnStartedEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    pub is_root: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
 pub struct LocalChatToolCallEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub tool_id: String,
     pub tool_name: String,
     pub input: String,
@@ -38,6 +67,15 @@ pub struct LocalChatToolCallEvent {
 pub struct LocalChatToolResultEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub tool_id: String,
     pub result: String,
     pub is_error: bool,
@@ -55,6 +93,15 @@ pub struct LocalChatFileChange {
 pub struct LocalChatFileChangeEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub tool_id: String,
     pub status: String,
     pub changes: Vec<LocalChatFileChange>,
@@ -65,6 +112,15 @@ pub struct LocalChatFileChangeEvent {
 pub struct LocalChatSessionUsageEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub model: String,
     pub context_tokens: u32,
     pub context_window: u32,
@@ -77,6 +133,13 @@ pub struct LocalChatSessionUsageEvent {
 pub struct LocalChatSessionEndEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[specta(optional)]
+    pub turn_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[specta(optional)]
+    pub is_root: bool,
     pub duration_ms: u32,
     pub cost_usd: f64,
     pub num_turns: u32,
@@ -90,6 +153,15 @@ pub struct LocalChatSessionEndEvent {
 pub struct LocalChatSessionErrorEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub error: String,
 }
 
@@ -97,12 +169,22 @@ pub struct LocalChatSessionErrorEvent {
 pub struct LocalChatSessionWarningEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub warning: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalChatEvent {
     Init(LocalChatSessionInitEvent),
+    TurnStarted(LocalChatTurnStartedEvent),
     Text(LocalChatTextEvent),
     ToolCall(LocalChatToolCallEvent),
     ToolResult(LocalChatToolResultEvent),
@@ -118,6 +200,7 @@ impl LocalChatEvent {
     pub(crate) fn tauri_event_name(&self) -> &'static str {
         match self {
             LocalChatEvent::Init(_) => "local-chat-session-init-event",
+            LocalChatEvent::TurnStarted(_) => "local-chat-turn-started-event",
             LocalChatEvent::Text(_) => "local-chat-text-event",
             LocalChatEvent::ToolCall(_) => "local-chat-tool-call-event",
             LocalChatEvent::ToolResult(_) => "local-chat-tool-result-event",
@@ -205,6 +288,7 @@ impl LocalChatEventSink {
 
         let result = match &event {
             LocalChatEvent::Init(payload) => payload.emit(app_handle),
+            LocalChatEvent::TurnStarted(payload) => payload.emit(app_handle),
             LocalChatEvent::Text(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolCall(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolResult(payload) => payload.emit(app_handle),

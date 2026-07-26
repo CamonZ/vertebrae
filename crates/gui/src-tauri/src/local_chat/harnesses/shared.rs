@@ -16,6 +16,7 @@ use crate::local_chat::{
     LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
     LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
     LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatTurnStartedEvent,
 };
 
 #[derive(Default)]
@@ -81,6 +82,9 @@ impl LocalChatHarnessEventSink {
         self.emit_local(LocalChatEvent::Error(LocalChatSessionErrorEvent {
             backend_session_id: self.backend_session_id.clone(),
             harness: self.harness,
+            turn_id: None,
+            thread_id: None,
+            is_root: true,
             error: error.into(),
         }))
     }
@@ -95,6 +99,8 @@ impl LocalChatHarnessEventSink {
 
     fn emit_end(
         &self,
+        turn_id: String,
+        thread_id: Option<String>,
         status: CompletionStatus,
         result: Option<String>,
         metrics: &vertebrae_harness_core::OutcomeMetrics,
@@ -131,6 +137,9 @@ impl LocalChatHarnessEventSink {
         self.emit_local(LocalChatEvent::End(LocalChatSessionEndEvent {
             backend_session_id: self.backend_session_id.clone(),
             harness: self.harness,
+            turn_id,
+            thread_id,
+            is_root: true,
             duration_ms: metrics
                 .duration_ms
                 .unwrap_or_default()
@@ -166,6 +175,12 @@ impl EventSink for LocalChatHarnessEventSink {
             .as_ref()
             .map(ToString::to_string);
         let is_root_stream = self.is_root_stream(&event);
+        let turn_id = event.correlation.turn_id.as_ref().map(ToString::to_string);
+        let thread_id = event
+            .correlation
+            .thread_id
+            .as_ref()
+            .map(ToString::to_string);
 
         match event.payload {
             HarnessEventPayloadV1::SessionStarted(started) => {
@@ -195,10 +210,28 @@ impl EventSink for LocalChatHarnessEventSink {
                     tools: started.tools,
                 }))?;
             }
+            HarnessEventPayloadV1::TurnStarted(_) => {
+                if !is_root_stream {
+                    return Ok(());
+                }
+                let Some(turn_id) = turn_id else {
+                    return Ok(());
+                };
+                self.emit_local(LocalChatEvent::TurnStarted(LocalChatTurnStartedEvent {
+                    backend_session_id,
+                    harness,
+                    turn_id,
+                    thread_id,
+                    is_root: true,
+                }))?;
+            }
             HarnessEventPayloadV1::Text(value) => {
                 self.emit_local(LocalChatEvent::Text(LocalChatTextEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     text: value.text,
                     is_partial: event.semantics == UpdateSemantics::Delta,
                     parent_tool_use_id,
@@ -211,6 +244,9 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_local(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     tool_id: value.tool_call_id.to_string(),
                     tool_name: value.name,
                     input: serde_json::to_string(&value.input).unwrap_or_default(),
@@ -221,6 +257,9 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_local(LocalChatEvent::ToolResult(LocalChatToolResultEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     tool_id: value.tool_call_id.to_string(),
                     result: Self::value_text(&value.output),
                     is_error: matches!(
@@ -234,6 +273,9 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_local(LocalChatEvent::FileChange(LocalChatFileChangeEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     tool_id: value
                         .tool_call_id
                         .map(|tool_id| tool_id.to_string())
@@ -281,6 +323,9 @@ impl EventSink for LocalChatHarnessEventSink {
                     self.emit_local(LocalChatEvent::Usage(LocalChatSessionUsageEvent {
                         backend_session_id,
                         harness,
+                        turn_id,
+                        thread_id,
+                        is_root: true,
                         model,
                         context_tokens,
                         context_window,
@@ -292,18 +337,39 @@ impl EventSink for LocalChatHarnessEventSink {
                 if !is_root_stream {
                     return Ok(());
                 }
-                self.emit_end(outcome.status, outcome.result_text, &outcome.metrics)?;
+                let Some(turn_id) = turn_id else {
+                    return Ok(());
+                };
+                self.emit_end(
+                    turn_id,
+                    thread_id,
+                    outcome.status,
+                    outcome.result_text,
+                    &outcome.metrics,
+                )?;
             }
             HarnessEventPayloadV1::RunFinished(outcome) => {
                 if !is_root_stream {
                     return Ok(());
                 }
-                self.emit_end(outcome.status, outcome.result_text, &outcome.metrics)?;
+                let Some(turn_id) = turn_id else {
+                    return Ok(());
+                };
+                self.emit_end(
+                    turn_id,
+                    thread_id,
+                    outcome.status,
+                    outcome.result_text,
+                    &outcome.metrics,
+                )?;
             }
             HarnessEventPayloadV1::Warning(value) => {
                 self.emit_local(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     warning: value.message,
                 }))?;
             }
@@ -311,6 +377,9 @@ impl EventSink for LocalChatHarnessEventSink {
                 self.emit_local(LocalChatEvent::Error(LocalChatSessionErrorEvent {
                     backend_session_id,
                     harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
                     error: value.message,
                 }))?;
             }
@@ -389,7 +458,11 @@ mod tests {
             event_id: EventId::new("file-event"),
             stream_id: StreamId::new("local-chat:backend-1"),
             sequence: 1,
-            correlation: EventCorrelation::default(),
+            correlation: EventCorrelation {
+                thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+                turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+                ..EventCorrelation::default()
+            },
             timestamp: chrono::Utc::now(),
             semantics: UpdateSemantics::Snapshot,
             provider_sequence: None,
@@ -412,6 +485,9 @@ mod tests {
             captured.as_slice(),
             [LocalChatEvent::FileChange(event)]
                 if event.harness == LocalChatHarnessKind::Codex
+                    && event.turn_id.as_deref() == Some("root-turn")
+                    && event.thread_id.as_deref() == Some("root-thread")
+                    && event.is_root
                     && event.tool_id == "file-1"
                     && event.status == "completed"
                     && event.changes[0].kind == "add"
@@ -436,6 +512,7 @@ mod tests {
             sequence: 1,
             correlation: EventCorrelation {
                 thread_id: Some(vertebrae_harness_core::ThreadId::new("child-1")),
+                turn_id: Some(vertebrae_harness_core::TurnId::new("child-turn")),
                 parent_tool_call_id: Some(ToolCallId::new("spawn-1")),
                 ..EventCorrelation::default()
             },
@@ -455,5 +532,80 @@ mod tests {
         .unwrap();
 
         assert!(captured.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn preserves_root_identity_from_turn_start_through_completion() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Codex,
+            event_sink,
+            Some("gpt".into()),
+            1_000,
+            false,
+        );
+        let correlation = EventCorrelation {
+            thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+            turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+            ..EventCorrelation::default()
+        };
+
+        for (sequence, payload) in [
+            (
+                1,
+                HarnessEventPayloadV1::TurnStarted(vertebrae_harness_core::TurnStarted {
+                    input_summary: Some("hello".into()),
+                }),
+            ),
+            (
+                2,
+                HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
+                    text: "answer".into(),
+                }),
+            ),
+            (
+                3,
+                HarnessEventPayloadV1::TurnFinished(vertebrae_harness_core::TurnOutcome {
+                    status: CompletionStatus::Completed,
+                    result_text: Some("answer".into()),
+                    structured_output: None,
+                    usage: None,
+                    metrics: Default::default(),
+                    error: None,
+                }),
+            ),
+        ] {
+            sink.emit(HarnessEventV1 {
+                event_id: EventId::new(format!("event-{sequence}")),
+                stream_id: StreamId::new("local-chat:backend-1"),
+                sequence,
+                correlation: correlation.clone(),
+                timestamp: chrono::Utc::now(),
+                semantics: UpdateSemantics::Snapshot,
+                provider_sequence: None,
+                payload,
+            })
+            .await
+            .unwrap();
+        }
+
+        let captured = captured.lock().unwrap();
+        assert!(matches!(
+            captured.as_slice(),
+            [
+                LocalChatEvent::TurnStarted(started),
+                LocalChatEvent::Text(text),
+                LocalChatEvent::End(end),
+            ] if started.turn_id == "root-turn"
+                && started.thread_id.as_deref() == Some("root-thread")
+                && started.is_root
+                && text.turn_id.as_deref() == Some("root-turn")
+                && text.thread_id.as_deref() == Some("root-thread")
+                && text.is_root
+                && end.turn_id == "root-turn"
+                && end.thread_id.as_deref() == Some("root-thread")
+                && end.is_root
+        ));
     }
 }
