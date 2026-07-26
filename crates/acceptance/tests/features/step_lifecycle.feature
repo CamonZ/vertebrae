@@ -44,13 +44,14 @@ Feature: Step lifecycle
     Then the command should fail with "Target step belongs to workflow"
     And the error should contain "Use 'vtb workflow assign' to change workflows first"
 
-  Scenario: Transition to final step shows unblocked tasks with title
+  Scenario: Transition to final step makes dependents ready
     Given I create a task with:
       | title | Dependent task |
     And I store the task ID as "dependent_id"
     And I run depend "<dependent_id>" --on the lifecycle task
     When I transition the lifecycle task through to step "done" with --skip-validation
-    Then the output should contain "Unblocked tasks:"
+    And I run ready
+    Then the output should contain "Ready to start (backlog):"
     And the output should contain "<dependent_id>"
     And the output should contain "Dependent task"
 
