@@ -162,9 +162,7 @@ fn map_workflow_transition_error(err: vertebrae_core::ServiceError) -> CommandEr
     let raw = err.to_string();
     let lower = raw.to_lowercase();
 
-    let friendly = if lower.contains("from_workflow_is_final") {
-        "Cannot create a transition from a final workflow. Unmark the source workflow as final first.".to_string()
-    } else if lower.contains("transition already exists")
+    let friendly = if lower.contains("transition already exists")
         || lower.contains("has already been taken")
     {
         "A transition between these workflows already exists.".to_string()
@@ -402,7 +400,6 @@ mod tests {
                     steps: vec![],
                     order: 0,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -438,7 +435,6 @@ mod tests {
                     steps: vec![],
                     order: 0,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -451,7 +447,6 @@ mod tests {
                     steps: vec![],
                     order: 1,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -499,7 +494,6 @@ mod tests {
                     steps: vec![],
                     order: 0,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -530,7 +524,6 @@ mod tests {
                     steps: vec![],
                     order: 0,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -561,7 +554,6 @@ mod tests {
                     steps: vec![],
                     order: 0,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -573,7 +565,6 @@ mod tests {
                     steps: vec![],
                     order: 1,
                     is_default: false,
-                    is_final: false,
                     kanban_column: None,
                 })
                 .await

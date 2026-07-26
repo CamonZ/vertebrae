@@ -52,9 +52,13 @@ pub async fn do_create_task(world: &mut SmokeWorld, step: &cucumber::gherkin::St
     world.run_vtb(&arg_refs).await;
 
     if world.last_exit_code == 0 {
-        if let Some(id) = world.extract_task_id_from_output() {
-            world.track_task(id);
-        }
+        let id = world.extract_task_id_from_output().unwrap_or_else(|| {
+            panic!(
+                "task creation succeeded but returned no task ID.\nstdout: '{}'\nstderr: '{}'",
+                world.last_stdout, world.last_stderr
+            )
+        });
+        world.track_task(id);
     }
 }
 

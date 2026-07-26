@@ -1257,7 +1257,7 @@ mod tests {
             "status": "pending",
             "goal": "Deploy to production",
             "context": {"title": "Some task"},
-            "is_final": true,
+            "unexpected_field": true,
             "transitions_to": ["next-step"]
         });
 

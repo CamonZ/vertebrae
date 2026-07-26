@@ -1267,10 +1267,6 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
 
-    /// Whether this is a final step
-    #[serde(default)]
-    pub is_final: bool,
-
     /// Step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
@@ -1302,7 +1298,6 @@ impl Step {
             agent_config: AgentConfig::default(),
             step_type: StepType::default(),
             output_schema: None,
-            is_final: false,
             transitions_to: Vec::new(),
             order: 0,
             created_at: None,
@@ -1364,12 +1359,6 @@ impl Step {
         self
     }
 
-    /// Mark as final
-    pub fn with_is_final(mut self, is_final: bool) -> Self {
-        self.is_final = is_final;
-        self
-    }
-
     /// Add a transition
     pub fn with_transition(mut self, step_id: impl Into<String>) -> Self {
         self.transitions_to.push(step_id.into());
@@ -1427,10 +1416,6 @@ pub struct Workflow {
     #[serde(default)]
     pub is_default: bool,
 
-    /// Whether this is a terminal workflow (cannot transition out)
-    #[serde(default)]
-    pub is_final: bool,
-
     /// Optional kanban column for workflows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kanban_column: Option<String>,
@@ -1459,7 +1444,6 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             order: 0,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             transitions: Vec::new(),
             created_at: None,
@@ -1494,12 +1478,6 @@ impl Workflow {
     /// Set whether this is the default workflow
     pub fn with_is_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;
-        self
-    }
-
-    /// Set whether this is a terminal (final) workflow
-    pub fn with_is_final(mut self, is_final: bool) -> Self {
-        self.is_final = is_final;
         self
     }
 
@@ -2067,8 +2045,6 @@ pub struct StepUpdate {
     pub step_type: Option<StepType>,
     /// New output schema
     pub output_schema: Option<Option<serde_json::Value>>,
-    /// New is_final value
-    pub is_final: Option<bool>,
     /// New transitions_to list (string IDs)
     pub transitions_to: Option<Vec<String>>,
     /// New order value
@@ -2126,12 +2102,6 @@ impl StepUpdate {
     /// Set the output schema (Some to set, None to clear)
     pub fn with_output_schema(mut self, schema: Option<serde_json::Value>) -> Self {
         self.output_schema = Some(schema);
-        self
-    }
-
-    /// Set the is_final flag
-    pub fn with_is_final(mut self, is_final: bool) -> Self {
-        self.is_final = Some(is_final);
         self
     }
 
@@ -2249,7 +2219,6 @@ mod tests {
             .with_skill("code-review")
             .with_skills(vec!["lint".into()])
             .with_agent_config(AgentConfig::default())
-            .with_is_final(true)
             .with_transition("step2")
             .with_transitions_to(vec!["s3".into()])
             .with_order(5);
@@ -2259,7 +2228,6 @@ mod tests {
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
         assert_eq!(step.agents, vec!["agent1"]);
         assert_eq!(step.skills, vec!["lint"]);
-        assert!(step.is_final);
         assert_eq!(step.transitions_to, vec!["s3"]);
         assert_eq!(step.order, 5);
     }
@@ -2634,7 +2602,6 @@ mod tests {
             .with_agents(vec!["a1".into()])
             .with_skills(vec!["s1".into()])
             .with_agent_config(serde_json::json!({"key": "val"}))
-            .with_is_final(true)
             .with_transitions_to(vec!["s2".into()])
             .with_order(3);
 
@@ -2643,7 +2610,6 @@ mod tests {
         assert_eq!(u.agents.as_ref().unwrap(), &vec!["a1".to_string()]);
         assert_eq!(u.skills.as_ref().unwrap(), &vec!["s1".to_string()]);
         assert!(u.agent_config.is_some());
-        assert_eq!(u.is_final, Some(true));
         assert_eq!(u.transitions_to.as_ref().unwrap(), &vec!["s2".to_string()]);
         assert_eq!(u.order, Some(3));
     }

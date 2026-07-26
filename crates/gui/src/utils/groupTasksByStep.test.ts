@@ -35,7 +35,6 @@ function createStep(id: string, name: string, order: number): Step {
     },
     step_type: "execute",
     output_schema: null,
-    is_final: false,
     transitions_to: [],
     order,
     created_at: null,

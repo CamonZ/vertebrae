@@ -158,10 +158,6 @@ pub struct StepAddCommand {
     #[arg(long, short, default_value = "0")]
     pub order: i32,
 
-    /// Mark this step as a final step
-    #[arg(long)]
-    pub r#final: bool,
-
     /// IDs of steps this step can transition to (can be specified multiple times)
     #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
@@ -253,8 +249,7 @@ impl StepAddCommand {
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
             .with_step_type(step_type)
-            .with_order(self.order)
-            .with_is_final(self.r#final);
+            .with_order(self.order);
 
         if let Some(schema) = output_schema {
             step = step.with_output_schema(schema);
@@ -352,15 +347,13 @@ impl StepListCommand {
                         .unwrap_or_else(|| "?".to_string());
                 let model = s.agent_config.model.as_deref().unwrap_or("default");
                 let step_type = s.step_type.to_string();
-                let final_marker = if s.is_final { " [FINAL]" } else { "" };
                 format!(
-                    "{}. {} (id: {}, type: {}, model: {}){}",
+                    "{}. {} (id: {}, type: {}, model: {})",
                     s.order + 1,
                     s.name,
                     id,
                     step_type,
-                    model,
-                    final_marker
+                    model
                 )
             })
             .collect::<Vec<_>>()
@@ -447,9 +440,8 @@ Step Type:     {}
 Goal:          {}
 Agents:        {}
 Skills:        {}
-Model:         {}
+            Model:         {}
 Output Schema: {}
-Is Final:      {}
 Transitions:   {}
 Created:       {}
 Updated:       {}"#,
@@ -463,7 +455,6 @@ Updated:       {}"#,
             skills,
             model,
             output_schema,
-            if s.is_final { "Yes" } else { "No" },
             transitions,
             s.created_at
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
@@ -556,10 +547,6 @@ pub struct StepUpdateCommand {
     /// New order for the step
     #[arg(long, short)]
     pub order: Option<i32>,
-
-    /// Set whether this step is a final step
-    #[arg(long)]
-    pub r#final: Option<bool>,
 
     /// New transitions_to list (replaces existing)
     #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
@@ -654,10 +641,6 @@ impl StepUpdateCommand {
 
         if let Some(order) = self.order {
             updates = updates.with_order(order);
-        }
-
-        if let Some(is_final) = self.r#final {
-            updates = updates.with_is_final(is_final);
         }
 
         if self.agent_config.is_some()
@@ -766,7 +749,6 @@ mod tests {
                 assert_eq!(cmd.name, "Review");
                 assert_eq!(cmd.workflow, "a1b2c3d4-0000-4000-8000-000000000006");
                 assert_eq!(cmd.order, 0);
-                assert!(!cmd.r#final);
             }
             _ => panic!("Expected Add command"),
         }
@@ -786,7 +768,6 @@ mod tests {
             "sonnet",
             "--order",
             "3",
-            "--final",
             "--transition-to",
             "a1b2c3d4-0000-4000-8000-000000000009",
             "--transition-to",
@@ -803,7 +784,6 @@ mod tests {
                 );
                 assert_eq!(cmd.model, Some("sonnet".to_string()));
                 assert_eq!(cmd.order, 3);
-                assert!(cmd.r#final);
                 assert_eq!(
                     cmd.transitions_to,
                     vec![
@@ -966,7 +946,6 @@ mod tests {
                 assert!(cmd.name.is_none());
                 assert!(cmd.model.is_none());
                 assert!(cmd.order.is_none());
-                assert!(cmd.r#final.is_none());
             }
             _ => panic!("Expected Update command"),
         }
@@ -984,8 +963,6 @@ mod tests {
             "opus",
             "--order",
             "5",
-            "--final",
-            "true",
             "--transition-to",
             "a1b2c3d4-0000-4000-8000-00000000000c",
         ]);
@@ -996,7 +973,6 @@ mod tests {
                 assert_eq!(cmd.name, Some("Code Review".to_string()));
                 assert_eq!(cmd.model, Some("opus".to_string()));
                 assert_eq!(cmd.order, Some(5));
-                assert_eq!(cmd.r#final, Some(true));
                 assert_eq!(
                     cmd.transitions_to,
                     vec!["a1b2c3d4-0000-4000-8000-00000000000c"]

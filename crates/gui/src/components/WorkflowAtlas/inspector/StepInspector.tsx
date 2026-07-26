@@ -132,9 +132,8 @@ export function StepInspector({
   if (!wf || !step) return null;
 
   const kindCls = kindClass(step.kind);
-  const isFinal = step.isFinal;
   const isFinish = step.kind === "finish";
-  const isTerminal = isFinal || isFinish;
+  const isTerminal = isFinish;
   const agents = cfg?.agents ?? [];
   const skills = cfg?.skills ?? [];
   const model_ = cfg?.agent_config?.model ?? null;
@@ -212,7 +211,7 @@ export function StepInspector({
               <span className="wfd-pill">{step.order}</span>
             </div>
             <div className="wfd-row">
-              <span className="rk">{isFinish ? "Terminal step" : "Final step"}</span>
+              <span className="rk">Terminal step</span>
               <span className={"wfd-toggle" + (isTerminal ? " on" : "")}>
                 <span className="knob" />
               </span>

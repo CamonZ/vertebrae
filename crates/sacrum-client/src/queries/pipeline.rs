@@ -17,7 +17,6 @@ pub const PIPELINE_SUMMARY: &str = r#"
             name
             description
             is_default
-            is_final
             display_order
             metadata
             initial_step_id
@@ -31,7 +30,6 @@ pub const PIPELINE_SUMMARY: &str = r#"
                 goal
                 step_order
                 step_type
-                is_final
                 workflow_id
                 project_id
                 inserted_at

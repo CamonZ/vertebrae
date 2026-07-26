@@ -185,6 +185,11 @@ async fn given_assign_workflow_to_task(world: &mut SmokeWorld) {
 #[given(expr = "I create a task with:")]
 async fn given_create_task_with_table(world: &mut SmokeWorld, step: &cucumber::gherkin::Step) {
     crate::steps::task::do_create_task(world, step).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "failed to create fixture task: {}{}",
+        world.last_stdout, world.last_stderr
+    );
 }
 
 #[given(expr = "I run depend {string} --on {string}")]

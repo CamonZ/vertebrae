@@ -153,7 +153,6 @@ A single stage within a workflow. Each step defines what an AI agent should do.
 | `agents` | Agent file paths to run |
 | `skills` | Skill names to enable as tools |
 | `agent_config` | LLM configuration (see below) |
-| `is_final` | Whether this is a terminal step |
 | `transitions_to` | Step IDs reachable from this step |
 
 **Step types:**
@@ -164,11 +163,10 @@ A single stage within a workflow. Each step defines what an AI agent should do.
 - **`human_input`** — Human review/input gate. Pauses for external input instead of dispatching a daemon execution.
 - **`finish`** — Explicit promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to the daemon.
 
-`finish` is the explicit terminal type and supersedes `is_final` for new
-workflows. A finish step is terminal even when its legacy `is_final` field is
-`false`; existing `is_final` steps remain supported for compatibility. The
-finish type is preserved across the Sacrum wire model, core/CLI/Tauri models,
-GUI workflow/task surfaces, and trace events.
+`finish` is the sole explicit terminal type. A finish step completes the task
+immediately, has no outgoing transitions, and is never dispatched to the
+daemon. The finish type is preserved across the Sacrum wire model,
+core/CLI/Tauri models, GUI workflow/task surfaces, and trace events.
 
 **Output schema precedence:** When a step has `output_schema`, it overrides `agent_config.json_schema`. This gives step-level structured output contracts priority over the default agent config.
 
@@ -259,7 +257,7 @@ This is the core loop: a task moves through a workflow, and each step is execute
    ├── If step has eval_prompt AND multiple outgoing transitions:
    │   ├── :evaluating — dispatch eval execution to daemon
    │   └── Daemon runs eval, returns transition label
-   └── Else: follow single outgoing transition (or terminal finish / is_final)
+   └── Else: follow single outgoing transition (or terminal finish)
 
 10. :transitioning
     ├── advance_to_step(task_id, next_step_id)

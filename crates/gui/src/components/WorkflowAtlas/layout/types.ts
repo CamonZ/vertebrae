@@ -14,7 +14,7 @@
  * from `StepType` via `hearthStepKind` (renaming `eval`/`wait`/`human`). Drives
  * `k-<kind>` token classes. NOTE: there is no synthetic `entry`/`final` kind —
  * the backend has no such step types; flow position is carried by `Role`, and
- * terminality by `AtlasStep.isFinal` or the finish type.
+ * terminality by the finish type.
  */
 export type Kind =
   | "execute"
@@ -48,7 +48,6 @@ export interface AtlasStep {
   order: number;
   /** Bare backend step ids this step transitions into (same workflow). */
   transitionsTo: string[];
-  isFinal: boolean;
   /** All work items (epic + ticket + task) parked at this step. */
   total: number;
   /** How many of those have an active TaskRun. `running <= total`. */
@@ -68,7 +67,6 @@ export interface AtlasWorkflow {
   /** Backend display order (used for column ordering + intra-column stacking). */
   displayOrder: number;
   isDefault: boolean;
-  isFinal: boolean;
   /** Bare backend step ids belonging to this workflow, in order. */
   stepIds: string[];
   /** All work items parked across the workflow's steps (sum of step totals). */

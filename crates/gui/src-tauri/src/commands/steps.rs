@@ -93,7 +93,6 @@ pub async fn create_step(
         .with_agents(options.agents)
         .with_skills(options.skills)
         .with_order(options.order)
-        .with_is_final(options.is_final)
         .with_transitions_to(transitions)
         .with_step_type(options.step_type.into());
 
@@ -252,7 +251,6 @@ mod tests {
                 agents: vec!["sonnet".to_string()],
                 skills: vec![],
                 order: 0,
-                is_final: false,
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,
@@ -281,7 +279,6 @@ mod tests {
                 agents: vec![],
                 skills: vec![],
                 order: 0,
-                is_final: false,
                 transitions_to: vec![],
                 step_type: crate::types::StepType::Finish,
                 output_schema: None,
@@ -291,7 +288,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(step.step_type, crate::types::StepType::Finish);
-        assert!(!step.is_final);
         assert!(step.transitions_to.is_empty());
     }
 
@@ -316,7 +312,6 @@ mod tests {
                 agents: vec![],
                 skills: vec![],
                 order: 0,
-                is_final: false,
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,
@@ -333,7 +328,6 @@ mod tests {
                 agents: vec![],
                 skills: vec![],
                 order: 1,
-                is_final: true,
                 transitions_to: vec![],
                 step_type: Default::default(),
                 output_schema: None,

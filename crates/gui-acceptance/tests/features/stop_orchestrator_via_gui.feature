@@ -9,7 +9,6 @@ Feature: Stop a running workflow from the GUI
     And I create a workflow with:
       | name | Stop GUI Workflow |
     And I create a step "run" in the workflow "Stop GUI Workflow" via the CLI
-    And the step is marked final via the CLI
     And the step prompt is set to a mock that sleeps 15000 milliseconds
     And the GUI is showing the task list
     When I create a task with:

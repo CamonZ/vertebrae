@@ -73,7 +73,6 @@ export function createMockStep(overrides?: Partial<Step>): Step {
     goal: null,
     prompt: null,
     agent_config: createMockAgentConfig({ model: "claude-3-sonnet" }),
-    is_final: false,
     transitions_to: [],
     order: 0,
     created_at: null,
@@ -122,7 +121,6 @@ export function createMockSteps(workflowId = "test-workflow-1"): Step[] {
       workflow_id: workflowId,
       name: "done",
       order: 2,
-      is_final: true,
     }),
   ];
 }

@@ -210,7 +210,6 @@ function pipelineWorkflowFromWorkflow(workflow: Workflow): PipelineWorkflow {
     initial_step_id: workflow.initial_step ?? null,
     kanban_column: workflow.kanban_column ?? null,
     is_default: workflow.is_default ?? false,
-    is_final: workflow.is_final ?? false,
     display_order: workflow.display_order ?? 0,
     workflow_steps: [],
     transitions: [],
@@ -226,7 +225,6 @@ function pipelineStepFromStep(step: Step): PipelineStep {
     step_order: step.order ?? 0,
     step_type:
       typeof step.step_type === "string" ? step.step_type : null,
-    is_final: step.is_final ?? false,
     transitions_to: step.transitions_to ?? [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -269,7 +267,6 @@ export function applyWorkflowUpdated(
     initial_step_id: workflow.initial_step ?? null,
     kanban_column: workflow.kanban_column ?? null,
     is_default: workflow.is_default ?? existing.is_default,
-    is_final: workflow.is_final ?? existing.is_final,
     display_order: workflow.display_order ?? existing.display_order,
   };
 
@@ -337,7 +334,6 @@ export function applyStepUpdated(
       step_order: step.order ?? existing.step_order,
       step_type:
         typeof step.step_type === "string" ? step.step_type : existing.step_type,
-      is_final: step.is_final ?? existing.is_final,
       // Counts are preserved — they live in `pipeline_summary.workflow_steps`
       // and aren't carried by the Step payload.
     };

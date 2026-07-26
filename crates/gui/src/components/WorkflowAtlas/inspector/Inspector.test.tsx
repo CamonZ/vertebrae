@@ -2,7 +2,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,7 +11,6 @@ import type {
   PipelineWorkflow,
   Step,
 } from "../../../bindings";
-import { commands } from "../../../bindings";
 import { buildAtlasModel } from "../adapter/buildAtlasModel";
 import { StepInspector } from "./StepInspector";
 import { WorkflowInspector } from "./WorkflowInspector";
@@ -37,7 +35,6 @@ function makeStep(
     goal: null,
     step_order: order,
     step_type: "execute",
-    is_final: false,
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -58,7 +55,6 @@ function makeWorkflow(
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
     is_default: false,
-    is_final: false,
     display_order: 0,
     workflow_steps: steps,
     transitions: [],
@@ -128,7 +124,6 @@ const stepFixture = (overrides: Partial<Step> = {}): Step => ({
     json_schema: null,
   },
   step_type: "execute",
-  is_final: false,
   transitions_to: [],
   order: 0,
   created_at: null,
@@ -295,46 +290,6 @@ describe("WorkflowInspector", () => {
     expect(screen.getByText("default")).toBeInTheDocument();
   });
 
-  it("updates the final workflow setting through the GUI command", async () => {
-    const updateWorkflow = vi
-      .spyOn(commands, "updateWorkflow")
-      .mockResolvedValue({ status: "ok", data: null });
-    const onRefresh = vi.fn().mockResolvedValue(undefined);
-
-    try {
-      render(
-        <WorkflowInspector
-          model={MODEL}
-          workflowId="wf-build"
-          onSelect={vi.fn()}
-          onClose={vi.fn()}
-          onRefresh={onRefresh}
-        />
-      );
-
-      const toggle = screen.getByRole("switch", {
-        name: "Final workflow: disabled",
-      });
-      expect(toggle).toHaveAttribute("aria-checked", "false");
-
-      fireEvent.click(toggle);
-
-      await waitFor(() => {
-        expect(updateWorkflow).toHaveBeenCalledWith({
-          workflow_id: "wf-build",
-          name: null,
-          description: null,
-          order: null,
-          is_default: null,
-          is_final: true,
-          kanban_column: null,
-        });
-      });
-      expect(onRefresh).toHaveBeenCalledTimes(1);
-    } finally {
-      updateWorkflow.mockRestore();
-    }
-  });
 });
 
 describe("StepInspector", () => {

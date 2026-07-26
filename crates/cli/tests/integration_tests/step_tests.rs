@@ -42,7 +42,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -54,7 +53,7 @@ mod step_create_tests {
     }
 
     #[tokio::test]
-    async fn test_create_finish_step_is_terminal_without_is_final() {
+    async fn test_create_finish_step_is_terminal_by_type() {
         let services = mock_services();
         let workflow_id = services
             .workflows()
@@ -76,7 +75,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Finish,
             output_schema: None,
@@ -91,7 +89,6 @@ mod step_create_tests {
             .unwrap();
 
         assert_eq!(step.step_type, vertebrae_core::StepType::Finish);
-        assert!(!step.is_final);
         assert!(step.prompt.is_none());
         assert!(step.transitions_to.is_empty());
     }
@@ -119,7 +116,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec!["next-step".to_string()],
             step_type: CliStepType::Finish,
             output_schema: None,
@@ -156,7 +152,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -204,7 +199,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -252,7 +246,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 5,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -266,7 +259,7 @@ mod step_create_tests {
     }
 
     #[tokio::test]
-    async fn test_create_final_step() {
+    async fn test_create_finish_step() {
         let services = mock_services();
 
         // Create workflow
@@ -277,7 +270,7 @@ mod step_create_tests {
             .await
             .unwrap();
 
-        // Create final step
+        // Create finish step
         let cmd = StepAddCommand {
             name: "Complete".to_string(),
             workflow: workflow_id.clone(),
@@ -292,22 +285,20 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: true,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::Finish,
             output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
 
-        // Verify is_final is set
         let step = services
             .steps()
             .get_step("complete")
             .await
             .unwrap()
             .unwrap();
-        assert!(step.is_final);
+        assert_eq!(step.step_type, vertebrae_core::StepType::Finish);
     }
 
     #[tokio::test]
@@ -340,7 +331,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -393,7 +383,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -435,7 +424,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![
                 "approved".to_string(),
                 "rejected".to_string(),
@@ -487,7 +475,6 @@ mod step_create_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -542,9 +529,12 @@ mod step_list_tests {
                 reasoning_effort: None,
                 codex_model_provider: None,
                 order: i,
-                r#final: i == 2,
                 transitions_to: vec![],
-                step_type: CliStepType::Execute,
+                step_type: if i == 2 {
+                    CliStepType::Finish
+                } else {
+                    CliStepType::Execute
+                },
                 output_schema: None,
             };
             cmd.execute(services.steps()).await.unwrap();
@@ -560,7 +550,7 @@ mod step_list_tests {
         assert!(result.contains("Steps for workflow"));
         assert!(result.contains("1. Step 1 (id: step-0, type: execute, model: default)"));
         assert!(result.contains("2. Step 2 (id: step-1, type: execute, model: default)"));
-        assert!(result.contains("3. Step 3 (id: step-2, type: execute, model: default) [FINAL]"));
+        assert!(result.contains("3. Step 3 (id: step-2, type: finish, model: default)"));
     }
 
     #[tokio::test]
@@ -588,7 +578,6 @@ mod step_list_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: true,
             transitions_to: vec![],
             step_type: CliStepType::Evaluate,
             output_schema: None,
@@ -614,7 +603,6 @@ mod step_list_tests {
         assert_eq!(steps[0]["goal"], "Review implementation");
         assert_eq!(steps[0]["step_type"], "evaluate");
         assert_eq!(steps[0]["agent_config"]["model"], "sonnet");
-        assert_eq!(steps[0]["is_final"], true);
     }
 
     #[tokio::test]
@@ -666,7 +654,6 @@ mod step_list_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -718,7 +705,6 @@ mod step_show_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 1,
-            r#final: false,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -736,7 +722,6 @@ mod step_show_tests {
         assert!(result.contains("Workflow:"));
         assert!(result.contains("Goal:          Review code quality"));
         assert!(result.contains("Order:         1"));
-        assert!(result.contains("Is Final:      No"));
         assert!(result.contains("Transitions:   approved, rejected"));
     }
 
@@ -766,7 +751,6 @@ mod step_show_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -786,10 +770,10 @@ mod step_show_tests {
     }
 
     #[tokio::test]
-    async fn test_show_final_step() {
+    async fn test_show_finish_step() {
         let services = mock_services();
 
-        // Create workflow and final step
+        // Create workflow and finish step
         let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
         let workflow_id = services
             .workflows()
@@ -811,9 +795,8 @@ mod step_show_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 10,
-            r#final: true,
             transitions_to: vec![],
-            step_type: CliStepType::Execute,
+            step_type: CliStepType::Finish,
             output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
@@ -824,8 +807,7 @@ mod step_show_tests {
         };
         let result = show_cmd.execute(services.steps()).await.unwrap();
 
-        // Verify final marker
-        assert!(result.contains("Is Final:      Yes"));
+        assert!(result.contains("Step Type:     finish"));
     }
 
     #[tokio::test]
@@ -866,7 +848,6 @@ mod step_show_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -907,7 +888,6 @@ mod step_show_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::HumanInput,
             output_schema: Some(r#"{"type":"object","required":["decision"]}"#.to_string()),
@@ -971,7 +951,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -994,7 +973,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1030,7 +1008,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1054,7 +1031,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: Some(CliStepType::Finish),
@@ -1094,7 +1070,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1117,7 +1092,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1156,14 +1130,13 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
-        // Update order and final flag
+        // Update order
         let update_cmd = StepUpdateCommand {
             id: "step".to_string(),
             name: None,
@@ -1179,7 +1152,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: Some(5),
-            r#final: Some(true),
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1218,7 +1190,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1241,7 +1212,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1288,7 +1258,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1311,7 +1280,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1350,7 +1318,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1373,7 +1340,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
             clear_transitions: false,
             step_type: None,
@@ -1425,7 +1391,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec!["old".to_string()],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1448,7 +1413,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: true,
             step_type: None,
@@ -1486,7 +1450,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1508,7 +1471,6 @@ mod step_update_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -1568,7 +1530,6 @@ mod step_dispatcher_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1618,7 +1579,6 @@ mod step_delete_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1682,7 +1642,6 @@ mod step_delete_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1725,7 +1684,6 @@ mod step_delete_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1777,7 +1735,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1817,7 +1774,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1856,7 +1812,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1907,7 +1862,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1948,7 +1902,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -1970,7 +1923,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -2007,7 +1959,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -2030,7 +1981,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -2067,7 +2017,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -2089,7 +2038,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,
@@ -2132,7 +2080,6 @@ mod step_prompt_and_agent_config_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 2,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -2182,7 +2129,6 @@ mod route_step_schema_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Route,
             output_schema: Some(schema_json),
@@ -2205,7 +2151,6 @@ mod route_step_schema_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: Some(CliStepType::Route),
@@ -2342,7 +2287,6 @@ mod provider_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: 0,
-            r#final: false,
             transitions_to: vec![],
             step_type: CliStepType::Execute,
             output_schema: None,
@@ -2370,7 +2314,6 @@ mod provider_tests {
             reasoning_effort: None,
             codex_model_provider: None,
             order: None,
-            r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
             step_type: None,

@@ -1275,7 +1275,6 @@ mod tests {
             name: "Workflow".to_string(),
             description: None,
             is_default: None,
-            is_final: None,
             display_order: None,
             metadata: None,
             initial_step_id: None,

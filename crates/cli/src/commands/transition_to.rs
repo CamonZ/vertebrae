@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Serialize;
-use vertebrae_core::{ServiceError, StepType, VertebraeServices};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Transition a task to a specific workflow step
 ///
@@ -41,7 +41,6 @@ pub struct TransitionToResult {
     pub target_step: Option<String>,
     pub from_workflow: Option<String>,
     pub from_step: Option<String>,
-    pub unblocked_tasks: Vec<(String, String)>,
     pub validation_skipped: bool,
 }
 
@@ -80,15 +79,6 @@ impl std::fmt::Display for TransitionToResult {
                 "Assigned task '{}' to workflow {}{}",
                 self.id, self.target_workflow, step_info
             )?;
-        }
-
-        // Show unblocked tasks if any
-        if !self.unblocked_tasks.is_empty() {
-            writeln!(f)?;
-            writeln!(f, "Unblocked tasks:")?;
-            for (id, title) in &self.unblocked_tasks {
-                writeln!(f, "  - {} ({})", id, title)?;
-            }
         }
 
         Ok(())
@@ -279,34 +269,12 @@ impl TransitionToCommand {
             None
         };
 
-        // Get unblocked tasks when a completion boundary is reached. Keep the
-        // legacy final marker for older workflows, but use the explicit finish
-        // step type for new workflows.
-        let mut unblocked_tasks = vec![];
-        if target_step.is_final || matches!(&target_step.step_type, StepType::Finish) {
-            let dependents = services.tasks().get_dependents(&id).await?;
-
-            for dependent_id in dependents {
-                let blockers = services
-                    .tasks()
-                    .get_incomplete_blockers_with_details(&dependent_id)
-                    .await?;
-
-                if blockers.is_empty()
-                    && let Ok(task) = services.tasks().get_task(&dependent_id).await
-                {
-                    unblocked_tasks.push((dependent_id, task.title));
-                }
-            }
-        }
-
         Ok(TransitionToResult {
             id,
             target_workflow: target_workflow_name,
             target_step: target_step_name,
             from_workflow: from_workflow_name,
             from_step: from_step_name,
-            unblocked_tasks,
             validation_skipped: self.skip_validation,
         })
     }
@@ -326,7 +294,6 @@ mod tests {
             target_step: Some("pending".to_string()),
             from_workflow: Some("implementation".to_string()),
             from_step: Some("coding".to_string()),
-            unblocked_tasks: vec![],
             validation_skipped: false,
         };
         let output = format!("{}", result);
@@ -346,7 +313,6 @@ mod tests {
             target_step: None,
             from_workflow: Some("implementation".to_string()),
             from_step: None,
-            unblocked_tasks: vec![],
             validation_skipped: false,
         };
         let output = format!("{}", result);
@@ -361,7 +327,6 @@ mod tests {
             target_step: Some("backlog".to_string()),
             from_workflow: None,
             from_step: None,
-            unblocked_tasks: vec![],
             validation_skipped: false,
         };
         let output = format!("{}", result);
@@ -376,7 +341,6 @@ mod tests {
             target_step: None,
             from_workflow: None,
             from_step: None,
-            unblocked_tasks: vec![],
             validation_skipped: false,
         };
         let output = format!("{}", result);
@@ -391,7 +355,6 @@ mod tests {
             target_step: None,
             from_workflow: None,
             from_step: None,
-            unblocked_tasks: vec![],
             validation_skipped: true,
         };
         let output = format!("{}", result);
@@ -400,44 +363,19 @@ mod tests {
     }
 
     #[test]
-    fn test_display_transition_with_unblocked_tasks() {
-        let result = TransitionToResult {
-            id: "task1".to_string(),
-            target_workflow: "default".to_string(),
-            target_step: Some("done".to_string()),
-            from_workflow: Some("default".to_string()),
-            from_step: Some("in_progress".to_string()),
-            unblocked_tasks: vec![
-                ("task2".to_string(), "Build feature X".to_string()),
-                ("task3".to_string(), "Write tests".to_string()),
-            ],
-            validation_skipped: false,
-        };
-        let output = format!("{}", result);
-        assert!(output.contains("Unblocked tasks:"));
-        assert!(output.contains("task2"));
-        assert!(output.contains("Build feature X"));
-        assert!(output.contains("task3"));
-        assert!(output.contains("Write tests"));
-    }
-
-    #[test]
-    fn test_display_transition_all_features() {
+    fn test_display_transition_with_all_features() {
         let result = TransitionToResult {
             id: "task1".to_string(),
             target_workflow: "done".to_string(),
             target_step: Some("completed".to_string()),
             from_workflow: Some("review".to_string()),
             from_step: Some("approved".to_string()),
-            unblocked_tasks: vec![("task2".to_string(), "Next task".to_string())],
             validation_skipped: true,
         };
         let output = format!("{}", result);
         assert!(output.contains("validation skipped"));
         assert!(output.contains("Transitioned task 'task1'"));
         assert!(output.contains("from review:approved to done:completed"));
-        assert!(output.contains("Unblocked tasks:"));
-        assert!(output.contains("task2"));
     }
 
     // ==================== TransitionToCommand struct tests ====================
@@ -478,7 +416,6 @@ mod tests {
             target_step: Some("pending".to_string()),
             from_workflow: None,
             from_step: None,
-            unblocked_tasks: vec![],
             validation_skipped: false,
         };
         let debug = format!("{:?}", result);
