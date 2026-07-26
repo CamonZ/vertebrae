@@ -1347,6 +1347,67 @@ describe("ChatWindow", () => {
     await act(async () => resolveClose({ status: "ok", data: null }));
   });
 
+  it("keeps the composer closed when End arrives before Stop completes", async () => {
+    const user = userEvent.setup();
+    let resolveClose!: (result: { status: "ok"; data: null }) => void;
+    mockedCommands.closeLocalChatSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClose = resolve;
+        })
+    );
+    const session = createSession({
+      backendSessionId: "claude-stop-end-race",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-stop-end-race",
+        turnId: "root-turn-stop-end-race",
+        phase: "active",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    fireEvent.click(screen.getByTestId("local-chat-stop-generation"));
+    act(() => {
+      expect(
+        routeLocalChatSessionEndEvent({
+          backend_session_id: "claude-stop-end-race",
+          harness: "claude",
+          turn_id: "root-turn-stop-end-race",
+          thread_id: "root-thread-stop-end-race",
+          is_root: true,
+          duration_ms: 1,
+          cost_usd: 0,
+          num_turns: 1,
+          result: "interrupted",
+          is_error: false,
+          context_tokens: 0,
+          context_window: 200000,
+        })
+      ).toBe(true);
+    });
+
+    const composer = screen.getByTestId("local-chat-composer");
+    expect(useChatStore.getState().sessions["test-session"].lifecycle).toBe(
+      "closing"
+    );
+    expect(composer).toBeDisabled();
+    await user.type(composer, "must not send{Enter}");
+    expect(composer).toHaveValue("");
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+
+    await act(async () => resolveClose({ status: "ok", data: null }));
+    expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+      lifecycle: "idle",
+      backendSessionId: null,
+    });
+  });
+
   it("restores Stop for retry when the close transport fails", async () => {
     const user = userEvent.setup();
     mockedCommands.closeLocalChatSession.mockResolvedValueOnce({

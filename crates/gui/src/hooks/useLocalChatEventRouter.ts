@@ -279,7 +279,7 @@ export function routeLocalChatSessionEndEvent(
     payload,
     payload.backend_session_id,
     sessionId,
-    store.setSessionLifecycle,
+    wasStopping ? () => {} : store.setSessionLifecycle,
     store.clearStreamingAssistant
   );
   if (!wasStopping) void flushNextQueuedMessage(sessionId);

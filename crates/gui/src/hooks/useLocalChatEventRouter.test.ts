@@ -395,6 +395,7 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(
       useChatStore.getState().markActiveTurnStopping("local")
     ).toBe(true);
+    useChatStore.getState().setSessionLifecycle("local", "closing");
 
     expect(
       routeLocalChatSessionEndEvent({
@@ -417,7 +418,7 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
     expect(useChatStore.getState().sessions.local).toMatchObject({
       activeTurn: null,
-      lifecycle: "idle",
+      lifecycle: "closing",
       queuedMessages: ["must not start"],
     });
   });

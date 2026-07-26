@@ -1840,12 +1840,48 @@ describe("doCloseSession", () => {
     );
   });
 
-  it("does not clear a replacement turn when an earlier close resolves", async () => {
+  it("leaves a terminal stopping turn idle when close transport fails", async () => {
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "transport unavailable" },
+    } as never);
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => null),
+      getBackendSessionId: vi.fn(() => CLAUDE_SESSION_ID),
+      restoreActiveTurn: vi.fn(),
+    };
+
+    expect(
+      await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps, {
+        expectedActiveTurnLocalId: "settled-local-turn",
+        failureLifecycle: "streaming",
+      })
+    ).toBe(false);
+
+    expect(deps.restoreActiveTurn).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    expect(deps.setSessionLifecycle).toHaveBeenNthCalledWith(
+      1,
+      SESSION_ID,
+      "closing"
+    );
+    expect(deps.setSessionLifecycle).toHaveBeenNthCalledWith(
+      2,
+      SESSION_ID,
+      "idle"
+    );
+  });
+
+  it("does not clear a settled replacement backend when an earlier close resolves", async () => {
     const close = deferredCommandResult();
     mockedCommands.closeLocalChatSession.mockReturnValueOnce(
       close.promise as never
     );
-    let currentLocalId = "local-turn-1";
+    let currentLocalId: string | null = "local-turn-1";
+    let currentBackendSessionId = CLAUDE_SESSION_ID;
     const deps = {
       markSessionClosed: vi.fn(),
       setSessionLifecycle: vi.fn(),
@@ -1853,12 +1889,14 @@ describe("doCloseSession", () => {
       clearQueuedMessages: vi.fn(),
       settleActiveTurn: vi.fn(),
       getActiveTurnLocalId: vi.fn(() => currentLocalId),
+      getBackendSessionId: vi.fn(() => currentBackendSessionId),
     };
     const closing = doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps, {
       expectedActiveTurnLocalId: "local-turn-1",
     });
 
-    currentLocalId = "local-turn-2";
+    currentLocalId = null;
+    currentBackendSessionId = "replacement-backend";
     close.resolve({ status: "ok" });
 
     expect(await closing).toBe(true);

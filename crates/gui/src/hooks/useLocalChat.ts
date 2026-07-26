@@ -539,6 +539,7 @@ export async function doCloseSession(
     markPendingUserQuestionsUnavailable?: (id: string) => void;
     settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
     getActiveTurnLocalId?: (id: string) => string | null;
+    getBackendSessionId?: (id: string) => string | null;
     restoreActiveTurn?: (id: string, localId: string) => boolean;
   },
   options: {
@@ -546,8 +547,15 @@ export async function doCloseSession(
     failureLifecycle?: LocalChatLifecycle;
   } = {}
 ): Promise<boolean> {
-  const hasReplacementTurn = () => {
-    if (!sessionId || !options.expectedActiveTurnLocalId) return false;
+  const completionIsStale = () => {
+    if (!sessionId) return false;
+    if (
+      deps.getBackendSessionId &&
+      deps.getBackendSessionId(sessionId) !== backendSessionId
+    ) {
+      return true;
+    }
+    if (!options.expectedActiveTurnLocalId) return false;
     const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
     return (
       currentLocalId !== null &&
@@ -563,7 +571,7 @@ export async function doCloseSession(
     const result = await commands.closeLocalChatSession(backendSessionId);
     if (result.status === "error") {
       if (isSessionNotFoundError(result.error)) {
-        if (hasReplacementTurn()) return true;
+        if (completionIsStale()) return true;
         if (sessionId) {
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
@@ -577,7 +585,7 @@ export async function doCloseSession(
       throw new Error(commandErrorMessage(result.error));
     }
     if (sessionId) {
-      if (hasReplacementTurn()) return true;
+      if (completionIsStale()) return true;
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
@@ -588,6 +596,7 @@ export async function doCloseSession(
     return true;
   } catch (error) {
     if (sessionId) {
+      if (completionIsStale()) return false;
       const expectedLocalId = options.expectedActiveTurnLocalId;
       const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
       if (expectedLocalId) {
@@ -597,6 +606,8 @@ export async function doCloseSession(
             sessionId,
             options.failureLifecycle ?? "streaming"
           );
+        } else if (currentLocalId === null) {
+          deps.setSessionLifecycle(sessionId, "idle");
         }
       } else {
         deps.setSessionLifecycle(
@@ -793,6 +804,8 @@ export function useLocalChat(sessionId: string | null) {
         settleActiveTurn,
         getActiveTurnLocalId: (id) =>
           useChatStore.getState().sessions[id]?.activeTurn?.localId ?? null,
+        getBackendSessionId: (id) =>
+          useChatStore.getState().sessions[id]?.backendSessionId ?? null,
         restoreActiveTurn,
       },
       {
