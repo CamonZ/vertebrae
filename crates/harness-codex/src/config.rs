@@ -66,6 +66,9 @@ pub struct CodexProviderConfig {
     pub installed_skills_roots: Vec<PathBuf>,
     pub cleanup_timeout: Duration,
     pub readiness_timeout: Duration,
+    /// Maximum wait for an App Server request/response round trip once the
+    /// connection is ready.
+    pub request_timeout: Duration,
     pub terminal_exit_timeout: Duration,
     pub launch_attempts: usize,
     pub launcher: Option<Arc<dyn CodexAppServerLauncher>>,
@@ -91,6 +94,7 @@ impl std::fmt::Debug for CodexProviderConfig {
             .field("installed_skills_roots", &self.installed_skills_roots)
             .field("cleanup_timeout", &self.cleanup_timeout)
             .field("readiness_timeout", &self.readiness_timeout)
+            .field("request_timeout", &self.request_timeout)
             .field("terminal_exit_timeout", &self.terminal_exit_timeout)
             .field("launch_attempts", &self.launch_attempts)
             .field("launcher", &self.launcher.as_ref().map(|_| "configured"))
@@ -114,6 +118,7 @@ impl Default for CodexProviderConfig {
             installed_skills_roots: Vec::new(),
             cleanup_timeout: Duration::from_secs(3),
             readiness_timeout: Duration::from_secs(5),
+            request_timeout: Duration::from_secs(30),
             terminal_exit_timeout: Duration::from_millis(250),
             launch_attempts: 3,
             launcher: None,
