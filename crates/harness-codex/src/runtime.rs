@@ -794,7 +794,7 @@ impl SessionState {
             UpdateSemantics::Snapshot,
         )
         .await?;
-        let structured_output_requested = output_schema.is_some();
+        let validation_schema = output_schema.clone();
         let result = async {
             self.emit(
                 self.root_stream_id.clone(),
@@ -890,7 +890,10 @@ impl SessionState {
             Ok::<_, HarnessError>(outcome)
         }
         .await;
-        let result = result.unwrap_or_else(failed_outcome);
+        let result = validate_structured_output(
+            result.unwrap_or_else(failed_outcome),
+            validation_schema.as_ref(),
+        );
         if run_id.is_none() {
             self.emit(
                 self.root_stream_id.clone(),
@@ -900,33 +903,12 @@ impl SessionState {
             )
             .await?;
         }
-        let mut result = result;
         log::info!(
             "[Codex] turn finished turn_id={} status={:?} result_text_len={}",
             turn_id,
             result.status,
             result.result_text.as_deref().map_or(0, str::len)
         );
-        if structured_output_requested
-            && result.status == CompletionStatus::Completed
-            && result.structured_output.is_none()
-        {
-            match result.result_text.as_deref() {
-                Some(text) => match serde_json::from_str(text) {
-                    Ok(value) => result.structured_output = Some(value),
-                    Err(error) => {
-                        result.status = CompletionStatus::Failed;
-                        result.error = Some(format!(
-                            "Codex structured output was not valid JSON: {error}"
-                        ));
-                    }
-                },
-                None => {
-                    result.status = CompletionStatus::Failed;
-                    result.error = Some("Codex structured output was empty".into());
-                }
-            }
-        }
         Ok(result)
     }
 
@@ -1033,6 +1015,55 @@ fn failed_outcome(error: HarnessError) -> TurnOutcome {
         metrics: OutcomeMetrics::default(),
         error: Some(error.to_string()),
     }
+}
+
+fn validate_structured_output(mut outcome: TurnOutcome, schema: Option<&Value>) -> TurnOutcome {
+    let Some(schema) = schema else {
+        return outcome;
+    };
+    if outcome.status != CompletionStatus::Completed {
+        return outcome;
+    }
+
+    if outcome.structured_output.is_none() {
+        let Some(text) = outcome.result_text.as_deref() else {
+            outcome.status = CompletionStatus::Failed;
+            outcome.error = Some("Codex structured output was empty".into());
+            return outcome;
+        };
+        match serde_json::from_str(text) {
+            Ok(value) => outcome.structured_output = Some(value),
+            Err(error) => {
+                outcome.status = CompletionStatus::Failed;
+                outcome.error = Some(format!(
+                    "Codex structured output was not valid JSON: {error}"
+                ));
+                return outcome;
+            }
+        }
+    }
+
+    let validator = match jsonschema::validator_for(schema) {
+        Ok(validator) => validator,
+        Err(error) => {
+            outcome.status = CompletionStatus::Failed;
+            outcome.error = Some(format!(
+                "Codex output schema could not be compiled: {error}"
+            ));
+            return outcome;
+        }
+    };
+    let output = outcome
+        .structured_output
+        .as_ref()
+        .expect("structured output is populated above");
+    if let Err(error) = validator.validate(output) {
+        outcome.status = CompletionStatus::Failed;
+        outcome.error = Some(format!(
+            "Codex structured output did not match the requested schema: {error}"
+        ));
+    }
+    outcome
 }
 
 fn cancelled_outcome(status: CompletionStatus, usage: Option<TurnUsage>) -> TurnOutcome {
@@ -1714,19 +1745,19 @@ fn outcome_from_completion(
         )
         .unwrap_or_else(|| "Codex turn failed".into())
     });
-    let structured_output = [
-        "/turn/structuredOutput",
-        "/structuredOutput",
-        "/turn/result",
-        "/result",
-    ]
-    .iter()
-    .find_map(|pointer| params.pointer(pointer))
-    .and_then(|value| match value {
-        Value::String(value) => serde_json::from_str(value).ok(),
-        Value::Object(_) | Value::Array(_) => Some(value.clone()),
-        _ => None,
-    });
+    let structured_output = ["/turn/structuredOutput", "/structuredOutput"]
+        .iter()
+        .find_map(|pointer| params.pointer(pointer))
+        .cloned()
+        .or_else(|| {
+            ["/turn/result", "/result"]
+                .iter()
+                .find_map(|pointer| params.pointer(pointer))
+                .and_then(|value| match value {
+                    Value::String(value) => serde_json::from_str(value).ok(),
+                    value => Some(value.clone()),
+                })
+        });
     TurnOutcome {
         status,
         result_text: (!accumulator.text.is_empty())

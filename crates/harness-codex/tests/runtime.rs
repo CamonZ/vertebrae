@@ -148,6 +148,10 @@ enum LifecycleScenario {
     InterruptNoAck,
     NotificationLag,
     DelayedSuccess,
+    StructuredValid,
+    StructuredScalar,
+    StructuredInvalidJson,
+    StructuredSchemaViolation,
 }
 
 async fn lifecycle_server(
@@ -268,6 +272,42 @@ async fn lifecycle_server(
                                         .await
                                         .unwrap();
                                 }
+                            }
+                            LifecycleScenario::StructuredValid => {
+                                socket
+                                    .send(Message::Text(
+                                        json!({"method": "turn/completed", "params": {"threadId": "root-thread", "turn": {"id": "provider-turn", "status": "completed", "structuredOutput": {"count": 1}}}})
+                                            .to_string(),
+                                    ))
+                                    .await
+                                    .unwrap();
+                            }
+                            LifecycleScenario::StructuredScalar => {
+                                socket
+                                    .send(Message::Text(
+                                        json!({"method": "turn/completed", "params": {"threadId": "root-thread", "turn": {"id": "provider-turn", "status": "completed", "structuredOutput": "ok"}}})
+                                            .to_string(),
+                                    ))
+                                    .await
+                                    .unwrap();
+                            }
+                            LifecycleScenario::StructuredInvalidJson => {
+                                socket
+                                    .send(Message::Text(
+                                        json!({"method": "turn/completed", "params": {"threadId": "root-thread", "turn": {"id": "provider-turn", "status": "completed", "result": "not json"}}})
+                                            .to_string(),
+                                    ))
+                                    .await
+                                    .unwrap();
+                            }
+                            LifecycleScenario::StructuredSchemaViolation => {
+                                socket
+                                    .send(Message::Text(
+                                        json!({"method": "turn/completed", "params": {"threadId": "root-thread", "turn": {"id": "provider-turn", "status": "completed", "structuredOutput": {"count": "wrong"}}}})
+                                            .to_string(),
+                                    ))
+                                    .await
+                                    .unwrap();
                             }
                             LifecycleScenario::DelayedSuccess => {
                                 tokio::time::sleep(Duration::from_millis(80)).await;
@@ -721,4 +761,76 @@ async fn child_terminal_does_not_settle_the_root_turn_handle() {
 
     session.close().await.unwrap();
     let _ = server.await;
+}
+
+#[tokio::test]
+async fn structured_output_is_validated_before_terminal_settlement() {
+    let count_schema = json!({
+        "type": "object",
+        "properties": {"count": {"type": "integer"}},
+        "required": ["count"],
+        "additionalProperties": false
+    });
+    for (scenario, schema, expected_status, expected_error, expected_output) in [
+        (
+            LifecycleScenario::StructuredValid,
+            count_schema.clone(),
+            CompletionStatus::Completed,
+            None,
+            Some(json!({"count": 1})),
+        ),
+        (
+            LifecycleScenario::StructuredInvalidJson,
+            count_schema.clone(),
+            CompletionStatus::Failed,
+            Some("not valid JSON"),
+            None,
+        ),
+        (
+            LifecycleScenario::StructuredScalar,
+            json!({"type": "string"}),
+            CompletionStatus::Completed,
+            None,
+            Some(json!("ok")),
+        ),
+        (
+            LifecycleScenario::StructuredSchemaViolation,
+            count_schema,
+            CompletionStatus::Failed,
+            Some("did not match the requested schema"),
+            Some(json!({"count": "wrong"})),
+        ),
+        (
+            LifecycleScenario::StructuredValid,
+            json!({"type": 7}),
+            CompletionStatus::Failed,
+            Some("schema could not be compiled"),
+            Some(json!({"count": 1})),
+        ),
+    ] {
+        let (url, server, _, _) = lifecycle_server(scenario).await;
+        let runtime = runtime_with_timeouts(url);
+        let events = Arc::new(CapturingSink::default());
+        let session = start_test_session(&runtime, events.clone()).await;
+        let turn = session
+            .send(SendTurnRequest {
+                turn_id: TurnId::from("structured"),
+                content: "return structured output".into(),
+                output_schema: Some(schema),
+            })
+            .await
+            .unwrap();
+
+        let outcome = turn.await_outcome().await.unwrap();
+        assert_eq!(outcome.status, expected_status);
+        assert_eq!(outcome.structured_output, expected_output);
+        match expected_error {
+            Some(expected) => assert!(outcome.error.as_deref().unwrap().contains(expected)),
+            None => assert!(outcome.error.is_none()),
+        }
+        assert_balanced_turn(&events.events.lock().unwrap(), "structured", &outcome);
+
+        session.close().await.unwrap();
+        let _ = server.await;
+    }
 }
