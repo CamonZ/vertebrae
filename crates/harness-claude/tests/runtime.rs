@@ -5,12 +5,16 @@ use std::{
     future::pending,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
 use tempfile::TempDir;
+use tokio::sync::Notify;
 use vertebrae_harness_claude::{ClaudeProviderConfig, ClaudeRuntime};
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
@@ -73,6 +77,42 @@ struct FailingSink;
 impl EventSink for FailingSink {
     async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
         Err(HarnessError::EventSink("fixture sink failure".into()))
+    }
+}
+
+#[derive(Default)]
+struct TerminalGateSink {
+    events: Mutex<Vec<HarnessEventV1>>,
+    terminal_entered: Notify,
+    terminal_release: Notify,
+}
+
+#[async_trait]
+impl EventSink for TerminalGateSink {
+    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        if matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_)) {
+            self.terminal_entered.notify_one();
+            self.terminal_release.notified().await;
+        }
+        self.events.lock().unwrap().push(event);
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct FailTerminalSink {
+    terminal_attempts: AtomicUsize,
+}
+
+#[async_trait]
+impl EventSink for FailTerminalSink {
+    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        if matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_)) {
+            self.terminal_attempts.fetch_add(1, Ordering::SeqCst);
+            Err(HarnessError::EventSink("terminal sink failure".into()))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -1000,6 +1040,191 @@ sleep 30
         session.close().await.unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed
     );
+}
+
+#[tokio::test]
+async fn provider_result_is_dispatched_before_outcome_and_settles_once_during_close() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-result",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"ordered-session"}'
+IFS= read -r _
+printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
+sleep 30
+"#,
+    );
+    let sink = Arc::new(TerminalGateSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("ordered-requested"),
+                stream_id: StreamId::from("ordered-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("ordered-turn"),
+            content: "finish".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(2), sink.terminal_entered.notified())
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), turn.await_outcome())
+            .await
+            .is_err(),
+        "outcome became observable before TurnFinished dispatch completed"
+    );
+    let session_to_close = session.clone();
+    let close = tokio::spawn(async move { session_to_close.close().await });
+    sink.terminal_release.notify_one();
+
+    let outcome = turn.await_outcome().await.unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Completed);
+    assert_eq!(outcome.result_text.as_deref(), Some("done"));
+    assert_eq!(
+        close.await.unwrap().unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
+    );
+    let events = sink.events.lock().unwrap();
+    let finishes = events
+        .iter()
+        .filter(|event| {
+            event.correlation.turn_id.as_ref() == Some(turn.turn_id())
+                && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(finishes.len(), 1);
+    assert!(matches!(
+        &finishes[0].payload,
+        HarnessEventPayloadV1::TurnFinished(event_outcome) if event_outcome == &outcome
+    ));
+}
+
+#[tokio::test]
+async fn interrupt_dispatches_terminal_event_before_outcome() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-interrupt",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"interrupt-ordered-session"}'
+IFS= read -r _
+sleep 30
+"#,
+    );
+    let sink = Arc::new(TerminalGateSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("interrupt-ordered-requested"),
+                stream_id: StreamId::from("interrupt-ordered-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("interrupt-ordered-turn"),
+            content: "wait".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let turn_to_interrupt = turn.clone();
+    let interrupt = tokio::spawn(async move { turn_to_interrupt.interrupt().await });
+
+    tokio::time::timeout(Duration::from_secs(2), sink.terminal_entered.notified())
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(20), turn.await_outcome())
+            .await
+            .is_err(),
+        "interrupted outcome became observable before TurnFinished dispatch completed"
+    );
+    sink.terminal_release.notify_one();
+
+    interrupt.await.unwrap().unwrap();
+    let outcome = turn.await_outcome().await.unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Interrupted);
+    assert_eq!(
+        sink.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event.correlation.turn_id.as_ref() == Some(turn.turn_id())
+                    && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+            })
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn terminal_sink_failure_is_typed_and_not_retried() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "terminal-sink-failure",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"sink-failure-session"}'
+IFS= read -r _
+printf '%s\n' '{"type":"result","subtype":"success","result":"unobservable"}'
+sleep 30
+"#,
+    );
+    let sink = Arc::new(FailTerminalSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("sink-failure-requested"),
+                stream_id: StreamId::from("sink-failure-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("sink-failure-turn"),
+            content: "finish".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+
+    let error = turn.await_outcome().await.unwrap_err();
+    assert!(matches!(
+        error,
+        HarnessError::EventSink(message) if message == "terminal sink failure"
+    ));
+    assert_eq!(sink.terminal_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        session.close().await.unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Failed
+    );
+    assert_eq!(sink.terminal_attempts.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

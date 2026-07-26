@@ -15,6 +15,7 @@ pub(super) enum OutcomeState<T> {
     Pending,
     Ready(T),
     Failed(String),
+    EventSinkFailed(String),
 }
 
 pub(super) struct ClaudeTurnHandle {
@@ -142,6 +143,7 @@ async fn await_state<T: Clone>(
             })?,
             OutcomeState::Ready(value) => return Ok(value),
             OutcomeState::Failed(error) => return Err(HarnessError::Operation(error)),
+            OutcomeState::EventSinkFailed(error) => return Err(HarnessError::EventSink(error)),
         }
     }
 }
