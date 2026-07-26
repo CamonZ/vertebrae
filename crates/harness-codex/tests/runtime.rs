@@ -1,3 +1,6 @@
+#[path = "../../harness-core/tests/common/lifecycle.rs"]
+mod lifecycle;
+
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -14,8 +17,10 @@ use vertebrae_harness_codex::{
 use vertebrae_harness_core::{
     CompletionStatus, ControlResolution, ControlSink, EventSink, HarnessError,
     HarnessEventPayloadV1, HarnessEventV1, HarnessRuntime, RunRequest, SendTurnRequest, SessionId,
-    StartSessionRequest, StreamId, TurnId, TurnInputProvenance, TurnOutcome,
+    StartSessionRequest, StreamId, TurnId, TurnInputProvenance,
 };
+
+use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
 
 #[derive(Clone)]
 struct TestLauncher {
@@ -147,7 +152,7 @@ enum LifecycleScenario {
     InterruptFallback,
     InterruptNoAck,
     NotificationLag,
-    DelayedSuccess,
+    ControlledSuccess,
     StructuredValid,
     StructuredScalar,
     StructuredInvalidJson,
@@ -309,15 +314,14 @@ async fn lifecycle_server(
                                     .await
                                     .unwrap();
                             }
-                            LifecycleScenario::DelayedSuccess => {
-                                tokio::time::sleep(Duration::from_millis(80)).await;
-                                socket
+                            LifecycleScenario::ControlledSuccess => {
+                                server_root_completion.notified().await;
+                                let _ = socket
                                     .send(Message::Text(
                                         json!({"method": "turn/completed", "params": {"threadId": "root-thread", "turn": {"id": "provider-turn", "status": "completed"}}})
                                             .to_string(),
                                     ))
-                                    .await
-                                    .unwrap();
+                                    .await;
                             }
                             LifecycleScenario::InterruptCompleted
                             | LifecycleScenario::InterruptFallback
@@ -376,31 +380,6 @@ async fn start_test_session(
         .unwrap()
 }
 
-fn assert_balanced_turn(events: &[HarnessEventV1], turn_id: &str, expected_outcome: &TurnOutcome) {
-    let turn_id = TurnId::from(turn_id);
-    let starts: Vec<_> = events
-        .iter()
-        .filter(|event| {
-            event.correlation.turn_id.as_ref() == Some(&turn_id)
-                && matches!(event.payload, HarnessEventPayloadV1::TurnStarted(_))
-        })
-        .collect();
-    let finishes: Vec<_> = events
-        .iter()
-        .filter(|event| {
-            event.correlation.turn_id.as_ref() == Some(&turn_id)
-                && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
-        })
-        .collect();
-    assert_eq!(starts.len(), 1, "expected one correlated TurnStarted");
-    assert_eq!(finishes.len(), 1, "expected one correlated TurnFinished");
-    assert!(starts[0].sequence < finishes[0].sequence);
-    assert!(matches!(
-        &finishes[0].payload,
-        HarnessEventPayloadV1::TurnFinished(outcome) if outcome == expected_outcome
-    ));
-}
-
 #[tokio::test]
 async fn persistent_session_emits_normalized_turn_and_human_input() {
     let (url, server, requests) = mock_server().await;
@@ -450,6 +429,33 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         requests.lock().unwrap().as_slice(),
         ["initialize", "initialized", "thread/start", "turn/start"]
     );
+    tokio::time::timeout(Duration::from_secs(2), server)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn persistent_session_satisfies_shared_lifecycle_ordering() {
+    let (url, server, _) = mock_server().await;
+    let runtime = runtime(url);
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = start_test_session(&runtime, sink.clone()).await;
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("shared-ordering"),
+            content: "hello".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Completed)
+        .await;
+    assert_eq!(outcome.result_text.as_deref(), Some("hello"));
+
+    session.close().await.unwrap();
     tokio::time::timeout(Duration::from_secs(2), server)
         .await
         .unwrap()
@@ -528,7 +534,8 @@ async fn interactive_runtime_failures_emit_one_matching_failed_terminal() {
 
 #[tokio::test]
 async fn queued_cancellation_is_balanced_without_starting_provider_work() {
-    let (url, server, requests, _) = lifecycle_server(LifecycleScenario::DelayedSuccess).await;
+    let (url, server, requests, root_completion) =
+        lifecycle_server(LifecycleScenario::ControlledSuccess).await;
     let runtime = runtime_with_timeouts(url);
     let events = Arc::new(CapturingSink::default());
     let session = start_test_session(&runtime, events.clone()).await;
@@ -557,6 +564,7 @@ async fn queued_cancellation_is_balanced_without_starting_provider_work() {
         .await
         .unwrap();
     queued.interrupt().await.unwrap();
+    root_completion.notify_one();
 
     assert_eq!(
         first.await_outcome().await.unwrap().status,
@@ -577,6 +585,44 @@ async fn queued_cancellation_is_balanced_without_starting_provider_work() {
 
     session.close().await.unwrap();
     let _ = server.await;
+}
+
+#[tokio::test]
+async fn explicit_session_close_preserves_terminal_before_outcome_ordering() {
+    let (url, server, requests, root_completion) =
+        lifecycle_server(LifecycleScenario::ControlledSuccess).await;
+    let runtime = runtime_with_timeouts(url);
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = start_test_session(&runtime, sink.clone()).await;
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("closed"),
+            content: "hello".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    while !requests
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|method| method == "turn/start")
+    {
+        tokio::task::yield_now().await;
+    }
+    let session_to_close = session.clone();
+    let close = tokio::spawn(async move { session_to_close.close().await });
+
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Failed)
+        .await;
+    assert!(outcome.error.as_deref().unwrap().contains("closed"));
+    assert_eq!(
+        close.await.unwrap().unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
+    );
+    root_completion.notify_one();
+    let _ = tokio::time::timeout(Duration::from_secs(2), server).await;
 }
 
 #[tokio::test]

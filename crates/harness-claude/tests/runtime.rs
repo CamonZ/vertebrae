@@ -1,5 +1,8 @@
 #![cfg(unix)]
 
+#[path = "../../harness-core/tests/common/lifecycle.rs"]
+mod lifecycle;
+
 use std::{
     fs,
     future::pending,
@@ -14,7 +17,6 @@ use std::{
 
 use async_trait::async_trait;
 use tempfile::TempDir;
-use tokio::sync::Notify;
 use vertebrae_harness_claude::{ClaudeProviderConfig, ClaudeRuntime};
 use vertebrae_harness_core::{
     CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
@@ -23,6 +25,8 @@ use vertebrae_harness_core::{
     ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId, StartSessionRequest, StreamId,
     ThreadKind, TurnId, TurnInputProvenance,
 };
+
+use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
 
 #[derive(Default)]
 struct CollectSink(Mutex<Vec<HarnessEventV1>>);
@@ -77,25 +81,6 @@ struct FailingSink;
 impl EventSink for FailingSink {
     async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
         Err(HarnessError::EventSink("fixture sink failure".into()))
-    }
-}
-
-#[derive(Default)]
-struct TerminalGateSink {
-    events: Mutex<Vec<HarnessEventV1>>,
-    terminal_entered: Notify,
-    terminal_release: Notify,
-}
-
-#[async_trait]
-impl EventSink for TerminalGateSink {
-    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
-        if matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_)) {
-            self.terminal_entered.notify_one();
-            self.terminal_release.notified().await;
-        }
-        self.events.lock().unwrap().push(event);
-        Ok(())
     }
 }
 
@@ -458,6 +443,7 @@ done
             .unwrap()
             .unwrap();
         assert_eq!(outcome.status, CompletionStatus::Completed);
+        assert_balanced_turn(&sink.0.lock().unwrap(), id, &outcome);
     }
     let close = session.close().await.unwrap();
     assert_eq!(
@@ -956,10 +942,12 @@ async fn lost_persistent_process_settles_a_queued_or_active_turn() {
         "lost",
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"lost-session"}'
+IFS= read -r _
 exit 9
 "#,
     );
     let runtime = runtime(executable);
+    let sink = Arc::new(LifecycleProbeSink::default());
     let session = runtime
         .start_session(
             StartSessionRequest {
@@ -968,33 +956,74 @@ exit 9
                 resume_id: None,
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
         .unwrap();
-    match session
+    let turn = session
         .send(SendTurnRequest {
             turn_id: TurnId::from("lost-turn"),
             content: "hello".into(),
             output_schema: None,
         })
         .await
-    {
-        Ok(turn) => {
-            let outcome = tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(outcome.status, CompletionStatus::Failed);
-            assert!(outcome.error.as_deref().unwrap().contains("stdout"));
-        }
-        Err(error) => assert!(error.to_string().contains("Claude")),
-    }
+        .unwrap();
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Failed)
+        .await;
+    assert!(outcome.error.as_deref().unwrap().contains("stdout"));
     let close = session.close().await.unwrap();
     assert_eq!(
         close.status,
         vertebrae_harness_core::SessionCloseStatus::Failed
+    );
+}
+
+#[tokio::test]
+async fn explicit_close_dispatches_terminal_before_cancelling_outcome() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-close",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"close-session"}'
+IFS= read -r _
+sleep 30
+"#,
+    );
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("close-requested"),
+                stream_id: StreamId::from("close-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("close-turn"),
+            content: "wait".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let session_to_close = session.clone();
+    let close = tokio::spawn(async move { session_to_close.close().await });
+
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Cancelled)
+        .await;
+    assert!(outcome.error.is_none());
+    assert_eq!(
+        close.await.unwrap().unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
     );
 }
 
@@ -1010,6 +1039,7 @@ IFS= read -r _
 sleep 30
 "#,
     );
+    let sink = Arc::new(CollectSink::default());
     let session = runtime(executable)
         .start_session(
             StartSessionRequest {
@@ -1018,7 +1048,7 @@ sleep 30
                 resume_id: None,
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
@@ -1036,6 +1066,7 @@ sleep 30
     let second = turn.await_outcome().await.unwrap();
     assert_eq!(first.status, CompletionStatus::Interrupted);
     assert_eq!(second.status, CompletionStatus::Interrupted);
+    assert_balanced_turn(&sink.0.lock().unwrap(), turn.turn_id().as_str(), &first);
     assert_eq!(
         session.close().await.unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed
@@ -1055,7 +1086,7 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
 sleep 30
 "#,
     );
-    let sink = Arc::new(TerminalGateSink::default());
+    let sink = Arc::new(LifecycleProbeSink::default());
     let session = runtime(executable)
         .start_session(
             StartSessionRequest {
@@ -1078,18 +1109,11 @@ sleep 30
         .await
         .unwrap();
 
-    tokio::time::timeout(Duration::from_secs(2), sink.terminal_entered.notified())
-        .await
-        .unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(20), turn.await_outcome())
-            .await
-            .is_err(),
-        "outcome became observable before TurnFinished dispatch completed"
-    );
+    sink.wait_until_terminal_dispatch().await;
+    sink.assert_outcome_pending(&turn).await;
     let session_to_close = session.clone();
     let close = tokio::spawn(async move { session_to_close.close().await });
-    sink.terminal_release.notify_one();
+    sink.release_terminal();
 
     let outcome = turn.await_outcome().await.unwrap();
     assert_eq!(outcome.status, CompletionStatus::Completed);
@@ -1098,7 +1122,7 @@ sleep 30
         close.await.unwrap().unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed
     );
-    let events = sink.events.lock().unwrap();
+    let events = sink.events();
     let finishes = events
         .iter()
         .filter(|event| {
@@ -1111,6 +1135,7 @@ sleep 30
         &finishes[0].payload,
         HarnessEventPayloadV1::TurnFinished(event_outcome) if event_outcome == &outcome
     ));
+    assert_balanced_turn(&events, turn.turn_id().as_str(), &outcome);
 }
 
 #[tokio::test]
@@ -1125,7 +1150,7 @@ IFS= read -r _
 sleep 30
 "#,
     );
-    let sink = Arc::new(TerminalGateSink::default());
+    let sink = Arc::new(LifecycleProbeSink::default());
     let session = runtime(executable)
         .start_session(
             StartSessionRequest {
@@ -1150,24 +1175,16 @@ sleep 30
     let turn_to_interrupt = turn.clone();
     let interrupt = tokio::spawn(async move { turn_to_interrupt.interrupt().await });
 
-    tokio::time::timeout(Duration::from_secs(2), sink.terminal_entered.notified())
-        .await
-        .unwrap();
-    assert!(
-        tokio::time::timeout(Duration::from_millis(20), turn.await_outcome())
-            .await
-            .is_err(),
-        "interrupted outcome became observable before TurnFinished dispatch completed"
-    );
-    sink.terminal_release.notify_one();
+    sink.wait_until_terminal_dispatch().await;
+    sink.assert_outcome_pending(&turn).await;
+    sink.release_terminal();
 
     interrupt.await.unwrap().unwrap();
     let outcome = turn.await_outcome().await.unwrap();
     assert_eq!(outcome.status, CompletionStatus::Interrupted);
+    assert_balanced_turn(&sink.events(), turn.turn_id().as_str(), &outcome);
     assert_eq!(
-        sink.events
-            .lock()
-            .unwrap()
+        sink.events()
             .iter()
             .filter(|event| {
                 event.correlation.turn_id.as_ref() == Some(turn.turn_id())
