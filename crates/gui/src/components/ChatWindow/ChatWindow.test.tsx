@@ -11,7 +11,15 @@ import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
-import { routePermissionRequestEvent } from "../../hooks/useLocalChatEventRouter";
+import {
+  routeLocalChatSessionEndEvent,
+  routeLocalChatSessionErrorEvent,
+  routeLocalChatTextEvent,
+  routeLocalChatToolCallEvent,
+  routeLocalChatToolResultEvent,
+  routeLocalChatTurnStartedEvent,
+  routePermissionRequestEvent,
+} from "../../hooks/useLocalChatEventRouter";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -1308,6 +1316,266 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+  });
+
+  it.each([
+    { harness: "claude" as const, backendSessionId: "claude-full-turn" },
+    { harness: "codex" as const, backendSessionId: "codex-full-turn" },
+  ])(
+    "keeps $harness activity and Stop active through the complete turn",
+    ({ harness, backendSessionId }) => {
+      const turnId = `${harness}-root-turn`;
+      const session = createSession({
+        backendSessionId,
+        harness,
+        lifecycle: "sending",
+        messages: [
+          {
+            kind: "user",
+            text: "Inspect the project",
+            timestamp: "2026-07-26T00:00:00Z",
+          },
+        ],
+      });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+        panelOpen: true,
+      });
+      useChatStore.getState().beginActiveTurn("test-session");
+
+      render(<ChatWindow sessionId="test-session" />);
+
+      const stop = screen.getByTestId("local-chat-stop-generation");
+      const expectTurnActive = () => {
+        expect(stop).toBeEnabled();
+        expect(screen.getByText("Thinking...")).toBeInTheDocument();
+      };
+      expectTurnActive();
+
+      act(() => {
+        expect(
+          routeLocalChatTurnStartedEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+          })
+        ).toBe(true);
+      });
+      expectTurnActive();
+
+      act(() => {
+        expect(
+          routeLocalChatTextEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+            text: "I found the entry point.",
+            is_partial: false,
+            parent_tool_use_id: null,
+          })
+        ).toBe(true);
+      });
+      expectTurnActive();
+
+      act(() => {
+        expect(
+          routeLocalChatToolCallEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+            tool_name: "Read",
+            tool_id: `${harness}-tool`,
+            input: '{"path":"src/main.rs"}',
+            parent_tool_use_id: null,
+          })
+        ).toBe(true);
+        expect(
+          routeLocalChatToolResultEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+            tool_id: `${harness}-tool`,
+            result: "fn main() {}",
+            is_error: false,
+            parent_tool_use_id: null,
+          })
+        ).toBe(true);
+      });
+      expectTurnActive();
+
+      act(() => {
+        expect(
+          routePermissionRequestEvent({
+            request_id: `${harness}-permission`,
+            session_id: backendSessionId,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+            tool_name: "Bash",
+            tool_use_id: `${harness}-approval-tool`,
+            input: { command: "cargo test" },
+            message: "Allow running the tests?",
+          })
+        ).toBe(true);
+      });
+      expectTurnActive();
+      expect(screen.getByText("Permission required")).toBeInTheDocument();
+
+      act(() => {
+        expect(
+          routeLocalChatSessionEndEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: `${turnId}-child`,
+            thread_id: `${harness}-child-thread`,
+            is_root: false,
+            duration_ms: 1,
+            cost_usd: 0,
+            num_turns: 1,
+            result: "child done",
+            is_error: false,
+            context_tokens: 10,
+            context_window: 200000,
+          })
+        ).toBe(false);
+      });
+      expectTurnActive();
+
+      act(() => {
+        expect(
+          routeLocalChatSessionEndEvent({
+            backend_session_id: backendSessionId,
+            harness,
+            turn_id: turnId,
+            thread_id: `${harness}-thread`,
+            is_root: true,
+            duration_ms: 10,
+            cost_usd: 0,
+            num_turns: 1,
+            result: "done",
+            is_error: false,
+            context_tokens: 10,
+            context_window: 200000,
+          })
+        ).toBe(true);
+      });
+
+      expect(stop).toBeDisabled();
+      expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+      expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+        backendSessionId,
+        activeTurn: null,
+        lifecycle: "idle",
+      });
+    }
+  );
+
+  it("ends activity for an empty assistant response", () => {
+    const backendSessionId = "claude-empty-turn";
+    const session = createSession({
+      backendSessionId,
+      lifecycle: "streaming",
+      messages: [
+        {
+          kind: "user",
+          text: "Respond only if needed",
+          timestamp: "2026-07-26T00:00:00Z",
+        },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    useChatStore.getState().beginActiveTurn("test-session");
+    routeLocalChatTurnStartedEvent({
+      backend_session_id: backendSessionId,
+      harness: "claude",
+      turn_id: "empty-root-turn",
+      thread_id: "empty-root-thread",
+      is_root: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    act(() => {
+      routeLocalChatSessionEndEvent({
+        backend_session_id: backendSessionId,
+        harness: "claude",
+        turn_id: "empty-root-turn",
+        thread_id: "empty-root-thread",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      });
+    });
+
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+    expect(useChatStore.getState().sessions["test-session"].messages).toEqual([
+      expect.objectContaining({ kind: "user", text: "Respond only if needed" }),
+    ]);
+  });
+
+  it("ends activity and disables Stop on a matching terminal error", () => {
+    const backendSessionId = "codex-error-turn";
+    const session = createSession({
+      backendSessionId,
+      harness: "codex",
+      lifecycle: "streaming",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    useChatStore.getState().beginActiveTurn("test-session");
+    routeLocalChatTurnStartedEvent({
+      backend_session_id: backendSessionId,
+      harness: "codex",
+      turn_id: "error-root-turn",
+      thread_id: "error-root-thread",
+      is_root: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    act(() => {
+      expect(
+        routeLocalChatSessionErrorEvent({
+          backend_session_id: backendSessionId,
+          harness: "codex",
+          turn_id: "error-root-turn",
+          thread_id: "error-root-thread",
+          is_root: true,
+          error: "Codex stopped unexpectedly",
+        })
+      ).toBe(true);
+    });
+
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+    expect(screen.getByText("Codex stopped unexpectedly")).toBeInTheDocument();
+    expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+      backendSessionId: null,
+      activeTurn: null,
+      lifecycle: "error",
+      lifecycleError: "Codex stopped unexpectedly",
+    });
   });
 
   it("stops an active backend session with Cmd+period", async () => {
