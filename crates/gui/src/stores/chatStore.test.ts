@@ -1430,6 +1430,74 @@ describe("chatStore", () => {
     });
   });
 
+  describe("active turn state", () => {
+    it("tracks a locally accepted turn before binding its root turn ID", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      const localId = useChatStore.getState().beginActiveTurn(id);
+
+      expect(localId).toMatch(/^local-turn-/);
+      expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
+        localId,
+        turnId: null,
+        phase: "starting",
+      });
+
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
+        true
+      );
+      expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
+        localId,
+        turnId: "root-turn-1",
+        phase: "active",
+      });
+    });
+
+    it("settles only a matching provider root turn", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().beginActiveTurn(id);
+      useChatStore.getState().bindActiveTurn(id, "root-turn-2");
+
+      expect(
+        useChatStore.getState().settleActiveTurn(id, "stale-root-turn")
+      ).toBe(false);
+      expect(useChatStore.getState().sessions[id].activeTurn?.turnId).toBe(
+        "root-turn-2"
+      );
+
+      expect(
+        useChatStore.getState().settleActiveTurn(id, "root-turn-2")
+      ).toBe(true);
+      expect(useChatStore.getState().sessions[id].activeTurn).toBeNull();
+    });
+
+    it("replaces turn identity when the harness starts a newer root turn", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().bindActiveTurn(id, "root-turn-1");
+      const firstLocalId =
+        useChatStore.getState().sessions[id].activeTurn?.localId;
+
+      useChatStore.getState().bindActiveTurn(id, "root-turn-2");
+
+      expect(useChatStore.getState().sessions[id].activeTurn).toMatchObject({
+        turnId: "root-turn-2",
+        phase: "active",
+      });
+      expect(
+        useChatStore.getState().sessions[id].activeTurn?.localId
+      ).not.toBe(firstLocalId);
+    });
+
+    it("does not persist runtime turn state", () => {
+      const id = useChatStore.getState().openSession("T1", "/repo/root");
+      useChatStore.getState().beginActiveTurn(id);
+      useChatStore.getState().bindActiveTurn(id, "root-turn-1");
+
+      expect(useChatStore.getState().sessions[id].activeTurn).not.toBeNull();
+      expect(loadPersistedLocalChatSession(id)?.activeTurn).toBeUndefined();
+    });
+  });
+
   describe("setBackendSessionId", () => {
     it("sets the backend session ID", () => {
       const id = useChatStore.getState().openSession("T1");

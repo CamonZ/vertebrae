@@ -392,12 +392,15 @@ export async function doStartSession(
       lifecycle: LocalChatLifecycle,
       errorMessage?: string | null
     ) => void;
+    beginActiveTurn?: (id: string) => string | null;
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
   },
   userMessage?: string,
   options: { addUserMessage?: boolean } = {}
 ) {
   const resumeId = session.providerResumeId;
   deps.setSessionLifecycle(sessionId, resumeId ? "resuming" : "starting");
+  if (userMessage) deps.beginActiveTurn?.(sessionId);
 
   const backendSessionId = `local-${sessionId}-${Date.now()}`;
   deps.setBackendSessionId(sessionId, backendSessionId);
@@ -465,6 +468,7 @@ export async function doStartSession(
       message,
       timestamp: new Date().toISOString(),
     });
+    if (userMessage) deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", message);
   }
 }
@@ -481,11 +485,14 @@ export async function doSendMessage(
       errorMessage?: string | null
     ) => void;
     markStreamingIfSending: (id: string) => void;
+    beginActiveTurn?: (id: string) => string | null;
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
     setBackendSessionId?: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
   },
   options: { addUserMessage?: boolean } = {}
 ) {
+  deps.beginActiveTurn?.(sessionId);
   deps.setSessionLifecycle(sessionId, "sending");
   if (options.addUserMessage !== false) {
     deps.addMessage(sessionId, {
@@ -511,6 +518,7 @@ export async function doSendMessage(
     deps.markStreamingIfSending(sessionId);
   } catch (error) {
     const message = commandErrorMessage(error);
+    deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", message);
   }
 }
@@ -586,6 +594,8 @@ export function useLocalChat(sessionId: string | null) {
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const markStreamingIfSending = useChatStore((s) => s.markStreamingIfSending);
+  const beginActiveTurn = useChatStore((s) => s.beginActiveTurn);
+  const settleActiveTurn = useChatStore((s) => s.settleActiveTurn);
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const markPendingUserQuestionsUnavailable = useChatStore(
@@ -614,6 +624,8 @@ export function useLocalChat(sessionId: string | null) {
           addMessage,
           setSessionTitleCandidate,
           setSessionLifecycle,
+          beginActiveTurn,
+          settleActiveTurn,
         },
         userMessage
       );
@@ -625,6 +637,8 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       setSessionLifecycle,
       setSessionTitleCandidate,
+      beginActiveTurn,
+      settleActiveTurn,
     ]
   );
 
@@ -671,6 +685,8 @@ export function useLocalChat(sessionId: string | null) {
         addMessage,
         setSessionLifecycle,
         markStreamingIfSending,
+        beginActiveTurn,
+        settleActiveTurn,
         setBackendSessionId,
       });
     },
@@ -683,6 +699,8 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       setSessionTitleCandidate,
       enqueueQueuedMessage,
+      beginActiveTurn,
+      settleActiveTurn,
     ]
   );
 

@@ -65,14 +65,14 @@ function resolveSessionId(backendSessionId: string | null | undefined) {
 }
 
 function matchesActiveRootTurn(
-  backendSessionId: string,
+  sessionId: string,
   payload: CorrelatedEvent
 ): boolean {
+  const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
   return (
     payload.is_root === true &&
     !!payload.turn_id &&
-    rootTurnByBackendSessionId.get(backendSessionId)?.phase === "active" &&
-    rootTurnByBackendSessionId.get(backendSessionId)?.turnId === payload.turn_id
+    activeTurn?.turnId === payload.turn_id
   );
 }
 
@@ -98,6 +98,9 @@ export function routeLocalChatTurnStartedEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId || !payload.is_root || !payload.turn_id) return false;
+  if (!useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id)) {
+    return false;
+  }
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
     turnId: payload.turn_id,
     phase: "active",
@@ -247,7 +250,7 @@ export function routeLocalChatSessionEndEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
-  if (!matchesActiveRootTurn(payload.backend_session_id, payload)) {
+  if (!matchesActiveRootTurn(sessionId, payload)) {
     return false;
   }
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
@@ -255,6 +258,7 @@ export function routeLocalChatSessionEndEvent(
     phase: "settled",
   });
   const store = useChatStore.getState();
+  if (!store.settleActiveTurn(sessionId, payload.turn_id)) return false;
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
@@ -283,7 +287,7 @@ export function routeLocalChatSessionErrorEvent(
   }
   if (
     payload.turn_id &&
-    !matchesActiveRootTurn(payload.backend_session_id, payload)
+    !matchesActiveRootTurn(sessionId, payload)
   ) {
     return false;
   }
@@ -344,6 +348,8 @@ export async function flushNextQueuedMessage(
         addMessage: store.addMessage,
         setSessionLifecycle: store.setSessionLifecycle,
         markStreamingIfSending: store.markStreamingIfSending,
+        beginActiveTurn: store.beginActiveTurn,
+        settleActiveTurn: store.settleActiveTurn,
         setBackendSessionId: store.setBackendSessionId,
       },
       { addUserMessage: false }
@@ -359,6 +365,8 @@ export async function flushNextQueuedMessage(
       addMessage: store.addMessage,
       setSessionTitleCandidate: store.setSessionTitleCandidate,
       setSessionLifecycle: store.setSessionLifecycle,
+      beginActiveTurn: store.beginActiveTurn,
+      settleActiveTurn: store.settleActiveTurn,
     },
     content,
     { addUserMessage: false }

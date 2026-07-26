@@ -336,6 +336,16 @@ export type LocalChatLifecycle =
   | "closed"
   | "error";
 
+export type ActiveChatTurnPhase = "starting" | "active" | "stopping";
+
+export interface ActiveChatTurn {
+  /** Client identity available before the provider acknowledges the turn. */
+  localId: string;
+  /** Provider-neutral root turn identity supplied by harness events. */
+  turnId: string | null;
+  phase: ActiveChatTurnPhase;
+}
+
 export type ChatTitleStatus =
   | "pending"
   | "low_confidence"
@@ -395,6 +405,8 @@ export interface ChatSession {
   lifecycle?: LocalChatLifecycle;
   /** Runtime-only error detail for the current lifecycle state */
   lifecycleError?: string | null;
+  /** Runtime-only state for the current root turn, separate from the backend. */
+  activeTurn?: ActiveChatTurn | null;
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
   /** Runtime-only user messages queued while a local turn is still active */
@@ -491,6 +503,12 @@ interface ChatStoreActions {
     lifecycle: LocalChatLifecycle,
     errorMessage?: string | null
   ) => void;
+  /** Begin a locally accepted root turn before provider acknowledgement. */
+  beginActiveTurn: (sessionId: string) => string | null;
+  /** Bind the current root turn to its provider-neutral harness identity. */
+  bindActiveTurn: (sessionId: string, turnId: string) => boolean;
+  /** Settle only the current root turn with the matching harness identity. */
+  settleActiveTurn: (sessionId: string, turnId?: string | null) => boolean;
   /** Upgrade a command-send lifecycle only if it is still awaiting first output */
   markStreamingIfSending: (sessionId: string) => void;
   /** Clear any ephemeral assistant stream overlay */
@@ -592,6 +610,13 @@ function generatePaneId(): string {
   return `pane-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
+let activeTurnGeneration = 0;
+
+function generateActiveTurnId(): string {
+  activeTurnGeneration += 1;
+  return `local-turn-${Date.now()}-${activeTurnGeneration}`;
+}
+
 function createLocalSession(
   label: string,
   projectPath?: string | null
@@ -613,6 +638,7 @@ function createLocalSession(
     permissionMode: "default",
     lifecycle: "idle",
     lifecycleError: null,
+    activeTurn: null,
     streamingAssistant: null,
     createdAt: now,
     updatedAt: now,
@@ -684,6 +710,7 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     backendSessionId: null,
     lifecycle: session.lifecycle ?? "idle",
     lifecycleError: null,
+    activeTurn: null,
     streamingAssistant: null,
     messageCount: session.messageCount ?? messages.length,
   };
@@ -1814,6 +1841,74 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
+    beginActiveTurn: (sessionId) => {
+      let localId: string | null = null;
+      updateSession(
+        sessionId,
+        (session) => {
+          if (session.activeTurn) {
+            localId = session.activeTurn.localId;
+            return session;
+          }
+          localId = generateActiveTurnId();
+          return {
+            ...session,
+            activeTurn: {
+              localId,
+              turnId: null,
+              phase: "starting",
+            },
+          };
+        },
+        { persist: false }
+      );
+      return localId;
+    },
+
+    bindActiveTurn: (sessionId, turnId) => {
+      if (!turnId) return false;
+      let bound = false;
+      updateSession(
+        sessionId,
+        (session) => {
+          const current = session.activeTurn;
+          bound = true;
+          return {
+            ...session,
+            activeTurn: {
+              localId:
+                current?.turnId && current.turnId !== turnId
+                  ? generateActiveTurnId()
+                  : (current?.localId ?? generateActiveTurnId()),
+              turnId,
+              phase:
+                current?.turnId === turnId && current.phase === "stopping"
+                  ? "stopping"
+                  : "active",
+            },
+          };
+        },
+        { persist: false }
+      );
+      return bound;
+    },
+
+    settleActiveTurn: (sessionId, turnId = null) => {
+      let settled = false;
+      updateSession(
+        sessionId,
+        (session) => {
+          const current = session.activeTurn;
+          if (!current) return session;
+          if (turnId && current.turnId !== turnId) return session;
+          settled = true;
+          return { ...session, activeTurn: null };
+        },
+        { persist: false }
+      );
+      return settled;
+    },
+
     markStreamingIfSending: (sessionId) => {
       updateSession(
         sessionId,
@@ -2064,6 +2159,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         backendSessionId: null,
         lifecycle: "closed" as const,
         lifecycleError: null,
+        activeTurn: null,
         streamingAssistant: null,
         queuedMessages: undefined,
       };
@@ -2114,6 +2210,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               status: "open",
               lifecycle: "idle",
               lifecycleError: null,
+              activeTurn: null,
               streamingAssistant: null,
               queuedMessages: undefined,
               updatedAt: timestamp,
