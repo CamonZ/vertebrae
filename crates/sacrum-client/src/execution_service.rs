@@ -1,11 +1,11 @@
 //! ExecutionService implementation for Sacrum GraphQL API
 //!
 //! Implements the ExecutionService trait by making GraphQL calls to the Sacrum API.
-//! Supports full CRUD: create, read, update executions, and create/list session logs.
+//! Supports reading and updating executions plus creating/listing session logs.
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use vertebrae_core::error::ServiceResult;
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::{
@@ -17,10 +17,9 @@ use crate::api_types::{
 };
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
-    ACTIVE_RUN, CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS,
-    LIST_LOGS, ORCHESTRATE_TASK, RUN_STEP, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR,
-    STOP_RUN, TASK_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS,
-    UPDATE_EXECUTION,
+    ACTIVE_RUN, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
+    ORCHESTRATE_TASK, RUN_STEP, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR, STOP_RUN,
+    TASK_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -142,32 +141,6 @@ impl SacrumExecutionService {
 
 #[async_trait]
 impl ExecutionService for SacrumExecutionService {
-    async fn create_execution(&self, execution: StepExecution) -> ServiceResult<String> {
-        let mut variables = json!({
-            "task_id": execution.task_id,
-            "workflow_id": execution.workflow_id,
-            "step_name": execution.step_name,
-            "status": execution.status.as_str(),
-            "model": execution.model_used,
-            "model_provider": Value::Null,
-        });
-        // Absinthe's Json scalar rejects explicit null values, so only include
-        // `context` / `prompt` keys when the StepExecution carries them.
-        if let Some(context) = execution.context {
-            variables["context"] = Value::String(context);
-        }
-        if let Some(prompt) = execution.prompt {
-            variables["prompt"] = Value::String(prompt);
-        }
-
-        let result: IdOnly = self
-            .client
-            .execute(CREATE_EXECUTION, variables, "create_step_execution")
-            .await?;
-
-        Ok(result.id)
-    }
-
     async fn get_execution(&self, id: &str) -> ServiceResult<Option<StepExecution>> {
         let query = with_fragments(GET_EXECUTION, &[EXECUTION_FIELDS]);
         let variables = json!({ "id": id });
@@ -692,78 +665,6 @@ mod tests {
             "test-proj".to_string(),
         ));
         SacrumExecutionService::new(client)
-    }
-
-    #[tokio::test]
-    async fn test_create_execution_returns_id() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": {
-                    "create_step_execution": {
-                        "id": "exec-new"
-                    }
-                }
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let execution = StepExecution::new("task-1", "wf-1", "review");
-        let result = service.create_execution(execution).await.unwrap();
-
-        assert_eq!(result, "exec-new");
-    }
-
-    #[tokio::test]
-    async fn test_create_execution_with_all_fields() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": {
-                    "create_step_execution": {
-                        "id": "exec-full"
-                    }
-                }
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let execution = StepExecution::new("task-2", "wf-1", "implement")
-            .with_context("some context")
-            .with_prompt("do the work")
-            .with_model_used("claude-opus")
-            .with_token_usage(vertebrae_core::models::TokenUsage::new(1000, 500))
-            .with_cost_usd(0.05)
-            .with_duration_ms(1500);
-
-        let result = service.create_execution(execution).await.unwrap();
-        assert_eq!(result, "exec-full");
-    }
-
-    #[tokio::test]
-    async fn test_create_execution_graphql_error() {
-        let server = MockServer::start().await;
-
-        Mock::given(method("POST"))
-            .and(path("/graphql"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": null,
-                "errors": [{"message": "step_name can't be blank", "path": ["create_step_execution"]}]
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let execution = StepExecution::new("bad-task", "wf-1", "");
-        let result = service.create_execution(execution).await;
-
-        assert!(result.is_err());
     }
 
     #[tokio::test]

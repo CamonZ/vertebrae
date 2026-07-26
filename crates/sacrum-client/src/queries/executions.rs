@@ -166,32 +166,6 @@ pub const GET_EXECUTION: &str = r#"
     }
 "#;
 
-pub const CREATE_EXECUTION: &str = r#"
-    mutation CreateExecution(
-        $task_id: Uuid4!,
-        $workflow_id: Uuid4!,
-        $step_name: String!,
-        $status: String,
-        $context: Json,
-        $prompt: String,
-        $model: String,
-        $model_provider: String
-    ) {
-        create_step_execution(
-            task_id: $task_id,
-            workflow_id: $workflow_id,
-            step_name: $step_name,
-            status: $status,
-            context: $context,
-            prompt: $prompt,
-            model: $model,
-            model_provider: $model_provider
-        ) {
-            id
-        }
-    }
-"#;
-
 pub const UPDATE_EXECUTION: &str = r#"
     mutation UpdateExecution(
         $id: Uuid4!,
