@@ -243,6 +243,87 @@ describe("useLocalChatEventRouter route functions", () => {
     ]);
   });
 
+  it("keeps a turn active through snapshot text and later tool activity", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "root-turn");
+
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "root-turn",
+        thread_id: "root-thread",
+        is_root: true,
+        text: "I will inspect that.",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatToolCallEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "root-turn",
+        thread_id: "root-thread",
+        is_root: true,
+        tool_name: "Read",
+        tool_id: "tool-1",
+        input: '{"path":"src/main.ts"}',
+        parent_tool_use_id: null,
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatToolResultEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "root-turn",
+        thread_id: "root-thread",
+        is_root: true,
+        tool_id: "tool-1",
+        result: "file contents",
+        is_error: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(true);
+
+    const active = useChatStore.getState().sessions.local;
+    expect(active.lifecycle).toBe("streaming");
+    expect(active.activeTurn).toMatchObject({
+      turnId: "root-turn",
+      phase: "active",
+    });
+    expect(active.messages.map((message) => message.kind)).toEqual([
+      "assistant",
+      "tool_call",
+      "tool_result",
+    ]);
+
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "root-turn",
+        thread_id: "root-thread",
+        is_root: true,
+        duration_ms: 10,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.activeTurn).toBeNull();
+    expect(useChatStore.getState().sessions.local.lifecycle).toBe("idle");
+  });
+
   it("flushes a queued follow-up when a hidden session receives End", async () => {
     resetChatStore({
       hidden: makeSession({

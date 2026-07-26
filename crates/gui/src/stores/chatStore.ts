@@ -1810,8 +1810,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...session,
           messages,
           updatedAt: timestamp,
-          lifecycle: "idle",
-          lifecycleError: null,
           streamingAssistant: null,
         };
       });

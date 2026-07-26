@@ -1290,6 +1290,8 @@ describe("chatStore", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
       const id = useChatStore.getState().openSession("T1", "/repo/root");
+      useChatStore.getState().setSessionLifecycle(id, "streaming");
+      useChatStore.getState().bindActiveTurn(id, "root-turn");
 
       useChatStore
         .getState()
@@ -1333,7 +1335,11 @@ describe("chatStore", () => {
 
       const session = useChatStore.getState().sessions[id];
       expect(session.streamingAssistant).toBeNull();
-      expect(session.lifecycle).toBe("idle");
+      expect(session.lifecycle).toBe("streaming");
+      expect(session.activeTurn).toMatchObject({
+        turnId: "root-turn",
+        phase: "active",
+      });
       expect(session.messages).toEqual([
         {
           kind: "assistant",
