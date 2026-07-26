@@ -84,6 +84,27 @@ impl ControlSink for AutomaticControl {
     }
 }
 
+#[derive(Default)]
+struct CapturingControl {
+    requests: Mutex<Vec<vertebrae_harness_core::ControlRequestEnvelope>>,
+}
+
+#[async_trait]
+impl ControlSink for CapturingControl {
+    async fn request(
+        &self,
+        request: vertebrae_harness_core::ControlRequestEnvelope,
+    ) -> Result<ControlResolution, HarnessError> {
+        self.requests.lock().unwrap().push(request.clone());
+        Ok(ControlResolution {
+            request_id: request.request_id,
+            source: vertebrae_harness_core::ResolutionSource::Consumer,
+            decision: Some(vertebrae_harness_core::ControlDecision::AllowOnce),
+            message: None,
+        })
+    }
+}
+
 async fn mock_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -112,7 +133,12 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<Vec<St
                     socket.send(Message::Text(json!({"method":"turn/started","params":{"threadId":"root-thread","turn":{"id":"turn-1","status":"inProgress"}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"mcpServer/startupStatus/updated","params":{"threadId":"root-thread","name":"node_repl","status":"ready"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":21}}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"id":"approval-1","method":"item/commandExecution/requestApproval","params":{"requestId":"approval-1","threadId":"root-thread","turnId":"turn-1","command":"pwd"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/agentMessage/delta","params":{"threadId":"root-thread","turnId":"turn-1","delta":"hello"}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"item/started","params":{"threadId":"root-thread","turnId":"turn-1","item":{"id":"tool-1","type":"commandExecution","command":"pwd"}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"item/completed","params":{"threadId":"root-thread","turnId":"turn-1","item":{"id":"tool-1","type":"commandExecution","command":"pwd","aggregatedOutput":"/tmp","exitCode":0}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"thread/tokenUsage/updated","params":{"threadId":"root-thread","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":2,"outputTokens":3,"totalTokens":5},"total":{"inputTokens":2,"outputTokens":3,"totalTokens":5},"modelContextWindow":100}}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"method":"error","params":{"threadId":"root-thread","turnId":"turn-1","message":"recoverable diagnostic"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/completed","params":{"threadId":"root-thread","turnId":"turn-1","item":{"type":"agentMessage","text":"hello"}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"turn/completed","params":{"threadId":"root-thread","turn":{"id":"turn-1","status":"completed","durationMs":12}}}).to_string())).await.unwrap();
                 }
@@ -385,6 +411,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
     let (url, server, requests) = mock_server().await;
     let runtime = runtime(url);
     let events = Arc::new(CapturingSink::default());
+    let controls = Arc::new(CapturingControl::default());
     let session = runtime
         .start_session(
             StartSessionRequest {
@@ -394,7 +421,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
                 config: Default::default(),
             },
             events.clone(),
-            Arc::new(AutomaticControl),
+            controls.clone(),
         )
         .await
         .unwrap();
@@ -411,6 +438,13 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         .unwrap()
         .unwrap();
     assert_eq!(outcome.status, CompletionStatus::Completed);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while controls.requests.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     let events = events.events.lock().unwrap();
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::SessionStarted(started) if started.provider == "openai")));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "hello" && input.provenance == TurnInputProvenance::Human)));
@@ -418,12 +452,64 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         |event| matches!(&event.payload, HarnessEventPayloadV1::Text(text) if text.text == "hello")
     ));
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::TurnFinished(outcome) if outcome.status == CompletionStatus::Completed)));
+    let correlated_root_events = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload,
+                HarnessEventPayloadV1::TurnStarted(_)
+                    | HarnessEventPayloadV1::TurnInput(_)
+                    | HarnessEventPayloadV1::Text(_)
+                    | HarnessEventPayloadV1::ToolCall(_)
+                    | HarnessEventPayloadV1::ToolOutput(_)
+                    | HarnessEventPayloadV1::Usage(_)
+                    | HarnessEventPayloadV1::Error(_)
+                    | HarnessEventPayloadV1::TurnFinished(_)
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(correlated_root_events.len(), 9);
+    assert!(correlated_root_events.iter().all(|event| {
+        event.correlation.turn_id.as_ref() == Some(&TurnId::from("turn"))
+            && event.correlation.thread_id.as_ref()
+                == Some(&vertebrae_harness_core::ThreadId::from("root-thread"))
+    }));
+    assert!(
+        !events
+            .iter()
+            .any(|event| { event.correlation.turn_id.as_ref() == Some(&TurnId::from("turn-1")) })
+    );
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::ToolCall(tool) if tool.tool_call_id.as_str() == "tool-1"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::ToolOutput(tool) if tool.tool_call_id.as_str() == "tool-1"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::Usage(usage)
+            if usage.turn_delta.as_ref().is_some_and(|usage| usage.tokens.input_tokens == 2)
+    )));
+    assert!(events.iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::Error(error) if error.message == "recoverable diagnostic"
+    )));
     assert!(
         !events
             .iter()
             .any(|event| matches!(&event.payload, HarnessEventPayloadV1::Warning(_)))
     );
     drop(events);
+    let controls = controls.requests.lock().unwrap();
+    assert_eq!(controls.len(), 1);
+    assert_eq!(
+        controls[0].session_id.as_ref(),
+        Some(&SessionId::from("root-thread"))
+    );
+    assert_eq!(controls[0].turn_id.as_ref(), Some(&TurnId::from("turn")));
+    drop(controls);
     session.close().await.unwrap();
     assert_eq!(
         requests.lock().unwrap().as_slice(),

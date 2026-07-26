@@ -58,6 +58,36 @@ struct NotificationMessage {
 
 struct PendingResponse {
     tx: oneshot::Sender<Result<Value, HarnessError>>,
+    normalized_root_turn_id: Option<TurnId>,
+}
+
+#[derive(Default)]
+struct RootTurnIdentity {
+    provider_turn_ids: Mutex<HashMap<String, TurnId>>,
+}
+
+impl RootTurnIdentity {
+    fn bind_provider_turn(&self, provider_turn_id: &str, turn_id: TurnId) {
+        self.provider_turn_ids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(provider_turn_id.to_string(), turn_id);
+    }
+
+    fn normalize_control_request(&self, request: &mut ControlRequestEnvelope) {
+        let Some(provider_turn_id) = request.turn_id.as_ref() else {
+            return;
+        };
+        let normalized = self
+            .provider_turn_ids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(provider_turn_id.as_str())
+            .cloned();
+        if let Some(normalized) = normalized {
+            request.turn_id = Some(normalized);
+        }
+    }
 }
 
 struct CodexConnection {
@@ -80,6 +110,7 @@ impl CodexConnection {
         let (writer, mut reader) = stream.split();
         let (notifications, _) = broadcast::channel(512);
         let (closed, _) = watch::channel(None);
+        let root_turn_identity = Arc::new(RootTurnIdentity::default());
         let connection = Arc::new(Self {
             writer: Arc::new(AsyncMutex::new(writer)),
             pending: Arc::new(AsyncMutex::new(HashMap::new())),
@@ -124,6 +155,17 @@ impl CodexConnection {
                                 ))),
                                 None => Ok(message.result.unwrap_or(Value::Null)),
                             };
+                            if let (Some(normalized_turn_id), Ok(response)) =
+                                (pending.normalized_root_turn_id, &result)
+                                && let Ok(provider_turn_id) = required_string(
+                                    response.get("turn").unwrap_or(response),
+                                    &["/id", "/turn/id"],
+                                    "turn/start response turn id",
+                                )
+                            {
+                                root_turn_identity
+                                    .bind_provider_turn(&provider_turn_id, normalized_turn_id);
+                            }
                             let _ = pending.tx.send(result);
                         }
                         continue;
@@ -131,10 +173,12 @@ impl CodexConnection {
                     if let Some(method) = message.method {
                         let writer = Arc::clone(&writer);
                         let control_sink = Arc::clone(&control_sink);
+                        let root_turn_identity = Arc::clone(&root_turn_identity);
                         tokio::spawn(async move {
                             respond_to_control_request(
                                 &writer,
                                 &control_sink,
+                                &root_turn_identity,
                                 id,
                                 &method,
                                 message.params.unwrap_or(Value::Null),
@@ -172,10 +216,13 @@ impl CodexConnection {
         };
         let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(key.clone(), PendingResponse { tx });
+        self.pending.lock().await.insert(
+            key.clone(),
+            PendingResponse {
+                tx,
+                normalized_root_turn_id: None,
+            },
+        );
         let message = json!({"id": id, "method": method, "params": params});
         if let Err(error) = self.send(message).await {
             self.pending.lock().await.remove(&key);
@@ -193,6 +240,7 @@ impl CodexConnection {
         method: &str,
         params: Value,
         timeout: std::time::Duration,
+        normalized_root_turn_id: TurnId,
     ) -> Result<Value, HarnessError> {
         let id = {
             let mut next = self.next_id.lock().await;
@@ -202,10 +250,13 @@ impl CodexConnection {
         };
         let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(key.clone(), PendingResponse { tx });
+        self.pending.lock().await.insert(
+            key.clone(),
+            PendingResponse {
+                tx,
+                normalized_root_turn_id: Some(normalized_root_turn_id),
+            },
+        );
         if let Err(error) = self
             .send(json!({"id": id, "method": method, "params": params}))
             .await
@@ -277,6 +328,7 @@ impl CodexConnection {
 async fn respond_to_control_request(
     writer: &Arc<AsyncMutex<futures::stream::SplitSink<WsStream, Message>>>,
     control_sink: &Arc<dyn ControlSink>,
+    root_turn_identity: &RootTurnIdentity,
     id: Value,
     method: &str,
     params: Value,
@@ -285,12 +337,17 @@ async fn respond_to_control_request(
         None => {
             json!({"id": id, "error": {"code": -32601, "message": format!("unsupported Codex server request '{method}'")}})
         }
-        Some(request) => match control_sink.request(request).await {
-            Ok(resolution) => json!({"id": id, "result": encode_control_resolution(&resolution)}),
-            Err(error) => {
-                json!({"id": id, "error": {"code": -32000, "message": error.to_string()}})
+        Some(mut request) => {
+            root_turn_identity.normalize_control_request(&mut request);
+            match control_sink.request(request).await {
+                Ok(resolution) => {
+                    json!({"id": id, "result": encode_control_resolution(&resolution)})
+                }
+                Err(error) => {
+                    json!({"id": id, "error": {"code": -32000, "message": error.to_string()}})
+                }
             }
-        },
+        }
     };
     log_raw_traffic("send", &response.to_string());
     let _ = writer
@@ -552,7 +609,8 @@ impl SessionState {
     async fn process_notification(
         &self,
         notification: CodexNotification,
-        expected_turn: Option<&str>,
+        expected_provider_turn: Option<&str>,
+        normalized_root_turn: Option<&TurnId>,
         root_turn: &mut TurnAccumulator,
     ) -> Result<Option<TurnOutcome>, HarnessError> {
         let params = notification.params().clone();
@@ -566,7 +624,7 @@ impl SessionState {
             };
             (stream, correlation)
         } else {
-            if let Some(expected) = expected_turn {
+            if let Some(expected) = expected_provider_turn {
                 let actual = optional_string(&params, &["/turnId", "/turn/id"]);
                 if actual.as_deref().is_some_and(|actual| actual != expected) {
                     log::warn!(
@@ -578,10 +636,7 @@ impl SessionState {
             }
             (
                 self.root_stream_id.clone(),
-                self.root_correlation(
-                    optional_string(&params, &["/turnId", "/turn/id"]).map(TurnId::new),
-                    None,
-                ),
+                self.root_correlation(normalized_root_turn.cloned(), None),
             )
         };
         match notification {
@@ -725,7 +780,7 @@ impl SessionState {
                     .unwrap_or_else(|| "completed".into());
                 let actual_turn = optional_string(&params, &["/turnId", "/turn/id"]);
                 log::info!(
-                    "[Codex] turn/completed received thread_id={thread_id:?} turn_id={actual_turn:?} expected_turn={expected_turn:?} status={status}"
+                    "[Codex] turn/completed received thread_id={thread_id:?} turn_id={actual_turn:?} expected_turn={expected_provider_turn:?} status={status}"
                 );
                 let outcome = outcome_from_completion(&params, status, root_turn);
                 if is_child {
@@ -819,7 +874,12 @@ impl SessionState {
             self.config.permission.apply_to_params(&mut params);
             let response = self
                 .connection
-                .request_with_timeout("turn/start", params, self.config.request_timeout)
+                .request_with_timeout(
+                    "turn/start",
+                    params,
+                    self.config.request_timeout,
+                    turn_id.clone(),
+                )
                 .await?;
             let provider_turn = required_string(
                 response.get("turn").unwrap_or(&response),
@@ -845,6 +905,7 @@ impl SessionState {
                                     tokio::select! {
                                         outcome = self.wait_for_provider_terminal(
                                             &provider_turn,
+                                            &turn_id,
                                             &mut notifications,
                                             &mut connection_closed,
                                             &mut accumulator,
@@ -854,6 +915,7 @@ impl SessionState {
                                             json!({"threadId": self.root_thread_id.as_str(), "turnId": provider_turn}),
                                         ) => self.wait_for_provider_terminal(
                                             &provider_turn,
+                                            &turn_id,
                                             &mut notifications,
                                             &mut connection_closed,
                                             &mut accumulator,
@@ -877,6 +939,7 @@ impl SessionState {
                     }
                     outcome = self.next_provider_notification(
                         &provider_turn,
+                        &turn_id,
                         &mut notifications,
                         &mut connection_closed,
                         &mut accumulator,
@@ -915,6 +978,7 @@ impl SessionState {
     async fn next_provider_notification(
         &self,
         provider_turn: &str,
+        normalized_turn: &TurnId,
         notifications: &mut broadcast::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
@@ -927,7 +991,12 @@ impl SessionState {
                 Ok(notification) => {
                     let notification = decode_notification(notification.method, notification.params)
                         .map_err(HarnessError::Operation)?;
-                    self.process_notification(notification, Some(provider_turn), accumulator).await
+                    self.process_notification(
+                        notification,
+                        Some(provider_turn),
+                        Some(normalized_turn),
+                        accumulator,
+                    ).await
                 }
                 Err(broadcast::error::RecvError::Lagged(count)) => Err(HarnessError::Operation(format!(
                     "Codex notification buffer lost {count} messages"
@@ -950,6 +1019,7 @@ impl SessionState {
     async fn wait_for_provider_terminal(
         &self,
         provider_turn: &str,
+        normalized_turn: &TurnId,
         notifications: &mut broadcast::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
@@ -958,6 +1028,7 @@ impl SessionState {
             if let Some(outcome) = self
                 .next_provider_notification(
                     provider_turn,
+                    normalized_turn,
                     notifications,
                     connection_closed,
                     accumulator,

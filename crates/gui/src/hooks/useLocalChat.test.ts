@@ -625,6 +625,8 @@ describe("handleEndEvent", () => {
       {
         backend_session_id: CLAUDE_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -673,6 +675,8 @@ describe("handleEndEvent", () => {
       {
         backend_session_id: CLAUDE_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -699,6 +703,8 @@ describe("handleEndEvent", () => {
       {
         backend_session_id: CLAUDE_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -728,6 +734,8 @@ describe("handleEndEvent", () => {
       {
         backend_session_id: CLAUDE_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 1,
@@ -753,6 +761,8 @@ describe("handleEndEvent", () => {
       {
         backend_session_id: OTHER_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0.01,
         num_turns: 5,
@@ -1580,6 +1590,8 @@ describe("doSendMessage", () => {
       {
         backend_session_id: CLAUDE_SESSION_ID,
         harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
         duration_ms: 1000,
         cost_usd: 0,
         num_turns: 1,

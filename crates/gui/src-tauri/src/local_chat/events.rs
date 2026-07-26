@@ -133,12 +133,10 @@ pub struct LocalChatSessionUsageEvent {
 pub struct LocalChatSessionEndEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
-    #[specta(optional)]
     pub turn_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[specta(optional)]
     pub thread_id: Option<String>,
-    #[specta(optional)]
     pub is_root: bool,
     pub duration_ms: u32,
     pub cost_usd: f64,

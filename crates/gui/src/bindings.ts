@@ -1574,9 +1574,9 @@ export type LocalChatReasoningEffortOption = { id: string; label: string };
 export type LocalChatSessionEndEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
-  turn_id?: string;
+  turn_id: string;
   thread_id?: string | null;
-  is_root?: boolean;
+  is_root: boolean;
   duration_ms: number;
   cost_usd: number;
   num_turns: number;
