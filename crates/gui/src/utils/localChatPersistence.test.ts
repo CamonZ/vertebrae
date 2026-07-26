@@ -391,6 +391,7 @@ describe("localChatPersistence", () => {
             updatedAt: "2026-01-01T00:00:00Z",
             projectPath: "/repo",
             providerResumeId: "conv-existing",
+            threadTotalTokens: null,
             messageCount: 1,
             lifecycle: "idle",
             status: "open",
