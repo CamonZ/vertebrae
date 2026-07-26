@@ -165,6 +165,7 @@ describe("handleUsageEvent", () => {
         model: "claude-mystery-9-9",
         context_tokens: 50_000,
         context_window: 250_000,
+        thread_total_tokens: 75_000,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -176,7 +177,8 @@ describe("handleUsageEvent", () => {
       {
         used: 50_000,
         max: 250_000,
-      }
+      },
+      75_000
     );
   });
 
@@ -189,6 +191,7 @@ describe("handleUsageEvent", () => {
         model: "claude-opus-4-7",
         context_tokens: 1,
         context_window: 200_000,
+        thread_total_tokens: 1,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
@@ -658,6 +661,7 @@ describe("handleEndEvent", () => {
         model: "claude-sonnet-4.5",
         context_tokens: 100_050,
         context_window: 200_000,
+        thread_total_tokens: 150_000,
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,

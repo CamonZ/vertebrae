@@ -89,7 +89,7 @@ describe("resolveTaskLocation", () => {
   it("preserves finish as the task location step type", () => {
     const finish = createMockStep({
       id: "finish-1",
-      workflow_id: workflow.id,
+      workflow_id: "workflow-from-step",
       name: "Finish",
       step_type: "finish",
     });
