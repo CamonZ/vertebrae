@@ -1,11 +1,19 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { commands } from "../bindings";
+import {
+  commands,
+  type LocalChatSessionEndEvent,
+  type LocalChatTextEvent,
+  type LocalChatToolCallEvent,
+  type LocalChatTurnStartedEvent,
+} from "../bindings";
 import { useChatStore, type ChatSession } from "../stores/chatStore";
+import translationSequence from "../test/fixtures/localChatTurnTranslation.json";
 import {
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionErrorEvent,
   routeLocalChatTextEvent,
+  routeLocalChatToolCallEvent,
   routeLocalChatToolResultEvent,
   routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
@@ -550,5 +558,249 @@ describe("useLocalChatEventRouter route functions", () => {
         parentToolUseId: "spawn-tool",
       }),
     ]);
+  });
+
+  it("routes the shared HarnessEventV1 translation fixture through root completion", () => {
+    resetChatStore({
+      bridge: makeSession({
+        id: "bridge",
+        harness: "codex",
+        backendSessionId: "backend-bridge",
+        lifecycle: "streaming",
+      }),
+    });
+
+    const routed = translationSequence.map((event) => {
+      switch (event.type) {
+        case "turn_started":
+          return routeLocalChatTurnStartedEvent(
+            event.payload as LocalChatTurnStartedEvent
+          );
+        case "text":
+          return routeLocalChatTextEvent(event.payload as LocalChatTextEvent);
+        case "tool_call":
+          return routeLocalChatToolCallEvent(
+            event.payload as LocalChatToolCallEvent
+          );
+        case "end":
+          return routeLocalChatSessionEndEvent(
+            event.payload as LocalChatSessionEndEvent
+          );
+        default:
+          throw new Error(`unexpected fixture event: ${event.type}`);
+      }
+    });
+
+    expect(routed).toEqual([true, true, true, true, true]);
+    const bridge = useChatStore.getState().sessions.bridge;
+    expect(bridge.lifecycle).toBe("idle");
+    expect(bridge.messages).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "root answer",
+      }),
+      expect.objectContaining({
+        kind: "tool_call",
+        toolId: "spawn-1",
+        toolName: "Agent",
+      }),
+      expect.objectContaining({
+        kind: "assistant",
+        text: "child update",
+        parentToolUseId: "spawn-1",
+      }),
+    ]);
+  });
+
+  it("ignores a late final snapshot and duplicate End after settlement", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-1");
+    const end = {
+      backend_session_id: "backend-local",
+      harness: "claude" as const,
+      turn_id: "turn-1",
+      thread_id: "backend-local-thread",
+      is_root: true,
+      duration_ms: 1,
+      cost_usd: 0,
+      num_turns: 1,
+      result: "done",
+      is_error: false,
+      context_tokens: 0,
+      context_window: 200000,
+    };
+
+    expect(routeLocalChatSessionEndEvent(end)).toBe(true);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        text: "late final",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(routeLocalChatSessionEndEvent(end)).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.lifecycle).toBe("idle");
+    expect(JSON.stringify(local.messages)).not.toContain("late final");
+  });
+
+  it("keeps sequential queued turns active when prior-turn events arrive late", async () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        queuedMessages: ["second", "third"],
+        messages: [
+          { kind: "user", text: "second", timestamp: "2026-01-01T00:00:00Z" },
+          { kind: "user", text: "third", timestamp: "2026-01-01T00:00:01Z" },
+        ],
+      }),
+    });
+    const end = (turnId: string): LocalChatSessionEndEvent => ({
+      backend_session_id: "backend-local",
+      harness: "claude",
+      turn_id: turnId,
+      thread_id: "backend-local-thread",
+      is_root: true,
+      duration_ms: 1,
+      cost_usd: 0,
+      num_turns: 1,
+      result: `${turnId} done`,
+      is_error: false,
+      context_tokens: 0,
+      context_window: 200000,
+    });
+
+    startTurn("backend-local", "turn-1");
+    expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(true);
+    await waitFor(() => {
+      expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
+        1,
+        "backend-local",
+        "second"
+      );
+    });
+    startTurn("backend-local", "turn-2");
+    expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(false);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        text: "late turn one",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(useChatStore.getState().sessions.local.lifecycle).toBe("streaming");
+
+    expect(routeLocalChatSessionEndEvent(end("turn-2"))).toBe(true);
+    await waitFor(() => {
+      expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
+        2,
+        "backend-local",
+        "third"
+      );
+    });
+    startTurn("backend-local", "turn-3");
+    expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(false);
+    expect(useChatStore.getState().sessions.local.lifecycle).toBe("streaming");
+    expect(
+      useChatStore.getState().sessions.local.queuedMessages
+    ).toBeUndefined();
+
+    expect(routeLocalChatSessionEndEvent(end("turn-3"))).toBe(true);
+    expect(useChatStore.getState().sessions.local.lifecycle).toBe("idle");
+  });
+
+  it("ignores stale terminal errors after a replacement turn starts", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-1");
+    startTurn("backend-local", "turn-2");
+
+    expect(
+      routeLocalChatSessionErrorEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        error: "stale failure",
+      })
+    ).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.backendSessionId).toBe("backend-local");
+    expect(local.lifecycle).toBe("streaming");
+    expect(local.messages).toEqual([]);
+  });
+
+  it("drops events from a closed or replaced backend session", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-new",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-new", "new-turn");
+
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-old",
+        harness: "claude",
+        turn_id: "old-turn",
+        thread_id: "old-thread",
+        is_root: true,
+      })
+    ).toBe(false);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-old",
+        harness: "claude",
+        turn_id: "old-turn",
+        thread_id: "old-thread",
+        is_root: true,
+        text: "old text",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(
+      routeLocalChatSessionErrorEvent({
+        backend_session_id: "backend-old",
+        harness: "claude",
+        turn_id: "old-turn",
+        thread_id: "old-thread",
+        is_root: true,
+        error: "old failure",
+      })
+    ).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.backendSessionId).toBe("backend-new");
+    expect(local.lifecycle).toBe("streaming");
+    expect(local.messages).toEqual([]);
   });
 });

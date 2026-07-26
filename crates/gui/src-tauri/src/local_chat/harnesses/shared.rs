@@ -608,4 +608,127 @@ mod tests {
                 && end.is_root
         ));
     }
+
+    #[tokio::test]
+    async fn translates_harness_sequence_to_shared_frontend_fixture() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-bridge".into(),
+            LocalChatHarnessKind::Codex,
+            event_sink,
+            Some("gpt".into()),
+            1_000,
+            false,
+        );
+        let root = EventCorrelation {
+            thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+            turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+            ..EventCorrelation::default()
+        };
+        let child = EventCorrelation {
+            thread_id: Some(vertebrae_harness_core::ThreadId::new("child-thread")),
+            turn_id: Some(vertebrae_harness_core::TurnId::new("child-turn")),
+            parent_tool_call_id: Some(ToolCallId::new("spawn-1")),
+            ..EventCorrelation::default()
+        };
+        let events = [
+            (
+                "local-chat:backend-bridge",
+                root.clone(),
+                HarnessEventPayloadV1::TurnStarted(vertebrae_harness_core::TurnStarted {
+                    input_summary: Some("question".into()),
+                }),
+            ),
+            (
+                "local-chat:backend-bridge",
+                root.clone(),
+                HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
+                    text: "root answer".into(),
+                }),
+            ),
+            (
+                "local-chat:backend-bridge",
+                root.clone(),
+                HarnessEventPayloadV1::ToolCall(vertebrae_harness_core::ToolCallEvent {
+                    tool_call_id: ToolCallId::new("spawn-1"),
+                    name: "Agent".into(),
+                    input: serde_json::json!({ "prompt": "inspect" }),
+                    status: ToolStatus::Started,
+                }),
+            ),
+            (
+                "local-chat:backend-bridge:thread:child-thread",
+                child.clone(),
+                HarnessEventPayloadV1::Text(vertebrae_harness_core::TextEvent {
+                    text: "child update".into(),
+                }),
+            ),
+            (
+                "local-chat:backend-bridge:thread:child-thread",
+                child,
+                HarnessEventPayloadV1::TurnFinished(vertebrae_harness_core::TurnOutcome {
+                    status: CompletionStatus::Completed,
+                    result_text: Some("child done".into()),
+                    structured_output: None,
+                    usage: None,
+                    metrics: Default::default(),
+                    error: None,
+                }),
+            ),
+            (
+                "local-chat:backend-bridge",
+                root,
+                HarnessEventPayloadV1::TurnFinished(vertebrae_harness_core::TurnOutcome {
+                    status: CompletionStatus::Completed,
+                    result_text: Some("root done".into()),
+                    structured_output: None,
+                    usage: None,
+                    metrics: Default::default(),
+                    error: None,
+                }),
+            ),
+        ];
+
+        for (index, (stream_id, correlation, payload)) in events.into_iter().enumerate() {
+            sink.emit(HarnessEventV1 {
+                event_id: EventId::new(format!("bridge-{index}")),
+                stream_id: StreamId::new(stream_id),
+                sequence: index as u64 + 1,
+                correlation,
+                timestamp: chrono::Utc::now(),
+                semantics: UpdateSemantics::Snapshot,
+                provider_sequence: None,
+                payload,
+            })
+            .await
+            .unwrap();
+        }
+
+        let translated = captured
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| match event {
+                LocalChatEvent::TurnStarted(payload) => {
+                    serde_json::json!({ "type": "turn_started", "payload": payload })
+                }
+                LocalChatEvent::Text(payload) => {
+                    serde_json::json!({ "type": "text", "payload": payload })
+                }
+                LocalChatEvent::ToolCall(payload) => {
+                    serde_json::json!({ "type": "tool_call", "payload": payload })
+                }
+                LocalChatEvent::End(payload) => {
+                    serde_json::json!({ "type": "end", "payload": payload })
+                }
+                event => panic!("unexpected translated event: {event:?}"),
+            })
+            .collect::<Vec<_>>();
+        let expected: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../../src/test/fixtures/localChatTurnTranslation.json"
+        ))
+        .unwrap();
+
+        assert_eq!(translated, expected);
+    }
 }

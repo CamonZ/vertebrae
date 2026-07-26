@@ -1,0 +1,69 @@
+[
+  {
+    "type": "turn_started",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
+      "turn_id": "root-turn",
+      "thread_id": "root-thread",
+      "is_root": true
+    }
+  },
+  {
+    "type": "text",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
+      "turn_id": "root-turn",
+      "thread_id": "root-thread",
+      "is_root": true,
+      "text": "root answer",
+      "is_partial": false,
+      "parent_tool_use_id": null
+    }
+  },
+  {
+    "type": "tool_call",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
+      "turn_id": "root-turn",
+      "thread_id": "root-thread",
+      "is_root": true,
+      "tool_id": "spawn-1",
+      "tool_name": "Agent",
+      "input": "{\"prompt\":\"inspect\"}",
+      "parent_tool_use_id": null
+    }
+  },
+  {
+    "type": "text",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
+      "turn_id": "child-turn",
+      "thread_id": "child-thread",
+      "is_root": false,
+      "text": "child update",
+      "is_partial": false,
+      "parent_tool_use_id": "spawn-1"
+    }
+  },
+  {
+    "type": "end",
+    "payload": {
+      "backend_session_id": "backend-bridge",
+      "harness": "codex",
+      "turn_id": "root-turn",
+      "thread_id": "root-thread",
+      "is_root": true,
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result": "root done",
+      "is_error": false,
+      "context_tokens": 0,
+      "context_window": 1000
+    }
+  }
+]
