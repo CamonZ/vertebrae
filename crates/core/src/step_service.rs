@@ -53,10 +53,8 @@ pub trait StepService: Send + Sync {
     /// Get possible transitions from a step
     async fn get_transitions(&self, step_id: &str) -> ServiceResult<Vec<Step>>;
 
-    /// Get the final (terminal) steps for a workflow
-    ///
-    /// Final steps are those with is_final = true.
-    async fn get_final_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>>;
+    /// Get the finish steps for a workflow.
+    async fn get_finish_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>>;
 
     /// List all steps across all workflows
     ///

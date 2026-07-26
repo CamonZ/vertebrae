@@ -71,7 +71,6 @@ impl SacrumStepService {
             agent_config,
             step_type,
             output_schema: response.output_schema.clone(),
-            is_final: response.is_final,
             transitions_to,
             order: response.step_order,
             created_at,
@@ -95,7 +94,6 @@ impl StepService for SacrumStepService {
             "skills": step.skills,
             "agent_config": agent_config_str,
             "step_type": step.step_type.as_str(),
-            "is_final": step.is_final,
             "step_order": step.order,
         });
         if let Some(schema) = &step.output_schema {
@@ -254,9 +252,6 @@ impl StepService for SacrumStepService {
                     ServiceError::validation_failed(format!("Invalid agent config: {}", e))
                 })?);
         }
-        if let Some(is_final) = updates.is_final {
-            variables["is_final"] = json!(is_final);
-        }
         if let Some(order) = updates.order {
             variables["step_order"] = json!(order);
         }
@@ -328,9 +323,12 @@ impl StepService for SacrumStepService {
         }
     }
 
-    async fn get_final_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
+    async fn get_finish_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
         let steps = self.list_steps_for_workflow(workflow_id).await?;
-        Ok(steps.into_iter().filter(|s| s.is_final).collect())
+        Ok(steps
+            .into_iter()
+            .filter(|s| s.step_type == StepType::Finish)
+            .collect())
     }
 
     async fn list_all_steps(&self) -> ServiceResult<Vec<Step>> {
@@ -384,7 +382,6 @@ mod tests {
             agent_config: None,
             step_type: Some("evaluate".to_string()),
             output_schema: Some(json!({"type": "object"})),
-            is_final: false,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: Some(vec![StepTransitionResponse {
@@ -406,7 +403,6 @@ mod tests {
         assert_eq!(step.skills, vec!["code-review"]);
         assert_eq!(step.step_type, StepType::Evaluate);
         assert_eq!(step.output_schema, Some(json!({"type": "object"})));
-        assert!(!step.is_final);
         assert_eq!(step.order, 0);
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions_to, vec!["step-2"]);
@@ -425,7 +421,6 @@ mod tests {
             agent_config: None,
             step_type: None,
             output_schema: None,
-            is_final: true,
             step_order: 5,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -443,7 +438,6 @@ mod tests {
         assert!(step.skills.is_empty());
         assert_eq!(step.step_type, StepType::Execute);
         assert!(step.output_schema.is_none());
-        assert!(step.is_final);
         assert_eq!(step.order, 5);
         assert!(step.transitions_to.is_empty());
     }
@@ -460,7 +454,6 @@ mod tests {
             agent_config: Some(json!({"model": "claude-opus"})),
             step_type: Some("route".to_string()),
             output_schema: None,
-            is_final: false,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -485,7 +478,6 @@ mod tests {
             agent_config: None,
             step_type: Some("future_type".to_string()),
             output_schema: None,
-            is_final: false,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
             transitions: None,
@@ -521,7 +513,6 @@ mod tests {
                 agent_config: None,
                 step_type: Some(input.to_string()),
                 output_schema: None,
-                is_final: false,
                 step_order: 0,
                 workflow_id: "wf-1".to_string(),
                 transitions: None,
@@ -584,7 +575,6 @@ mod tests {
             "agents": [],
             "skills": [],
             "agent_config": null,
-            "is_final": false,
             "step_order": step_order,
             "workflow_id": workflow_id,
             "project_id": "test-project",
@@ -631,7 +621,6 @@ mod tests {
                     "agents": ["claude"],
                     "skills": [],
                     "agent_config": null,
-                    "is_final": false,
                     "step_order": 1,
                     "workflow_id": "wf-1",
                     "project_id": "test-project",
@@ -683,7 +672,6 @@ mod tests {
 
         let mut response = make_step_response("step-1", "Finish", "wf-1", 0);
         response["step_type"] = json!("finish");
-        response["is_final"] = json!(false);
 
         Mock::given(method("POST"))
             .and(path("/graphql"))
@@ -698,7 +686,6 @@ mod tests {
         let step = service.get_step("step-1").await.unwrap().unwrap();
 
         assert_eq!(step.step_type, StepType::Finish);
-        assert!(!step.is_final);
     }
 
     #[tokio::test]
@@ -858,7 +845,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_final_steps() {
+    async fn test_get_finish_steps() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
@@ -869,14 +856,14 @@ mod tests {
                     {
                         "id": "step-1", "name": "Backlog", "goal": null,
                         "agents": [], "skills": [], "agent_config": null,
-                        "is_final": false, "step_order": 0, "workflow_id": "wf-1",
+                        "step_type": "execute", "step_order": 0, "workflow_id": "wf-1",
                         "project_id": "test-project",
                         "inserted_at": null, "updated_at": null, "transitions": []
                     },
                     {
                         "id": "step-2", "name": "Done", "goal": null,
                         "agents": [], "skills": [], "agent_config": null,
-                        "is_final": true, "step_order": 1, "workflow_id": "wf-1",
+                        "step_type": "finish", "step_order": 1, "workflow_id": "wf-1",
                         "project_id": "test-project",
                         "inserted_at": null, "updated_at": null, "transitions": []
                     }
@@ -886,11 +873,10 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let final_steps = service.get_final_steps("wf-1").await.unwrap();
+        let final_steps = service.get_finish_steps("wf-1").await.unwrap();
 
         assert_eq!(final_steps.len(), 1);
         assert_eq!(final_steps[0].name, "Done");
-        assert!(final_steps[0].is_final);
     }
 
     #[tokio::test]

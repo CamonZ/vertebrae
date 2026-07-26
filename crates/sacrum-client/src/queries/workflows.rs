@@ -6,7 +6,6 @@ pub const WORKFLOW_FIELDS: &str = r#"
         name
         description
         is_default
-        is_final
         display_order
         metadata
         initial_step_id
@@ -47,7 +46,7 @@ pub const GET_WORKFLOW: &str = r#"
             ...WorkflowFields
             workflow_steps {
                 id name goal agents skills agent_config step_type
-                is_final step_order workflow_id
+                step_order workflow_id
                 transitions { id to_step_id label }
             }
         }
@@ -88,7 +87,6 @@ pub const CREATE_WORKFLOW: &str = r#"
         $description: String,
         $display_order: Int,
         $is_default: Boolean,
-        $is_final: Boolean,
         $kanban_column: String
     ) {
         create_workflow(
@@ -97,7 +95,6 @@ pub const CREATE_WORKFLOW: &str = r#"
             description: $description,
             display_order: $display_order,
             is_default: $is_default,
-            is_final: $is_final,
             kanban_column: $kanban_column
         ) {
             id
@@ -112,7 +109,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $description: String,
         $display_order: Int,
         $is_default: Boolean,
-        $is_final: Boolean,
         $initial_step_id: Uuid4,
         $kanban_column: String
     ) {
@@ -122,7 +118,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
             description: $description,
             display_order: $display_order,
             is_default: $is_default,
-            is_final: $is_final,
             initial_step_id: $initial_step_id,
             kanban_column: $kanban_column
         ) {

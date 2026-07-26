@@ -172,8 +172,6 @@ pub struct WorkflowResponse {
     #[serde(default)]
     pub is_default: Option<bool>,
     #[serde(default)]
-    pub is_final: Option<bool>,
-    #[serde(default)]
     pub display_order: Option<i32>,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
@@ -223,8 +221,6 @@ pub struct WorkflowStepResponse {
     pub step_type: Option<String>,
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
-    #[serde(default)]
-    pub is_final: bool,
     #[serde(default)]
     pub step_order: i32,
     pub workflow_id: String,
@@ -524,8 +520,6 @@ pub struct PipelineStepResponse {
     pub step_order: i32,
     #[serde(default)]
     pub step_type: Option<String>,
-    #[serde(default)]
-    pub is_final: bool,
     pub workflow_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
@@ -586,8 +580,6 @@ pub struct PipelineWorkflowResponse {
     pub description: Option<String>,
     #[serde(default)]
     pub is_default: Option<bool>,
-    #[serde(default)]
-    pub is_final: Option<bool>,
     #[serde(default)]
     pub display_order: Option<i32>,
     #[serde(default)]
@@ -765,7 +757,6 @@ mod tests {
             "skills": ["code-review"],
             "agent_config": {"model": "opus"},
             "step_type": "finish",
-            "is_final": false,
             "step_order": 0,
             "workflow_id": "wf-1",
             "transitions": [
@@ -780,7 +771,6 @@ mod tests {
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.skills, vec!["code-review"]);
         assert_eq!(step.step_type.as_deref(), Some("finish"));
-        assert!(!step.is_final);
         assert_eq!(step.step_order, 0);
         assert_eq!(step.workflow_id, "wf-1");
         assert_eq!(step.transitions.as_ref().unwrap().len(), 1);
@@ -1128,7 +1118,6 @@ mod tests {
                         "goal": null,
                         "step_order": 0,
                         "step_type": "execute",
-                        "is_final": false,
                         "workflow_id": "wf-1",
                         "project_id": "proj-1",
                         "inserted_at": null,
@@ -1197,7 +1186,6 @@ mod tests {
             "id": "step-empty",
             "name": "review",
             "step_order": 1,
-            "is_final": false,
             "workflow_id": "wf-1"
         }"#;
 
@@ -1221,7 +1209,6 @@ mod tests {
             "id": "step-compat",
             "name": "running alias",
             "step_order": 1,
-            "is_final": false,
             "workflow_id": "wf-1",
             "task_counts": { "epic": 0, "ticket": 2, "task": 0 },
             "running_count": 7

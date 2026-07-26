@@ -111,7 +111,6 @@ impl SacrumWorkflowService {
             metadata,
             order: response.display_order.unwrap_or(0),
             is_default: response.is_default.unwrap_or(false),
-            is_final: response.is_final.unwrap_or(false),
             kanban_column: response.kanban_column.clone(),
             transitions,
             created_at,
@@ -191,7 +190,6 @@ impl WorkflowService for SacrumWorkflowService {
             "description": options.description,
             "display_order": options.order,
             "is_default": options.is_default,
-            "is_final": options.is_final,
         });
 
         if let Some(ref kanban_column) = options.kanban_column {
@@ -359,9 +357,6 @@ impl WorkflowService for SacrumWorkflowService {
         }
         if let Some(is_default) = options.is_default {
             variables["is_default"] = json!(is_default);
-        }
-        if let Some(is_final) = options.is_final {
-            variables["is_final"] = json!(is_final);
         }
         if let Some(ref kanban_opt) = options.kanban_column {
             match kanban_opt {
@@ -636,7 +631,6 @@ mod tests {
             name: name.to_string(),
             description: None,
             is_default: None,
-            is_final: None,
             display_order: None,
             metadata: None,
             initial_step_id: None,
@@ -972,7 +966,6 @@ mod tests {
                         "agents": [],
                         "skills": [],
                         "agent_config": {"model": "sonnet"},
-                        "is_final": false,
                         "step_order": 0,
                         "workflow_id": "wf-with-steps",
                         "project_id": "test-proj",
@@ -998,7 +991,6 @@ mod tests {
                         "agents": [],
                         "skills": [],
                         "agent_config": {"model": "haiku"},
-                        "is_final": false,
                         "step_order": 1,
                         "workflow_id": "wf-with-steps",
                         "project_id": "test-proj",
@@ -1024,7 +1016,6 @@ mod tests {
                         "agents": [],
                         "skills": [],
                         "agent_config": {"model": "sonnet"},
-                        "is_final": false,
                         "step_order": 0,
                         "workflow_id": "wf-with-steps",
                         "project_id": "test-proj",
@@ -1079,7 +1070,6 @@ mod tests {
                                 "id": "step-1",
                                 "name": "backlog",
                                 "step_order": 0,
-                                "is_final": false,
                                 "workflow_id": "wf-1",
                                 "agents": [],
                                 "skills": []
@@ -1503,9 +1493,9 @@ mod tests {
                         "id": "wf-1",
                         "name": "Dev Flow",
                         "workflow_steps": [
-                            { "id": "s-1", "name": "backlog", "step_order": 0, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
-                            { "id": "s-2", "name": "in_progress", "step_order": 1, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
-                            { "id": "s-3", "name": "done", "step_order": 2, "is_final": true, "workflow_id": "wf-1", "agents": [], "skills": [] }
+                            { "id": "s-1", "name": "backlog", "step_order": 0, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-2", "name": "in_progress", "step_order": 1, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-3", "name": "done", "step_order": 2, "workflow_id": "wf-1", "agents": [], "skills": [] }
                         ]
                     }
                 }
@@ -1540,8 +1530,8 @@ mod tests {
                         "id": "wf-1",
                         "name": "Dev Flow",
                         "workflow_steps": [
-                            { "id": "s-1", "name": "backlog", "step_order": 0, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
-                            { "id": "s-2", "name": "done", "step_order": 1, "is_final": true, "workflow_id": "wf-1", "agents": [], "skills": [] }
+                            { "id": "s-1", "name": "backlog", "step_order": 0, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-2", "name": "done", "step_order": 1, "workflow_id": "wf-1", "agents": [], "skills": [] }
                         ]
                     }
                 }
@@ -1615,7 +1605,6 @@ mod tests {
                                     "id": "step-1",
                                     "name": "todo",
                                     "step_order": 0,
-                                    "is_final": false,
                                     "workflow_id": "wf-1",
                                     "task_counts": { "epic": 1, "ticket": 2, "task": 3 },
                                     "pipeline_counts": { "epic": 1, "ticket": 2, "task": 3, "active": 4 },
@@ -1629,7 +1618,6 @@ mod tests {
                                     "id": "step-2",
                                     "name": "done",
                                     "step_order": 1,
-                                    "is_final": true,
                                     "workflow_id": "wf-1",
                                     "task_counts": { "epic": 0, "ticket": 0, "task": 0 },
                                     "pipeline_counts": { "epic": 0, "ticket": 0, "task": 0, "active": 0 },
