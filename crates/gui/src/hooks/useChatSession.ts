@@ -38,6 +38,7 @@ export function useChatSession(sessionId: string) {
     startSession,
     sendMessage,
     closeLocalChatSession,
+    stopActiveTurn,
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
@@ -292,9 +293,8 @@ export function useChatSession(sessionId: string) {
       lifecycle === "streaming");
 
   const handleStopGeneration = useCallback(async () => {
-    if (!session?.backendSessionId) return;
-    await closeLocalChatSession({ markClosed: false });
-  }, [closeLocalChatSession, session?.backendSessionId]);
+    await stopActiveTurn();
+  }, [stopActiveTurn]);
 
   useEffect(() => {
     if (!canStopGeneration) return;

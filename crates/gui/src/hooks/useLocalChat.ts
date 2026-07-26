@@ -537,6 +537,7 @@ export async function doCloseSession(
     setBackendSessionIdRef?: (backendId: string | null) => void;
     clearQueuedMessages?: (id: string) => void;
     markPendingUserQuestionsUnavailable?: (id: string) => void;
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
   }
 ): Promise<boolean> {
   if (sessionId) {
@@ -552,6 +553,7 @@ export async function doCloseSession(
           deps.setBackendSessionId(sessionId, null);
           deps.clearQueuedMessages?.(sessionId);
           deps.markPendingUserQuestionsUnavailable?.(sessionId);
+          deps.settleActiveTurn?.(sessionId);
         }
         deps.setBackendSessionIdRef?.(null);
         return true;
@@ -563,11 +565,13 @@ export async function doCloseSession(
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
       deps.markPendingUserQuestionsUnavailable?.(sessionId);
+      deps.settleActiveTurn?.(sessionId);
     }
     deps.setBackendSessionIdRef?.(null);
     return true;
   } catch (error) {
     if (sessionId) {
+      deps.settleActiveTurn?.(sessionId);
       deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
     }
     return false;
@@ -596,6 +600,9 @@ export function useLocalChat(sessionId: string | null) {
   const markStreamingIfSending = useChatStore((s) => s.markStreamingIfSending);
   const beginActiveTurn = useChatStore((s) => s.beginActiveTurn);
   const settleActiveTurn = useChatStore((s) => s.settleActiveTurn);
+  const markActiveTurnStopping = useChatStore(
+    (s) => s.markActiveTurnStopping
+  );
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const markPendingUserQuestionsUnavailable = useChatStore(
@@ -719,6 +726,7 @@ export function useLocalChat(sessionId: string | null) {
         setBackendSessionId,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
+        settleActiveTurn,
       });
     },
     [
@@ -729,8 +737,31 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       clearQueuedMessages,
       markPendingUserQuestionsUnavailable,
+      settleActiveTurn,
     ]
   );
+
+  const stopActiveTurn = useCallback(async () => {
+    if (!session?.backendSessionId || !sessionId) return false;
+    if (!markActiveTurnStopping(sessionId)) return false;
+    return doCloseSession(session.backendSessionId, sessionId, {
+      markSessionClosed: (id) => setSessionLifecycle(id, "idle"),
+      setSessionLifecycle,
+      setBackendSessionId,
+      clearQueuedMessages,
+      markPendingUserQuestionsUnavailable,
+      settleActiveTurn,
+    });
+  }, [
+    session?.backendSessionId,
+    sessionId,
+    markActiveTurnStopping,
+    setSessionLifecycle,
+    setBackendSessionId,
+    clearQueuedMessages,
+    markPendingUserQuestionsUnavailable,
+    settleActiveTurn,
+  ]);
 
   const isActive =
     session?.status === "open" &&
@@ -745,6 +776,7 @@ export function useLocalChat(sessionId: string | null) {
     startSession,
     sendMessage,
     closeLocalChatSession,
+    stopActiveTurn,
   };
 }
 

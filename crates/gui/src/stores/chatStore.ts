@@ -507,6 +507,8 @@ interface ChatStoreActions {
   beginActiveTurn: (sessionId: string) => string | null;
   /** Bind the current root turn to its provider-neutral harness identity. */
   bindActiveTurn: (sessionId: string, turnId: string) => boolean;
+  /** Move the current root turn into stopping exactly once. */
+  markActiveTurnStopping: (sessionId: string) => boolean;
   /** Settle only the current root turn with the matching harness identity. */
   settleActiveTurn: (sessionId: string, turnId?: string | null) => boolean;
   /** Upgrade a command-send lifecycle only if it is still awaiting first output */
@@ -1889,6 +1891,24 @@ export const useChatStore = create<ChatStore>((set, get) => {
         { persist: false }
       );
       return bound;
+    },
+
+    markActiveTurnStopping: (sessionId) => {
+      let marked = false;
+      updateSession(
+        sessionId,
+        (session) => {
+          const current = session.activeTurn;
+          if (!current || current.phase === "stopping") return session;
+          marked = true;
+          return {
+            ...session,
+            activeTurn: { ...current, phase: "stopping" },
+          };
+        },
+        { persist: false }
+      );
+      return marked;
     },
 
     settleActiveTurn: (sessionId, turnId = null) => {

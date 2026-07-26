@@ -292,6 +292,12 @@ export function routeLocalChatSessionErrorEvent(
     return false;
   }
   rootTurnByBackendSessionId.delete(payload.backend_session_id);
+  if (
+    store.sessions[sessionId]?.activeTurn &&
+    !store.settleActiveTurn(sessionId, payload.turn_id ?? null)
+  ) {
+    return false;
+  }
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,

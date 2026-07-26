@@ -1443,6 +1443,7 @@ describe("doSendMessage", () => {
       markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hello", deps);
@@ -1516,12 +1517,14 @@ describe("doSendMessage", () => {
       markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
 
     expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
     expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
@@ -1540,12 +1543,14 @@ describe("doSendMessage", () => {
       markStreamingIfSending: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     await doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "Hi", deps);
 
     expect(deps.setBackendSessionId).not.toHaveBeenCalled();
     expect(deps.setBackendSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
@@ -1709,6 +1714,7 @@ describe("doCloseSession", () => {
       setSessionLifecycle: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
@@ -1724,6 +1730,7 @@ describe("doCloseSession", () => {
     expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
     expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
     expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
+    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
   });
 
   it("does not call markSessionClosed when sessionId is null", async () => {
@@ -1732,6 +1739,7 @@ describe("doCloseSession", () => {
       setSessionLifecycle: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, null, deps);
@@ -1778,6 +1786,7 @@ describe("doCloseSession", () => {
       setSessionLifecycle: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      settleActiveTurn: vi.fn(),
     };
 
     const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps);
@@ -1786,6 +1795,7 @@ describe("doCloseSession", () => {
     expect(deps.markSessionClosed).not.toHaveBeenCalled();
     expect(deps.setBackendSessionId).not.toHaveBeenCalled();
     expect(deps.setBackendSessionIdRef).not.toHaveBeenCalled();
+    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",

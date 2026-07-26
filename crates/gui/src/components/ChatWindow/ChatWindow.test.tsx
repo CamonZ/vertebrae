@@ -1203,6 +1203,11 @@ describe("ChatWindow", () => {
       backendSessionId: "codex-active",
       harness: "codex",
       lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-active",
+        turnId: "root-turn-active",
+        phase: "active",
+      },
       messages: [
         {
           kind: "user",
@@ -1228,6 +1233,54 @@ describe("ChatWindow", () => {
       expect(
         useChatStore.getState().sessions["test-session"].messages
       ).toHaveLength(1);
+    });
+  });
+
+  it("keeps stopping visible and sends only one close request", async () => {
+    let resolveClose!: (result: { status: "ok"; data: null }) => void;
+    mockedCommands.closeLocalChatSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClose = resolve;
+        })
+    );
+    const session = createSession({
+      backendSessionId: "codex-stopping",
+      harness: "codex",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-stopping",
+        turnId: "root-turn-stopping",
+        phase: "active",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    const stop = screen.getByTestId("local-chat-stop-generation");
+    fireEvent.click(stop);
+    fireEvent.click(stop);
+
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(1);
+    expect(
+      useChatStore.getState().sessions["test-session"].activeTurn
+    ).toMatchObject({
+      turnId: "root-turn-stopping",
+      phase: "stopping",
+    });
+
+    await act(async () => resolveClose({ status: "ok", data: null }));
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().sessions["test-session"].activeTurn
+      ).toBeNull();
+      expect(
+        useChatStore.getState().sessions["test-session"].backendSessionId
+      ).toBeNull();
     });
   });
 
@@ -1260,6 +1313,11 @@ describe("ChatWindow", () => {
       backendSessionId: "codex-hotkey",
       harness: "codex",
       lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-hotkey",
+        turnId: "root-turn-hotkey",
+        phase: "active",
+      },
     });
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1291,6 +1349,11 @@ describe("ChatWindow", () => {
       backendSessionId: "claude-question",
       providerResumeId: "claude-conversation",
       lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-question",
+        turnId: "root-turn-question",
+        phase: "active",
+      },
       messages: [
         {
           kind: "user_question",

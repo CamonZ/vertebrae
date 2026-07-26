@@ -809,6 +809,8 @@ describe("useLocalChatEventRouter route functions", () => {
     });
 
     startTurn("backend-local", "turn-1");
+    const firstLocalTurnId =
+      useChatStore.getState().sessions.local.activeTurn?.localId;
     expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(true);
     await waitFor(() => {
       expect(mockedCommands.sendLocalChatMessage).toHaveBeenNthCalledWith(
@@ -819,6 +821,12 @@ describe("useLocalChatEventRouter route functions", () => {
       expect(useChatStore.getState().sessions.local.lifecycle).toBe(
         "streaming"
       );
+      expect(
+        useChatStore.getState().sessions.local.activeTurn
+      ).toMatchObject({ turnId: null, phase: "starting" });
+      expect(
+        useChatStore.getState().sessions.local.activeTurn?.localId
+      ).not.toBe(firstLocalTurnId);
     });
     expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(false);
     expect(
@@ -880,7 +888,36 @@ describe("useLocalChatEventRouter route functions", () => {
     const local = useChatStore.getState().sessions.local;
     expect(local.backendSessionId).toBe("backend-local");
     expect(local.lifecycle).toBe("streaming");
+    expect(local.activeTurn?.turnId).toBe("turn-2");
     expect(local.messages).toEqual([]);
+  });
+
+  it("settles only the matching turn on a terminal error", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-error");
+
+    expect(
+      routeLocalChatSessionErrorEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "turn-error",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        error: "turn failed",
+      })
+    ).toBe(true);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.activeTurn).toBeNull();
+    expect(local.backendSessionId).toBeNull();
+    expect(local.lifecycle).toBe("error");
+    expect(local.lifecycleError).toBe("turn failed");
   });
 
   it("drops events from a closed or replaced backend session", () => {

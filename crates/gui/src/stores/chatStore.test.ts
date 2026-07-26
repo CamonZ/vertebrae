@@ -1502,6 +1502,18 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id].activeTurn).not.toBeNull();
       expect(loadPersistedLocalChatSession(id)?.activeTurn).toBeUndefined();
     });
+
+    it("moves an active turn to stopping only once", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().bindActiveTurn(id, "root-turn");
+
+      expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(true);
+      expect(useChatStore.getState().sessions[id].activeTurn).toMatchObject({
+        turnId: "root-turn",
+        phase: "stopping",
+      });
+      expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(false);
+    });
   });
 
   describe("setBackendSessionId", () => {
