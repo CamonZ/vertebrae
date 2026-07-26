@@ -560,6 +560,35 @@ describe("useLocalChatEventRouter route functions", () => {
     ]);
   });
 
+  it("keeps an uncorrelated child error visible without settling the root", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "root-turn", "codex");
+
+    expect(
+      routeLocalChatSessionErrorEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: null,
+        thread_id: "child-thread",
+        is_root: false,
+        error: "child failed",
+      })
+    ).toBe(true);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.backendSessionId).toBe("backend-local");
+    expect(local.lifecycle).toBe("streaming");
+    expect(local.messages).toEqual([
+      expect.objectContaining({ kind: "error", message: "child failed" }),
+    ]);
+  });
+
   it("routes the shared HarnessEventV1 translation fixture through root completion", () => {
     resetChatStore({
       bridge: makeSession({
@@ -612,7 +641,7 @@ describe("useLocalChatEventRouter route functions", () => {
     ]);
   });
 
-  it("ignores a late final snapshot and duplicate End after settlement", () => {
+  it("accepts a same-turn late final snapshot but ignores duplicate End", () => {
     resetChatStore({
       local: makeSession({
         id: "local",
@@ -644,16 +673,30 @@ describe("useLocalChatEventRouter route functions", () => {
         turn_id: "turn-1",
         thread_id: "backend-local-thread",
         is_root: true,
+        text: "late delta",
+        is_partial: true,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
         text: "late final",
         is_partial: false,
         parent_tool_use_id: null,
       })
-    ).toBe(false);
+    ).toBe(true);
     expect(routeLocalChatSessionEndEvent(end)).toBe(false);
 
     const local = useChatStore.getState().sessions.local;
     expect(local.lifecycle).toBe("idle");
-    expect(JSON.stringify(local.messages)).not.toContain("late final");
+    expect(local.messages).toEqual([
+      expect.objectContaining({ kind: "assistant", text: "late final" }),
+    ]);
   });
 
   it("keeps sequential queued turns active when prior-turn events arrive late", async () => {
@@ -692,8 +735,10 @@ describe("useLocalChatEventRouter route functions", () => {
         "backend-local",
         "second"
       );
+      expect(useChatStore.getState().sessions.local.lifecycle).toBe(
+        "streaming"
+      );
     });
-    startTurn("backend-local", "turn-2");
     expect(routeLocalChatSessionEndEvent(end("turn-1"))).toBe(false);
     expect(
       routeLocalChatTextEvent({
@@ -708,6 +753,7 @@ describe("useLocalChatEventRouter route functions", () => {
       })
     ).toBe(false);
     expect(useChatStore.getState().sessions.local.lifecycle).toBe("streaming");
+    startTurn("backend-local", "turn-2");
 
     expect(routeLocalChatSessionEndEvent(end("turn-2"))).toBe(true);
     await waitFor(() => {
