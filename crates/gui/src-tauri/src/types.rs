@@ -541,9 +541,6 @@ pub struct Step {
     /// JSON Schema describing the expected output of this step
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<serde_json::Value>,
-    /// Whether this is a final step (no outgoing transitions)
-    #[serde(default)]
-    pub is_final: bool,
     /// List of step IDs this step can transition to
     #[serde(default)]
     pub transitions_to: Vec<String>,
@@ -570,7 +567,6 @@ impl From<vertebrae_core::Step> for Step {
             agent_config: step.agent_config.into(),
             step_type: step.step_type.into(),
             output_schema: step.output_schema,
-            is_final: step.is_final,
             transitions_to: step.transitions_to,
             order: step.order,
             created_at: step.created_at.map(|dt| dt.to_rfc3339()),
@@ -596,9 +592,6 @@ pub struct Workflow {
     /// Whether this is the default workflow for new tasks
     #[serde(default)]
     pub is_default: bool,
-    /// Whether this is a terminal workflow (cannot transition out)
-    #[serde(default)]
-    pub is_final: bool,
     /// Sort order for displaying workflows (Sacrum: `display_order`).
     #[serde(default, alias = "order")]
     pub display_order: i32,
@@ -621,7 +614,6 @@ impl From<vertebrae_core::Workflow> for Workflow {
             initial_step: workflow.initial_step,
             kanban_column: workflow.kanban_column,
             is_default: workflow.is_default,
-            is_final: workflow.is_final,
             display_order: workflow.order,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
@@ -640,7 +632,6 @@ pub struct UpdateWorkflowOptions {
     pub description: Option<String>,
     pub order: Option<i32>,
     pub is_default: Option<bool>,
-    pub is_final: Option<bool>,
     pub kanban_column: Option<String>,
 }
 
@@ -658,9 +649,6 @@ impl From<UpdateWorkflowOptions> for vertebrae_core::UpdateWorkflowOptions {
         }
         if let Some(is_default) = opts.is_default {
             update = update.with_is_default(is_default);
-        }
-        if let Some(is_final) = opts.is_final {
-            update = update.with_is_final(is_final);
         }
         if let Some(kanban_column) = opts.kanban_column {
             update = update.with_kanban_column(kanban_column);
@@ -1098,7 +1086,6 @@ pub struct PipelineStep {
     pub goal: Option<String>,
     pub step_order: i32,
     pub step_type: Option<String>,
-    pub is_final: bool,
     /// IDs of the steps that this step transitions into within the same workflow.
     pub transitions_to: Vec<String>,
     /// Per-level task counts for tasks currently parked at this step.
@@ -1129,7 +1116,6 @@ pub struct PipelineWorkflow {
     pub initial_step_id: Option<String>,
     pub kanban_column: Option<String>,
     pub is_default: bool,
-    pub is_final: bool,
     pub display_order: i32,
     pub workflow_steps: Vec<PipelineStep>,
     pub transitions: Vec<PipelineWorkflowTransition>,
@@ -1164,7 +1150,6 @@ impl From<vertebrae_sacrum_client::PipelineWorkflowResponse> for PipelineWorkflo
             initial_step_id: wf.initial_step_id,
             kanban_column: wf.kanban_column,
             is_default: wf.is_default.unwrap_or(false),
-            is_final: wf.is_final.unwrap_or(false),
             display_order: wf.display_order.unwrap_or(0),
             workflow_steps,
             transitions,
@@ -1188,7 +1173,6 @@ impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
             goal: step.goal,
             step_order: step.step_order,
             step_type: step.step_type,
-            is_final: step.is_final,
             transitions_to,
             task_counts: PipelineTaskCounts {
                 epic: task_counts.epic,
@@ -1229,7 +1213,6 @@ pub struct CreateStepOptions {
     pub agents: Vec<String>,
     pub skills: Vec<String>,
     pub order: i32,
-    pub is_final: bool,
     pub transitions_to: Vec<String>,
     #[serde(default)]
     pub step_type: StepType,
@@ -1250,7 +1233,6 @@ pub struct UpdateStepOptions {
     pub step_type: Option<StepType>,
     pub output_schema: Option<serde_json::Value>,
     pub order: Option<i32>,
-    pub is_final: Option<bool>,
     pub transitions_to: Option<Vec<String>>,
 }
 
@@ -1280,9 +1262,6 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         }
         if let Some(output_schema) = opts.output_schema {
             update = update.with_output_schema(Some(output_schema));
-        }
-        if let Some(is_final) = opts.is_final {
-            update = update.with_is_final(is_final);
         }
         if let Some(transitions) = opts.transitions_to {
             let transition_ids: Vec<String> =
@@ -1793,7 +1772,6 @@ mod tests {
         assert_eq!(gui.prompt, None);
         assert!(gui.agents.is_empty());
         assert!(gui.skills.is_empty());
-        assert!(!gui.is_final);
         assert!(gui.transitions_to.is_empty());
         assert_eq!(gui.order, 0);
     }
@@ -1824,13 +1802,11 @@ mod tests {
             step_type: Some(StepType::Finish),
             output_schema: None,
             order: None,
-            is_final: Some(false),
             transitions_to: Some(vec![]),
         }
         .into();
 
         assert_eq!(update.step_type, Some(vertebrae_core::StepType::Finish));
-        assert_eq!(update.is_final, Some(false));
         assert_eq!(update.transitions_to, Some(vec![]));
     }
 
@@ -1841,7 +1817,6 @@ mod tests {
             .with_prompt("Review the PR")
             .with_agent("claude")
             .with_skill("code-review")
-            .with_is_final(true)
             .with_order(5);
         let gui = Step::from(core);
         assert_eq!(gui.name, "review");
@@ -1849,7 +1824,6 @@ mod tests {
         assert_eq!(gui.prompt, Some("Review the PR".to_string()));
         assert_eq!(gui.agents, vec!["claude"]);
         assert_eq!(gui.skills, vec!["code-review"]);
-        assert!(gui.is_final);
         assert_eq!(gui.order, 5);
     }
 
@@ -2217,7 +2191,6 @@ mod tests {
             "goal": "Review code changes",
             "prompt": "Review the PR carefully",
             "order": 2,
-            "is_final": false,
             "inserted_at": "2026-03-15T10:00:00.000000Z",
             "updated_at": "2026-03-15T11:00:00.000000Z",
             "short_id": "s001",
@@ -2230,7 +2203,6 @@ mod tests {
         assert_eq!(step.workflow_id, "wf-001");
         assert_eq!(step.goal, Some("Review code changes".to_string()));
         assert_eq!(step.order, 2);
-        assert!(!step.is_final);
         assert!(step.agents.is_empty());
         assert!(step.skills.is_empty());
         assert!(step.transitions_to.is_empty());
@@ -2252,7 +2224,6 @@ mod tests {
         assert_eq!(step.name, "backlog");
         assert_eq!(step.workflow_id, "wf-001");
         assert_eq!(step.order, 0);
-        assert!(!step.is_final);
         assert!(step.transitions_to.is_empty());
     }
 

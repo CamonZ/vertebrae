@@ -26,7 +26,6 @@ function wf(
     phase,
     displayOrder,
     isDefault: false,
-    isFinal: false,
     stepIds,
     total: 0,
     running: 0,
@@ -44,7 +43,6 @@ function step(id: string, workflowId: string, order: number): AtlasStep {
     role: "process",
     order,
     transitionsTo: [],
-    isFinal: false,
     total: 0,
     running: 0,
   };

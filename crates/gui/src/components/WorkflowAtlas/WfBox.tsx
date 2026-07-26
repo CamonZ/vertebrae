@@ -87,7 +87,6 @@ export function WfBox({
             >
               {w.name}
             </button>
-            {w.isFinal ? <span className="uv-final">Final</span> : null}
             {w.isDefault ? <span className="uv-default">default</span> : null}
             <TaskCount
               total={w.total}
@@ -114,7 +113,6 @@ export function WfBox({
           <button type="button" className="al-name" onClick={selectFromName}>
             {w.name}
           </button>
-          {w.isFinal ? <span className="uv-final">Final</span> : null}
           {w.isDefault ? <span className="uv-default">default</span> : null}
           <TaskCount total={w.total} running={w.running} className="uv-tc-wf" />
         </div>

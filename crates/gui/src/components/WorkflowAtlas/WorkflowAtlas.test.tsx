@@ -59,7 +59,6 @@ function makeStep(
     goal: null,
     step_order: order,
     step_type: "execute",
-    is_final: false,
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -80,7 +79,6 @@ function makeWorkflow(
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
     is_default: false,
-    is_final: false,
     display_order: 0,
     workflow_steps: steps,
     transitions: [],
@@ -98,7 +96,7 @@ const FIXTURE: PipelineSummary = {
           name: "Execute",
           transitions_to: ["s1"], // backward → loop edge
         }),
-        makeStep("s3", "wf-build", 2, { name: "Ship", is_final: true }),
+        makeStep("s3", "wf-build", 2, { name: "Ship", step_type: "finish" }),
       ],
       { name: "Build", description: "Build pipeline", kanban_column: "Dev" }
     ),

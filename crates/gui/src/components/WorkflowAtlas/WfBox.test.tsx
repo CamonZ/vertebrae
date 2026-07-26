@@ -15,7 +15,6 @@ function makeWorkflow(overrides: Partial<AtlasWorkflow> = {}): AtlasWorkflow {
     phase: "Build",
     displayOrder: 0,
     isDefault: false,
-    isFinal: false,
     stepIds: ["s1", "s2"],
     total: 0,
     running: 0,
@@ -48,22 +47,6 @@ describe("WfBox default badge", () => {
       />
     );
     expect(queryByText("default")).not.toBeInTheDocument();
-  });
-});
-
-describe("WfBox final badge", () => {
-  it("shows the Final badge next to workflow-name buttons on both faces", () => {
-    const { getAllByRole, getAllByText } = render(
-      <WfBox
-        workflow={makeWorkflow({ isFinal: true })}
-        rect={RECT}
-        shape={SHAPE}
-        stepCount={2}
-      />
-    );
-
-    expect(getAllByRole("button", { name: "Backlog" })).toHaveLength(2);
-    expect(getAllByText("Final")).toHaveLength(2);
   });
 });
 

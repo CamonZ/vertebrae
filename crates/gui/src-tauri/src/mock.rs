@@ -627,7 +627,6 @@ impl WorkflowService for MockWorkflowService {
             metadata: std::collections::HashMap::new(),
             order: options.order,
             is_default: options.is_default,
-            is_final: options.is_final,
             kanban_column: options.kanban_column.clone(),
             transitions: Vec::new(),
             created_at: Some(Utc::now()),
@@ -700,9 +699,6 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(is_default) = options.is_default {
             wf.is_default = is_default;
-        }
-        if let Some(is_final) = options.is_final {
-            wf.is_final = is_final;
         }
         if let Some(kanban_column) = &options.kanban_column {
             wf.kanban_column = kanban_column.clone();
@@ -1273,9 +1269,6 @@ impl StepService for MockStepService {
         if let Some(skills) = &updates.skills {
             step.skills = skills.clone();
         }
-        if let Some(is_final) = updates.is_final {
-            step.is_final = is_final;
-        }
         if let Some(order) = updates.order {
             step.order = order;
         }
@@ -1310,11 +1303,11 @@ impl StepService for MockStepService {
     async fn get_transitions(&self, _step_id: &str) -> ServiceResult<Vec<Step>> {
         Ok(vec![])
     }
-    async fn get_final_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
+    async fn get_finish_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
         let s = self.state.lock().unwrap();
         Ok(s.steps
             .values()
-            .filter(|step| step.workflow_id == workflow_id && step.is_final)
+            .filter(|step| step.workflow_id == workflow_id && step.step_type == StepType::Finish)
             .cloned()
             .collect())
     }

@@ -102,7 +102,7 @@ export function layoutKey(model: AtlasModel): string {
 }
 
 export function WorkflowAtlas() {
-  const { summary, isLoading, error, refetch } = usePipelineSummary();
+  const { summary, isLoading, error } = usePipelineSummary();
 
   const [view, setView] = useState<AtlasView>("graph");
   const [query, setQuery] = useState("");
@@ -741,7 +741,6 @@ export function WorkflowAtlas() {
               workflowId={sel.workflowId}
               onSelect={setSel}
               onClose={() => setSel(null)}
-              onRefresh={refetch}
               onHoverEdge={setHoverEdge}
             />
           ) : (

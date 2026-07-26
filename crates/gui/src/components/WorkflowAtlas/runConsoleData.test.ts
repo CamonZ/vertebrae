@@ -89,7 +89,6 @@ function makeStep(
     goal: null,
     step_order: order,
     step_type: "execute",
-    is_final: false,
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -107,12 +106,11 @@ const SUMMARY: PipelineSummary = {
       initial_step_id: "s1",
       kanban_column: null,
       is_default: false,
-      is_final: false,
       display_order: 0,
       workflow_steps: [
         makeStep("s1", 0),
         makeStep("s2", 1),
-        makeStep("s3", 2, { is_final: true }),
+        makeStep("s3", 2, { step_type: "finish" }),
       ],
       transitions: [],
     } as PipelineWorkflow,
@@ -181,9 +179,8 @@ describe("miniPipeline", () => {
     const task = makeTask({ current_step_id: "s2" });
     const segs = miniPipeline(task, SUMMARY);
     expect(segs.map((s) => s.state)).toEqual(["done", "current", "queued"]);
-    // kind is the real backend step type (all execute here) — no synthetic
-    // entry/final.
-    expect(segs.map((s) => s.kind)).toEqual(["execute", "execute", "execute"]);
+    // kind is the real backend step type — no synthetic entry/final kinds.
+    expect(segs.map((s) => s.kind)).toEqual(["execute", "execute", "finish"]);
   });
 
   it("marks the current step `running` only when the run is active", () => {

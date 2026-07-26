@@ -69,7 +69,6 @@ const summary = (
       initial_step_id: "step-1",
       kanban_column: null,
       is_default: true,
-      is_final: false,
       display_order: 0,
       workflow_steps: [
         {
@@ -79,7 +78,6 @@ const summary = (
           goal: null,
           step_order: 0,
           step_type: "execute",
-          is_final: false,
           transitions_to: [],
           task_counts: { epic: 0, ticket: ticketCount, task: 0 },
           pipeline_counts: {
@@ -97,7 +95,6 @@ const summary = (
           goal: null,
           step_order: 1,
           step_type: "execute",
-          is_final: false,
           transitions_to: [],
           task_counts: {
             epic: 0,

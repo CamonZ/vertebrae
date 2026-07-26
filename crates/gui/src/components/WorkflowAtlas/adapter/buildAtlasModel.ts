@@ -34,14 +34,12 @@ export function stepRef(workflowId: string, stepId: string): string {
 /**
  * Derive the visual `Kind` of a step.
  *
- * Precedence (highest first): `final` → `entry` → type-mapped.
- *  - `final`  if `step.is_final`.
  *  Maps the REAL backend `StepType` via `hearthStepKind`, renaming the Hearth
  *  kinds to the Atlas vocabulary: `eval` (evaluate), `wait` (wait_children),
  *  `human` (human_input). `execute`/`route`/`finish` pass through. `unknown`
  *  collapses to `execute` (a generic process box). There is no synthetic
  *  entry/final kind — the backend has no such types; position is `Role`,
- *  terminality is `is_final` or the finish type.
+ *  terminality is the finish type.
  */
 export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
   // PipelineStep.step_type is `string | null`. hearthStepKind only recognises
@@ -78,9 +76,9 @@ export function kindFor(step: Pick<PipelineStep, "step_type">): Kind {
 }
 
 /** Derive the cosmetic foot `Role` of a step (flow position, not the type). */
-export function roleFor(kind: Kind, isFirst: boolean, isFinal: boolean): Role {
+export function roleFor(kind: Kind, isFirst: boolean): Role {
   if (isFirst) return "entry";
-  if (isFinal || kind === "route" || kind === "finish") return "exit";
+  if (kind === "route" || kind === "finish") return "exit";
   return "process";
 }
 
@@ -126,7 +124,7 @@ function orderPhases(
 /**
  * Resolve a cross-workflow transition's source step ref. There is no source
  * step on the backend payload, so we synthesise a plausible terminal step:
- * the last `finish` step if one exists, else the last `route` step, else the last `final` step, else the
+ * the last `finish` step if one exists, else the last `route` step, else the
  * last step by order, else the initial step.
  */
 function resolveSourceStep(wf: PipelineWorkflow): string | null {
@@ -138,9 +136,6 @@ function resolveSourceStep(wf: PipelineWorkflow): string | null {
   if (lastFinish) return lastFinish.id;
   const lastRoute = [...ordered].reverse().find((s) => kindFor(s) === "route");
   if (lastRoute) return lastRoute.id;
-
-  const lastFinal = [...ordered].reverse().find((s) => s.is_final);
-  if (lastFinal) return lastFinal.id;
 
   return ordered[ordered.length - 1]?.id ?? wf.initial_step_id;
 }
@@ -202,7 +197,7 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
     let runningSum = 0;
     ordered.forEach((s, i) => {
       const kind = kindFor(s);
-      const role = roleFor(kind, i === 0, s.is_final);
+      const role = roleFor(kind, i === 0);
       // "tasks parked here" = every work item across levels (epic + ticket +
       // task); "running" = how many of those have an active TaskRun.
       const c = s.pipeline_counts;
@@ -220,7 +215,6 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
         role,
         order: s.step_order,
         transitionsTo: s.transitions_to,
-        isFinal: s.is_final,
         total,
         running,
       });
@@ -253,7 +247,6 @@ export function buildAtlasModel(summary: PipelineSummary): AtlasModel {
       phase: phaseOf(wf),
       displayOrder: wf.display_order,
       isDefault: wf.is_default,
-      isFinal: wf.is_final,
       stepIds: ordered.map((s) => s.id),
       total: totalSum,
       running: runningSum,

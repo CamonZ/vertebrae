@@ -28,7 +28,6 @@ function createStep(overrides?: Partial<Step>): Step {
     goal: null,
     prompt: null,
     order: 0,
-    is_final: false,
     transitions_to: [],
     step_type: "execute",
     output_schema: null,

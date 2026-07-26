@@ -23,7 +23,6 @@ function makeStep(
     goal: null,
     step_order: order,
     step_type: "execute",
-    is_final: false,
     transitions_to: [],
     task_counts: { epic: 0, ticket: 0, task: 0 },
     pipeline_counts: { epic: 0, ticket: 0, task: 0, active: 0 },
@@ -44,7 +43,6 @@ function makeWorkflow(
     initial_step_id: steps[0]?.id ?? null,
     kanban_column: null,
     is_default: false,
-    is_final: false,
     display_order: 0,
     workflow_steps: steps,
     transitions: [],
@@ -92,16 +90,16 @@ describe("kindFor", () => {
 
 describe("roleFor", () => {
   it("labels the first step entry", () => {
-    expect(roleFor("execute", true, false)).toBe("entry");
+    expect(roleFor("execute", true)).toBe("entry");
   });
   it("labels route / terminal steps exit", () => {
-    expect(roleFor("route", false, false)).toBe("exit");
-    expect(roleFor("execute", false, true)).toBe("exit");
-    expect(roleFor("finish", false, false)).toBe("exit");
+    expect(roleFor("route", false)).toBe("exit");
+    expect(roleFor("execute", false)).toBe("process");
+    expect(roleFor("finish", false)).toBe("exit");
   });
   it("labels everything else process", () => {
-    expect(roleFor("execute", false, false)).toBe("process");
-    expect(roleFor("eval", false, false)).toBe("process");
+    expect(roleFor("execute", false)).toBe("process");
+    expect(roleFor("eval", false)).toBe("process");
   });
 });
 
@@ -135,7 +133,6 @@ describe("buildAtlasModel", () => {
     expect(byId.get("gate")!.kind).toBe("eval");
     expect(byId.get("router")!.kind).toBe("route");
     expect(byId.get("done")!.kind).toBe("finish");
-    expect(byId.get("done")!.isFinal).toBe(false);
     expect(byId.get("done")!.role).toBe("exit");
     expect(byId.get("gate")!.stepType).toBe("evaluate");
     expect(byId.get("router")!.stepType).toBe("route");
