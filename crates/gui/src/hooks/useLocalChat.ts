@@ -538,8 +538,23 @@ export async function doCloseSession(
     clearQueuedMessages?: (id: string) => void;
     markPendingUserQuestionsUnavailable?: (id: string) => void;
     settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
-  }
+    getActiveTurnLocalId?: (id: string) => string | null;
+    restoreActiveTurn?: (id: string, localId: string) => boolean;
+  },
+  options: {
+    expectedActiveTurnLocalId?: string;
+    failureLifecycle?: LocalChatLifecycle;
+  } = {}
 ): Promise<boolean> {
+  const hasReplacementTurn = () => {
+    if (!sessionId || !options.expectedActiveTurnLocalId) return false;
+    const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
+    return (
+      currentLocalId !== null &&
+      currentLocalId !== options.expectedActiveTurnLocalId
+    );
+  };
+
   if (sessionId) {
     deps.setSessionLifecycle(sessionId, "closing");
   }
@@ -548,6 +563,7 @@ export async function doCloseSession(
     const result = await commands.closeLocalChatSession(backendSessionId);
     if (result.status === "error") {
       if (isSessionNotFoundError(result.error)) {
+        if (hasReplacementTurn()) return true;
         if (sessionId) {
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
@@ -561,6 +577,7 @@ export async function doCloseSession(
       throw new Error(commandErrorMessage(result.error));
     }
     if (sessionId) {
+      if (hasReplacementTurn()) return true;
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
@@ -571,8 +588,23 @@ export async function doCloseSession(
     return true;
   } catch (error) {
     if (sessionId) {
-      deps.settleActiveTurn?.(sessionId);
-      deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+      const expectedLocalId = options.expectedActiveTurnLocalId;
+      const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
+      if (expectedLocalId) {
+        if (currentLocalId === expectedLocalId) {
+          deps.restoreActiveTurn?.(sessionId, expectedLocalId);
+          deps.setSessionLifecycle(
+            sessionId,
+            options.failureLifecycle ?? "streaming"
+          );
+        }
+      } else {
+        deps.setSessionLifecycle(
+          sessionId,
+          "error",
+          commandErrorMessage(error)
+        );
+      }
     }
     return false;
   }
@@ -603,6 +635,7 @@ export function useLocalChat(sessionId: string | null) {
   const markActiveTurnStopping = useChatStore(
     (s) => s.markActiveTurnStopping
   );
+  const restoreActiveTurn = useChatStore((s) => s.restoreActiveTurn);
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const markPendingUserQuestionsUnavailable = useChatStore(
@@ -743,19 +776,37 @@ export function useLocalChat(sessionId: string | null) {
 
   const stopActiveTurn = useCallback(async () => {
     if (!session?.backendSessionId || !sessionId) return false;
+    const activeTurn = session.activeTurn;
+    if (!activeTurn) return false;
+    const failureLifecycle =
+      session.lifecycle === "sending" ? "sending" : "streaming";
     if (!markActiveTurnStopping(sessionId)) return false;
-    return doCloseSession(session.backendSessionId, sessionId, {
-      markSessionClosed: (id) => setSessionLifecycle(id, "idle"),
-      setSessionLifecycle,
-      setBackendSessionId,
-      clearQueuedMessages,
-      markPendingUserQuestionsUnavailable,
-      settleActiveTurn,
-    });
+    return doCloseSession(
+      session.backendSessionId,
+      sessionId,
+      {
+        markSessionClosed: (id) => setSessionLifecycle(id, "idle"),
+        setSessionLifecycle,
+        setBackendSessionId,
+        clearQueuedMessages,
+        markPendingUserQuestionsUnavailable,
+        settleActiveTurn,
+        getActiveTurnLocalId: (id) =>
+          useChatStore.getState().sessions[id]?.activeTurn?.localId ?? null,
+        restoreActiveTurn,
+      },
+      {
+        expectedActiveTurnLocalId: activeTurn.localId,
+        failureLifecycle,
+      }
+    );
   }, [
     session?.backendSessionId,
+    session?.activeTurn,
+    session?.lifecycle,
     sessionId,
     markActiveTurnStopping,
+    restoreActiveTurn,
     setSessionLifecycle,
     setBackendSessionId,
     clearQueuedMessages,

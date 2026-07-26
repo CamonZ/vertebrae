@@ -1795,11 +1795,76 @@ describe("doCloseSession", () => {
     expect(deps.markSessionClosed).not.toHaveBeenCalled();
     expect(deps.setBackendSessionId).not.toHaveBeenCalled();
     expect(deps.setBackendSessionIdRef).not.toHaveBeenCalled();
-    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.settleActiveTurn).not.toHaveBeenCalled();
     expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
       SESSION_ID,
       "error",
       "pipe closed"
     );
+  });
+
+  it("restores a stopping turn when close transport fails", async () => {
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "transport unavailable" },
+    } as never);
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      settleActiveTurn: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => "local-turn-1"),
+      restoreActiveTurn: vi.fn(() => true),
+    };
+
+    const closed = await doCloseSession(
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      deps,
+      {
+        expectedActiveTurnLocalId: "local-turn-1",
+        failureLifecycle: "streaming",
+      }
+    );
+
+    expect(closed).toBe(false);
+    expect(deps.restoreActiveTurn).toHaveBeenCalledWith(
+      SESSION_ID,
+      "local-turn-1"
+    );
+    expect(deps.settleActiveTurn).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "streaming"
+    );
+  });
+
+  it("does not clear a replacement turn when an earlier close resolves", async () => {
+    const close = deferredCommandResult();
+    mockedCommands.closeLocalChatSession.mockReturnValueOnce(
+      close.promise as never
+    );
+    let currentLocalId = "local-turn-1";
+    const deps = {
+      markSessionClosed: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      clearQueuedMessages: vi.fn(),
+      settleActiveTurn: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => currentLocalId),
+    };
+    const closing = doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps, {
+      expectedActiveTurnLocalId: "local-turn-1",
+    });
+
+    currentLocalId = "local-turn-2";
+    close.resolve({ status: "ok" });
+
+    expect(await closing).toBe(true);
+    expect(deps.markSessionClosed).not.toHaveBeenCalled();
+    expect(deps.setBackendSessionId).not.toHaveBeenCalled();
+    expect(deps.clearQueuedMessages).not.toHaveBeenCalled();
+    expect(deps.settleActiveTurn).not.toHaveBeenCalled();
   });
 });

@@ -509,6 +509,8 @@ interface ChatStoreActions {
   bindActiveTurn: (sessionId: string, turnId: string) => boolean;
   /** Move the current root turn into stopping exactly once. */
   markActiveTurnStopping: (sessionId: string) => boolean;
+  /** Restore a failed stop request for the same local turn. */
+  restoreActiveTurn: (sessionId: string, localId: string) => boolean;
   /** Settle only the current root turn with the matching harness identity. */
   settleActiveTurn: (sessionId: string, turnId?: string | null) => boolean;
   /** Upgrade a command-send lifecycle only if it is still awaiting first output */
@@ -1872,19 +1874,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
         sessionId,
         (session) => {
           const current = session.activeTurn;
+          if (!current || current.turnId !== null) return session;
           bound = true;
           return {
             ...session,
             activeTurn: {
-              localId:
-                current?.turnId && current.turnId !== turnId
-                  ? generateActiveTurnId()
-                  : (current?.localId ?? generateActiveTurnId()),
+              localId: current.localId,
               turnId,
-              phase:
-                current?.turnId === turnId && current.phase === "stopping"
-                  ? "stopping"
-                  : "active",
+              phase: current.phase === "stopping" ? "stopping" : "active",
             },
           };
         },
@@ -1909,6 +1906,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
         { persist: false }
       );
       return marked;
+    },
+
+    restoreActiveTurn: (sessionId, localId) => {
+      let restored = false;
+      updateSession(
+        sessionId,
+        (session) => {
+          const current = session.activeTurn;
+          if (
+            !current ||
+            current.localId !== localId ||
+            current.phase !== "stopping"
+          ) {
+            return session;
+          }
+          restored = true;
+          return {
+            ...session,
+            activeTurn: {
+              ...current,
+              phase: current.turnId === null ? "starting" : "active",
+            },
+          };
+        },
+        { persist: false }
+      );
+      return restored;
     },
 
     settleActiveTurn: (sessionId, turnId = null) => {

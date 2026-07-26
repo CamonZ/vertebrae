@@ -17,6 +17,7 @@ import {
   routeLocalChatToolResultEvent,
   routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
+  resetLocalChatTurnRoutingForTests,
   useLocalChatEventRouter,
 } from "./useLocalChatEventRouter";
 
@@ -97,6 +98,12 @@ function startTurn(
   turnId: string,
   harness: "claude" | "codex" = "claude"
 ) {
+  const sessionId = Object.values(useChatStore.getState().sessions).find(
+    (session) => session.backendSessionId === backendSessionId
+  )?.id;
+  if (sessionId && !useChatStore.getState().sessions[sessionId].activeTurn) {
+    useChatStore.getState().beginActiveTurn(sessionId);
+  }
   expect(
     routeLocalChatTurnStartedEvent({
       backend_session_id: backendSessionId,
@@ -112,6 +119,7 @@ describe("useLocalChatEventRouter route functions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     unlisteners.length = 0;
+    resetLocalChatTurnRoutingForTests();
     localStorage.clear();
     resetChatStore({});
   });
@@ -374,6 +382,46 @@ describe("useLocalChatEventRouter route functions", () => {
     ).toHaveLength(1);
   });
 
+  it("does not hand off queued work when End races a stopping turn", async () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        queuedMessages: ["must not start"],
+      }),
+    });
+    startTurn("backend-local", "turn-stopping");
+    expect(
+      useChatStore.getState().markActiveTurnStopping("local")
+    ).toBe(true);
+
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-stopping",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "interrupted",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      })
+    ).toBe(true);
+    await Promise.resolve();
+
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessions.local).toMatchObject({
+      activeTurn: null,
+      lifecycle: "idle",
+      queuedMessages: ["must not start"],
+    });
+  });
+
   it("routes interleaved multi-session events without transcript cross-talk", () => {
     resetChatStore({
       left: makeSession({
@@ -555,6 +603,8 @@ describe("useLocalChatEventRouter route functions", () => {
       }),
     });
     startTurn("backend-local", "turn-1");
+    useChatStore.getState().settleActiveTurn("local", "turn-1");
+    useChatStore.getState().beginActiveTurn("local");
     startTurn("backend-local", "turn-2");
 
     expect(
@@ -679,6 +729,7 @@ describe("useLocalChatEventRouter route functions", () => {
         lifecycle: "streaming",
       }),
     });
+    useChatStore.getState().beginActiveTurn("bridge");
 
     const routed = translationSequence.map((event) => {
       switch (event.type) {
@@ -780,6 +831,68 @@ describe("useLocalChatEventRouter route functions", () => {
     ]);
   });
 
+  it("rejects a stale TurnStarted after settlement without consuming a new pending turn", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-1");
+    const end: LocalChatSessionEndEvent = {
+      backend_session_id: "backend-local",
+      harness: "claude",
+      turn_id: "turn-1",
+      thread_id: "backend-local-thread",
+      is_root: true,
+      duration_ms: 1,
+      cost_usd: 0,
+      num_turns: 1,
+      result: "done",
+      is_error: false,
+      context_tokens: 0,
+      context_window: 200000,
+    };
+    expect(routeLocalChatSessionEndEvent(end)).toBe(true);
+
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+      })
+    ).toBe(false);
+    expect(useChatStore.getState().sessions.local.activeTurn).toBeNull();
+
+    const nextLocalId = useChatStore.getState().beginActiveTurn("local");
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+      })
+    ).toBe(false);
+    expect(useChatStore.getState().sessions.local.activeTurn).toEqual({
+      localId: nextLocalId,
+      turnId: null,
+      phase: "starting",
+    });
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-2",
+        thread_id: "backend-local-thread",
+        is_root: true,
+      })
+    ).toBe(true);
+  });
+
   it("keeps sequential queued turns active when prior-turn events arrive late", async () => {
     resetChatStore({
       local: makeSession({
@@ -872,6 +985,8 @@ describe("useLocalChatEventRouter route functions", () => {
       }),
     });
     startTurn("backend-local", "turn-1");
+    useChatStore.getState().settleActiveTurn("local", "turn-1");
+    useChatStore.getState().beginActiveTurn("local");
     startTurn("backend-local", "turn-2");
 
     expect(

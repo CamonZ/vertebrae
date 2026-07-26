@@ -1291,6 +1291,7 @@ describe("chatStore", () => {
       vi.setSystemTime(new Date("2024-01-02T00:00:00Z"));
       const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().setSessionLifecycle(id, "streaming");
+      useChatStore.getState().beginActiveTurn(id);
       useChatStore.getState().bindActiveTurn(id, "root-turn");
 
       useChatStore
@@ -1477,21 +1478,26 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id].activeTurn).toBeNull();
     });
 
-    it("replaces turn identity when the harness starts a newer root turn", () => {
+    it("binds only a pending local turn and rejects later acknowledgements", () => {
       const id = useChatStore.getState().openSession("T1");
-      useChatStore.getState().bindActiveTurn(id, "root-turn-1");
-      const firstLocalId =
-        useChatStore.getState().sessions[id].activeTurn?.localId;
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
+        false
+      );
+      expect(useChatStore.getState().sessions[id].activeTurn).toBeNull();
 
-      useChatStore.getState().bindActiveTurn(id, "root-turn-2");
+      const localId = useChatStore.getState().beginActiveTurn(id);
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
+        true
+      );
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-2")).toBe(
+        false
+      );
 
-      expect(useChatStore.getState().sessions[id].activeTurn).toMatchObject({
-        turnId: "root-turn-2",
+      expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
+        localId,
+        turnId: "root-turn-1",
         phase: "active",
       });
-      expect(
-        useChatStore.getState().sessions[id].activeTurn?.localId
-      ).not.toBe(firstLocalId);
     });
 
     it("does not persist runtime turn state", () => {
@@ -1505,6 +1511,7 @@ describe("chatStore", () => {
 
     it("moves an active turn to stopping only once", () => {
       const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().beginActiveTurn(id);
       useChatStore.getState().bindActiveTurn(id, "root-turn");
 
       expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(true);
@@ -1513,6 +1520,37 @@ describe("chatStore", () => {
         phase: "stopping",
       });
       expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(false);
+    });
+
+    it("keeps a pre-acknowledgement stop disabled after binding the turn ID", () => {
+      const id = useChatStore.getState().openSession("T1");
+      const localId = useChatStore.getState().beginActiveTurn(id);
+
+      expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(true);
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn")).toBe(
+        true
+      );
+      expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
+        localId,
+        turnId: "root-turn",
+        phase: "stopping",
+      });
+      expect(useChatStore.getState().markActiveTurnStopping(id)).toBe(false);
+    });
+
+    it("restores only the matching stopping turn after a failed stop", () => {
+      const id = useChatStore.getState().openSession("T1");
+      const localId = useChatStore.getState().beginActiveTurn(id)!;
+      useChatStore.getState().markActiveTurnStopping(id);
+
+      expect(useChatStore.getState().restoreActiveTurn(id, "stale")).toBe(
+        false
+      );
+      expect(useChatStore.getState().restoreActiveTurn(id, localId)).toBe(true);
+      expect(useChatStore.getState().sessions[id].activeTurn).toMatchObject({
+        localId,
+        phase: "starting",
+      });
     });
   });
 

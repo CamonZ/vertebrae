@@ -1294,6 +1294,99 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("keeps Stop disabled when provider acknowledgement races a local stop", async () => {
+    let resolveClose!: (result: { status: "ok"; data: null }) => void;
+    mockedCommands.closeLocalChatSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClose = resolve;
+        })
+    );
+    const session = createSession({
+      backendSessionId: "codex-stop-before-ack",
+      harness: "codex",
+      lifecycle: "sending",
+      activeTurn: {
+        localId: "local-turn-before-ack",
+        turnId: null,
+        phase: "starting",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    const stop = screen.getByTestId("local-chat-stop-generation");
+    fireEvent.click(stop);
+    act(() => {
+      expect(
+        routeLocalChatTurnStartedEvent({
+          backend_session_id: "codex-stop-before-ack",
+          harness: "codex",
+          turn_id: "provider-turn-before-ack",
+          thread_id: "provider-thread-before-ack",
+          is_root: true,
+        })
+      ).toBe(true);
+    });
+
+    expect(stop).toBeDisabled();
+    expect(
+      useChatStore.getState().sessions["test-session"].activeTurn
+    ).toEqual({
+      localId: "local-turn-before-ack",
+      turnId: "provider-turn-before-ack",
+      phase: "stopping",
+    });
+    fireEvent.click(stop);
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveClose({ status: "ok", data: null }));
+  });
+
+  it("restores Stop for retry when the close transport fails", async () => {
+    const user = userEvent.setup();
+    mockedCommands.closeLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SendFailed: "close transport failed" },
+    } as never);
+    const session = createSession({
+      backendSessionId: "claude-stop-retry",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-retry",
+        turnId: "provider-turn-retry",
+        phase: "active",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    const stop = screen.getByTestId("local-chat-stop-generation");
+    await user.click(stop);
+
+    expect(stop).toBeEnabled();
+    expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
+      backendSessionId: "claude-stop-retry",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-retry",
+        turnId: "provider-turn-retry",
+        phase: "active",
+      },
+    });
+
+    await user.click(stop);
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(2);
+  });
+
   it("disables stop after a persistent turn returns to idle", () => {
     const session = createSession({
       backendSessionId: "codex-idle",

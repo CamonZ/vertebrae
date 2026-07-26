@@ -48,6 +48,11 @@ type RootTurnRoutingState = {
 };
 const rootTurnByBackendSessionId = new Map<string, RootTurnRoutingState>();
 
+/** Reset module-level turn correlation between isolated test cases. */
+export function resetLocalChatTurnRoutingForTests() {
+  rootTurnByBackendSessionId.clear();
+}
+
 type CorrelatedEvent = {
   turn_id?: string | null;
   is_root?: boolean;
@@ -98,6 +103,13 @@ export function routeLocalChatTurnStartedEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId || !payload.is_root || !payload.turn_id) return false;
+  const routedTurn = rootTurnByBackendSessionId.get(payload.backend_session_id);
+  if (
+    routedTurn?.phase === "settled" &&
+    routedTurn.turnId === payload.turn_id
+  ) {
+    return false;
+  }
   if (!useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id)) {
     return false;
   }
@@ -253,6 +265,9 @@ export function routeLocalChatSessionEndEvent(
   if (!matchesActiveRootTurn(sessionId, payload)) {
     return false;
   }
+  const wasStopping =
+    useChatStore.getState().sessions[sessionId]?.activeTurn?.phase ===
+    "stopping";
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
     turnId: payload.turn_id,
     phase: "settled",
@@ -267,7 +282,7 @@ export function routeLocalChatSessionEndEvent(
     store.setSessionLifecycle,
     store.clearStreamingAssistant
   );
-  void flushNextQueuedMessage(sessionId);
+  if (!wasStopping) void flushNextQueuedMessage(sessionId);
   return true;
 }
 
@@ -285,13 +300,17 @@ export function routeLocalChatSessionErrorEvent(
     });
     return true;
   }
-  if (
-    payload.turn_id &&
-    !matchesActiveRootTurn(sessionId, payload)
-  ) {
+  if (payload.turn_id && !matchesActiveRootTurn(sessionId, payload)) {
     return false;
   }
-  rootTurnByBackendSessionId.delete(payload.backend_session_id);
+  if (payload.turn_id) {
+    rootTurnByBackendSessionId.set(payload.backend_session_id, {
+      turnId: payload.turn_id,
+      phase: "settled",
+    });
+  } else {
+    rootTurnByBackendSessionId.delete(payload.backend_session_id);
+  }
   if (
     store.sessions[sessionId]?.activeTurn &&
     !store.settleActiveTurn(sessionId, payload.turn_id ?? null)
