@@ -188,6 +188,60 @@ impl CodexConnection {
         })?
     }
 
+    async fn request_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: std::time::Duration,
+    ) -> Result<Value, HarnessError> {
+        let id = {
+            let mut next = self.next_id.lock().await;
+            let id = *next;
+            *next = next.saturating_add(1);
+            id
+        };
+        let key = id.to_string();
+        let (tx, rx) = oneshot::channel();
+        self.pending
+            .lock()
+            .await
+            .insert(key.clone(), PendingResponse { tx });
+        if let Err(error) = self
+            .send(json!({"id": id, "method": method, "params": params}))
+            .await
+        {
+            self.pending.lock().await.remove(&key);
+            return Err(error);
+        }
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(result) => result.map_err(|_| {
+                HarnessError::Operation(format!(
+                    "Codex App Server response channel closed for {method}"
+                ))
+            })?,
+            Err(_) => {
+                self.pending.lock().await.remove(&key);
+                Err(HarnessError::Operation(format!(
+                    "Codex {method} request timed out"
+                )))
+            }
+        }
+    }
+
+    /// Sends a JSON-RPC request without retaining response state. Used for
+    /// best-effort interruption, where provider terminal notification is the
+    /// authoritative acknowledgement.
+    async fn request_no_wait(&self, method: &str, params: Value) -> Result<(), HarnessError> {
+        let id = {
+            let mut next = self.next_id.lock().await;
+            let id = *next;
+            *next = next.saturating_add(1);
+            id
+        };
+        self.send(json!({"id": id, "method": method, "params": params}))
+            .await
+    }
+
     async fn notify(&self, method: &str, params: Value) -> Result<(), HarnessError> {
         self.send(json!({"method": method, "params": params})).await
     }
@@ -728,16 +782,6 @@ impl SessionState {
         provenance: TurnInputProvenance,
         mut cancel_rx: watch::Receiver<bool>,
     ) -> Result<TurnOutcome, HarnessError> {
-        if *cancel_rx.borrow() {
-            return Ok(TurnOutcome {
-                status: CompletionStatus::Cancelled,
-                result_text: None,
-                structured_output: None,
-                usage: None,
-                metrics: OutcomeMetrics::default(),
-                error: Some("Codex turn cancelled".into()),
-            });
-        }
         let mut notifications = self.connection.notifications.subscribe();
         let mut connection_closed = self.connection.closed.subscribe();
         let correlation = self.root_correlation(Some(turn_id.clone()), run_id.clone());
@@ -750,93 +794,179 @@ impl SessionState {
             UpdateSemantics::Snapshot,
         )
         .await?;
-        self.emit(
-            self.root_stream_id.clone(),
-            correlation.clone(),
-            HarnessEventPayloadV1::TurnInput(TurnInput {
-                thread_id: self.root_thread_id.clone(),
-                run_id: run_id.clone(),
-                content: content.clone(),
-                provenance,
-            }),
-            UpdateSemantics::Snapshot,
-        )
-        .await?;
-        let mut params = json!({"threadId": self.root_thread_id.as_str(), "input": [{"type":"text", "text": content}]});
-        if let Some(schema) = output_schema {
-            params["outputSchema"] = schema;
-        }
-        let structured_output_requested = params.get("outputSchema").is_some();
-        self.config.permission.apply_to_params(&mut params);
-        let response = self.connection.request("turn/start", params).await?;
-        let provider_turn = required_string(
-            response.get("turn").unwrap_or(&response),
-            &["/id", "/turn/id"],
-            "turn/start response turn id",
-        )
-        .map_err(HarnessError::Operation)?;
-        log::info!(
-            "[Codex] turn/start accepted requested_turn_id={} provider_turn_id={provider_turn}",
-            turn_id
-        );
-        let mut accumulator = TurnAccumulator::default();
-        if let Some(error) = connection_closed.borrow().clone() {
-            return Err(HarnessError::Operation(error));
-        }
-        let result = loop {
-            tokio::select! {
-                changed = cancel_rx.changed() => { if changed.is_ok() && *cancel_rx.borrow() { let _ = tokio::time::timeout(self.config.terminal_exit_timeout, self.connection.request("turn/interrupt", json!({"threadId": self.root_thread_id.as_str(), "turnId": provider_turn}))).await; break TurnOutcome { status: CompletionStatus::Cancelled, result_text: None, structured_output: None, usage: accumulator.usage, metrics: OutcomeMetrics::default(), error: Some("Codex run cancelled".into()) }; } }
-                closed = connection_closed.changed() => {
-                    if closed.is_ok()
-                        && let Some(error) = connection_closed.borrow().clone()
-                    {
-                        return Err(HarnessError::Operation(error));
+        let validation_schema = output_schema.clone();
+        let result = async {
+            self.emit(
+                self.root_stream_id.clone(),
+                correlation,
+                HarnessEventPayloadV1::TurnInput(TurnInput {
+                    thread_id: self.root_thread_id.clone(),
+                    run_id: run_id.clone(),
+                    content: content.clone(),
+                    provenance,
+                }),
+                UpdateSemantics::Snapshot,
+            )
+            .await?;
+            if *cancel_rx.borrow() {
+                return Ok(cancelled_outcome(CompletionStatus::Cancelled, None));
+            }
+
+            let mut params = json!({"threadId": self.root_thread_id.as_str(), "input": [{"type":"text", "text": content}]});
+            if let Some(schema) = output_schema {
+                params["outputSchema"] = schema;
+            }
+            self.config.permission.apply_to_params(&mut params);
+            let response = self
+                .connection
+                .request_with_timeout("turn/start", params, self.config.request_timeout)
+                .await?;
+            let provider_turn = required_string(
+                response.get("turn").unwrap_or(&response),
+                &["/id", "/turn/id"],
+                "turn/start response turn id",
+            )
+            .map_err(HarnessError::Operation)?;
+            log::info!(
+                "[Codex] turn/start accepted requested_turn_id={} provider_turn_id={provider_turn}",
+                turn_id
+            );
+            let mut accumulator = TurnAccumulator::default();
+            if let Some(error) = connection_closed.borrow().clone() {
+                return Err(HarnessError::Operation(error));
+            }
+            let outcome = loop {
+                tokio::select! {
+                    changed = cancel_rx.changed() => {
+                        if changed.is_ok() && *cancel_rx.borrow() {
+                            let provider_terminal = tokio::time::timeout(
+                                self.config.terminal_exit_timeout,
+                                async {
+                                    tokio::select! {
+                                        outcome = self.wait_for_provider_terminal(
+                                            &provider_turn,
+                                            &mut notifications,
+                                            &mut connection_closed,
+                                            &mut accumulator,
+                                        ) => outcome,
+                                        _ = self.connection.request_no_wait(
+                                            "turn/interrupt",
+                                            json!({"threadId": self.root_thread_id.as_str(), "turnId": provider_turn}),
+                                        ) => self.wait_for_provider_terminal(
+                                            &provider_turn,
+                                            &mut notifications,
+                                            &mut connection_closed,
+                                            &mut accumulator,
+                                        ).await,
+                                    }
+                                },
+                            )
+                            .await;
+                            break match provider_terminal {
+                                Ok(result) => result?,
+                                Err(_) => cancelled_outcome(
+                                    if run_id.is_none() {
+                                        CompletionStatus::Interrupted
+                                    } else {
+                                        CompletionStatus::Cancelled
+                                    },
+                                    accumulator.usage,
+                                ),
+                            };
+                        }
+                    }
+                    outcome = self.next_provider_notification(
+                        &provider_turn,
+                        &mut notifications,
+                        &mut connection_closed,
+                        &mut accumulator,
+                    ) => {
+                        if let Some(outcome) = outcome? {
+                            break outcome;
+                        }
                     }
                 }
-                notification = notifications.recv() => match notification {
-                    Ok(notification) => if let Some(outcome) = self.process_notification(decode_notification(notification.method, notification.params).map_err(HarnessError::Operation)?, Some(&provider_turn), &mut accumulator).await? {
-                        if run_id.is_none() {
-                            self.emit(
-                                self.root_stream_id.clone(),
-                                self.root_correlation(Some(turn_id.clone()), None),
-                                HarnessEventPayloadV1::TurnFinished(outcome.clone()),
-                                UpdateSemantics::Snapshot,
-                            ).await?;
-                        }
-                        break outcome;
-                    },
-                    Err(broadcast::error::RecvError::Lagged(count)) => return Err(HarnessError::Operation(format!("Codex notification buffer lost {count} messages"))),
-                    Err(broadcast::error::RecvError::Closed) => return Err(HarnessError::Operation("Codex notification stream closed".into())),
-                }
-            }
-        };
-        let mut result = result;
+            };
+            Ok::<_, HarnessError>(outcome)
+        }
+        .await;
+        let result = validate_structured_output(
+            result.unwrap_or_else(failed_outcome),
+            validation_schema.as_ref(),
+        );
+        if run_id.is_none() {
+            self.emit(
+                self.root_stream_id.clone(),
+                self.root_correlation(Some(turn_id.clone()), None),
+                HarnessEventPayloadV1::TurnFinished(result.clone()),
+                UpdateSemantics::Snapshot,
+            )
+            .await?;
+        }
         log::info!(
-            "[Codex] turn finished provider_turn_id={provider_turn} status={:?} result_text_len={}",
+            "[Codex] turn finished turn_id={} status={:?} result_text_len={}",
+            turn_id,
             result.status,
             result.result_text.as_deref().map_or(0, str::len)
         );
-        if structured_output_requested
-            && result.status == CompletionStatus::Completed
-            && result.structured_output.is_none()
-        {
-            match result.result_text.as_deref() {
-                Some(text) => match serde_json::from_str(text) {
-                    Ok(value) => result.structured_output = Some(value),
-                    Err(error) => {
-                        result.status = CompletionStatus::Failed;
-                        result.error = Some(format!(
-                            "Codex structured output was not valid JSON: {error}"
-                        ));
-                    }
-                },
-                None => {
-                    result.status = CompletionStatus::Failed;
-                    result.error = Some("Codex structured output was empty".into());
+        Ok(result)
+    }
+
+    async fn next_provider_notification(
+        &self,
+        provider_turn: &str,
+        notifications: &mut broadcast::Receiver<NotificationMessage>,
+        connection_closed: &mut watch::Receiver<Option<String>>,
+        accumulator: &mut TurnAccumulator,
+    ) -> Result<Option<TurnOutcome>, HarnessError> {
+        tokio::select! {
+            // Prefer a terminal notification already buffered ahead of a
+            // connection close observed in the same poll.
+            biased;
+            notification = notifications.recv() => match notification {
+                Ok(notification) => {
+                    let notification = decode_notification(notification.method, notification.params)
+                        .map_err(HarnessError::Operation)?;
+                    self.process_notification(notification, Some(provider_turn), accumulator).await
                 }
+                Err(broadcast::error::RecvError::Lagged(count)) => Err(HarnessError::Operation(format!(
+                    "Codex notification buffer lost {count} messages"
+                ))),
+                Err(broadcast::error::RecvError::Closed) => Err(HarnessError::Operation(
+                    "Codex notification stream closed".into(),
+                )),
+            },
+            closed = connection_closed.changed() => {
+                if closed.is_ok()
+                    && let Some(error) = connection_closed.borrow().clone()
+                {
+                    return Err(HarnessError::Operation(error));
+                }
+                Err(HarnessError::Operation("Codex connection closed without a reason".into()))
             }
         }
-        Ok(result)
+    }
+
+    async fn wait_for_provider_terminal(
+        &self,
+        provider_turn: &str,
+        notifications: &mut broadcast::Receiver<NotificationMessage>,
+        connection_closed: &mut watch::Receiver<Option<String>>,
+        accumulator: &mut TurnAccumulator,
+    ) -> Result<TurnOutcome, HarnessError> {
+        loop {
+            if let Some(outcome) = self
+                .next_provider_notification(
+                    provider_turn,
+                    notifications,
+                    connection_closed,
+                    accumulator,
+                )
+                .await?
+            {
+                return Ok(outcome);
+            }
+        }
     }
 
     async fn close(
@@ -876,6 +1006,82 @@ struct TurnAccumulator {
     context_window: Option<u64>,
 }
 
+fn failed_outcome(error: HarnessError) -> TurnOutcome {
+    TurnOutcome {
+        status: CompletionStatus::Failed,
+        result_text: None,
+        structured_output: None,
+        usage: None,
+        metrics: OutcomeMetrics::default(),
+        error: Some(error.to_string()),
+    }
+}
+
+fn validate_structured_output(mut outcome: TurnOutcome, schema: Option<&Value>) -> TurnOutcome {
+    let Some(schema) = schema else {
+        return outcome;
+    };
+    if outcome.status != CompletionStatus::Completed {
+        return outcome;
+    }
+
+    if outcome.structured_output.is_none() {
+        let Some(text) = outcome.result_text.as_deref() else {
+            outcome.status = CompletionStatus::Failed;
+            outcome.error = Some("Codex structured output was empty".into());
+            return outcome;
+        };
+        match serde_json::from_str(text) {
+            Ok(value) => outcome.structured_output = Some(value),
+            Err(error) => {
+                outcome.status = CompletionStatus::Failed;
+                outcome.error = Some(format!(
+                    "Codex structured output was not valid JSON: {error}"
+                ));
+                return outcome;
+            }
+        }
+    }
+
+    let validator = match jsonschema::validator_for(schema) {
+        Ok(validator) => validator,
+        Err(error) => {
+            outcome.status = CompletionStatus::Failed;
+            outcome.error = Some(format!(
+                "Codex output schema could not be compiled: {error}"
+            ));
+            return outcome;
+        }
+    };
+    let output = outcome
+        .structured_output
+        .as_ref()
+        .expect("structured output is populated above");
+    if let Err(error) = validator.validate(output) {
+        outcome.status = CompletionStatus::Failed;
+        outcome.error = Some(format!(
+            "Codex structured output did not match the requested schema: {error}"
+        ));
+    }
+    outcome
+}
+
+fn cancelled_outcome(status: CompletionStatus, usage: Option<TurnUsage>) -> TurnOutcome {
+    let message = if status == CompletionStatus::Interrupted {
+        "Codex turn interrupted"
+    } else {
+        "Codex turn cancelled"
+    };
+    TurnOutcome {
+        status,
+        result_text: None,
+        structured_output: None,
+        usage,
+        metrics: OutcomeMetrics::default(),
+        error: Some(message.into()),
+    }
+}
+
 struct CodexSessionHandle {
     state: Arc<SessionState>,
     session_id: SessionId,
@@ -897,7 +1103,31 @@ enum OutcomeState<T> {
     #[default]
     Pending,
     Ready(T),
-    Failed(String),
+    Failed(OutcomeFailure),
+}
+
+#[derive(Clone)]
+enum OutcomeFailure {
+    EventSink(String),
+    Other(String),
+}
+
+impl From<HarnessError> for OutcomeFailure {
+    fn from(error: HarnessError) -> Self {
+        match error {
+            HarnessError::EventSink(message) => Self::EventSink(message),
+            error => Self::Other(error.to_string()),
+        }
+    }
+}
+
+impl OutcomeFailure {
+    fn into_harness_error(self) -> HarnessError {
+        match self {
+            Self::EventSink(message) => HarnessError::EventSink(message),
+            Self::Other(message) => HarnessError::Operation(message),
+        }
+    }
 }
 
 #[async_trait]
@@ -929,7 +1159,7 @@ impl SessionHandle for CodexSessionHandle {
                 .await;
             let _ = tx.send(match result {
                 Ok(value) => OutcomeState::Ready(value),
-                Err(error) => OutcomeState::Failed(error.to_string()),
+                Err(error) => OutcomeState::Failed(error.into()),
             });
         });
         Ok(Arc::new(CodexTurnHandle {
@@ -983,7 +1213,7 @@ async fn await_state<T: Clone>(
                 .await
                 .map_err(|_| HarnessError::Operation(message.into()))?,
             OutcomeState::Ready(value) => return Ok(value),
-            OutcomeState::Failed(error) => return Err(HarnessError::Operation(error)),
+            OutcomeState::Failed(error) => return Err(error.into_harness_error()),
         }
     }
 }
@@ -1515,19 +1745,19 @@ fn outcome_from_completion(
         )
         .unwrap_or_else(|| "Codex turn failed".into())
     });
-    let structured_output = [
-        "/turn/structuredOutput",
-        "/structuredOutput",
-        "/turn/result",
-        "/result",
-    ]
-    .iter()
-    .find_map(|pointer| params.pointer(pointer))
-    .and_then(|value| match value {
-        Value::String(value) => serde_json::from_str(value).ok(),
-        Value::Object(_) | Value::Array(_) => Some(value.clone()),
-        _ => None,
-    });
+    let structured_output = ["/turn/structuredOutput", "/structuredOutput"]
+        .iter()
+        .find_map(|pointer| params.pointer(pointer))
+        .cloned()
+        .or_else(|| {
+            ["/turn/result", "/result"]
+                .iter()
+                .find_map(|pointer| params.pointer(pointer))
+                .and_then(|value| match value {
+                    Value::String(value) => serde_json::from_str(value).ok(),
+                    value => Some(value.clone()),
+                })
+        });
     TurnOutcome {
         status,
         result_text: (!accumulator.text.is_empty())

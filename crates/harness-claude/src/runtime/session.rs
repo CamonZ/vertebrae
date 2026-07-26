@@ -6,9 +6,10 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
 };
 use vertebrae_harness_core::{
-    CompletionStatus, ControlSink, EventSequencer, EventSink, HarnessEventPayloadV1,
-    ResolutionSource, SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, ThreadKind,
-    TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted,
+    CompletionStatus, ControlSink, EventCorrelation, EventSequencer, EventSink, HarnessError,
+    HarnessEventPayloadV1, ResolutionSource, SequencedEventSink, SessionCloseOutcome,
+    SessionCloseStatus, StreamId, ThreadKind, TurnInput, TurnInputProvenance, TurnOutcome,
+    TurnStarted,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeRootLocatorResolver, ClaudeStreamDecoder};
@@ -114,21 +115,35 @@ pub(super) async fn run_persistent_process_v2(
                         continue;
                     }
                     let outcome = TurnOutcome { status: CompletionStatus::Interrupted, result_text: None, structured_output: None, usage: None, metrics: vertebrae_harness_core::OutcomeMetrics::default(), error: None };
-                    if let Some(turn) = pending_turn.take() {
-                        if let Some(response) = turn.response {
+                    if let Some(mut turn) = pending_turn.take() {
+                        if let Some(response) = turn.response.take() {
                             let _ = response.send(Err(
                                 "Claude turn was interrupted before canonical initialization".into(),
                             ));
                         }
-                        let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome.clone()));
-                    }
-                    let context = decoder.context().clone();
-                    if emit_runtime_event(&sequenced, stream_id.clone(), correlation(context.session_id, &context.root_thread_id, Some(turn_id), None), HarnessEventPayloadV1::TurnFinished(outcome)).await.is_err() {
-                        close_status = SessionCloseStatus::Failed;
-                        close_error = Some("event sink failed while interrupting Claude turn".into());
-                    } else {
-                        close_status = SessionCloseStatus::Closed;
-                        close_error = None;
+                        let context = decoder.context().clone();
+                        if let Err(error) = settle_turn(
+                            &sequenced,
+                            turn,
+                            outcome,
+                            Some((
+                                stream_id.clone(),
+                                correlation(
+                                    context.session_id,
+                                    &context.root_thread_id,
+                                    Some(turn_id),
+                                    None,
+                                ),
+                            )),
+                        )
+                        .await
+                        {
+                            close_status = SessionCloseStatus::Failed;
+                            close_error = Some(error.to_string());
+                        } else {
+                            close_status = SessionCloseStatus::Closed;
+                            close_error = None;
+                        }
                     }
                     stop_source = ResolutionSource::Interrupted;
                     requested_stop = true;
@@ -213,6 +228,18 @@ pub(super) async fn run_persistent_process_v2(
                             };
                             let provider_input = provider_control_input(&mut decoder, &draft);
                             if let Err(error) = dispatch_provider_draft(&sequenced, control_sink.clone(), &control_tx, &mut controls, draft, provider_input).await {
+                                if terminal.is_some()
+                                    && let Some(mut turn) = pending_turn.take()
+                                {
+                                    let sink_error = event_sink_message(&error);
+                                    if let Some(response) = turn.response.take() {
+                                        let _ = response.send(Err(sink_error.clone()));
+                                    }
+                                    let _ = turn.outcome_tx.send(OutcomeState::EventSinkFailed(
+                                        sink_error,
+                                    ));
+                                    decoder.context_mut().turn_id = None;
+                                }
                                 close_status = SessionCloseStatus::Failed;
                                 close_error = Some(error.to_string());
                                 break 'process;
@@ -236,9 +263,18 @@ pub(super) async fn run_persistent_process_v2(
                                 }
                             }
                             if let Some(outcome) = terminal
-                                && let Some(turn) = pending_turn.take()
+                                && let Some(mut turn) = pending_turn.take()
                             {
-                                let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome));
+                                if let Some(response) = turn.response.take() {
+                                    let _ = response.send(Ok(()));
+                                }
+                                let _ = settle_turn(
+                                    &sequenced,
+                                    turn,
+                                    outcome,
+                                    None,
+                                )
+                                .await;
                                 decoder.context_mut().turn_id = None;
                                 if let Err(error) = settle_pending_controls(
                                     &sequenced,
@@ -343,25 +379,18 @@ pub(super) async fn run_persistent_process_v2(
             error: (stop_source != ResolutionSource::Cancelled).then_some(error),
         };
         let context = decoder.context().clone();
-        let emitted = emit_runtime_event(
-            &sequenced,
+        let terminal_event = Some((
             stream_id.clone(),
             correlation(
                 context.session_id,
                 &context.root_thread_id,
-                Some(turn.id),
+                Some(turn.id.clone()),
                 None,
             ),
-            HarnessEventPayloadV1::TurnFinished(outcome.clone()),
-        )
-        .await
-        .is_ok();
-        if emitted {
-            let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome));
-        } else {
-            let _ = turn.outcome_tx.send(OutcomeState::Failed(
-                "event sink failed while finishing Claude turn".into(),
-            ));
+        ));
+        if let Err(error) = settle_turn(&sequenced, turn, outcome, terminal_event).await {
+            close_status = SessionCloseStatus::Failed;
+            close_error = Some(error.to_string());
         }
     }
     let (status, forced) = if requested_stop {
@@ -391,6 +420,39 @@ pub(super) async fn run_persistent_process_v2(
     let _ = close_tx.send(OutcomeState::Ready(outcome.clone()));
     if let Some(response) = close_response {
         let _ = response.send(Ok(outcome));
+    }
+}
+
+async fn settle_turn(
+    sink: &SequencedEventSink,
+    turn: PendingTurn,
+    outcome: TurnOutcome,
+    terminal_event: Option<(StreamId, EventCorrelation)>,
+) -> Result<(), HarnessError> {
+    if let Some((stream_id, correlation)) = terminal_event
+        && let Err(error) = emit_runtime_event(
+            sink,
+            stream_id,
+            correlation,
+            HarnessEventPayloadV1::TurnFinished(outcome.clone()),
+        )
+        .await
+    {
+        let sink_error = event_sink_message(&error);
+        let _ = turn
+            .outcome_tx
+            .send(OutcomeState::EventSinkFailed(sink_error));
+        return Err(error);
+    }
+
+    let _ = turn.outcome_tx.send(OutcomeState::Ready(outcome));
+    Ok(())
+}
+
+fn event_sink_message(error: &HarnessError) -> String {
+    match error {
+        HarnessError::EventSink(message) => message.clone(),
+        error => error.to_string(),
     }
 }
 

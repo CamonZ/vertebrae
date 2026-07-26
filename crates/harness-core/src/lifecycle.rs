@@ -188,6 +188,11 @@ pub enum HarnessError {
 
 #[async_trait]
 pub trait EventSink: Send + Sync {
+    /// Accepts an event for ordered delivery.
+    ///
+    /// `Ok` means the sink accepted the event; `Err` means it did not. Sinks
+    /// must not accept an event and then report failure, because adapters use
+    /// this result to preserve exactly-once lifecycle delivery.
     async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError>;
 }
 
@@ -202,8 +207,25 @@ pub trait ControlSink: Send + Sync {
 #[async_trait]
 pub trait TurnHandle: Send + Sync {
     fn turn_id(&self) -> &TurnId;
-    /// Interrupts the turn while another task may be awaiting its outcome.
+    /// Requests interruption while another task may be awaiting the outcome.
+    ///
+    /// This applies equally to a turn waiting in an adapter queue and one that
+    /// is already in flight. A successful request does not itself settle the
+    /// handle: the adapter must still emit the turn's single `TurnFinished`
+    /// event and make the same terminal outcome available through
+    /// [`TurnHandle::await_outcome`]. Repeated calls must be safe and must not
+    /// produce additional terminal events.
     async fn interrupt(&self) -> Result<(), HarnessError>;
+    /// Waits for the terminal outcome of an accepted interactive turn.
+    ///
+    /// Before this future becomes ready, the adapter must have delivered
+    /// exactly one `TurnFinished` event to the session's event sink. The event
+    /// must be correlated with [`TurnHandle::turn_id`] and contain the same
+    /// [`CompletionStatus`] and outcome data returned here. This guarantee
+    /// applies to completed, failed, interrupted, and cancelled turns.
+    ///
+    /// If the single terminal delivery attempt fails, this method returns that
+    /// sink failure instead of making an outcome available.
     async fn await_outcome(&self) -> Result<TurnOutcome, HarnessError>;
 }
 
@@ -211,6 +233,22 @@ pub trait TurnHandle: Send + Sync {
 pub trait SessionHandle: Send + Sync {
     fn session_id(&self) -> &SessionId;
     fn provider_resume_id(&self) -> Option<&ProviderResumeId>;
+    /// Submits an interactive turn to the provider adapter.
+    ///
+    /// Returning `Ok` is the provider-neutral acceptance boundary and
+    /// transfers responsibility for the complete lifecycle to the adapter. An
+    /// accepted turn emits exactly one correlated `TurnStarted` followed by
+    /// exactly one correlated `TurnFinished`. `TurnStarted` represents this
+    /// adapter acceptance; a later provider request rejection is a `Failed`
+    /// terminal outcome, not a rejected `send`. Returning `Err` rejects the
+    /// turn and therefore creates no lifecycle events or handle for that
+    /// request.
+    ///
+    /// Because adapters may dispatch asynchronously after returning the
+    /// handle, failure to deliver `TurnStarted` is surfaced by
+    /// `TurnHandle::await_outcome` as an event-sink error. Provider work and the
+    /// matching terminal event must not begin after that start-delivery
+    /// failure.
     async fn send(&self, request: SendTurnRequest) -> Result<Arc<dyn TurnHandle>, HarnessError>;
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError>;
 }

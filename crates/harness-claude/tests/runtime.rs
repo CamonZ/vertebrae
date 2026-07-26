@@ -1,11 +1,17 @@
 #![cfg(unix)]
 
+#[path = "../../harness-core/tests/common/lifecycle.rs"]
+mod lifecycle;
+
 use std::{
     fs,
     future::pending,
     os::unix::fs::PermissionsExt,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -19,6 +25,8 @@ use vertebrae_harness_core::{
     ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId, StartSessionRequest, StreamId,
     ThreadKind, TurnId, TurnInputProvenance,
 };
+
+use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
 
 #[derive(Default)]
 struct CollectSink(Mutex<Vec<HarnessEventV1>>);
@@ -73,6 +81,23 @@ struct FailingSink;
 impl EventSink for FailingSink {
     async fn emit(&self, _event: HarnessEventV1) -> Result<(), HarnessError> {
         Err(HarnessError::EventSink("fixture sink failure".into()))
+    }
+}
+
+#[derive(Default)]
+struct FailTerminalSink {
+    terminal_attempts: AtomicUsize,
+}
+
+#[async_trait]
+impl EventSink for FailTerminalSink {
+    async fn emit(&self, event: HarnessEventV1) -> Result<(), HarnessError> {
+        if matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_)) {
+            self.terminal_attempts.fetch_add(1, Ordering::SeqCst);
+            Err(HarnessError::EventSink("terminal sink failure".into()))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -418,6 +443,7 @@ done
             .unwrap()
             .unwrap();
         assert_eq!(outcome.status, CompletionStatus::Completed);
+        assert_balanced_turn(&sink.0.lock().unwrap(), id, &outcome);
     }
     let close = session.close().await.unwrap();
     assert_eq!(
@@ -916,10 +942,12 @@ async fn lost_persistent_process_settles_a_queued_or_active_turn() {
         "lost",
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"lost-session"}'
+IFS= read -r _
 exit 9
 "#,
     );
     let runtime = runtime(executable);
+    let sink = Arc::new(LifecycleProbeSink::default());
     let session = runtime
         .start_session(
             StartSessionRequest {
@@ -928,33 +956,74 @@ exit 9
                 resume_id: None,
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
         .unwrap();
-    match session
+    let turn = session
         .send(SendTurnRequest {
             turn_id: TurnId::from("lost-turn"),
             content: "hello".into(),
             output_schema: None,
         })
         .await
-    {
-        Ok(turn) => {
-            let outcome = tokio::time::timeout(Duration::from_secs(2), turn.await_outcome())
-                .await
-                .unwrap()
-                .unwrap();
-            assert_eq!(outcome.status, CompletionStatus::Failed);
-            assert!(outcome.error.as_deref().unwrap().contains("stdout"));
-        }
-        Err(error) => assert!(error.to_string().contains("Claude")),
-    }
+        .unwrap();
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Failed)
+        .await;
+    assert!(outcome.error.as_deref().unwrap().contains("stdout"));
     let close = session.close().await.unwrap();
     assert_eq!(
         close.status,
         vertebrae_harness_core::SessionCloseStatus::Failed
+    );
+}
+
+#[tokio::test]
+async fn explicit_close_dispatches_terminal_before_cancelling_outcome() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-close",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"close-session"}'
+IFS= read -r _
+sleep 30
+"#,
+    );
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("close-requested"),
+                stream_id: StreamId::from("close-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("close-turn"),
+            content: "wait".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let session_to_close = session.clone();
+    let close = tokio::spawn(async move { session_to_close.close().await });
+
+    let outcome = sink
+        .await_ordered_outcome(&turn, CompletionStatus::Cancelled)
+        .await;
+    assert!(outcome.error.is_none());
+    assert_eq!(
+        close.await.unwrap().unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
     );
 }
 
@@ -970,6 +1039,7 @@ IFS= read -r _
 sleep 30
 "#,
     );
+    let sink = Arc::new(CollectSink::default());
     let session = runtime(executable)
         .start_session(
             StartSessionRequest {
@@ -978,7 +1048,7 @@ sleep 30
                 resume_id: None,
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
@@ -996,10 +1066,182 @@ sleep 30
     let second = turn.await_outcome().await.unwrap();
     assert_eq!(first.status, CompletionStatus::Interrupted);
     assert_eq!(second.status, CompletionStatus::Interrupted);
+    assert_balanced_turn(&sink.0.lock().unwrap(), turn.turn_id().as_str(), &first);
     assert_eq!(
         session.close().await.unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed
     );
+}
+
+#[tokio::test]
+async fn provider_result_is_dispatched_before_outcome_and_settles_once_during_close() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-result",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"ordered-session"}'
+IFS= read -r _
+printf '%s\n' '{"type":"result","subtype":"success","result":"done"}'
+sleep 30
+"#,
+    );
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("ordered-requested"),
+                stream_id: StreamId::from("ordered-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("ordered-turn"),
+            content: "finish".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+
+    sink.wait_until_terminal_dispatch().await;
+    sink.assert_outcome_pending(&turn).await;
+    let session_to_close = session.clone();
+    let close = tokio::spawn(async move { session_to_close.close().await });
+    sink.release_terminal();
+
+    let outcome = turn.await_outcome().await.unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Completed);
+    assert_eq!(outcome.result_text.as_deref(), Some("done"));
+    assert_eq!(
+        close.await.unwrap().unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Closed
+    );
+    let events = sink.events();
+    let finishes = events
+        .iter()
+        .filter(|event| {
+            event.correlation.turn_id.as_ref() == Some(turn.turn_id())
+                && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(finishes.len(), 1);
+    assert!(matches!(
+        &finishes[0].payload,
+        HarnessEventPayloadV1::TurnFinished(event_outcome) if event_outcome == &outcome
+    ));
+    assert_balanced_turn(&events, turn.turn_id().as_str(), &outcome);
+}
+
+#[tokio::test]
+async fn interrupt_dispatches_terminal_event_before_outcome() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "ordered-interrupt",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"interrupt-ordered-session"}'
+IFS= read -r _
+sleep 30
+"#,
+    );
+    let sink = Arc::new(LifecycleProbeSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("interrupt-ordered-requested"),
+                stream_id: StreamId::from("interrupt-ordered-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("interrupt-ordered-turn"),
+            content: "wait".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+    let turn_to_interrupt = turn.clone();
+    let interrupt = tokio::spawn(async move { turn_to_interrupt.interrupt().await });
+
+    sink.wait_until_terminal_dispatch().await;
+    sink.assert_outcome_pending(&turn).await;
+    sink.release_terminal();
+
+    interrupt.await.unwrap().unwrap();
+    let outcome = turn.await_outcome().await.unwrap();
+    assert_eq!(outcome.status, CompletionStatus::Interrupted);
+    assert_balanced_turn(&sink.events(), turn.turn_id().as_str(), &outcome);
+    assert_eq!(
+        sink.events()
+            .iter()
+            .filter(|event| {
+                event.correlation.turn_id.as_ref() == Some(turn.turn_id())
+                    && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+            })
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn terminal_sink_failure_is_typed_and_not_retried() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "terminal-sink-failure",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"sink-failure-session"}'
+IFS= read -r _
+printf '%s\n' '{"type":"result","subtype":"success","result":"unobservable"}'
+sleep 30
+"#,
+    );
+    let sink = Arc::new(FailTerminalSink::default());
+    let session = runtime(executable)
+        .start_session(
+            StartSessionRequest {
+                session_id: SessionId::from("sink-failure-requested"),
+                stream_id: StreamId::from("sink-failure-stream"),
+                resume_id: None,
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    let turn = session
+        .send(SendTurnRequest {
+            turn_id: TurnId::from("sink-failure-turn"),
+            content: "finish".into(),
+            output_schema: None,
+        })
+        .await
+        .unwrap();
+
+    let error = turn.await_outcome().await.unwrap_err();
+    assert!(matches!(
+        error,
+        HarnessError::EventSink(message) if message == "terminal sink failure"
+    ));
+    assert_eq!(sink.terminal_attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        session.close().await.unwrap().status,
+        vertebrae_harness_core::SessionCloseStatus::Failed
+    );
+    assert_eq!(sink.terminal_attempts.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
