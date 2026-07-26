@@ -9,6 +9,7 @@ import type {
   LocalChatTextEvent,
   LocalChatToolCallEvent,
   LocalChatToolResultEvent,
+  LocalChatTurnStartedEvent,
   LocalChatFileChangeEvent,
   PermissionRequestEvent,
 } from "../bindings";
@@ -41,12 +42,54 @@ interface RouterSubscription {
 }
 
 let activeRouterSubscription: RouterSubscription | null = null;
+const activeRootTurnByBackendSessionId = new Map<string, string>();
+
+type CorrelatedEvent = {
+  turn_id?: string | null;
+  is_root?: boolean;
+};
 
 function resolveSessionId(backendSessionId: string | null | undefined) {
-  return findSessionIdByBackendSessionId(
+  const sessionId = findSessionIdByBackendSessionId(
     useChatStore.getState().sessions,
     backendSessionId
   );
+  if (!sessionId && backendSessionId) {
+    activeRootTurnByBackendSessionId.delete(backendSessionId);
+  }
+  return sessionId;
+}
+
+function matchesActiveRootTurn(
+  backendSessionId: string,
+  payload: CorrelatedEvent
+): boolean {
+  return (
+    payload.is_root === true &&
+    !!payload.turn_id &&
+    activeRootTurnByBackendSessionId.get(backendSessionId) === payload.turn_id
+  );
+}
+
+function shouldRouteContentEvent(
+  backendSessionId: string,
+  payload: CorrelatedEvent
+): boolean {
+  if (!payload.turn_id) return true;
+  if (payload.is_root === false) return true;
+  return matchesActiveRootTurn(backendSessionId, payload);
+}
+
+export function routeLocalChatTurnStartedEvent(
+  payload: LocalChatTurnStartedEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId || !payload.is_root || !payload.turn_id) return false;
+  activeRootTurnByBackendSessionId.set(
+    payload.backend_session_id,
+    payload.turn_id
+  );
+  return true;
 }
 
 export function routeLocalChatSessionInitEvent(
@@ -70,6 +113,9 @@ export function routeLocalChatSessionUsageEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   handleUsageEvent(
     payload,
     payload.backend_session_id,
@@ -82,6 +128,9 @@ export function routeLocalChatSessionUsageEvent(
 export function routeLocalChatTextEvent(payload: LocalChatTextEvent): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   const store = useChatStore.getState();
   handleTextEvent(
     payload,
@@ -99,6 +148,9 @@ export function routeLocalChatToolCallEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   handleToolCallEvent(
     payload,
     payload.backend_session_id,
@@ -113,6 +165,9 @@ export function routeLocalChatToolResultEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   handleToolResultEvent(
     payload,
     payload.backend_session_id,
@@ -127,6 +182,9 @@ export function routeLocalChatFileChangeEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   handleFileChangeEvent(
     payload,
     payload.backend_session_id,
@@ -141,6 +199,12 @@ export function routePermissionRequestEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.session_id);
   if (!sessionId) return false;
+  if (
+    payload.session_id &&
+    !shouldRouteContentEvent(payload.session_id, payload)
+  ) {
+    return false;
+  }
   handleSacrumPermissionRequestEvent(
     payload,
     payload.session_id,
@@ -155,6 +219,10 @@ export function routeLocalChatSessionEndEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!matchesActiveRootTurn(payload.backend_session_id, payload)) {
+    return false;
+  }
+  activeRootTurnByBackendSessionId.delete(payload.backend_session_id);
   const store = useChatStore.getState();
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
@@ -174,6 +242,21 @@ export function routeLocalChatSessionErrorEvent(
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
   const store = useChatStore.getState();
+  if (
+    payload.turn_id &&
+    !matchesActiveRootTurn(payload.backend_session_id, payload)
+  ) {
+    if (payload.is_root === false) {
+      store.addMessage(sessionId, {
+        kind: "error",
+        message: payload.error,
+        timestamp: new Date().toISOString(),
+      });
+      return true;
+    }
+    return false;
+  }
+  activeRootTurnByBackendSessionId.delete(payload.backend_session_id);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
@@ -193,6 +276,9 @@ export function routeLocalChatSessionWarningEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
+  if (!shouldRouteContentEvent(payload.backend_session_id, payload)) {
+    return false;
+  }
   handleWarningEvent(
     payload,
     payload.backend_session_id,
@@ -285,6 +371,11 @@ function subscribeLocalChatEvents(): Unlisten {
   void register(
     events.localChatSessionInitEvent.listen((event) => {
       routeLocalChatSessionInitEvent(event.payload);
+    })
+  );
+  void register(
+    events.localChatTurnStartedEvent.listen((event) => {
+      routeLocalChatTurnStartedEvent(event.payload);
     })
   );
   void register(

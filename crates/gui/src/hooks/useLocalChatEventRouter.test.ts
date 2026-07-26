@@ -7,6 +7,7 @@ import {
   routeLocalChatSessionErrorEvent,
   routeLocalChatTextEvent,
   routeLocalChatToolResultEvent,
+  routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
   useLocalChatEventRouter,
 } from "./useLocalChatEventRouter";
@@ -42,6 +43,7 @@ vi.mock("../bindings", () => {
     },
     events: {
       localChatSessionInitEvent: { listen },
+      localChatTurnStartedEvent: { listen },
       localChatSessionUsageEvent: { listen },
       localChatTextEvent: { listen },
       localChatToolCallEvent: { listen },
@@ -82,6 +84,22 @@ function resetChatStore(sessions: Record<string, ChatSession>) {
   });
 }
 
+function startTurn(
+  backendSessionId: string,
+  turnId: string,
+  harness: "claude" | "codex" = "claude"
+) {
+  expect(
+    routeLocalChatTurnStartedEvent({
+      backend_session_id: backendSessionId,
+      harness,
+      turn_id: turnId,
+      thread_id: `${backendSessionId}-thread`,
+      is_root: true,
+    })
+  ).toBe(true);
+}
+
 describe("useLocalChatEventRouter route functions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -95,9 +113,9 @@ describe("useLocalChatEventRouter route functions", () => {
     const second = renderHook(() => useLocalChatEventRouter());
 
     await waitFor(() => {
-      expect(listen).toHaveBeenCalledTimes(9);
+      expect(listen).toHaveBeenCalledTimes(10);
     });
-    expect(unlisteners).toHaveLength(9);
+    expect(unlisteners).toHaveLength(10);
 
     first.unmount();
     for (const unlisten of unlisteners) {
@@ -118,11 +136,15 @@ describe("useLocalChatEventRouter route functions", () => {
         lifecycle: "streaming",
       }),
     });
+    startTurn("backend-hidden", "turn-hidden");
 
     expect(
       routeLocalChatTextEvent({
         backend_session_id: "backend-hidden",
         harness: "claude",
+        turn_id: "turn-hidden",
+        thread_id: "backend-hidden-thread",
+        is_root: true,
         text: "Final ",
         is_partial: true,
         parent_tool_use_id: null,
@@ -132,6 +154,9 @@ describe("useLocalChatEventRouter route functions", () => {
       routeLocalChatTextEvent({
         backend_session_id: "backend-hidden",
         harness: "claude",
+        turn_id: "turn-hidden",
+        thread_id: "backend-hidden-thread",
+        is_root: true,
         text: "answer",
         is_partial: true,
         parent_tool_use_id: null,
@@ -141,6 +166,9 @@ describe("useLocalChatEventRouter route functions", () => {
       routeLocalChatSessionEndEvent({
         backend_session_id: "backend-hidden",
         harness: "claude",
+        turn_id: "turn-hidden",
+        thread_id: "backend-hidden-thread",
+        is_root: true,
         duration_ms: 100,
         cost_usd: 0,
         num_turns: 1,
@@ -176,11 +204,15 @@ describe("useLocalChatEventRouter route functions", () => {
         },
       }),
     });
+    startTurn("backend-codex", "turn-codex", "codex");
 
     expect(
       routeLocalChatSessionEndEvent({
         backend_session_id: "backend-codex",
         harness: "codex",
+        turn_id: "turn-codex",
+        thread_id: "backend-codex-thread",
+        is_root: true,
         duration_ms: 120,
         cost_usd: 0,
         num_turns: 1,
@@ -219,10 +251,14 @@ describe("useLocalChatEventRouter route functions", () => {
         ],
       }),
     });
+    startTurn("backend-hidden", "turn-queued");
 
     routeLocalChatSessionEndEvent({
       backend_session_id: "backend-hidden",
       harness: "claude",
+      turn_id: "turn-queued",
+      thread_id: "backend-hidden-thread",
+      is_root: true,
       duration_ms: 100,
       cost_usd: 0,
       num_turns: 1,
@@ -417,6 +453,101 @@ describe("useLocalChatEventRouter route functions", () => {
       expect.objectContaining({
         kind: "error",
         message: "child process exited unexpectedly",
+      }),
+    ]);
+  });
+
+  it("ignores stale root content and terminal events after turn replacement", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "turn-1");
+    startTurn("backend-local", "turn-2");
+
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        text: "stale answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(false);
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-1",
+        thread_id: "backend-local-thread",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "stale answer",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      })
+    ).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.lifecycle).toBe("streaming");
+    expect(local.messages).toEqual([]);
+  });
+
+  it("keeps child content without allowing child terminal settlement", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-local", "root-turn");
+
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "child-turn",
+        thread_id: "child-thread",
+        is_root: false,
+        text: "child update",
+        is_partial: false,
+        parent_tool_use_id: "spawn-tool",
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "codex",
+        turn_id: "child-turn",
+        thread_id: "child-thread",
+        is_root: false,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "child update",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200000,
+      })
+    ).toBe(false);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.lifecycle).toBe("streaming");
+    expect(local.messages).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "child update",
+        parentToolUseId: "spawn-tool",
       }),
     ]);
   });
