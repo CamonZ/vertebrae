@@ -377,19 +377,6 @@ async fn update_step_name_via_cli(world: &mut GuiWorld, new_name: String) {
     );
 }
 
-#[given("the step is marked final via the CLI")]
-async fn step_is_marked_final_via_cli(world: &mut GuiWorld) {
-    let step_id = world.step_id.as_ref().expect("no step ID stored").clone();
-    world
-        .run_vtb(&["step", "update", &step_id, "--final", "true"])
-        .await;
-    assert_eq!(
-        world.last_exit_code, 0,
-        "vtb step update --final failed: {}{}",
-        world.last_stdout, world.last_stderr
-    );
-}
-
 #[when("I delete the step via the CLI")]
 async fn delete_step_via_cli(world: &mut GuiWorld) {
     let step_id = world.step_id.as_ref().expect("no step ID stored").clone();

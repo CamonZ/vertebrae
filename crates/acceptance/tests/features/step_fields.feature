@@ -91,7 +91,6 @@ Feature: Step fields: prompt and agent-config
     And the step "Complete" in the workflow should have step_type "finish"
     When I show the step "Complete"
     Then the output should contain "Step Type:     finish"
-    And the output should contain "Is Final:      No"
 
   Scenario: Step show JSON preserves finish step type
     When I add a step "JsonComplete" to the workflow with flag "--step-type" and value "finish"

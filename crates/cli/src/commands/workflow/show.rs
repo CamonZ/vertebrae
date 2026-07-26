@@ -67,7 +67,6 @@ impl WorkflowShowCommand {
             name: workflow.name,
             description: workflow.description,
             is_default: workflow.is_default,
-            is_final: workflow.is_final,
             kanban_column: workflow.kanban_column,
             steps,
             metadata: workflow.metadata,

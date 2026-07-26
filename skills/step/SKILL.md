@@ -57,8 +57,8 @@ vtb step add "Testing" -w <workflow-id> \
   --skill run-tests \
   --skill check-coverage
 
-# With transitions and final flag
-vtb step add "Approved" -w <workflow-id> --final
+# With transitions and a finish step
+vtb step add "Approved" -w <workflow-id> --step-type finish
 vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
 
 # With step type and structured output schema
@@ -89,7 +89,6 @@ vtb --json step add "Review" -w <workflow-id>
 | `--step-type` | | Step type: `execute`, `evaluate`, `route`, `wait_children`, or `human_input` (default: `execute`) |
 | `--output-schema` | | JSON Schema describing expected structured output |
 | `--order` | `-o` | Step order (default: 0) |
-| `--final` | | Mark as a final step |
 | `--transition-to` | `-t` | Steps this can transition to (repeatable) |
 
 The required positional argument is `<name>`. `--workflow` and
@@ -118,7 +117,7 @@ Output:
 Steps for workflow '<workflow-id>':
 1. coding (id: a1b2c3d4, type: execute, model: sonnet)
 2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
-3. approved (id: c9d0e1f2, type: execute, model: default) [FINAL]
+3. approved (id: c9d0e1f2, type: finish, model: default)
 ```
 
 ### Options
@@ -139,7 +138,7 @@ No steps found for workflow '<workflow-id>'
 ```
 
 `--json` returns the raw array of `Step` objects with fields such as `id`,
-`name`, `workflow_id`, `order`, `step_type`, `agent_config`, `is_final`,
+`name`, `workflow_id`, `order`, `step_type`, `agent_config`,
 `transitions_to`, and timestamps. It does not wrap the result in an `output`
 field.
 
@@ -168,13 +167,13 @@ full UUID or an 8-character hex short ID and is resolved case-insensitively.
 There are no command aliases, defaults, or value enums for `step show`.
 
 Human-readable output is a flat detail view with the step ID and name, workflow
-ID, order, step type, goal, agents, skills, model, output schema, final-step
-marker, transitions, and created/updated timestamps. Missing optional fields are
+ID, order, step type, goal, agents, skills, model, output schema, transitions,
+and created/updated timestamps. Missing optional fields are
 shown as `(none)`, and missing timestamps are shown as `-`.
 
 `--json` returns the raw `Step` object with fields such as `id`, `name`,
 `workflow_id`, `order`, `goal`, `prompt`, `agents`, `skills`, `step_type`,
-`agent_config`, `output_schema`, `is_final`, `transitions_to`, and timestamps.
+`agent_config`, `output_schema`, `transitions_to`, and timestamps.
 It does not wrap the result in an `output` field.
 
 If a full UUID reaches `step show` but no matching step exists, the command
@@ -226,9 +225,8 @@ vtb step update <step-id> --clear-transitions
 # Change order
 vtb step update <step-id> --order 1
 
-# Set or unset final-step marker
-vtb step update <step-id> --final true
-vtb step update <step-id> --final false
+# Change terminality by setting the finish step type
+vtb step update <step-id> --step-type finish
 
 # Machine-readable update result
 vtb --json step update <step-id> --goal "New goal"
@@ -255,7 +253,6 @@ vtb --json step update <step-id> --goal "New goal"
 | `--output-schema` | | New output schema as a JSON string |
 | `--clear-output-schema` | | Clear the output schema |
 | `--order` | `-o` | New 0-indexed step order |
-| `--final` | | Set final-step marker to `true` or `false` |
 | `--transition-to` | `-t` | Replace transitions list; repeatable |
 | `--clear-transitions` | | Clear all transitions |
 
@@ -320,8 +317,9 @@ resolved, the shared ID resolver reports `step with prefix '<id>' not found`.
 ### Order
 Steps are ordered by their `order` field. Lower values execute first.
 
-### Final Steps
-Steps marked `--final` represent completion states. When a task reaches a final step, the workflow is considered complete.
+### Finish Steps
+Steps with `--step-type finish` represent completion states. Sacrum completes
+the task and updates dependent-task readiness when a task reaches a finish step.
 
 ### Transitions
 By default, steps can transition to any other step. Use `--transition-to` to restrict valid transitions.

@@ -6,7 +6,7 @@
 
 use super::mock::mock_services;
 use vertebrae_cli::commands::workflow::*;
-use vertebrae_core::{CreateWorkflowOptions, Step, VertebraeServices};
+use vertebrae_core::{CreateWorkflowOptions, Step, StepType, VertebraeServices};
 
 // ============================================================================
 // Helper functions
@@ -24,7 +24,6 @@ async fn create_workflow(
         steps: vec![],
         order: 0,
         is_default: false,
-        is_final: false,
         kanban_column: None,
     };
     services.workflows().create_workflow(options).await.unwrap()
@@ -125,7 +124,6 @@ async fn test_workflow_list_shows_default_marker() {
         steps: vec![],
         order: 0,
         is_default: true,
-        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -573,7 +571,6 @@ async fn test_workflow_update_no_default_flag() {
         steps: vec![],
         order: 0,
         is_default: true,
-        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -612,7 +609,6 @@ async fn test_workflow_show_displays_default_yes() {
         steps: vec![],
         order: 0,
         is_default: true,
-        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -641,34 +637,34 @@ async fn test_workflow_show_displays_default_no() {
 }
 
 #[tokio::test]
-async fn test_workflow_show_displays_final_flag() {
+async fn test_workflow_show_omits_legacy_final_flag() {
     let services = mock_services();
 
-    let options = CreateWorkflowOptions::new("Terminal Workflow", vec![]).with_is_final(true);
+    let options = CreateWorkflowOptions::new("Terminal Workflow", vec![]);
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
 
     let cmd = WorkflowShowCommand { id: wf_id };
     let output = cmd.execute(&services).await.unwrap();
 
     assert!(
-        output.contains("Final: Yes"),
-        "expected 'Final: Yes' in show output: {}",
+        !output.contains("Final:"),
+        "legacy final output: {}",
         output
     );
 }
 
 #[tokio::test]
-async fn test_workflow_show_json_includes_final_flag_and_step_ids() {
+async fn test_workflow_show_json_includes_finish_step_ids() {
     let services = mock_services();
 
-    let options = CreateWorkflowOptions::new("JSON Workflow", vec![]).with_is_final(true);
+    let options = CreateWorkflowOptions::new("JSON Workflow", vec![]);
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
 
     let review_step = Step::new("review", &wf_id);
     let review_step = services.steps().create_step(&review_step).await.unwrap();
     let review_step_id = review_step.id.unwrap();
 
-    let done_step = Step::new("done", &wf_id).with_is_final(true);
+    let done_step = Step::new("done", &wf_id).with_step_type(StepType::Finish);
     let done_step = services.steps().create_step(&done_step).await.unwrap();
     let done_step_id = done_step.id.unwrap();
 
@@ -676,7 +672,7 @@ async fn test_workflow_show_json_includes_final_flag_and_step_ids() {
     let detail = cmd.execute_detail(&services).await.unwrap();
     let json = serde_json::to_value(&detail).unwrap();
 
-    assert_eq!(json["is_final"], true);
+    assert!(json.get("is_final").is_none());
 
     let mut steps = json["steps"].as_array().unwrap().clone();
     steps.sort_by_key(|step| step["name"].as_str().unwrap().to_string());

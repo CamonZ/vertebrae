@@ -9,8 +9,8 @@ vtb step add "Testing" -w <workflow-id> \
   --model sonnet \
   --order 1
 
-# Add a final step (marks workflow complete when reached)
-vtb step add "Approved" -w <workflow-id> --final
+# Add a finish step (completes the task when reached)
+vtb step add "Approved" -w <workflow-id> --step-type finish
 
 # Add step with transition restrictions
 vtb step add "Needs Work" -w <workflow-id> --transition-to <step-id>
@@ -53,7 +53,7 @@ vtb step update <step-id> --step-type evaluate
 vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 vtb step update <step-id> --clear-agents --clear-skills
-vtb --json step update <step-id> --final true
+vtb --json step update <step-id> --step-type finish
 vtb step delete <step-id>
 vtb step delete <step-id> --force
 vtb --json step delete <step-id>
@@ -68,14 +68,13 @@ and `workflow_id`.
 `vtb step list` takes exactly one required `<workflow>` argument and no
 command-specific flags. `vtb step list --help` shows only the global `--json`
 flag plus `-h` / `--help`. Human-readable output is ordered by each step's
-`order` field and includes the step name, ID, type, model, and `[FINAL]` marker
-when applicable:
+`order` field and includes the step name, ID, type, and model:
 
 ```text
 Steps for workflow '<workflow-id>':
 1. coding (id: a1b2c3d4, type: execute, model: sonnet)
 2. testing (id: e5f6a7b8, type: evaluate, model: haiku)
-3. approved (id: c9d0e1f2, type: execute, model: default) [FINAL]
+3. approved (id: c9d0e1f2, type: finish, model: default)
 ```
 
 When the workflow has no steps, it prints `No steps found for workflow
@@ -88,8 +87,8 @@ case-insensitively. The command has no aliases, defaults, or value enums; its
 help lists only `<ID>`, `--json`, and `-h` / `--help`.
 
 Human-readable output is a flat detail view with the step ID and name, workflow
-ID, order, step type, goal, agents, skills, model, output schema, final-step
-marker, transitions, and created/updated timestamps:
+ID, order, step type, goal, agents, skills, model, output schema, transitions,
+and created/updated timestamps:
 
 ```text
 Step: 925c50ac-a1ed-4f5b-82c3-9dcb0773597b - implement
@@ -103,7 +102,6 @@ Agents:        (none)
 Skills:        (none)
 Model:         gpt-5.5
 Output Schema: (none)
-Is Final:      No
 Transitions:   57d373b1-e40d-4a42-9ae4-1c6461d7a2b9
 Created:       2026-05-29 12:53
 Updated:       2026-05-30 16:48
@@ -123,7 +121,7 @@ vtb --json step show <step-id>
 
 The JSON object includes fields such as `id`, `name`, `workflow_id`, `order`,
 `goal`, `prompt`, `agents`, `skills`, `step_type`, `agent_config`,
-`output_schema`, `is_final`, `transitions_to`, `created_at`, and `updated_at`.
+`output_schema`, `transitions_to`, `created_at`, and `updated_at`.
 
 `vtb step update` takes exactly one required `<id>` argument: the step ID to
 update. It accepts a full UUID or an 8-character hex short ID and resolves IDs
@@ -149,7 +147,6 @@ request with no property changes before reporting success.
 | `--output-schema <JSON>` | | Replace the step output schema from a JSON string |
 | `--clear-output-schema` | | Remove the output schema |
 | `--order <ORDER>` | `-o` | Replace the 0-indexed step order |
-| `--final <true|false>` | | Set or unset the final-step marker |
 | `--transition-to <STEP_ID>` | `-t` | Replace the full transitions list; repeat for multiple target steps |
 | `--clear-transitions` | | Replace the transitions list with an empty list |
 
@@ -217,7 +214,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 |----------|-------------|
 | `name` | Step name (e.g., "backlog", "coding", "review") |
 | `order` | Execution order (lower = first, 0-indexed) |
-| `final` | Marks workflow as complete when reached |
+| `step_type` | `finish` marks the task complete when reached |
 | `goal` | What this step accomplishes |
 | `prompt` | Template sent to the executing agent (supports `{{task.id}}` interpolation) |
 | `model` | AI model shortcut (sonnet, haiku, opus) |
@@ -260,12 +257,10 @@ vtb step update <step-id> --step-type route
 
 When a step has type `evaluate` and multiple outgoing transitions, the daemon runs a separate evaluation execution whose output is matched against transition labels to determine the next step — creating a **branching state machine** driven by AI judgment.
 
-`finish` is the explicit terminal step type introduced by Sacrum. It supersedes
-the legacy `is_final` marker for new workflows: a finish step is terminal even
-when `is_final` is `false`, and its prompt, agent configuration, output schema,
-and outgoing transitions must be empty. The daemon and GUI treat it as a
-completion event rather than an AI execution. Existing `is_final` steps remain
-wire-compatible and continue to render as terminal steps.
+`finish` is the sole terminal step type. Its prompt, agent configuration, output
+schema, and outgoing transitions must be empty. Sacrum owns task completion and
+dependent-task readiness; the daemon and GUI render that backend state and treat
+finish as a completion event rather than an AI execution.
 
 The six step types are carried unchanged through the Sacrum API, core models,
 CLI JSON output, Tauri bindings, Atlas/task-location surfaces, and trace

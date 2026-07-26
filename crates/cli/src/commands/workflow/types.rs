@@ -57,8 +57,6 @@ pub struct WorkflowDetail {
     pub description: Option<String>,
     /// Whether this is the default workflow for new tasks
     pub is_default: bool,
-    /// Whether this workflow is terminal/final
-    pub is_final: bool,
     /// Optional kanban column
     pub kanban_column: Option<String>,
     /// Ordered list of workflow steps
@@ -88,9 +86,6 @@ impl std::fmt::Display for WorkflowDetail {
 
         // Default workflow setting
         writeln!(f, "Default: {}", if self.is_default { "Yes" } else { "No" })?;
-
-        // Final workflow setting
-        writeln!(f, "Final: {}", if self.is_final { "Yes" } else { "No" })?;
 
         // Kanban column (if present)
         if let Some(ref kanban_column) = self.kanban_column {
@@ -204,7 +199,6 @@ mod tests {
             name: "Test Workflow".to_string(),
             description: Some("A detailed workflow".to_string()),
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
@@ -230,7 +224,6 @@ mod tests {
         let output = format!("{}", detail);
         assert!(output.contains("Workflow: wf1 - Test Workflow"));
         assert!(output.contains("A detailed workflow"));
-        assert!(output.contains("Final: No"));
         assert!(output.contains("1. step1 (model: model1)"));
         assert!(output.contains("2. step2 (model: model2)"));
     }
@@ -245,7 +238,6 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -303,7 +295,6 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -323,7 +314,6 @@ mod tests {
             name: "Empty".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -342,7 +332,6 @@ mod tests {
             name: "Def".to_string(),
             description: None,
             is_default: true,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -360,7 +349,6 @@ mod tests {
             name: "NoDef".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -372,13 +360,12 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_detail_display_final_yes() {
+    fn test_workflow_detail_display_without_legacy_final() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
             name: "Final".to_string(),
             description: None,
             is_default: false,
-            is_final: true,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -386,7 +373,7 @@ mod tests {
             updated_at: None,
         };
         let output = format!("{}", detail);
-        assert!(output.contains("Final: Yes"));
+        assert!(!output.contains("Final:"));
     }
 
     #[test]
@@ -396,7 +383,6 @@ mod tests {
             name: "Timestamped".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -416,7 +402,6 @@ mod tests {
             name: "Created".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -436,7 +421,6 @@ mod tests {
             name: "Updated".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -456,7 +440,6 @@ mod tests {
             name: "NoTs".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -474,7 +457,6 @@ mod tests {
             name: "Default Model".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),
@@ -498,7 +480,6 @@ mod tests {
             name: "Sorted".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
@@ -543,7 +524,6 @@ mod tests {
             name: "NoDesc".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -566,7 +546,6 @@ mod tests {
             name: "Meta".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -644,7 +623,6 @@ mod tests {
             name: "Serializable".to_string(),
             description: None,
             is_default: false,
-            is_final: true,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-123".to_string()),
@@ -660,7 +638,6 @@ mod tests {
 
         let json = serde_json::to_value(&detail).unwrap();
 
-        assert_eq!(json["is_final"], true);
         assert_eq!(json["steps"][0]["id"], "step-123");
         assert_eq!(json["steps"][0]["name"], "review");
     }
@@ -701,7 +678,6 @@ mod tests {
             name: "Prompted".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),
@@ -725,7 +701,6 @@ mod tests {
             name: "NoPrompts".to_string(),
             description: None,
             is_default: false,
-            is_final: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 id: Some("step-id".to_string()),

@@ -6,7 +6,6 @@ Feature: Real-time TaskRun updates on task detail
     Given I create a workflow with:
       | name | TaskRun Detail Workflow |
     And I create a step "run" in the workflow "TaskRun Detail Workflow" via the CLI
-    And the step is marked final via the CLI
     And the GUI is showing the task list
     When I create a task with:
       | title    | TaskRun Detail Task     |

@@ -80,11 +80,11 @@ the workflow ID to show. It accepts a case-insensitive full UUID or 8-character
 short ID and has no command-specific flags, short flags, aliases, defaults, or
 value enums. Its generated help lists only `<ID>`, the global `--json`, and
 `-h` / `--help`. Human-readable output shows the workflow id, name,
-description, Default and Final values, kanban column, ordered steps with model
-and prompt text, and timestamps.
+description, Default value, kanban column, ordered steps with model and prompt
+text, and timestamps.
 
 With the global `--json` flag, `workflow show` returns the raw workflow-detail
-object with `id`, `name`, `description`, `is_default`, `is_final`,
+object with `id`, `name`, `description`, `is_default`,
 `kanban_column`, `steps`, `metadata`, `created_at`, and `updated_at` fields.
 Each `steps` entry includes `id`, `name`, `model`, `order`, and `prompt`.
 Malformed IDs fail validation before execution; valid UUIDs or short IDs that
@@ -203,8 +203,8 @@ vtb transition-to <id> <target> --json
 `transitions_to` graph unless `--skip-validation` is supplied. The command
 allows no-op transitions to the task's current step. If the target step belongs
 to a different workflow, the command fails and directs you to `workflow assign`.
-When a task reaches a final step, the human-readable output lists dependent
-tasks that became unblocked.
+When a task reaches a finish step, Sacrum completes it and owns dependent-task
+readiness. Use `vtb ready` to observe the backend's current ready state.
 
 ### Workflow Transition Rules
 
@@ -293,7 +293,7 @@ Steps exist within a workflow. Use `transition-to` to move a task between steps:
 
 #### Working Through a Workflow
 
-Given a workflow with steps: Coding (order 0) -> Testing (order 1) -> Review (order 2, final):
+Given a workflow with steps: Coding (order 0) -> Testing (order 1) -> Review (order 2, finish):
 
 ```bash
 # 1. Check current position
@@ -307,7 +307,7 @@ vtb transition-to <id> testing
 # ... write and run tests ...
 vtb transition-to <id> review
 # ... review the work ...
-# Transitioning past the final step completes the workflow.
+# Transitioning to the finish step completes the task through Sacrum.
 ```
 
 #### Handling Rejections
