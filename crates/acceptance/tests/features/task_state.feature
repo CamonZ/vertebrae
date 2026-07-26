@@ -58,7 +58,7 @@ Feature: Task state management
 
   # --- ready ---
 
-  Scenario: Ready shows unblocked tasks
+  Scenario: Ready lists actionable tasks
     Given I create a task with:
       | title | Ready task |
     And I store the task ID as "task_id"
