@@ -64,6 +64,8 @@ fn control_request() -> ControlRequestEnvelope {
         request_id: ControlRequestId::from("control-1"),
         session_id: Some(SessionId::from("session-s")),
         turn_id: Some(TurnId::from("turn-s")),
+        thread_id: Some(ThreadId::from("thread-s")),
+        is_root: Some(true),
         request: ControlRequest::UserQuestion {
             questions: vec![UserQuestion {
                 id: "q1".into(),
@@ -87,6 +89,19 @@ fn control_request() -> ControlRequestEnvelope {
         timeout_ms: Some(1_000),
         automatic_resolution: Some(ControlDecision::Deny),
     }
+}
+
+#[test]
+fn control_request_thread_classification_is_backward_compatible() {
+    let mut value = serde_json::to_value(control_request()).unwrap();
+    let object = value.as_object_mut().unwrap();
+    object.remove("thread_id");
+    object.remove("is_root");
+
+    let decoded: ControlRequestEnvelope = serde_json::from_value(value).unwrap();
+
+    assert_eq!(decoded.thread_id, None);
+    assert_eq!(decoded.is_root, None);
 }
 
 #[test]
@@ -491,6 +506,8 @@ fn control_scenarios_round_trip_as_correlated_durable_pairs() {
                 request_id: request_id.clone(),
                 session_id: Some(SessionId::from("session")),
                 turn_id: Some(TurnId::from("turn")),
+                thread_id: Some(ThreadId::from("thread")),
+                is_root: Some(true),
                 request,
                 presentation: None,
                 timeout_ms: Some(100),

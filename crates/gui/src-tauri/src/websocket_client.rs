@@ -1739,6 +1739,9 @@ impl SacrumSocket {
         let event = PermissionRequestEvent {
             request_id,
             session_id,
+            turn_id: None,
+            thread_id: None,
+            is_root: false,
             tool_name,
             tool_use_id,
             input,

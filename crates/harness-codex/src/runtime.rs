@@ -58,6 +58,136 @@ struct NotificationMessage {
 
 struct PendingResponse {
     tx: oneshot::Sender<Result<Value, HarnessError>>,
+    normalized_root_turn_id: Option<TurnId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ControlDisposition {
+    Forward,
+    RejectStale,
+}
+
+struct ActiveRootTurn {
+    normalized_turn_id: TurnId,
+    provider_turn_id: Option<String>,
+}
+
+#[derive(Default)]
+struct RootTurnIdentityState {
+    root_thread_id: Option<ThreadId>,
+    active: Option<ActiveRootTurn>,
+    recent_provider_turn_id: Option<String>,
+}
+
+#[derive(Default)]
+struct RootTurnIdentity {
+    state: Mutex<RootTurnIdentityState>,
+}
+
+impl RootTurnIdentity {
+    fn set_root_thread(&self, thread_id: ThreadId) {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .root_thread_id = Some(thread_id);
+    }
+
+    fn begin_turn(&self, turn_id: TurnId) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(provider_turn_id) = state
+            .active
+            .take()
+            .and_then(|active| active.provider_turn_id)
+        {
+            state.recent_provider_turn_id = Some(provider_turn_id);
+        }
+        state.active = Some(ActiveRootTurn {
+            normalized_turn_id: turn_id,
+            provider_turn_id: None,
+        });
+    }
+
+    fn bind_provider_turn(&self, provider_turn_id: &str, turn_id: TurnId) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(active) = state.active.as_mut()
+            && active.normalized_turn_id == turn_id
+        {
+            active.provider_turn_id = Some(provider_turn_id.to_string());
+        }
+    }
+
+    fn finish_turn(&self, turn_id: &TurnId) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|active| &active.normalized_turn_id == turn_id)
+        {
+            let active = state.active.take().expect("active turn was checked");
+            if active.provider_turn_id.is_some() {
+                state.recent_provider_turn_id = active.provider_turn_id;
+            }
+        }
+    }
+
+    fn clear(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.root_thread_id = None;
+        state.active = None;
+        state.recent_provider_turn_id = None;
+    }
+
+    fn prepare_control_request(&self, request: &mut ControlRequestEnvelope) -> ControlDisposition {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(thread_id) = request.thread_id.as_ref() else {
+            return ControlDisposition::Forward;
+        };
+        let Some(root_thread_id) = state.root_thread_id.as_ref() else {
+            return ControlDisposition::Forward;
+        };
+        let is_root = thread_id == root_thread_id;
+        request.is_root = Some(is_root);
+        if !is_root {
+            return ControlDisposition::Forward;
+        }
+
+        let Some(active) = state.active.as_ref() else {
+            return ControlDisposition::RejectStale;
+        };
+        let Some(requested_turn_id) = request.turn_id.as_ref() else {
+            request.turn_id = Some(active.normalized_turn_id.clone());
+            return ControlDisposition::Forward;
+        };
+        if requested_turn_id == &active.normalized_turn_id
+            || active.provider_turn_id.as_deref() == Some(requested_turn_id.as_str())
+        {
+            request.turn_id = Some(active.normalized_turn_id.clone());
+            return ControlDisposition::Forward;
+        }
+        if state.recent_provider_turn_id.as_deref() == Some(requested_turn_id.as_str()) {
+            return ControlDisposition::RejectStale;
+        }
+        if active.provider_turn_id.is_none() {
+            request.turn_id = Some(active.normalized_turn_id.clone());
+            return ControlDisposition::Forward;
+        }
+        ControlDisposition::RejectStale
+    }
 }
 
 struct CodexConnection {
@@ -67,6 +197,7 @@ struct CodexConnection {
     notifications: broadcast::Sender<NotificationMessage>,
     closed: watch::Sender<Option<String>>,
     reader: AsyncMutex<Option<JoinHandle<()>>>,
+    root_turn_identity: Arc<RootTurnIdentity>,
 }
 
 impl CodexConnection {
@@ -80,6 +211,7 @@ impl CodexConnection {
         let (writer, mut reader) = stream.split();
         let (notifications, _) = broadcast::channel(512);
         let (closed, _) = watch::channel(None);
+        let root_turn_identity = Arc::new(RootTurnIdentity::default());
         let connection = Arc::new(Self {
             writer: Arc::new(AsyncMutex::new(writer)),
             pending: Arc::new(AsyncMutex::new(HashMap::new())),
@@ -87,6 +219,7 @@ impl CodexConnection {
             notifications,
             closed,
             reader: AsyncMutex::new(None),
+            root_turn_identity: Arc::clone(&root_turn_identity),
         });
         let pending = Arc::clone(&connection.pending);
         let writer = Arc::clone(&connection.writer);
@@ -124,6 +257,17 @@ impl CodexConnection {
                                 ))),
                                 None => Ok(message.result.unwrap_or(Value::Null)),
                             };
+                            if let (Some(normalized_turn_id), Ok(response)) =
+                                (pending.normalized_root_turn_id, &result)
+                                && let Ok(provider_turn_id) = required_string(
+                                    response.get("turn").unwrap_or(response),
+                                    &["/id", "/turn/id"],
+                                    "turn/start response turn id",
+                                )
+                            {
+                                root_turn_identity
+                                    .bind_provider_turn(&provider_turn_id, normalized_turn_id);
+                            }
                             let _ = pending.tx.send(result);
                         }
                         continue;
@@ -131,13 +275,19 @@ impl CodexConnection {
                     if let Some(method) = message.method {
                         let writer = Arc::clone(&writer);
                         let control_sink = Arc::clone(&control_sink);
+                        let params = message.params.unwrap_or(Value::Null);
+                        let prepared = control_request(&method, &params).map(|mut request| {
+                            let disposition =
+                                root_turn_identity.prepare_control_request(&mut request);
+                            (request, disposition)
+                        });
                         tokio::spawn(async move {
                             respond_to_control_request(
                                 &writer,
                                 &control_sink,
                                 id,
                                 &method,
-                                message.params.unwrap_or(Value::Null),
+                                prepared,
                             )
                             .await;
                         });
@@ -172,10 +322,13 @@ impl CodexConnection {
         };
         let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(key.clone(), PendingResponse { tx });
+        self.pending.lock().await.insert(
+            key.clone(),
+            PendingResponse {
+                tx,
+                normalized_root_turn_id: None,
+            },
+        );
         let message = json!({"id": id, "method": method, "params": params});
         if let Err(error) = self.send(message).await {
             self.pending.lock().await.remove(&key);
@@ -193,6 +346,7 @@ impl CodexConnection {
         method: &str,
         params: Value,
         timeout: std::time::Duration,
+        normalized_root_turn_id: TurnId,
     ) -> Result<Value, HarnessError> {
         let id = {
             let mut next = self.next_id.lock().await;
@@ -202,10 +356,13 @@ impl CodexConnection {
         };
         let key = id.to_string();
         let (tx, rx) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(key.clone(), PendingResponse { tx });
+        self.pending.lock().await.insert(
+            key.clone(),
+            PendingResponse {
+                tx,
+                normalized_root_turn_id: Some(normalized_root_turn_id),
+            },
+        );
         if let Err(error) = self
             .send(json!({"id": id, "method": method, "params": params}))
             .await
@@ -260,6 +417,7 @@ impl CodexConnection {
     }
 
     async fn close(&self) {
+        self.root_turn_identity.clear();
         if let Some(reader) = self.reader.lock().await.take() {
             reader.abort();
         }
@@ -272,6 +430,18 @@ impl CodexConnection {
             )));
         }
     }
+
+    fn set_root_thread(&self, thread_id: ThreadId) {
+        self.root_turn_identity.set_root_thread(thread_id);
+    }
+
+    fn begin_root_turn(&self, turn_id: TurnId) {
+        self.root_turn_identity.begin_turn(turn_id);
+    }
+
+    fn finish_root_turn(&self, turn_id: &TurnId) {
+        self.root_turn_identity.finish_turn(turn_id);
+    }
 }
 
 async fn respond_to_control_request(
@@ -279,16 +449,23 @@ async fn respond_to_control_request(
     control_sink: &Arc<dyn ControlSink>,
     id: Value,
     method: &str,
-    params: Value,
+    prepared: Option<(ControlRequestEnvelope, ControlDisposition)>,
 ) {
-    let response = match control_request(method, &params) {
+    let response = match prepared {
         None => {
             json!({"id": id, "error": {"code": -32601, "message": format!("unsupported Codex server request '{method}'")}})
         }
-        Some(request) => match control_sink.request(request).await {
-            Ok(resolution) => json!({"id": id, "result": encode_control_resolution(&resolution)}),
-            Err(error) => {
-                json!({"id": id, "error": {"code": -32000, "message": error.to_string()}})
+        Some((request, disposition)) => match disposition {
+            ControlDisposition::Forward => match control_sink.request(request).await {
+                Ok(resolution) => {
+                    json!({"id": id, "result": encode_control_resolution(&resolution)})
+                }
+                Err(error) => {
+                    json!({"id": id, "error": {"code": -32000, "message": error.to_string()}})
+                }
+            },
+            ControlDisposition::RejectStale => {
+                json!({"id": id, "result": {"decision": "decline"}})
             }
         },
     };
@@ -349,6 +526,11 @@ fn control_request(method: &str, params: &Value) -> Option<ControlRequestEnvelop
             .get("turnId")
             .and_then(Value::as_str)
             .map(|value| TurnId::new(value.to_string())),
+        thread_id: params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .map(|value| ThreadId::new(value.to_string())),
+        is_root: None,
         request,
         presentation: None,
         timeout_ms: None,
@@ -552,7 +734,8 @@ impl SessionState {
     async fn process_notification(
         &self,
         notification: CodexNotification,
-        expected_turn: Option<&str>,
+        expected_provider_turn: Option<&str>,
+        normalized_root_turn: Option<&TurnId>,
         root_turn: &mut TurnAccumulator,
     ) -> Result<Option<TurnOutcome>, HarnessError> {
         let params = notification.params().clone();
@@ -566,7 +749,7 @@ impl SessionState {
             };
             (stream, correlation)
         } else {
-            if let Some(expected) = expected_turn {
+            if let Some(expected) = expected_provider_turn {
                 let actual = optional_string(&params, &["/turnId", "/turn/id"]);
                 if actual.as_deref().is_some_and(|actual| actual != expected) {
                     log::warn!(
@@ -578,10 +761,7 @@ impl SessionState {
             }
             (
                 self.root_stream_id.clone(),
-                self.root_correlation(
-                    optional_string(&params, &["/turnId", "/turn/id"]).map(TurnId::new),
-                    None,
-                ),
+                self.root_correlation(normalized_root_turn.cloned(), None),
             )
         };
         match notification {
@@ -725,7 +905,7 @@ impl SessionState {
                     .unwrap_or_else(|| "completed".into());
                 let actual_turn = optional_string(&params, &["/turnId", "/turn/id"]);
                 log::info!(
-                    "[Codex] turn/completed received thread_id={thread_id:?} turn_id={actual_turn:?} expected_turn={expected_turn:?} status={status}"
+                    "[Codex] turn/completed received thread_id={thread_id:?} turn_id={actual_turn:?} expected_turn={expected_provider_turn:?} status={status}"
                 );
                 let outcome = outcome_from_completion(&params, status, root_turn);
                 if is_child {
@@ -817,9 +997,15 @@ impl SessionState {
                 params["outputSchema"] = schema;
             }
             self.config.permission.apply_to_params(&mut params);
+            self.connection.begin_root_turn(turn_id.clone());
             let response = self
                 .connection
-                .request_with_timeout("turn/start", params, self.config.request_timeout)
+                .request_with_timeout(
+                    "turn/start",
+                    params,
+                    self.config.request_timeout,
+                    turn_id.clone(),
+                )
                 .await?;
             let provider_turn = required_string(
                 response.get("turn").unwrap_or(&response),
@@ -845,6 +1031,7 @@ impl SessionState {
                                     tokio::select! {
                                         outcome = self.wait_for_provider_terminal(
                                             &provider_turn,
+                                            &turn_id,
                                             &mut notifications,
                                             &mut connection_closed,
                                             &mut accumulator,
@@ -854,6 +1041,7 @@ impl SessionState {
                                             json!({"threadId": self.root_thread_id.as_str(), "turnId": provider_turn}),
                                         ) => self.wait_for_provider_terminal(
                                             &provider_turn,
+                                            &turn_id,
                                             &mut notifications,
                                             &mut connection_closed,
                                             &mut accumulator,
@@ -877,6 +1065,7 @@ impl SessionState {
                     }
                     outcome = self.next_provider_notification(
                         &provider_turn,
+                        &turn_id,
                         &mut notifications,
                         &mut connection_closed,
                         &mut accumulator,
@@ -890,6 +1079,7 @@ impl SessionState {
             Ok::<_, HarnessError>(outcome)
         }
         .await;
+        self.connection.finish_root_turn(&turn_id);
         let result = validate_structured_output(
             result.unwrap_or_else(failed_outcome),
             validation_schema.as_ref(),
@@ -915,6 +1105,7 @@ impl SessionState {
     async fn next_provider_notification(
         &self,
         provider_turn: &str,
+        normalized_turn: &TurnId,
         notifications: &mut broadcast::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
@@ -927,7 +1118,12 @@ impl SessionState {
                 Ok(notification) => {
                     let notification = decode_notification(notification.method, notification.params)
                         .map_err(HarnessError::Operation)?;
-                    self.process_notification(notification, Some(provider_turn), accumulator).await
+                    self.process_notification(
+                        notification,
+                        Some(provider_turn),
+                        Some(normalized_turn),
+                        accumulator,
+                    ).await
                 }
                 Err(broadcast::error::RecvError::Lagged(count)) => Err(HarnessError::Operation(format!(
                     "Codex notification buffer lost {count} messages"
@@ -950,6 +1146,7 @@ impl SessionState {
     async fn wait_for_provider_terminal(
         &self,
         provider_turn: &str,
+        normalized_turn: &TurnId,
         notifications: &mut broadcast::Receiver<NotificationMessage>,
         connection_closed: &mut watch::Receiver<Option<String>>,
         accumulator: &mut TurnAccumulator,
@@ -958,6 +1155,7 @@ impl SessionState {
             if let Some(outcome) = self
                 .next_provider_notification(
                     provider_turn,
+                    normalized_turn,
                     notifications,
                     connection_closed,
                     accumulator,
@@ -1490,6 +1688,7 @@ async fn setup_session(
         .unwrap_or_else(|| "Codex default".into());
     let root_session_id = SessionId::new(thread.clone());
     let root_thread_id = ThreadId::new(thread.clone());
+    connection.set_root_thread(root_thread_id.clone());
     let provider_ref = ProviderThreadRef::new(thread.clone());
     let (closed, closed_rx) = watch::channel(false);
     let state = Arc::new(SessionState {
@@ -1793,8 +1992,8 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        FileChangeKind, SessionState, ToolStatus, file_change_event, parse_usage, tool_call,
-        tool_output,
+        ControlDisposition, FileChangeKind, RootTurnIdentity, SessionState, ToolStatus,
+        control_request, file_change_event, parse_usage, tool_call, tool_output,
     };
     use vertebrae_harness_core::{SessionId, ThreadId, ToolCallId, TurnId};
 
@@ -1811,6 +2010,85 @@ mod tests {
             correlation.parent_tool_call_id,
             Some(ToolCallId::new("spawn-tool"))
         );
+    }
+
+    fn approval(thread_id: &str, turn_id: &str) -> vertebrae_harness_core::ControlRequestEnvelope {
+        control_request(
+            "item/commandExecution/requestApproval",
+            &json!({
+                "requestId": format!("approval-{thread_id}-{turn_id}"),
+                "threadId": thread_id,
+                "turnId": turn_id,
+            }),
+        )
+        .expect("supported control request")
+    }
+
+    #[test]
+    fn classifies_and_normalizes_early_root_controls_without_touching_children() {
+        let identity = RootTurnIdentity::default();
+        identity.set_root_thread(ThreadId::new("root-thread"));
+        identity.begin_turn(TurnId::new("requested-root"));
+
+        let mut early_root = approval("root-thread", "provider-root");
+        assert_eq!(
+            identity.prepare_control_request(&mut early_root),
+            ControlDisposition::Forward
+        );
+        assert_eq!(early_root.turn_id, Some(TurnId::new("requested-root")));
+        assert_eq!(early_root.thread_id, Some(ThreadId::new("root-thread")));
+        assert_eq!(early_root.is_root, Some(true));
+
+        let mut child = approval("child-thread", "child-turn");
+        assert_eq!(
+            identity.prepare_control_request(&mut child),
+            ControlDisposition::Forward
+        );
+        assert_eq!(child.turn_id, Some(TurnId::new("child-turn")));
+        assert_eq!(child.thread_id, Some(ThreadId::new("child-thread")));
+        assert_eq!(child.is_root, Some(false));
+    }
+
+    #[test]
+    fn root_turn_identity_is_bounded_and_rejects_the_replaced_provider_turn() {
+        let identity = RootTurnIdentity::default();
+        identity.set_root_thread(ThreadId::new("root-thread"));
+
+        for index in 0..100 {
+            let normalized = TurnId::new(format!("requested-{index}"));
+            identity.begin_turn(normalized.clone());
+            identity.bind_provider_turn(&format!("provider-{index}"), normalized.clone());
+            identity.finish_turn(&normalized);
+        }
+        {
+            let state = identity.state.lock().unwrap();
+            assert!(state.active.is_none());
+            assert_eq!(
+                state.recent_provider_turn_id.as_deref(),
+                Some("provider-99")
+            );
+        }
+
+        identity.begin_turn(TurnId::new("requested-next"));
+        let mut old = approval("root-thread", "provider-99");
+        assert_eq!(
+            identity.prepare_control_request(&mut old),
+            ControlDisposition::RejectStale
+        );
+        assert_eq!(old.turn_id, Some(TurnId::new("provider-99")));
+
+        identity.bind_provider_turn("provider-next", TurnId::new("requested-next"));
+        let mut current = approval("root-thread", "provider-next");
+        assert_eq!(
+            identity.prepare_control_request(&mut current),
+            ControlDisposition::Forward
+        );
+        assert_eq!(current.turn_id, Some(TurnId::new("requested-next")));
+
+        identity.clear();
+        let state = identity.state.lock().unwrap();
+        assert!(state.active.is_none());
+        assert!(state.recent_provider_turn_id.is_none());
     }
 
     #[test]

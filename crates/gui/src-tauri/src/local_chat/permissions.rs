@@ -571,6 +571,9 @@ impl PermissionBridge {
         let event = PermissionRequestEvent {
             request_id: request.request_id.clone(),
             session_id: Some(session_id),
+            turn_id: None,
+            thread_id: None,
+            is_root: true,
             tool_name: request.tool_name.clone(),
             tool_use_id: request.tool_use_id,
             input: request.input,
@@ -859,6 +862,9 @@ fn harness_permission_event(
     Ok(crate::events::PermissionRequestEvent {
         request_id: request.request_id.to_string(),
         session_id: Some(backend_session_id.to_string()),
+        turn_id: request.turn_id.as_ref().map(ToString::to_string),
+        thread_id: request.thread_id.as_ref().map(ToString::to_string),
+        is_root: request.is_root.unwrap_or(true),
         tool_name: presentation
             .and_then(|value| value.tool_name.clone())
             .unwrap_or(tool_name),

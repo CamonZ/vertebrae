@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ControlRequestId, SessionId, ToolCallId, TurnId};
+use crate::{ControlRequestId, SessionId, ThreadId, ToolCallId, TurnId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +107,12 @@ pub struct ControlRequestEnvelope {
     pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+    /// Whether this control belongs to the root thread. `None` preserves
+    /// compatibility with providers that cannot classify control lineage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_root: Option<bool>,
     pub request: ControlRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<ControlPresentation>,

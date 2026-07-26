@@ -291,6 +291,15 @@ pub struct UserQuestion {
 pub struct PermissionRequestEvent {
     pub request_id: String,
     pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
     pub tool_name: String,
     pub tool_use_id: String,
     pub input: serde_json::Value,

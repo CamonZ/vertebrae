@@ -1267,6 +1267,7 @@ export const events = __makeEvents__<{
   localChatTextEvent: LocalChatTextEvent;
   localChatToolCallEvent: LocalChatToolCallEvent;
   localChatToolResultEvent: LocalChatToolResultEvent;
+  localChatTurnStartedEvent: LocalChatTurnStartedEvent;
   permissionRequestEvent: PermissionRequestEvent;
   sectionChangedEvent: SectionChangedEvent;
   sessionLogCreatedEvent: SessionLogCreatedEvent;
@@ -1290,6 +1291,7 @@ export const events = __makeEvents__<{
   localChatTextEvent: "local-chat-text-event",
   localChatToolCallEvent: "local-chat-tool-call-event",
   localChatToolResultEvent: "local-chat-tool-result-event",
+  localChatTurnStartedEvent: "local-chat-turn-started-event",
   permissionRequestEvent: "permission-request-event",
   sectionChangedEvent: "section-changed-event",
   sessionLogCreatedEvent: "session-log-created-event",
@@ -1539,6 +1541,9 @@ export type LocalChatFileChange = {
 export type LocalChatFileChangeEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   tool_id: string;
   status: string;
   changes: LocalChatFileChange[];
@@ -1569,6 +1574,9 @@ export type LocalChatReasoningEffortOption = { id: string; label: string };
 export type LocalChatSessionEndEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id: string;
+  thread_id?: string | null;
+  is_root: boolean;
   duration_ms: number;
   cost_usd: number;
   num_turns: number;
@@ -1593,6 +1601,9 @@ export type LocalChatSessionError =
 export type LocalChatSessionErrorEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   error: string;
 };
 export type LocalChatSessionIndexEntry = {
@@ -1626,6 +1637,9 @@ export type LocalChatSessionInitEvent = {
 export type LocalChatSessionUsageEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   model: string;
   context_tokens: number;
   context_window: number;
@@ -1638,11 +1652,17 @@ export type LocalChatSessionUsageEvent = {
 export type LocalChatSessionWarningEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   warning: string;
 };
 export type LocalChatTextEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   text: string;
   is_partial: boolean;
   parent_tool_use_id: string | null;
@@ -1650,6 +1670,9 @@ export type LocalChatTextEvent = {
 export type LocalChatToolCallEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   tool_id: string;
   tool_name: string;
   input: string;
@@ -1658,10 +1681,20 @@ export type LocalChatToolCallEvent = {
 export type LocalChatToolResultEvent = {
   backend_session_id: string;
   harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   tool_id: string;
   result: string;
   is_error: boolean;
   parent_tool_use_id: string | null;
+};
+export type LocalChatTurnStartedEvent = {
+  backend_session_id: string;
+  harness: LocalChatHarnessKind;
+  turn_id: string;
+  thread_id?: string | null;
+  is_root: boolean;
 };
 export type PermissionDecisionBehavior = "allow" | "deny";
 /**
@@ -1677,6 +1710,9 @@ export type PermissionMode =
 export type PermissionRequestEvent = {
   request_id: string;
   session_id: string | null;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
   tool_name: string;
   tool_use_id: string;
   input: JsonValue;

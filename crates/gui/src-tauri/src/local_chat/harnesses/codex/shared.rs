@@ -284,6 +284,9 @@ fn emit_error(runtime: &LocalChatRuntime, backend_session_id: &str, error: Strin
         .emit(LocalChatEvent::Error(LocalChatSessionErrorEvent {
             backend_session_id: backend_session_id.into(),
             harness: LocalChatHarnessKind::Codex,
+            turn_id: None,
+            thread_id: None,
+            is_root: true,
             error,
         }));
 }

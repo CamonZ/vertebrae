@@ -49,6 +49,8 @@ pub(super) fn decode_control_request(
         request_id: ControlRequestId::new(request_id),
         session_id: context.session_id.clone(),
         turn_id: context.turn_id.clone(),
+        thread_id: Some(context.root_thread_id.clone()),
+        is_root: Some(true),
         request: control_request,
         presentation: Some(ControlPresentation {
             tool_name: Some(tool_name.to_owned()),
