@@ -4,15 +4,13 @@ import { FloatingDetailPanel } from "./FloatingDetailPanel";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 
-function renderPanel(standalone = false) {
+function renderPanel() {
   return render(
     <FloatingDetailPanel
       panelId="test-detail"
       widthStorageKey="test-detail-width"
-      standalone={standalone}
       onClose={vi.fn()}
       testId="detail-panel"
-      standaloneTestId="detail-panel-standalone"
     >
       detail
     </FloatingDetailPanel>
@@ -100,19 +98,4 @@ describe("FloatingDetailPanel chat coordination", () => {
     );
   });
 
-  it("does not apply in-app chat geometry to a standalone panel", () => {
-    usePanelLayoutStore.getState().setChatLayout({
-      isPresent: true,
-      renderedWidth: 432,
-      isMaximized: false,
-    });
-
-    renderPanel(true);
-
-    expect(
-      screen
-        .getByTestId("detail-panel-standalone")
-        .style.getPropertyValue("--detail-panel-chat-offset")
-    ).toBe("");
-  });
 });

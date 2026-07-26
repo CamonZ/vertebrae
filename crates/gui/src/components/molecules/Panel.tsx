@@ -14,8 +14,6 @@ interface PanelProps {
   width?: number;
   minWidth?: number;
   maxWidth?: number;
-  /** Optional pop-out detach action — rendered next to the close button. */
-  onDetach?: () => void;
   footer?: ReactNode;
   children?: ReactNode;
   className?: string;
@@ -32,7 +30,6 @@ export function Panel({
   width = 360,
   minWidth = 280,
   maxWidth = 560,
-  onDetach,
   footer,
   children,
   className,
@@ -103,16 +100,6 @@ export function Panel({
           {title}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {onDetach && (
-            <button
-              type="button"
-              onClick={onDetach}
-              aria-label="Detach to window"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
-            >
-              ⧉
-            </button>
-          )}
           <button
             type="button"
             onClick={onClose}

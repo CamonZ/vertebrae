@@ -22,11 +22,6 @@ interface FloatingDetailPanelProps {
   minWidth?: number;
   maxWidth?: number;
   defaultWidth?: number;
-  /**
-   * Pop-out window mode: the same glass surface but opaque and inset-filling its
-   * own window, with no float positioning, resize handle, or focus registration.
-   */
-  standalone?: boolean;
   /** Plays the exit animation; the parent unmounts the node on animation end. */
   closing?: boolean;
   onExitAnimationEnd?: AnimationEventHandler<HTMLDivElement>;
@@ -39,15 +34,13 @@ interface FloatingDetailPanelProps {
   shouldHandleEscape?: () => boolean;
   /**
    * Whether the panel is logically open (drives focus registration). Defaults to
-   * mounted-and-not-closing in float mode.
+   * mounted-and-not-closing.
    */
   isOpen?: boolean;
   /** Extra classes on the root — e.g. "tasks-v2" to scope inner content. */
   className?: string;
   /** Test id for the float root. */
   testId?: string;
-  /** Test id for the standalone (pop-out) root. */
-  standaloneTestId?: string;
   children: ReactNode;
 }
 
@@ -59,9 +52,9 @@ const RESIZE_STEP = 16;
 /**
  * The Hearth floating-glass detail surface, shared by the task / step / workflow
  * detail panels. Owns the right-anchored fixed overlay, horizontal drag/keyboard
- * resize with localStorage persistence, the shared focus model (Escape-to-close),
- * and the standalone pop-out variant. Callers supply the panel's content; the
- * visual chrome (header, body) lives in that content, not here.
+ * resize with localStorage persistence, and the shared focus model
+ * (Escape-to-close). Callers supply the panel's content; the visual chrome
+ * (header, body) lives in that content, not here.
  */
 export function FloatingDetailPanel({
   panelId,
@@ -69,7 +62,6 @@ export function FloatingDetailPanel({
   minWidth = DEFAULT_MIN_WIDTH,
   maxWidth = DEFAULT_MAX_WIDTH,
   defaultWidth = DEFAULT_WIDTH,
-  standalone = false,
   closing = false,
   onExitAnimationEnd,
   onClose,
@@ -77,7 +69,6 @@ export function FloatingDetailPanel({
   isOpen,
   className = "",
   testId,
-  standaloneTestId,
   children,
 }: FloatingDetailPanelProps) {
   // Right-anchored: a drag on the left edge widens the panel as the cursor moves
@@ -116,12 +107,12 @@ export function FloatingDetailPanel({
   }, [panelWidth, widthStorageKey]);
 
   useEffect(() => {
-    if (standalone || typeof window === "undefined") return;
+    if (typeof window === "undefined") return;
     const updateViewportWidth = () => setViewportWidth(window.innerWidth);
     updateViewportWidth();
     window.addEventListener("resize", updateViewportWidth);
     return () => window.removeEventListener("resize", updateViewportWidth);
-  }, [standalone]);
+  }, []);
 
   useEffect(() => {
     if (!isResizing) return;
@@ -145,28 +136,14 @@ export function FloatingDetailPanel({
     };
   }, [isResizing, minWidth, maxWidth]);
 
-  // Join the shared glass-panel focus model (in-app float only — the pop-out is
-  // its own window). Escape closes the focused panel unless the caller declines.
+  // Join the shared glass-panel focus model. Escape closes the focused panel
+  // unless the caller declines.
   const { isFocused, focusProps } = useGlassPanel({
     id: panelId,
-    isOpen: isOpen ?? (!standalone && !closing),
+    isOpen: isOpen ?? !closing,
     onClose: onClose ?? (() => {}),
     shouldHandleEscape,
   });
-
-  if (standalone) {
-    // Pop-out window: same floating-glass surface, inset on all sides so it
-    // floats within — and grows with — its resizable window.
-    return (
-      <div
-        className={`${className} detail detail-standalone`.trim()}
-        data-testid={standaloneTestId}
-      >
-        <div data-tauri-drag-region className="detail-drag-strip" />
-        {children}
-      </div>
-    );
-  }
 
   return (
     <div

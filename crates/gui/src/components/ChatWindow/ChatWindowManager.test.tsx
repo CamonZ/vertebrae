@@ -9,30 +9,14 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-const { popOutMock, savedProjects } = vi.hoisted(() => {
-  const popOutMock = vi.fn<
-    (
-      route: string,
-      label: string,
-      opts?: Record<string, unknown>
-    ) => Promise<{
-      window: { onCloseRequested: (h: () => void) => Promise<() => void> };
-      reused: boolean;
-    }>
-  >();
-  popOutMock.mockResolvedValue({
-    window: { onCloseRequested: async () => () => {} },
-    reused: false,
-  });
+const { savedProjects } = vi.hoisted(() => {
   const savedProjects = [
     { slug: "test-project", project_id: "project-test", path: "/test/project" },
     { slug: "old-project", project_id: "project-old", path: "/old/project" },
     { slug: "new-project", project_id: "project-new", path: "/new/project" },
   ];
-  return { popOutMock, savedProjects };
+  return { savedProjects };
 });
-
-vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
 
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
@@ -2078,70 +2062,4 @@ describe("ChatWindowManager", () => {
     });
   });
 
-  // --- Detach / reattach ---
-
-  it("does not render a detach button (detach removed from the chat panel)", () => {
-    const s1 = createSession({ id: "s1", label: "Task A" });
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    expect(
-      screen.queryByTitle("Detach into pop-out window")
-    ).not.toBeInTheDocument();
-  });
-
-  it("renders the detached placeholder (not the chat history) when active session is detached", () => {
-    const s1 = createSession({
-      id: "s1",
-      label: "Task A",
-      isDetached: true,
-      messages: [
-        {
-          kind: "user",
-          text: "should-not-render",
-          timestamp: "2025-01-01T00:00:00Z",
-        },
-      ],
-    });
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    expect(screen.queryByText("should-not-render")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("status", { name: "Session detached" })
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Reattach to panel" })
-    ).toBeInTheDocument();
-  });
-
-  it("clicking reattach in the placeholder clears isDetached", async () => {
-    const user = userEvent.setup();
-    const s1 = createSession({
-      id: "s1",
-      label: "Task A",
-      isDetached: true,
-    });
-    useChatStore.setState({
-      sessions: { s1 },
-      activeSessionId: "s1",
-      panelOpen: true,
-    });
-
-    render(<ChatWindowManager />);
-
-    await user.click(screen.getByRole("button", { name: "Reattach to panel" }));
-
-    expect(useChatStore.getState().sessions["s1"].isDetached).toBe(false);
-  });
 });

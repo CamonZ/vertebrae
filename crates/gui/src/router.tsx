@@ -14,9 +14,6 @@ import {
   TasksPage,
   BoardPage,
   TracesPage,
-  TaskDetailPage,
-  StandaloneChatWindow,
-  StandaloneTracesPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
@@ -167,18 +164,6 @@ const appRoutes: RouteObject[] = [
   {
     path: "/setup",
     element: <ProjectSetupPage />,
-  },
-  {
-    path: "/task/:taskId",
-    element: <TaskDetailPage />,
-  },
-  {
-    path: "/chat",
-    element: <StandaloneChatWindow />,
-  },
-  {
-    path: "/traces-window/:taskId",
-    element: <StandaloneTracesPage />,
   },
   {
     path: "/",

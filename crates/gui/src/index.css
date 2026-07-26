@@ -460,15 +460,6 @@ body {
   color: var(--color-fg);
 }
 
-/* Transparent pop-out windows (see WindowLayout `transparent`). Scoped to the
-   window whose documentElement carries this class, so the main app window keeps
-   its opaque body background. Lets a floating-glass panel blur the desktop. */
-html.window-transparent,
-html.window-transparent body,
-html.window-transparent #root {
-  background: transparent !important;
-}
-
 /* Restore pointer cursor on interactive elements.
    Tailwind v4 preflight drops the historical user-agent 'cursor: pointer'
    for native buttons, so this base rule re-establishes the affordance
@@ -3360,8 +3351,7 @@ html.window-transparent #root {
    chat / Design inspector. The 38px top inset clears the shell titlebar
    (Header.tsx, h-[38px]). Width is owned by the component's inline style
    (horizontal drag-to-resize); the panel is right-anchored so only the left
-   edge moves. Scoped to `.detail-float` so the standalone pop-out keeps its
-   opaque window fill. */
+   edge moves. */
 .detail.detail-float {
   position: fixed;
   top: calc(38px + var(--s-3));
@@ -3401,45 +3391,8 @@ html.window-transparent #root {
     var(--shadow-3),
     -18px 0 44px rgba(0, 0, 0, 0.34),
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
-  /* Drill open: slide in from the right edge toward center (right-anchored).
-     Scoped to `.detail-float` so the standalone pop-out window doesn't slide. */
+  /* Drill open: slide in from the right edge toward center (right-anchored). */
   animation: panel-drill-right var(--t-slow) var(--ease);
-}
-
-/* Pop-out (detached) variant: the same floating-glass surface, but inset on
-   all four sides of its own window so it floats within and fills/grows with the
-   resizable window. `width/max-width: ...` override the docked `.tasks-v2.detail`
-   cap (420px) that would otherwise leave the window half-empty. No 38px top
-   inset — the pop-out has no in-app titlebar. */
-.detail.detail-standalone {
-  position: fixed;
-  /* Fill the window edge-to-edge: a detached window is self-contained, so the
-     glass must cover the whole surface. Any inset gutter would be transparent
-     and bleed the app/desktop behind the window through. The macOS window
-     supplies its own rounded corners and drop shadow. */
-  inset: 0;
-  width: auto;
-  max-width: none;
-  /* Clear the overlay title bar's traffic lights. This band is glass (part of
-     the surface), not a see-through gutter. */
-  padding-top: 28px;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  /* Mostly-opaque frosted glass: the window is transparent, so the backdrop
-     blur frosts whatever sits behind the window without it reading through as
-     legible content. Dark base tones — the darkest surfaces in the ramp. */
-  background: linear-gradient(
-    205deg,
-    color-mix(in oklch, var(--bg-1) 92%, transparent),
-    color-mix(in oklch, var(--bg) 90%, transparent)
-  );
-  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
-  backdrop-filter: blur(30px) brightness(1.4) saturate(1.5);
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 /* ── Light-theme glass ──────────────────────────────────────────────────────
@@ -3466,16 +3419,6 @@ html.window-transparent #root {
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
-.light .detail.detail-standalone {
-  background: linear-gradient(
-    205deg,
-    color-mix(in oklch, var(--bg) 88%, transparent),
-    color-mix(in oklch, var(--bg-1) 84%, transparent)
-  );
-  -webkit-backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
-  backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
-}
-
 .light .hc-panel {
   background: linear-gradient(
     155deg,
@@ -3498,18 +3441,6 @@ html.window-transparent #root {
     var(--shadow-2),
     0 0 18px var(--accent-glow),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-
-/* Drag handle for the detached window: spans the top title-bar band (the glass
-   padding above the header where the overlay traffic lights sit). Sits above
-   the surface but below the header content, which starts at padding-top. */
-.detail.detail-standalone .detail-drag-strip {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 28px;
-  z-index: 70;
 }
 
 /* Left-edge drag handle for horizontal resize. Sits inside the panel (the
@@ -3542,8 +3473,8 @@ html.window-transparent #root {
   background: color-mix(in oklch, var(--accent) 60%, transparent);
 }
 
-/* Thin separator between the action icons and the window-control group
-   (detach / close) in the panel header, per docs/design/tasks-v2.html. */
+/* Thin separator between the action icons and the close control in the panel
+   header, per docs/design/tasks-v2.html. */
 .tasks-v2-detail-shell .t-action-sep {
   width: 1px;
   align-self: stretch;

@@ -3,6 +3,3 @@ export { WelcomeInstallPage } from "./WelcomeInstallPage";
 export { TasksPage } from "./TasksPage";
 export { BoardPage } from "./BoardPage";
 export { TracesPage } from "./TracesPage";
-export { TaskDetailPage } from "./TaskDetailPage";
-export { StandaloneChatWindow } from "./StandaloneChatWindow";
-export { StandaloneTracesPage } from "./StandaloneTracesPage";

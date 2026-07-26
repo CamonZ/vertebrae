@@ -25,7 +25,6 @@ import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
-import { popOut, stashTask } from "../utils";
 
 type TaskScope =
   | "all"
@@ -295,36 +294,6 @@ export function TasksPage() {
     setSelectedTaskId(taskId);
   }, []);
 
-  const handleDetachPanel = useCallback(async () => {
-    if (!selectedTaskId) return;
-    const focal = tasks.find((t) => t.id === selectedTaskId);
-    if (focal) {
-      const related = tasks.filter(
-        (t) =>
-          t.id !== selectedTaskId &&
-          (t.parent_id === selectedTaskId ||
-            t.dependency_ids?.includes(selectedTaskId))
-      );
-      stashTask(focal, related);
-    }
-    await popOut(`/task/${selectedTaskId}`, `task-${selectedTaskId}`, {
-      title: "Task Details",
-      width: 720,
-      height: 800,
-      // Transparent native window so the floating-glass panel reads as a glass
-      // card over the desktop rather than sitting on opaque app chrome. The
-      // pop-out document is made transparent via WindowLayout (scoped to this
-      // window's DOM only — the main window stays opaque).
-      transparent: true,
-      // Overlay title bar: no separate native top bar — the traffic lights
-      // float in the transparent strip above the inset glass card.
-      titleBarStyle: "overlay",
-      hiddenTitle: true,
-    });
-    // The task now lives in its own window — dismiss the docked panel.
-    setSelectedTaskId(null);
-  }, [selectedTaskId, tasks]);
-
   const expandableIds = useMemo(
     () => collectExpandableIds(hierarchy),
     [hierarchy]
@@ -496,7 +465,6 @@ export function TasksPage() {
           onExitAnimationEnd={detailOnAnimationEnd}
           onClose={handleClosePanel}
           onTaskSelect={handleRelatedTaskSelect}
-          onDetach={handleDetachPanel}
         />
       )}
     </div>

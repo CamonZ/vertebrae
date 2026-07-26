@@ -14,11 +14,6 @@ export {
   utilizationLevel,
 } from "./modelContextWindow";
 export type { UtilizationLevel } from "./modelContextWindow";
-export { popOut } from "./popOut";
-export type { PopOutOptions, PopOutResult } from "./popOut";
-export { stashTask, takeStashedTask } from "./taskStash";
-export type { TaskStashPayload } from "./taskStash";
-export { stashChatSession, takeStashedChatSession } from "./chatStash";
 export {
   FALLBACK_CHAT_PROJECT_LABEL,
   groupLocalChatSessionsByProject,

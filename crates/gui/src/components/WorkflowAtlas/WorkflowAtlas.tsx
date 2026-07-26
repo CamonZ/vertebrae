@@ -722,7 +722,7 @@ export function WorkflowAtlas() {
       <KindLegend />
 
       {/* Inspector — the canonical detail surface for the topology. Reuses the
-          shared FloatingDetailPanel shell (resize / Escape / pop-out) with NEW
+          shared FloatingDetailPanel shell (resize / Escape) with NEW
           content (WorkflowInspector / StepInspector) computed from the pure
           model + live useStep. The `.wfd` content carries `data-no-pan` so it
           sits outside pan capture. Mounted outside the morph layers so it

@@ -35,7 +35,7 @@ import {
 } from "../components/Traces/viewFilter";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { runToThreads, type ThreadModel } from "../components/thread";
-import { computeExecutionRollups, popOut } from "../utils";
+import { computeExecutionRollups } from "../utils";
 import { isEditableShortcutTarget } from "../utils/keyboard";
 
 function taskChildrenFilter(parentId: string): TaskFilterOptions {
@@ -61,22 +61,9 @@ function mergeTasksById(...taskLists: readonly (readonly Task[])[]): Task[] {
   return Array.from(byId.values());
 }
 
-interface TracesPageProps {
-  /** Overrides `:taskId` for the standalone pop-out window. */
-  taskIdOverride?: string | null;
-  /** Override picker selection (pop-out keeps its own URL/label stable). */
-  onPickTask?: (id: string) => void;
-  /** Suppresses Detach/Back in the already-detached pop-out window. */
-  standalone?: boolean;
-}
-
-export function TracesPage({
-  taskIdOverride,
-  onPickTask,
-  standalone,
-}: TracesPageProps = {}): ReactNode {
+export function TracesPage(): ReactNode {
   const { taskId: routeTaskId } = useParams<{ taskId: string }>();
-  const taskId = taskIdOverride ?? routeTaskId;
+  const taskId = routeTaskId;
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -345,19 +332,6 @@ export function TracesPage({
 
   const handleBack = useCallback(() => navigate(-1), [navigate]);
 
-  const handleDetach = useCallback(async () => {
-    if (!taskId) return;
-    const selection =
-      currentTaskId && currentTaskId !== taskId
-        ? `?task=${encodeURIComponent(currentTaskId)}`
-        : "";
-    await popOut(`/traces-window/${taskId}${selection}`, `traces-${taskId}`, {
-      title: "Traces",
-      width: 1100,
-      height: 800,
-    });
-  }, [taskId, currentTaskId]);
-
   const handleToggleRail = useCallback(() => {
     setRailCollapsed((v) => !v);
   }, []);
@@ -368,20 +342,9 @@ export function TracesPage({
       setPickerInRail(false);
       setFocused(null);
       setSelectedEvt(null);
-      if (onPickTask) {
-        setSearchParams(
-          (prev) => {
-            const params = new URLSearchParams(prev);
-            params.delete("task");
-            params.delete("runId");
-            return params;
-          },
-          { replace: true }
-        );
-        onPickTask(id);
-      } else navigate(`/traces/${id}`);
+      navigate(`/traces/${id}`);
     },
-    [navigate, onPickTask, setSearchParams]
+    [navigate]
   );
 
   // TASKS-tree selection: keep the tree scoped to the entry task and only
@@ -438,8 +401,7 @@ export function TracesPage({
         runState={activeRun?.status ?? null}
         isLoading={headerLoading}
         error={headerError}
-        onBack={!standalone && taskId ? handleBack : undefined}
-        onDetach={!standalone && taskId ? handleDetach : undefined}
+        onBack={taskId ? handleBack : undefined}
       />
 
       {taskId && (

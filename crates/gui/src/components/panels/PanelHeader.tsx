@@ -5,7 +5,7 @@ interface PanelHeaderProps {
   title: ReactNode;
   /** Identity row content rendered below the title (IdentityBadge · workflow:step · StatusBadge). */
   metadata?: ReactNode;
-  /** Right-aligned controls (close, detach, more). */
+  /** Right-aligned controls (close, more). */
   controls?: ReactNode;
   className?: string;
 }

@@ -1,6 +1,5 @@
 import type { ChatPane, ChatSession } from "../../stores/chatStore";
 import { ChatWindow } from "./ChatWindow";
-import { DetachedPlaceholder } from "./DetachedPlaceholder";
 
 interface ChatPaneListProps {
   visiblePanes: ChatPane[];
@@ -11,7 +10,6 @@ interface ChatPaneListProps {
   focusPane: (paneId: string) => void;
   closePane: (paneId: string) => void;
   unsplitPanes: (paneId?: string) => void;
-  reattachSession: (sessionId: string) => void;
   closeChatPanel: () => void;
   toggleHistorySelector: () => boolean;
   toggleMaximized: () => void;
@@ -21,8 +19,8 @@ interface ChatPaneListProps {
 
 /**
  * Renders the visible chat panes side-by-side (maximized) or as a single pane.
- * Each pane wraps a ChatWindow (or DetachedPlaceholder) in a focusable section
- * that drives pane selection on interaction.
+ * Each pane wraps a ChatWindow in a focusable section that drives pane
+ * selection on interaction.
  */
 export function ChatPaneList({
   visiblePanes,
@@ -33,7 +31,6 @@ export function ChatPaneList({
   focusPane,
   closePane,
   unsplitPanes,
-  reattachSession,
   closeChatPanel,
   toggleHistorySelector,
   toggleMaximized,
@@ -65,41 +62,32 @@ export function ChatPaneList({
               focusPane(pane.id);
             }}
           >
-            {session.isDetached ? (
-              <DetachedPlaceholder
-                label={session.label}
-                onReattach={() => reattachSession(session.id)}
-              />
-            ) : (
-              <ChatWindow
-                key={`${pane.id}:${session.id}`}
-                sessionId={session.id}
-                onClosePanel={closeChatPanel}
-                onStartFresh={() => void startFreshActiveSession()}
-                onToggleHistory={() => {
-                  toggleHistorySelector();
-                }}
-                onToggleWide={toggleMaximized}
-                isWide={isMaximized}
-                onSplitPane={
-                  isMaximized
-                    ? () => void splitWithFreshSession()
-                    : undefined
-                }
-                canSplitPane={canAddSplitPane}
-                onUnsplitPanes={
-                  isMaximized && paneCount > 1
-                    ? () => unsplitPanes(pane.id)
-                    : undefined
-                }
-                onClosePane={
-                  isMaximized && paneCount > 1
-                    ? () => closePane(pane.id)
-                    : undefined
-                }
-                autoFocusComposer={!isMaximized || paneIsActive}
-              />
-            )}
+            <ChatWindow
+              key={`${pane.id}:${session.id}`}
+              sessionId={session.id}
+              onClosePanel={closeChatPanel}
+              onStartFresh={() => void startFreshActiveSession()}
+              onToggleHistory={() => {
+                toggleHistorySelector();
+              }}
+              onToggleWide={toggleMaximized}
+              isWide={isMaximized}
+              onSplitPane={
+                isMaximized ? () => void splitWithFreshSession() : undefined
+              }
+              canSplitPane={canAddSplitPane}
+              onUnsplitPanes={
+                isMaximized && paneCount > 1
+                  ? () => unsplitPanes(pane.id)
+                  : undefined
+              }
+              onClosePane={
+                isMaximized && paneCount > 1
+                  ? () => closePane(pane.id)
+                  : undefined
+              }
+              autoFocusComposer={!isMaximized || paneIsActive}
+            />
           </section>
         );
       })}

@@ -369,19 +369,6 @@ describe("ChatWindow", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not show the standalone end session button", () => {
-    const session = createSession({ backendSessionId: "claude-abc" });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
-
-    render(<ChatWindow sessionId="test-session" />);
-
-    expect(screen.queryByTitle("End session")).not.toBeInTheDocument();
-  });
-
   it("has clear messages button", () => {
     const session = createSession();
     useChatStore.setState({
