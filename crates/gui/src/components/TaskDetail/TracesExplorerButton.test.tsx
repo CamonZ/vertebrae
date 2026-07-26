@@ -8,11 +8,6 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => navigateMock,
 }));
 
-const popOutMock = vi.fn();
-vi.mock("../../utils", () => ({
-  popOut: (...args: unknown[]) => popOutMock(...args),
-}));
-
 const emptyRollups: ExecutionRollups = {
   totalRuns: 0,
   totalAttempts: 0,
@@ -31,7 +26,6 @@ vi.mock("../../hooks/useSubtreeExecutions", () => ({
 describe("TracesExplorerButton", () => {
   beforeEach(() => {
     navigateMock.mockReset();
-    popOutMock.mockReset();
     rollups = { ...emptyRollups, totalRuns: 10, totalAttempts: 104 };
   });
 
@@ -55,17 +49,5 @@ describe("TracesExplorerButton", () => {
     render(<TracesExplorerButton taskId="task-42" />);
     fireEvent.click(screen.getByTestId("task-detail-traces"));
     expect(navigateMock).toHaveBeenCalledWith("/traces/task-42");
-    expect(popOutMock).not.toHaveBeenCalled();
-  });
-
-  it("pops out a traces window instead of navigating when standalone", () => {
-    render(<TracesExplorerButton taskId="task-42" standalone />);
-    fireEvent.click(screen.getByTestId("task-detail-traces"));
-    expect(popOutMock).toHaveBeenCalledWith(
-      "/traces-window/task-42",
-      "traces-task-42",
-      expect.objectContaining({ title: "Traces" })
-    );
-    expect(navigateMock).not.toHaveBeenCalled();
   });
 });

@@ -22,16 +22,6 @@ const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "dont_ask",
   "plan",
 ]);
-const VALID_LIFECYCLES = new Set<LocalChatLifecycle>([
-  "idle",
-  "starting",
-  "resuming",
-  "sending",
-  "streaming",
-  "closing",
-  "closed",
-  "error",
-]);
 const DURABLE_LIFECYCLES = new Set<LocalChatLifecycle>(["idle", "closed"]);
 const VALID_TITLE_STATUSES = new Set<ChatTitleStatus>([
   "pending",
@@ -87,10 +77,6 @@ export interface LocalChatSessionSummary {
 
 type LocalChatSessionRecord = Partial<ChatSession>;
 
-interface NormalizeSessionOptions {
-  preserveRuntimeBackendSessionId?: boolean;
-}
-
 function canUseStorage(): boolean {
   return typeof localStorage !== "undefined";
 }
@@ -102,21 +88,7 @@ function normalizeHarness(value: unknown): LocalChatHarnessKind {
     : DEFAULT_LOCAL_CHAT_HARNESS;
 }
 
-function normalizeRuntimeBackendSessionId(
-  candidate: LocalChatSessionRecord,
-  options: NormalizeSessionOptions
-): string | null {
-  if (!options.preserveRuntimeBackendSessionId) return null;
-  if (typeof candidate.backendSessionId === "string") {
-    return candidate.backendSessionId;
-  }
-  return null;
-}
-
-export function normalizeLocalChatSession(
-  value: unknown,
-  options: NormalizeSessionOptions = {}
-): ChatSession | null {
+export function normalizeLocalChatSession(value: unknown): ChatSession | null {
   if (typeof value !== "object" || value === null) return null;
   const candidate = value as LocalChatSessionRecord;
   if (typeof candidate.id !== "string") return null;
@@ -128,18 +100,14 @@ export function normalizeLocalChatSession(
 
   const lifecycle =
     typeof candidate.lifecycle === "string" &&
-    (options.preserveRuntimeBackendSessionId
-      ? VALID_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle)
-      : DURABLE_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle))
+    DURABLE_LIFECYCLES.has(candidate.lifecycle as LocalChatLifecycle)
       ? (candidate.lifecycle as LocalChatLifecycle)
       : candidate.status === "closed"
         ? "closed"
         : "idle";
 
   const messages = durableMessages(rawMessages).map((message) =>
-    !options.preserveRuntimeBackendSessionId &&
-    message.kind === "user_question" &&
-    message.status === "pending"
+    message.kind === "user_question" && message.status === "pending"
       ? { ...message, status: "unavailable" as const }
       : message
   );
@@ -190,7 +158,7 @@ export function normalizeLocalChatSession(
     messages,
     status: candidate.status,
     harness: normalizeHarness(candidate.harness),
-    backendSessionId: normalizeRuntimeBackendSessionId(candidate, options),
+    backendSessionId: null,
     providerResumeId,
     projectPath:
       typeof candidate.projectPath === "string" ? candidate.projectPath : null,
@@ -228,25 +196,9 @@ export function normalizeLocalChatSession(
       Number.isFinite(candidate.threadTotalTokens)
         ? Math.max(0, Math.floor(candidate.threadTotalTokens))
         : undefined,
-    isDetached: options.preserveRuntimeBackendSessionId
-      ? candidate.isDetached === true
-      : false,
     lifecycle,
-    lifecycleError: options.preserveRuntimeBackendSessionId
-      ? typeof candidate.lifecycleError === "string"
-        ? candidate.lifecycleError
-        : null
-      : null,
-    streamingAssistant:
-      options.preserveRuntimeBackendSessionId &&
-      candidate.streamingAssistant &&
-      typeof candidate.streamingAssistant.text === "string" &&
-      typeof candidate.streamingAssistant.timestamp === "string"
-        ? {
-            text: candidate.streamingAssistant.text,
-            timestamp: candidate.streamingAssistant.timestamp,
-          }
-        : null,
+    lifecycleError: null,
+    streamingAssistant: null,
     createdAt,
     updatedAt,
     messageCount,
@@ -357,7 +309,6 @@ function serializeSession(
     permissionMode: session.permissionMode ?? "default",
     model: session.model,
     tokenUsage: session.tokenUsage,
-    isDetached: false,
     lifecycle: session.lifecycle === "closed" ? "closed" : "idle",
     lifecycleError: null,
     streamingAssistant: null,
@@ -580,7 +531,6 @@ export function findPersistedLocalChatSession(
       .filter(
         (session) =>
           session.status === "open" &&
-          !session.isDetached &&
           !isDisposableClosedLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )

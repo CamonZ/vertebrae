@@ -10,7 +10,7 @@ interface IconButtonProps {
 }
 
 /**
- * Standard detail-panel icon button (close, detach, delete, …). The shared
+ * Standard detail-panel icon button (close, delete, …). The shared
  * chrome control used across the task / step / workflow detail headers so every
  * floating panel presents the same 28px hit target and hover/focus treatment.
  */

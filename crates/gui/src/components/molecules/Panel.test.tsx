@@ -24,10 +24,4 @@ describe("Panel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("renders the detach button when onDetach provided", () => {
-    render(<Panel open onClose={() => {}} title="X" onDetach={() => {}} />);
-    expect(
-      screen.getByRole("button", { name: "Detach to window" }),
-    ).toBeInTheDocument();
-  });
 });

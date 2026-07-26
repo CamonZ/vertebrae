@@ -14,7 +14,6 @@ import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 import { SearchInput } from "../components/molecules/SearchInput";
 import { Select } from "../components/atoms/Select";
-import { popOut, stashTask } from "../utils";
 
 const UNASSIGNED_COLUMN = "Unassigned";
 
@@ -219,26 +218,6 @@ export function BoardPage() {
   const handleClosePanel = useCallback(() => {
     setSelectedTaskId(null);
   }, []);
-
-  const handleDetachPanel = useCallback(async () => {
-    if (!selectedTaskId) return;
-    const focal = tasks.find((t) => t.id === selectedTaskId);
-    if (focal) {
-      const related = tasks.filter(
-        (t) =>
-          t.id !== selectedTaskId &&
-          (t.parent_id === selectedTaskId ||
-            t.dependency_ids?.includes(selectedTaskId))
-      );
-      stashTask(focal, related);
-    }
-    await popOut(`/task/${selectedTaskId}`, `task-${selectedTaskId}`, {
-      title: "Task Details",
-      width: 720,
-      height: 800,
-    });
-    setSelectedTaskId(null);
-  }, [selectedTaskId, tasks]);
 
   const handleLevelChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setLevelFilter(event.target.value as TaskLevel | "");
@@ -482,7 +461,6 @@ export function BoardPage() {
         taskId={selectedTaskId}
         onClose={handleClosePanel}
         onTaskSelect={setSelectedTaskId}
-        onDetach={handleDetachPanel}
       />
     </div>
   );

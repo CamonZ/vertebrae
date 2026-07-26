@@ -1,17 +1,10 @@
 import { create } from "zustand";
-import { popOut } from "../utils/popOut";
-import {
-  discardStashedChatSession,
-  stashChatSession,
-} from "../utils/chatStash";
 import {
   clearLastUsedLocalChatModelId,
-  clearLocalChatSessionCleared,
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
   findPersistedLocalChatSession,
   isDisposableClosedLocalChatSession,
-  isLocalChatSessionCleared,
   listPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
   markLocalChatSessionCleared,
@@ -398,8 +391,6 @@ export interface ChatSession {
   tokenUsage?: { used: number; max: number };
   /** Cumulative token total reported for the provider thread. */
   threadTotalTokens?: number;
-  /** Whether this session is detached into a standalone pop-out window */
-  isDetached?: boolean;
   /** Runtime-only local chat lifecycle state */
   lifecycle?: LocalChatLifecycle;
   /** Runtime-only error detail for the current lifecycle state */
@@ -566,10 +557,6 @@ interface ChatStoreActions {
   togglePanel: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
-  /** Detach a session into a standalone pop-out window. */
-  detachSession: (sessionId: string) => Promise<void>;
-  /** Reattach a previously detached session back into the main panel. */
-  reattachSession: (sessionId: string) => void;
   /** Reset local chat sessions */
   reset: () => void;
 }
@@ -692,7 +679,6 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
     titleStatus: session.titleStatus ?? (title ? "generated" : "pending"),
     titleConfidence: session.titleConfidence ?? (title ? 1 : null),
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
-    isDetached: false,
     harness,
     permissionMode,
     backendSessionId: null,
@@ -989,7 +975,6 @@ function findMatchingSession(
       .filter(
         (session) =>
           session.status === "open" &&
-          !session.isDetached &&
           projectPathMatches(session.projectPath, projectPath)
       )
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
@@ -999,7 +984,7 @@ function findMatchingSession(
 function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   return (
     Object.values(sessions)
-      .filter((session) => session.status === "open" && !session.isDetached)
+      .filter((session) => session.status === "open")
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
   );
 }
@@ -1022,7 +1007,7 @@ export function normalizePaneLayout(
   const seenSessionIds = new Set<string>();
   const panes = (paneLayout?.panes ?? []).filter((pane) => {
     const session = sessions[pane.sessionId];
-    if (!session || session.status !== "open" || session.isDetached) {
+    if (!session || session.status !== "open") {
       return false;
     }
     if (seenSessionIds.has(pane.sessionId)) return false;
@@ -1043,7 +1028,7 @@ function focusSessionInPaneLayout(
   sessionId: string
 ): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
   const session = state.sessions[sessionId];
-  if (!session || session.status !== "open" || session.isDetached) {
+  if (!session || session.status !== "open") {
     return {
       activeSessionId: state.activeSessionId,
       paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
@@ -1092,7 +1077,7 @@ function addSessionPane(
   sessionId: string
 ): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
   const session = state.sessions[sessionId];
-  if (!session || session.status !== "open" || session.isDetached) {
+  if (!session || session.status !== "open") {
     return {
       activeSessionId: state.activeSessionId,
       paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
@@ -1404,7 +1389,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       let bound = false;
       set((state) => {
         const session = state.sessions[sessionId];
-        if (!session || session.status !== "open" || session.isDetached) {
+        if (!session || session.status !== "open") {
           return {
             paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
           };
@@ -1499,38 +1484,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const existing = get().sessions[sessionId];
       if (existing) {
         hydrateProviderMessagesInPlace(sessionId, existing);
-        let reattached: ChatSession | null = null;
         set((state) => {
           const current = state.sessions[sessionId];
           if (!current) return state;
-          const nextSession = current.isDetached
-            ? { ...current, isDetached: false }
-            : current;
-          const nextSessions = current.isDetached
-            ? { ...state.sessions, [sessionId]: nextSession }
-            : state.sessions;
-          if (current.isDetached) {
-            reattached = nextSession;
-          }
           return {
-            sessions: nextSessions,
+            sessions: state.sessions,
             ...focusSessionInPaneLayout(
-              { ...state, sessions: nextSessions },
+              state,
               sessionId
             ),
             panelOpen: true,
           };
         });
-        if (reattached) {
-          const reattachedSession = reattached;
-          persistLocalChatSession(reattachedSession);
-          set((state) => ({
-            localSessionSummaries: upsertLocalSessionSummary(
-              state.localSessionSummaries,
-              reattachedSession
-            ),
-          }));
-        }
         return true;
       }
 
@@ -1623,7 +1588,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     deleteLocalSession: (sessionId) => {
       markLocalChatSessionCleared(sessionId);
-      discardStashedChatSession(sessionId);
       set((state) => {
         const localSessionSummaries = omitLocalSessionSummary(
           state.localSessionSummaries,
@@ -2124,7 +2088,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
     clearMessages: (sessionId) => {
       if (!get().sessions[sessionId]) return;
       markLocalChatSessionCleared(sessionId);
-      discardStashedChatSession(sessionId);
       const timestamp = new Date().toISOString();
       set((state) => {
         const session = state.sessions[sessionId];
@@ -2168,134 +2131,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     setPanelOpen: (open) => {
       set({ panelOpen: open });
-    },
-
-    detachSession: async (sessionId) => {
-      const session = get().sessions[sessionId];
-      if (!session || session.isDetached) return;
-
-      // Stash the full session so the pop-out can seed its empty store
-      // synchronously before first paint. The existing backendSessionId is
-      // carried across so useLocalChat does not double-create the backend
-      // local chat session.
-      stashChatSession({ ...session, isDetached: true });
-
-      const updated = { ...session, isDetached: true };
-      persistLocalChatSession(updated);
-
-      set((state) => {
-        if (!state.sessions[sessionId]) return state;
-        const remainingIds = Object.keys(state.sessions).filter(
-          (id) => id !== sessionId && !state.sessions[id].isDetached
-        );
-        const nextActiveSessionId =
-          state.activeSessionId === sessionId
-            ? (remainingIds[remainingIds.length - 1] ?? null)
-            : state.activeSessionId;
-        const nextSessions = {
-          ...state.sessions,
-          [sessionId]: updated,
-        };
-        const nextPaneLayout = normalizePaneLayout(
-          state.paneLayout,
-          nextSessions
-        );
-        return {
-          sessions: nextSessions,
-          localSessionSummaries: upsertLocalSessionSummary(
-            state.localSessionSummaries,
-            updated
-          ),
-          activeSessionId: nextActiveSessionId,
-          paneLayout: nextPaneLayout,
-        };
-      });
-
-      const { window: webview, reused } = await popOut(
-        `/chat?sessionId=${encodeURIComponent(sessionId)}`,
-        `chat-${sessionId}`,
-        {
-          title: session.title || session.label,
-          width: 600,
-          height: 800,
-        }
-      );
-
-      // Listen once for the pop-out window's close so we reattach the session
-      // back into the main panel. `reused` means a prior detach already
-      // installed the listener — don't stack another.
-      if (!reused) {
-        try {
-          await webview.onCloseRequested(() => {
-            get().reattachSession(sessionId);
-          });
-        } catch {
-          // Listener registration can fail in tests / non-Tauri contexts;
-          // reattach will simply not fire automatically there.
-        }
-      }
-    },
-
-    reattachSession: (sessionId) => {
-      const wasCleared = isLocalChatSessionCleared(sessionId);
-      let updated: ChatSession | null = null;
-      set((state) => {
-        const session = state.sessions[sessionId];
-        if (!session) return state;
-        if (wasCleared) {
-          const remaining = Object.fromEntries(
-            Object.entries(state.sessions).filter(([id]) => id !== sessionId)
-          );
-          const sessionIds = Object.keys(remaining);
-          const normalizedPaneLayout = normalizePaneLayout(
-            state.paneLayout,
-            remaining
-          );
-          const activePaneSessionId =
-            activeSessionIdFromPaneLayout(normalizedPaneLayout);
-          return {
-            sessions: remaining,
-            activeSessionId:
-              state.activeSessionId === sessionId
-                ? (activePaneSessionId ??
-                  sessionIds[sessionIds.length - 1] ??
-                  null)
-                : state.activeSessionId,
-            paneLayout: normalizedPaneLayout,
-            panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
-          };
-        }
-        updated = { ...session, isDetached: false };
-        const nextSessions = {
-          ...state.sessions,
-          [sessionId]: updated,
-        };
-        const nextState = {
-          ...state,
-          sessions: nextSessions,
-        };
-        return {
-          sessions: nextSessions,
-          ...addSessionPane(nextState, sessionId),
-          localSessionSummaries: upsertLocalSessionSummary(
-            state.localSessionSummaries,
-            updated
-          ),
-          panelOpen: true,
-        };
-      });
-      if (wasCleared) {
-        clearLocalChatSessionCleared(sessionId);
-      } else if (updated) {
-        const updatedSession = updated;
-        persistLocalChatSession(updatedSession);
-        set((state) => ({
-          localSessionSummaries: upsertLocalSessionSummary(
-            state.localSessionSummaries,
-            updatedSession
-          ),
-        }));
-      }
     },
 
     reset: () => set(emptyState),

@@ -32,7 +32,6 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
     selectedReasoningEffort: "high",
     model: "claude-sonnet-4",
     tokenUsage: { used: 120, max: 200000 },
-    isDetached: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
     ...overrides,
@@ -79,7 +78,6 @@ describe("localChatPersistence", () => {
       permissionMode: "auto",
       model: "claude-sonnet-4",
       tokenUsage: { used: 120, max: 200000 },
-      isDetached: false,
       lifecycle: "idle",
       lifecycleError: null,
       streamingAssistant: null,
@@ -208,11 +206,21 @@ describe("localChatPersistence", () => {
       normalizeLocalChatSession(makeSession({ messages: [pendingQuestion] }))
         ?.messages[0]
     ).toMatchObject({ kind: "user_question", status: "unavailable" });
-    expect(
-      normalizeLocalChatSession(makeSession({ messages: [pendingQuestion] }), {
-        preserveRuntimeBackendSessionId: true,
-      })?.messages[0]
-    ).toMatchObject({ kind: "user_question", status: "pending" });
+  });
+
+  it("ignores legacy task and chat handoff records", () => {
+    localStorage.setItem(
+      "task-stash:legacy",
+      JSON.stringify({ taskId: "task-1", task: makeSession({ id: "task-1" }) })
+    );
+    localStorage.setItem(
+      "chat-stash:legacy",
+      JSON.stringify({ session: makeSession({ id: "chat-1" }) })
+    );
+
+    expect(loadPersistedLocalChatSession("task-1")).toBeNull();
+    expect(loadPersistedLocalChatSession("chat-1")).toBeNull();
+    expect(listPersistedLocalChatSessions()).toEqual([]);
   });
 
   it("excludes closed sessions from startup hydration", () => {

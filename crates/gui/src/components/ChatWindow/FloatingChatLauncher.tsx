@@ -56,7 +56,6 @@ export function FloatingChatLauncher() {
     ): boolean =>
       session.status === "open" &&
       session.lifecycle !== "closed" &&
-      !session.isDetached &&
       projectPathMatches(session.projectPath, projectPath);
     const activeSession = state.activeSessionId
       ? state.sessions[state.activeSessionId]

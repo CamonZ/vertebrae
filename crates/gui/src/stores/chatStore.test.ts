@@ -65,7 +65,7 @@ describe("chatStore", () => {
       expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
 
-    it("reuses the newest open non-detached session for the same project path", () => {
+    it("reuses the newest open session for the same project path", () => {
       useChatStore.setState({
         sessions: {
           older: {
@@ -79,19 +79,6 @@ describe("chatStore", () => {
             projectPath: "/repo/root",
             createdAt: "2026-01-01T00:00:00Z",
             updatedAt: "2026-01-01T00:00:00Z",
-          },
-          detached: {
-            id: "detached",
-            label: "Detached",
-            messages: [],
-            status: "open",
-            harness: "claude",
-            backendSessionId: null,
-            providerResumeId: "conv-detached",
-            projectPath: "/repo/root",
-            isDetached: true,
-            createdAt: "2026-01-03T00:00:00Z",
-            updatedAt: "2026-01-03T00:00:00Z",
           },
           newer: {
             id: "newer",
@@ -754,45 +741,6 @@ describe("chatStore", () => {
         backendSessionId: "live-backend",
         lifecycle: "streaming",
       });
-    });
-
-    it("reattaches an already-loaded detached session when selected from history", async () => {
-      const first = useChatStore.getState().openSession("Pane One", "/repo");
-      const second = useChatStore
-        .getState()
-        .startFreshSessionInNewPane("Pane Two", "/repo");
-      useChatStore.getState().focusSession(first);
-      const firstPaneId = useChatStore.getState().paneLayout.activePaneId;
-      useChatStore.setState((state) => ({
-        sessions: {
-          ...state.sessions,
-          detached: {
-            id: "detached",
-            label: "Detached",
-            messages: [],
-            status: "open",
-            harness: "claude",
-            backendSessionId: null,
-            providerResumeId: "conv-detached",
-            projectPath: "/repo",
-            isDetached: true,
-          },
-        },
-      }));
-
-      await expect(
-        useChatStore.getState().selectPersistedSession("detached")
-      ).resolves.toBe(true);
-
-      const state = useChatStore.getState();
-      expect(state.sessions.detached.isDetached).toBe(false);
-      expect(state.activeSessionId).toBe("detached");
-      expect(state.paneLayout.activePaneId).toBe(firstPaneId);
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
-        "detached",
-        second,
-      ]);
-      expect(state.sessions[first]).toBeDefined();
     });
 
     it("deletes one local session without removing unrelated persisted sessions", () => {

@@ -1,16 +1,9 @@
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSubtreeExecutions } from "../../hooks/useSubtreeExecutions";
-import { popOut } from "../../utils";
 
 interface TracesExplorerButtonProps {
   taskId: string;
-  /**
-   * When the panel is itself a pop-out window, navigating to the in-app
-   * `/traces/:taskId` route would swap the whole app shell into this small
-   * window. Pop a dedicated traces window instead.
-   */
-  standalone?: boolean;
 }
 
 /**
@@ -19,24 +12,13 @@ interface TracesExplorerButtonProps {
  * button reading "Explore <N> subtree runs · <M> attempts →" that turns
  * solid-accent on hover. Counts are the live subtree rollups for the task.
  */
-export function TracesExplorerButton({
-  taskId,
-  standalone = false,
-}: TracesExplorerButtonProps) {
+export function TracesExplorerButton({ taskId }: TracesExplorerButtonProps) {
   const navigate = useNavigate();
   const { rollups } = useSubtreeExecutions(taskId);
 
-  const handleExplore = useCallback(async () => {
-    if (standalone) {
-      await popOut(`/traces-window/${taskId}`, `traces-${taskId}`, {
-        title: "Traces",
-        width: 1100,
-        height: 800,
-      });
-      return;
-    }
+  const handleExplore = useCallback(() => {
     navigate(`/traces/${taskId}`);
-  }, [navigate, standalone, taskId]);
+  }, [navigate, taskId]);
 
   const runs = rollups.totalRuns;
   const attempts = rollups.totalAttempts;

@@ -334,44 +334,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).not.toBeInTheDocument();
     });
 
-    it("renders back button when onBack is provided", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-          onBack={vi.fn()}
-        />
-      );
-
-      expect(
-        screen.getByRole("button", { name: /go back/i })
-      ).toBeInTheDocument();
-    });
-
-    it("calls onBack when back button is clicked", () => {
-      const mockOnBack = vi.fn();
-
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-          onBack={mockOnBack}
-        />
-      );
-
-      const backButton = screen.getByRole("button", { name: /go back/i });
-      fireEvent.click(backButton);
-
-      expect(mockOnBack).toHaveBeenCalledTimes(1);
-    });
-
-    it("does not render back button when onBack is not provided", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      expect(
-        screen.queryByRole("button", { name: /go back/i })
-      ).not.toBeInTheDocument();
-    });
   });
 
   describe("Close button", () => {
@@ -399,40 +361,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
-    it("hides the Detach button when no onDetach handler is provided", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
-
-      expect(
-        screen.queryByRole("button", { name: /detach into pop-out window/i })
-      ).not.toBeInTheDocument();
-    });
-
-    it("does not render the Detach button even when onDetach is provided (temporarily disabled)", () => {
-      const mockOnDetach = vi.fn();
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-          onDetach={mockOnDetach}
-        />
-      );
-
-      expect(
-        screen.queryByRole("button", { name: /detach into pop-out window/i })
-      ).not.toBeInTheDocument();
-    });
-
-    it("renders the standalone wrapper and hides Detach in standalone mode", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} standalone />);
-
-      expect(
-        screen.getByTestId("task-detail-panel-standalone")
-      ).toBeInTheDocument();
-      // Detach is meaningless in a window that's already detached
-      expect(
-        screen.queryByRole("button", { name: /detach into pop-out window/i })
-      ).not.toBeInTheDocument();
-    });
   });
 
   describe("Header buttons", () => {

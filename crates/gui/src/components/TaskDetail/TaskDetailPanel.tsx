@@ -83,19 +83,10 @@ function TaskLocationBadge({ task }: { task: Task }) {
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
 
-/** Temporarily hide the pop-out/detach control on side panels. Flip back to
- * `true` to restore the Detach button (the onDetach plumbing is left intact). */
-const DETACH_ENABLED = false;
-
 interface TaskDetailPanelProps {
   taskId: string | null;
   onClose?: () => void;
   onTaskSelect?: (taskId: string) => void;
-  onBack?: () => void;
-  /** When omitted, the Detach button is hidden (e.g. inside the pop-out itself). */
-  onDetach?: () => void;
-  /** Skip the ResizablePanel wrapper and fill the area — used by the pop-out window. */
-  standalone?: boolean;
   /** Drilling out on close — applies the exit animation and drops focus. The
    *  parent (TasksPage) keeps the panel mounted through this window. */
   closing?: boolean;
@@ -150,9 +141,6 @@ export function TaskDetailPanel({
   taskId,
   onClose,
   onTaskSelect,
-  onBack,
-  onDetach,
-  standalone = false,
   closing = false,
   onExitAnimationEnd,
 }: TaskDetailPanelProps) {
@@ -660,29 +648,6 @@ export function TaskDetailPanel({
         </svg>
       </IconButton>
       {onClose && <span className="t-action-sep" aria-hidden="true" />}
-      {DETACH_ENABLED && onDetach && (
-        <IconButton
-          onClick={onDetach}
-          ariaLabel="Detach into pop-out window"
-          title="Open in a new window"
-          testId="detach-button"
-        >
-          <svg
-            className="h-4 w-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M14 3h7v7m0-7L10 14m-4-7H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-1"
-            />
-          </svg>
-        </IconButton>
-      )}
       {onClose && (
         <IconButton onClick={onClose} ariaLabel="Close panel">
           <CloseIcon />
@@ -727,29 +692,6 @@ export function TaskDetailPanel({
 
   const headerMetadata = taskData ? (
     <>
-      {onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="Go back"
-          className="cursor-pointer rounded-[var(--radius-sm)] p-1 text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-        >
-          <svg
-            className="h-3.5 w-3.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M15 19l-7-7 7-7"
-            />
-          </svg>
-        </button>
-      )}
       <IdChip
         id={taskData.id}
         kind="task"
@@ -1196,7 +1138,7 @@ export function TaskDetailPanel({
             </div>
           </SectionGroup>
 
-          <TracesExplorerButton taskId={taskData.id} standalone={standalone} />
+          <TracesExplorerButton taskId={taskData.id} />
         </div>
       )}
     </div>
@@ -1204,21 +1146,19 @@ export function TaskDetailPanel({
 
   // Floating glass overlay (mirrors the chat / Design inspector), per
   // docs/design/tasks-v2.html `.detail`. The shared FloatingDetailPanel owns the
-  // surface, drag/keyboard resize, focus model, and the standalone pop-out
-  // variant; `tasks-v2` scopes the inner content's typography and section styles.
+  // surface, drag/keyboard resize, and focus model; `tasks-v2` scopes the inner
+  // content's typography and section styles.
   return (
     <FloatingDetailPanel
       panelId="task-detail"
       widthStorageKey="task-detail-panel-width"
-      standalone={standalone}
       closing={closing}
       onExitAnimationEnd={onExitAnimationEnd}
       onClose={onClose}
-      isOpen={!standalone && taskId != null && !closing}
+      isOpen={taskId != null && !closing}
       shouldHandleEscape={() => editingField === null && onClose != null}
       className="tasks-v2"
       testId="task-detail-panel"
-      standaloneTestId="task-detail-panel-standalone"
     >
       {content}
     </FloatingDetailPanel>

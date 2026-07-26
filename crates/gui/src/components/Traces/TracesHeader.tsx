@@ -3,10 +3,6 @@ import type { TaskLevel } from "../../bindings";
 import { formatTokenCount, type ExecutionRollups } from "../../utils";
 import { formatDurationMs } from "../../utils/formatDuration";
 
-/** Temporarily hide the pop-out/detach control on side panels. Flip back to
- * `true` to restore the Detach button (the onDetach plumbing is left intact). */
-const DETACH_ENABLED = false;
-
 interface TracesHeaderProps {
   taskId: string | null;
   title: string | null;
@@ -17,7 +13,6 @@ interface TracesHeaderProps {
   isLoading?: boolean;
   error?: string | null;
   onBack?: () => void;
-  onDetach?: () => void;
 }
 
 /** Map a run status to a hero pill: label, accent colour and left-edge colour. */
@@ -58,7 +53,6 @@ export function TracesHeader({
   isLoading,
   error,
   onBack,
-  onDetach,
 }: TracesHeaderProps): ReactNode {
   const hasTask = taskId != null;
   const displayTitle = hasTask ? (title ?? "Unknown task") : "Pick a task to explore traces";
@@ -124,32 +118,6 @@ export function TracesHeader({
           {displayTitle}
         </h1>
 
-        {DETACH_ENABLED && onDetach && (
-          <button
-            type="button"
-            onClick={onDetach}
-            data-testid="traces-detach-button"
-            className="ml-auto flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-2)] px-2 py-1 text-xs text-[var(--color-fg-soft)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
-            aria-label="Detach traces into a separate window"
-            title="Detach into separate window"
-          >
-            <svg
-              className="h-3 w-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M14 5l7 7m0 0l-7 7m7-7H3"
-              />
-            </svg>
-            <span>Detach</span>
-          </button>
-        )}
       </div>
 
       {hasTask && (

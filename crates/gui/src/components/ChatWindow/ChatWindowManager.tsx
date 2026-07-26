@@ -40,7 +40,6 @@ export function ChatWindowManager() {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const panelOpen = useChatStore((s) => s.panelOpen);
   const togglePanel = useChatStore((s) => s.togglePanel);
-  const reattachSession = useChatStore((s) => s.reattachSession);
   const selectPersistedSession = useChatStore((s) => s.selectPersistedSession);
   const selectProviderThreadSession = useChatStore(
     (s) => s.selectProviderThreadSession
@@ -394,7 +393,6 @@ export function ChatWindowManager() {
             focusPane={focusPane}
             closePane={closePane}
             unsplitPanes={unsplitPanes}
-            reattachSession={reattachSession}
             closeChatPanel={closeChatPanel}
             toggleHistorySelector={toggleHistorySelector}
             toggleMaximized={toggleMaximized}

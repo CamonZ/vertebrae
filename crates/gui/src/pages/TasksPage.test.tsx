@@ -63,15 +63,6 @@ vi.mock("../components/TaskDetail", () => ({
     taskId ? <div data-testid="task-detail-panel" /> : null,
 }));
 
-vi.mock("../utils", async () => {
-  const actual = await vi.importActual<typeof import("../utils")>("../utils");
-  return {
-    ...actual,
-    popOut: vi.fn(),
-    stashTask: vi.fn(),
-  };
-});
-
 describe("TasksPage", () => {
   beforeEach(() => {
     mockTasks = [];
