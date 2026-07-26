@@ -111,10 +111,6 @@ mod tests {
 
     #[async_trait]
     impl ExecutionService for CapturingExecutionService {
-        async fn create_execution(&self, _execution: StepExecution) -> ServiceResult<String> {
-            unused()
-        }
-
         async fn get_execution(&self, _id: &str) -> ServiceResult<Option<StepExecution>> {
             unused()
         }

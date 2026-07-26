@@ -1,8 +1,7 @@
 //! Execution service trait and implementation
 //!
 //! Provides the main abstraction layer for step execution operations. The `ExecutionService` trait
-//! defines the interface for all step execution management operations, including CRUD operations
-//! for both step executions and session logs.
+//! defines the interface for reading and updating step executions plus managing session logs.
 
 use crate::error::ServiceResult;
 use crate::models::{ExecutionStatus, SessionLog, StepExecution, TaskRun, TaskRunTrace};
@@ -134,17 +133,6 @@ fn non_blank(value: String) -> Option<String> {
 /// This trait is object-safe, enabling dynamic dispatch when needed.
 #[async_trait]
 pub trait ExecutionService: Send + Sync {
-    /// Create a new step execution record
-    ///
-    /// # Arguments
-    ///
-    /// * `execution` - The step execution data to create
-    ///
-    /// # Returns
-    ///
-    /// The ID of the created execution.
-    async fn create_execution(&self, execution: StepExecution) -> ServiceResult<String>;
-
     /// Get a step execution by ID
     ///
     /// ID lookups are case-insensitive.

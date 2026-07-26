@@ -949,14 +949,6 @@ fn sync_task_run_controls(s: &mut MockState, task_id: &str) {
 
 #[async_trait]
 impl ExecutionService for MockExecutionService {
-    async fn create_execution(&self, mut execution: StepExecution) -> ServiceResult<String> {
-        let mut s = self.state.lock().unwrap();
-        let id = s.gen_id();
-        execution.id = Some(id.clone());
-        s.executions.insert(id.clone(), execution);
-        Ok(id)
-    }
-
     async fn get_execution(&self, id: &str) -> ServiceResult<Option<StepExecution>> {
         let s = self.state.lock().unwrap();
         Ok(s.executions.get(id).cloned())
