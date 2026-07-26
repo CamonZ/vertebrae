@@ -468,6 +468,88 @@ fn session_end_and_turn_cancellation_settle_pending_controls() {
 }
 
 #[test]
+fn duplicate_turn_lifecycle_events_cannot_replace_the_authoritative_lifecycle() {
+    let mut projection = HarnessProjection::new(2);
+    let mut started = event(
+        "started",
+        "turn-stream",
+        1,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::TurnStarted(TurnStarted {
+            input_summary: Some("accepted".into()),
+        }),
+    );
+    started.correlation.turn_id = Some(TurnId::from("turn"));
+    projection.ingest(started).unwrap();
+
+    let mut duplicate_start = event(
+        "duplicate-start",
+        "turn-stream",
+        2,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::TurnStarted(TurnStarted {
+            input_summary: Some("late duplicate".into()),
+        }),
+    );
+    duplicate_start.correlation.turn_id = Some(TurnId::from("turn"));
+    projection.ingest(duplicate_start).unwrap();
+
+    let mut finished = event(
+        "finished",
+        "turn-stream",
+        3,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::TurnFinished(outcome(CompletionStatus::Completed)),
+    );
+    finished.correlation.turn_id = Some(TurnId::from("turn"));
+    projection.ingest(finished).unwrap();
+
+    let mut duplicate_finish = event(
+        "duplicate-finish",
+        "turn-stream",
+        4,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::TurnFinished(outcome(CompletionStatus::Failed)),
+    );
+    duplicate_finish.correlation.turn_id = Some(TurnId::from("turn"));
+    let update = projection.ingest(duplicate_finish).unwrap();
+    assert_eq!(
+        update.applied_event_ids,
+        vec![EventId::from("duplicate-finish")]
+    );
+
+    projection
+        .ingest(event(
+            "after-duplicate",
+            "turn-stream",
+            5,
+            UpdateSemantics::Snapshot,
+            HarnessEventPayloadV1::Warning(DiagnosticEvent {
+                message: "still projecting".into(),
+                code: None,
+            }),
+        ))
+        .unwrap();
+
+    let state = projection.stream(&StreamId::from("turn-stream")).unwrap();
+    assert_eq!(state.next_sequence, 6);
+    assert_eq!(state.warnings[0].message, "still projecting");
+    let turn = &state.turns[&TurnId::from("turn")];
+    assert_eq!(
+        turn.started.as_ref().unwrap().input_summary.as_deref(),
+        Some("accepted")
+    );
+    assert_eq!(
+        turn.outcome.as_ref().unwrap().status,
+        CompletionStatus::Completed
+    );
+    assert_eq!(
+        state.turn_outcomes[&TurnId::from("turn")].status,
+        CompletionStatus::Completed
+    );
+}
+
+#[test]
 fn one_shot_run_correlation_settles_controls_without_double_counting_terminal_usage() {
     for (index, (status, expected_source, expected_decision)) in [
         (

@@ -670,7 +670,15 @@ impl HarnessProjection {
             HarnessEventPayloadV1::ThreadDeclared(_) => {}
             HarnessEventPayloadV1::TurnStarted(started) => {
                 if let Some(turn_id) = turn_id {
-                    stream.turns.entry(turn_id).or_default().started = Some(started);
+                    // Lifecycle events are singular. Preserve the first event
+                    // as the authoritative projection if malformed or legacy
+                    // input contains a duplicate.
+                    stream
+                        .turns
+                        .entry(turn_id)
+                        .or_default()
+                        .started
+                        .get_or_insert(started);
                 }
             }
             HarnessEventPayloadV1::TurnInput(input) => {
@@ -753,7 +761,9 @@ impl HarnessProjection {
                     .insert(resolution.request_id.clone(), resolution);
             }
             HarnessEventPayloadV1::TurnFinished(outcome) => {
-                if let Some(turn_id) = turn_id {
+                if let Some(turn_id) = turn_id
+                    && !stream.turn_outcomes.contains_key(&turn_id)
+                {
                     match outcome.status {
                         CompletionStatus::Interrupted => settle_pending_controls(
                             stream,

@@ -120,6 +120,10 @@ pub struct SessionStarted {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnStarted {
+    /// Optional display summary for a turn accepted by the adapter. Exactly
+    /// one `TurnStarted` is emitted for each successful `SessionHandle::send`,
+    /// correlated with the accepted handle's turn id. A later provider request
+    /// rejection is represented by the matching failed terminal event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_summary: Option<String>,
 }
@@ -296,6 +300,13 @@ pub enum HarnessEventPayloadV1 {
     Error(DiagnosticEvent),
     ControlRequested(ControlRequestEnvelope),
     ControlResolved(ControlResolution),
+    /// The single terminal event for an accepted interactive turn. For a
+    /// handle-backed turn, its correlation contains the handle's turn id and
+    /// its outcome is identical to the value returned by
+    /// `TurnHandle::await_outcome`; delivery precedes readiness of that handle
+    /// for every terminal status. Child turns may also use this event without
+    /// having a consumer-visible handle. If a handle-backed turn's single
+    /// delivery attempt fails, the handle returns the sink error instead.
     TurnFinished(TurnOutcome),
     SessionClosed(SessionCloseOutcome),
     RunFinished(RunOutcome),
