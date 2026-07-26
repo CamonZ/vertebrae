@@ -863,8 +863,8 @@ fn harness_permission_event(
         request_id: request.request_id.to_string(),
         session_id: Some(backend_session_id.to_string()),
         turn_id: request.turn_id.as_ref().map(ToString::to_string),
-        thread_id: None,
-        is_root: true,
+        thread_id: request.thread_id.as_ref().map(ToString::to_string),
+        is_root: request.is_root.unwrap_or(true),
         tool_name: presentation
             .and_then(|value| value.tool_name.clone())
             .unwrap_or(tool_name),

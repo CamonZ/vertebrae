@@ -5,6 +5,8 @@ fn harness_approval_request(id: &str) -> ControlRequestEnvelope {
         request_id: vertebrae_harness_core::ControlRequestId::new(id),
         session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
         turn_id: Some(vertebrae_harness_core::TurnId::new("turn-1")),
+        thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+        is_root: Some(true),
         request: ControlRequest::Approval(vertebrae_harness_core::ApprovalRequest {
             category: vertebrae_harness_core::ApprovalCategory::CommandExecution,
             title: "Run shell command".into(),
@@ -27,7 +29,7 @@ fn harness_control_allow_and_deny_preserve_gui_and_neutral_shapes() {
     let event = harness_permission_event("backend-control", &request).unwrap();
     assert_eq!(event.session_id.as_deref(), Some("backend-control"));
     assert_eq!(event.turn_id.as_deref(), Some("turn-1"));
-    assert_eq!(event.thread_id, None);
+    assert_eq!(event.thread_id.as_deref(), Some("root-thread"));
     assert!(event.is_root);
     assert_eq!(event.tool_name, "Bash");
     assert_eq!(event.tool_use_id, "tool-control");
@@ -58,11 +60,28 @@ fn harness_control_allow_and_deny_preserve_gui_and_neutral_shapes() {
 }
 
 #[test]
+fn harness_child_control_preserves_child_turn_and_thread_classification() {
+    let mut request = harness_approval_request("child-control");
+    request.turn_id = Some(vertebrae_harness_core::TurnId::new("child-turn"));
+    request.thread_id = Some(vertebrae_harness_core::ThreadId::new("child-thread"));
+    request.is_root = Some(false);
+
+    let event = harness_permission_event("backend-control", &request).unwrap();
+
+    assert_eq!(event.turn_id.as_deref(), Some("child-turn"));
+    assert_eq!(event.thread_id.as_deref(), Some("child-thread"));
+    assert!(!event.is_root);
+    assert_eq!(event.tool_name, "Bash");
+}
+
+#[test]
 fn harness_question_control_preserves_ui_shape_and_returns_exact_answer() {
     let request = ControlRequestEnvelope {
         request_id: vertebrae_harness_core::ControlRequestId::new("question-control"),
         session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
         turn_id: Some(vertebrae_harness_core::TurnId::new("turn-1")),
+        thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+        is_root: Some(true),
         request: ControlRequest::UserQuestion {
             questions: vec![vertebrae_harness_core::UserQuestion {
                 id: "environment".into(),
@@ -143,6 +162,8 @@ async fn invalid_harness_question_answer_remains_pending_for_retry() {
         request_id: vertebrae_harness_core::ControlRequestId::new("retry-question"),
         session_id: Some(vertebrae_harness_core::SessionId::new("provider-session")),
         turn_id: None,
+        thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+        is_root: Some(true),
         request: ControlRequest::UserQuestion {
             questions: vec![vertebrae_harness_core::UserQuestion {
                 id: "environment".into(),

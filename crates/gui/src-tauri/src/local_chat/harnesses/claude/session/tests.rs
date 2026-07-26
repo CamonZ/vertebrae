@@ -1195,6 +1195,8 @@ async fn explicit_close_denies_pending_harness_controls() {
         request_id: vertebrae_harness_core::ControlRequestId::new("pending-close-control"),
         session_id: None,
         turn_id: None,
+        thread_id: None,
+        is_root: None,
         request: ControlRequest::Approval(ApprovalRequest {
             category: ApprovalCategory::CommandExecution,
             title: "Run command".into(),

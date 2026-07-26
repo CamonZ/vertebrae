@@ -558,6 +558,8 @@ async fn control_sink_preserves_correlation_and_resolution_source() {
         request_id: ControlRequestId::from("request"),
         session_id: Some(SessionId::from("session")),
         turn_id: Some(TurnId::from("turn")),
+        thread_id: Some(ThreadId::from("thread")),
+        is_root: Some(true),
         request: ControlRequest::PermissionGrant(PermissionGrantRequest {
             permissions: vec!["filesystem".into()],
             scope_supported: vec![GrantScope::Turn, GrantScope::Session],
@@ -581,6 +583,8 @@ async fn durable_control_events_bracket_the_live_control_exchange() {
         request_id: ControlRequestId::from("request"),
         session_id: Some(SessionId::from("session")),
         turn_id: Some(TurnId::from("turn")),
+        thread_id: Some(ThreadId::from("thread")),
+        is_root: Some(true),
         request: ControlRequest::Approval(ApprovalRequest {
             category: ApprovalCategory::FileChange,
             title: "Apply changes?".into(),

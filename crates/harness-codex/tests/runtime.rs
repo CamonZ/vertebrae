@@ -134,6 +134,7 @@ async fn mock_server() -> (String, tokio::task::JoinHandle<()>, Arc<Mutex<Vec<St
                     socket.send(Message::Text(json!({"method":"mcpServer/startupStatus/updated","params":{"threadId":"root-thread","name":"node_repl","status":"ready"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":21}}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"id":"approval-1","method":"item/commandExecution/requestApproval","params":{"requestId":"approval-1","threadId":"root-thread","turnId":"turn-1","command":"pwd"}}).to_string())).await.unwrap();
+                    socket.send(Message::Text(json!({"id":"child-approval","method":"item/commandExecution/requestApproval","params":{"requestId":"child-approval","threadId":"child-thread","turnId":"child-turn","command":"pwd"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/agentMessage/delta","params":{"threadId":"root-thread","turnId":"turn-1","delta":"hello"}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/started","params":{"threadId":"root-thread","turnId":"turn-1","item":{"id":"tool-1","type":"commandExecution","command":"pwd"}}}).to_string())).await.unwrap();
                     socket.send(Message::Text(json!({"method":"item/completed","params":{"threadId":"root-thread","turnId":"turn-1","item":{"id":"tool-1","type":"commandExecution","command":"pwd","aggregatedOutput":"/tmp","exitCode":0}}}).to_string())).await.unwrap();
@@ -439,7 +440,7 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
         .unwrap();
     assert_eq!(outcome.status, CompletionStatus::Completed);
     tokio::time::timeout(Duration::from_secs(2), async {
-        while controls.requests.lock().unwrap().is_empty() {
+        while controls.requests.lock().unwrap().len() < 2 {
             tokio::task::yield_now().await;
         }
     })
@@ -503,12 +504,34 @@ async fn persistent_session_emits_normalized_turn_and_human_input() {
     );
     drop(events);
     let controls = controls.requests.lock().unwrap();
-    assert_eq!(controls.len(), 1);
+    assert_eq!(controls.len(), 2);
+    let root_control = controls
+        .iter()
+        .find(|control| control.request_id.as_str() == "approval-1")
+        .expect("root control");
     assert_eq!(
-        controls[0].session_id.as_ref(),
+        root_control.session_id.as_ref(),
         Some(&SessionId::from("root-thread"))
     );
-    assert_eq!(controls[0].turn_id.as_ref(), Some(&TurnId::from("turn")));
+    assert_eq!(root_control.turn_id.as_ref(), Some(&TurnId::from("turn")));
+    assert_eq!(
+        root_control.thread_id.as_ref(),
+        Some(&vertebrae_harness_core::ThreadId::from("root-thread"))
+    );
+    assert_eq!(root_control.is_root, Some(true));
+    let child_control = controls
+        .iter()
+        .find(|control| control.request_id.as_str() == "child-approval")
+        .expect("child control");
+    assert_eq!(
+        child_control.turn_id.as_ref(),
+        Some(&TurnId::from("child-turn"))
+    );
+    assert_eq!(
+        child_control.thread_id.as_ref(),
+        Some(&vertebrae_harness_core::ThreadId::from("child-thread"))
+    );
+    assert_eq!(child_control.is_root, Some(false));
     drop(controls);
     session.close().await.unwrap();
     assert_eq!(

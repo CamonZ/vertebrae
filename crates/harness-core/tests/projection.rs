@@ -315,6 +315,8 @@ fn terminal_outcomes_controls_and_unknown_events_project_without_cross_talk() {
         request_id: ControlRequestId::from("r"),
         session_id: Some(SessionId::from("session-s")),
         turn_id: Some(TurnId::from("turn-s")),
+        thread_id: Some(ThreadId::from("thread-s")),
+        is_root: Some(true),
         request: ControlRequest::Approval(ApprovalRequest {
             category: ApprovalCategory::CommandExecution,
             title: "Run?".into(),
@@ -391,6 +393,8 @@ fn session_end_and_turn_cancellation_settle_pending_controls() {
                 request_id: ControlRequestId::from(format!("request-{id}")),
                 session_id: Some(SessionId::from(format!("session-{stream}"))),
                 turn_id: Some(TurnId::from(turn)),
+                thread_id: Some(ThreadId::from(format!("thread-{stream}"))),
+                is_root: Some(true),
                 request: ControlRequest::Approval(ApprovalRequest {
                     category: ApprovalCategory::AdditionalPermission,
                     title: "Grant?".into(),
@@ -604,6 +608,8 @@ fn one_shot_run_correlation_settles_controls_without_double_counting_terminal_us
                 request_id: request_id.clone(),
                 session_id: None,
                 turn_id: None,
+                thread_id: None,
+                is_root: None,
                 request: ControlRequest::Approval(ApprovalRequest {
                     category: ApprovalCategory::CommandExecution,
                     title: "Run command?".into(),
@@ -977,6 +983,8 @@ fn conflicting_run_cannot_settle_controls_owned_by_the_stream_run() {
             request_id: request_id.clone(),
             session_id: None,
             turn_id: None,
+            thread_id: None,
+            is_root: None,
             request: ControlRequest::Approval(ApprovalRequest {
                 category: ApprovalCategory::CommandExecution,
                 title: "approve".into(),
