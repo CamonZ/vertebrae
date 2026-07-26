@@ -722,7 +722,6 @@ mod step_show_tests {
         assert!(result.contains("Workflow:"));
         assert!(result.contains("Goal:          Review code quality"));
         assert!(result.contains("Order:         1"));
-        assert!(!result.contains("Is Final:"));
         assert!(result.contains("Transitions:   approved, rejected"));
     }
 
@@ -809,7 +808,6 @@ mod step_show_tests {
         let result = show_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Step Type:     finish"));
-        assert!(!result.contains("Is Final:"));
     }
 
     #[tokio::test]

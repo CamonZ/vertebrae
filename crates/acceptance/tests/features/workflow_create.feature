@@ -28,7 +28,7 @@ Feature: Workflow creation with kanban column and default flag
     Then the command should succeed
     And the workflow is_default should be false
 
-  Scenario: Show workflow exposes JSON step ids without legacy final state
+  Scenario: Show workflow exposes JSON step ids
     Given I create a workflow "Inspectable WF" with:
       | steps | review, done |
     Then the command should succeed

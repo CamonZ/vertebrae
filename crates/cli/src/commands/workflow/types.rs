@@ -360,10 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_detail_display_without_legacy_final() {
+    fn test_workflow_detail_display_without_terminal_workflow_flag() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
-            name: "Final".to_string(),
+            name: "Terminal".to_string(),
             description: None,
             is_default: false,
             kanban_column: None,
@@ -617,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_detail_serializes_final_flag_and_step_ids() {
+    fn test_workflow_detail_serializes_step_ids() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
             name: "Serializable".to_string(),

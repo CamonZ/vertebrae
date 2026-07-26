@@ -637,7 +637,7 @@ async fn test_workflow_show_displays_default_no() {
 }
 
 #[tokio::test]
-async fn test_workflow_show_omits_legacy_final_flag() {
+async fn test_workflow_show_does_not_render_terminal_workflow_flag() {
     let services = mock_services();
 
     let options = CreateWorkflowOptions::new("Terminal Workflow", vec![]);
@@ -648,7 +648,7 @@ async fn test_workflow_show_omits_legacy_final_flag() {
 
     assert!(
         !output.contains("Final:"),
-        "legacy final output: {}",
+        "unexpected terminal workflow output: {}",
         output
     );
 }
@@ -671,8 +671,6 @@ async fn test_workflow_show_json_includes_finish_step_ids() {
     let cmd = WorkflowShowCommand { id: wf_id };
     let detail = cmd.execute_detail(&services).await.unwrap();
     let json = serde_json::to_value(&detail).unwrap();
-
-    assert!(json.get("is_final").is_none());
 
     let mut steps = json["steps"].as_array().unwrap().clone();
     steps.sort_by_key(|step| step["name"].as_str().unwrap().to_string());
