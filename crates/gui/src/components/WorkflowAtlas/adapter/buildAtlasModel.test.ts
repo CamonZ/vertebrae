@@ -74,6 +74,7 @@ describe("kindFor", () => {
       ["wait_children", "wait"],
       ["human_input", "human"],
       ["route", "route"],
+      ["finish", "finish"],
       [null, "execute"],
       ["totally-unknown", "execute"],
     ];
@@ -96,6 +97,7 @@ describe("roleFor", () => {
   it("labels route / terminal steps exit", () => {
     expect(roleFor("route", false, false)).toBe("exit");
     expect(roleFor("execute", false, true)).toBe("exit");
+    expect(roleFor("finish", false, false)).toBe("exit");
   });
   it("labels everything else process", () => {
     expect(roleFor("execute", false, false)).toBe("process");
@@ -116,7 +118,7 @@ describe("buildAtlasModel", () => {
             makeStep("ai", "wf", 1, { step_type: "execute" }),
             makeStep("gate", "wf", 2, { step_type: "evaluate" }),
             makeStep("router", "wf", 3, { step_type: "route" }),
-            makeStep("done", "wf", 4, { is_final: true }),
+            makeStep("done", "wf", 4, { step_type: "finish" }),
           ],
           { initial_step_id: "entry" }
         ),
@@ -127,12 +129,14 @@ describe("buildAtlasModel", () => {
     const byId = new Map(model.steps.map((s) => [s.stepId, s]));
 
     // kind is always the REAL backend step type — the initial step ("entry")
-    // and the final step ("done") both keep their type (execute here).
+    // and the terminal step ("done") both keep their real backend type.
     expect(byId.get("entry")!.kind).toBe("execute");
     expect(byId.get("ai")!.kind).toBe("execute");
     expect(byId.get("gate")!.kind).toBe("eval");
     expect(byId.get("router")!.kind).toBe("route");
-    expect(byId.get("done")!.kind).toBe("execute");
+    expect(byId.get("done")!.kind).toBe("finish");
+    expect(byId.get("done")!.isFinal).toBe(false);
+    expect(byId.get("done")!.role).toBe("exit");
     expect(byId.get("gate")!.stepType).toBe("evaluate");
     expect(byId.get("router")!.stepType).toBe("route");
 

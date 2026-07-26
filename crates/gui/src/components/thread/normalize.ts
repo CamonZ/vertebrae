@@ -103,7 +103,7 @@ export interface ChatMsg {
 /**
  * Map a Sacrum {@link StepType} to a {@link StepKind}.
  *   execute → "execute", evaluate → "eval", route → "route",
- *   human_input → "human", wait_children → "wait".
+ *   human_input → "human", wait_children → "wait", finish → "finish".
  * Unknown / `{ unsupported }` types fall back to "execute".
  *
  * `StepExecution.step_type` arrives as a nullable string (not the union), so
@@ -123,6 +123,8 @@ export function stepKindFromStepType(
       return "human";
     case "wait_children":
       return "wait";
+    case "finish":
+      return "finish";
     default:
       return "execute";
   }
@@ -131,6 +133,11 @@ export function stepKindFromStepType(
 /** A wait step is the only one rendered as a terminal WaitMessage (constraint #3). */
 function isWaitStep(stepType: string | null | undefined): boolean {
   return stepType === "wait_children";
+}
+
+/** A finish step is terminal and has no provider/session transcript. */
+function isFinishStep(stepType: string | null | undefined): boolean {
+  return stepType === "finish";
 }
 
 // ===========================================================================
@@ -530,7 +537,15 @@ function stepExecutionToThread(
 
   let turns: Turn[];
 
-  if (isWaitStep(exec.step_type)) {
+  if (isFinishStep(exec.step_type)) {
+    const finish: ResultMessage = {
+      evt: `${execId}-finish`,
+      type: "result",
+      label: "finish",
+      body: exec.output ?? "Task completed by finish step",
+    };
+    turns = [{ id: `${execId}-t0`, messages: [finish] }];
+  } else if (isWaitStep(exec.step_type)) {
     // constraint #3 — a wait step is a single terminal WaitMessage. childRunIds
     // stay empty until the backend exposes the blocked-on child run ids.
     const wait: WaitMessage = {

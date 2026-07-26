@@ -5,7 +5,7 @@ Feature: CLI TaskRun lifecycle
     Given a configured Sacrum client
 
   Scenario: TaskRun lifecycle state is visible across CLI commands
-    Given a workflow "cli-taskrun-wf" with steps "start, finish"
+    Given a workflow "cli-taskrun-wf" with steps "start:execute, finish:finish"
     And I create a task with:
       | title | CLI TaskRun lifecycle |
     And I assign the workflow to the task

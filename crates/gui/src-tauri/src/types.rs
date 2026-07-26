@@ -481,6 +481,7 @@ pub enum StepType {
     Route,
     WaitChildren,
     HumanInput,
+    Finish,
     Unsupported(String),
 }
 
@@ -492,6 +493,7 @@ impl From<vertebrae_core::StepType> for StepType {
             vertebrae_core::StepType::Route => StepType::Route,
             vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
             vertebrae_core::StepType::HumanInput => StepType::HumanInput,
+            vertebrae_core::StepType::Finish => StepType::Finish,
             vertebrae_core::StepType::Unsupported(value) => StepType::Unsupported(value),
         }
     }
@@ -505,6 +507,7 @@ impl From<StepType> for vertebrae_core::StepType {
             StepType::Route => vertebrae_core::StepType::Route,
             StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
             StepType::HumanInput => vertebrae_core::StepType::HumanInput,
+            StepType::Finish => vertebrae_core::StepType::Finish,
             StepType::Unsupported(value) => vertebrae_core::StepType::Unsupported(value),
         }
     }
@@ -1793,6 +1796,42 @@ mod tests {
         assert!(!gui.is_final);
         assert!(gui.transitions_to.is_empty());
         assert_eq!(gui.order, 0);
+    }
+
+    #[test]
+    fn step_type_finish_round_trips_between_core_and_gui() {
+        let gui = StepType::from(vertebrae_core::StepType::Finish);
+        assert_eq!(gui, StepType::Finish);
+        assert_eq!(
+            vertebrae_core::StepType::from(gui),
+            vertebrae_core::StepType::Finish
+        );
+        assert_eq!(
+            serde_json::to_string(&StepType::Finish).unwrap(),
+            "\"finish\""
+        );
+    }
+
+    #[test]
+    fn update_step_options_preserves_finish_type() {
+        let update: vertebrae_core::StepUpdate = UpdateStepOptions {
+            step_id: "finish".to_string(),
+            name: None,
+            goal: None,
+            prompt: None,
+            agents: None,
+            skills: None,
+            step_type: Some(StepType::Finish),
+            output_schema: None,
+            order: None,
+            is_final: Some(false),
+            transitions_to: Some(vec![]),
+        }
+        .into();
+
+        assert_eq!(update.step_type, Some(vertebrae_core::StepType::Finish));
+        assert_eq!(update.is_final, Some(false));
+        assert_eq!(update.transitions_to, Some(vec![]));
     }
 
     #[test]

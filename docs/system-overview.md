@@ -145,7 +145,7 @@ A single stage within a workflow. Each step defines what an AI agent should do.
 | Field | Description |
 |-------|-------------|
 | `name` | Stage name (e.g., "backlog", "in_progress", "pending_review") |
-| `step_type` | `execute` (default), `evaluate`, or `route` — determines step behavior |
+| `step_type` | `execute` (default), `evaluate`, `route`, `wait_children`, `human_input`, or `finish` — determines step behavior |
 | `goal` | What this step accomplishes |
 | `prompt` | Template sent to the executing agent |
 | `eval_prompt` | Template for evaluating output and choosing next transition |
@@ -160,6 +160,15 @@ A single stage within a workflow. Each step defines what an AI agent should do.
 - **`execute`** — Standard execution. Runs the prompt via Claude and produces output.
 - **`evaluate`** — Assesses previous output. Used with `eval_prompt` and multiple outgoing transitions to create branching decisions.
 - **`route`** — Directs work to different paths based on conditions.
+- **`wait_children`** — Server-side parent/child barrier. Pauses until all child tasks complete; the daemon does not dispatch it.
+- **`human_input`** — Human review/input gate. Pauses for external input instead of dispatching a daemon execution.
+- **`finish`** — Explicit promptless terminal step. Completes the task immediately, has no outgoing transitions, and is never dispatched to the daemon.
+
+`finish` is the explicit terminal type and supersedes `is_final` for new
+workflows. A finish step is terminal even when its legacy `is_final` field is
+`false`; existing `is_final` steps remain supported for compatibility. The
+finish type is preserved across the Sacrum wire model, core/CLI/Tauri models,
+GUI workflow/task surfaces, and trace events.
 
 **Output schema precedence:** When a step has `output_schema`, it overrides `agent_config.json_schema`. This gives step-level structured output contracts priority over the default agent config.
 
@@ -250,7 +259,7 @@ This is the core loop: a task moves through a workflow, and each step is execute
    ├── If step has eval_prompt AND multiple outgoing transitions:
    │   ├── :evaluating — dispatch eval execution to daemon
    │   └── Daemon runs eval, returns transition label
-   └── Else: follow single outgoing transition (or is_final)
+   └── Else: follow single outgoing transition (or terminal finish / is_final)
 
 10. :transitioning
     ├── advance_to_step(task_id, next_step_id)

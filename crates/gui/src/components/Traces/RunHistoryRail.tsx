@@ -88,6 +88,8 @@ function stepKindColorVar(kind: string): string {
       return "var(--color-step-human, var(--color-info))";
     case "wait":
       return "var(--color-step-wait, var(--color-fg-mute))";
+    case "finish":
+      return "var(--color-step-finish, var(--color-ok))";
     default:
       return "var(--color-step-execute, var(--color-accent))";
   }

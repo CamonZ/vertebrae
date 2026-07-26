@@ -1,10 +1,10 @@
 //! Parent/child orchestration steps.
 //!
 //! These steps build workflows and tasks for the wait_children scenarios:
-//! - a reusable child workflow with a single `execute` step that the mock
-//!   claude drives to completion,
+//! - a reusable child workflow with an `execute` step followed by an explicit
+//!   `finish` step that the mock claude drives to completion,
 //! - a parent workflow with `wait_children` -> `work` (both mock-claude
-//!   scripted; `work` is marked final so the parent finishes after it),
+//!   scripted) -> `finish` so the parent finishes after the work step,
 //! - parent/child/grandchild tasks wired via `vtb add --parent` and
 //!   assigned to the appropriate workflows.
 //!
@@ -35,6 +35,8 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
             &wf_name,
             "--step",
             "run:claude-sonnet-4-6",
+            "--step",
+            "finish:claude-sonnet-4-6",
         ])
         .await;
     world.assert_vtb_ok("workflow add (child)");
@@ -43,12 +45,12 @@ pub async fn child_execute_workflow(world: &mut DaemonWorld) {
     world.created_workflow_ids.push(wf_id.clone());
 
     let step_id = step_id_by_name(world, &wf_id, "run").await;
+    let finish_step_id = step_id_by_name(world, &wf_id, "finish").await;
 
-    // Mark the child step as final so the TaskRun completes the task.
     world
-        .run_vtb(&["step", "update", &step_id, "--final", "true"])
+        .run_vtb(&["step", "update", &finish_step_id, "--step-type", "finish"])
         .await;
-    world.assert_vtb_ok("child step update --final");
+    world.assert_vtb_ok("child finish step update --step-type finish");
 
     // Script the mock to exit 0 with a valid stream-json result line. The
     // same fixture is reused across every child; they all share the same
@@ -363,8 +365,8 @@ fn status_eq(exec: &serde_json::Value, expected: &str) -> bool {
 
 async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> String {
     let wf_name = format!("daemon-acc-{label}-wf-{}", uuid::Uuid::new_v4().simple());
-    // Two steps: wait_children parks the parent; work runs post-resume and
-    // terminates the task.
+    // Three steps: wait_children parks the parent; work runs post-resume;
+    // finish terminates the task without daemon dispatch.
     world
         .run_vtb(&[
             "workflow",
@@ -374,6 +376,8 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
             "wait_children:claude-sonnet-4-6",
             "--step",
             "work:claude-sonnet-4-6",
+            "--step",
+            "finish:claude-sonnet-4-6",
         ])
         .await;
     world.assert_vtb_ok("workflow add (parent/intermediate)");
@@ -382,6 +386,7 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
 
     let wait_step_id = step_id_by_name(world, &wf_id, "wait_children").await;
     let work_step_id = step_id_by_name(world, &wf_id, "work").await;
+    let finish_step_id = step_id_by_name(world, &wf_id, "finish").await;
 
     world
         .run_vtb(&[
@@ -395,9 +400,9 @@ async fn create_wait_children_workflow(world: &mut DaemonWorld, label: &str) -> 
     world.assert_vtb_ok("step update --step-type wait_children");
 
     world
-        .run_vtb(&["step", "update", &work_step_id, "--final", "true"])
+        .run_vtb(&["step", "update", &finish_step_id, "--step-type", "finish"])
         .await;
-    world.assert_vtb_ok("step update work --final");
+    world.assert_vtb_ok("step update finish --step-type finish");
 
     // Script mock-claude for the work step so the post-wait dispatch
     // succeeds. Labeled by workflow role so parent and intermediate don't

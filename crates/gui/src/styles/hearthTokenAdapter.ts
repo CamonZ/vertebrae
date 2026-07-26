@@ -49,6 +49,9 @@ export const V2_TOKEN_GROUPS = [
       "--step-wait",
       "--step-wait-fg",
       "--step-wait-wash",
+      "--step-finish",
+      "--step-finish-fg",
+      "--step-finish-wash",
     ],
   },
   {

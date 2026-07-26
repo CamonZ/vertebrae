@@ -3,8 +3,7 @@ Feature: Step lifecycle
 
   Background:
     Given a configured Sacrum client
-    And a workflow "test-wf" with steps "backlog, in_progress, pending_review, done"
-    And the workflow is final
+    And a workflow "test-wf" with steps "backlog, in_progress, pending_review, done:finish"
     And I create a task with:
       | title | Lifecycle task |
     And I assign the workflow to the task

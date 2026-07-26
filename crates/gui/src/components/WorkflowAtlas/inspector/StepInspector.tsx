@@ -50,6 +50,8 @@ function backendTypeForKind(kind: string): string {
       return "wait_children";
     case "route":
       return "route";
+    case "finish":
+      return "finish";
     default:
       return "execute";
   }
@@ -89,6 +91,7 @@ export function StepInspector({
 
   const transitions = useMemo<Transition[]>(() => {
     if (!wf || !step) return [];
+    if (step.kind === "finish") return [];
     const list: Transition[] = [];
     // implicit forward step (next in order)
     const nextStepId =
@@ -130,6 +133,8 @@ export function StepInspector({
 
   const kindCls = kindClass(step.kind);
   const isFinal = step.isFinal;
+  const isFinish = step.kind === "finish";
+  const isTerminal = isFinal || isFinish;
   const agents = cfg?.agents ?? [];
   const skills = cfg?.skills ?? [];
   const model_ = cfg?.agent_config?.model ?? null;
@@ -181,7 +186,11 @@ export function StepInspector({
             </pre>
           ) : (
             <div className="wfd-placeholder">
-              {isLoading ? "Loading…" : "No prompt"}
+              {isLoading
+                ? "Loading…"
+                : isFinish
+                  ? "No prompt — completes task immediately"
+                  : "No prompt"}
             </div>
           )}
         </section>
@@ -203,8 +212,8 @@ export function StepInspector({
               <span className="wfd-pill">{step.order}</span>
             </div>
             <div className="wfd-row">
-              <span className="rk">Final step</span>
-              <span className={"wfd-toggle" + (isFinal ? " on" : "")}>
+              <span className="rk">{isFinish ? "Terminal step" : "Final step"}</span>
+              <span className={"wfd-toggle" + (isTerminal ? " on" : "")}>
                 <span className="knob" />
               </span>
             </div>

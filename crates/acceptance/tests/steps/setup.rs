@@ -1,8 +1,12 @@
 use cucumber::{given, when};
-use vertebrae_core::workflow_service::{UpdateWorkflowOptions, WorkflowService};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::SmokeWorld;
+
+struct WorkflowFixtureStep {
+    name: String,
+    step_type: Option<String>,
+}
 
 #[given("a configured Sacrum client")]
 async fn configured_client(world: &mut SmokeWorld) {
@@ -63,14 +67,36 @@ async fn store_task_id(world: &mut SmokeWorld, name: String) {
 
 #[given(expr = "a workflow {string} with steps {string}")]
 async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_str: String) {
-    let mut args: Vec<&str> = vec!["workflow", "add", &name];
-    let steps: Vec<String> = steps_str
-        .split(", ")
-        .map(|s| s.trim().to_string())
+    let step_specs: Vec<WorkflowFixtureStep> = steps_str
+        .split(',')
+        .map(|raw| {
+            let raw = raw.trim();
+            let (name, step_type) = raw
+                .split_once(':')
+                .map(|(name, step_type)| (name.trim(), Some(step_type.trim().to_string())))
+                .unwrap_or((raw, None));
+            assert!(
+                !name.is_empty(),
+                "workflow fixture step name cannot be empty"
+            );
+            if let Some(step_type) = &step_type {
+                assert!(
+                    !step_type.is_empty(),
+                    "workflow fixture step type cannot be empty for '{}'",
+                    name
+                );
+            }
+            WorkflowFixtureStep {
+                name: name.to_string(),
+                step_type,
+            }
+        })
         .collect();
-    let step_args: Vec<String> = steps
+
+    let mut args: Vec<&str> = vec!["workflow", "add", &name];
+    let step_args: Vec<String> = step_specs
         .iter()
-        .flat_map(|s| vec!["--step".to_string(), format!("{}:default", s)])
+        .flat_map(|spec| vec!["--step".to_string(), format!("{}:default", spec.name)])
         .collect();
     let step_refs: Vec<&str> = step_args.iter().map(|s| s.as_str()).collect();
     args.extend_from_slice(&step_refs);
@@ -90,10 +116,7 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
         panic!("unexpected workflow create output: {}", stdout);
     };
 
-    // Steps are created in order by `workflow add --step`. The linear ordering
-    // defines the transition graph. We just need to mark the last step as final.
-
-    // List steps to find the last one
+    // List steps to resolve the created step IDs.
     let json = world
         .run_vtb_json(&["step", "list", &wf_id])
         .await
@@ -119,38 +142,25 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
             .insert(format!("step:{}", step_name), id.clone());
     }
 
-    // Mark last step as final
-    let last_id = &ordered.last().unwrap().0;
-    world
-        .run_vtb(&["step", "update", last_id, "--final", "true"])
-        .await;
-    assert_eq!(
-        world.last_exit_code, 0,
-        "failed to mark last step as final: {}{}",
-        world.last_stdout, world.last_stderr
-    );
+    for spec in &step_specs {
+        if let Some(step_type) = &spec.step_type {
+            let step_id = world
+                .stored_ids
+                .get(&format!("step:{}", spec.name))
+                .unwrap_or_else(|| panic!("step '{}' was not returned by step list", spec.name))
+                .clone();
+            world
+                .run_vtb(&["step", "update", &step_id, "--step-type", step_type])
+                .await;
+            assert_eq!(
+                world.last_exit_code, 0,
+                "failed to set step '{}' type to '{}': {}{}",
+                spec.name, step_type, world.last_stdout, world.last_stderr
+            );
+        }
+    }
 
     world.track_workflow(wf_id);
-}
-
-#[given("the workflow is final")]
-async fn given_workflow_is_final(world: &mut SmokeWorld) {
-    let wf_id = world
-        .workflow_id
-        .as_ref()
-        .expect("no workflow ID stored")
-        .clone();
-    let client = world
-        .graphql_client
-        .as_ref()
-        .expect("no configured Sacrum client")
-        .clone();
-    let service = vertebrae_sacrum_client::SacrumWorkflowService::new(client);
-
-    service
-        .update_workflow(&wf_id, UpdateWorkflowOptions::new().with_is_final(true))
-        .await
-        .expect("failed to mark workflow as final");
 }
 
 #[given("I assign the workflow to the task")]

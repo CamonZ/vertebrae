@@ -74,7 +74,7 @@
   --color-info: oklch(0.78 0.13 220);
   --color-info-wash: oklch(0.32 0.1 220);
 
-  /* Step types — FIVE Vertebrae step kinds, each with bar / wash / fg variants.
+  /* Step types — SIX Vertebrae step kinds, each with bar / wash / fg variants.
      bar  = top accent strip on a step node
      wash = subtle background tint on tinted surfaces
      fg   = readable foreground on the wash background */
@@ -97,6 +97,10 @@
   --color-step-wait: oklch(0.62 0.04 250); /* slate — paused on children */
   --color-step-wait-wash: oklch(0.28 0.02 250);
   --color-step-wait-fg: oklch(0.75 0.04 250);
+
+  --color-step-finish: oklch(0.78 0.15 145); /* green — completes the task */
+  --color-step-finish-wash: oklch(0.32 0.1 145);
+  --color-step-finish-fg: oklch(0.88 0.14 145);
 
   /* ---------------------------------------------------------------------------
      TYPOGRAPHY — three stacks
@@ -242,6 +246,9 @@
   --step-wait: var(--color-step-wait);
   --step-wait-wash: var(--color-step-wait-wash);
   --step-wait-fg: var(--color-step-wait-fg);
+  --step-finish: var(--color-step-finish);
+  --step-finish-wash: var(--color-step-finish-wash);
+  --step-finish-fg: var(--color-step-finish-fg);
 
   /* Typography */
   --serif: var(--font-serif);
@@ -405,6 +412,10 @@
   --color-step-wait: oklch(0.5 0.04 250);
   --color-step-wait-wash: oklch(0.92 0.02 250);
   --color-step-wait-fg: oklch(0.42 0.04 250);
+
+  --color-step-finish: oklch(0.55 0.15 145);
+  --color-step-finish-wash: oklch(0.93 0.06 145);
+  --color-step-finish-fg: oklch(0.45 0.15 145);
 
   /* Light-mode shadows carry visible elevation */
   --shadow-1: 0 1px 2px rgba(20, 20, 20, 0.08);
@@ -3772,6 +3783,11 @@ html.window-transparent #root {
   --kc: var(--step-wait);
   --kf: var(--step-wait-fg);
   --kw: var(--step-wait-wash);
+}
+.k-finish {
+  --kc: var(--step-finish);
+  --kf: var(--step-finish-fg);
+  --kw: var(--step-finish-wash);
 }
 
 /* ── Edge (.gedge) — link/transition vocabulary ─────────────────────────────

@@ -193,6 +193,11 @@ pub struct RunStepPayload {
     /// Additional agent configuration.
     #[serde(default)]
     pub agent_config: serde_json::Value,
+    /// Wire step type. Finish steps are completed by Sacrum and must never be
+    /// handed to the daemon's provider executor, even if a stale or malformed
+    /// channel event reaches the daemon.
+    #[serde(default)]
+    pub step_type: Option<String>,
     /// Optional worktree path override for the execution directory.
     /// When present, the daemon uses this instead of the project root.
     #[serde(default)]
@@ -226,6 +231,15 @@ pub struct CancelStepPayload {
 pub fn parse_run_step_payload(payload: &serde_json::Value) -> Result<RunStepPayload, String> {
     serde_json::from_value(payload.clone())
         .map_err(|e| format!("Failed to parse run_step payload: {e}"))
+}
+
+/// Whether a parsed run-step payload represents a server-side finish step.
+///
+/// Sacrum normally never broadcasts `run_step` for finish steps. Keeping this
+/// guard in the daemon makes that invariant defensive across rolling upgrades
+/// and prevents a promptless finish from being turned into provider work.
+pub fn should_dispatch_run_step(payload: &RunStepPayload) -> bool {
+    !matches!(payload.step_type.as_deref(), Some("finish"))
 }
 
 /// Parse a `cancel_step` event payload into a strongly-typed struct.
@@ -492,6 +506,16 @@ impl ProjectSupervisor {
                         payload.id,
                         payload.task_id,
                     );
+
+                    if !should_dispatch_run_step(&payload) {
+                        tracing::warn!(
+                            "[project:{}] ignoring run_step for server-side finish step: execution_id={}, task_id={}",
+                            state.project_id,
+                            payload.id,
+                            payload.task_id,
+                        );
+                        return;
+                    }
 
                     let verbose = payload.verbose_daemon_logging;
 
@@ -1191,6 +1215,20 @@ mod tests {
         assert!(result.agents.is_empty());
         assert!(result.skills.is_empty());
         assert_eq!(result.agent_config, serde_json::Value::Null);
+        assert!(should_dispatch_run_step(&result));
+    }
+
+    #[test]
+    fn finish_run_step_payload_is_not_dispatchable() {
+        let payload = serde_json::json!({
+            "id": "exec-finish",
+            "task_id": "task-finish",
+            "step_type": "finish"
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert_eq!(result.step_type.as_deref(), Some("finish"));
+        assert!(!should_dispatch_run_step(&result));
     }
 
     #[test]
@@ -1269,6 +1307,21 @@ mod tests {
     fn classify_cancel_step_event() {
         let m = msg("project:proj-1", "cancel_step", serde_json::json!({}));
         assert_eq!(classify_project_event(&m), ProjectAction::CancelStep);
+    }
+
+    #[test]
+    fn classify_task_run_completion_as_task_event() {
+        let m = msg(
+            "project:proj-1",
+            "task_run_completed",
+            serde_json::json!({"task_id": "task-1"}),
+        );
+        assert_eq!(
+            classify_project_event(&m),
+            ProjectAction::TaskEvent {
+                event: "task_run_completed".to_string()
+            }
+        );
     }
 
     // ===== build_step_config_from_payload tests =====
@@ -1557,6 +1610,7 @@ mod tests {
             skills: Vec::new(),
             worktree: None,
             output_schema: Some(serde_json::Value::Null),
+            step_type: None,
             verbose_daemon_logging: false,
         };
 

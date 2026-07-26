@@ -146,6 +146,8 @@ async fn create_workflow_and_step(world: &mut DaemonWorld, output_schema: Option
             &wf_name,
             "--step",
             "run:claude-sonnet-4-6",
+            "--step",
+            "finish:claude-sonnet-4-6",
         ])
         .await;
     world.assert_vtb_ok("workflow add");
@@ -171,11 +173,19 @@ async fn create_workflow_and_step(world: &mut DaemonWorld, output_schema: Option
     let step_id = step["id"].as_str().unwrap().to_string();
     world.step_id = Some(step_id.clone());
 
-    // Execution-complete transitions require the step to be marked final.
+    let finish_step_id = arr
+        .iter()
+        .find(|v| v["name"].as_str() == Some("finish"))
+        .unwrap_or_else(|| panic!("step 'finish' not found in list: {arr:?}"))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Execution completion transitions into the explicit finish step.
     world
-        .run_vtb(&["step", "update", &step_id, "--final", "true"])
+        .run_vtb(&["step", "update", &finish_step_id, "--step-type", "finish"])
         .await;
-    world.assert_vtb_ok("step update --final");
+    world.assert_vtb_ok("step update --step-type finish");
 
     if let Some(schema_json) = output_schema {
         world

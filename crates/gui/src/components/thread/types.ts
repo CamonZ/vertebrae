@@ -83,17 +83,23 @@ export interface ThreadCapabilities {
 // ===========================================================================
 
 /**
- * The five Vertebrae step kinds plus the subagent fallback. Drives the tick /
+ * The six Vertebrae step kinds plus the subagent fallback. Drives the tick /
  * kind-badge color (--step-execute / -eval / -route / -human / -wait) and the
  * subthread spine color. Maps from Sacrum `StepType`:
  *   execute       → "execute"
  *   evaluate      → "eval"
  *   route         → "route"
  *   human_input   → "human"
- *   wait_children → "wait"
+ *   wait_children → "wait", finish → "finish"
  * A spawned subagent thread that carries no step uses "execute" by default.
  */
-export type StepKind = "execute" | "eval" | "route" | "human" | "wait";
+export type StepKind =
+  | "execute"
+  | "eval"
+  | "route"
+  | "human"
+  | "wait"
+  | "finish";
 
 /**
  * Status of a thread / subthread, used by the subthread summary status mark
