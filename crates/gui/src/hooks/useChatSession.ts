@@ -38,6 +38,7 @@ export function useChatSession(sessionId: string) {
     startSession,
     sendMessage,
     closeLocalChatSession,
+    stopActiveTurn,
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
@@ -270,31 +271,27 @@ export function useChatSession(sessionId: string) {
     ];
   }, [sessionMessages, streamingAssistant]);
 
-  const hasStreamingOverlay = !!streamingAssistant;
-  const isWaiting =
-    (lifecycle === "sending" ||
-      lifecycle === "streaming" ||
-      (isActive && lifecycle !== "error")) &&
-    !hasStreamingOverlay &&
-    messages.length > 0 &&
-    messages[messages.length - 1].kind === "user";
+  const activeTurn = session?.activeTurn ?? null;
+  const isWaiting = activeTurn !== null;
+  const activityLabel =
+    activeTurn?.phase === "stopping" ? "Stopping..." : "Thinking...";
 
   const assistantLabel = session
     ? harnessDisplayName(session.harness)
     : "Assistant";
 
   // --- Stop generation ---
+  // "closing" covers a Clear that is already tearing this backend session
+  // down; without it Stop stays live and issues a second concurrent close.
   const canStopGeneration =
     !!session?.backendSessionId &&
-    (lifecycle === "starting" ||
-      lifecycle === "resuming" ||
-      lifecycle === "sending" ||
-      lifecycle === "streaming");
+    lifecycle !== "closing" &&
+    activeTurn !== null &&
+    activeTurn.phase !== "stopping";
 
   const handleStopGeneration = useCallback(async () => {
-    if (!session?.backendSessionId) return;
-    await closeLocalChatSession({ markClosed: false });
-  }, [closeLocalChatSession, session?.backendSessionId]);
+    await stopActiveTurn();
+  }, [stopActiveTurn]);
 
   useEffect(() => {
     if (!canStopGeneration) return;
@@ -415,8 +412,8 @@ export function useChatSession(sessionId: string) {
     submitLabel,
     composerPlaceholder,
     canStopGeneration,
-    hasStreamingOverlay,
     isWaiting,
+    activityLabel,
     hasPendingUserQuestion,
 
     // harness catalog

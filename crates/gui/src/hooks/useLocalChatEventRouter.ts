@@ -19,6 +19,8 @@ import {
   useChatStore,
 } from "../stores/chatStore";
 import {
+  currentActiveTurnLocalId,
+  currentBackendSessionId,
   doSendMessage,
   doStartSession,
   handleEndEvent,
@@ -48,6 +50,11 @@ type RootTurnRoutingState = {
 };
 const rootTurnByBackendSessionId = new Map<string, RootTurnRoutingState>();
 
+/** Reset module-level turn correlation between isolated test cases. */
+export function resetLocalChatTurnRoutingForTests() {
+  rootTurnByBackendSessionId.clear();
+}
+
 type CorrelatedEvent = {
   turn_id?: string | null;
   is_root?: boolean;
@@ -65,15 +72,19 @@ function resolveSessionId(backendSessionId: string | null | undefined) {
 }
 
 function matchesActiveRootTurn(
+  sessionId: string,
   backendSessionId: string,
   payload: CorrelatedEvent
 ): boolean {
-  return (
-    payload.is_root === true &&
-    !!payload.turn_id &&
-    rootTurnByBackendSessionId.get(backendSessionId)?.phase === "active" &&
-    rootTurnByBackendSessionId.get(backendSessionId)?.turnId === payload.turn_id
-  );
+  if (payload.is_root !== true || !payload.turn_id) return false;
+  const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
+  if (activeTurn) return activeTurn.turnId === payload.turn_id;
+  // No locally tracked turn: the store never began one, or an earlier failure
+  // settled it while the provider kept running. Fall back to routing state so
+  // a real terminal event still returns the session to idle instead of
+  // stranding it mid-turn.
+  const routed = rootTurnByBackendSessionId.get(backendSessionId);
+  return routed?.phase === "active" && routed.turnId === payload.turn_id;
 }
 
 function shouldRouteContentEvent(
@@ -98,11 +109,21 @@ export function routeLocalChatTurnStartedEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId || !payload.is_root || !payload.turn_id) return false;
+  const routedTurn = rootTurnByBackendSessionId.get(payload.backend_session_id);
+  if (
+    routedTurn?.phase === "settled" &&
+    routedTurn.turnId === payload.turn_id
+  ) {
+    return false;
+  }
+  // Content routing must follow the provider even when the store declines the
+  // bind (no local turn, or a duplicate start). Dropping the routing update
+  // would silently discard every event of this turn.
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
     turnId: payload.turn_id,
     phase: "active",
   });
-  return true;
+  return useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id);
 }
 
 export function routeLocalChatSessionInitEvent(
@@ -247,23 +268,27 @@ export function routeLocalChatSessionEndEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
-  if (!matchesActiveRootTurn(payload.backend_session_id, payload)) {
+  if (!matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)) {
     return false;
   }
+  const wasStopping =
+    useChatStore.getState().sessions[sessionId]?.activeTurn?.phase ===
+    "stopping";
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
     turnId: payload.turn_id,
     phase: "settled",
   });
   const store = useChatStore.getState();
+  store.settleActiveTurn(sessionId, payload.turn_id);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
     payload.backend_session_id,
     sessionId,
-    store.setSessionLifecycle,
+    wasStopping ? () => {} : store.setSessionLifecycle,
     store.clearStreamingAssistant
   );
-  void flushNextQueuedMessage(sessionId);
+  if (!wasStopping) void flushNextQueuedMessage(sessionId);
   return true;
 }
 
@@ -283,11 +308,21 @@ export function routeLocalChatSessionErrorEvent(
   }
   if (
     payload.turn_id &&
-    !matchesActiveRootTurn(payload.backend_session_id, payload)
+    !matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)
   ) {
     return false;
   }
-  rootTurnByBackendSessionId.delete(payload.backend_session_id);
+  if (payload.turn_id) {
+    rootTurnByBackendSessionId.set(payload.backend_session_id, {
+      turnId: payload.turn_id,
+      phase: "settled",
+    });
+  } else {
+    rootTurnByBackendSessionId.delete(payload.backend_session_id);
+  }
+  // A root error with no turn id is session-fatal: clear whatever turn is
+  // tracked. A correlated one only clears the turn it matched above.
+  store.settleActiveTurn(sessionId, payload.turn_id ?? null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
@@ -344,7 +379,11 @@ export async function flushNextQueuedMessage(
         addMessage: store.addMessage,
         setSessionLifecycle: store.setSessionLifecycle,
         markStreamingIfSending: store.markStreamingIfSending,
+        beginActiveTurn: store.beginActiveTurn,
+        settleActiveTurn: store.settleActiveTurn,
         setBackendSessionId: store.setBackendSessionId,
+        getActiveTurnLocalId: currentActiveTurnLocalId,
+        getBackendSessionId: currentBackendSessionId,
       },
       { addUserMessage: false }
     );
@@ -359,6 +398,10 @@ export async function flushNextQueuedMessage(
       addMessage: store.addMessage,
       setSessionTitleCandidate: store.setSessionTitleCandidate,
       setSessionLifecycle: store.setSessionLifecycle,
+      beginActiveTurn: store.beginActiveTurn,
+      settleActiveTurn: store.settleActiveTurn,
+      getActiveTurnLocalId: currentActiveTurnLocalId,
+      getBackendSessionId: currentBackendSessionId,
     },
     content,
     { addUserMessage: false }

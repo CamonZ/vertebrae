@@ -376,6 +376,52 @@ export function handleWarningEvent(
 
 // --- Extracted session lifecycle functions ---
 
+/**
+ * Identity probes for the session a lifecycle call started out owning.
+ *
+ * Every lifecycle call awaits an IPC round trip, during which a Stop or a
+ * replacement turn can take the session somewhere else. Writing the result
+ * back unconditionally is how a resolved-too-late call resurrects a lifecycle
+ * that no longer exists or tears down a session that already moved on.
+ */
+export interface TurnOwnershipDeps {
+  getActiveTurnLocalId?: (id: string) => string | null;
+  getBackendSessionId?: (id: string) => string | null;
+}
+
+export function currentBackendSessionId(sessionId: string): string | null {
+  return useChatStore.getState().sessions[sessionId]?.backendSessionId ?? null;
+}
+
+export function currentActiveTurnLocalId(sessionId: string): string | null {
+  return (
+    useChatStore.getState().sessions[sessionId]?.activeTurn?.localId ?? null
+  );
+}
+
+function makeStalenessCheck(
+  deps: TurnOwnershipDeps,
+  sessionId: string | null,
+  backendSessionId: string | null,
+  expectedActiveTurnLocalId?: string | null
+): () => boolean {
+  return () => {
+    if (!sessionId) return false;
+    if (
+      deps.getBackendSessionId &&
+      backendSessionId !== null &&
+      deps.getBackendSessionId(sessionId) !== backendSessionId
+    ) {
+      return true;
+    }
+    if (!expectedActiveTurnLocalId) return false;
+    const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
+    return (
+      currentLocalId !== null && currentLocalId !== expectedActiveTurnLocalId
+    );
+  };
+}
+
 export async function doStartSession(
   session: ChatSession,
   sessionId: string,
@@ -392,16 +438,27 @@ export async function doStartSession(
       lifecycle: LocalChatLifecycle,
       errorMessage?: string | null
     ) => void;
-  },
+    beginActiveTurn?: (id: string) => string | null;
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
+  } & TurnOwnershipDeps,
   userMessage?: string,
   options: { addUserMessage?: boolean } = {}
 ) {
   const resumeId = session.providerResumeId;
   deps.setSessionLifecycle(sessionId, resumeId ? "resuming" : "starting");
+  const activeTurnLocalId = userMessage
+    ? (deps.beginActiveTurn?.(sessionId) ?? null)
+    : null;
 
   const backendSessionId = `local-${sessionId}-${Date.now()}`;
   deps.setBackendSessionId(sessionId, backendSessionId);
   deps.setBackendSessionIdRef?.(backendSessionId);
+  const completionIsStale = makeStalenessCheck(
+    deps,
+    sessionId,
+    backendSessionId,
+    activeTurnLocalId
+  );
 
   try {
     const initialPrompt = userMessage || undefined;
@@ -455,8 +512,13 @@ export async function doStartSession(
     if (result.status === "error") {
       throw new Error(commandErrorMessage(result.error));
     }
+    // A Stop (or a replacement start) that landed while this create was in
+    // flight already nulled the backend session. Writing "streaming" back here
+    // strands the session busy with nothing running and no way to recover.
+    if (completionIsStale()) return;
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
   } catch (error) {
+    if (completionIsStale()) return;
     const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
     deps.setBackendSessionIdRef?.(null);
@@ -465,6 +527,7 @@ export async function doStartSession(
       message,
       timestamp: new Date().toISOString(),
     });
+    if (userMessage) deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", message);
   }
 }
@@ -481,11 +544,20 @@ export async function doSendMessage(
       errorMessage?: string | null
     ) => void;
     markStreamingIfSending: (id: string) => void;
+    beginActiveTurn?: (id: string) => string | null;
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
     setBackendSessionId?: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
-  },
+  } & TurnOwnershipDeps,
   options: { addUserMessage?: boolean } = {}
 ) {
+  const activeTurnLocalId = deps.beginActiveTurn?.(sessionId) ?? null;
+  const completionIsStale = makeStalenessCheck(
+    deps,
+    sessionId,
+    backendSessionId,
+    activeTurnLocalId
+  );
   deps.setSessionLifecycle(sessionId, "sending");
   if (options.addUserMessage !== false) {
     deps.addMessage(sessionId, {
@@ -500,18 +572,28 @@ export async function doSendMessage(
       backendSessionId,
       content
     );
+    // Gate before any write: settling or erroring unconditionally here would
+    // clear whichever turn is current, including a replacement started after
+    // this send was abandoned by a Stop.
+    if (completionIsStale()) return;
     if (result.status === "error") {
-      const message = commandErrorMessage(result.error);
       if (isSessionNotFoundError(result.error)) {
         deps.setBackendSessionId?.(sessionId, null);
         deps.setBackendSessionIdRef?.(null);
       }
-      throw new Error(message);
+      deps.settleActiveTurn?.(sessionId);
+      deps.setSessionLifecycle(
+        sessionId,
+        "error",
+        commandErrorMessage(result.error)
+      );
+      return;
     }
     deps.markStreamingIfSending(sessionId);
   } catch (error) {
-    const message = commandErrorMessage(error);
-    deps.setSessionLifecycle(sessionId, "error", message);
+    if (completionIsStale()) return;
+    deps.settleActiveTurn?.(sessionId);
+    deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
   }
 }
 
@@ -529,8 +611,21 @@ export async function doCloseSession(
     setBackendSessionIdRef?: (backendId: string | null) => void;
     clearQueuedMessages?: (id: string) => void;
     markPendingUserQuestionsUnavailable?: (id: string) => void;
-  }
+    settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
+    restoreActiveTurn?: (id: string, localId: string) => boolean;
+  } & TurnOwnershipDeps,
+  options: {
+    expectedActiveTurnLocalId?: string;
+    failureLifecycle?: LocalChatLifecycle;
+  } = {}
 ): Promise<boolean> {
+  const completionIsStale = makeStalenessCheck(
+    deps,
+    sessionId,
+    backendSessionId,
+    options.expectedActiveTurnLocalId
+  );
+
   if (sessionId) {
     deps.setSessionLifecycle(sessionId, "closing");
   }
@@ -539,11 +634,13 @@ export async function doCloseSession(
     const result = await commands.closeLocalChatSession(backendSessionId);
     if (result.status === "error") {
       if (isSessionNotFoundError(result.error)) {
+        if (completionIsStale()) return true;
         if (sessionId) {
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
           deps.clearQueuedMessages?.(sessionId);
           deps.markPendingUserQuestionsUnavailable?.(sessionId);
+          deps.settleActiveTurn?.(sessionId);
         }
         deps.setBackendSessionIdRef?.(null);
         return true;
@@ -551,16 +648,37 @@ export async function doCloseSession(
       throw new Error(commandErrorMessage(result.error));
     }
     if (sessionId) {
+      if (completionIsStale()) return true;
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
       deps.markPendingUserQuestionsUnavailable?.(sessionId);
+      deps.settleActiveTurn?.(sessionId);
     }
     deps.setBackendSessionIdRef?.(null);
     return true;
   } catch (error) {
     if (sessionId) {
-      deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+      if (completionIsStale()) return false;
+      const expectedLocalId = options.expectedActiveTurnLocalId;
+      const currentLocalId = deps.getActiveTurnLocalId?.(sessionId) ?? null;
+      if (expectedLocalId) {
+        if (currentLocalId === expectedLocalId) {
+          deps.restoreActiveTurn?.(sessionId, expectedLocalId);
+          deps.setSessionLifecycle(
+            sessionId,
+            options.failureLifecycle ?? "streaming"
+          );
+        } else if (currentLocalId === null) {
+          deps.setSessionLifecycle(sessionId, "idle");
+        }
+      } else {
+        deps.setSessionLifecycle(
+          sessionId,
+          "error",
+          commandErrorMessage(error)
+        );
+      }
     }
     return false;
   }
@@ -586,6 +704,10 @@ export function useLocalChat(sessionId: string | null) {
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const markStreamingIfSending = useChatStore((s) => s.markStreamingIfSending);
+  const beginActiveTurn = useChatStore((s) => s.beginActiveTurn);
+  const settleActiveTurn = useChatStore((s) => s.settleActiveTurn);
+  const markActiveTurnStopping = useChatStore((s) => s.markActiveTurnStopping);
+  const restoreActiveTurn = useChatStore((s) => s.restoreActiveTurn);
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
   const markPendingUserQuestionsUnavailable = useChatStore(
@@ -614,6 +736,10 @@ export function useLocalChat(sessionId: string | null) {
           addMessage,
           setSessionTitleCandidate,
           setSessionLifecycle,
+          beginActiveTurn,
+          settleActiveTurn,
+          getActiveTurnLocalId: currentActiveTurnLocalId,
+          getBackendSessionId: currentBackendSessionId,
         },
         userMessage
       );
@@ -625,6 +751,8 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       setSessionLifecycle,
       setSessionTitleCandidate,
+      beginActiveTurn,
+      settleActiveTurn,
     ]
   );
 
@@ -671,7 +799,11 @@ export function useLocalChat(sessionId: string | null) {
         addMessage,
         setSessionLifecycle,
         markStreamingIfSending,
+        beginActiveTurn,
+        settleActiveTurn,
         setBackendSessionId,
+        getActiveTurnLocalId: currentActiveTurnLocalId,
+        getBackendSessionId: currentBackendSessionId,
       });
     },
     [
@@ -683,6 +815,8 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       setSessionTitleCandidate,
       enqueueQueuedMessage,
+      beginActiveTurn,
+      settleActiveTurn,
     ]
   );
 
@@ -701,6 +835,7 @@ export function useLocalChat(sessionId: string | null) {
         setBackendSessionId,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
+        settleActiveTurn,
       });
     },
     [
@@ -711,8 +846,55 @@ export function useLocalChat(sessionId: string | null) {
       setBackendSessionId,
       clearQueuedMessages,
       markPendingUserQuestionsUnavailable,
+      settleActiveTurn,
     ]
   );
+
+  const stopActiveTurn = useCallback(async () => {
+    if (!session?.backendSessionId || !sessionId) return false;
+    const activeTurn = session.activeTurn;
+    if (!activeTurn) return false;
+    // Restore whatever the turn was actually doing, not an assumed "streaming":
+    // a stop during start-up must not report a stream that never began.
+    const failureLifecycle: LocalChatLifecycle =
+      session.lifecycle === "sending" ||
+      session.lifecycle === "starting" ||
+      session.lifecycle === "resuming"
+        ? session.lifecycle
+        : "streaming";
+    if (!markActiveTurnStopping(sessionId)) return false;
+    return doCloseSession(
+      session.backendSessionId,
+      sessionId,
+      {
+        markSessionClosed: (id) => setSessionLifecycle(id, "idle"),
+        setSessionLifecycle,
+        setBackendSessionId,
+        clearQueuedMessages,
+        markPendingUserQuestionsUnavailable,
+        settleActiveTurn,
+        getActiveTurnLocalId: currentActiveTurnLocalId,
+        getBackendSessionId: currentBackendSessionId,
+        restoreActiveTurn,
+      },
+      {
+        expectedActiveTurnLocalId: activeTurn.localId,
+        failureLifecycle,
+      }
+    );
+  }, [
+    session?.backendSessionId,
+    session?.activeTurn,
+    session?.lifecycle,
+    sessionId,
+    markActiveTurnStopping,
+    restoreActiveTurn,
+    setSessionLifecycle,
+    setBackendSessionId,
+    clearQueuedMessages,
+    markPendingUserQuestionsUnavailable,
+    settleActiveTurn,
+  ]);
 
   const isActive =
     session?.status === "open" &&
@@ -727,6 +909,7 @@ export function useLocalChat(sessionId: string | null) {
     startSession,
     sendMessage,
     closeLocalChatSession,
+    stopActiveTurn,
   };
 }
 

@@ -84,6 +84,7 @@ export function ChatWindow({
         isEmpty={isEmpty}
         isActive={chat.isActive}
         isWaiting={chat.isWaiting}
+        activityLabel={chat.activityLabel}
         streamingAssistant={chat.session.streamingAssistant}
       />
       <ChatComposer
