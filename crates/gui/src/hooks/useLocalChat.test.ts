@@ -1429,6 +1429,99 @@ describe("doStartSession", () => {
       "claude missing"
     );
   });
+
+  it("begins and settles a turn only for a prompted start", async () => {
+    const withPrompt = {
+      setBackendSessionId: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      beginActiveTurn: vi.fn(() => "local-turn-1"),
+      settleActiveTurn: vi.fn(),
+    };
+    await doStartSession(makeSession(), SESSION_ID, withPrompt, "hello");
+    expect(withPrompt.beginActiveTurn).toHaveBeenCalledWith(SESSION_ID);
+    expect(withPrompt.settleActiveTurn).not.toHaveBeenCalled();
+    expect(withPrompt.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "streaming"
+    );
+
+    const withoutPrompt = {
+      setBackendSessionId: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      beginActiveTurn: vi.fn(() => "local-turn-2"),
+      settleActiveTurn: vi.fn(),
+    };
+    await doStartSession(makeSession(), SESSION_ID, withoutPrompt);
+    expect(withoutPrompt.beginActiveTurn).not.toHaveBeenCalled();
+    expect(withoutPrompt.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "idle"
+    );
+  });
+
+  it("settles the started turn when createLocalChatSession fails", async () => {
+    mockedCommands.createLocalChatSession.mockResolvedValueOnce({
+      status: "error",
+      error: { SpawnFailed: "claude missing" },
+    } as never);
+    const deps = {
+      setBackendSessionId: vi.fn(),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      beginActiveTurn: vi.fn(() => "local-turn-1"),
+      settleActiveTurn: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => "local-turn-1"),
+      getBackendSessionId: vi.fn(
+        () => deps.setBackendSessionId.mock.calls[0]?.[1] ?? null
+      ),
+    };
+
+    await doStartSession(makeSession(), SESSION_ID, deps, "hello");
+
+    expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.setSessionLifecycle).toHaveBeenLastCalledWith(
+      SESSION_ID,
+      "error",
+      "claude missing"
+    );
+  });
+
+  it("does not resurrect a lifecycle when a stop lands before the start resolves", async () => {
+    const create = deferredCommandResult();
+    mockedCommands.createLocalChatSession.mockReturnValueOnce(
+      create.promise as never
+    );
+    // The stop nulls the backend id and settles the turn while the create is
+    // still in flight; the late success must not write anything back.
+    let backendSessionId: string | null = null;
+    let activeTurnLocalId: string | null = "local-turn-1";
+    const deps = {
+      setBackendSessionId: vi.fn((_id: string, backendId: string | null) => {
+        backendSessionId = backendId;
+      }),
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      beginActiveTurn: vi.fn(() => "local-turn-1"),
+      settleActiveTurn: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => activeTurnLocalId),
+      getBackendSessionId: vi.fn(() => backendSessionId),
+    };
+
+    const starting = doStartSession(makeSession(), SESSION_ID, deps, "hello");
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    backendSessionId = null;
+    activeTurnLocalId = null;
+    deps.setSessionLifecycle.mockClear();
+    create.resolve({ status: "ok" });
+    await starting;
+
+    expect(deps.setSessionLifecycle).not.toHaveBeenCalled();
+  });
 });
 
 describe("doSendMessage", () => {
@@ -1701,6 +1794,37 @@ describe("doSendMessage", () => {
       permission_mode: "default",
     });
   });
+
+  it("does not settle a replacement turn when an abandoned send fails late", async () => {
+    const firstSend = deferredCommandResult();
+    mockedCommands.sendLocalChatMessage.mockReturnValueOnce(
+      firstSend.promise as never
+    );
+    let activeTurnLocalId: string | null = "local-turn-1";
+    let backendSessionId: string | null = CLAUDE_SESSION_ID;
+    const deps = {
+      addMessage: vi.fn(),
+      setSessionLifecycle: vi.fn(),
+      markStreamingIfSending: vi.fn(),
+      beginActiveTurn: vi.fn(() => activeTurnLocalId),
+      settleActiveTurn: vi.fn(),
+      setBackendSessionId: vi.fn(),
+      getActiveTurnLocalId: vi.fn(() => activeTurnLocalId),
+      getBackendSessionId: vi.fn(() => backendSessionId),
+    };
+
+    const sending = doSendMessage(CLAUDE_SESSION_ID, SESSION_ID, "hi", deps);
+
+    // Stop tears the first turn down, then the user starts a fresh one.
+    activeTurnLocalId = "local-turn-2";
+    backendSessionId = "replacement-backend";
+    deps.setSessionLifecycle.mockClear();
+    firstSend.resolve({ status: "error" } as never);
+    await sending;
+
+    expect(deps.settleActiveTurn).not.toHaveBeenCalled();
+    expect(deps.setSessionLifecycle).not.toHaveBeenCalled();
+  });
 });
 
 describe("doCloseSession", () => {
@@ -1817,15 +1941,10 @@ describe("doCloseSession", () => {
       restoreActiveTurn: vi.fn(() => true),
     };
 
-    const closed = await doCloseSession(
-      CLAUDE_SESSION_ID,
-      SESSION_ID,
-      deps,
-      {
-        expectedActiveTurnLocalId: "local-turn-1",
-        failureLifecycle: "streaming",
-      }
-    );
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, SESSION_ID, deps, {
+      expectedActiveTurnLocalId: "local-turn-1",
+      failureLifecycle: "streaming",
+    });
 
     expect(closed).toBe(false);
     expect(deps.restoreActiveTurn).toHaveBeenCalledWith(

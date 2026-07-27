@@ -1,7 +1,11 @@
 /**
  * Thinking indicator shown while waiting for Claude to respond
  */
-export function ThinkingIndicator({ label = "Thinking..." }: { label?: string }) {
+export function ThinkingIndicator({
+  label = "Thinking...",
+}: {
+  label?: string;
+}) {
   return (
     <div className="flex justify-start">
       <div className="flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] px-4 py-3">

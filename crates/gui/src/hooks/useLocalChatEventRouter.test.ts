@@ -392,9 +392,7 @@ describe("useLocalChatEventRouter route functions", () => {
       }),
     });
     startTurn("backend-local", "turn-stopping");
-    expect(
-      useChatStore.getState().markActiveTurnStopping("local")
-    ).toBe(true);
+    expect(useChatStore.getState().markActiveTurnStopping("local")).toBe(true);
     useChatStore.getState().setSessionLifecycle("local", "closing");
 
     expect(
@@ -935,9 +933,10 @@ describe("useLocalChatEventRouter route functions", () => {
       expect(useChatStore.getState().sessions.local.lifecycle).toBe(
         "streaming"
       );
-      expect(
-        useChatStore.getState().sessions.local.activeTurn
-      ).toMatchObject({ turnId: null, phase: "starting" });
+      expect(useChatStore.getState().sessions.local.activeTurn).toMatchObject({
+        turnId: null,
+        phase: "starting",
+      });
       expect(
         useChatStore.getState().sessions.local.activeTurn?.localId
       ).not.toBe(firstLocalTurnId);
@@ -1082,5 +1081,118 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(local.backendSessionId).toBe("backend-new");
     expect(local.lifecycle).toBe("streaming");
     expect(local.messages).toEqual([]);
+  });
+
+  it("keeps routing content when a new root turn replaces a stale binding", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-stale",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-stale", "turn-1");
+
+    // The terminal event for turn-1 never arrived. A refused re-bind would
+    // leave the routing map pointing at turn-1 and blank the entire turn.
+    startTurn("backend-stale", "turn-2");
+    expect(useChatStore.getState().sessions.local.activeTurn).toMatchObject({
+      turnId: "turn-2",
+      phase: "active",
+    });
+
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-stale",
+        harness: "claude",
+        turn_id: "turn-2",
+        thread_id: "backend-stale-thread",
+        is_root: true,
+        text: "second turn answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-stale",
+        harness: "claude",
+        turn_id: "turn-2",
+        thread_id: "backend-stale-thread",
+        is_root: true,
+        duration_ms: 5,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "ok",
+        is_error: false,
+        context_tokens: 1,
+        context_window: 200000,
+      })
+    ).toBe(true);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.lifecycle).toBe("idle");
+    expect(local.activeTurn).toBeNull();
+    expect(local.messages).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "second turn answer",
+      }),
+    ]);
+  });
+
+  it("still routes and settles a root turn the store never began", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-unbegun",
+        lifecycle: "streaming",
+      }),
+    });
+
+    // No local turn to bind, so the store declines — routing must not go dark.
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-unbegun",
+        harness: "claude",
+        turn_id: "turn-x",
+        thread_id: "backend-unbegun-thread",
+        is_root: true,
+      })
+    ).toBe(false);
+    expect(
+      routeLocalChatTextEvent({
+        backend_session_id: "backend-unbegun",
+        harness: "claude",
+        turn_id: "turn-x",
+        thread_id: "backend-unbegun-thread",
+        is_root: true,
+        text: "unbegun answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      })
+    ).toBe(true);
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-unbegun",
+        harness: "claude",
+        turn_id: "turn-x",
+        thread_id: "backend-unbegun-thread",
+        is_root: true,
+        duration_ms: 5,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "ok",
+        is_error: false,
+        context_tokens: 1,
+        context_window: 200000,
+      })
+    ).toBe(true);
+
+    const local = useChatStore.getState().sessions.local;
+    expect(local.lifecycle).toBe("idle");
+    expect(local.messages).toEqual([
+      expect.objectContaining({ kind: "assistant", text: "unbegun answer" }),
+    ]);
   });
 });

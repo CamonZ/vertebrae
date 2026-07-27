@@ -271,7 +271,6 @@ export function useChatSession(sessionId: string) {
     ];
   }, [sessionMessages, streamingAssistant]);
 
-  const hasStreamingOverlay = !!streamingAssistant;
   const activeTurn = session?.activeTurn ?? null;
   const isWaiting = activeTurn !== null;
   const activityLabel =
@@ -282,8 +281,11 @@ export function useChatSession(sessionId: string) {
     : "Assistant";
 
   // --- Stop generation ---
+  // "closing" covers a Clear that is already tearing this backend session
+  // down; without it Stop stays live and issues a second concurrent close.
   const canStopGeneration =
     !!session?.backendSessionId &&
+    lifecycle !== "closing" &&
     activeTurn !== null &&
     activeTurn.phase !== "stopping";
 
@@ -410,7 +412,6 @@ export function useChatSession(sessionId: string) {
     submitLabel,
     composerPlaceholder,
     canStopGeneration,
-    hasStreamingOverlay,
     isWaiting,
     activityLabel,
     hasPendingUserQuestion,

@@ -1334,13 +1334,13 @@ describe("ChatWindow", () => {
     });
 
     expect(stop).toBeDisabled();
-    expect(
-      useChatStore.getState().sessions["test-session"].activeTurn
-    ).toEqual({
-      localId: "local-turn-before-ack",
-      turnId: "provider-turn-before-ack",
-      phase: "stopping",
-    });
+    expect(useChatStore.getState().sessions["test-session"].activeTurn).toEqual(
+      {
+        localId: "local-turn-before-ack",
+        turnId: "provider-turn-before-ack",
+        phase: "stopping",
+      }
+    );
     fireEvent.click(stop);
     expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(1);
 
@@ -1405,6 +1405,50 @@ describe("ChatWindow", () => {
     expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
       lifecycle: "idle",
       backendSessionId: null,
+    });
+  });
+
+  it("disables Stop while a clear is already closing the session", async () => {
+    const user = userEvent.setup();
+    let resolveClose!: (result: { status: "ok"; data: null }) => void;
+    mockedCommands.closeLocalChatSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveClose = resolve;
+        })
+    );
+    const session = createSession({
+      backendSessionId: "claude-clear-stop",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn-clear",
+        turnId: "root-turn-clear",
+        phase: "active",
+      },
+      messages: [
+        { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTitle("Clear messages"));
+
+    // The clear owns the teardown; a second concurrent close must not be sent.
+    const stop = screen.getByTestId("local-chat-stop-generation");
+    expect(stop).toBeDisabled();
+    fireEvent.click(stop);
+    expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveClose({ status: "ok", data: null }));
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().sessions["test-session"].messages
+      ).toHaveLength(0);
     });
   });
 

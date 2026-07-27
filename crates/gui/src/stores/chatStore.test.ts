@@ -1478,7 +1478,7 @@ describe("chatStore", () => {
       expect(useChatStore.getState().sessions[id].activeTurn).toBeNull();
     });
 
-    it("binds only a pending local turn and rejects later acknowledgements", () => {
+    it("binds only a pending local turn and ignores repeat acknowledgements", () => {
       const id = useChatStore.getState().openSession("T1");
       expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
         false
@@ -1489,13 +1489,30 @@ describe("chatStore", () => {
       expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
         true
       );
-      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-2")).toBe(
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-1")).toBe(
         false
       );
 
       expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
         localId,
         turnId: "root-turn-1",
+        phase: "active",
+      });
+    });
+
+    it("re-points a stale binding when a different root turn starts", () => {
+      const id = useChatStore.getState().openSession("T1");
+      const localId = useChatStore.getState().beginActiveTurn(id);
+      useChatStore.getState().bindActiveTurn(id, "root-turn-1");
+
+      // The terminal event for root-turn-1 never arrived; a new root turn is
+      // proof it is over. Refusing here would strand the session forever.
+      expect(useChatStore.getState().bindActiveTurn(id, "root-turn-2")).toBe(
+        true
+      );
+      expect(useChatStore.getState().sessions[id].activeTurn).toEqual({
+        localId,
+        turnId: "root-turn-2",
         phase: "active",
       });
     });

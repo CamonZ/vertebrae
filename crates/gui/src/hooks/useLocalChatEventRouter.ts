@@ -19,6 +19,8 @@ import {
   useChatStore,
 } from "../stores/chatStore";
 import {
+  currentActiveTurnLocalId,
+  currentBackendSessionId,
   doSendMessage,
   doStartSession,
   handleEndEvent,
@@ -71,14 +73,18 @@ function resolveSessionId(backendSessionId: string | null | undefined) {
 
 function matchesActiveRootTurn(
   sessionId: string,
+  backendSessionId: string,
   payload: CorrelatedEvent
 ): boolean {
+  if (payload.is_root !== true || !payload.turn_id) return false;
   const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
-  return (
-    payload.is_root === true &&
-    !!payload.turn_id &&
-    activeTurn?.turnId === payload.turn_id
-  );
+  if (activeTurn) return activeTurn.turnId === payload.turn_id;
+  // No locally tracked turn: the store never began one, or an earlier failure
+  // settled it while the provider kept running. Fall back to routing state so
+  // a real terminal event still returns the session to idle instead of
+  // stranding it mid-turn.
+  const routed = rootTurnByBackendSessionId.get(backendSessionId);
+  return routed?.phase === "active" && routed.turnId === payload.turn_id;
 }
 
 function shouldRouteContentEvent(
@@ -110,14 +116,14 @@ export function routeLocalChatTurnStartedEvent(
   ) {
     return false;
   }
-  if (!useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id)) {
-    return false;
-  }
+  // Content routing must follow the provider even when the store declines the
+  // bind (no local turn, or a duplicate start). Dropping the routing update
+  // would silently discard every event of this turn.
   rootTurnByBackendSessionId.set(payload.backend_session_id, {
     turnId: payload.turn_id,
     phase: "active",
   });
-  return true;
+  return useChatStore.getState().bindActiveTurn(sessionId, payload.turn_id);
 }
 
 export function routeLocalChatSessionInitEvent(
@@ -262,7 +268,7 @@ export function routeLocalChatSessionEndEvent(
 ): boolean {
   const sessionId = resolveSessionId(payload.backend_session_id);
   if (!sessionId) return false;
-  if (!matchesActiveRootTurn(sessionId, payload)) {
+  if (!matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)) {
     return false;
   }
   const wasStopping =
@@ -273,7 +279,7 @@ export function routeLocalChatSessionEndEvent(
     phase: "settled",
   });
   const store = useChatStore.getState();
-  if (!store.settleActiveTurn(sessionId, payload.turn_id)) return false;
+  store.settleActiveTurn(sessionId, payload.turn_id);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
@@ -300,7 +306,10 @@ export function routeLocalChatSessionErrorEvent(
     });
     return true;
   }
-  if (payload.turn_id && !matchesActiveRootTurn(sessionId, payload)) {
+  if (
+    payload.turn_id &&
+    !matchesActiveRootTurn(sessionId, payload.backend_session_id, payload)
+  ) {
     return false;
   }
   if (payload.turn_id) {
@@ -311,12 +320,9 @@ export function routeLocalChatSessionErrorEvent(
   } else {
     rootTurnByBackendSessionId.delete(payload.backend_session_id);
   }
-  if (
-    store.sessions[sessionId]?.activeTurn &&
-    !store.settleActiveTurn(sessionId, payload.turn_id ?? null)
-  ) {
-    return false;
-  }
+  // A root error with no turn id is session-fatal: clear whatever turn is
+  // tracked. A correlated one only clears the turn it matched above.
+  store.settleActiveTurn(sessionId, payload.turn_id ?? null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
@@ -376,6 +382,8 @@ export async function flushNextQueuedMessage(
         beginActiveTurn: store.beginActiveTurn,
         settleActiveTurn: store.settleActiveTurn,
         setBackendSessionId: store.setBackendSessionId,
+        getActiveTurnLocalId: currentActiveTurnLocalId,
+        getBackendSessionId: currentBackendSessionId,
       },
       { addUserMessage: false }
     );
@@ -392,6 +400,8 @@ export async function flushNextQueuedMessage(
       setSessionLifecycle: store.setSessionLifecycle,
       beginActiveTurn: store.beginActiveTurn,
       settleActiveTurn: store.settleActiveTurn,
+      getActiveTurnLocalId: currentActiveTurnLocalId,
+      getBackendSessionId: currentBackendSessionId,
     },
     content,
     { addUserMessage: false }

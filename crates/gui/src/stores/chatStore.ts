@@ -505,7 +505,10 @@ interface ChatStoreActions {
   ) => void;
   /** Begin a locally accepted root turn before provider acknowledgement. */
   beginActiveTurn: (sessionId: string) => string | null;
-  /** Bind the current root turn to its provider-neutral harness identity. */
+  /**
+   * Bind the current root turn to its provider-neutral harness identity,
+   * re-pointing a stale binding whose terminal event never arrived.
+   */
   bindActiveTurn: (sessionId: string, turnId: string) => boolean;
   /** Move the current root turn into stopping exactly once. */
   markActiveTurnStopping: (sessionId: string) => boolean;
@@ -1874,7 +1877,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         sessionId,
         (session) => {
           const current = session.activeTurn;
-          if (!current || current.turnId !== null) return session;
+          if (!current || current.turnId === turnId) return session;
+          // A root turn starts once per accepted send, so a start for a
+          // different turn is proof the bound turn is stale (its terminal
+          // event never arrived). Re-point rather than refuse: refusing
+          // strands the session on a turn that can never settle.
           bound = true;
           return {
             ...session,
