@@ -72,8 +72,9 @@ pub use workflow_service::{
 
 // Re-export domain models for convenience
 pub use models::{
-    AgentConfig, BlockerNode, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section,
-    SectionType, SessionLog, Step, StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun,
-    TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
-    Workflow, WorkflowTransition,
+    AgentConfig, Artifact, BlockerNode, CodeRef, CreateArtifactInput, ExecutionStatus, Level,
+    ListArtifactInput, PermissionMode, Priority, Section, SectionType, SessionLog, Step,
+    StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun, TaskRunControls, TaskRunStatus,
+    TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage, UpdateArtifactInput, Workflow,
+    WorkflowTransition,
 };

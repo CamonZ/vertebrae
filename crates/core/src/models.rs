@@ -1010,6 +1010,170 @@ impl std::fmt::Display for Thing {
 
 // ─── Domain Models ─────────────────────────────────────────────────────────
 
+/// An artifact stored in a project (domain model).
+///
+/// Sacrum exposes the creation timestamp as `inserted_at`; the core model uses
+/// the same `created_at` name as the other domain models while accepting both
+/// wire names during deserialization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Artifact {
+    /// Unique artifact identifier.
+    pub id: String,
+
+    /// Project that owns the artifact.
+    pub project_id: String,
+
+    /// Artifact filename.
+    pub filename: String,
+
+    /// Artifact body.
+    pub body: String,
+
+    /// Creation timestamp.
+    #[serde(alias = "inserted_at")]
+    pub created_at: Option<DateTime<Utc>>,
+
+    /// Last update timestamp.
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl Artifact {
+    /// Create an artifact value without persistence timestamps.
+    pub fn new(
+        id: impl Into<String>,
+        project_id: impl Into<String>,
+        filename: impl Into<String>,
+        body: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            project_id: project_id.into(),
+            filename: filename.into(),
+            body: body.into(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+}
+
+/// Input for creating an artifact.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateArtifactInput {
+    /// Artifact filename.
+    pub filename: String,
+
+    /// Artifact body.
+    pub body: String,
+
+    /// Optional type of the artifact's direct attachment target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_type: Option<String>,
+
+    /// Optional ID of the artifact's direct attachment target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_id: Option<String>,
+}
+
+impl CreateArtifactInput {
+    /// Create input for a standalone artifact.
+    pub fn new(filename: impl Into<String>, body: impl Into<String>) -> Self {
+        Self {
+            filename: filename.into(),
+            body: body.into(),
+            subject_type: None,
+            subject_id: None,
+        }
+    }
+
+    /// Set the direct attachment target.
+    pub fn with_subject(
+        mut self,
+        subject_type: impl Into<String>,
+        subject_id: impl Into<String>,
+    ) -> Self {
+        self.subject_type = Some(subject_type.into());
+        self.subject_id = Some(subject_id.into());
+        self
+    }
+
+    /// Validate the optional direct attachment target.
+    ///
+    /// Sacrum accepts a target only when both its type and ID are supplied.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        match (&self.subject_type, &self.subject_id) {
+            (None, None) | (Some(_), Some(_)) => Ok(()),
+            _ => Err("subject_type and subject_id must be provided together"),
+        }
+    }
+}
+
+/// Input for updating an artifact.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateArtifactInput {
+    /// New artifact filename.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+
+    /// New artifact body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+impl UpdateArtifactInput {
+    /// Create empty update input.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set a new filename.
+    pub fn with_filename(mut self, filename: impl Into<String>) -> Self {
+        self.filename = Some(filename.into());
+        self
+    }
+
+    /// Set a new body.
+    pub fn with_body(mut self, body: impl Into<String>) -> Self {
+        self.body = Some(body.into());
+        self
+    }
+
+    /// Whether this input changes at least one artifact field.
+    pub fn has_updates(&self) -> bool {
+        self.filename.is_some() || self.body.is_some()
+    }
+}
+
+/// Input for listing the artifacts attached to the active project.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListArtifactInput {
+    /// Maximum number of artifacts to return.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i32>,
+
+    /// Number of artifacts to skip before returning results.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<i32>,
+}
+
+impl ListArtifactInput {
+    /// Create an input using Sacrum's default pagination.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of artifacts to return.
+    pub fn with_limit(mut self, limit: i32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Set the number of artifacts to skip.
+    pub fn with_offset(mut self, offset: i32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+}
+
 /// A task in the Vertebrae task management system (domain model)
 ///
 /// This is the canonical task type used throughout the system.
@@ -2121,6 +2285,69 @@ impl StepUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Artifact ──────────────────────────────────────────────────
+
+    #[test]
+    fn artifact_preserves_identity_and_content() {
+        let artifact = Artifact::new("artifact-1", "project-1", "notes.md", "hello");
+
+        assert_eq!(artifact.id, "artifact-1");
+        assert_eq!(artifact.project_id, "project-1");
+        assert_eq!(artifact.filename, "notes.md");
+        assert_eq!(artifact.body, "hello");
+        assert!(artifact.created_at.is_none());
+        assert!(artifact.updated_at.is_none());
+    }
+
+    #[test]
+    fn artifact_deserializes_sacrum_inserted_at_timestamp() {
+        let artifact: Artifact = serde_json::from_value(serde_json::json!({
+            "id": "artifact-1",
+            "project_id": "project-1",
+            "filename": "notes.md",
+            "body": "hello",
+            "inserted_at": "2026-07-29T12:00:00Z",
+            "updated_at": "2026-07-29T12:01:00Z"
+        }))
+        .expect("artifact response should deserialize");
+
+        assert_eq!(
+            artifact.created_at,
+            Some("2026-07-29T12:00:00Z".parse().unwrap())
+        );
+        assert_eq!(
+            artifact.updated_at,
+            Some("2026-07-29T12:01:00Z".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn create_artifact_input_requires_subject_type_and_id_together() {
+        let standalone = CreateArtifactInput::new("notes.md", "hello");
+        assert!(standalone.validate().is_ok());
+
+        let attached = standalone.clone().with_subject("task", "task-1");
+        assert!(attached.validate().is_ok());
+
+        let missing_id = CreateArtifactInput {
+            subject_type: Some("task".into()),
+            ..standalone.clone()
+        };
+        assert_eq!(
+            missing_id.validate(),
+            Err("subject_type and subject_id must be provided together")
+        );
+
+        let missing_type = CreateArtifactInput {
+            subject_id: Some("task-1".into()),
+            ..standalone
+        };
+        assert_eq!(
+            missing_type.validate(),
+            Err("subject_type and subject_id must be provided together")
+        );
+    }
 
     // ─── Task ───────────────────────────────────────────────────────
 
