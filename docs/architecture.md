@@ -32,6 +32,7 @@ flowchart TB
         WS["WorkflowService trait"]
         ES["ExecutionService trait"]
         SS["StepService trait"]
+        AS["ArtifactService trait"]
         VSvc["VertebraeServices container"]
     end
 
@@ -45,6 +46,7 @@ flowchart TB
         SWS["SacrumWorkflowService"]
         SES["SacrumExecutionService"]
         SSS["SacrumStepService"]
+        SAS["SacrumArtifactService"]
     end
 
     subgraph "Remote Backend"
@@ -60,13 +62,14 @@ flowchart TB
     Daemon --> Factory
     Factory --> Claude & Codex
 
-    VSvc --> TS & WS & ES & SS
+    VSvc --> TS & WS & ES & SS & AS
     TS -.-> STS
     WS -.-> SWS
     ES -.-> SES
     SS -.-> SSS
+    AS -.-> SAS
 
-    STS & SWS & SES & SSS --> SC
+    STS & SWS & SES & SSS & SAS --> SC
     SC -->|POST /graphql| GQL --> Sacrum
 
     GUI -.->|Real-time sync| WS2
@@ -86,10 +89,11 @@ The shared contract layer. Contains **no backend implementation** — only trait
 | `WorkflowService` | Workflow CRUD, assignment, step progression, chaining |
 | `ExecutionService` | Step execution history and session logs |
 | `StepService` | First-class workflow step CRUD |
+| `ArtifactService` | Project-scoped artifact CRUD |
 
 ### Service Container
 
-`VertebraeServices` bundles all four service traits:
+`VertebraeServices` bundles all five service traits:
 
 ```rust
 pub struct VertebraeServices {
@@ -97,6 +101,7 @@ pub struct VertebraeServices {
     pub workflows: Arc<dyn WorkflowService>,
     pub executions: Arc<dyn ExecutionService>,
     pub steps: Arc<dyn StepService>,
+    pub artifacts: Arc<dyn ArtifactService>,
 }
 ```
 
@@ -104,14 +109,14 @@ CLI, GUI, and daemon all construct it via a `from_sacrum()` factory at startup. 
 
 ### Domain Models
 
-Key types: `Task`, `Workflow`, `Step`, `Section`, `CodeRef`, `StepExecution`, `SessionLog`, `TaskFilter`, `Priority`, `Level`, `StepType`
+Key types: `Task`, `Workflow`, `Step`, `Artifact`, `Section`, `CodeRef`, `StepExecution`, `SessionLog`, `TaskFilter`, `Priority`, `Level`, `StepType`
 
 Steps carry:
 - `step_type: StepType` — `Execute` (default), `Evaluate`, or `Route`
 - `output_schema: Option<Value>` — JSON Schema for structured output enforcement
 - `agent_config: AgentConfig` — LLM configuration (model, budget, tools, permissions, json_schema)
 
-DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `StepUpdate`, etc.
+DTOs: `CreateTaskOptions`, `UpdateTaskOptions`, `CreateWorkflowOptions`, `CreateArtifactInput`, `UpdateArtifactInput`, `ListArtifactInput`, `StepUpdate`, etc.
 
 Error types: `ServiceError`, `ServiceResult`
 
@@ -205,6 +210,7 @@ See [SACRUM_CONFIG.md](SACRUM_CONFIG.md) for full reference.
 | `SacrumWorkflowService` | `WorkflowService` | Workflow GraphQL queries and mutations |
 | `SacrumExecutionService` | `ExecutionService` | Execution GraphQL queries and mutations |
 | `SacrumStepService` | `StepService` | Step GraphQL queries and mutations |
+| `SacrumArtifactService` | `ArtifactService` | Artifact GraphQL queries and mutations |
 
 ## CLI (`crates/cli`)
 
