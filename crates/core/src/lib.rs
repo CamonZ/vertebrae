@@ -32,6 +32,7 @@
 //! }
 //! ```
 
+pub mod artifact_service;
 pub mod error;
 pub mod execution_service;
 pub mod id_generator;
@@ -44,6 +45,7 @@ pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
+pub use artifact_service::ArtifactService;
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
