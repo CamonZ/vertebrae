@@ -33,8 +33,8 @@ impl ArtifactCommand {
         match self {
             Self::Add(command) => command.execute(services).await,
             Self::List(command) => command.execute(services).await,
-            Self::Show(_) => scaffold_execute(services.artifacts(), "show").await,
-            Self::Update(_) => scaffold_execute(services.artifacts(), "update").await,
+            Self::Show(command) => command.execute(services).await,
+            Self::Update(command) => command.execute(services).await,
             Self::Delete(_) => scaffold_execute(services.artifacts(), "delete").await,
         }
     }
@@ -44,8 +44,8 @@ impl ArtifactCommand {
         match self {
             Self::Add(command) => command.execute_json(services).await,
             Self::List(command) => command.execute_json(services).await,
-            Self::Show(_) => scaffold_execute_json(services.artifacts(), "show").await,
-            Self::Update(_) => scaffold_execute_json(services.artifacts(), "update").await,
+            Self::Show(command) => command.execute_json(services).await,
+            Self::Update(command) => command.execute_json(services).await,
             Self::Delete(_) => scaffold_execute_json(services.artifacts(), "delete").await,
         }
     }
@@ -144,6 +144,20 @@ fn format_artifact_list(artifacts: &[Artifact]) -> String {
         .map(|artifact| format!("{}  {}", artifact.id, artifact.filename))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn format_artifact(artifact: &Artifact) -> String {
+    let mut output = format!(
+        "Artifact: {}\nFilename: {}\nProject: {}\nBody:\n{}",
+        artifact.id, artifact.filename, artifact.project_id, artifact.body
+    );
+    if let Some(created_at) = artifact.created_at {
+        output.push_str(&format!("\nCreated: {created_at}"));
+    }
+    if let Some(updated_at) = artifact.updated_at {
+        output.push_str(&format!("\nUpdated: {updated_at}"));
+    }
+    output
 }
 
 fn artifact_operation(
@@ -315,6 +329,20 @@ pub struct ArtifactShowCommand {
     pub id: String,
 }
 
+impl ArtifactShowCommand {
+    async fn execute_result(&self, services: &VertebraeServices) -> Result<Artifact, ServiceError> {
+        services.artifacts().get_artifact(&self.id).await
+    }
+
+    async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        Ok(format_artifact(&self.execute_result(services).await?))
+    }
+
+    async fn execute_json(&self, services: &VertebraeServices) -> Result<Value, ServiceError> {
+        super::json_value(self.execute_result(services).await?)
+    }
+}
+
 /// Update an artifact by ID.
 #[derive(Debug, Args)]
 pub struct ArtifactUpdateCommand {
@@ -327,12 +355,72 @@ pub struct ArtifactUpdateCommand {
     pub filename: Option<String>,
 
     /// Replacement artifact body text.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "body_file")]
     pub body: Option<String>,
 
     /// Read the replacement artifact body from a file.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "body")]
     pub body_file: Option<PathBuf>,
+}
+
+impl ArtifactUpdateCommand {
+    fn read_body(&self) -> Result<Option<String>, ServiceError> {
+        match (&self.body, &self.body_file) {
+            (Some(_), Some(_)) => Err(ServiceError::validation_failed(
+                "provide exactly one artifact body update source: --body or --body-file",
+            )),
+            (Some(body), None) => Ok(Some(body.clone())),
+            (None, Some(path)) => fs::read_to_string(path).map(Some).map_err(|error| {
+                ServiceError::validation_failed(format!(
+                    "failed to read artifact body file '{}': {error}",
+                    path.display()
+                ))
+            }),
+            (None, None) => Ok(None),
+        }
+    }
+
+    fn update_input(&self) -> Result<vertebrae_core::UpdateArtifactInput, ServiceError> {
+        if let Some(filename) = &self.filename {
+            validate_filename(filename)?;
+        }
+
+        let body = self.read_body()?;
+        if self.filename.is_none() && body.is_none() {
+            return Err(ServiceError::validation_failed(
+                "artifact update requires --filename, --body, or --body-file",
+            ));
+        }
+
+        let mut input = vertebrae_core::UpdateArtifactInput::new();
+        if let Some(filename) = &self.filename {
+            input = input.with_filename(filename.clone());
+        }
+        if let Some(body) = body {
+            input = input.with_body(body);
+        }
+        Ok(input)
+    }
+
+    async fn execute_result(&self, services: &VertebraeServices) -> Result<Artifact, ServiceError> {
+        services
+            .artifacts()
+            .update_artifact(&self.id, self.update_input()?)
+            .await
+    }
+
+    async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let artifact = self.execute_result(services).await?;
+        Ok(format!("Updated artifact: {}", artifact.id))
+    }
+
+    async fn execute_json(&self, services: &VertebraeServices) -> Result<Value, ServiceError> {
+        artifact_operation(
+            "artifact update",
+            "updated",
+            &self.execute_result(services).await?,
+        )
+    }
 }
 
 /// Delete an artifact by ID.
@@ -467,6 +555,56 @@ mod tests {
             .input()
             .is_err()
         );
+    }
+
+    #[test]
+    fn reads_add_and_update_body_files_and_rejects_empty_update() {
+        let path = std::env::temp_dir().join(format!(
+            "vtb-artifact-body-{}-{}.txt",
+            std::process::id(),
+            ARTIFACT_ID.replace('-', "")
+        ));
+        std::fs::write(&path, "file body").expect("temporary body file should be writable");
+
+        let add = ArtifactAddCommand {
+            filename: "notes.md".to_string(),
+            body: None,
+            body_file: Some(path.clone()),
+            subject_type: None,
+            subject_id: None,
+        };
+        assert_eq!(add.create_input().unwrap().body, "file body");
+
+        let update = ArtifactUpdateCommand {
+            id: ARTIFACT_ID.to_string(),
+            filename: None,
+            body: None,
+            body_file: Some(path.clone()),
+        };
+        assert_eq!(
+            update.update_input().unwrap().body.as_deref(),
+            Some("file body")
+        );
+
+        let empty_update = ArtifactUpdateCommand {
+            id: ARTIFACT_ID.to_string(),
+            filename: None,
+            body: None,
+            body_file: None,
+        };
+        assert!(empty_update.update_input().is_err());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn renders_artifact_details_for_humans() {
+        let artifact = Artifact::new(ARTIFACT_ID, "project-id", "notes.md", "hello");
+        let output = format_artifact(&artifact);
+
+        assert!(output.contains("Artifact: a1b2c3d4-0000-4000-8000-000000000001"));
+        assert!(output.contains("Filename: notes.md"));
+        assert!(output.contains("Body:\nhello"));
     }
 
     #[test]
