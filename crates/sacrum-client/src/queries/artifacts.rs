@@ -3,7 +3,6 @@
 pub const ARTIFACT_FIELDS: &str = r#"
     fragment ArtifactFields on Artifact {
         id
-        project_id
         filename
         body
         inserted_at
@@ -19,7 +18,9 @@ pub const GET_ARTIFACT: &str = r#"
 
 pub const LIST_ARTIFACTS: &str = r#"
     query ListArtifacts($project_id: Uuid4!, $limit: Int, $offset: Int) {
-        artifacts(project_id: $project_id, limit: $limit, offset: $offset) { ...ArtifactFields }
+        project(id: $project_id) {
+            artifacts(limit: $limit, offset: $offset) { ...ArtifactFields }
+        }
     }
 "#;
 

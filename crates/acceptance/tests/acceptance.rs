@@ -16,6 +16,7 @@ pub struct SmokeWorld {
     stored_ids: HashMap<String, String>,
     created_task_ids: Vec<String>,
     created_workflow_ids: Vec<String>,
+    created_artifact_ids: Vec<String>,
     workflow_id: Option<String>,
     lifecycle_task_id: Option<String>,
 
@@ -55,6 +56,7 @@ impl SmokeWorld {
             stored_ids: HashMap::new(),
             created_task_ids: Vec::new(),
             created_workflow_ids: Vec::new(),
+            created_artifact_ids: Vec::new(),
             workflow_id: None,
             lifecycle_task_id: None,
             last_stdout: String::new(),
@@ -157,6 +159,37 @@ impl SmokeWorld {
         self.created_workflow_ids.push(id);
     }
 
+    fn extract_artifact_id_from_output(&self) -> Option<String> {
+        let stdout = self.last_stdout.trim();
+        if let Some(rest) = stdout.strip_prefix("Created artifact: ") {
+            let id = rest.trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(stdout) {
+            if let Some(id) = json.get("artifact_id").and_then(|value| value.as_str()) {
+                if !id.is_empty() {
+                    return Some(id.to_string());
+                }
+            }
+            if let Some(id) = json
+                .get("artifact")
+                .and_then(|artifact| artifact.get("id"))
+                .and_then(|value| value.as_str())
+            {
+                if !id.is_empty() {
+                    return Some(id.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn track_artifact(&mut self, id: String) {
+        self.created_artifact_ids.push(id);
+    }
+
     fn combined_output(&self) -> String {
         format!("{}{}", self.last_stdout, self.last_stderr)
     }
@@ -169,6 +202,20 @@ async fn main() {
         .after(|_feature, _rule, _scenario, _ev, world| {
             Box::pin(async move {
                 if let Some(world) = world {
+                    // Cleanup created artifacts before their attached tasks/projects.
+                    if let Some(client) = &world.graphql_client {
+                        let artifact_service =
+                            vertebrae_sacrum_client::SacrumArtifactService::new(client.clone());
+                        for artifact_id in world.created_artifact_ids.iter().rev() {
+                            let _ =
+                                vertebrae_core::artifact_service::ArtifactService::delete_artifact(
+                                    &artifact_service,
+                                    artifact_id,
+                                )
+                                .await;
+                        }
+                    }
+
                     // Cleanup created tasks in reverse order
                     if let Some(client) = &world.graphql_client {
                         let task_service =

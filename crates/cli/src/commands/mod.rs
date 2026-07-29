@@ -6,6 +6,7 @@
 
 pub mod add;
 pub mod archive;
+pub mod artifact;
 pub mod blockers;
 pub mod check_item;
 pub mod criterion_ref;
@@ -34,6 +35,7 @@ pub mod workflow;
 
 pub use add::AddCommand;
 pub use archive::{ArchiveCommand, UnarchiveCommand};
+pub use artifact::ArtifactCommand;
 pub use blockers::BlockersCommand;
 pub use check_item::CheckItemCommand;
 pub use criterion_ref::CriterionRefCommand;
@@ -95,6 +97,19 @@ pub fn parse_uuid(field_name: &'static str) -> ValueParser {
     })
 }
 
+/// Build a UUID-only validator for a named field.
+pub fn parse_full_uuid(field_name: &'static str) -> ValueParser {
+    ValueParser::from(move |s: &str| -> Result<String, String> {
+        uuid::Uuid::parse_str(s).map_err(|_| {
+            format!(
+                "{field_name} '{s}' is not a valid UUID \
+                 (expected: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+            )
+        })?;
+        Ok(s.to_lowercase())
+    })
+}
+
 /// Like [`parse_uuid`] but the returned validator also accepts an empty string.
 ///
 /// Used for arguments where an empty string has a special meaning
@@ -126,6 +141,9 @@ pub enum Command {
     Add(AddCommand),
     /// Archive a task (set archived=true)
     Archive(ArchiveCommand),
+    /// Manage project artifacts
+    #[command(subcommand)]
+    Artifact(ArtifactCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
     /// Add a code reference to a testing criterion
@@ -453,6 +471,7 @@ impl Command {
                 resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
             }
             Command::Archive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Artifact(cmd) => cmd.resolve_ids(services).await?,
             Command::Blockers(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::CriterionRef(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Delete(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -578,6 +597,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
             Command::Archive(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
+            }
+            Command::Artifact(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
@@ -731,6 +754,7 @@ impl Command {
                     json!({ "task_id": cmd.id.to_lowercase(), "archived": true }),
                 )
             }
+            Command::Artifact(cmd) => cmd.execute_json(services).await?,
             Command::Show(cmd) => {
                 let detail = cmd.execute(services).await?;
                 json_value(&detail)?

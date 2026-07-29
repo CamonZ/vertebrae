@@ -2,6 +2,7 @@ use crate::api_types::ArtifactResponse;
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::artifacts;
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::json;
 use std::str::FromStr;
 use vertebrae_core::artifact_service::ArtifactService;
@@ -14,6 +15,11 @@ pub struct SacrumArtifactService {
     client: GraphqlClient,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProjectArtifactsResponse {
+    artifacts: Vec<ArtifactResponse>,
+}
+
 impl SacrumArtifactService {
     pub fn new(client: GraphqlClient) -> Self {
         Self { client }
@@ -23,7 +29,14 @@ impl SacrumArtifactService {
             .map(|_| id.to_owned())
             .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact id: {e}")))
     }
-    fn map(response: ArtifactResponse) -> ServiceResult<Artifact> {
+    fn map(response: ArtifactResponse, project_id: &str) -> ServiceResult<Artifact> {
+        // Sacrum scopes artifact queries by project but does not expose the
+        // owning project as a field on the public Artifact GraphQL type.
+        // Preserve that domain field from the client scope instead.
+        let mut response = response;
+        if response.project_id.is_empty() {
+            response.project_id = project_id.to_owned();
+        }
         response.into_artifact()
     }
 }
@@ -47,7 +60,7 @@ impl ArtifactService for SacrumArtifactService {
             .execute(&query, variables, "createArtifact")
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response)
+        Self::map(response, self.client.project_id())
     }
     async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
         let query = with_fragments(artifacts::LIST_ARTIFACTS, &[artifacts::ARTIFACT_FIELDS]);
@@ -56,12 +69,16 @@ impl ArtifactService for SacrumArtifactService {
             "limit": input.limit,
             "offset": input.offset,
         });
-        let responses: Vec<ArtifactResponse> = self
+        let project: ProjectArtifactsResponse = self
             .client
-            .execute(&query, variables, "artifacts")
+            .execute(&query, variables, "project")
             .await
             .map_err(ServiceError::from)?;
-        responses.into_iter().map(Self::map).collect()
+        project
+            .artifacts
+            .into_iter()
+            .map(|response| Self::map(response, self.client.project_id()))
+            .collect()
     }
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact> {
         let response: ArtifactResponse = self
@@ -73,7 +90,7 @@ impl ArtifactService for SacrumArtifactService {
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response)
+        Self::map(response, self.client.project_id())
     }
     async fn update_artifact(
         &self,
@@ -94,7 +111,7 @@ impl ArtifactService for SacrumArtifactService {
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response)
+        Self::map(response, self.client.project_id())
     }
     async fn delete_artifact(&self, id: &str) -> ServiceResult<Artifact> {
         let response: ArtifactResponse = self
@@ -106,7 +123,7 @@ impl ArtifactService for SacrumArtifactService {
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response)
+        Self::map(response, self.client.project_id())
     }
 }
 
@@ -175,7 +192,7 @@ mod tests {
             .and(body_string_contains(PROJECT_ID))
             .and(body_string_contains("\"limit\":2"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "artifacts": [artifact_json()] }
+                "data": { "project": { "artifacts": [artifact_json()] } }
             })))
             .mount(&server)
             .await;

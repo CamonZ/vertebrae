@@ -10,6 +10,7 @@ use vertebrae_core::models::Artifact;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactResponse {
     pub id: String,
+    #[serde(default)]
     pub project_id: String,
     pub filename: String,
     pub body: String,

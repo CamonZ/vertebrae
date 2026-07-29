@@ -1,3 +1,4 @@
+pub mod artifact;
 pub mod assertions;
 pub mod dependencies;
 pub mod refs;
