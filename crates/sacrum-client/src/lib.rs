@@ -45,14 +45,8 @@
 //! }
 //! ```
 
-use async_trait::async_trait;
-use vertebrae_core::artifact_service::ArtifactService;
-use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{
-    Artifact, CreateArtifactInput, ListArtifactInput, UpdateArtifactInput,
-};
-
 pub mod api_types;
+pub mod artifact_service;
 pub mod client;
 pub mod config;
 pub mod error;
@@ -70,6 +64,7 @@ pub use api_types::{
     TaskRunControlsResponse, TaskRunResponse, TaskRunTraceResponse, WorkflowResponse,
     WorkflowStepResponse, WorkflowTransitionResponse,
 };
+pub use artifact_service::SacrumArtifactService;
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
     GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
@@ -80,48 +75,6 @@ pub use execution_service::SacrumExecutionService;
 pub use step_service::SacrumStepService;
 pub use task_service::SacrumTaskService;
 pub use workflow_service::SacrumWorkflowService;
-
-/// Temporary service used by the shared service container until the Sacrum
-/// artifact client implementation is added.
-///
-/// The core service container requires every service at construction time, but
-/// the concrete artifact client is delivered by the follow-up Sacrum ticket.
-/// Keeping this explicit placeholder preserves that required dependency without
-/// pretending that artifact operations are supported by the current client.
-struct UnavailableArtifactService;
-
-#[async_trait]
-impl ArtifactService for UnavailableArtifactService {
-    async fn create_artifact(&self, _input: CreateArtifactInput) -> ServiceResult<Artifact> {
-        unavailable()
-    }
-
-    async fn list_artifacts(&self, _input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
-        unavailable()
-    }
-
-    async fn get_artifact(&self, _id: &str) -> ServiceResult<Artifact> {
-        unavailable()
-    }
-
-    async fn update_artifact(
-        &self,
-        _id: &str,
-        _input: UpdateArtifactInput,
-    ) -> ServiceResult<Artifact> {
-        unavailable()
-    }
-
-    async fn delete_artifact(&self, _id: &str) -> ServiceResult<Artifact> {
-        unavailable()
-    }
-}
-
-fn unavailable<T>() -> ServiceResult<T> {
-    Err(ServiceError::invalid_input(
-        "Artifact service is not available in this Sacrum client",
-    ))
-}
 
 /// Create a new [`VertebraeServices`] container from a Sacrum GraphQL client.
 ///
@@ -140,7 +93,7 @@ pub fn from_sacrum(client: std::sync::Arc<GraphqlClient>) -> vertebrae_core::Ver
         std::sync::Arc::new(workflow_service),
         std::sync::Arc::new(execution_service),
         std::sync::Arc::new(step_service),
-        std::sync::Arc::new(UnavailableArtifactService),
+        std::sync::Arc::new(SacrumArtifactService::new((*client).clone())),
     )
 }
 
