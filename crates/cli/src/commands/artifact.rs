@@ -2,14 +2,17 @@
 //!
 //! This module implements the `vtb artifact` command group.
 
-use std::{fs, io::Read, path::PathBuf};
+use std::{
+    fs,
+    io::{self, Read, Write},
+    path::PathBuf,
+};
 
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use vertebrae_core::{
-    Artifact, ArtifactService, CreateArtifactInput, ListArtifactInput, ServiceError,
-    VertebraeServices,
+    Artifact, CreateArtifactInput, ListArtifactInput, ServiceError, VertebraeServices,
 };
 
 /// Artifact management commands.
@@ -35,7 +38,7 @@ impl ArtifactCommand {
             Self::List(command) => command.execute(services).await,
             Self::Show(command) => command.execute(services).await,
             Self::Update(command) => command.execute(services).await,
-            Self::Delete(_) => scaffold_execute(services.artifacts(), "delete").await,
+            Self::Delete(command) => command.execute(services).await,
         }
     }
 
@@ -46,7 +49,7 @@ impl ArtifactCommand {
             Self::List(command) => command.execute_json(services).await,
             Self::Show(command) => command.execute_json(services).await,
             Self::Update(command) => command.execute_json(services).await,
-            Self::Delete(_) => scaffold_execute_json(services.artifacts(), "delete").await,
+            Self::Delete(command) => command.execute_json(services).await,
         }
     }
 
@@ -65,24 +68,6 @@ impl ArtifactCommand {
         }
         Ok(())
     }
-}
-
-async fn scaffold_execute(
-    _service: &dyn ArtifactService,
-    command: &'static str,
-) -> Result<String, ServiceError> {
-    Err(ServiceError::validation_failed(format!(
-        "artifact {command} command is not implemented"
-    )))
-}
-
-async fn scaffold_execute_json(
-    _service: &dyn ArtifactService,
-    command: &'static str,
-) -> Result<Value, ServiceError> {
-    Err(ServiceError::validation_failed(format!(
-        "artifact {command} command is not implemented"
-    )))
 }
 
 const SUPPORTED_SUBJECT_TYPES: &[&str] = &[
@@ -433,6 +418,54 @@ pub struct ArtifactDeleteCommand {
     /// Skip the deletion confirmation prompt.
     #[arg(short, long)]
     pub force: bool,
+}
+
+impl ArtifactDeleteCommand {
+    async fn execute_result(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<Option<Artifact>, ServiceError> {
+        let id = self.id.to_lowercase();
+        if !self.force && !Self::confirm_delete(&id)? {
+            return Ok(None);
+        }
+
+        services.artifacts().delete_artifact(&id).await.map(Some)
+    }
+
+    async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        match self.execute_result(services).await? {
+            Some(artifact) => Ok(format!("Deleted artifact: {}", artifact.id)),
+            None => Ok("Deletion cancelled".to_string()),
+        }
+    }
+
+    async fn execute_json(&self, services: &VertebraeServices) -> Result<Value, ServiceError> {
+        match self.execute_result(services).await? {
+            Some(artifact) => artifact_operation("artifact delete", "deleted", &artifact),
+            None => Ok(super::operation_result(
+                "artifact delete",
+                "cancelled",
+                json!({
+                    "artifact_id": self.id.to_lowercase(),
+                    "deleted": false,
+                }),
+            )),
+        }
+    }
+
+    fn confirm_delete(id: &str) -> Result<bool, ServiceError> {
+        print!("Delete artifact '{}'? [y/N] ", id);
+        io::stdout().flush().map_err(|error| {
+            ServiceError::validation_failed(format!("failed to flush stdout: {error}"))
+        })?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).map_err(|error| {
+            ServiceError::validation_failed(format!("failed to read confirmation: {error}"))
+        })?;
+        Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
+    }
 }
 
 #[cfg(test)]
