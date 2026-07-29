@@ -32,6 +32,7 @@
 //! }
 //! ```
 
+pub mod artifact_service;
 pub mod error;
 pub mod execution_service;
 pub mod id_generator;
@@ -44,6 +45,7 @@ pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
+pub use artifact_service::ArtifactService;
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
@@ -72,8 +74,9 @@ pub use workflow_service::{
 
 // Re-export domain models for convenience
 pub use models::{
-    AgentConfig, BlockerNode, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section,
-    SectionType, SessionLog, Step, StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun,
-    TaskRunControls, TaskRunStatus, TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage,
-    Workflow, WorkflowTransition,
+    AgentConfig, Artifact, BlockerNode, CodeRef, CreateArtifactInput, ExecutionStatus, Level,
+    ListArtifactInput, PermissionMode, Priority, Section, SectionType, SessionLog, Step,
+    StepExecution, StepType, StepUpdate, Task, TaskFilter, TaskRun, TaskRunControls, TaskRunStatus,
+    TaskRunSummary, TaskRunTrace, TaskUpdate, Thing, TokenUsage, UpdateArtifactInput, Workflow,
+    WorkflowTransition,
 };

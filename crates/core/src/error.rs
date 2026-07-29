@@ -21,6 +21,10 @@ pub enum ServiceError {
     #[error("Workflow not found: {workflow_id}")]
     WorkflowNotFound { workflow_id: String },
 
+    /// An artifact with the given ID was not found in the active project.
+    #[error("Artifact not found: {artifact_id}")]
+    ArtifactNotFound { artifact_id: String },
+
     /// Invalid task state transition
     #[error("Invalid status transition from '{from}' to '{to}'")]
     InvalidTransition {
@@ -79,6 +83,13 @@ impl ServiceError {
     pub fn workflow_not_found(workflow_id: &str) -> Self {
         Self::WorkflowNotFound {
             workflow_id: workflow_id.to_string(),
+        }
+    }
+
+    /// Create an ArtifactNotFound error.
+    pub fn artifact_not_found(artifact_id: &str) -> Self {
+        Self::ArtifactNotFound {
+            artifact_id: artifact_id.to_string(),
         }
     }
 
@@ -168,6 +179,10 @@ impl ServiceError {
                 "hint: Workflow '{}' does not exist. Use 'vtb workflow list' to see available workflows.",
                 workflow_id
             )),
+            ServiceError::ArtifactNotFound { artifact_id } => Some(format!(
+                "hint: Artifact '{}' does not exist in the active project.",
+                artifact_id
+            )),
             ServiceError::InvalidTransition {
                 from,
                 valid_transitions,
@@ -228,6 +243,14 @@ mod tests {
         let err = ServiceError::workflow_not_found("default");
         assert!(matches!(err, ServiceError::WorkflowNotFound { .. }));
         assert!(err.to_string().contains("default"));
+    }
+
+    #[test]
+    fn test_artifact_not_found_error() {
+        let err = ServiceError::artifact_not_found("artifact123");
+        assert!(matches!(err, ServiceError::ArtifactNotFound { .. }));
+        assert!(err.to_string().contains("artifact123"));
+        assert!(err.hint().is_some_and(|hint| hint.contains("artifact123")));
     }
 
     #[test]

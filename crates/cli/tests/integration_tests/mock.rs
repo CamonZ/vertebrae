@@ -8,6 +8,7 @@ use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use vertebrae_core::VertebraeServices;
+use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::*;
@@ -35,6 +36,8 @@ struct MockState {
     logs: HashMap<String, SessionLog>,
     /// steps stored by id
     steps: HashMap<String, Step>,
+    /// artifacts stored by id
+    artifacts: HashMap<String, Artifact>,
     /// next server-assigned section order by task and section type
     next_section_orders: HashMap<(String, SectionType), u32>,
     next_id: u64,
@@ -1383,6 +1386,96 @@ impl StepService for MockStepService {
 }
 
 // ============================================================================
+// MockArtifactService
+// ============================================================================
+
+pub struct MockArtifactService {
+    state: State,
+}
+
+impl MockArtifactService {
+    fn new(state: State) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl ArtifactService for MockArtifactService {
+    async fn create_artifact(&self, input: CreateArtifactInput) -> ServiceResult<Artifact> {
+        input.validate().map_err(ServiceError::validation_failed)?;
+
+        let mut state = self.state.lock().unwrap();
+        let id = state.gen_id();
+        let now = Utc::now();
+        let artifact = Artifact {
+            id: id.clone(),
+            project_id: "mock-project".to_string(),
+            filename: input.filename,
+            body: input.body,
+            created_at: Some(now),
+            updated_at: Some(now),
+        };
+        state.artifacts.insert(id, artifact.clone());
+        Ok(artifact)
+    }
+
+    async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
+        let state = self.state.lock().unwrap();
+        let mut artifacts: Vec<_> = state.artifacts.values().cloned().collect();
+        artifacts.sort_by(|left, right| left.id.cmp(&right.id));
+
+        let offset = input.offset.unwrap_or(0).max(0) as usize;
+        let limit = input.limit.unwrap_or(50).max(1) as usize;
+        Ok(artifacts.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact> {
+        self.state
+            .lock()
+            .unwrap()
+            .artifacts
+            .get(id)
+            .cloned()
+            .ok_or_else(|| ServiceError::artifact_not_found(id))
+    }
+
+    async fn update_artifact(
+        &self,
+        id: &str,
+        input: UpdateArtifactInput,
+    ) -> ServiceResult<Artifact> {
+        if !input.has_updates() {
+            return Err(ServiceError::validation_failed(
+                "At least one artifact field must be updated",
+            ));
+        }
+
+        let mut state = self.state.lock().unwrap();
+        let artifact = state
+            .artifacts
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::artifact_not_found(id))?;
+        if let Some(filename) = input.filename {
+            artifact.filename = filename;
+        }
+        if let Some(body) = input.body {
+            artifact.body = body;
+        }
+        artifact.updated_at = Some(Utc::now());
+        Ok(artifact.clone())
+    }
+
+    async fn delete_artifact(&self, id: &str) -> ServiceResult<Artifact> {
+        self.state
+            .lock()
+            .unwrap()
+            .artifacts
+            .remove(id)
+            .ok_or_else(|| ServiceError::artifact_not_found(id))
+    }
+}
+
+// ============================================================================
 // Factory function to create VertebraeServices with mocks
 // ============================================================================
 
@@ -1429,6 +1522,7 @@ pub fn mock_services_with_seeder() -> (VertebraeServices, MockSeeder) {
         Arc::new(MockWorkflowService::new(state.clone())),
         Arc::new(MockExecutionService::new(state.clone())),
         Arc::new(MockStepService::new(state.clone())),
+        Arc::new(MockArtifactService::new(state.clone())),
     );
     (services, MockSeeder { state })
 }

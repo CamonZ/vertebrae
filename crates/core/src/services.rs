@@ -2,7 +2,7 @@
 //!
 //! This module provides a single entry point for accessing all service layer components.
 //! The `VertebraeServices` struct bundles all service traits (TaskService, WorkflowService,
-//! ExecutionService, StepService) into a unified container for convenient access in both CLI and GUI.
+//! ExecutionService, StepService, ArtifactService) into a unified container for convenient access in both CLI and GUI.
 //!
 //! # Sacrum Backend Support
 //!
@@ -13,6 +13,7 @@
 
 use std::sync::Arc;
 
+use crate::artifact_service::ArtifactService;
 use crate::execution_service::ExecutionService;
 use crate::service::TaskService;
 use crate::step_service::StepService;
@@ -41,6 +42,7 @@ use crate::workflow_service::WorkflowService;
 /// let workflows = services.workflows();
 /// let executions = services.executions();
 /// let steps = services.steps();
+/// let artifacts = services.artifacts();
 /// ```
 pub struct VertebraeServices {
     /// Task service implementation
@@ -51,6 +53,8 @@ pub struct VertebraeServices {
     executions: Arc<dyn ExecutionService>,
     /// Step service implementation
     steps: Arc<dyn StepService>,
+    /// Artifact service implementation
+    artifacts: Arc<dyn ArtifactService>,
 }
 
 impl VertebraeServices {
@@ -65,6 +69,7 @@ impl VertebraeServices {
     /// * `workflows` - Arc-wrapped workflow service implementation
     /// * `executions` - Arc-wrapped execution service implementation
     /// * `steps` - Arc-wrapped step service implementation
+    /// * `artifacts` - Arc-wrapped artifact service implementation
     ///
     /// # Returns
     ///
@@ -74,12 +79,14 @@ impl VertebraeServices {
         workflows: Arc<dyn WorkflowService>,
         executions: Arc<dyn ExecutionService>,
         steps: Arc<dyn StepService>,
+        artifacts: Arc<dyn ArtifactService>,
     ) -> Self {
         Self {
             tasks,
             workflows,
             executions,
             steps,
+            artifacts,
         }
     }
 
@@ -103,6 +110,11 @@ impl VertebraeServices {
         self.steps.as_ref()
     }
 
+    /// Get a reference to the artifact service
+    pub fn artifacts(&self) -> &dyn ArtifactService {
+        self.artifacts.as_ref()
+    }
+
     /// Get an Arc clone to the task service
     pub fn tasks_arc(&self) -> Arc<dyn TaskService> {
         Arc::clone(&self.tasks)
@@ -121,5 +133,10 @@ impl VertebraeServices {
     /// Get an Arc clone to the step service
     pub fn steps_arc(&self) -> Arc<dyn StepService> {
         Arc::clone(&self.steps)
+    }
+
+    /// Get an Arc clone to the artifact service
+    pub fn artifacts_arc(&self) -> Arc<dyn ArtifactService> {
+        Arc::clone(&self.artifacts)
     }
 }
