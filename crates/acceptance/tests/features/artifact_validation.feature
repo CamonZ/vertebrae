@@ -12,6 +12,11 @@ Feature: Artifact validation and not-found behavior
     When I list artifacts with --limit 0
     Then the command should fail with "Validation failed: artifact list limit must be greater than zero"
 
+  Scenario: Artifact listing rejects an invalid token
+    When I list artifacts with an invalid token
+    Then the command should fail
+    And the output should match "(?i)invalid (api )?token|invalid authorization|unauthor|forbidden|401"
+
   Scenario: Artifact attachment target requires both fields
     When I run vtb "artifact add target.md --body body --subject-type task"
     Then the command should fail with "Validation failed: subject_type and subject_id must be provided together"

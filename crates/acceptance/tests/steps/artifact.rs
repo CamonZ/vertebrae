@@ -84,6 +84,17 @@ async fn list_artifacts_with_limit(world: &mut SmokeWorld, limit: i32) {
         .await;
 }
 
+#[when("I list artifacts with an invalid token")]
+async fn list_artifacts_with_invalid_token(world: &mut SmokeWorld) {
+    world
+        .run_vtb_in(
+            std::path::Path::new("."),
+            &[("VTB_TOKEN", Some("invalid-acceptance-token"))],
+            &["artifact", "list"],
+        )
+        .await;
+}
+
 #[when("I list artifacts as JSON")]
 async fn list_artifacts_as_json(world: &mut SmokeWorld) {
     world.run_vtb(&["--json", "artifact", "list"]).await;
