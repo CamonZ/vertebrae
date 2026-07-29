@@ -3,6 +3,94 @@
 //! Defines structures for deserializing Sacrum API responses.
 
 use serde::{Deserialize, Deserializer, Serialize};
+use vertebrae_core::error::{ServiceError, ServiceResult};
+use vertebrae_core::models::Artifact;
+
+/// Artifact response returned by Sacrum's GraphQL API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactResponse {
+    pub id: String,
+    pub project_id: String,
+    pub filename: String,
+    pub body: String,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+impl ArtifactResponse {
+    /// Convert the API response into the transport-independent core model.
+    pub fn into_artifact(self) -> ServiceResult<Artifact> {
+        uuid::Uuid::parse_str(&self.id)
+            .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact id: {e}")))?;
+        uuid::Uuid::parse_str(&self.project_id)
+            .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact project id: {e}")))?;
+
+        fn timestamp(
+            value: Option<String>,
+            field: &str,
+        ) -> ServiceResult<Option<chrono::DateTime<chrono::Utc>>> {
+            value
+                .map(|value| {
+                    chrono::DateTime::parse_from_rfc3339(&value)
+                        .map(|dt| dt.with_timezone(&chrono::Utc))
+                        .map_err(|e| {
+                            ServiceError::InvalidInput(format!("invalid artifact {field}: {e}"))
+                        })
+                })
+                .transpose()
+        }
+
+        Ok(Artifact {
+            id: self.id,
+            project_id: self.project_id,
+            filename: self.filename,
+            body: self.body,
+            created_at: timestamp(self.inserted_at, "inserted_at")?,
+            updated_at: timestamp(self.updated_at, "updated_at")?,
+        })
+    }
+}
+
+#[cfg(test)]
+mod artifact_tests {
+    use super::*;
+
+    #[test]
+    fn maps_artifact_response() {
+        let artifact = ArtifactResponse {
+            id: "11111111-1111-1111-1111-111111111111".into(),
+            project_id: "22222222-2222-2222-2222-222222222222".into(),
+            filename: "notes.md".into(),
+            body: "hello".into(),
+            inserted_at: Some("2026-07-29T10:00:00Z".into()),
+            updated_at: Some("2026-07-29T11:00:00Z".into()),
+        };
+        let artifact = artifact.into_artifact().unwrap();
+        assert_eq!(artifact.filename, "notes.md");
+        assert_eq!(
+            artifact.created_at.unwrap().to_rfc3339(),
+            "2026-07-29T10:00:00+00:00"
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_identifier() {
+        let response = ArtifactResponse {
+            id: "not-a-uuid".into(),
+            project_id: "22222222-2222-2222-2222-222222222222".into(),
+            filename: "x".into(),
+            body: "x".into(),
+            inserted_at: None,
+            updated_at: None,
+        };
+        assert!(matches!(
+            response.into_artifact(),
+            Err(ServiceError::InvalidInput(_))
+        ));
+    }
+}
 
 /// Deserialize a value that may be either a number or a string representation of a number.
 fn deserialize_optional_f64_from_string<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>

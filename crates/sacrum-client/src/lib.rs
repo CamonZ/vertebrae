@@ -63,7 +63,7 @@ pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    CodeRefResponse, CreateProjectRequest, ErrorResponse, PipelineStepResponse,
+    ArtifactResponse, CodeRefResponse, CreateProjectRequest, ErrorResponse, PipelineStepResponse,
     PipelineStepTransitionResponse, PipelineTaskCountsResponse, PipelineWorkflowResponse,
     PipelineWorkflowTransitionResponse, ProjectListResponse, ProjectResponse, SectionResponse,
     SessionLogResponse, StepExecutionResponse, StepTransitionResponse, TaskResponse,
