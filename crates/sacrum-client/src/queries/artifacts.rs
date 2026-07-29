@@ -40,3 +40,19 @@ pub const DELETE_ARTIFACT: &str = r#"
         deleteArtifact(id: $id) { ...ArtifactFields }
     }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operations_and_variables_are_project_scoped() {
+        assert!(LIST_ARTIFACTS.contains("query ListArtifacts"));
+        assert!(LIST_ARTIFACTS.contains("$project_id: Uuid4!"));
+        assert!(CREATE_ARTIFACT.contains("mutation CreateArtifact"));
+        assert!(CREATE_ARTIFACT.contains("$subject_type: String"));
+        assert!(CREATE_ARTIFACT.contains("$subject_id: Uuid4"));
+        assert!(UPDATE_ARTIFACT.contains("mutation UpdateArtifact"));
+        assert!(DELETE_ARTIFACT.contains("mutation DeleteArtifact"));
+    }
+}
