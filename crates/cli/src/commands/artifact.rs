@@ -464,8 +464,12 @@ impl ArtifactDeleteCommand {
         io::stdin().read_line(&mut input).map_err(|error| {
             ServiceError::validation_failed(format!("failed to read confirmation: {error}"))
         })?;
-        Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
+        Ok(confirmation_accepted(&input))
     }
+}
+
+fn confirmation_accepted(input: &str) -> bool {
+    matches!(input.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
 #[cfg(test)]
@@ -638,6 +642,14 @@ mod tests {
         assert!(output.contains("Artifact: a1b2c3d4-0000-4000-8000-000000000001"));
         assert!(output.contains("Filename: notes.md"));
         assert!(output.contains("Body:\nhello"));
+    }
+
+    #[test]
+    fn delete_confirmation_defaults_to_no() {
+        assert!(!confirmation_accepted(""));
+        assert!(!confirmation_accepted("n"));
+        assert!(confirmation_accepted("y"));
+        assert!(confirmation_accepted(" YES\n"));
     }
 
     #[test]
