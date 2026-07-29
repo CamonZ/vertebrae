@@ -34,11 +34,33 @@ impl ArtifactService for SacrumArtifactService {
         input
             .validate()
             .map_err(|e| ServiceError::InvalidInput(e.into()))?;
-        let response: ArtifactResponse = self.client.execute(&with_fragments(artifacts::CREATE_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]), json!({"project_id": self.client.project_id(), "filename": input.filename, "body": input.body, "subject_type": input.subject_type, "subject_id": input.subject_id}), "createArtifact").await.map_err(ServiceError::from)?;
+        let query = with_fragments(artifacts::CREATE_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]);
+        let variables = json!({
+            "project_id": self.client.project_id(),
+            "filename": input.filename,
+            "body": input.body,
+            "subject_type": input.subject_type,
+            "subject_id": input.subject_id,
+        });
+        let response: ArtifactResponse = self
+            .client
+            .execute(&query, variables, "createArtifact")
+            .await
+            .map_err(ServiceError::from)?;
         Self::map(response)
     }
     async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
-        let responses: Vec<ArtifactResponse> = self.client.execute(&with_fragments(artifacts::LIST_ARTIFACTS, &[artifacts::ARTIFACT_FIELDS]), json!({"project_id": self.client.project_id(), "limit": input.limit, "offset": input.offset}), "artifacts").await.map_err(ServiceError::from)?;
+        let query = with_fragments(artifacts::LIST_ARTIFACTS, &[artifacts::ARTIFACT_FIELDS]);
+        let variables = json!({
+            "project_id": self.client.project_id(),
+            "limit": input.limit,
+            "offset": input.offset,
+        });
+        let responses: Vec<ArtifactResponse> = self
+            .client
+            .execute(&query, variables, "artifacts")
+            .await
+            .map_err(ServiceError::from)?;
         responses.into_iter().map(Self::map).collect()
     }
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact> {
@@ -85,5 +107,101 @@ impl ArtifactService for SacrumArtifactService {
             .await
             .map_err(ServiceError::from)?;
         Self::map(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::SacrumConfig;
+    use serde_json::json;
+    use vertebrae_core::error::ServiceError;
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const ARTIFACT_ID: &str = "11111111-1111-1111-1111-111111111111";
+    const PROJECT_ID: &str = "22222222-2222-2222-2222-222222222222";
+
+    fn service(server: &MockServer) -> SacrumArtifactService {
+        SacrumArtifactService::new(GraphqlClient::new(SacrumConfig::new(
+            server.uri(),
+            "test-token".into(),
+            PROJECT_ID.into(),
+        )))
+    }
+
+    fn artifact_json() -> serde_json::Value {
+        json!({
+            "id": ARTIFACT_ID,
+            "project_id": PROJECT_ID,
+            "filename": "notes.md",
+            "body": "hello",
+            "inserted_at": "2026-07-29T10:00:00Z",
+            "updated_at": "2026-07-29T11:00:00Z"
+        })
+    }
+
+    #[tokio::test]
+    async fn create_sends_project_and_attachment_variables() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateArtifact"))
+            .and(body_string_contains(PROJECT_ID))
+            .and(body_string_contains("subject_type"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "createArtifact": artifact_json() }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let artifact = service(&server)
+            .create_artifact(
+                CreateArtifactInput::new("notes.md", "hello").with_subject("task", ARTIFACT_ID),
+            )
+            .await
+            .unwrap();
+        assert_eq!(artifact.id, ARTIFACT_ID);
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn list_maps_pagination_and_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListArtifacts"))
+            .and(body_string_contains(PROJECT_ID))
+            .and(body_string_contains("\"limit\":2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "artifacts": [artifact_json()] }
+            })))
+            .mount(&server)
+            .await;
+
+        let artifacts = service(&server)
+            .list_artifacts(ListArtifactInput::new().with_limit(2).with_offset(4))
+            .await
+            .unwrap();
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].filename, "notes.md");
+    }
+
+    #[tokio::test]
+    async fn translates_graphql_errors() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "errors": [{ "message": "artifact validation failed" }]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = service(&server).get_artifact(ARTIFACT_ID).await;
+        assert!(
+            matches!(result, Err(ServiceError::InvalidInput(message)) if message.contains("validation failed"))
+        );
     }
 }
