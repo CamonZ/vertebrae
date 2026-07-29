@@ -1,3 +1,4 @@
+pub mod artifacts;
 pub mod executions;
 pub mod pipeline;
 pub mod projects;
