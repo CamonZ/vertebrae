@@ -84,6 +84,7 @@ services:
       VTB_URL: "http://localhost:4000"
       VTB_TOKEN: "sac_acceptance-test-token-vertebrae"
       VTB_BINARY: "/app/target/debug/vtb"
+      SACRUM_DATABASE_URL: "postgres://postgres:postgres@postgres/sacrum_prod"
       CARGO_HOME: "/cargo"
     volumes:
       - .:/app

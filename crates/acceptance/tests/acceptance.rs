@@ -1,7 +1,9 @@
 mod steps;
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
+use std::process::Stdio;
 
 use cucumber::World;
 use vertebrae_sacrum_client::GraphqlClient;
@@ -17,8 +19,11 @@ pub struct SmokeWorld {
     created_task_ids: Vec<String>,
     created_workflow_ids: Vec<String>,
     created_artifact_ids: Vec<String>,
+    created_project_ids: Vec<String>,
     workflow_id: Option<String>,
     lifecycle_task_id: Option<String>,
+
+    temp_files: Vec<tempfile::NamedTempFile>,
 
     last_stdout: String,
     last_stderr: String,
@@ -57,8 +62,10 @@ impl SmokeWorld {
             created_task_ids: Vec::new(),
             created_workflow_ids: Vec::new(),
             created_artifact_ids: Vec::new(),
+            created_project_ids: Vec::new(),
             workflow_id: None,
             lifecycle_task_id: None,
+            temp_files: Vec::new(),
             last_stdout: String::new(),
             last_stderr: String::new(),
             last_exit_code: 0,
@@ -105,6 +112,41 @@ impl SmokeWorld {
         self.last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
         self.last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
         self.last_exit_code = output.status.code().unwrap_or(-1);
+    }
+
+    async fn run_vtb_with_stdin(&mut self, args: &[&str], stdin: &str) {
+        let resolved_args: Vec<String> = args.iter().map(|a| self.resolve_vars(a)).collect();
+        let mut child = tokio::process::Command::new(&self.vtb_binary)
+            .args(&resolved_args)
+            .envs(&self.env)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to execute vtb");
+
+        let mut child_stdin = child.stdin.take().expect("vtb stdin should be piped");
+        tokio::io::AsyncWriteExt::write_all(&mut child_stdin, stdin.as_bytes())
+            .await
+            .expect("failed to write vtb stdin");
+        drop(child_stdin);
+
+        let output = child
+            .wait_with_output()
+            .await
+            .expect("failed to collect vtb output");
+        self.last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        self.last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        self.last_exit_code = output.status.code().unwrap_or(-1);
+    }
+
+    fn write_temp_file(&mut self, contents: &str) -> PathBuf {
+        let mut file = tempfile::NamedTempFile::new().expect("failed to create temp artifact body");
+        file.write_all(contents.as_bytes())
+            .expect("failed to write temp artifact body");
+        let path = file.path().to_path_buf();
+        self.temp_files.push(file);
+        path
     }
 
     async fn run_vtb_json(&mut self, args: &[&str]) -> Option<serde_json::Value> {
@@ -156,6 +198,8 @@ impl SmokeWorld {
 
     fn track_workflow(&mut self, id: String) {
         self.workflow_id = Some(id.clone());
+        self.stored_ids
+            .insert("workflow_id".to_string(), id.clone());
         self.created_workflow_ids.push(id);
     }
 
@@ -188,6 +232,10 @@ impl SmokeWorld {
 
     fn track_artifact(&mut self, id: String) {
         self.created_artifact_ids.push(id);
+    }
+
+    fn track_project(&mut self, id: String) {
+        self.created_project_ids.push(id);
     }
 
     fn combined_output(&self) -> String {
@@ -235,6 +283,20 @@ async fn main() {
                                 vertebrae_core::workflow_service::WorkflowService::delete_workflow(
                                     &wf_service,
                                     wf_id,
+                                )
+                                .await;
+                        }
+                        const DELETE_PROJECT: &str = r#"
+                            mutation DeleteAcceptanceProject($id: Uuid4!) {
+                                deleteProject(id: $id) { id }
+                            }
+                        "#;
+                        for project_id in world.created_project_ids.iter().rev() {
+                            let _: Result<serde_json::Value, _> = client
+                                .execute(
+                                    DELETE_PROJECT,
+                                    serde_json::json!({ "id": project_id }),
+                                    "delete_project",
                                 )
                                 .await;
                         }

@@ -53,6 +53,15 @@ async fn command_should_succeed(world: &mut SmokeWorld) {
     );
 }
 
+#[then("the command should fail")]
+async fn command_should_fail(world: &mut SmokeWorld) {
+    assert_ne!(
+        world.last_exit_code, 0,
+        "expected command to fail, but it succeeded (exit 0).\nstdout: '{}'\nstderr: '{}',",
+        world.last_stdout, world.last_stderr
+    );
+}
+
 #[then(expr = "the command should fail with {string}")]
 async fn command_should_fail_with(world: &mut SmokeWorld, expected: String) {
     let expected = world.resolve_vars(&expected);

@@ -354,7 +354,7 @@ mod tests {
     use std::time::Duration;
     use vertebrae_skills_assets::{install_embedded_skills, list_embedded_skills};
 
-    const CURATED_SKILL_COUNT: usize = 26;
+    const CURATED_SKILL_COUNT: usize = 27;
 
     /// Helper to create a temporary test directory
     fn create_temp_dir(prefix: &str) -> PathBuf {

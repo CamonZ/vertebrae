@@ -379,4 +379,16 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn managed_gui_skill_bundle_includes_artifact_skill() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        vertebrae_skills_assets::install_embedded_skills(dir.path())
+            .expect("install embedded GUI skills");
+
+        assert!(
+            dir.path().join("vtb-artifact/SKILL.md").is_file(),
+            "GUI managed skill bundle should include vtb-artifact"
+        );
+    }
 }
