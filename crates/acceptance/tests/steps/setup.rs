@@ -30,6 +30,10 @@ async fn configured_client(world: &mut SmokeWorld) {
         .expect("failed to create test project");
 
     let project_id = project.id;
+    world.track_project(project_id.clone());
+    world
+        .stored_ids
+        .insert("project_id".to_string(), project_id.clone());
 
     // Re-create the client with the actual project ID for cleanup
     let config_with_project =
