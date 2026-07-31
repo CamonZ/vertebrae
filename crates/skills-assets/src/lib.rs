@@ -149,9 +149,10 @@ fn create_dir_all(path: &Path) -> Result<(), SkillsAssetError> {
 mod tests {
     use super::*;
 
-    const CURATED_SKILLS: [&str; 26] = [
+    const CURATED_SKILLS: [&str; 27] = [
         "vtb-add",
         "vtb-archive",
+        "vtb-artifact",
         "vtb-blockers",
         "vtb-check-item",
         "vtb-criterion-ref",
