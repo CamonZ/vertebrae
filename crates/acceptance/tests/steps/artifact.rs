@@ -46,6 +46,53 @@ fn artifact_ids(value: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+const DEFAULT_LINK_METADATA: &str = r#"{
+    "version": 1,
+    "content_kind": "result",
+    "format": "markdown",
+    "origin": "acceptance",
+    "presentation": "rendered",
+    "extensions": {"suite": "artifact-links"}
+}"#;
+
+const ARTIFACT_SKILL: &str = include_str!("../../../../skills/artifact/SKILL.md");
+
+/// Extract a shell command from the embedded artifact skill, preserving the
+/// documented order of arguments while joining line continuations. The
+/// acceptance scenarios materialize its UUID/path placeholders with fixture
+/// values before invoking the CLI directly.
+fn documented_artifact_command(prefix: &str) -> String {
+    let mut lines = ARTIFACT_SKILL
+        .lines()
+        .skip_while(|line| !line.trim_start().starts_with(prefix));
+    let first = lines.next().unwrap_or_else(|| {
+        panic!("artifact skill no longer documents command starting with: {prefix}")
+    });
+
+    let mut command_parts = Vec::new();
+    let mut current = first.trim();
+    loop {
+        let continued = current.ends_with('\\');
+        command_parts.push(current.trim_end_matches('\\').trim_end());
+        if !continued {
+            break;
+        }
+        current = lines
+            .next()
+            .unwrap_or_else(|| panic!("unterminated documented artifact command: {first}"))
+            .trim();
+    }
+    command_parts.join(" ")
+}
+
+fn assert_documented_artifact_command(prefix: &str, expected: &str) {
+    assert_eq!(
+        documented_artifact_command(prefix),
+        expected,
+        "representative artifact skill invocation drifted; update the command and its real-Sacrum acceptance coverage together"
+    );
+}
+
 async fn assert_subject_has_artifact(
     world: &SmokeWorld,
     subject_type: &str,
@@ -152,6 +199,94 @@ async fn add_artifact_attached_to(
     remember_created_artifact(world, None);
 }
 
+#[when(
+    expr = "I add artifact {string} with body {string}, logical name {string}, and inline metadata attached to {string} {string} as {string}"
+)]
+async fn add_artifact_with_inline_metadata(
+    world: &mut SmokeWorld,
+    filename: String,
+    body: String,
+    logical_name: String,
+    subject_type: String,
+    subject_ref: String,
+    alias: String,
+) {
+    let subject_id = resolve_artifact_ref(world, &subject_ref);
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "add",
+            &filename,
+            "--body",
+            &body,
+            "--subject-type",
+            &subject_type,
+            "--subject-id",
+            &subject_id,
+            "--logical-name",
+            &logical_name,
+            "--metadata",
+            DEFAULT_LINK_METADATA,
+        ])
+        .await;
+    remember_created_artifact(world, Some(&alias));
+}
+
+#[when(
+    expr = "I add artifact {string} with body {string}, logical name {string}, and metadata from a file attached to {string} {string} as {string}"
+)]
+async fn add_artifact_with_metadata_file(
+    world: &mut SmokeWorld,
+    filename: String,
+    body: String,
+    logical_name: String,
+    subject_type: String,
+    subject_ref: String,
+    alias: String,
+) {
+    let subject_id = resolve_artifact_ref(world, &subject_ref);
+    let metadata_path = world.write_temp_file(DEFAULT_LINK_METADATA);
+    let metadata_path = metadata_path.to_string_lossy().into_owned();
+    world
+        .run_vtb(&[
+            "artifact",
+            "add",
+            &filename,
+            "--body",
+            &body,
+            "--subject-type",
+            &subject_type,
+            "--subject-id",
+            &subject_id,
+            "--logical-name",
+            &logical_name,
+            "--metadata-file",
+            &metadata_path,
+        ])
+        .await;
+    remember_created_artifact(world, Some(&alias));
+}
+
+#[when(expr = "I add artifact {string} with body {string} and invalid metadata")]
+async fn add_artifact_with_invalid_metadata(
+    world: &mut SmokeWorld,
+    filename: String,
+    body: String,
+) {
+    world
+        .run_vtb(&[
+            "artifact",
+            "add",
+            &filename,
+            "--body",
+            &body,
+            "--metadata",
+            "not-json",
+        ])
+        .await;
+}
+
 #[when(expr = "I list artifacts with --limit {int}")]
 async fn list_artifacts_with_limit(world: &mut SmokeWorld, limit: i32) {
     let limit = limit.to_string();
@@ -204,6 +339,49 @@ async fn show_artifact_as_json(world: &mut SmokeWorld, artifact_ref: String) {
 async fn show_artifact_for_humans(world: &mut SmokeWorld, artifact_ref: String) {
     let artifact_id = resolve_artifact_ref(world, &artifact_ref);
     world.run_vtb(&["artifact", "show", &artifact_id]).await;
+}
+
+#[when(expr = "I look up artifact logical name {string} on {string} {string} as JSON")]
+async fn lookup_artifact_as_json(
+    world: &mut SmokeWorld,
+    logical_name: String,
+    subject_type: String,
+    subject_ref: String,
+) {
+    let subject_id = resolve_artifact_ref(world, &subject_ref);
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "lookup",
+            &logical_name,
+            "--subject-type",
+            &subject_type,
+            "--subject-id",
+            &subject_id,
+        ])
+        .await;
+}
+
+#[when(expr = "I look up artifact logical name {string} on {string} {string} for humans")]
+async fn lookup_artifact_for_humans(
+    world: &mut SmokeWorld,
+    logical_name: String,
+    subject_type: String,
+    subject_ref: String,
+) {
+    let subject_id = resolve_artifact_ref(world, &subject_ref);
+    world
+        .run_vtb(&[
+            "artifact",
+            "lookup",
+            &logical_name,
+            "--subject-type",
+            &subject_type,
+            "--subject-id",
+            &subject_id,
+        ])
+        .await;
 }
 
 #[when(expr = "I update artifact {string} with filename {string} and body {string}")]
@@ -303,6 +481,145 @@ async fn update_artifact_with_filename_as_json(
 async fn update_artifact_without_changes(world: &mut SmokeWorld, artifact_ref: String) {
     let artifact_id = resolve_artifact_ref(world, &artifact_ref);
     world.run_vtb(&["artifact", "update", &artifact_id]).await;
+}
+
+#[when(
+    expr = "I reattach artifact {string} to {string} {string} with logical name {string} without changing its body"
+)]
+async fn reattach_artifact_without_changing_body(
+    world: &mut SmokeWorld,
+    artifact_ref: String,
+    subject_type: String,
+    subject_ref: String,
+    logical_name: String,
+) {
+    let artifact_id = resolve_artifact_ref(world, &artifact_ref);
+    let subject_id = resolve_artifact_ref(world, &subject_ref);
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "update",
+            &artifact_id,
+            "--subject-type",
+            &subject_type,
+            "--subject-id",
+            &subject_id,
+            "--logical-name",
+            &logical_name,
+        ])
+        .await;
+}
+
+#[when(expr = "I execute the documented artifact attachment example for the task as {string}")]
+async fn execute_documented_artifact_attachment_example(world: &mut SmokeWorld, alias: String) {
+    assert_documented_artifact_command(
+        "vtb artifact add task-output.md",
+        "vtb artifact add task-output.md --body \"Result\" --subject-type task --subject-id <task-uuid> --logical-name result",
+    );
+    let task_id = world
+        .task_id
+        .as_ref()
+        .expect("artifact skill fixture task is required")
+        .clone();
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "add",
+            "task-output.md",
+            "--body",
+            "Result",
+            "--subject-type",
+            "task",
+            "--subject-id",
+            &task_id,
+            "--logical-name",
+            "result",
+        ])
+        .await;
+    remember_created_artifact(world, Some(&alias));
+}
+
+#[when("I execute the documented artifact lookup example for the task")]
+async fn execute_documented_artifact_lookup_example(world: &mut SmokeWorld) {
+    assert_documented_artifact_command(
+        "vtb artifact lookup result",
+        "vtb artifact lookup result --subject-type task --subject-id <task-uuid>",
+    );
+    let task_id = world
+        .task_id
+        .as_ref()
+        .expect("artifact skill fixture task is required")
+        .clone();
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "lookup",
+            "result",
+            "--subject-type",
+            "task",
+            "--subject-id",
+            &task_id,
+        ])
+        .await;
+}
+
+#[when(expr = "I execute the documented metadata artifact example for the task as {string}")]
+async fn execute_documented_metadata_artifact_example(world: &mut SmokeWorld, alias: String) {
+    const DOCUMENTED_METADATA: &str = r#"{"version":1,"content_kind":"conversation","format":"jsonl","origin":"codex","presentation":"raw","extensions":{"provider":"openai"}}"#;
+    assert_documented_artifact_command(
+        "vtb artifact add conversation.jsonl",
+        "vtb artifact add conversation.jsonl --body-file ./conversation.jsonl --subject-type task --subject-id <task-uuid> --logical-name conversation --metadata '{\"version\":1,\"content_kind\":\"conversation\",\"format\":\"jsonl\",\"origin\":\"codex\",\"presentation\":\"raw\",\"extensions\":{\"provider\":\"openai\"}}'",
+    );
+    let task_id = world
+        .task_id
+        .as_ref()
+        .expect("artifact skill fixture task is required")
+        .clone();
+    let body_path = world.write_temp_file("documented conversation payload\n");
+    let body_path = body_path.to_string_lossy().into_owned();
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "add",
+            "conversation.jsonl",
+            "--body-file",
+            &body_path,
+            "--subject-type",
+            "task",
+            "--subject-id",
+            &task_id,
+            "--logical-name",
+            "conversation",
+            "--metadata",
+            DOCUMENTED_METADATA,
+        ])
+        .await;
+    remember_created_artifact(world, Some(&alias));
+}
+
+#[when(expr = "I execute the documented artifact update example for {string}")]
+async fn execute_documented_artifact_update_example(world: &mut SmokeWorld, artifact_ref: String) {
+    assert_documented_artifact_command(
+        r"vtb artifact update <artifact-uuid> \",
+        "vtb artifact update <artifact-uuid> --filename revised.md --body \"Revised content\"",
+    );
+    let artifact_id = resolve_artifact_ref(world, &artifact_ref);
+    world
+        .run_vtb(&[
+            "--json",
+            "artifact",
+            "update",
+            &artifact_id,
+            "--filename",
+            "revised.md",
+            "--body",
+            "Revised content",
+        ])
+        .await;
 }
 
 #[when(expr = "I delete artifact {string} with --force")]
@@ -476,6 +793,69 @@ async fn artifact_json_should_have_content(
         artifact["body"], expected_body,
         "artifact body mismatch: {}",
         artifact
+    );
+}
+
+#[then(
+    expr = "the artifact JSON should have logical name {string} and metadata content kind {string}"
+)]
+async fn artifact_json_should_have_link_context(
+    world: &mut SmokeWorld,
+    expected_logical_name: String,
+    expected_content_kind: String,
+) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "artifact lookup failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+    let artifact = last_json(world, "artifact lookup");
+    assert_eq!(
+        artifact["logical_name"], expected_logical_name,
+        "artifact logical name mismatch: {artifact}"
+    );
+    if expected_content_kind.is_empty() {
+        assert!(
+            artifact["metadata"].is_null(),
+            "artifact unexpectedly has link metadata: {artifact}"
+        );
+    } else {
+        assert_eq!(
+            artifact["metadata"]["content_kind"], expected_content_kind,
+            "artifact metadata mismatch: {artifact}"
+        );
+    }
+}
+
+#[then(
+    expr = "the artifact JSON operation should be {string} with logical name {string} and metadata content kind {string}"
+)]
+async fn artifact_json_operation_should_include_link_context(
+    world: &mut SmokeWorld,
+    expected_status: String,
+    expected_logical_name: String,
+    expected_content_kind: String,
+) {
+    assert_eq!(
+        world.last_exit_code, 0,
+        "artifact JSON operation failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+    let operation = last_json(world, "artifact operation");
+    assert_eq!(
+        operation["status"], expected_status,
+        "operation: {operation}"
+    );
+    let artifact = operation
+        .get("artifact")
+        .unwrap_or_else(|| panic!("artifact operation omitted nested artifact: {operation}"));
+    assert_eq!(
+        artifact["logical_name"], expected_logical_name,
+        "artifact logical name mismatch: {artifact}"
+    );
+    assert_eq!(
+        artifact["metadata"]["content_kind"], expected_content_kind,
+        "artifact metadata mismatch: {artifact}"
     );
 }
 

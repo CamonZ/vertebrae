@@ -23,7 +23,11 @@ Feature: Artifact validation and not-found behavior
 
   Scenario: Artifact update requires at least one field
     When I update artifact "00000000-0000-4000-8000-000000000000" without changes
-    Then the command should fail with "Validation failed: artifact update requires --filename, --body, or --body-file"
+    Then the command should fail with "Validation failed: artifact update requires a file, body, attachment, logical name, or metadata field"
+
+  Scenario: Artifact update requires paired attachment destination fields
+    When I run vtb "artifact update 00000000-0000-4000-8000-000000000000 --subject-type task"
+    Then the command should fail with "Validation failed: subject_type and subject_id must be provided together"
 
   Scenario: Artifact IDs must be full UUIDs
     When I show artifact "not-a-uuid" as JSON
