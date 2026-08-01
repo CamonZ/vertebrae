@@ -3,6 +3,7 @@
 //! Defines structures for deserializing Sacrum API responses.
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Artifact, ArtifactLinkMetadata};
 
@@ -16,12 +17,48 @@ pub struct ArtifactResponse {
     pub body: String,
     #[serde(default)]
     pub logical_name: Option<String>,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_artifact_link_metadata"
+    )]
     pub metadata: Option<ArtifactLinkMetadata>,
     #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+/// Sacrum represents a link without metadata as an all-null embedded metadata
+/// object when it is loaded through a subject association. Treat that transport
+/// sentinel as absent metadata while keeping genuinely partial envelopes invalid.
+fn deserialize_optional_artifact_link_metadata<'de, D>(
+    deserializer: D,
+) -> Result<Option<ArtifactLinkMetadata>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::Object(fields))
+            if fields.len() == 6
+                && [
+                    "version",
+                    "content_kind",
+                    "format",
+                    "origin",
+                    "presentation",
+                    "extensions",
+                ]
+                .into_iter()
+                .all(|field| fields.get(field).is_some_and(Value::is_null)) =>
+        {
+            Ok(None)
+        }
+        Some(value) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 impl ArtifactResponse {
@@ -108,6 +145,64 @@ mod artifact_tests {
             response.into_artifact(),
             Err(ServiceError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn maps_all_null_link_metadata_from_subject_artifact_lists_to_none() {
+        let response: ArtifactResponse = serde_json::from_value(serde_json::json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "filename": "notes.md",
+            "body": "hello",
+            "logical_name": null,
+            "metadata": {
+                "version": null,
+                "content_kind": null,
+                "format": null,
+                "origin": null,
+                "presentation": null,
+                "extensions": null
+            }
+        }))
+        .expect("all-null embedded metadata should represent absent metadata");
+
+        assert!(response.metadata.is_none());
+    }
+
+    #[test]
+    fn rejects_partially_populated_link_metadata() {
+        let error = serde_json::from_value::<ArtifactResponse>(serde_json::json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "filename": "notes.md",
+            "body": "hello",
+            "metadata": {
+                "version": 1,
+                "content_kind": null,
+                "format": "jsonl",
+                "origin": "harness",
+                "presentation": "raw",
+                "extensions": {}
+            }
+        }))
+        .expect_err("partial metadata must remain invalid");
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid type: null, expected a string")
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_all_null_link_metadata() {
+        assert!(
+            serde_json::from_value::<ArtifactResponse>(serde_json::json!({
+                "id": "11111111-1111-1111-1111-111111111111",
+                "filename": "notes.md",
+                "body": "hello",
+                "metadata": { "version": null }
+            }))
+            .is_err()
+        );
     }
 }
 

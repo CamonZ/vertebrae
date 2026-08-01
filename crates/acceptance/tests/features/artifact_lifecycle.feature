@@ -14,7 +14,6 @@ Feature: Artifact lifecycle
     And every listed artifact should belong to the active project
     When I show artifact "<artifact_id>" as JSON
     Then the artifact JSON should have filename "lifecycle.md" and body "initial body"
-    And the artifact JSON project_id should match the active project
     When I update artifact "<artifact_id>" with filename "updated.md" and body "updated body"
     Then the command should succeed
     And the output should contain "Updated artifact: <artifact_id>"

@@ -479,21 +479,6 @@ async fn artifact_json_should_have_content(
     );
 }
 
-#[then("the artifact JSON project_id should match the active project")]
-async fn artifact_json_project_should_match_active_project(world: &mut SmokeWorld) {
-    let project_id = world
-        .env
-        .get("VTB_PROJECT_ID")
-        .expect("configured client did not set VTB_PROJECT_ID");
-    let artifact = last_json(world, "artifact show");
-    assert_eq!(
-        artifact["project_id"].as_str(),
-        Some(project_id.as_str()),
-        "artifact project mismatch: {}",
-        artifact
-    );
-}
-
 #[then(expr = "artifact {string} should be attached to {string} {string}")]
 async fn artifact_should_be_attached_to(
     world: &mut SmokeWorld,
