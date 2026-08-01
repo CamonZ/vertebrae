@@ -31,6 +31,7 @@ struct MockState {
     logs: HashMap<String, SessionLog>,
     steps: HashMap<String, Step>,
     artifacts: HashMap<String, Artifact>,
+    artifact_subjects: HashMap<String, (String, String)>,
     next_section_orders: HashMap<(String, SectionType), u32>,
     next_id: u64,
 }
@@ -1335,12 +1336,21 @@ impl ArtifactService for MockArtifactService {
         let now = Utc::now();
         let artifact = Artifact {
             id: id.clone(),
-            project_id: "mock-project".to_string(),
+            project_id: Some("mock-project".to_string()),
             filename: input.filename,
             body: input.body,
+            logical_name: input.logical_name,
+            metadata: input.metadata,
             created_at: Some(now),
             updated_at: Some(now),
         };
+        state.artifact_subjects.insert(
+            id.clone(),
+            input
+                .subject_type
+                .zip(input.subject_id)
+                .unwrap_or_else(|| ("project".to_string(), "mock-project".to_string())),
+        );
         state.artifacts.insert(id, artifact.clone());
         Ok(artifact)
     }
@@ -1365,11 +1375,30 @@ impl ArtifactService for MockArtifactService {
             .ok_or_else(|| ServiceError::artifact_not_found(id))
     }
 
+    async fn get_artifact_by_logical_name(
+        &self,
+        input: GetArtifactByLogicalNameInput,
+    ) -> ServiceResult<Artifact> {
+        input.validate().map_err(ServiceError::validation_failed)?;
+        let state = self.state.lock().unwrap();
+        state
+            .artifacts
+            .iter()
+            .find(|(id, artifact)| {
+                artifact.logical_name.as_deref() == Some(&input.logical_name)
+                    && state.artifact_subjects.get(*id)
+                        == Some(&(input.subject_type.clone(), input.subject_id.clone()))
+            })
+            .map(|(_, artifact)| artifact.clone())
+            .ok_or_else(|| ServiceError::artifact_not_found(&input.logical_name))
+    }
+
     async fn update_artifact(
         &self,
         id: &str,
         input: UpdateArtifactInput,
     ) -> ServiceResult<Artifact> {
+        input.validate().map_err(ServiceError::validation_failed)?;
         if !input.has_updates() {
             return Err(ServiceError::validation_failed(
                 "At least one artifact field must be updated",
@@ -1387,8 +1416,18 @@ impl ArtifactService for MockArtifactService {
         if let Some(body) = input.body {
             artifact.body = body;
         }
+        if let Some(logical_name) = input.logical_name {
+            artifact.logical_name = Some(logical_name);
+        }
+        if let Some(metadata) = input.metadata {
+            artifact.metadata = Some(metadata);
+        }
         artifact.updated_at = Some(Utc::now());
-        Ok(artifact.clone())
+        let updated = artifact.clone();
+        if let Some(subject) = input.subject_type.zip(input.subject_id) {
+            state.artifact_subjects.insert(id.to_string(), subject);
+        }
+        Ok(updated)
     }
 
     async fn delete_artifact(&self, id: &str) -> ServiceResult<Artifact> {

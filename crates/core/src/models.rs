@@ -1010,7 +1010,7 @@ impl std::fmt::Display for Thing {
 
 // ─── Domain Models ─────────────────────────────────────────────────────────
 
-/// An artifact stored in a project (domain model).
+/// An artifact file, optionally enriched with attachment context.
 ///
 /// Sacrum exposes the creation timestamp as `inserted_at`; the core model uses
 /// the same `created_at` name as the other domain models while accepting both
@@ -1020,14 +1020,29 @@ pub struct Artifact {
     /// Unique artifact identifier.
     pub id: String,
 
-    /// Project that owns the artifact.
-    pub project_id: String,
+    /// Project that owns the artifact when the operation establishes project scope.
+    ///
+    /// Sacrum's root `artifact(id:)` query is user-scoped and does not return
+    /// the owning project. In that case this is `None`; clients must not infer
+    /// ownership from their active project configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
 
     /// Artifact filename.
     pub filename: String,
 
     /// Artifact body.
     pub body: String,
+
+    /// Stable logical name of the attachment returned by an attachment-context
+    /// operation. Root artifact reads may leave this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_name: Option<String>,
+
+    /// Provider-neutral attachment provenance returned by an attachment-context
+    /// operation. Root artifact reads may leave this unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ArtifactLinkMetadata>,
 
     /// Creation timestamp.
     #[serde(alias = "inserted_at")]
@@ -1047,13 +1062,117 @@ impl Artifact {
     ) -> Self {
         Self {
             id: id.into(),
-            project_id: project_id.into(),
+            project_id: Some(project_id.into()),
             filename: filename.into(),
             body: body.into(),
+            logical_name: None,
+            metadata: None,
             created_at: None,
             updated_at: None,
         }
     }
+}
+
+/// Versioned, provider-neutral provenance for an artifact attachment.
+///
+/// The envelope mirrors Sacrum's supported contract. Provider-specific or
+/// forward-compatible data belongs in `extensions` and is preserved exactly.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactLinkMetadata {
+    pub version: u32,
+    pub content_kind: String,
+    pub format: String,
+    pub origin: String,
+    pub presentation: String,
+    pub extensions: serde_json::Map<String, serde_json::Value>,
+}
+
+impl ArtifactLinkMetadata {
+    /// Create the current version of the required provenance envelope.
+    pub fn new(
+        content_kind: impl Into<String>,
+        format: impl Into<String>,
+        origin: impl Into<String>,
+        presentation: impl Into<String>,
+    ) -> Self {
+        Self {
+            version: 1,
+            content_kind: content_kind.into(),
+            format: format.into(),
+            origin: origin.into(),
+            presentation: presentation.into(),
+            extensions: serde_json::Map::new(),
+        }
+    }
+
+    /// Add or replace an opaque extension without interpreting its value.
+    pub fn with_extension(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.extensions.insert(key.into(), value);
+        self
+    }
+
+    /// Validate the versioned envelope required by Sacrum.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.version != 1 {
+            return Err("metadata version must be 1");
+        }
+        for (field, value) in [
+            ("metadata content_kind", &self.content_kind),
+            ("metadata format", &self.format),
+            ("metadata origin", &self.origin),
+            ("metadata presentation", &self.presentation),
+        ] {
+            if value.trim().is_empty() {
+                return Err(match field {
+                    "metadata content_kind" => "metadata content_kind must not be blank",
+                    "metadata format" => "metadata format must not be blank",
+                    "metadata origin" => "metadata origin must not be blank",
+                    _ => "metadata presentation must not be blank",
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_attachment_fields(
+    subject_type: &Option<String>,
+    subject_id: &Option<String>,
+    logical_name: &Option<String>,
+    metadata: &Option<ArtifactLinkMetadata>,
+) -> Result<(), &'static str> {
+    match (subject_type, subject_id) {
+        (None, None) => {}
+        (Some(subject_type), Some(subject_id)) => {
+            if !matches!(
+                subject_type.as_str(),
+                "project" | "task" | "task_section" | "workflow" | "task_run" | "step_execution"
+            ) {
+                return Err("subject_type must be a supported artifact subject type");
+            }
+            if subject_id.trim().is_empty() {
+                return Err("subject_id must not be blank");
+            }
+        }
+        _ => return Err("subject_type and subject_id must be provided together"),
+    }
+
+    if logical_name
+        .as_ref()
+        .is_some_and(|name| name.trim().is_empty())
+    {
+        return Err("logical_name must not be blank");
+    }
+    if logical_name
+        .as_ref()
+        .is_some_and(|name| name.chars().count() > 255)
+    {
+        return Err("logical_name must be at most 255 characters");
+    }
+    if let Some(metadata) = metadata {
+        metadata.validate()?;
+    }
+    Ok(())
 }
 
 /// Input for creating an artifact.
@@ -1072,6 +1191,14 @@ pub struct CreateArtifactInput {
     /// Optional ID of the artifact's direct attachment target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_id: Option<String>,
+
+    /// Optional stable logical name for the new attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_name: Option<String>,
+
+    /// Optional versioned provenance for the new attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ArtifactLinkMetadata>,
 }
 
 impl CreateArtifactInput {
@@ -1082,6 +1209,8 @@ impl CreateArtifactInput {
             body: body.into(),
             subject_type: None,
             subject_id: None,
+            logical_name: None,
+            metadata: None,
         }
     }
 
@@ -1096,14 +1225,28 @@ impl CreateArtifactInput {
         self
     }
 
+    /// Set the attachment's stable logical name.
+    pub fn with_logical_name(mut self, logical_name: impl Into<String>) -> Self {
+        self.logical_name = Some(logical_name.into());
+        self
+    }
+
+    /// Set versioned attachment provenance.
+    pub fn with_metadata(mut self, metadata: ArtifactLinkMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
     /// Validate the optional direct attachment target.
     ///
     /// Sacrum accepts a target only when both its type and ID are supplied.
     pub fn validate(&self) -> Result<(), &'static str> {
-        match (&self.subject_type, &self.subject_id) {
-            (None, None) | (Some(_), Some(_)) => Ok(()),
-            _ => Err("subject_type and subject_id must be provided together"),
-        }
+        validate_attachment_fields(
+            &self.subject_type,
+            &self.subject_id,
+            &self.logical_name,
+            &self.metadata,
+        )
     }
 }
 
@@ -1117,6 +1260,22 @@ pub struct UpdateArtifactInput {
     /// New artifact body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
+
+    /// Replacement attachment target. Both values must be supplied together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_type: Option<String>,
+
+    /// Replacement attachment target ID.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_id: Option<String>,
+
+    /// Updated stable logical name for the attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_name: Option<String>,
+
+    /// Updated versioned provenance for the attachment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ArtifactLinkMetadata>,
 }
 
 impl UpdateArtifactInput {
@@ -1137,9 +1296,78 @@ impl UpdateArtifactInput {
         self
     }
 
+    /// Replace the attachment target.
+    pub fn with_subject(
+        mut self,
+        subject_type: impl Into<String>,
+        subject_id: impl Into<String>,
+    ) -> Self {
+        self.subject_type = Some(subject_type.into());
+        self.subject_id = Some(subject_id.into());
+        self
+    }
+
+    /// Update the attachment's stable logical name.
+    pub fn with_logical_name(mut self, logical_name: impl Into<String>) -> Self {
+        self.logical_name = Some(logical_name.into());
+        self
+    }
+
+    /// Update versioned attachment provenance.
+    pub fn with_metadata(mut self, metadata: ArtifactLinkMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+
+    /// Validate supported attachment fields.
+    pub fn validate(&self) -> Result<(), &'static str> {
+        validate_attachment_fields(
+            &self.subject_type,
+            &self.subject_id,
+            &self.logical_name,
+            &self.metadata,
+        )
+    }
+
     /// Whether this input changes at least one artifact field.
     pub fn has_updates(&self) -> bool {
-        self.filename.is_some() || self.body.is_some()
+        self.filename.is_some()
+            || self.body.is_some()
+            || self.subject_type.is_some()
+            || self.subject_id.is_some()
+            || self.logical_name.is_some()
+            || self.metadata.is_some()
+    }
+}
+
+/// Input for retrieving a project-subject attachment by its stable logical name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetArtifactByLogicalNameInput {
+    pub subject_type: String,
+    pub subject_id: String,
+    pub logical_name: String,
+}
+
+impl GetArtifactByLogicalNameInput {
+    pub fn new(
+        subject_type: impl Into<String>,
+        subject_id: impl Into<String>,
+        logical_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            subject_type: subject_type.into(),
+            subject_id: subject_id.into(),
+            logical_name: logical_name.into(),
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        validate_attachment_fields(
+            &Some(self.subject_type.clone()),
+            &Some(self.subject_id.clone()),
+            &Some(self.logical_name.clone()),
+            &None,
+        )
     }
 }
 
@@ -2293,7 +2521,7 @@ mod tests {
         let artifact = Artifact::new("artifact-1", "project-1", "notes.md", "hello");
 
         assert_eq!(artifact.id, "artifact-1");
-        assert_eq!(artifact.project_id, "project-1");
+        assert_eq!(artifact.project_id.as_deref(), Some("project-1"));
         assert_eq!(artifact.filename, "notes.md");
         assert_eq!(artifact.body, "hello");
         assert!(artifact.created_at.is_none());
@@ -2346,6 +2574,117 @@ mod tests {
         assert_eq!(
             missing_type.validate(),
             Err("subject_type and subject_id must be provided together")
+        );
+    }
+
+    #[test]
+    fn artifact_link_metadata_preserves_extensions_and_validates_envelope() {
+        let metadata = ArtifactLinkMetadata::new("conversation", "jsonl", "harness", "raw")
+            .with_extension("provider", serde_json::json!({"trace": [1, 2]}));
+        assert!(metadata.validate().is_ok());
+        assert_eq!(
+            serde_json::to_value(&metadata).unwrap()["extensions"]["provider"]["trace"],
+            serde_json::json!([1, 2])
+        );
+
+        assert_eq!(
+            ArtifactLinkMetadata {
+                version: 2,
+                ..metadata.clone()
+            }
+            .validate(),
+            Err("metadata version must be 1")
+        );
+        for (metadata, expected) in [
+            (
+                ArtifactLinkMetadata {
+                    content_kind: " ".into(),
+                    ..metadata.clone()
+                },
+                "metadata content_kind must not be blank",
+            ),
+            (
+                ArtifactLinkMetadata {
+                    format: " ".into(),
+                    ..metadata.clone()
+                },
+                "metadata format must not be blank",
+            ),
+            (
+                ArtifactLinkMetadata {
+                    origin: " ".into(),
+                    ..metadata.clone()
+                },
+                "metadata origin must not be blank",
+            ),
+            (
+                ArtifactLinkMetadata {
+                    presentation: " ".into(),
+                    ..metadata
+                },
+                "metadata presentation must not be blank",
+            ),
+        ] {
+            assert_eq!(metadata.validate(), Err(expected));
+        }
+
+        assert!(
+            serde_json::from_value::<ArtifactLinkMetadata>(serde_json::json!({
+                "version": 1,
+                "content_kind": "conversation",
+                "format": "jsonl",
+                "origin": "harness",
+                "presentation": "raw"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn attachment_inputs_validate_supported_subjects_and_link_fields() {
+        let metadata = ArtifactLinkMetadata::new("result", "markdown", "agent", "rendered");
+        let create = CreateArtifactInput::new("result.md", "# Result")
+            .with_subject("task", "task-id")
+            .with_logical_name("result")
+            .with_metadata(metadata.clone());
+        assert!(create.validate().is_ok());
+
+        assert_eq!(
+            CreateArtifactInput::new("x", "x")
+                .with_subject("unknown", "subject")
+                .validate(),
+            Err("subject_type must be a supported artifact subject type")
+        );
+        assert_eq!(
+            CreateArtifactInput::new("x", "x")
+                .with_logical_name(" ")
+                .validate(),
+            Err("logical_name must not be blank")
+        );
+        assert_eq!(
+            CreateArtifactInput::new("x", "x")
+                .with_logical_name("x".repeat(256))
+                .validate(),
+            Err("logical_name must be at most 255 characters")
+        );
+
+        let update = UpdateArtifactInput::new()
+            .with_logical_name("result")
+            .with_metadata(metadata);
+        assert!(update.has_updates());
+        assert!(update.validate().is_ok());
+    }
+
+    #[test]
+    fn logical_name_lookup_requires_a_complete_supported_subject() {
+        assert!(
+            GetArtifactByLogicalNameInput::new("task", "task-id", "result")
+                .validate()
+                .is_ok()
+        );
+        assert_eq!(
+            GetArtifactByLogicalNameInput::new("task", "", "result").validate(),
+            Err("subject_id must not be blank")
         );
     }
 
