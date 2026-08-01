@@ -134,7 +134,13 @@ fn format_artifact_list(artifacts: &[Artifact]) -> String {
 fn format_artifact(artifact: &Artifact) -> String {
     let mut output = format!(
         "Artifact: {}\nFilename: {}\nProject: {}\nBody:\n{}",
-        artifact.id, artifact.filename, artifact.project_id, artifact.body
+        artifact.id,
+        artifact.filename,
+        artifact
+            .project_id
+            .as_deref()
+            .unwrap_or("<unknown (user-scoped)>"),
+        artifact.body
     );
     if let Some(created_at) = artifact.created_at {
         output.push_str(&format!("\nCreated: {created_at}"));

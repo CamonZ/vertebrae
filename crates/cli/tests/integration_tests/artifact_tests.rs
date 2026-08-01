@@ -8,6 +8,9 @@ use vertebrae_cli::commands::artifact::{
     ArtifactShowCommand, ArtifactUpdateCommand,
 };
 use vertebrae_cli::commands::{Command, CommandResult};
+use vertebrae_core::{
+    ArtifactLinkMetadata, CreateArtifactInput, GetArtifactByLogicalNameInput, UpdateArtifactInput,
+};
 
 const ARTIFACT_ID: &str = "a1b2c3d4-0000-4000-8000-000000000001";
 
@@ -62,6 +65,49 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["id"], artifact_id);
     assert_eq!(artifacts[0]["project_id"], "mock-project");
+}
+
+#[tokio::test]
+async fn mock_artifact_service_preserves_subject_link_context() {
+    let services = mock_services();
+    let metadata = ArtifactLinkMetadata::new("result", "markdown", "agent", "rendered")
+        .with_extension("provider", serde_json::json!("codex"));
+    let artifact = services
+        .artifacts()
+        .create_artifact(
+            CreateArtifactInput::new("result.md", "# Result")
+                .with_subject("task", ARTIFACT_ID)
+                .with_logical_name("result")
+                .with_metadata(metadata.clone()),
+        )
+        .await
+        .unwrap();
+
+    let found = services
+        .artifacts()
+        .get_artifact_by_logical_name(GetArtifactByLogicalNameInput::new(
+            "task",
+            ARTIFACT_ID,
+            "result",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(found.id, artifact.id);
+    assert_eq!(found.metadata, Some(metadata.clone()));
+
+    let updated = services
+        .artifacts()
+        .update_artifact(
+            &artifact.id,
+            UpdateArtifactInput::new()
+                .with_metadata(metadata.with_extension("display", serde_json::json!("summary"))),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        updated.metadata.unwrap().extensions["display"],
+        serde_json::json!("summary")
+    );
 }
 
 #[tokio::test]

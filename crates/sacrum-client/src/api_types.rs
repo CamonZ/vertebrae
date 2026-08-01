@@ -3,21 +3,62 @@
 //! Defines structures for deserializing Sacrum API responses.
 
 use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::Artifact;
+use vertebrae_core::models::{Artifact, ArtifactLinkMetadata};
 
 /// Artifact response returned by Sacrum's GraphQL API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactResponse {
     pub id: String,
     #[serde(default)]
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub filename: String,
     pub body: String,
+    #[serde(default)]
+    pub logical_name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_artifact_link_metadata"
+    )]
+    pub metadata: Option<ArtifactLinkMetadata>,
     #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+/// Sacrum represents a link without metadata as an all-null embedded metadata
+/// object when it is loaded through a subject association. Treat that transport
+/// sentinel as absent metadata while keeping genuinely partial envelopes invalid.
+fn deserialize_optional_artifact_link_metadata<'de, D>(
+    deserializer: D,
+) -> Result<Option<ArtifactLinkMetadata>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(Value::Object(fields))
+            if fields.len() == 6
+                && [
+                    "version",
+                    "content_kind",
+                    "format",
+                    "origin",
+                    "presentation",
+                    "extensions",
+                ]
+                .into_iter()
+                .all(|field| fields.get(field).is_some_and(Value::is_null)) =>
+        {
+            Ok(None)
+        }
+        Some(value) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
 }
 
 impl ArtifactResponse {
@@ -25,8 +66,11 @@ impl ArtifactResponse {
     pub fn into_artifact(self) -> ServiceResult<Artifact> {
         uuid::Uuid::parse_str(&self.id)
             .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact id: {e}")))?;
-        uuid::Uuid::parse_str(&self.project_id)
-            .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact project id: {e}")))?;
+        if let Some(project_id) = &self.project_id {
+            uuid::Uuid::parse_str(project_id).map_err(|e| {
+                ServiceError::InvalidInput(format!("invalid artifact project id: {e}"))
+            })?;
+        }
 
         fn timestamp(
             value: Option<String>,
@@ -48,6 +92,8 @@ impl ArtifactResponse {
             project_id: self.project_id,
             filename: self.filename,
             body: self.body,
+            logical_name: self.logical_name,
+            metadata: self.metadata,
             created_at: timestamp(self.inserted_at, "inserted_at")?,
             updated_at: timestamp(self.updated_at, "updated_at")?,
         })
@@ -62,9 +108,16 @@ mod artifact_tests {
     fn maps_artifact_response() {
         let artifact = ArtifactResponse {
             id: "11111111-1111-1111-1111-111111111111".into(),
-            project_id: "22222222-2222-2222-2222-222222222222".into(),
+            project_id: Some("22222222-2222-2222-2222-222222222222".into()),
             filename: "notes.md".into(),
             body: "hello".into(),
+            logical_name: Some("conversation".into()),
+            metadata: Some(ArtifactLinkMetadata::new(
+                "conversation",
+                "jsonl",
+                "harness",
+                "raw",
+            )),
             inserted_at: Some("2026-07-29T10:00:00Z".into()),
             updated_at: Some("2026-07-29T11:00:00Z".into()),
         };
@@ -80,9 +133,11 @@ mod artifact_tests {
     fn rejects_malformed_identifier() {
         let response = ArtifactResponse {
             id: "not-a-uuid".into(),
-            project_id: "22222222-2222-2222-2222-222222222222".into(),
+            project_id: Some("22222222-2222-2222-2222-222222222222".into()),
             filename: "x".into(),
             body: "x".into(),
+            logical_name: None,
+            metadata: None,
             inserted_at: None,
             updated_at: None,
         };
@@ -90,6 +145,64 @@ mod artifact_tests {
             response.into_artifact(),
             Err(ServiceError::InvalidInput(_))
         ));
+    }
+
+    #[test]
+    fn maps_all_null_link_metadata_from_subject_artifact_lists_to_none() {
+        let response: ArtifactResponse = serde_json::from_value(serde_json::json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "filename": "notes.md",
+            "body": "hello",
+            "logical_name": null,
+            "metadata": {
+                "version": null,
+                "content_kind": null,
+                "format": null,
+                "origin": null,
+                "presentation": null,
+                "extensions": null
+            }
+        }))
+        .expect("all-null embedded metadata should represent absent metadata");
+
+        assert!(response.metadata.is_none());
+    }
+
+    #[test]
+    fn rejects_partially_populated_link_metadata() {
+        let error = serde_json::from_value::<ArtifactResponse>(serde_json::json!({
+            "id": "11111111-1111-1111-1111-111111111111",
+            "filename": "notes.md",
+            "body": "hello",
+            "metadata": {
+                "version": 1,
+                "content_kind": null,
+                "format": "jsonl",
+                "origin": "harness",
+                "presentation": "raw",
+                "extensions": {}
+            }
+        }))
+        .expect_err("partial metadata must remain invalid");
+
+        assert!(
+            error
+                .to_string()
+                .contains("invalid type: null, expected a string")
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_all_null_link_metadata() {
+        assert!(
+            serde_json::from_value::<ArtifactResponse>(serde_json::json!({
+                "id": "11111111-1111-1111-1111-111111111111",
+                "filename": "notes.md",
+                "body": "hello",
+                "metadata": { "version": null }
+            }))
+            .is_err()
+        );
     }
 }
 

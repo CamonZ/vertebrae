@@ -3,12 +3,13 @@ use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::artifacts;
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::str::FromStr;
 use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{
-    Artifact, CreateArtifactInput, ListArtifactInput, UpdateArtifactInput,
+    Artifact, CreateArtifactInput, GetArtifactByLogicalNameInput, ListArtifactInput,
+    UpdateArtifactInput,
 };
 
 pub struct SacrumArtifactService {
@@ -24,20 +25,53 @@ impl SacrumArtifactService {
     pub fn new(client: GraphqlClient) -> Self {
         Self { client }
     }
-    fn id(id: &str) -> ServiceResult<String> {
+    fn id(id: &str, field: &str) -> ServiceResult<String> {
         uuid::Uuid::from_str(id)
             .map(|_| id.to_owned())
-            .map_err(|e| ServiceError::InvalidInput(format!("invalid artifact id: {e}")))
+            .map_err(|e| ServiceError::InvalidInput(format!("invalid {field}: {e}")))
     }
-    fn map(response: ArtifactResponse, project_id: &str) -> ServiceResult<Artifact> {
-        // Sacrum scopes artifact queries by project but does not expose the
-        // owning project as a field on the public Artifact GraphQL type.
-        // Preserve that domain field from the client scope instead.
+    fn active_project_id(&self) -> ServiceResult<String> {
+        Self::id(self.client.project_id(), "active project id")
+    }
+    fn map(response: ArtifactResponse, known_project_id: Option<&str>) -> ServiceResult<Artifact> {
         let mut response = response;
-        if response.project_id.is_empty() {
-            response.project_id = project_id.to_owned();
+        if response.project_id.is_none() {
+            response.project_id = known_project_id.map(ToOwned::to_owned);
         }
         response.into_artifact()
+    }
+
+    fn artifact_mutation(
+        operation_name: &str,
+        field_name: &str,
+        required: Vec<(&str, &str, Value)>,
+        optional: Vec<(&str, &str, Option<Value>)>,
+    ) -> (String, Value) {
+        let mut declarations = Vec::new();
+        let mut arguments = Vec::new();
+        let mut variables = Map::new();
+
+        for (name, ty, value) in required {
+            declarations.push(format!("${name}: {ty}"));
+            arguments.push(format!("{name}: ${name}"));
+            variables.insert(name.to_string(), value);
+        }
+        for (name, ty, value) in optional {
+            if let Some(value) = value {
+                declarations.push(format!("${name}: {ty}"));
+                arguments.push(format!("{name}: ${name}"));
+                variables.insert(name.to_string(), value);
+            }
+        }
+
+        (
+            format!(
+                "mutation {operation_name}({}) {{ {field_name}({}) {{ ...ArtifactFields }} }}",
+                declarations.join(", "),
+                arguments.join(", ")
+            ),
+            Value::Object(variables),
+        )
     }
 }
 
@@ -47,25 +81,52 @@ impl ArtifactService for SacrumArtifactService {
         input
             .validate()
             .map_err(|e| ServiceError::InvalidInput(e.into()))?;
-        let query = with_fragments(artifacts::CREATE_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]);
-        let variables = json!({
-            "project_id": self.client.project_id(),
-            "filename": input.filename,
-            "body": input.body,
-            "subject_type": input.subject_type,
-            "subject_id": input.subject_id,
-        });
+        let project_id = self.active_project_id()?;
+        let subject_id = input
+            .subject_id
+            .as_deref()
+            .map(|id| Self::id(id, "artifact subject id"))
+            .transpose()?;
+        let (operation, variables) = Self::artifact_mutation(
+            "CreateArtifact",
+            "createArtifact",
+            vec![
+                ("project_id", "Uuid4!", json!(project_id)),
+                ("filename", "String!", json!(input.filename)),
+                ("body", "String!", json!(input.body)),
+            ],
+            vec![
+                (
+                    "subject_type",
+                    "String",
+                    input.subject_type.map(Value::String),
+                ),
+                ("subject_id", "Uuid4", subject_id.map(Value::String)),
+                (
+                    "logical_name",
+                    "String",
+                    input.logical_name.map(Value::String),
+                ),
+                (
+                    "metadata",
+                    "Json",
+                    input.metadata.map(|metadata| json!(metadata)),
+                ),
+            ],
+        );
+        let query = with_fragments(&operation, &[artifacts::ARTIFACT_FIELDS]);
         let response: ArtifactResponse = self
             .client
             .execute(&query, variables, "createArtifact")
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response, self.client.project_id())
+        Self::map(response, Some(self.client.project_id()))
     }
     async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>> {
         let query = with_fragments(artifacts::LIST_ARTIFACTS, &[artifacts::ARTIFACT_FIELDS]);
+        let project_id = self.active_project_id()?;
         let variables = json!({
-            "project_id": self.client.project_id(),
+            "project_id": project_id,
             "limit": input.limit,
             "offset": input.offset,
         });
@@ -77,7 +138,7 @@ impl ArtifactService for SacrumArtifactService {
         project
             .artifacts
             .into_iter()
-            .map(|response| Self::map(response, self.client.project_id()))
+            .map(|response| Self::map(response, Some(self.client.project_id())))
             .collect()
     }
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact> {
@@ -85,45 +146,106 @@ impl ArtifactService for SacrumArtifactService {
             .client
             .execute(
                 &with_fragments(artifacts::GET_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]),
-                json!({"id": Self::id(id)?}),
+                json!({"id": Self::id(id, "artifact id")?}),
                 "artifact",
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response, self.client.project_id())
+        Self::map(response, None)
+    }
+    async fn get_artifact_by_logical_name(
+        &self,
+        input: GetArtifactByLogicalNameInput,
+    ) -> ServiceResult<Artifact> {
+        input
+            .validate()
+            .map_err(|e| ServiceError::InvalidInput(e.into()))?;
+        let project_id = self.active_project_id()?;
+        let subject_id = Self::id(&input.subject_id, "artifact subject id")?;
+        let response: ArtifactResponse = self
+            .client
+            .execute(
+                &with_fragments(
+                    artifacts::GET_ARTIFACT_BY_LOGICAL_NAME,
+                    &[artifacts::ARTIFACT_FIELDS],
+                ),
+                json!({
+                    "project_id": project_id,
+                    "subject_type": input.subject_type,
+                    "subject_id": subject_id,
+                    "logical_name": input.logical_name,
+                }),
+                "artifactByLogicalName",
+            )
+            .await
+            .map_err(ServiceError::from)?;
+        Self::map(response, Some(self.client.project_id()))
     }
     async fn update_artifact(
         &self,
         id: &str,
         input: UpdateArtifactInput,
     ) -> ServiceResult<Artifact> {
+        input
+            .validate()
+            .map_err(|e| ServiceError::InvalidInput(e.into()))?;
         if !input.has_updates() {
             return Err(ServiceError::InvalidInput(
                 "at least one artifact field must be updated".into(),
             ));
         }
+        let subject_id = input
+            .subject_id
+            .as_deref()
+            .map(|subject_id| Self::id(subject_id, "artifact subject id"))
+            .transpose()?;
+        let (operation, variables) = Self::artifact_mutation(
+            "UpdateArtifact",
+            "updateArtifact",
+            vec![("id", "Uuid4!", json!(Self::id(id, "artifact id")?))],
+            vec![
+                ("filename", "String", input.filename.map(Value::String)),
+                ("body", "String", input.body.map(Value::String)),
+                (
+                    "subject_type",
+                    "String",
+                    input.subject_type.map(Value::String),
+                ),
+                ("subject_id", "Uuid4", subject_id.map(Value::String)),
+                (
+                    "logical_name",
+                    "String",
+                    input.logical_name.map(Value::String),
+                ),
+                (
+                    "metadata",
+                    "Json",
+                    input.metadata.map(|metadata| json!(metadata)),
+                ),
+            ],
+        );
         let response: ArtifactResponse = self
             .client
             .execute(
-                &with_fragments(artifacts::UPDATE_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]),
-                json!({"id": Self::id(id)?, "filename": input.filename, "body": input.body}),
+                &with_fragments(&operation, &[artifacts::ARTIFACT_FIELDS]),
+                variables,
                 "updateArtifact",
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response, self.client.project_id())
+        Self::map(response, None)
     }
     async fn delete_artifact(&self, id: &str) -> ServiceResult<Artifact> {
         let response: ArtifactResponse = self
             .client
             .execute(
                 &with_fragments(artifacts::DELETE_ARTIFACT, &[artifacts::ARTIFACT_FIELDS]),
-                json!({"id": Self::id(id)?}),
+                json!({"id": Self::id(id, "artifact id")?}),
                 "deleteArtifact",
             )
             .await
             .map_err(ServiceError::from)?;
-        Self::map(response, self.client.project_id())
+        Self::map(response, None)
     }
 }
 
@@ -133,11 +255,26 @@ mod tests {
     use crate::config::SacrumConfig;
     use serde_json::json;
     use vertebrae_core::error::ServiceError;
+    use vertebrae_core::models::ArtifactLinkMetadata;
     use wiremock::matchers::{body_string_contains, method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
     const ARTIFACT_ID: &str = "11111111-1111-1111-1111-111111111111";
     const PROJECT_ID: &str = "22222222-2222-2222-2222-222222222222";
+
+    #[derive(Debug)]
+    struct VariablesExactly(serde_json::Value);
+
+    impl Match for VariablesExactly {
+        fn matches(&self, request: &Request) -> bool {
+            request
+                .body_json::<serde_json::Value>()
+                .ok()
+                .and_then(|body| body.get("variables").cloned())
+                .as_ref()
+                == Some(&self.0)
+        }
+    }
 
     fn service(server: &MockServer) -> SacrumArtifactService {
         SacrumArtifactService::new(GraphqlClient::new(SacrumConfig::new(
@@ -150,9 +287,29 @@ mod tests {
     fn artifact_json() -> serde_json::Value {
         json!({
             "id": ARTIFACT_ID,
-            "project_id": PROJECT_ID,
             "filename": "notes.md",
             "body": "hello",
+            "logical_name": "conversation",
+            "metadata": {
+                "version": 1,
+                "content_kind": "conversation",
+                "format": "jsonl",
+                "origin": "harness",
+                "presentation": "raw",
+                "extensions": { "provider": "codex" }
+            },
+            "inserted_at": "2026-07-29T10:00:00Z",
+            "updated_at": "2026-07-29T11:00:00Z"
+        })
+    }
+
+    fn root_artifact_json() -> serde_json::Value {
+        json!({
+            "id": ARTIFACT_ID,
+            "filename": "notes.md",
+            "body": "hello",
+            "logical_name": null,
+            "metadata": null,
             "inserted_at": "2026-07-29T10:00:00Z",
             "updated_at": "2026-07-29T11:00:00Z"
         })
@@ -166,6 +323,24 @@ mod tests {
             .and(body_string_contains("CreateArtifact"))
             .and(body_string_contains(PROJECT_ID))
             .and(body_string_contains("subject_type"))
+            .and(body_string_contains("logical_name"))
+            .and(body_string_contains("metadata"))
+            .and(VariablesExactly(json!({
+                "project_id": PROJECT_ID,
+                "filename": "notes.md",
+                "body": "hello",
+                "subject_type": "task",
+                "subject_id": ARTIFACT_ID,
+                "logical_name": "conversation",
+                "metadata": {
+                    "version": 1,
+                    "content_kind": "conversation",
+                    "format": "jsonl",
+                    "origin": "harness",
+                    "presentation": "raw",
+                    "extensions": { "provider": "codex" }
+                }
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "createArtifact": artifact_json() }
             })))
@@ -175,11 +350,19 @@ mod tests {
 
         let artifact = service(&server)
             .create_artifact(
-                CreateArtifactInput::new("notes.md", "hello").with_subject("task", ARTIFACT_ID),
+                CreateArtifactInput::new("notes.md", "hello")
+                    .with_subject("task", ARTIFACT_ID)
+                    .with_logical_name("conversation")
+                    .with_metadata(
+                        ArtifactLinkMetadata::new("conversation", "jsonl", "harness", "raw")
+                            .with_extension("provider", json!("codex")),
+                    ),
             )
             .await
             .unwrap();
         assert_eq!(artifact.id, ARTIFACT_ID);
+        assert_eq!(artifact.logical_name.as_deref(), Some("conversation"));
+        assert_eq!(artifact.project_id.as_deref(), Some(PROJECT_ID));
         server.verify().await;
     }
 
@@ -203,6 +386,127 @@ mod tests {
             .unwrap();
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].filename, "notes.md");
+        assert_eq!(artifacts[0].project_id.as_deref(), Some(PROJECT_ID));
+    }
+
+    #[tokio::test]
+    async fn root_get_keeps_project_scope_unknown() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetArtifact"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "artifact": root_artifact_json() }
+            })))
+            .mount(&server)
+            .await;
+
+        let artifact = service(&server).get_artifact(ARTIFACT_ID).await.unwrap();
+        assert!(artifact.project_id.is_none());
+        assert!(artifact.logical_name.is_none());
+        assert!(artifact.metadata.is_none());
+    }
+
+    #[tokio::test]
+    async fn subject_logical_name_lookup_sends_scope_and_preserves_link_fields() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetArtifactByLogicalName"))
+            .and(body_string_contains("artifactByLogicalName"))
+            .and(body_string_contains(PROJECT_ID))
+            .and(body_string_contains("conversation"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "artifactByLogicalName": artifact_json() }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let artifact = service(&server)
+            .get_artifact_by_logical_name(GetArtifactByLogicalNameInput::new(
+                "task",
+                ARTIFACT_ID,
+                "conversation",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(artifact.project_id.as_deref(), Some(PROJECT_ID));
+        assert_eq!(
+            artifact.metadata.unwrap().extensions["provider"],
+            serde_json::json!("codex")
+        );
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn link_only_update_sends_attachment_fields_without_project_scope() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateArtifact"))
+            .and(body_string_contains("logical_name"))
+            .and(body_string_contains("metadata"))
+            .and(VariablesExactly(json!({
+                "id": ARTIFACT_ID,
+                "logical_name": "conversation",
+                "metadata": {
+                    "version": 1,
+                    "content_kind": "conversation",
+                    "format": "jsonl",
+                    "origin": "harness",
+                    "presentation": "raw",
+                    "extensions": { "trace": { "turn": 7 } }
+                }
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "updateArtifact": artifact_json() }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let artifact = service(&server)
+            .update_artifact(
+                ARTIFACT_ID,
+                UpdateArtifactInput::new()
+                    .with_logical_name("conversation")
+                    .with_metadata(
+                        ArtifactLinkMetadata::new("conversation", "jsonl", "harness", "raw")
+                            .with_extension("trace", json!({ "turn": 7 })),
+                    ),
+            )
+            .await
+            .unwrap();
+        assert!(artifact.project_id.is_none());
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn filename_only_update_omits_attachment_variables() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateArtifact"))
+            .and(VariablesExactly(json!({
+                "id": ARTIFACT_ID,
+                "filename": "renamed.md"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "updateArtifact": artifact_json() }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        service(&server)
+            .update_artifact(
+                ARTIFACT_ID,
+                UpdateArtifactInput::new().with_filename("renamed.md"),
+            )
+            .await
+            .unwrap();
+        server.verify().await;
     }
 
     #[tokio::test]
