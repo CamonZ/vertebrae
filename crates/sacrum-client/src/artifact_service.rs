@@ -73,6 +73,17 @@ impl SacrumArtifactService {
             Value::Object(variables),
         )
     }
+
+    /// Sacrum's `Json` GraphQL scalar accepts a JSON-encoded string as its
+    /// input value, then decodes it server-side. Sending the object directly
+    /// causes Absinthe to treat each metadata key as an unknown GraphQL input
+    /// field.
+    fn metadata_variable(metadata: vertebrae_core::ArtifactLinkMetadata) -> Value {
+        Value::String(
+            serde_json::to_string(&metadata)
+                .expect("artifact link metadata contains only JSON-serializable values"),
+        )
+    }
 }
 
 #[async_trait]
@@ -110,7 +121,7 @@ impl ArtifactService for SacrumArtifactService {
                 (
                     "metadata",
                     "Json",
-                    input.metadata.map(|metadata| json!(metadata)),
+                    input.metadata.map(Self::metadata_variable),
                 ),
             ],
         );
@@ -220,7 +231,7 @@ impl ArtifactService for SacrumArtifactService {
                 (
                     "metadata",
                     "Json",
-                    input.metadata.map(|metadata| json!(metadata)),
+                    input.metadata.map(Self::metadata_variable),
                 ),
             ],
         );
@@ -316,7 +327,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_sends_project_and_attachment_variables() {
+    async fn create_encodes_metadata_as_a_json_scalar_string() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
@@ -332,14 +343,7 @@ mod tests {
                 "subject_type": "task",
                 "subject_id": ARTIFACT_ID,
                 "logical_name": "conversation",
-                "metadata": {
-                    "version": 1,
-                    "content_kind": "conversation",
-                    "format": "jsonl",
-                    "origin": "harness",
-                    "presentation": "raw",
-                    "extensions": { "provider": "codex" }
-                }
+                "metadata": "{\"version\":1,\"content_kind\":\"conversation\",\"format\":\"jsonl\",\"origin\":\"harness\",\"presentation\":\"raw\",\"extensions\":{\"provider\":\"codex\"}}"
             })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "createArtifact": artifact_json() }
@@ -440,7 +444,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_only_update_sends_attachment_fields_without_project_scope() {
+    async fn link_only_update_encodes_metadata_as_a_json_scalar_string() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/graphql"))
@@ -450,14 +454,7 @@ mod tests {
             .and(VariablesExactly(json!({
                 "id": ARTIFACT_ID,
                 "logical_name": "conversation",
-                "metadata": {
-                    "version": 1,
-                    "content_kind": "conversation",
-                    "format": "jsonl",
-                    "origin": "harness",
-                    "presentation": "raw",
-                    "extensions": { "trace": { "turn": 7 } }
-                }
+                "metadata": "{\"version\":1,\"content_kind\":\"conversation\",\"format\":\"jsonl\",\"origin\":\"harness\",\"presentation\":\"raw\",\"extensions\":{\"trace\":{\"turn\":7}}}"
             })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "updateArtifact": artifact_json() }

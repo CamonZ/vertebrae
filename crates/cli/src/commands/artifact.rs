@@ -12,7 +12,8 @@ use clap::{Args, Subcommand};
 use serde_json::{Value, json};
 use uuid::Uuid;
 use vertebrae_core::{
-    Artifact, CreateArtifactInput, ListArtifactInput, ServiceError, VertebraeServices,
+    Artifact, ArtifactLinkMetadata, CreateArtifactInput, GetArtifactByLogicalNameInput,
+    ListArtifactInput, ServiceError, UpdateArtifactInput, VertebraeServices,
 };
 
 /// Artifact management commands.
@@ -24,6 +25,8 @@ pub enum ArtifactCommand {
     List(ArtifactListCommand),
     /// Show an artifact by ID.
     Show(ArtifactShowCommand),
+    /// Look up an artifact by its subject-local logical name.
+    Lookup(ArtifactLookupCommand),
     /// Update an artifact by ID.
     Update(ArtifactUpdateCommand),
     /// Delete an artifact by ID.
@@ -37,6 +40,7 @@ impl ArtifactCommand {
             Self::Add(command) => command.execute(services).await,
             Self::List(command) => command.execute(services).await,
             Self::Show(command) => command.execute(services).await,
+            Self::Lookup(command) => command.execute(services).await,
             Self::Update(command) => command.execute(services).await,
             Self::Delete(command) => command.execute(services).await,
         }
@@ -48,6 +52,7 @@ impl ArtifactCommand {
             Self::Add(command) => command.execute_json(services).await,
             Self::List(command) => command.execute_json(services).await,
             Self::Show(command) => command.execute_json(services).await,
+            Self::Lookup(command) => command.execute_json(services).await,
             Self::Update(command) => command.execute_json(services).await,
             Self::Delete(command) => command.execute_json(services).await,
         }
@@ -63,7 +68,13 @@ impl ArtifactCommand {
             }
             Self::List(_) => {}
             Self::Show(command) => command.id = resolve_artifact_id(&command.id)?,
-            Self::Update(command) => command.id = resolve_artifact_id(&command.id)?,
+            Self::Lookup(command) => command.subject_id = resolve_artifact_id(&command.subject_id)?,
+            Self::Update(command) => {
+                command.id = resolve_artifact_id(&command.id)?;
+                if let Some(subject_id) = &mut command.subject_id {
+                    *subject_id = resolve_artifact_id(subject_id)?;
+                }
+            }
             Self::Delete(command) => command.id = resolve_artifact_id(&command.id)?,
         }
         Ok(())
@@ -119,6 +130,31 @@ fn validate_pagination(limit: Option<i32>, offset: Option<i32>) -> Result<(), Se
     Ok(())
 }
 
+fn read_metadata(
+    metadata: &Option<String>,
+    metadata_file: &Option<PathBuf>,
+) -> Result<Option<ArtifactLinkMetadata>, ServiceError> {
+    let value = match (metadata, metadata_file) {
+        (Some(_), Some(_)) => {
+            return Err(ServiceError::validation_failed(
+                "provide exactly one artifact metadata source: --metadata or --metadata-file",
+            ));
+        }
+        (Some(value), None) => value.clone(),
+        (None, Some(path)) => fs::read_to_string(path).map_err(|error| {
+            ServiceError::validation_failed(format!(
+                "failed to read artifact metadata file '{}': {error}",
+                path.display()
+            ))
+        })?,
+        (None, None) => return Ok(None),
+    };
+
+    serde_json::from_str(&value).map(Some).map_err(|error| {
+        ServiceError::validation_failed(format!("invalid artifact metadata JSON: {error}"))
+    })
+}
+
 fn format_artifact_list(artifacts: &[Artifact]) -> String {
     if artifacts.is_empty() {
         return "No artifacts found".to_string();
@@ -126,7 +162,12 @@ fn format_artifact_list(artifacts: &[Artifact]) -> String {
 
     artifacts
         .iter()
-        .map(|artifact| format!("{}  {}", artifact.id, artifact.filename))
+        .map(|artifact| match &artifact.logical_name {
+            Some(logical_name) => {
+                format!("{}  {}  ({logical_name})", artifact.id, artifact.filename)
+            }
+            None => format!("{}  {}", artifact.id, artifact.filename),
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -147,6 +188,14 @@ fn format_artifact(artifact: &Artifact) -> String {
     }
     if let Some(updated_at) = artifact.updated_at {
         output.push_str(&format!("\nUpdated: {updated_at}"));
+    }
+    if let Some(logical_name) = &artifact.logical_name {
+        output.push_str(&format!("\nLogical name: {logical_name}"));
+    }
+    if let Some(metadata) = &artifact.metadata {
+        let metadata = serde_json::to_string_pretty(metadata)
+            .expect("artifact link metadata should always serialize");
+        output.push_str(&format!("\nMetadata:\n{metadata}"));
     }
     output
 }
@@ -199,6 +248,18 @@ pub struct ArtifactAddCommand {
     /// ID of the direct attachment target.
     #[arg(long, value_parser = crate::commands::parse_full_uuid("subject ID"))]
     pub subject_id: Option<String>,
+
+    /// Stable logical name for the attachment within its subject.
+    #[arg(long)]
+    pub logical_name: Option<String>,
+
+    /// Attachment provenance as a JSON object.
+    #[arg(long, conflicts_with = "metadata_file")]
+    pub metadata: Option<String>,
+
+    /// Read attachment provenance JSON from a file.
+    #[arg(long, conflicts_with = "metadata")]
+    pub metadata_file: Option<PathBuf>,
 }
 
 impl ArtifactAddCommand {
@@ -242,9 +303,16 @@ impl ArtifactAddCommand {
         }
 
         let body = self.read_body()?;
+        let metadata = read_metadata(&self.metadata, &self.metadata_file)?;
         let mut input = CreateArtifactInput::new(self.filename.clone(), body);
         if let (Some(subject_type), Some(subject_id)) = (&self.subject_type, &self.subject_id) {
             input = input.with_subject(subject_type.clone(), subject_id.clone());
+        }
+        if let Some(logical_name) = &self.logical_name {
+            input = input.with_logical_name(logical_name.clone());
+        }
+        if let Some(metadata) = metadata {
+            input = input.with_metadata(metadata);
         }
         input.validate().map_err(ServiceError::validation_failed)?;
         Ok(input)
@@ -334,6 +402,49 @@ impl ArtifactShowCommand {
     }
 }
 
+/// Look up an attachment by its logical name within a subject.
+#[derive(Debug, Args)]
+pub struct ArtifactLookupCommand {
+    /// Stable logical name of the attachment.
+    #[arg(required = true)]
+    pub logical_name: String,
+
+    /// Type of the attachment target.
+    #[arg(long, value_parser = parse_subject_type)]
+    pub subject_type: String,
+
+    /// ID of the attachment target.
+    #[arg(long, value_parser = crate::commands::parse_full_uuid("subject ID"))]
+    pub subject_id: String,
+}
+
+impl ArtifactLookupCommand {
+    fn input(&self) -> Result<GetArtifactByLogicalNameInput, ServiceError> {
+        let input = GetArtifactByLogicalNameInput::new(
+            self.subject_type.clone(),
+            self.subject_id.clone(),
+            self.logical_name.clone(),
+        );
+        input.validate().map_err(ServiceError::validation_failed)?;
+        Ok(input)
+    }
+
+    async fn execute_result(&self, services: &VertebraeServices) -> Result<Artifact, ServiceError> {
+        services
+            .artifacts()
+            .get_artifact_by_logical_name(self.input()?)
+            .await
+    }
+
+    async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        Ok(format_artifact(&self.execute_result(services).await?))
+    }
+
+    async fn execute_json(&self, services: &VertebraeServices) -> Result<Value, ServiceError> {
+        super::json_value(self.execute_result(services).await?)
+    }
+}
+
 /// Update an artifact by ID.
 #[derive(Debug, Args)]
 pub struct ArtifactUpdateCommand {
@@ -352,6 +463,26 @@ pub struct ArtifactUpdateCommand {
     /// Read the replacement artifact body from a file.
     #[arg(long, conflicts_with = "body")]
     pub body_file: Option<PathBuf>,
+
+    /// Type of the replacement attachment target.
+    #[arg(long, value_parser = parse_subject_type)]
+    pub subject_type: Option<String>,
+
+    /// ID of the replacement attachment target.
+    #[arg(long, value_parser = crate::commands::parse_full_uuid("subject ID"))]
+    pub subject_id: Option<String>,
+
+    /// Updated stable logical name for the attachment.
+    #[arg(long)]
+    pub logical_name: Option<String>,
+
+    /// Replacement attachment provenance as a JSON object.
+    #[arg(long, conflicts_with = "metadata_file")]
+    pub metadata: Option<String>,
+
+    /// Read replacement attachment provenance JSON from a file.
+    #[arg(long, conflicts_with = "metadata")]
+    pub metadata_file: Option<PathBuf>,
 }
 
 impl ArtifactUpdateCommand {
@@ -371,25 +502,50 @@ impl ArtifactUpdateCommand {
         }
     }
 
-    fn update_input(&self) -> Result<vertebrae_core::UpdateArtifactInput, ServiceError> {
+    fn update_input(&self) -> Result<UpdateArtifactInput, ServiceError> {
         if let Some(filename) = &self.filename {
             validate_filename(filename)?;
         }
 
         let body = self.read_body()?;
-        if self.filename.is_none() && body.is_none() {
+        if self.subject_type.is_some() != self.subject_id.is_some() {
             return Err(ServiceError::validation_failed(
-                "artifact update requires --filename, --body, or --body-file",
+                "subject_type and subject_id must be provided together",
+            ));
+        }
+        if let Some(subject_type) = &self.subject_type {
+            parse_subject_type(subject_type).map_err(ServiceError::validation_failed)?;
+        }
+
+        let metadata = read_metadata(&self.metadata, &self.metadata_file)?;
+        if self.filename.is_none()
+            && body.is_none()
+            && self.subject_type.is_none()
+            && self.logical_name.is_none()
+            && metadata.is_none()
+        {
+            return Err(ServiceError::validation_failed(
+                "artifact update requires a file, body, attachment, logical name, or metadata field",
             ));
         }
 
-        let mut input = vertebrae_core::UpdateArtifactInput::new();
+        let mut input = UpdateArtifactInput::new();
         if let Some(filename) = &self.filename {
             input = input.with_filename(filename.clone());
         }
         if let Some(body) = body {
             input = input.with_body(body);
         }
+        if let (Some(subject_type), Some(subject_id)) = (&self.subject_type, &self.subject_id) {
+            input = input.with_subject(subject_type.clone(), subject_id.clone());
+        }
+        if let Some(logical_name) = &self.logical_name {
+            input = input.with_logical_name(logical_name.clone());
+        }
+        if let Some(metadata) = metadata {
+            input = input.with_metadata(metadata);
+        }
+        input.validate().map_err(ServiceError::validation_failed)?;
         Ok(input)
     }
 
@@ -497,6 +653,15 @@ mod tests {
             vec!["test", "add", "notes.md", "--body", "hello"],
             vec!["test", "list", "--limit", "10", "--offset", "2"],
             vec!["test", "show", ARTIFACT_ID],
+            vec![
+                "test",
+                "lookup",
+                "result",
+                "--subject-type",
+                "task",
+                "--subject-id",
+                ARTIFACT_ID,
+            ],
             vec!["test", "update", ARTIFACT_ID, "--filename", "README.md"],
             vec!["test", "delete", ARTIFACT_ID, "--force"],
         ];
@@ -555,6 +720,34 @@ mod tests {
                 "notes.md",
                 "--body",
                 "hello",
+                "--metadata",
+                "{}",
+                "--metadata-file",
+                "metadata.json",
+            ])
+            .is_err()
+        );
+
+        assert!(
+            TestCli::try_parse_from([
+                "test",
+                "lookup",
+                "result",
+                "--subject-type",
+                "workspace",
+                "--subject-id",
+                ARTIFACT_ID,
+            ])
+            .is_err()
+        );
+
+        assert!(
+            TestCli::try_parse_from([
+                "test",
+                "add",
+                "notes.md",
+                "--body",
+                "hello",
                 "--body-file",
                 "notes.txt",
             ])
@@ -570,6 +763,9 @@ mod tests {
             body_file: None,
             subject_type: Some("task".to_string()),
             subject_id: None,
+            logical_name: None,
+            metadata: None,
+            metadata_file: None,
         };
         assert!(add.create_input().is_err());
 
@@ -579,6 +775,9 @@ mod tests {
             body_file: None,
             subject_type: None,
             subject_id: None,
+            logical_name: None,
+            metadata: None,
+            metadata_file: None,
         };
         assert!(empty_filename.create_input().is_err());
 
@@ -615,6 +814,9 @@ mod tests {
             body_file: Some(path.clone()),
             subject_type: None,
             subject_id: None,
+            logical_name: None,
+            metadata: None,
+            metadata_file: None,
         };
         assert_eq!(add.create_input().unwrap().body, "file body");
 
@@ -623,6 +825,11 @@ mod tests {
             filename: None,
             body: None,
             body_file: Some(path.clone()),
+            subject_type: None,
+            subject_id: None,
+            logical_name: None,
+            metadata: None,
+            metadata_file: None,
         };
         assert_eq!(
             update.update_input().unwrap().body.as_deref(),
@@ -634,10 +841,91 @@ mod tests {
             filename: None,
             body: None,
             body_file: None,
+            subject_type: None,
+            subject_id: None,
+            logical_name: None,
+            metadata: None,
+            metadata_file: None,
         };
         assert!(empty_update.update_input().is_err());
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn builds_link_inputs_from_validated_metadata_and_paired_destinations() {
+        let metadata = r#"{
+            "version": 1,
+            "content_kind": "result",
+            "format": "markdown",
+            "origin": "agent",
+            "presentation": "rendered",
+            "extensions": {"provider": "codex"}
+        }"#;
+        let add = ArtifactAddCommand {
+            filename: "result.md".to_string(),
+            body: Some("# Result".to_string()),
+            body_file: None,
+            subject_type: Some("task".to_string()),
+            subject_id: Some(ARTIFACT_ID.to_string()),
+            logical_name: Some("result".to_string()),
+            metadata: Some(metadata.to_string()),
+            metadata_file: None,
+        };
+        let input = add.create_input().expect("valid metadata should parse");
+        assert_eq!(input.logical_name.as_deref(), Some("result"));
+        assert_eq!(input.metadata.unwrap().extensions["provider"], "codex");
+
+        let invalid_metadata = ArtifactAddCommand {
+            metadata: Some("not-json".to_string()),
+            ..add
+        };
+        assert!(invalid_metadata.create_input().is_err());
+
+        let path = std::env::temp_dir().join(format!(
+            "vtb-artifact-metadata-{}-{}.json",
+            std::process::id(),
+            ARTIFACT_ID.replace('-', "")
+        ));
+        std::fs::write(&path, metadata).expect("temporary metadata file should be writable");
+        let from_file = ArtifactAddCommand {
+            filename: "result.md".to_string(),
+            body: Some("# Result".to_string()),
+            body_file: None,
+            subject_type: Some("task".to_string()),
+            subject_id: Some(ARTIFACT_ID.to_string()),
+            logical_name: Some("result".to_string()),
+            metadata: None,
+            metadata_file: Some(path.clone()),
+        };
+        assert_eq!(
+            from_file.create_input().unwrap().metadata.unwrap().format,
+            "markdown"
+        );
+        let _ = std::fs::remove_file(path);
+
+        let update = ArtifactUpdateCommand {
+            id: ARTIFACT_ID.to_string(),
+            filename: None,
+            body: None,
+            body_file: None,
+            subject_type: Some("workflow".to_string()),
+            subject_id: Some(ARTIFACT_ID.to_string()),
+            logical_name: Some("result".to_string()),
+            metadata: Some(metadata.to_string()),
+            metadata_file: None,
+        };
+        let input = update
+            .update_input()
+            .expect("link-only update should be valid");
+        assert_eq!(input.subject_type.as_deref(), Some("workflow"));
+        assert_eq!(input.logical_name.as_deref(), Some("result"));
+
+        let incomplete_destination = ArtifactUpdateCommand {
+            subject_id: None,
+            ..update
+        };
+        assert!(incomplete_destination.update_input().is_err());
     }
 
     #[test]
@@ -679,7 +967,7 @@ mod tests {
     impl ArtifactCommand {
         async fn resolve_ids_without_services(&mut self) -> Result<(), ServiceError> {
             match self {
-                Self::Add(_) | Self::List(_) => {}
+                Self::Add(_) | Self::List(_) | Self::Lookup(_) => {}
                 Self::Show(command) => command.id = resolve_artifact_id(&command.id)?,
                 Self::Update(command) => command.id = resolve_artifact_id(&command.id)?,
                 Self::Delete(command) => command.id = resolve_artifact_id(&command.id)?,

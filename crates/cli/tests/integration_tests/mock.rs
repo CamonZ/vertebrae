@@ -1406,6 +1406,21 @@ impl ArtifactService for MockArtifactService {
         input.validate().map_err(ServiceError::validation_failed)?;
 
         let mut state = self.state.lock().unwrap();
+        let subject = input
+            .subject_type
+            .clone()
+            .zip(input.subject_id.clone())
+            .unwrap_or_else(|| ("project".to_string(), "mock-project".to_string()));
+        if let Some(logical_name) = input.logical_name.as_deref()
+            && state.artifacts.iter().any(|(id, artifact)| {
+                artifact.logical_name.as_deref() == Some(logical_name)
+                    && state.artifact_subjects.get(id) == Some(&subject)
+            })
+        {
+            return Err(ServiceError::validation_failed(format!(
+                "artifact logical name '{logical_name}' already exists for this subject"
+            )));
+        }
         let id = state.gen_id();
         let now = Utc::now();
         let artifact = Artifact {
@@ -1418,13 +1433,7 @@ impl ArtifactService for MockArtifactService {
             created_at: Some(now),
             updated_at: Some(now),
         };
-        state.artifact_subjects.insert(
-            id.clone(),
-            input
-                .subject_type
-                .zip(input.subject_id)
-                .unwrap_or_else(|| ("project".to_string(), "mock-project".to_string())),
-        );
+        state.artifact_subjects.insert(id.clone(), subject);
         state.artifacts.insert(id, artifact.clone());
         Ok(artifact)
     }
@@ -1480,6 +1489,30 @@ impl ArtifactService for MockArtifactService {
         }
 
         let mut state = self.state.lock().unwrap();
+        let artifact = state
+            .artifacts
+            .get(id)
+            .ok_or_else(|| ServiceError::artifact_not_found(id))?;
+        let subject = input
+            .subject_type
+            .clone()
+            .zip(input.subject_id.clone())
+            .or_else(|| state.artifact_subjects.get(id).cloned());
+        let logical_name = input
+            .logical_name
+            .as_ref()
+            .or(artifact.logical_name.as_ref());
+        if let (Some(subject), Some(logical_name)) = (subject.as_ref(), logical_name)
+            && state.artifacts.iter().any(|(other_id, artifact)| {
+                other_id != id
+                    && artifact.logical_name.as_deref() == Some(logical_name)
+                    && state.artifact_subjects.get(other_id) == Some(subject)
+            })
+        {
+            return Err(ServiceError::validation_failed(format!(
+                "artifact logical name '{logical_name}' already exists for this subject"
+            )));
+        }
         let artifact = state
             .artifacts
             .get_mut(id)

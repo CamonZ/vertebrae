@@ -5,7 +5,7 @@ use clap::Parser;
 use vertebrae_cli::CliArgs;
 use vertebrae_cli::commands::artifact::{
     ArtifactAddCommand, ArtifactCommand, ArtifactDeleteCommand, ArtifactListCommand,
-    ArtifactShowCommand, ArtifactUpdateCommand,
+    ArtifactLookupCommand, ArtifactShowCommand, ArtifactUpdateCommand,
 };
 use vertebrae_cli::commands::{Command, CommandResult};
 use vertebrae_core::{
@@ -21,7 +21,82 @@ fn add_command(filename: &str, body: &str) -> ArtifactCommand {
         body_file: None,
         subject_type: None,
         subject_id: None,
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     })
+}
+
+#[test]
+fn global_json_parser_covers_artifact_link_flags_and_conflicts() {
+    let metadata = r#"{"version":1,"content_kind":"result","format":"markdown","origin":"agent","presentation":"rendered","extensions":{}}"#;
+    let parsed = CliArgs::try_parse_from([
+        "vtb",
+        "--json",
+        "artifact",
+        "add",
+        "result.md",
+        "--body",
+        "# Result",
+        "--subject-type",
+        "task",
+        "--subject-id",
+        ARTIFACT_ID,
+        "--logical-name",
+        "result",
+        "--metadata",
+        metadata,
+    ])
+    .expect("global JSON artifact add should parse");
+    assert!(parsed.json);
+    let Some(Command::Artifact(ArtifactCommand::Add(command))) = parsed.command else {
+        panic!("expected artifact add command");
+    };
+    assert_eq!(command.logical_name.as_deref(), Some("result"));
+    assert_eq!(command.metadata.as_deref(), Some(metadata));
+
+    let parsed = CliArgs::try_parse_from([
+        "vtb",
+        "--json",
+        "artifact",
+        "update",
+        ARTIFACT_ID,
+        "--subject-type",
+        "workflow",
+        "--subject-id",
+        ARTIFACT_ID,
+        "--logical-name",
+        "summary",
+        "--metadata-file",
+        "metadata.json",
+    ])
+    .expect("global JSON artifact update should parse");
+    let Some(Command::Artifact(ArtifactCommand::Update(command))) = parsed.command else {
+        panic!("expected artifact update command");
+    };
+    assert_eq!(command.logical_name.as_deref(), Some("summary"));
+    assert_eq!(
+        command
+            .metadata_file
+            .as_deref()
+            .and_then(|path| path.to_str()),
+        Some("metadata.json")
+    );
+
+    assert!(
+        CliArgs::try_parse_from([
+            "vtb",
+            "--json",
+            "artifact",
+            "update",
+            ARTIFACT_ID,
+            "--metadata",
+            metadata,
+            "--metadata-file",
+            "metadata.json",
+        ])
+        .is_err()
+    );
 }
 
 async fn add_artifact(
@@ -111,6 +186,100 @@ async fn mock_artifact_service_preserves_subject_link_context() {
 }
 
 #[tokio::test]
+async fn cli_commands_create_lookup_and_reattach_logical_artifacts() {
+    let services = mock_services();
+    let metadata = r#"{
+        "version": 1,
+        "content_kind": "result",
+        "format": "markdown",
+        "origin": "agent",
+        "presentation": "rendered",
+        "extensions": {"provider": "codex"}
+    }"#;
+    let created = ArtifactCommand::Add(ArtifactAddCommand {
+        filename: "result.md".to_string(),
+        body: Some("# Result".to_string()),
+        body_file: None,
+        subject_type: Some("task".to_string()),
+        subject_id: Some(ARTIFACT_ID.to_string()),
+        logical_name: Some("result".to_string()),
+        metadata: Some(metadata.to_string()),
+        metadata_file: None,
+    })
+    .execute_json(&services)
+    .await
+    .unwrap();
+    let artifact_id = created["artifact_id"].as_str().unwrap().to_string();
+    assert_eq!(created["artifact"]["logical_name"], "result");
+    assert_eq!(
+        created["artifact"]["metadata"]["extensions"]["provider"],
+        "codex"
+    );
+
+    assert!(
+        ArtifactCommand::Add(ArtifactAddCommand {
+            filename: "duplicate.md".to_string(),
+            body: Some("duplicate".to_string()),
+            body_file: None,
+            subject_type: Some("task".to_string()),
+            subject_id: Some(ARTIFACT_ID.to_string()),
+            logical_name: Some("result".to_string()),
+            metadata: None,
+            metadata_file: None,
+        })
+        .execute(&services)
+        .await
+        .is_err()
+    );
+
+    let lookup = ArtifactCommand::Lookup(ArtifactLookupCommand {
+        logical_name: "result".to_string(),
+        subject_type: "task".to_string(),
+        subject_id: ARTIFACT_ID.to_string(),
+    });
+    let output = lookup.execute(&services).await.unwrap();
+    assert!(output.contains("Logical name: result"));
+    assert!(output.contains("Metadata:"));
+
+    let updated = ArtifactCommand::Update(ArtifactUpdateCommand {
+        id: artifact_id,
+        filename: None,
+        body: None,
+        body_file: None,
+        subject_type: Some("workflow".to_string()),
+        subject_id: Some(ARTIFACT_ID.to_string()),
+        logical_name: Some("summary".to_string()),
+        metadata: None,
+        metadata_file: None,
+    })
+    .execute_json(&services)
+    .await
+    .unwrap();
+    assert_eq!(updated["artifact"]["logical_name"], "summary");
+
+    assert!(
+        ArtifactCommand::Lookup(ArtifactLookupCommand {
+            logical_name: "result".to_string(),
+            subject_type: "task".to_string(),
+            subject_id: ARTIFACT_ID.to_string(),
+        })
+        .execute(&services)
+        .await
+        .is_err()
+    );
+
+    let found = ArtifactCommand::Lookup(ArtifactLookupCommand {
+        logical_name: "summary".to_string(),
+        subject_type: "workflow".to_string(),
+        subject_id: ARTIFACT_ID.to_string(),
+    })
+    .execute_json(&services)
+    .await
+    .unwrap();
+    assert_eq!(found["logical_name"], "summary");
+}
+
+#[tokio::test]
 async fn add_supports_body_files_and_rejects_invalid_body_source_combinations() {
     let services = mock_services();
     let path =
@@ -123,6 +292,9 @@ async fn add_supports_body_files_and_rejects_invalid_body_source_combinations() 
         body_file: Some(path.clone()),
         subject_type: Some("project".to_string()),
         subject_id: Some(ARTIFACT_ID.to_string()),
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     });
     let output = command.execute(&services).await.unwrap();
     let artifact_id = output.strip_prefix("Created artifact: ").unwrap();
@@ -152,6 +324,9 @@ async fn add_supports_body_files_and_rejects_invalid_body_source_combinations() 
         body_file: None,
         subject_type: Some("task".to_string()),
         subject_id: None,
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     });
     assert!(missing_target.execute(&services).await.is_err());
 
@@ -177,6 +352,11 @@ async fn show_and_update_preserve_partial_update_semantics() {
         filename: None,
         body: Some("after".to_string()),
         body_file: None,
+        subject_type: None,
+        subject_id: None,
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     })
     .execute(&services)
     .await
@@ -188,6 +368,11 @@ async fn show_and_update_preserve_partial_update_semantics() {
         filename: Some("renamed.md".to_string()),
         body: None,
         body_file: None,
+        subject_type: None,
+        subject_id: None,
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     })
     .execute_json(&services)
     .await
@@ -208,8 +393,16 @@ async fn show_and_update_preserve_partial_update_semantics() {
         filename: None,
         body: None,
         body_file: None,
+        subject_type: None,
+        subject_id: None,
+        logical_name: None,
+        metadata: None,
+        metadata_file: None,
     });
-    assert!(empty_update.execute(&services).await.is_err());
+    let error = empty_update.execute(&services).await.unwrap_err();
+    assert!(error.to_string().contains(
+        "artifact update requires a file, body, attachment, logical name, or metadata field"
+    ));
 }
 
 #[tokio::test]

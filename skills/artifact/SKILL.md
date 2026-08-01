@@ -6,8 +6,8 @@ description: Manage project-scoped file artifacts with the vtb CLI. Use when cre
 # /artifact
 
 Use `vtb artifact` for project-scoped filename/body records. Artifacts are
-ordinary files represented by a filename and text body; they are not typed
-artifact variants and there is no standalone ArtifactLink CLI resource.
+ordinary files represented by a filename and text body. An attachment can
+also carry a subject-local logical name and versioned provenance metadata.
 
 ## Before running commands
 
@@ -32,12 +32,26 @@ flags attaches to the active project.
 
 ```bash
 vtb artifact add task-output.md --body "Result" \
-  --subject-type task --subject-id <task-uuid>
+  --subject-type task --subject-id <task-uuid> --logical-name result
 ```
 
 Supported subject types are `project`, `task`, `task_section`, `workflow`,
 `task_run`, and `step_execution`. `--subject-type` and `--subject-id` must be
 provided together, and the destination must belong to the active project.
+
+Pass provenance separately from the artifact body. Use either an inline JSON
+object or a JSON file, never both. Metadata must contain the current Sacrum
+envelope: `version: 1`, non-empty `content_kind`, `format`, `origin`, and
+`presentation`, plus an `extensions` JSON object for provider data. Use
+`"extensions": {}` when there is no provider-specific metadata.
+
+```bash
+vtb artifact add conversation.jsonl --body-file ./conversation.jsonl \
+  --subject-type task --subject-id <task-uuid> --logical-name conversation \
+  --metadata '{"version":1,"content_kind":"conversation","format":"jsonl","origin":"codex","presentation":"raw","extensions":{"provider":"openai"}}'
+vtb artifact add result.md --body-file ./result.md \
+  --metadata-file ./result-metadata.json
+```
 
 ## Read and paginate
 
@@ -45,15 +59,19 @@ provided together, and the destination must belong to the active project.
 vtb artifact list
 vtb artifact list --limit 20 --offset 20
 vtb artifact show <artifact-uuid>
+vtb artifact lookup result --subject-type task --subject-id <task-uuid>
 
 # Machine-readable output: put the global flag before the command group.
 vtb --json artifact list --limit 20 --offset 0
 vtb --json artifact show <artifact-uuid>
+vtb --json artifact lookup result --subject-type task --subject-id <task-uuid>
 ```
 
 `list` is scoped to the active project. Human-readable empty results say
 `No artifacts found`; JSON list output is an array. The backend caps the list
-limit at 50.
+limit at 50. `show` and `lookup` render the logical name and metadata when an
+attachment context is available. Use `lookup` when the stable subject-local
+logical name is known; do not search root artifacts by filename.
 
 ## Update
 
@@ -66,12 +84,17 @@ vtb artifact update <artifact-uuid> \
   --filename revised.md --body "Revised content"
 vtb artifact update <artifact-uuid> \
   --filename revised.md --body-file ./revised.md
+vtb artifact update <artifact-uuid> \
+  --subject-type task --subject-id <new-task-uuid> \
+  --logical-name result --metadata-file ./result-metadata.json
 vtb --json artifact update <artifact-uuid> \
   --filename revised.md --body "Revised content"
 ```
 
-Do not pass `--body` and `--body-file` together. An update with no fields is
-invalid.
+Do not pass `--body` and `--body-file` together, or `--metadata` and
+`--metadata-file` together. When changing an attachment destination, provide
+both `--subject-type` and `--subject-id`; this atomically reattaches the link.
+An update with no fields is invalid.
 
 ## Delete safely
 
@@ -89,7 +112,7 @@ operation by querying `vtb artifact show` or listing the project afterward.
 
 ## Failure handling
 
-Treat invalid UUIDs, missing artifacts, mismatched project scope, invalid
-attachment targets, and unauthorized requests as command failures. Do not
-retry with another project or fabricate a target ID; first resolve the
-current project and destination from Vertebrae.
+Treat invalid UUIDs, metadata JSON, missing logical-name lookups, mismatched
+project scope, invalid attachment targets, and unauthorized requests as
+command failures. Do not retry with another project or fabricate a target ID;
+first resolve the current project and destination from Vertebrae.
