@@ -303,6 +303,18 @@ mod tests {
         })
     }
 
+    fn root_artifact_json() -> serde_json::Value {
+        json!({
+            "id": ARTIFACT_ID,
+            "filename": "notes.md",
+            "body": "hello",
+            "logical_name": null,
+            "metadata": null,
+            "inserted_at": "2026-07-29T10:00:00Z",
+            "updated_at": "2026-07-29T11:00:00Z"
+        })
+    }
+
     #[tokio::test]
     async fn create_sends_project_and_attachment_variables() {
         let server = MockServer::start().await;
@@ -313,6 +325,22 @@ mod tests {
             .and(body_string_contains("subject_type"))
             .and(body_string_contains("logical_name"))
             .and(body_string_contains("metadata"))
+            .and(VariablesExactly(json!({
+                "project_id": PROJECT_ID,
+                "filename": "notes.md",
+                "body": "hello",
+                "subject_type": "task",
+                "subject_id": ARTIFACT_ID,
+                "logical_name": "conversation",
+                "metadata": {
+                    "version": 1,
+                    "content_kind": "conversation",
+                    "format": "jsonl",
+                    "origin": "harness",
+                    "presentation": "raw",
+                    "extensions": { "provider": "codex" }
+                }
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "createArtifact": artifact_json() }
             })))
@@ -325,12 +353,10 @@ mod tests {
                 CreateArtifactInput::new("notes.md", "hello")
                     .with_subject("task", ARTIFACT_ID)
                     .with_logical_name("conversation")
-                    .with_metadata(ArtifactLinkMetadata::new(
-                        "conversation",
-                        "jsonl",
-                        "harness",
-                        "raw",
-                    )),
+                    .with_metadata(
+                        ArtifactLinkMetadata::new("conversation", "jsonl", "harness", "raw")
+                            .with_extension("provider", json!("codex")),
+                    ),
             )
             .await
             .unwrap();
@@ -370,14 +396,15 @@ mod tests {
             .and(path("/graphql"))
             .and(body_string_contains("GetArtifact"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": { "artifact": artifact_json() }
+                "data": { "artifact": root_artifact_json() }
             })))
             .mount(&server)
             .await;
 
         let artifact = service(&server).get_artifact(ARTIFACT_ID).await.unwrap();
         assert!(artifact.project_id.is_none());
-        assert_eq!(artifact.logical_name.as_deref(), Some("conversation"));
+        assert!(artifact.logical_name.is_none());
+        assert!(artifact.metadata.is_none());
     }
 
     #[tokio::test]
@@ -420,6 +447,18 @@ mod tests {
             .and(body_string_contains("UpdateArtifact"))
             .and(body_string_contains("logical_name"))
             .and(body_string_contains("metadata"))
+            .and(VariablesExactly(json!({
+                "id": ARTIFACT_ID,
+                "logical_name": "conversation",
+                "metadata": {
+                    "version": 1,
+                    "content_kind": "conversation",
+                    "format": "jsonl",
+                    "origin": "harness",
+                    "presentation": "raw",
+                    "extensions": { "trace": { "turn": 7 } }
+                }
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "updateArtifact": artifact_json() }
             })))
@@ -432,12 +471,10 @@ mod tests {
                 ARTIFACT_ID,
                 UpdateArtifactInput::new()
                     .with_logical_name("conversation")
-                    .with_metadata(ArtifactLinkMetadata::new(
-                        "conversation",
-                        "jsonl",
-                        "harness",
-                        "raw",
-                    )),
+                    .with_metadata(
+                        ArtifactLinkMetadata::new("conversation", "jsonl", "harness", "raw")
+                            .with_extension("trace", json!({ "turn": 7 })),
+                    ),
             )
             .await
             .unwrap();
