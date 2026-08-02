@@ -47,7 +47,7 @@ describe("ArtifactPreviewBody", () => {
   });
 
   it("pretty-prints declared JSON deterministically", () => {
-    render(
+    const { container } = render(
       <ArtifactPreviewBody
         artifact={artifact({
           body: '{"z":1,"nested":{"a":true}}',
@@ -59,6 +59,9 @@ describe("ArtifactPreviewBody", () => {
     expect(screen.getByTestId("artifact-json-preview").textContent).toBe(
       '{\n  "z": 1,\n  "nested": {\n    "a": true\n  }\n}'
     );
+    expect(
+      container.querySelectorAll('[data-testid="artifact-json-preview"] span')
+    ).not.toHaveLength(0);
   });
 
   it("preserves invalid JSON as selectable raw content", () => {

@@ -1,3 +1,6 @@
+import type { CSSProperties } from "react";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { Artifact } from "../../bindings";
 import { parseHarnessJsonl } from "../../types/conversation";
 import { MarkdownContent } from "../shared/MarkdownContent";
@@ -6,6 +9,29 @@ import { ReadOnlyConversationPreview } from "./ReadOnlyConversationPreview";
 interface ArtifactPreviewBodyProps {
   artifact: Artifact;
 }
+
+const jsonSyntaxTheme = {
+  ...vscDarkPlus,
+  'pre[class*="language-"]': {
+    ...(vscDarkPlus['pre[class*="language-"]'] as CSSProperties),
+    background: "transparent",
+    margin: 0,
+  },
+  'code[class*="language-"]': {
+    ...(vscDarkPlus['code[class*="language-"]'] as CSSProperties),
+    background: "none",
+  },
+};
+
+const jsonCodeStyle: CSSProperties = {
+  margin: 0,
+  padding: "0.75rem",
+  background: "transparent",
+  fontSize: "var(--text-13)",
+  lineHeight: "1.6",
+  overflow: "auto",
+  maxHeight: "24rem",
+};
 
 function RawArtifactBody({
   body,
@@ -69,12 +95,20 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
     try {
       const formatted = JSON.stringify(JSON.parse(artifact.body), null, 2);
       return (
-        <pre
+        <div
           data-testid="artifact-json-preview"
-          className="max-h-96 overflow-auto rounded-md border border-border bg-bg p-3 font-mono text-xs whitespace-pre-wrap"
+          className="max-h-96 overflow-auto rounded-md border border-border bg-bg font-mono text-xs"
         >
-          <code>{formatted}</code>
-        </pre>
+          <SyntaxHighlighter
+            style={jsonSyntaxTheme as { [key: string]: CSSProperties }}
+            language="json"
+            PreTag="div"
+            customStyle={jsonCodeStyle}
+            codeTagProps={{ className: "font-mono" }}
+          >
+            {formatted}
+          </SyntaxHighlighter>
+        </div>
       );
     } catch {
       return (
