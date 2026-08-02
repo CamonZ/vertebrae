@@ -3,6 +3,7 @@ import type {
   Step,
   StepExecution,
   Task,
+  Artifact,
   TaskFilterOptions,
   TaskRun,
   TaskRunTrace,
@@ -127,6 +128,49 @@ function setExistingQueryData<T>(
 ): void {
   if (!queryEntryExists(queryKey)) return;
   queryClient.setQueryData<T | undefined>(queryKey, updater);
+}
+
+export function upsertArtifactInQueryCache(
+  artifact: Artifact,
+  taskId: string | null,
+  generation = getProjectScopeGeneration()
+) {
+  const key = taskId
+    ? queryKeys.artifacts.task(generation, taskId)
+    : queryKeys.artifacts.project(generation);
+  setExistingQueryData<Artifact[]>(key, (items) => {
+    const current = items ?? [];
+    const index = current.findIndex((item) => item.id === artifact.id);
+    if (index < 0) return [...current, artifact];
+    const next = current.slice();
+    next[index] = artifact;
+    return next;
+  });
+}
+
+export function removeArtifactFromQueryCache(
+  artifactId: string,
+  taskId: string | null,
+  generation = getProjectScopeGeneration()
+) {
+  if (taskId) {
+    setExistingQueryData<Artifact[]>(
+      queryKeys.artifacts.task(generation, taskId),
+      (items) => items?.filter((item) => item.id !== artifactId)
+    );
+    return;
+  }
+  setExistingQueryData<Artifact[]>(
+    queryKeys.artifacts.project(generation),
+    (items) => items?.filter((item) => item.id !== artifactId)
+  );
+  for (const [key] of queryClient.getQueriesData<Artifact[]>({
+    queryKey: queryKeys.artifacts.all(generation),
+  })) {
+    queryClient.setQueryData<Artifact[] | undefined>(key, (items) =>
+      items?.filter((item) => item.id !== artifactId)
+    );
+  }
 }
 
 export function upsertStepExecutionInList(

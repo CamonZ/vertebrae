@@ -1288,6 +1288,7 @@ export const commands = {
 /** user-defined events **/
 
 export const events = __makeEvents__<{
+  artifactChangedEvent: ArtifactChangedEvent;
   localChatFileChangeEvent: LocalChatFileChangeEvent;
   localChatSessionEndEvent: LocalChatSessionEndEvent;
   localChatSessionErrorEvent: LocalChatSessionErrorEvent;
@@ -1312,6 +1313,7 @@ export const events = __makeEvents__<{
   workflowChangedEvent: WorkflowChangedEvent;
   workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
 }>({
+  artifactChangedEvent: "artifact-changed-event",
   localChatFileChangeEvent: "local-chat-file-change-event",
   localChatSessionEndEvent: "local-chat-session-end-event",
   localChatSessionErrorEvent: "local-chat-session-error-event",
@@ -1418,6 +1420,16 @@ export type Artifact = {
   metadata: ArtifactLinkMetadata | null;
   created_at: string | null;
   updated_at: string | null;
+};
+export type ArtifactChangeType = "Created" | "Updated" | "Deleted";
+/**
+ * Complete artifact projection changed on the active Sacrum project.
+ */
+export type ArtifactChangedEvent = {
+  artifact_id: string;
+  task_id: string | null;
+  change_type: ArtifactChangeType;
+  artifact: Artifact | null;
 };
 /**
  * Versioned provenance carried by an artifact attachment projection.

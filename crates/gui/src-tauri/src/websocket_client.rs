@@ -16,13 +16,13 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::events::{
-    PermissionRequestEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
-    SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
-    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
-    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskPreviousBucketIdentity,
-    TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
-    WorkflowTransitionChangedEvent,
+    ArtifactChangeType, ArtifactChangedEvent, PermissionRequestEvent, SectionChangeType,
+    SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType,
+    StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
+    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
+    TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload,
+    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
+    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -858,6 +858,9 @@ impl SacrumSocket {
             Self::trace_event(&format!("RECV event='{}' topic='{}'", event, topic));
 
             match event {
+                "artifact_created" | "artifact_updated" | "artifact_deleted" => {
+                    Self::handle_artifact_event(event, payload, app_handle)?;
+                }
                 "task_created" | "task_updated" | "task_deleted" => {
                     Self::handle_task_event(event, payload, app_handle)?;
                 }
@@ -912,6 +915,42 @@ impl SacrumSocket {
         }
 
         Ok(())
+    }
+
+    fn handle_artifact_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let artifact_id = payload
+            .get("id")
+            .or_else(|| payload.get("artifact_id"))
+            .and_then(|value| value.as_str())
+            .ok_or("Missing artifact_id in payload")?
+            .to_string();
+        let change_type = match event {
+            "artifact_created" => ArtifactChangeType::Created,
+            "artifact_updated" => ArtifactChangeType::Updated,
+            "artifact_deleted" => ArtifactChangeType::Deleted,
+            _ => return Err(format!("Unhandled artifact event: {event}")),
+        };
+        let task_id = payload
+            .get("task_id")
+            .or_else(|| payload.get("subject_id"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string);
+        let artifact = serde_json::from_value::<types::Artifact>(payload.clone()).ok();
+        app_handle
+            .emit(
+                "artifact-changed-event",
+                &ArtifactChangedEvent {
+                    artifact_id,
+                    task_id,
+                    change_type,
+                    artifact,
+                },
+            )
+            .map_err(|error| format!("Failed to emit artifact event: {error}"))
     }
 
     /// Handle task events and emit to Tauri
