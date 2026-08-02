@@ -81,10 +81,11 @@ describe("ArtifactPreviewBody", () => {
   });
 
   it("renders normalized conversation JSONL without active-chat controls", () => {
-    render(
+    const { container } = render(
       <ArtifactPreviewBody
         artifact={artifact({
           body: [
+            conversationLine("session_started", { provider: "Codex" }),
             conversationLine("turn_input", {
               provenance: "human",
               content: "Please summarize",
@@ -106,6 +107,12 @@ describe("ArtifactPreviewBody", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Please summarize")).toBeInTheDocument();
     expect(screen.getByText("Here is the summary.")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
+    expect(container.querySelector(".evrow--user")).toBeInTheDocument();
+    expect(screen.getByText("You")).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-testid="artifact-user-message"]')
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /send/i })

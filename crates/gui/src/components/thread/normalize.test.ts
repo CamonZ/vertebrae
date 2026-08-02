@@ -3,12 +3,14 @@ import {
   runToThreads,
   runToRun,
   msgsToThread,
+  conversationEventsToThread,
   stepKindFromStepType,
   humanDuration,
   type RunInput,
   type ChatMsg,
 } from "./normalize";
 import type { SessionLog, StepExecution, TaskRun } from "../../bindings";
+import type { ConversationEvent } from "../../types/conversation";
 import type {
   AgentMessage,
   ResultMessage,
@@ -651,5 +653,54 @@ describe("msgsToThread — CHAT variant", () => {
     const am = t.turns[0].messages[1] as AgentMessage;
     am.tools![0].onToggle!();
     expect(calls).toEqual([[2, 0]]);
+  });
+});
+
+describe("conversationEventsToThread", () => {
+  it("retains subagent user input inside its spawned child thread", () => {
+    const events: ConversationEvent[] = [
+      {
+        kind: "user_message",
+        timestamp: "2026-08-02T00:00:00Z",
+        text: "Main request",
+      },
+      {
+        kind: "tool_call",
+        timestamp: "2026-08-02T00:00:01Z",
+        toolId: "spawn-1",
+        toolName: "Agent",
+        displayName: "delegate",
+        icon: "git-branch",
+        summary: "delegate",
+        input: { collab_tool: "spawnAgent", prompt: "Investigate" },
+      },
+      {
+        kind: "user_message",
+        timestamp: "2026-08-02T00:00:02Z",
+        text: "Child task instructions",
+        parentToolUseId: "spawn-1",
+      },
+      {
+        kind: "assistant_message",
+        timestamp: "2026-08-02T00:00:03Z",
+        text: "Child result",
+        parentToolUseId: "spawn-1",
+      },
+    ];
+
+    const thread = conversationEventsToThread(events);
+
+    expect(thread.turns).toHaveLength(1);
+    expect(thread.turns[0].messages[0]).toMatchObject({
+      type: "user",
+      text: "Main request",
+    });
+    const spawn = thread.turns[0].messages.find(
+      (message) => message.type === "spawn"
+    ) as SpawnMessage;
+    expect(spawn.thread.turns[0].messages).toMatchObject([
+      { type: "user", text: "Child task instructions" },
+      { type: "agent", prose: "Child result" },
+    ]);
   });
 });

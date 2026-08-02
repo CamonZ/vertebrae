@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseSessionLogs, getToolIcon } from "./conversation";
+import {
+  parseHarnessJsonl,
+  parseSessionLogs,
+  getToolIcon,
+} from "./conversation";
 import type { SessionLog } from "../bindings";
 
 describe("getToolIcon", () => {
@@ -409,5 +413,28 @@ describe("parseSessionLogs", () => {
       sessionId: "stream-ok",
       model: "claude",
     });
+  });
+});
+
+describe("parseHarnessJsonl", () => {
+  it("preserves raw stored turn input for historical transcript artifacts", () => {
+    const body = JSON.stringify({
+      version: 1,
+      event_id: "artifact-user-input",
+      stream_id: "artifact-stream",
+      timestamp: "2026-08-02T00:00:00Z",
+      type: "turn_input",
+      data: {
+        provenance: "human",
+        content: "# AGENTS.md instructions for /historic/worktree",
+      },
+    });
+
+    expect(parseHarnessJsonl(body)).toMatchObject([
+      {
+        kind: "user_message",
+        text: "# AGENTS.md instructions for /historic/worktree",
+      },
+    ]);
   });
 });

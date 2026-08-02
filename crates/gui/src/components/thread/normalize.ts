@@ -1307,6 +1307,97 @@ export function chatTurnEventsToMessages(
   return msgs;
 }
 
+/**
+ * Project a persisted, normalized conversation into the exact same canonical
+ * Thread shape used by the local chat surface. The input is retained as a
+ * complete ordered event stream: a human input opens a turn and every other
+ * event is passed to the shared chat event normalizer for that turn.
+ *
+ * This adapter deliberately has no artifact-specific presentation policy. It
+ * is also useful for any historic or replayed conversation whose source is a
+ * normalized harness transcript rather than the live chat store.
+ */
+export function conversationEventsToThread(
+  events: readonly ConversationEvent[]
+): Thread {
+  const resultById = new Map<string, ToolResultEvent>();
+  for (const event of events) {
+    if (event.kind === "tool_result") {
+      resultById.set(event.toolUseId, event);
+    }
+  }
+
+  const assistantLabel = events.find(
+    (event): event is Extract<ConversationEvent, { kind: "session_start" }> =>
+      event.kind === "session_start"
+  )?.model;
+
+  const drafts: Array<{
+    userText: string | null;
+    events: ConversationEvent[];
+  }> = [];
+  let current: (typeof drafts)[number] | null = null;
+  const openTurn = () => {
+    if (!current) {
+      current = { userText: null, events: [] };
+      drafts.push(current);
+    }
+    return current;
+  };
+
+  for (const event of events) {
+    if (event.kind === "user_message" && !event.parentToolUseId) {
+      current = { userText: event.text, events: [] };
+      drafts.push(current);
+    } else {
+      openTurn().events.push(event);
+    }
+  }
+
+  const turns: Turn[] = [];
+  drafts.forEach((draft, index) => {
+    const turnId = `conversation-turn-${index}`;
+    const messages = chatTurnEventsToMessages(draft.events, {
+      assistantLabel,
+      resultById,
+    });
+    stabilizeHistoricMessageKeys(messages, turnId);
+    if (draft.userText !== null) {
+      messages.unshift({
+        evt: `${turnId}-user`,
+        type: "user",
+        role: "human",
+        label: "You",
+        text: draft.userText,
+        textFormat: "markdown",
+      });
+    }
+    if (messages.length > 0) turns.push({ id: turnId, messages });
+  });
+
+  return { id: "historic-conversation-thread", turns };
+}
+
+/** Give non-tool rows durable keys without changing their presentation. */
+function stabilizeHistoricMessageKeys(
+  messages: Message[],
+  prefix: string
+): void {
+  messages.forEach((message, index) => {
+    if (message.type !== "tool" && message.type !== "spawn") {
+      message.evt = `${prefix}-m${index}`;
+    }
+    if (message.type === "spawn") {
+      message.thread.turns.forEach((turn, turnIndex) =>
+        stabilizeHistoricMessageKeys(
+          turn.messages,
+          `${prefix}-spawn${index}-${turnIndex}`
+        )
+      );
+    }
+  });
+}
+
 /** Recursively apply the chat collapse model to every ToolMessage in a series. */
 function wireChatToolCollapse(msgs: Message[], opts: ChatTurnOptions): void {
   for (const m of msgs) {
