@@ -38,7 +38,10 @@ export function ArtifactInspectorPanel({
       testId="artifact-inspector-panel"
       position={position}
     >
-      <div className="flex h-full min-h-0 flex-col bg-bg">
+      <div
+        className="flex h-full min-h-0 flex-col"
+        data-testid="artifact-inspector-content"
+      >
         <PanelHeader
           title={<span data-testid="artifact-inspector-title">{label}</span>}
           metadata={
