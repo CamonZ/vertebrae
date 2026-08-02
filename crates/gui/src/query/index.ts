@@ -12,10 +12,12 @@ export {
 } from "./commandResult";
 export {
   hasTaskInQueryCache,
+  invalidateArtifactQuery,
   mergeFetchedStepExecutions,
   mergeFetchedTaskRuns,
   mergeFetchedTaskRunTrace,
   removeTaskFromQueryCache,
+  removeArtifactFromQueryCache,
   removeTaskRunsFromQueryCache,
   removeStepFromQueryCache,
   removeWorkflowFromQueryCache,
@@ -26,6 +28,7 @@ export {
   upsertStepInQueryCache,
   upsertTaskRunInQueryCache,
   upsertTaskInQueryCache,
+  upsertArtifactInQueryCache,
   updateTaskLocationInQueryCache,
   upsertWorkflowInQueryCache,
   upsertWorkflowTransitionInQueryCache,

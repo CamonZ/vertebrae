@@ -203,6 +203,36 @@ export const commands = {
     }
   },
   /**
+   * List artifact files in the active project.
+   */
+  async listProjectArtifacts(): Promise<Result<Artifact[], CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("list_project_artifacts"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * List artifact files attached to one task.
+   */
+  async listTaskArtifacts(
+    taskId: string
+  ): Promise<Result<Artifact[], CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("list_task_artifacts", { taskId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
    * Set the parent task
    *
    * Sets the parent of the given task. If the task already has a parent, it will be replaced.
@@ -1258,6 +1288,7 @@ export const commands = {
 /** user-defined events **/
 
 export const events = __makeEvents__<{
+  artifactChangedEvent: ArtifactChangedEvent;
   localChatFileChangeEvent: LocalChatFileChangeEvent;
   localChatSessionEndEvent: LocalChatSessionEndEvent;
   localChatSessionErrorEvent: LocalChatSessionErrorEvent;
@@ -1282,6 +1313,7 @@ export const events = __makeEvents__<{
   workflowChangedEvent: WorkflowChangedEvent;
   workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
 }>({
+  artifactChangedEvent: "artifact-changed-event",
   localChatFileChangeEvent: "local-chat-file-change-event",
   localChatSessionEndEvent: "local-chat-session-end-event",
   localChatSessionErrorEvent: "local-chat-session-error-event",
@@ -1375,6 +1407,40 @@ export type AgentConfig = {
    * JSON Schema for structured output validation (serialized as JSON string)
    */
   json_schema: string | null;
+};
+/**
+ * A file projection returned from the project artifact list or Task.artifacts.
+ */
+export type Artifact = {
+  id: string;
+  project_id: string | null;
+  filename: string;
+  body: string;
+  logical_name: string | null;
+  metadata: ArtifactLinkMetadata | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+export type ArtifactChangeType = "Created" | "Updated" | "Deleted";
+/**
+ * Complete artifact projection changed on the active Sacrum project.
+ */
+export type ArtifactChangedEvent = {
+  artifact_id: string;
+  task_id: string | null;
+  change_type: ArtifactChangeType;
+  artifact: Artifact | null;
+};
+/**
+ * Versioned provenance carried by an artifact attachment projection.
+ */
+export type ArtifactLinkMetadata = {
+  version: number;
+  content_kind: string;
+  format: string;
+  origin: string;
+  presentation: string;
+  extensions: JsonValue;
 };
 /**
  * Code reference - file location reference

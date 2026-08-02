@@ -33,6 +33,7 @@ export {
   runToThreads,
   runToRun,
   msgsToThread,
+  conversationEventsToThread,
   stepKindFromStepType,
   humanDuration,
 } from "./normalize";

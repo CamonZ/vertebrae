@@ -66,6 +66,7 @@ describe("Sidebar Traces nav", () => {
     expect(order).toEqual([
       "sidebar-nav-tasks",
       "sidebar-nav-board",
+      "sidebar-nav-artifacts",
       "sidebar-nav-design",
       "sidebar-nav-traces",
     ]);

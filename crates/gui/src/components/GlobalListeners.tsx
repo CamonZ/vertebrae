@@ -1,5 +1,6 @@
 import {
   useTaskChangeListener,
+  useArtifactChangeListener,
   useTaskRunChangeListener,
   useWorkflowChangeListener,
   useStepChangeListener,
@@ -21,6 +22,7 @@ import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
  * subscription lives here.
  */
 export function GlobalListeners() {
+  useArtifactChangeListener();
   useTaskChangeListener();
   useTaskRunChangeListener();
   useWorkflowChangeListener();

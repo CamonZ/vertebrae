@@ -421,6 +421,17 @@ const RAIL_NAV_ITEMS = [
     ),
   },
   {
+    id: "artifacts",
+    to: "/artifacts",
+    label: "Artifacts",
+    icon: (
+      <Icon size="sm" strokeWidth={2}>
+        <path d="M4 4h10l6 6v10H4z" />
+        <path d="M14 4v6h6" />
+      </Icon>
+    ),
+  },
+  {
     id: "design",
     to: "/design",
     label: "Atlas",

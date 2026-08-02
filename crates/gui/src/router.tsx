@@ -14,6 +14,7 @@ import {
   TasksPage,
   BoardPage,
   TracesPage,
+  ArtifactsPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
@@ -195,6 +196,14 @@ const appRoutes: RouteObject[] = [
         element: (
           <GuardedRoute>
             <TasksPage />
+          </GuardedRoute>
+        ),
+      },
+      {
+        path: "artifacts",
+        element: (
+          <GuardedRoute>
+            <ArtifactsPage />
           </GuardedRoute>
         ),
       },

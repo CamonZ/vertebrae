@@ -32,6 +32,19 @@ pub const LIST_ARTIFACTS: &str = r#"
     }
 "#;
 
+/// List the artifact projections attached to one task.
+///
+/// Sacrum already exposes this through the Task association. Keeping this
+/// query here lets every client use the same artifact projection rather than
+/// adding a logical-name lookup or a separate link enumeration API.
+pub const LIST_TASK_ARTIFACTS: &str = r#"
+    query ListTaskArtifacts($task_id: Uuid4!) {
+        task(id: $task_id) {
+            artifacts { ...ArtifactFields }
+        }
+    }
+"#;
+
 pub const CREATE_ARTIFACT: &str = r#"
     mutation CreateArtifact($project_id: Uuid4!, $filename: String!, $body: String!, $subject_type: String, $subject_id: Uuid4, $logical_name: String, $metadata: Json) {
         createArtifact(project_id: $project_id, filename: $filename, body: $body, subject_type: $subject_type, subject_id: $subject_id, logical_name: $logical_name, metadata: $metadata) { ...ArtifactFields }
@@ -58,6 +71,10 @@ mod tests {
     fn operations_and_variables_are_project_scoped() {
         assert!(LIST_ARTIFACTS.contains("query ListArtifacts"));
         assert!(LIST_ARTIFACTS.contains("$project_id: Uuid4!"));
+        assert!(LIST_TASK_ARTIFACTS.contains("query ListTaskArtifacts"));
+        assert!(LIST_TASK_ARTIFACTS.contains("$task_id: Uuid4!"));
+        assert!(LIST_TASK_ARTIFACTS.contains("task(id: $task_id)"));
+        assert!(LIST_TASK_ARTIFACTS.contains("artifacts { ...ArtifactFields }"));
         assert!(CREATE_ARTIFACT.contains("mutation CreateArtifact"));
         assert!(CREATE_ARTIFACT.contains("$subject_type: String"));
         assert!(CREATE_ARTIFACT.contains("$subject_id: Uuid4"));

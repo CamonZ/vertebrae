@@ -68,6 +68,7 @@ impl CommandError {
     }
 }
 
+mod artifact;
 mod execution;
 mod local_chat;
 mod project;
@@ -77,6 +78,7 @@ mod steps;
 mod task;
 mod workflow;
 
+pub use artifact::*;
 pub use execution::*;
 pub use local_chat::*;
 pub use project::*;

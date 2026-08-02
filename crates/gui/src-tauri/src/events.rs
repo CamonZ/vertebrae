@@ -4,6 +4,22 @@ use tauri_specta::Event;
 
 use crate::types;
 
+/// Complete artifact projection changed on the active Sacrum project.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ArtifactChangedEvent {
+    pub artifact_id: String,
+    pub task_id: Option<String>,
+    pub change_type: ArtifactChangeType,
+    pub artifact: Option<types::Artifact>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum ArtifactChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
+
 /// Event payload for task changes.
 /// Emitted when a task is created, updated, deleted, or its status changes.
 /// For create/update events, `task` carries the full deserialized entity.

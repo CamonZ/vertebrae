@@ -21,6 +21,11 @@ struct ProjectArtifactsResponse {
     artifacts: Vec<ArtifactResponse>,
 }
 
+#[derive(Debug, Deserialize)]
+struct TaskArtifactsResponse {
+    artifacts: Vec<ArtifactResponse>,
+}
+
 impl SacrumArtifactService {
     pub fn new(client: GraphqlClient) -> Self {
         Self { client }
@@ -148,6 +153,24 @@ impl ArtifactService for SacrumArtifactService {
             .map_err(ServiceError::from)?;
         project
             .artifacts
+            .into_iter()
+            .map(|response| Self::map(response, Some(self.client.project_id())))
+            .collect()
+    }
+
+    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>> {
+        let task_id = Self::id(task_id, "task id")?;
+        let query = with_fragments(
+            artifacts::LIST_TASK_ARTIFACTS,
+            &[artifacts::ARTIFACT_FIELDS],
+        );
+        let task: TaskArtifactsResponse = self
+            .client
+            .execute(&query, json!({ "task_id": task_id }), "task")
+            .await
+            .map_err(ServiceError::from)?;
+
+        task.artifacts
             .into_iter()
             .map(|response| Self::map(response, Some(self.client.project_id())))
             .collect()
@@ -391,6 +414,33 @@ mod tests {
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].filename, "notes.md");
         assert_eq!(artifacts[0].project_id.as_deref(), Some(PROJECT_ID));
+    }
+
+    #[tokio::test]
+    async fn list_task_artifacts_maps_the_task_projection() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListTaskArtifacts"))
+            .and(body_string_contains("task(id: $task_id)"))
+            .and(body_string_contains(ARTIFACT_ID))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": { "artifacts": [artifact_json()] } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let artifacts = service(&server)
+            .list_task_artifacts(ARTIFACT_ID)
+            .await
+            .unwrap();
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].filename, "notes.md");
+        assert_eq!(artifacts[0].logical_name.as_deref(), Some("conversation"));
+        assert_eq!(artifacts[0].project_id.as_deref(), Some(PROJECT_ID));
+        server.verify().await;
     }
 
     #[tokio::test]

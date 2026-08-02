@@ -142,6 +142,58 @@ impl From<vertebrae_core::CodeRef> for CodeRef {
     }
 }
 
+/// Versioned provenance carried by an artifact attachment projection.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct ArtifactLinkMetadata {
+    pub version: u32,
+    pub content_kind: String,
+    pub format: String,
+    pub origin: String,
+    pub presentation: String,
+    pub extensions: serde_json::Value,
+}
+
+impl From<vertebrae_core::ArtifactLinkMetadata> for ArtifactLinkMetadata {
+    fn from(metadata: vertebrae_core::ArtifactLinkMetadata) -> Self {
+        Self {
+            version: metadata.version,
+            content_kind: metadata.content_kind,
+            format: metadata.format,
+            origin: metadata.origin,
+            presentation: metadata.presentation,
+            extensions: serde_json::Value::Object(metadata.extensions),
+        }
+    }
+}
+
+/// A file projection returned from the project artifact list or Task.artifacts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct Artifact {
+    pub id: String,
+    pub project_id: Option<String>,
+    pub filename: String,
+    pub body: String,
+    pub logical_name: Option<String>,
+    pub metadata: Option<ArtifactLinkMetadata>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_core::Artifact> for Artifact {
+    fn from(artifact: vertebrae_core::Artifact) -> Self {
+        Self {
+            id: artifact.id,
+            project_id: artifact.project_id,
+            filename: artifact.filename,
+            body: artifact.body,
+            logical_name: artifact.logical_name,
+            metadata: artifact.metadata.map(Into::into),
+            created_at: artifact.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: artifact.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
 /// Section content within a task
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Section {

@@ -23,10 +23,10 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent,
-    StepChangedEvent, StepExecutionChangedEvent, StepTransitionChangedEvent, TaskChangedEvent,
-    TaskRunChangedEvent, TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
-    WorkflowTransitionChangedEvent,
+    ArtifactChangedEvent, PermissionRequestEvent, SectionChangedEvent, SessionLogCreatedEvent,
+    SessionLogUpdatedEvent, StepChangedEvent, StepExecutionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskRunStepChangedEvent,
+    TaskStepChangedEvent, WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use local_chat::{
     ClaudeStartupCapabilities, LocalChatFileChangeEvent, LocalChatSessionEndEvent,
@@ -76,6 +76,9 @@ fn create_builder() -> Builder {
             commands::list_tasks,
             commands::list_ready,
             commands::get_task,
+            // Artifact read commands
+            commands::list_project_artifacts,
+            commands::list_task_artifacts,
             // Task relationship commands
             commands::set_parent,
             commands::remove_parent,
@@ -146,6 +149,7 @@ fn create_builder() -> Builder {
             install::install_components,
         ])
         .events(collect_events![
+            ArtifactChangedEvent,
             TaskChangedEvent,
             TaskRunChangedEvent,
             TaskStepChangedEvent,

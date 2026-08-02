@@ -31,11 +31,50 @@ import {
   upsertTaskInQueryCache,
   upsertWorkflowInQueryCache,
   upsertWorkflowTransitionInQueryCache,
+  upsertArtifactInQueryCache,
+  removeArtifactFromQueryCache,
 } from "./serverCache";
 
 describe("server cache helpers", () => {
   beforeEach(() => {
     queryClient.clear();
+  });
+
+  it("updates initialized project and task artifact projections without refetching", () => {
+    const generation = 4;
+    const artifact = {
+      id: "artifact-1",
+      project_id: "project-1",
+      filename: "notes.md",
+      body: "# Notes",
+      logical_name: "notes",
+      metadata: null,
+      created_at: null,
+      updated_at: null,
+    };
+    queryClient.setQueryData(queryKeys.artifacts.project(generation), [
+      artifact,
+    ]);
+    queryClient.setQueryData(queryKeys.artifacts.task(generation, "task-1"), [
+      artifact,
+    ]);
+    upsertArtifactInQueryCache(
+      { ...artifact, body: "# Updated" },
+      null,
+      generation
+    );
+    expect(
+      queryClient.getQueryData<(typeof artifact)[]>(
+        queryKeys.artifacts.project(generation)
+      )?.[0].body
+    ).toBe("# Updated");
+    removeArtifactFromQueryCache("artifact-1", null, generation);
+    expect(
+      queryClient.getQueryData(queryKeys.artifacts.project(generation))
+    ).toEqual([]);
+    expect(
+      queryClient.getQueryData(queryKeys.artifacts.task(generation, "task-1"))
+    ).toEqual([]);
   });
 
   it("keeps a websocket TaskRun update received while a fetch was in flight", () => {

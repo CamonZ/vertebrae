@@ -16,13 +16,13 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::events::{
-    PermissionRequestEvent, SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent,
-    SessionLogUpdatedEvent, StepChangeType, StepChangedEvent, StepExecutionChangeType,
-    StepExecutionChangedEvent, StepExecutionStatus, StepTransitionChangeType,
-    StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent, TaskPreviousBucketIdentity,
-    TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload, TaskRunStepChangedEvent,
-    TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
-    WorkflowTransitionChangedEvent,
+    ArtifactChangeType, ArtifactChangedEvent, PermissionRequestEvent, SectionChangeType,
+    SectionChangedEvent, SessionLogCreatedEvent, SessionLogUpdatedEvent, StepChangeType,
+    StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
+    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
+    TaskPreviousBucketIdentity, TaskRunChangeType, TaskRunChangedEvent, TaskRunControlsPayload,
+    TaskRunStepChangedEvent, TaskStepChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
+    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -858,6 +858,12 @@ impl SacrumSocket {
             Self::trace_event(&format!("RECV event='{}' topic='{}'", event, topic));
 
             match event {
+                "artifact_created" | "artifact_updated" | "artifact_deleted" => {
+                    Self::handle_artifact_event(event, payload, app_handle)?;
+                }
+                "artifact_link_created" | "artifact_link_updated" | "artifact_link_deleted" => {
+                    Self::handle_artifact_link_event(event, payload, app_handle)?;
+                }
                 "task_created" | "task_updated" | "task_deleted" => {
                     Self::handle_task_event(event, payload, app_handle)?;
                 }
@@ -912,6 +918,96 @@ impl SacrumSocket {
         }
 
         Ok(())
+    }
+
+    fn handle_artifact_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let artifact_id = payload
+            .get("id")
+            .or_else(|| payload.get("artifact_id"))
+            .and_then(|value| value.as_str())
+            .ok_or("Missing artifact_id in payload")?
+            .to_string();
+        let change_type = match event {
+            "artifact_created" => ArtifactChangeType::Created,
+            "artifact_updated" => ArtifactChangeType::Updated,
+            "artifact_deleted" => ArtifactChangeType::Deleted,
+            _ => return Err(format!("Unhandled artifact event: {event}")),
+        };
+        let task_id = payload
+            .get("task_id")
+            .or_else(|| payload.get("subject_id"))
+            .and_then(|value| value.as_str())
+            .map(ToString::to_string);
+        app_handle
+            .emit(
+                "artifact-changed-event",
+                &ArtifactChangedEvent {
+                    artifact_id,
+                    task_id,
+                    change_type,
+                    // Artifact CDC records only contain the file fields. The
+                    // list projection also carries attachment-local logical
+                    // name and presentation metadata, so upserting this raw
+                    // record would erase those fields from the GUI cache.
+                    // The browser refreshes the affected list instead.
+                    artifact: None,
+                },
+            )
+            .map_err(|error| format!("Failed to emit artifact event: {error}"))
+    }
+
+    /// Link events carry the subject-local presentation metadata and target,
+    /// while artifact CDC carries the file body. They do not introduce a link
+    /// cache or logical-name lookup: the frontend simply refreshes the one
+    /// initialized Artifact list affected by the attachment change.
+    fn handle_artifact_link_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let artifact_id = payload
+            .get("artifact_id")
+            .and_then(|value| value.as_str())
+            .ok_or("Missing artifact_id in artifact link payload")?
+            .to_string();
+        let subject_type = payload
+            .get("subject_type")
+            .and_then(|value| value.as_str())
+            .ok_or("Missing subject_type in artifact link payload")?;
+        let task_id = if subject_type == "task" {
+            payload
+                .get("subject_id")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        } else {
+            None
+        };
+        if subject_type != "task" && subject_type != "project" {
+            return Ok(());
+        }
+        if !matches!(
+            event,
+            "artifact_link_created" | "artifact_link_updated" | "artifact_link_deleted"
+        ) {
+            return Err(format!("Unhandled artifact link event: {event}"));
+        }
+        app_handle
+            .emit(
+                "artifact-changed-event",
+                &ArtifactChangedEvent {
+                    artifact_id,
+                    task_id,
+                    // This signals a projection refresh, not an artifact
+                    // delete: the artifact may remain attached elsewhere.
+                    change_type: ArtifactChangeType::Updated,
+                    artifact: None,
+                },
+            )
+            .map_err(|error| format!("Failed to emit artifact link event: {error}"))
     }
 
     /// Handle task events and emit to Tauri
@@ -3194,6 +3290,33 @@ mod tests {
         tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap()
+    }
+
+    #[test]
+    fn artifact_updates_emit_an_invalidation_instead_of_a_partial_projection() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("artifact-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let payload = serde_json::json!({
+            "id": "artifact-1",
+            "filename": "notes.md",
+            "body": "# Updated"
+        });
+        SacrumSocket::handle_artifact_event("artifact_updated", &payload, handle)
+            .expect("artifact event should be forwarded");
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("artifact update should emit a webview event");
+        let event: ArtifactChangedEvent =
+            serde_json::from_str(&emitted).expect("event payload should deserialize");
+        assert_eq!(event.artifact_id, "artifact-1");
+        assert!(matches!(event.change_type, ArtifactChangeType::Updated));
+        assert!(event.artifact.is_none());
     }
 
     #[test]

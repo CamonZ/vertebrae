@@ -26,6 +26,11 @@ async fn gui_showing_task_list(world: &mut GuiWorld) {
     navigate_to(world, "/tasks", "nav-tasks").await;
 }
 
+#[given("the GUI is showing project artifacts")]
+async fn gui_showing_project_artifacts(world: &mut GuiWorld) {
+    navigate_to(world, "/artifacts", "nav-artifacts").await;
+}
+
 #[given("the GUI is on the kanban board")]
 async fn gui_on_kanban_board(world: &mut GuiWorld) {
     navigate_to(world, "/board", "nav-board").await;
@@ -414,6 +419,37 @@ async fn gui_should_show_element_with_test_id_within(
     world
         .screenshot(&client, &format!("after-assert-testid-{test_id}"))
         .await;
+}
+
+#[then("the artifact preview has no composer")]
+async fn artifact_preview_has_no_composer(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let inspector = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::Css("[data-testid='artifact-inspector-panel']"))
+        .await
+        .expect("artifact inspector was not open");
+    let inspector_json = serde_json::to_value(&inspector).expect("serialize inspector");
+    let composer_count = client
+        .execute(
+            "return arguments[0].querySelectorAll('input, textarea, [contenteditable=\"true\"]').length;",
+            vec![inspector_json],
+        )
+        .await
+        .expect("inspect artifact preview")
+        .as_u64()
+        .unwrap_or(u64::MAX);
+
+    assert_eq!(
+        composer_count, 0,
+        "artifact conversation preview must not mount composer controls"
+    );
 }
 
 #[then(

@@ -438,7 +438,8 @@ function harnessTurnKey(event: HarnessRawEvent): string | undefined {
 function parseHarnessEvent(
   raw: HarnessRawEvent,
   fallbackTimestamp: string,
-  state: HarnessParseState
+  state: HarnessParseState,
+  options: ConversationParseOptions
 ): ConversationEvent[] {
   const timestamp = readString(raw.timestamp) ?? fallbackTimestamp;
   const data = raw.data;
@@ -461,16 +462,21 @@ function parseHarnessEvent(
       const provenance = readString(data.provenance);
       const text = readString(data.content);
       if (provenance === "human" || provenance === "agent") {
-        const notification = text
-          ? readHarnessNotificationText(text)
-          : undefined;
+        const notification = options.preserveRawInputs
+          ? undefined
+          : text
+            ? readHarnessNotificationText(text)
+            : undefined;
         if (notification) {
           events.push({
             kind: "task_notification",
             timestamp,
             message: notification,
           });
-        } else if (text && shouldKeepUserMessage(text)) {
+        } else if (
+          text &&
+          (options.preserveRawInputs || shouldKeepUserMessage(text))
+        ) {
           events.push({ kind: "user_message", timestamp, text });
         }
       }
@@ -659,11 +665,24 @@ function mergeHarnessDeltaEvent(
   return false;
 }
 
+/** Controls data-retention policy while projecting harness session logs. */
+export interface ConversationParseOptions {
+  /**
+   * Keep each stored `turn_input` verbatim, including environment and plugin
+   * context. Historic conversation artifacts use this mode; live surfaces keep
+   * their existing concise input filtering.
+   */
+  preserveRawInputs?: boolean;
+}
+
 /**
  * Parse normalized HarnessEventV1 SessionLog entries into conversation events.
  * Entries without format="harness" or with invalid event payloads are ignored.
  */
-export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
+export function parseSessionLogs(
+  logs: SessionLog[],
+  options: ConversationParseOptions = {}
+): ConversationEvent[] {
   const events: ConversationEvent[] = [];
   const harnessStateByExecution = new Map<string, HarnessParseState>();
 
@@ -693,7 +712,8 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
     const parsedHarnessEvents = parseHarnessEvent(
       raw,
       log.created_at ?? "",
-      state
+      state,
+      options
     );
     for (const ev of parsedHarnessEvents) {
       if (mergeHarnessDeltaEvent(events, ev, raw, state)) continue;
@@ -734,6 +754,42 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
   }
 
   return events;
+}
+
+/**
+ * Validate and project a newline-delimited normalized harness transcript.
+ *
+ * Artifact previews intentionally use this stricter entry point rather than
+ * treating arbitrary JSON as a conversation: every nonblank line must be a
+ * HarnessEventV1 envelope. A malformed or unsupported transcript returns
+ * undefined so the caller can preserve and display the original raw body.
+ */
+export function parseHarnessJsonl(
+  body: string
+): ConversationEvent[] | undefined {
+  const lines = body.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return undefined;
+
+  const logs: SessionLog[] = [];
+  for (const [index, line] of lines.entries()) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+    if (!isHarnessRawEvent(raw)) return undefined;
+    logs.push({
+      id: `artifact-event-${index}`,
+      step_execution_id: "artifact-preview",
+      format: "harness",
+      content: line,
+      created_at: raw.timestamp,
+    });
+  }
+
+  const events = parseSessionLogs(logs, { preserveRawInputs: true });
+  return events.length > 0 ? events : undefined;
 }
 
 // ============================================================================

@@ -1,5 +1,7 @@
 // Barrel export for all hooks
 export { useTasks } from "./useTasks";
+export { useProjectArtifacts } from "./useProjectArtifacts";
+export { useTaskArtifacts } from "./useTaskArtifacts";
 export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";
@@ -17,6 +19,7 @@ export type {
 export { useRunTrace } from "./useRunTrace";
 export type { UseRunTraceResult } from "./useRunTrace";
 export { useTaskChangeListener } from "./useTaskChangeListener";
+export { useArtifactChangeListener } from "./useArtifactChangeListener";
 export { useTaskLocation } from "./useTaskLocation";
 export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useWorkflows } from "./useWorkflows";

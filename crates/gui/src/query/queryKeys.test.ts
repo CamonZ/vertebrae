@@ -64,6 +64,23 @@ describe("queryKeys", () => {
     ]);
   });
 
+  it("builds project- and task-scoped artifact keys", () => {
+    expect(queryKeys.artifacts.all(6)).toEqual(["project", 6, "artifacts"]);
+    expect(queryKeys.artifacts.project(6)).toEqual([
+      "project",
+      6,
+      "artifacts",
+      "project",
+    ]);
+    expect(queryKeys.artifacts.task(6, "task-1")).toEqual([
+      "project",
+      6,
+      "artifacts",
+      "task",
+      "task-1",
+    ]);
+  });
+
   it("builds project-scoped execution keys", () => {
     expect(queryKeys.executions.all(5)).toEqual(["project", 5, "executions"]);
     expect(queryKeys.executions.byTask(5, "task-1")).toEqual([

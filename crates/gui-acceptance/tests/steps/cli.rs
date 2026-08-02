@@ -2,6 +2,98 @@ use cucumber::{given, when};
 
 use crate::GuiWorld;
 
+fn artifact_fixture(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "markdown" => (
+            "# Artifact Markdown Heading\n\nRendered **markdown** body.",
+            r#"{"version":1,"content_kind":"document","format":"markdown","origin":"acceptance","presentation":"rendered","extensions":{}}"#,
+        ),
+        "json" => (
+            r#"{"fixture":"Artifact JSON Value","count":2}"#,
+            r#"{"version":1,"content_kind":"document","format":"json","origin":"acceptance","presentation":"rendered","extensions":{}}"#,
+        ),
+        "conversation" => (
+            concat!(
+                r#"{"version":1,"event_id":"turn","stream_id":"artifact","timestamp":"2026-08-02T00:00:00Z","type":"turn_input","data":{"provenance":"human","content":"Artifact conversation question"}}"#,
+                "\n",
+                r#"{"version":1,"event_id":"answer","stream_id":"artifact","timestamp":"2026-08-02T00:00:01Z","type":"text","data":{"text":"Artifact conversation answer"}}"#,
+            ),
+            r#"{"version":1,"content_kind":"conversation","format":"jsonl","origin":"acceptance","presentation":"raw","extensions":{}}"#,
+        ),
+        "malformed-json" => (
+            "{not valid json}",
+            r#"{"version":1,"content_kind":"document","format":"json","origin":"acceptance","presentation":"rendered","extensions":{}}"#,
+        ),
+        "unknown" => (
+            "Unknown artifact raw payload",
+            r#"{"version":1,"content_kind":"document","format":"yaml","origin":"acceptance","presentation":"rendered","extensions":{}}"#,
+        ),
+        other => panic!("unsupported artifact fixture kind '{other}'"),
+    }
+}
+
+async fn create_artifact(world: &mut GuiWorld, filename: &str, kind: &str, task_id: Option<&str>) {
+    let (body, metadata) = artifact_fixture(kind);
+    let mut args = vec![
+        "artifact",
+        "add",
+        filename,
+        "--body",
+        body,
+        "--metadata",
+        metadata,
+    ];
+    if let Some(task_id) = task_id {
+        args.extend(["--subject-type", "task", "--subject-id", task_id]);
+    }
+    world.run_vtb(&args).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb artifact add failed:\nstdout: {}\nstderr: {}",
+        world.last_stdout, world.last_stderr
+    );
+    let id = world.extract_artifact_id_from_output().unwrap_or_else(|| {
+        panic!(
+            "failed to extract artifact ID from vtb artifact add output: {}",
+            world.last_stdout
+        )
+    });
+    world.track_artifact(id);
+}
+
+#[when(expr = "I create project artifact {string} of kind {string} via the CLI")]
+async fn create_project_artifact_via_cli(world: &mut GuiWorld, filename: String, kind: String) {
+    create_artifact(world, &filename, &kind, None).await;
+}
+
+#[when(expr = "I create a task artifact {string} of kind {string} via the CLI")]
+async fn create_task_artifact_via_cli(world: &mut GuiWorld, filename: String, kind: String) {
+    let task_id = world
+        .task_id
+        .as_deref()
+        .expect("no task ID stored")
+        .to_owned();
+    create_artifact(world, &filename, &kind, Some(&task_id)).await;
+}
+
+#[when("I delete the current artifact via the CLI")]
+async fn delete_current_artifact_via_cli(world: &mut GuiWorld) {
+    let artifact_id = world
+        .artifact_id
+        .as_deref()
+        .expect("no artifact ID stored")
+        .to_owned();
+    world
+        .run_vtb(&["artifact", "delete", &artifact_id, "--force"])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb artifact delete failed:\nstdout: {}\nstderr: {}",
+        world.last_stdout, world.last_stderr
+    );
+    world.artifact_id = None;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
