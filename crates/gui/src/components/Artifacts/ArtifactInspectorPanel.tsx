@@ -15,6 +15,7 @@ interface ArtifactInspectorPanelProps {
     target: EventTarget;
     currentTarget: EventTarget;
   }) => void;
+  position?: "right" | "left-of-task";
 }
 
 export function ArtifactInspectorPanel({
@@ -22,6 +23,7 @@ export function ArtifactInspectorPanel({
   closing = false,
   onClose,
   onExitAnimationEnd,
+  position,
 }: ArtifactInspectorPanelProps) {
   const label = artifact?.logical_name ?? artifact?.filename ?? "Artifact";
   return (
@@ -34,6 +36,7 @@ export function ArtifactInspectorPanel({
       isOpen={artifact != null && !closing}
       className="tasks-v2"
       testId="artifact-inspector-panel"
+      position={position}
     >
       <div className="flex h-full min-h-0 flex-col bg-bg">
         <PanelHeader

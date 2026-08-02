@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import type { Task, TaskChangedEvent } from "../../bindings";
+import type { Artifact, Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
+import { useTaskArtifacts } from "../../hooks/useTaskArtifacts";
+import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
+import { ArtifactInspectorPanel } from "../Artifacts/ArtifactInspectorPanel";
 import { useTaskLocation } from "../../hooks/useTaskLocation";
 import { useTasks } from "../../hooks/useTasks";
 import { useRunTrace } from "../../hooks/useRunTrace";
@@ -144,6 +147,26 @@ export function TaskDetailPanel({
   closing = false,
   onExitAnimationEnd,
 }: TaskDetailPanelProps) {
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(
+    null
+  );
+  const {
+    artifacts,
+    isLoading: artifactsLoading,
+    error: artifactsError,
+  } = useTaskArtifacts(taskId);
+  const selectedArtifact =
+    artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null;
+  const lastSelectedArtifact = useRef<Artifact | null>(null);
+  if (selectedArtifact) lastSelectedArtifact.current = selectedArtifact;
+  const artifactPreview = usePanelExitTransition(
+    selectedArtifactId != null,
+    180
+  );
+  useEffect(() => setSelectedArtifactId(null), [taskId]);
+  useEffect(() => {
+    if (selectedArtifactId && !selectedArtifact) setSelectedArtifactId(null);
+  }, [selectedArtifact, selectedArtifactId]);
   const [editingField, setEditingField] = useState<
     "title" | "priority" | "level" | null
   >(null);
@@ -894,6 +917,48 @@ export function TaskDetailPanel({
 
           <SectionGroup
             className="accordion"
+            label={<SectionLabel>Attachments</SectionLabel>}
+            defaultOpen={artifacts.length > 0}
+            testId="attachments-section"
+            ariaLabel="Toggle Attachments section"
+            count={artifacts.length}
+          >
+            {artifactsLoading ? (
+              <p className="py-2 text-xs text-[var(--color-fg-mute)]">
+                Loading attachments…
+              </p>
+            ) : artifactsError ? (
+              <p role="alert" className="py-2 text-xs text-[var(--color-err)]">
+                {artifactsError}
+              </p>
+            ) : artifacts.length === 0 ? (
+              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
+                No attachments
+              </p>
+            ) : (
+              <div className="space-y-1 py-2">
+                {artifacts.map((artifact) => (
+                  <button
+                    key={artifact.id}
+                    type="button"
+                    data-testid={`task-artifact-${artifact.id}`}
+                    onClick={() => setSelectedArtifactId(artifact.id)}
+                    className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left hover:bg-[var(--color-bg-2)]"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
+                      {artifact.logical_name ?? artifact.filename}
+                    </span>
+                    <span className="font-mono text-2xs uppercase text-[var(--color-fg-mute)]">
+                      {artifact.metadata?.content_kind ?? "raw"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </SectionGroup>
+
+          <SectionGroup
+            className="accordion"
             label={<SectionLabel>Spec</SectionLabel>}
             defaultOpen
             testId="spec-section-wrapper"
@@ -1149,18 +1214,29 @@ export function TaskDetailPanel({
   // surface, drag/keyboard resize, and focus model; `tasks-v2` scopes the inner
   // content's typography and section styles.
   return (
-    <FloatingDetailPanel
-      panelId="task-detail"
-      widthStorageKey="task-detail-panel-width"
-      closing={closing}
-      onExitAnimationEnd={onExitAnimationEnd}
-      onClose={onClose}
-      isOpen={taskId != null && !closing}
-      shouldHandleEscape={() => editingField === null && onClose != null}
-      className="tasks-v2"
-      testId="task-detail-panel"
-    >
-      {content}
-    </FloatingDetailPanel>
+    <>
+      {artifactPreview.mounted && (
+        <ArtifactInspectorPanel
+          artifact={selectedArtifact ?? lastSelectedArtifact.current}
+          closing={artifactPreview.closing}
+          onClose={() => setSelectedArtifactId(null)}
+          onExitAnimationEnd={artifactPreview.onAnimationEnd}
+          position="left-of-task"
+        />
+      )}
+      <FloatingDetailPanel
+        panelId="task-detail"
+        widthStorageKey="task-detail-panel-width"
+        closing={closing}
+        onExitAnimationEnd={onExitAnimationEnd}
+        onClose={onClose}
+        isOpen={taskId != null && !closing}
+        shouldHandleEscape={() => editingField === null && onClose != null}
+        className="tasks-v2"
+        testId="task-detail-panel"
+      >
+        {content}
+      </FloatingDetailPanel>
+    </>
   );
 }

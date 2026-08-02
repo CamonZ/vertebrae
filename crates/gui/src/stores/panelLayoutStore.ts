@@ -12,11 +12,18 @@ export interface ChatPanelLayout {
   /** Wide chat overlays detail panels instead of reserving adjacent space. */
   isMaximized: boolean;
 }
+export interface DetailPanelLayout {
+  isPresent: boolean;
+  renderedWidth: number;
+}
 
 interface PanelLayoutState {
   chat: ChatPanelLayout;
+  taskDetail: DetailPanelLayout;
   setChatLayout: (layout: ChatPanelLayout) => void;
   clearChatLayout: () => void;
+  setTaskDetailLayout: (layout: DetailPanelLayout) => void;
+  clearTaskDetailLayout: () => void;
   /** Test seam. */
   reset: () => void;
 }
@@ -26,6 +33,10 @@ const EMPTY_CHAT_LAYOUT: ChatPanelLayout = {
   renderedWidth: 0,
   isMaximized: false,
 };
+const EMPTY_DETAIL_LAYOUT: DetailPanelLayout = {
+  isPresent: false,
+  renderedWidth: 0,
+};
 
 /**
  * Shares geometry between the globally mounted chat and page-local detail
@@ -34,7 +45,11 @@ const EMPTY_CHAT_LAYOUT: ChatPanelLayout = {
  */
 export const usePanelLayoutStore = create<PanelLayoutState>((set) => ({
   chat: EMPTY_CHAT_LAYOUT,
+  taskDetail: EMPTY_DETAIL_LAYOUT,
   setChatLayout: (chat) => set({ chat }),
   clearChatLayout: () => set({ chat: EMPTY_CHAT_LAYOUT }),
-  reset: () => set({ chat: EMPTY_CHAT_LAYOUT }),
+  setTaskDetailLayout: (taskDetail) => set({ taskDetail }),
+  clearTaskDetailLayout: () => set({ taskDetail: EMPTY_DETAIL_LAYOUT }),
+  reset: () =>
+    set({ chat: EMPTY_CHAT_LAYOUT, taskDetail: EMPTY_DETAIL_LAYOUT }),
 }));
