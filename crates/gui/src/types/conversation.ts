@@ -736,6 +736,42 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
   return events;
 }
 
+/**
+ * Validate and project a newline-delimited normalized harness transcript.
+ *
+ * Artifact previews intentionally use this stricter entry point rather than
+ * treating arbitrary JSON as a conversation: every nonblank line must be a
+ * HarnessEventV1 envelope. A malformed or unsupported transcript returns
+ * undefined so the caller can preserve and display the original raw body.
+ */
+export function parseHarnessJsonl(
+  body: string
+): ConversationEvent[] | undefined {
+  const lines = body.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return undefined;
+
+  const logs: SessionLog[] = [];
+  for (const [index, line] of lines.entries()) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      return undefined;
+    }
+    if (!isHarnessRawEvent(raw)) return undefined;
+    logs.push({
+      id: `artifact-event-${index}`,
+      step_execution_id: "artifact-preview",
+      format: "harness",
+      content: line,
+      created_at: raw.timestamp,
+    });
+  }
+
+  const events = parseSessionLogs(logs);
+  return events.length > 0 ? events : undefined;
+}
+
 // ============================================================================
 // Trace event metadata
 // ============================================================================
