@@ -942,7 +942,6 @@ impl SacrumSocket {
             .or_else(|| payload.get("subject_id"))
             .and_then(|value| value.as_str())
             .map(ToString::to_string);
-        let artifact = serde_json::from_value::<types::Artifact>(payload.clone()).ok();
         app_handle
             .emit(
                 "artifact-changed-event",
@@ -950,7 +949,12 @@ impl SacrumSocket {
                     artifact_id,
                     task_id,
                     change_type,
-                    artifact,
+                    // Artifact CDC records only contain the file fields. The
+                    // list projection also carries attachment-local logical
+                    // name and presentation metadata, so upserting this raw
+                    // record would erase those fields from the GUI cache.
+                    // The browser refreshes the affected list instead.
+                    artifact: None,
                 },
             )
             .map_err(|error| format!("Failed to emit artifact event: {error}"))
@@ -3286,6 +3290,33 @@ mod tests {
         tauri::test::mock_builder()
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap()
+    }
+
+    #[test]
+    fn artifact_updates_emit_an_invalidation_instead_of_a_partial_projection() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("artifact-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let payload = serde_json::json!({
+            "id": "artifact-1",
+            "filename": "notes.md",
+            "body": "# Updated"
+        });
+        SacrumSocket::handle_artifact_event("artifact_updated", &payload, handle)
+            .expect("artifact event should be forwarded");
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("artifact update should emit a webview event");
+        let event: ArtifactChangedEvent =
+            serde_json::from_str(&emitted).expect("event payload should deserialize");
+        assert_eq!(event.artifact_id, "artifact-1");
+        assert!(matches!(event.change_type, ArtifactChangeType::Updated));
+        assert!(event.artifact.is_none());
     }
 
     #[test]

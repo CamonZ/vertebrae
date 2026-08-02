@@ -7,10 +7,9 @@ import {
 import {
   removeArtifactFromQueryCache,
   invalidateArtifactQuery,
-  upsertArtifactInQueryCache,
 } from "../query";
 
-/** Applies complete artifact projections directly to TanStack Query. */
+/** Refreshes attachment projections after artifact or link CDC updates. */
 export function useArtifactChangeListener() {
   const generation = useProjectScopeGeneration();
   const handleChanged = useCallback(
@@ -22,13 +21,10 @@ export function useArtifactChangeListener() {
           payload.task_id,
           generation
         );
-      } else if (payload.artifact) {
-        upsertArtifactInQueryCache(
-          payload.artifact,
-          payload.task_id,
-          generation
-        );
       } else {
+        // Artifact CDC only has file fields, while the rendered list item
+        // includes attachment-local logical name and metadata. Refetch the
+        // projection instead of replacing a complete entry with raw CDC.
         invalidateArtifactQuery(payload.task_id, generation);
       }
     },

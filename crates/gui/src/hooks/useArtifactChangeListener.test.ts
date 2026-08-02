@@ -48,9 +48,11 @@ describe("useArtifactChangeListener", () => {
     );
   });
 
-  it("upserts and deletes initialized artifact projections without refetching", async () => {
+  it("refreshes raw artifact updates without discarding attachment metadata", async () => {
     const generation = getProjectScopeGeneration();
-    queryClient.setQueryData(queryKeys.artifacts.project(generation), []);
+    const queryKey = queryKeys.artifacts.project(generation);
+    const initial = artifact();
+    queryClient.setQueryData(queryKey, [initial]);
     renderHook(() => useArtifactChangeListener());
     await waitFor(() => expect(listen).toHaveBeenCalledOnce());
 
@@ -59,16 +61,19 @@ describe("useArtifactChangeListener", () => {
         payload: {
           artifact_id: "artifact-1",
           task_id: null,
-          change_type: "Created",
-          artifact: artifact("# Created"),
+          change_type: "Updated",
+          // The artifact CDC payload has file fields but not attachment
+          // metadata. It must not overwrite the rendered projection.
+          artifact: { ...artifact("# Updated"), metadata: null },
         },
       });
     });
     expect(
       queryClient.getQueryData<Artifact[]>(
-        queryKeys.artifacts.project(generation)
+        queryKey
       )
-    ).toEqual([artifact("# Created")]);
+    ).toEqual([initial]);
+    expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
 
     act(() => {
       handler?.({
@@ -81,7 +86,7 @@ describe("useArtifactChangeListener", () => {
       });
     });
     expect(
-      queryClient.getQueryData(queryKeys.artifacts.project(generation))
+      queryClient.getQueryData(queryKey)
     ).toEqual([]);
   });
 
