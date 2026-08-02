@@ -1,5 +1,7 @@
 // Barrel export for all hooks
 export { useTasks } from "./useTasks";
+export { useProjectArtifacts } from "./useProjectArtifacts";
+export { useTaskArtifacts } from "./useTaskArtifacts";
 export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";

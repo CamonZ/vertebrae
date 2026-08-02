@@ -76,6 +76,9 @@ fn create_builder() -> Builder {
             commands::list_tasks,
             commands::list_ready,
             commands::get_task,
+            // Artifact read commands
+            commands::list_project_artifacts,
+            commands::list_task_artifacts,
             // Task relationship commands
             commands::set_parent,
             commands::remove_parent,
