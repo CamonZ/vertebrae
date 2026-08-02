@@ -173,6 +173,19 @@ export function removeArtifactFromQueryCache(
   }
 }
 
+/** Refresh one initialized attachment projection after link metadata changes. */
+export function invalidateArtifactQuery(
+  taskId: string | null,
+  generation: number
+) {
+  void queryClient.invalidateQueries({
+    queryKey: taskId
+      ? queryKeys.artifacts.task(generation, taskId)
+      : queryKeys.artifacts.project(generation),
+    exact: true,
+  });
+}
+
 export function upsertStepExecutionInList(
   executions: readonly StepExecution[],
   execution: StepExecution

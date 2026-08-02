@@ -6,6 +6,7 @@ import {
 } from "../stores/projectScopedStores";
 import {
   removeArtifactFromQueryCache,
+  invalidateArtifactQuery,
   upsertArtifactInQueryCache,
 } from "../query";
 
@@ -27,6 +28,8 @@ export function useArtifactChangeListener() {
           payload.task_id,
           generation
         );
+      } else {
+        invalidateArtifactQuery(payload.task_id, generation);
       }
     },
     [generation]

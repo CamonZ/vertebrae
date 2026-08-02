@@ -12,6 +12,7 @@ export {
 } from "./commandResult";
 export {
   hasTaskInQueryCache,
+  invalidateArtifactQuery,
   mergeFetchedStepExecutions,
   mergeFetchedTaskRuns,
   mergeFetchedTaskRunTrace,

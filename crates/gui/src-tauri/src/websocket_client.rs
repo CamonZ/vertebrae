@@ -861,6 +861,9 @@ impl SacrumSocket {
                 "artifact_created" | "artifact_updated" | "artifact_deleted" => {
                     Self::handle_artifact_event(event, payload, app_handle)?;
                 }
+                "artifact_link_created" | "artifact_link_updated" | "artifact_link_deleted" => {
+                    Self::handle_artifact_link_event(event, payload, app_handle)?;
+                }
                 "task_created" | "task_updated" | "task_deleted" => {
                     Self::handle_task_event(event, payload, app_handle)?;
                 }
@@ -951,6 +954,56 @@ impl SacrumSocket {
                 },
             )
             .map_err(|error| format!("Failed to emit artifact event: {error}"))
+    }
+
+    /// Link events carry the subject-local presentation metadata and target,
+    /// while artifact CDC carries the file body. They do not introduce a link
+    /// cache or logical-name lookup: the frontend simply refreshes the one
+    /// initialized Artifact list affected by the attachment change.
+    fn handle_artifact_link_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let artifact_id = payload
+            .get("artifact_id")
+            .and_then(|value| value.as_str())
+            .ok_or("Missing artifact_id in artifact link payload")?
+            .to_string();
+        let subject_type = payload
+            .get("subject_type")
+            .and_then(|value| value.as_str())
+            .ok_or("Missing subject_type in artifact link payload")?;
+        let task_id = if subject_type == "task" {
+            payload
+                .get("subject_id")
+                .and_then(|value| value.as_str())
+                .map(ToString::to_string)
+        } else {
+            None
+        };
+        if subject_type != "task" && subject_type != "project" {
+            return Ok(());
+        }
+        if !matches!(
+            event,
+            "artifact_link_created" | "artifact_link_updated" | "artifact_link_deleted"
+        ) {
+            return Err(format!("Unhandled artifact link event: {event}"));
+        }
+        app_handle
+            .emit(
+                "artifact-changed-event",
+                &ArtifactChangedEvent {
+                    artifact_id,
+                    task_id,
+                    // This signals a projection refresh, not an artifact
+                    // delete: the artifact may remain attached elsewhere.
+                    change_type: ArtifactChangeType::Updated,
+                    artifact: None,
+                },
+            )
+            .map_err(|error| format!("Failed to emit artifact link event: {error}"))
     }
 
     /// Handle task events and emit to Tauri

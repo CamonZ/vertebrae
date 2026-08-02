@@ -51,6 +51,9 @@ pub struct GuiWorld {
     /// All task IDs created during this scenario (for cleanup).
     created_task_ids: Vec<String>,
 
+    /// The most recently created artifact ID.
+    artifact_id: Option<String>,
+
     /// The most recently created workflow ID.
     workflow_id: Option<String>,
 
@@ -120,6 +123,7 @@ impl GuiWorld {
             env: HashMap::new(),
             task_id: None,
             created_task_ids: Vec::new(),
+            artifact_id: None,
             workflow_id: None,
             created_workflow_ids: Vec::new(),
             workflow_ids_by_name: HashMap::new(),
@@ -239,6 +243,20 @@ impl GuiWorld {
             }
         }
         None
+    }
+
+    /// Extract an artifact ID from `vtb artifact add` output.
+    fn extract_artifact_id_from_output(&self) -> Option<String> {
+        let stdout = self.last_stdout.trim();
+        stdout
+            .strip_prefix("Created artifact: ")
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(ToOwned::to_owned)
+    }
+
+    fn track_artifact(&mut self, id: String) {
+        self.artifact_id = Some(id);
     }
 
     /// Track a newly created task for cleanup.
