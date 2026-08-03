@@ -23,11 +23,15 @@ pub trait ArtifactService: Send + Sync {
     /// List artifacts in the active project using the supplied pagination.
     async fn list_artifacts(&self, input: ListArtifactInput) -> ServiceResult<Vec<Artifact>>;
 
-    /// List artifacts attached to a task in the active project.
+    /// List artifacts attached to a task in the active project using the supplied pagination.
     ///
     /// The returned artifact projections include the attachment's logical name
     /// and metadata when Sacrum loads them through `Task.artifacts`.
-    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>>;
+    async fn list_task_artifacts(
+        &self,
+        task_id: &str,
+        input: ListArtifactInput,
+    ) -> ServiceResult<Vec<Artifact>>;
 
     /// Get an artifact by ID within the caller's user scope.
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact>;
