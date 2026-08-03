@@ -132,3 +132,23 @@ their opaque `type` and `data`, so durable logs can be replayed after the reader
 is upgraded. Such readers may discard correlation keys they do not recognize;
 therefore required new `turn_input` identity is also stored inside `data`, while
 `thread_declared` already carries its canonical thread identity there.
+
+## Tool progress
+
+In-flight tool progress uses the existing `tool_output` payload rather than a
+provider-specific event. It carries `status: "running"`,
+`content_semantics: "delta"`, and the originating `tool_call_id`; the `output`
+object has this provider-neutral shape:
+
+```json
+{
+  "kind": "progress",
+  "tool_name": "Bash",
+  "elapsed_seconds": 1.25,
+  "task_id": "optional-background-task"
+}
+```
+
+`task_id` is omitted when the provider does not associate the update with a
+background task. Terminal tool output remains a separate snapshot, so progress
+updates never replace or duplicate the final result.

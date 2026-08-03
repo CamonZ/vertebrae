@@ -495,6 +495,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forwards_running_tool_progress_to_local_chat() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Claude,
+            event_sink,
+            Some("sonnet".into()),
+            1_000,
+            false,
+        );
+
+        sink.emit(HarnessEventV1 {
+            event_id: EventId::new("progress-event"),
+            stream_id: StreamId::new("local-chat:backend-1"),
+            sequence: 1,
+            correlation: EventCorrelation {
+                thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+                turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+                ..EventCorrelation::default()
+            },
+            timestamp: chrono::Utc::now(),
+            semantics: UpdateSemantics::Delta,
+            provider_sequence: Some(3),
+            payload: HarnessEventPayloadV1::ToolOutput(vertebrae_harness_core::ToolOutputEvent {
+                tool_call_id: ToolCallId::new("tool-1"),
+                output: serde_json::json!({
+                    "kind": "progress",
+                    "tool_name": "Bash",
+                    "elapsed_seconds": 1.25,
+                    "task_id": "task-1"
+                }),
+                status: ToolStatus::Running,
+                content_semantics: UpdateSemantics::Delta,
+            }),
+        })
+        .await
+        .unwrap();
+
+        let captured = captured.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let LocalChatEvent::ToolResult(result) = &captured[0] else {
+            panic!("expected local-chat tool result, got {:?}", captured[0]);
+        };
+        assert_eq!(result.tool_id, "tool-1");
+        assert!(!result.is_error);
+        assert_eq!(result.turn_id.as_deref(), Some("root-turn"));
+        assert_eq!(result.thread_id.as_deref(), Some("root-thread"));
+        let progress: serde_json::Value = serde_json::from_str(&result.result).unwrap();
+        assert_eq!(progress["kind"], "progress");
+        assert_eq!(progress["elapsed_seconds"], 1.25);
+        assert_eq!(progress["task_id"], "task-1");
+    }
+
+    #[tokio::test]
     async fn ignores_child_turn_finished_for_local_chat_lifecycle() {
         let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
         let sink = LocalChatHarnessEventSink::new(

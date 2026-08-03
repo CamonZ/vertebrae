@@ -235,7 +235,8 @@ mod tests {
 
     use tempfile::tempdir;
     use vertebrae_harness_core::{
-        HarnessEventPayloadV1, ProviderResumeId, StreamId, TranscriptReplayRequest,
+        HarnessEventPayloadV1, HarnessProjection, ProviderResumeId, StreamId, ToolCallId,
+        ToolStatus, TranscriptReplayRequest, UpdateSemantics,
     };
 
     use super::*;
@@ -282,5 +283,88 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+    }
+
+    #[test]
+    fn replays_tool_progress_as_ordered_running_deltas_before_terminal_result() {
+        let home = tempdir().unwrap();
+        let project = PathBuf::from("/workspace/progress");
+        let directory = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir_name(&project));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("session-progress.jsonl"),
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"session-progress\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"Bash\",\"input\":{\"command\":\"sleep 2\"}}]},\"timestamp\":\"2026-01-01T00:00:01Z\"}\n",
+                "{\"type\":\"tool_progress\",\"tool_use_id\":\"tool-1\",\"tool_name\":\"Bash\",\"elapsed_time_seconds\":1.25,\"task_id\":\"task-1\",\"timestamp\":\"2026-01-01T00:00:02Z\"}\n",
+                "{\"type\":\"tool_progress\",\"tool_use_id\":\"tool-1\",\"tool_name\":\"Bash\",\"elapsed_time_seconds\":2.5,\"task_id\":\"task-1\",\"timestamp\":\"2026-01-01T00:00:03Z\"}\n",
+                "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"tool-1\",\"content\":\"done\"}]},\"timestamp\":\"2026-01-01T00:00:04Z\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let replay = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()))
+            .replay(&TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("session-progress"),
+                stream_id: StreamId::new("replay/progress"),
+                project_path: Some(project),
+                created_at: None,
+            })
+            .unwrap()
+            .unwrap();
+
+        let progress = replay
+            .events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                HarnessEventPayloadV1::ToolOutput(output)
+                    if output.status == ToolStatus::Running =>
+                {
+                    Some((event, output))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(progress.len(), 2);
+        assert!(progress[0].0.sequence < progress[1].0.sequence);
+        assert_eq!(progress[0].1.output["elapsed_seconds"], 1.25);
+        assert_eq!(progress[1].1.output["elapsed_seconds"], 2.5);
+        let terminal = replay
+            .events
+            .iter()
+            .find_map(|event| match &event.payload {
+                HarnessEventPayloadV1::ToolOutput(output)
+                    if output.status == ToolStatus::Completed =>
+                {
+                    Some((event, output))
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(progress[1].0.sequence < terminal.0.sequence);
+        assert_eq!(terminal.1.content_semantics, UpdateSemantics::Snapshot);
+        assert_eq!(terminal.1.output, "done");
+        assert!(replay.events.iter().all(|event| !matches!(
+            &event.payload,
+            HarnessEventPayloadV1::Warning(warning)
+                if warning.code.as_deref() == Some("claude_unknown_record")
+        )));
+
+        let mut projection = HarnessProjection::new(16);
+        for event in replay.events.clone() {
+            projection.ingest(event).unwrap();
+        }
+        let tool = &projection
+            .stream(&StreamId::new("replay/progress"))
+            .unwrap()
+            .tools[&ToolCallId::new("tool-1")];
+        assert_eq!(tool.output_deltas.len(), 2);
+        assert_eq!(
+            tool.output_snapshot.as_ref().unwrap().status,
+            ToolStatus::Completed
+        );
     }
 }

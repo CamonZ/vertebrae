@@ -372,6 +372,124 @@ fn live_content_reasoning_plan_tools_usage_and_terminal_outcome_map_neutrally() 
 }
 
 #[test]
+fn tool_progress_is_a_running_delta_and_terminal_result_remains_a_snapshot() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("tool-progress-run"),
+        StreamId::from("tool-progress-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"tool-progress-session"}"#)
+        .unwrap();
+    decoder
+        .decode_line(
+            r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"sleep 2"}}]}}"#,
+        )
+        .unwrap();
+
+    let first = decoder
+        .decode_line(
+            r#"{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","parent_tool_use_id":null,"elapsed_time_seconds":1.25,"task_id":"task-1","uuid":"event-1","session_id":"tool-progress-session"}"#,
+        )
+        .unwrap();
+    let second = decoder
+        .decode_line(
+            r#"{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","parent_tool_use_id":null,"elapsed_time_seconds":2.5,"task_id":"task-1","uuid":"event-2","session_id":"tool-progress-session"}"#,
+        )
+        .unwrap();
+    let progress_events = first.into_iter().chain(second).collect::<Vec<_>>();
+    let progress = progress_events
+        .iter()
+        .filter_map(|draft| match draft.payload {
+            HarnessEventPayloadV1::ToolOutput(ref output) => Some((draft, output)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(progress.len(), 2);
+    assert!(progress[0].0.provider_sequence < progress[1].0.provider_sequence);
+    for (draft, output) in &progress {
+        assert_eq!(output.tool_call_id.as_str(), "tool-1");
+        assert_eq!(output.status, ToolStatus::Running);
+        assert_eq!(draft.semantics, UpdateSemantics::Delta);
+        assert_eq!(output.content_semantics, UpdateSemantics::Delta);
+        assert_eq!(output.output["kind"], "progress");
+        assert_eq!(output.output["tool_name"], "Bash");
+        assert_eq!(output.output["task_id"], "task-1");
+        assert!(output.output.get("elapsed_time_seconds").is_none());
+    }
+    assert_eq!(progress[0].1.output["elapsed_seconds"], 1.25);
+    assert_eq!(progress[1].1.output["elapsed_seconds"], 2.5);
+
+    let terminal = decoder
+        .decode_line(
+            r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}}"#,
+        )
+        .unwrap();
+    let terminal = terminal
+        .iter()
+        .find_map(|draft| match draft.payload {
+            HarnessEventPayloadV1::ToolOutput(ref output) => Some((draft, output)),
+            _ => None,
+        })
+        .unwrap();
+    assert!(progress[1].0.provider_sequence < terminal.0.provider_sequence);
+    assert_eq!(terminal.1.status, ToolStatus::Completed);
+    assert_eq!(terminal.1.content_semantics, UpdateSemantics::Snapshot);
+    assert_eq!(terminal.1.output, "done");
+}
+
+#[test]
+fn tool_progress_rejects_malformed_identity_and_metadata_deterministically() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("malformed-tool-progress-run"),
+        StreamId::from("malformed-tool-progress-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"malformed-tool-progress"}"#)
+        .unwrap();
+
+    for (line, expected) in [
+        (
+            r#"{"type":"tool_progress","tool_name":"Bash","elapsed_time_seconds":1}"#,
+            "tool_progress has no tool_use_id",
+        ),
+        (
+            r#"{"type":"tool_progress","tool_use_id":"","tool_name":"Bash","elapsed_time_seconds":1}"#,
+            "tool_progress tool_use_id is empty",
+        ),
+        (
+            r#"{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","elapsed_time_seconds":"1"}"#,
+            "tool_progress elapsed_time_seconds is not a non-negative number",
+        ),
+        (
+            r#"{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","elapsed_time_seconds":-1}"#,
+            "tool_progress elapsed_time_seconds is not a non-negative number",
+        ),
+        (
+            r#"{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","elapsed_time_seconds":1,"task_id":42}"#,
+            "tool_progress task_id is not a string",
+        ),
+    ] {
+        let error = decoder.decode_line(line).unwrap_err();
+        assert!(error.to_string().contains(expected), "{error}");
+    }
+
+    // Tool results and progress may be observed on a stream whose call was
+    // persisted before the current decoder started. Preserve the opaque ID so
+    // the projection can correlate it without maintaining provider state.
+    let orphan = decoder
+        .decode_line(
+            r#"{"type":"tool_progress","tool_use_id":"unknown-tool","tool_name":"FutureTool","elapsed_time_seconds":0}"#,
+        )
+        .unwrap();
+    assert!(orphan.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::ToolOutput(output)
+            if output.tool_call_id.as_str() == "unknown-tool"
+                && output.output["tool_name"] == "FutureTool"
+    )));
+}
+
+#[test]
 fn result_cost_is_preserved_without_a_usage_object() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run-cost-only"),

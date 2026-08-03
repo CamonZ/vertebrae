@@ -3,11 +3,13 @@ use vertebrae_harness_core::{
     ControlDecision, ControlResolution, DiagnosticEvent, HarnessEventDraftV1,
     HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId, ResolutionSource, SessionId,
     SessionStarted, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallId,
-    TurnInput, TurnInputProvenance, UpdateSemantics,
+    ToolOutputEvent, ToolStatus, TurnInput, TurnInputProvenance, UpdateSemantics,
 };
 
 use super::controls::decode_control_request;
-use super::drafts::{claude_init_tools, rate_limit_failure_message, string};
+use super::drafts::{
+    claude_init_tools, rate_limit_failure_message, required_nonempty_string, string,
+};
 use super::{ClaudeDecodeError, ClaudeStreamDecoder};
 
 impl ClaudeStreamDecoder {
@@ -145,6 +147,13 @@ impl ClaudeStreamDecoder {
                 parent_tool_call,
                 &mut drafts,
             ),
+            "tool_progress" => self.decode_tool_progress(
+                object,
+                &thread_id,
+                &stream_id,
+                parent_tool_call,
+                &mut drafts,
+            )?,
             "control_request" => {
                 let control = decode_control_request(object, &self.context)?;
                 if let Some(input) = object
@@ -232,6 +241,65 @@ impl ClaudeStreamDecoder {
             )),
         }
         Ok(drafts)
+    }
+
+    fn decode_tool_progress(
+        &self,
+        object: &Map<String, Value>,
+        thread_id: &ThreadId,
+        stream_id: &StreamId,
+        parent: Option<ToolCallId>,
+        drafts: &mut Vec<HarnessEventDraftV1>,
+    ) -> Result<(), ClaudeDecodeError> {
+        let tool_call_id = required_nonempty_string(object, "tool_use_id", "tool_progress")?;
+        let tool_name = required_nonempty_string(object, "tool_name", "tool_progress")?;
+        let elapsed_seconds = object
+            .get("elapsed_time_seconds")
+            .cloned()
+            .filter(|value| {
+                value
+                    .as_f64()
+                    .is_some_and(|seconds| seconds.is_finite() && seconds >= 0.0)
+            })
+            .ok_or_else(|| {
+                ClaudeDecodeError::Malformed(
+                    "tool_progress elapsed_time_seconds is not a non-negative number".into(),
+                )
+            })?;
+        let task_id = match object.get("task_id") {
+            None | Some(Value::Null) => None,
+            Some(value) => {
+                let task_id = value.as_str().ok_or_else(|| {
+                    ClaudeDecodeError::Malformed("tool_progress task_id is not a string".into())
+                })?;
+                Some(task_id)
+            }
+        };
+
+        // The V1 contract already represents an in-flight tool update as a
+        // running ToolOutput delta. Keep the output object provider-neutral;
+        // Claude's elapsed_time_seconds wire name does not escape the adapter.
+        let mut progress = Map::new();
+        progress.insert("kind".into(), Value::String("progress".into()));
+        progress.insert("tool_name".into(), Value::String(tool_name.into()));
+        progress.insert("elapsed_seconds".into(), elapsed_seconds);
+        if let Some(task_id) = task_id {
+            progress.insert("task_id".into(), Value::String(task_id.into()));
+        }
+
+        drafts.push(self.draft(
+            stream_id.clone(),
+            thread_id,
+            parent,
+            UpdateSemantics::Delta,
+            HarnessEventPayloadV1::ToolOutput(ToolOutputEvent {
+                tool_call_id: ToolCallId::new(tool_call_id),
+                output: Value::Object(progress),
+                status: ToolStatus::Running,
+                content_semantics: UpdateSemantics::Delta,
+            }),
+        ));
+        Ok(())
     }
 
     pub(super) fn decode_stream_event(
