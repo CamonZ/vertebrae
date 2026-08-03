@@ -23,7 +23,7 @@ use vertebrae_harness_core::{
     ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
     HarnessProjection, HarnessRuntime, ProviderThreadRef, QuestionAnswer, RequestConfig,
     ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId, StartSessionRequest, StreamId,
-    ThreadKind, TurnId, TurnInputProvenance,
+    ThreadKind, ToolStatus, TurnId, TurnInputProvenance, UpdateSemantics,
 };
 
 use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
@@ -237,6 +237,95 @@ printf '%s\n' '{"type":"result","subtype":"success","result":"hello","structured
     assert_eq!(input.content, "exact human prompt\nsecond line");
     assert_eq!(input.provenance, TurnInputProvenance::Human);
     assert!(events.iter().any(|event| matches!(&event.payload, HarnessEventPayloadV1::Warning(warning) if warning.code.as_deref() == Some("claude_stderr"))));
+}
+
+#[tokio::test]
+async fn one_shot_tool_progress_is_sequenced_projected_and_keeps_terminal_output() {
+    let temp = TempDir::new().unwrap();
+    let executable = script(
+        &temp,
+        "tool-progress",
+        r#"#!/bin/sh
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"progress-session","transcript_path":"opaque://progress.jsonl"}'
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"tool-1","name":"Bash","input":{"command":"sleep 2"}}]}}'
+printf '%s\n' '{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","elapsed_time_seconds":1.25,"task_id":"task-1"}'
+printf '%s\n' '{"type":"tool_progress","tool_use_id":"tool-1","tool_name":"Bash","elapsed_time_seconds":2.5,"task_id":"task-1"}'
+printf '%s\n' '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-1","content":"done"}]}}'
+printf '%s\n' '{"type":"result","subtype":"success","result":"finished"}'
+"#,
+    );
+    let sink = Arc::new(CollectSink::default());
+    let handle = runtime(executable)
+        .run_once(
+            RunRequest {
+                run_id: RunId::from("progress-run"),
+                stream_id: StreamId::from("progress-stream"),
+                prompt: "run the tool".into(),
+                config: RequestConfig::default(),
+            },
+            sink.clone(),
+            Arc::new(ResolvingControls::default()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        handle.await_outcome().await.unwrap().status,
+        CompletionStatus::Completed
+    );
+
+    let events = sink.0.lock().unwrap().clone();
+    for (index, event) in events.iter().enumerate() {
+        assert_eq!(event.sequence, index as u64 + 1);
+    }
+    let progress = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            HarnessEventPayloadV1::ToolOutput(output) if output.status == ToolStatus::Running => {
+                Some((event, output))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(progress.len(), 2);
+    assert!(progress[0].0.sequence < progress[1].0.sequence);
+    assert_eq!(progress[0].1.output["elapsed_seconds"], 1.25);
+    assert_eq!(progress[1].1.output["elapsed_seconds"], 2.5);
+    assert!(events.iter().all(|event| {
+        !matches!(
+            &event.payload,
+            HarnessEventPayloadV1::Warning(warning)
+                if warning.code.as_deref() == Some("claude_unknown_record")
+        )
+    }));
+
+    let terminal = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            HarnessEventPayloadV1::ToolOutput(output) if output.status == ToolStatus::Completed => {
+                Some((event, output))
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(progress[1].0.sequence < terminal.0.sequence);
+    assert_eq!(terminal.1.output, "done");
+    assert_eq!(terminal.1.content_semantics, UpdateSemantics::Snapshot);
+
+    let mut projection = HarnessProjection::new(32);
+    for event in events.clone() {
+        projection.ingest(event).unwrap();
+    }
+    let tool = &projection
+        .stream(&StreamId::from("progress-stream"))
+        .unwrap()
+        .tools[&vertebrae_harness_core::ToolCallId::from("tool-1")];
+    assert_eq!(tool.output_deltas.len(), 2);
+    assert_eq!(tool.output_deltas[0]["task_id"], "task-1");
+    assert_eq!(tool.output_snapshot.as_ref().unwrap().output, "done");
+    assert_eq!(
+        tool.output_snapshot.as_ref().unwrap().status,
+        ToolStatus::Completed
+    );
 }
 
 #[tokio::test]
