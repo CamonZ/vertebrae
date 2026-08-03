@@ -117,6 +117,7 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     let artifact_id = add_artifact(&services, "notes.md", "hello").await;
 
     let list = ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: None,
         offset: None,
     })
@@ -127,6 +128,7 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     assert!(list.contains("notes.md"));
 
     let result = Command::Artifact(ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: None,
         offset: None,
     }))
@@ -412,6 +414,7 @@ async fn list_pagination_and_delete_force_and_errors_are_enforced() {
     let second_id = add_artifact(&services, "second.md", "two").await;
 
     let page = ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: Some(1),
         offset: Some(1),
     })

@@ -59,14 +59,18 @@ impl ArtifactCommand {
     }
 
     /// Normalize full artifact UUIDs before execution.
-    pub async fn resolve_ids(&mut self, _services: &VertebraeServices) -> Result<(), ServiceError> {
+    pub async fn resolve_ids(&mut self, services: &VertebraeServices) -> Result<(), ServiceError> {
         match self {
             Self::Add(command) => {
                 if let Some(subject_id) = &mut command.subject_id {
                     *subject_id = resolve_artifact_id(subject_id)?;
                 }
             }
-            Self::List(_) => {}
+            Self::List(command) => {
+                if let Some(task_id) = &mut command.task_id {
+                    *task_id = super::resolve_id(task_id, services).await?;
+                }
+            }
             Self::Show(command) => command.id = resolve_artifact_id(&command.id)?,
             Self::Lookup(command) => command.subject_id = resolve_artifact_id(&command.subject_id)?,
             Self::Update(command) => {
@@ -342,6 +346,10 @@ impl ArtifactAddCommand {
 /// List artifacts in the active project.
 #[derive(Debug, Args)]
 pub struct ArtifactListCommand {
+    /// Task ID whose directly attached artifacts should be listed.
+    #[arg(long, value_parser = crate::commands::parse_uuid("task ID"))]
+    pub task_id: Option<String>,
+
     /// Maximum number of artifacts to return.
     #[arg(long)]
     pub limit: Option<i32>,
@@ -368,7 +376,16 @@ impl ArtifactListCommand {
         &self,
         services: &VertebraeServices,
     ) -> Result<Vec<Artifact>, ServiceError> {
-        services.artifacts().list_artifacts(self.input()?).await
+        let input = self.input()?;
+        match &self.task_id {
+            Some(task_id) => {
+                services
+                    .artifacts()
+                    .list_task_artifacts(task_id, input)
+                    .await
+            }
+            None => services.artifacts().list_artifacts(input).await,
+        }
     }
 
     async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
@@ -783,6 +800,7 @@ mod tests {
 
         assert!(
             ArtifactListCommand {
+                task_id: None,
                 limit: Some(0),
                 offset: None,
             }
@@ -791,6 +809,7 @@ mod tests {
         );
         assert!(
             ArtifactListCommand {
+                task_id: None,
                 limit: None,
                 offset: Some(-1),
             }
