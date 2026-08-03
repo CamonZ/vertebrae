@@ -256,16 +256,6 @@ async fn task_scoped_list_returns_only_direct_artifacts_across_task_hierarchy() 
         assert_eq!(artifacts[0]["filename"], filename);
     }
 
-    let task_page = ArtifactCommand::List(ArtifactListCommand {
-        task_id: Some(TASK_ID.to_string()),
-        limit: Some(1),
-        offset: Some(1),
-    })
-    .execute(&services)
-    .await
-    .unwrap();
-    assert_eq!(task_page, "No artifacts found");
-
     let invalid_page = ArtifactCommand::List(ArtifactListCommand {
         task_id: Some(TASK_ID.to_string()),
         limit: Some(0),

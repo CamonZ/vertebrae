@@ -38,9 +38,9 @@ pub const LIST_ARTIFACTS: &str = r#"
 /// query here lets every client use the same artifact projection rather than
 /// adding a logical-name lookup or a separate link enumeration API.
 pub const LIST_TASK_ARTIFACTS: &str = r#"
-    query ListTaskArtifacts($task_id: Uuid4!, $limit: Int, $offset: Int) {
+    query ListTaskArtifacts($task_id: Uuid4!) {
         task(id: $task_id) {
-            artifacts(limit: $limit, offset: $offset) { ...ArtifactFields }
+            artifacts { ...ArtifactFields }
         }
     }
 "#;
@@ -73,10 +73,8 @@ mod tests {
         assert!(LIST_ARTIFACTS.contains("$project_id: Uuid4!"));
         assert!(LIST_TASK_ARTIFACTS.contains("query ListTaskArtifacts"));
         assert!(LIST_TASK_ARTIFACTS.contains("$task_id: Uuid4!"));
-        assert!(LIST_TASK_ARTIFACTS.contains("$limit: Int"));
-        assert!(LIST_TASK_ARTIFACTS.contains("$offset: Int"));
         assert!(LIST_TASK_ARTIFACTS.contains("task(id: $task_id)"));
-        assert!(LIST_TASK_ARTIFACTS.contains("artifacts(limit: $limit, offset: $offset)"));
+        assert!(LIST_TASK_ARTIFACTS.contains("artifacts { ...ArtifactFields }"));
         assert!(CREATE_ARTIFACT.contains("mutation CreateArtifact"));
         assert!(CREATE_ARTIFACT.contains("$subject_type: String"));
         assert!(CREATE_ARTIFACT.contains("$subject_id: Uuid4"));

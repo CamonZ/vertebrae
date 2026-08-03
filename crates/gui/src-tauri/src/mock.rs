@@ -1365,11 +1365,7 @@ impl ArtifactService for MockArtifactService {
         Ok(artifacts.into_iter().skip(offset).take(limit).collect())
     }
 
-    async fn list_task_artifacts(
-        &self,
-        task_id: &str,
-        input: ListArtifactInput,
-    ) -> ServiceResult<Vec<Artifact>> {
+    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>> {
         let state = self.state.lock().unwrap();
         let subject = ("task".to_string(), task_id.to_string());
         let mut artifacts: Vec<_> = state
@@ -1379,9 +1375,7 @@ impl ArtifactService for MockArtifactService {
             .map(|(_, artifact)| artifact.clone())
             .collect();
         artifacts.sort_by(|left, right| left.id.cmp(&right.id));
-        let offset = input.offset.unwrap_or(0).max(0) as usize;
-        let limit = input.limit.unwrap_or(50).max(1) as usize;
-        Ok(artifacts.into_iter().skip(offset).take(limit).collect())
+        Ok(artifacts)
     }
 
     async fn get_artifact(&self, id: &str) -> ServiceResult<Artifact> {

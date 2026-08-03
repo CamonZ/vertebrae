@@ -18,7 +18,6 @@ List artifacts attached directly to an epic, ticket, or task:
 vtb artifact list --task-id <task-uuid>
 vtb artifact list --task-id <8-character-short-id>
 vtb --json artifact list --task-id <task-uuid>
-vtb artifact list --task-id <task-uuid> --limit 20 --offset 20
 ```
 
 Epics, tickets, and tasks use the same task ID namespace. Full UUIDs and
@@ -35,5 +34,6 @@ when present. JSON output returns the artifact array, including body, timestamps
 logical name, and attachment metadata when available. An empty scope prints
 `No artifacts found` in human-readable mode and returns `[]` in JSON mode.
 
-`--limit` must be greater than zero and `--offset` cannot be negative. Invalid
-or nonexistent task IDs fail instead of falling back to a project-wide list.
+`--limit` and `--offset` apply only to project-wide listing. Invalid task IDs or
+task-scoped pagination flags fail instead of falling back to a project-wide
+list.

@@ -158,11 +158,7 @@ impl ArtifactService for SacrumArtifactService {
             .collect()
     }
 
-    async fn list_task_artifacts(
-        &self,
-        task_id: &str,
-        input: ListArtifactInput,
-    ) -> ServiceResult<Vec<Artifact>> {
+    async fn list_task_artifacts(&self, task_id: &str) -> ServiceResult<Vec<Artifact>> {
         let task_id = Self::id(task_id, "task id")?;
         let query = with_fragments(
             artifacts::LIST_TASK_ARTIFACTS,
@@ -170,15 +166,7 @@ impl ArtifactService for SacrumArtifactService {
         );
         let task: TaskArtifactsResponse = self
             .client
-            .execute(
-                &query,
-                json!({
-                    "task_id": task_id,
-                    "limit": input.limit,
-                    "offset": input.offset,
-                }),
-                "task",
-            )
+            .execute(&query, json!({"task_id": task_id}), "task")
             .await
             .map_err(ServiceError::from)?;
 
@@ -436,11 +424,7 @@ mod tests {
             .and(body_string_contains("ListTaskArtifacts"))
             .and(body_string_contains("task(id: $task_id)"))
             .and(body_string_contains(ARTIFACT_ID))
-            .and(VariablesExactly(json!({
-                "task_id": ARTIFACT_ID,
-                "limit": 1,
-                "offset": 2,
-            })))
+            .and(VariablesExactly(json!({"task_id": ARTIFACT_ID})))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": { "task": { "artifacts": [artifact_json()] } }
             })))
@@ -449,10 +433,7 @@ mod tests {
             .await;
 
         let artifacts = service(&server)
-            .list_task_artifacts(
-                ARTIFACT_ID,
-                ListArtifactInput::new().with_limit(1).with_offset(2),
-            )
+            .list_task_artifacts(ARTIFACT_ID)
             .await
             .unwrap();
 

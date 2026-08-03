@@ -35,7 +35,7 @@ pub async fn list_task_artifacts(
 
     service
         .artifacts()
-        .list_task_artifacts(&task_id, ListArtifactInput::new())
+        .list_task_artifacts(&task_id)
         .await
         .map(|artifacts| artifacts.into_iter().map(Into::into).collect())
         .map_err(Into::into)
