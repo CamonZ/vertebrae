@@ -13,6 +13,7 @@ This entrypoint is intentionally short. The maintained command guide is split by
 | [Project Setup](vtb-guide/project-setup.md) | `vtb init`, project configuration, and live CLI help validation |
 | [Core Concepts and Workflow](vtb-guide/overview.md) | task hierarchy, workflow position, short IDs, JSON output, end-to-end usage |
 | [Tasks](vtb-guide/tasks.md) | create, triage, list, show, update, delete, archive, and checklist commands |
+| [Artifacts](vtb-guide/artifacts.md) | create, list, inspect, update, look up, and delete artifact files |
 | [Sections](vtb-guide/sections.md) | task documentation sections, section types, checklist criteria, edit/remove behavior |
 | [Dependencies](vtb-guide/dependencies.md) | `depend`, `undepend`, `blockers`, and `path` |
 | [Code References](vtb-guide/references.md) | `ref`, `refs`, `unref`, and `criterion-ref` |
