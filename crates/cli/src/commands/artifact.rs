@@ -696,6 +696,25 @@ mod tests {
     }
 
     #[test]
+    fn task_scoped_list_accepts_full_and_short_task_ids() {
+        let parsed = TestCli::try_parse_from(["test", "list", "--task-id", ARTIFACT_ID])
+            .expect("full task IDs should parse");
+        let ArtifactCommand::List(command) = parsed.command else {
+            panic!("expected artifact list command");
+        };
+        assert_eq!(command.task_id.as_deref(), Some(ARTIFACT_ID));
+
+        let parsed = TestCli::try_parse_from(["test", "list", "--task-id", "A1B2C3D4"])
+            .expect("short task IDs should parse");
+        let ArtifactCommand::List(command) = parsed.command else {
+            panic!("expected artifact list command");
+        };
+        assert_eq!(command.task_id.as_deref(), Some("a1b2c3d4"));
+
+        assert!(TestCli::try_parse_from(["test", "list", "--task-id", "not-a-task-id"]).is_err());
+    }
+
+    #[test]
     fn parses_every_supported_attachment_target() {
         for subject_type in SUPPORTED_SUBJECT_TYPES {
             TestCli::try_parse_from([
