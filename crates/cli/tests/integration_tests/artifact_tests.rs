@@ -9,10 +9,16 @@ use vertebrae_cli::commands::artifact::{
 };
 use vertebrae_cli::commands::{Command, CommandResult};
 use vertebrae_core::{
-    ArtifactLinkMetadata, CreateArtifactInput, GetArtifactByLogicalNameInput, UpdateArtifactInput,
+    ArtifactLinkMetadata, CreateArtifactInput, CreateTaskOptions, GetArtifactByLogicalNameInput,
+    Level, UpdateArtifactInput,
 };
 
 const ARTIFACT_ID: &str = "a1b2c3d4-0000-4000-8000-000000000001";
+const EPIC_ID: &str = "11111111-0000-4000-8000-000000000001";
+const TICKET_ID: &str = "22222222-0000-4000-8000-000000000001";
+const TASK_ID: &str = "33333333-0000-4000-8000-000000000001";
+const SIBLING_ID: &str = "44444444-0000-4000-8000-000000000001";
+const DESCENDANT_ID: &str = "55555555-0000-4000-8000-000000000001";
 
 fn add_command(filename: &str, body: &str) -> ArtifactCommand {
     ArtifactCommand::Add(ArtifactAddCommand {
@@ -117,6 +123,7 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     let artifact_id = add_artifact(&services, "notes.md", "hello").await;
 
     let list = ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: None,
         offset: None,
     })
@@ -127,6 +134,7 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     assert!(list.contains("notes.md"));
 
     let result = Command::Artifact(ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: None,
         offset: None,
     }))
@@ -140,6 +148,130 @@ async fn add_list_and_json_output_use_the_active_project_scope() {
     assert_eq!(artifacts.len(), 1);
     assert_eq!(artifacts[0]["id"], artifact_id);
     assert_eq!(artifacts[0]["project_id"], "mock-project");
+}
+
+#[tokio::test]
+async fn task_scoped_list_resolves_short_ids_and_preserves_human_and_json_output() {
+    let services = mock_services();
+    services
+        .tasks()
+        .create_task(CreateTaskOptions::new("Artifact task").with_id(ARTIFACT_ID))
+        .await
+        .unwrap();
+
+    let direct = ArtifactCommand::Add(ArtifactAddCommand {
+        filename: "task-result.json".to_string(),
+        body: Some("{\"ok\":true}".to_string()),
+        body_file: None,
+        subject_type: Some("task".to_string()),
+        subject_id: Some(ARTIFACT_ID.to_string()),
+        logical_name: Some("result".to_string()),
+        metadata: None,
+        metadata_file: None,
+    })
+    .execute(&services)
+    .await
+    .unwrap();
+    let direct_id = direct
+        .strip_prefix("Created artifact: ")
+        .expect("add output should contain the artifact ID")
+        .to_string();
+
+    let unrelated_id = add_artifact(&services, "project-note.md", "unrelated").await;
+    let mut command = Command::Artifact(ArtifactCommand::List(ArtifactListCommand {
+        task_id: Some("a1b2c3d4".to_string()),
+        limit: None,
+        offset: None,
+    }));
+    command.resolve_ids(&services).await.unwrap();
+
+    let human = command.execute(&services).await.unwrap();
+    let CommandResult::Message(human) = human else {
+        panic!("task artifact list should return human output");
+    };
+    assert!(human.contains(&direct_id));
+    assert!(human.contains("task-result.json"));
+    assert!(!human.contains(&unrelated_id));
+
+    let json = command.execute_json(&services).await.unwrap();
+    let CommandResult::Json(json) = json else {
+        panic!("task artifact list should return JSON output");
+    };
+    let artifacts = json.as_array().expect("artifact list should be an array");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0]["id"], direct_id);
+    assert_eq!(artifacts[0]["logical_name"], "result");
+}
+
+#[tokio::test]
+async fn task_scoped_list_returns_only_direct_artifacts_across_task_hierarchy() {
+    let services = mock_services();
+    for (id, title, level, parent_id) in [
+        (EPIC_ID, "Epic", Level::Epic, None),
+        (TICKET_ID, "Ticket", Level::Ticket, Some(EPIC_ID)),
+        (TASK_ID, "Task", Level::Task, Some(TICKET_ID)),
+        (SIBLING_ID, "Sibling", Level::Task, Some(TICKET_ID)),
+        (DESCENDANT_ID, "Descendant", Level::Task, Some(TASK_ID)),
+    ] {
+        let mut options = CreateTaskOptions::new(title).with_id(id).with_level(level);
+        if let Some(parent_id) = parent_id {
+            options = options.with_parent(parent_id);
+        }
+        services.tasks().create_task(options).await.unwrap();
+    }
+
+    for (subject_id, filename) in [
+        (EPIC_ID, "epic.md"),
+        (TICKET_ID, "ticket.md"),
+        (TASK_ID, "task.md"),
+        (SIBLING_ID, "sibling.md"),
+        (DESCENDANT_ID, "descendant.md"),
+    ] {
+        services
+            .artifacts()
+            .create_artifact(
+                CreateArtifactInput::new(filename, filename).with_subject("task", subject_id),
+            )
+            .await
+            .unwrap();
+    }
+
+    for (subject_id, filename) in [
+        (EPIC_ID, "epic.md"),
+        (TICKET_ID, "ticket.md"),
+        (TASK_ID, "task.md"),
+        (SIBLING_ID, "sibling.md"),
+        (DESCENDANT_ID, "descendant.md"),
+    ] {
+        let result = ArtifactCommand::List(ArtifactListCommand {
+            task_id: Some(subject_id.to_string()),
+            limit: None,
+            offset: None,
+        })
+        .execute_json(&services)
+        .await
+        .unwrap();
+        let artifacts = result.as_array().expect("artifact list should be an array");
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0]["filename"], filename);
+    }
+
+    let task_page = ArtifactCommand::List(ArtifactListCommand {
+        task_id: Some(TASK_ID.to_string()),
+        limit: Some(1),
+        offset: Some(1),
+    })
+    .execute(&services)
+    .await
+    .unwrap();
+    assert_eq!(task_page, "No artifacts found");
+
+    let invalid_page = ArtifactCommand::List(ArtifactListCommand {
+        task_id: Some(TASK_ID.to_string()),
+        limit: Some(0),
+        offset: None,
+    });
+    assert!(invalid_page.execute(&services).await.is_err());
 }
 
 #[tokio::test]
@@ -412,6 +544,7 @@ async fn list_pagination_and_delete_force_and_errors_are_enforced() {
     let second_id = add_artifact(&services, "second.md", "two").await;
 
     let page = ArtifactCommand::List(ArtifactListCommand {
+        task_id: None,
         limit: Some(1),
         offset: Some(1),
     })
