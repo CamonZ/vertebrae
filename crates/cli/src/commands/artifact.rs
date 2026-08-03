@@ -376,17 +376,15 @@ impl ArtifactListCommand {
         &self,
         services: &VertebraeServices,
     ) -> Result<Vec<Artifact>, ServiceError> {
+        let input = self.input()?;
         match &self.task_id {
             Some(task_id) => {
-                if self.limit.is_some() || self.offset.is_some() {
-                    return Err(ServiceError::InvalidInput(
-                        "artifact list pagination is only supported for project-wide listing"
-                            .to_string(),
-                    ));
-                }
-                services.artifacts().list_task_artifacts(task_id).await
+                services
+                    .artifacts()
+                    .list_task_artifacts(task_id, input)
+                    .await
             }
-            None => services.artifacts().list_artifacts(self.input()?).await,
+            None => services.artifacts().list_artifacts(input).await,
         }
     }
 
