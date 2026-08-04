@@ -337,8 +337,10 @@ async fn one_shot_clean_exit_without_result_is_completed_without_output_or_metri
         "clean-exit",
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-session"}'
+printf '%s\n' 'informational diagnostic' >&2
 "#,
     );
+    let sink = Arc::new(CollectSink::default());
     let handle = runtime(executable)
         .run_once(
             RunRequest {
@@ -347,7 +349,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-sessio
                 prompt: "finish quietly".into(),
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
@@ -360,6 +362,12 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-sessio
     assert_eq!(outcome.usage, None);
     assert_eq!(outcome.metrics, Default::default());
     assert_eq!(outcome.error, None);
+    assert!(sink.0.lock().unwrap().iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::Warning(warning)
+            if warning.code.as_deref() == Some("claude_stderr")
+                && warning.message == "informational diagnostic"
+    )));
 }
 
 #[tokio::test]

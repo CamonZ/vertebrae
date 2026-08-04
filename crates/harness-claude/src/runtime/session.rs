@@ -61,6 +61,8 @@ pub(super) async fn run_persistent_process_v2(
     let mut requested_stop = false;
     let mut close_status = SessionCloseStatus::ProcessLost;
     let mut close_error = Some("Claude stdout closed unexpectedly".to_string());
+    let mut stdout_closed = false;
+    let mut stderr_closed = false;
 
     'process: loop {
         tokio::select! {
@@ -319,8 +321,19 @@ pub(super) async fn run_persistent_process_v2(
                     close_error = Some(error);
                     break 'process;
                 }
-                Some(ProcessOutput::StdoutClosed) | None => break 'process,
-                Some(ProcessOutput::StderrClosed) => {}
+                Some(ProcessOutput::StdoutClosed) => {
+                    stdout_closed = true;
+                    if stderr_closed {
+                        break 'process;
+                    }
+                }
+                Some(ProcessOutput::StderrClosed) => {
+                    stderr_closed = true;
+                    if stdout_closed {
+                        break 'process;
+                    }
+                }
+                None => break 'process,
             }
         }
     }
