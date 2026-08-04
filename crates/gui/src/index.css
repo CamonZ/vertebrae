@@ -485,8 +485,13 @@ body {
   }
 }
 
-/* Selection styling */
+/* Selection styling — muted copper in dark mode, paper-toned in light mode. */
 ::selection {
+  background-color: var(--color-accent-mute);
+  color: var(--color-fg);
+}
+
+html.light ::selection {
   background-color: var(--color-accent-wash);
   color: var(--color-fg);
 }

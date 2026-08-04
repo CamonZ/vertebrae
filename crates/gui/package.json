@@ -24,7 +24,8 @@
     "package": "../../scripts/build-package.sh",
     "package:debug": "../../scripts/build-package.sh --debug",
     "package:release": "../../scripts/build-package.sh --release",
-    "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs"
+    "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs",
+    "test:selection": "node --test scripts/selection-style.test.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
