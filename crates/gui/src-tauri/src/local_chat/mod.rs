@@ -6,10 +6,11 @@ pub(crate) mod permissions;
 pub(crate) mod title_inference;
 
 pub(crate) use events::{
-    LocalChatEvent, LocalChatEventSink, LocalChatFileChange, LocalChatFileChangeEvent,
-    LocalChatSessionEndEvent, LocalChatSessionErrorEvent, LocalChatSessionInitEvent,
-    LocalChatSessionUsageEvent, LocalChatSessionWarningEvent, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
+    LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
+    LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
+    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatTurnStartedEvent,
 };
 pub(crate) use harness::{
     CreateLocalChatSessionInput, HarnessCreateSessionInput, LocalChatHarness,

@@ -3,12 +3,12 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 
 use crate::{
-    CompletionStatus, ControlDecision, ControlRequestEnvelope, ControlRequestId, ControlResolution,
-    DiagnosticEvent, EventId, FileChange, HarnessEventPayloadV1, HarnessEventV1, PlanEntry,
-    ProviderResumeId, ResolutionSource, RunId, RunOutcome, SessionCloseOutcome, SessionCloseStatus,
-    SessionId, SessionStarted, SessionUsage, StreamId, ThreadDeclared, ThreadId, ThreadKind,
-    ToolCallEvent, ToolCallId, ToolOutputEvent, TurnId, TurnInput, TurnOutcome, TurnStarted,
-    TurnUsage, UpdateSemantics,
+    CompactionEvent, CompletionStatus, ControlDecision, ControlRequestEnvelope, ControlRequestId,
+    ControlResolution, DiagnosticEvent, EventId, FileChange, HarnessEventPayloadV1, HarnessEventV1,
+    PlanEntry, ProviderResumeId, ResolutionSource, RunId, RunOutcome, SessionCloseOutcome,
+    SessionCloseStatus, SessionId, SessionStarted, SessionUsage, StreamId, ThreadDeclared,
+    ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, TurnId, TurnInput,
+    TurnOutcome, TurnStarted, TurnUsage, UpdateSemantics,
 };
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -67,6 +67,8 @@ pub struct StreamProjection {
     pub session_usage: Option<SessionUsage>,
     pub warnings: Vec<DiagnosticEvent>,
     pub errors: Vec<DiagnosticEvent>,
+    /// Latest ordered compaction lifecycle state for this stream.
+    pub compaction: Option<CompactionEvent>,
     pub pending_controls: BTreeMap<ControlRequestId, ControlRequestEnvelope>,
     pub resolved_controls: BTreeMap<ControlRequestId, ControlResolution>,
     pub turn_outcomes: BTreeMap<TurnId, TurnOutcome>,
@@ -99,6 +101,7 @@ impl Default for StreamProjection {
             session_usage: None,
             warnings: Vec::new(),
             errors: Vec::new(),
+            compaction: None,
             pending_controls: BTreeMap::new(),
             resolved_controls: BTreeMap::new(),
             turn_outcomes: BTreeMap::new(),
@@ -749,6 +752,7 @@ impl HarnessProjection {
             }
             HarnessEventPayloadV1::Warning(warning) => stream.warnings.push(warning),
             HarnessEventPayloadV1::Error(error) => stream.errors.push(error),
+            HarnessEventPayloadV1::Compaction(compaction) => stream.compaction = Some(compaction),
             HarnessEventPayloadV1::ControlRequested(request) => {
                 stream
                     .pending_controls

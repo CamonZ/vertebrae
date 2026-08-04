@@ -272,9 +272,12 @@ export function useChatSession(sessionId: string) {
   }, [sessionMessages, streamingAssistant]);
 
   const activeTurn = session?.activeTurn ?? null;
-  const isWaiting = activeTurn !== null;
-  const activityLabel =
-    activeTurn?.phase === "stopping" ? "Stopping..." : "Thinking...";
+  const isWaiting = activeTurn !== null || session?.compactionActive === true;
+  const activityLabel = session?.compactionActive
+    ? "Compacting conversation…"
+    : activeTurn?.phase === "stopping"
+      ? "Stopping..."
+      : "Thinking...";
 
   const assistantLabel = session
     ? harnessDisplayName(session.harness)
@@ -414,6 +417,7 @@ export function useChatSession(sessionId: string) {
     canStopGeneration,
     isWaiting,
     activityLabel,
+    compactionSummary: session?.compactionSummary ?? null,
     hasPendingUserQuestion,
 
     // harness catalog

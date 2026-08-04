@@ -282,6 +282,33 @@ pub struct DiagnosticEvent {
     pub code: Option<String>,
 }
 
+/// Lifecycle state for a provider-neutral context compaction operation.
+///
+/// Compaction events are ordered on the same stream as the turn events they
+/// accompany. Consumers should use the event sequence and correlation fields
+/// for routing rather than treating this as a separate status channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompactionState {
+    Active,
+    Completed,
+    Cleared,
+}
+
+/// Provider-neutral context compaction lifecycle metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompactionEvent {
+    pub state: CompactionState,
+    /// Provider-independent display metadata, such as a manual or automatic
+    /// trigger. Unknown future values remain round-trippable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<String>,
+    /// Context token count observed immediately before compaction, when the
+    /// provider supplies it. This is meaningful on a completed event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_tokens: Option<u64>,
+}
+
 /// Every event payload in the V1 neutral contract.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HarnessEventPayloadV1 {
@@ -298,6 +325,7 @@ pub enum HarnessEventPayloadV1 {
     Usage(UsageEvent),
     Warning(DiagnosticEvent),
     Error(DiagnosticEvent),
+    Compaction(CompactionEvent),
     ControlRequested(ControlRequestEnvelope),
     ControlResolved(ControlResolution),
     /// The single terminal event for an accepted interactive turn. For a
@@ -333,6 +361,7 @@ impl HarnessEventPayloadV1 {
             Self::Usage(_) => "usage",
             Self::Warning(_) => "warning",
             Self::Error(_) => "error",
+            Self::Compaction(_) => "compaction",
             Self::ControlRequested(_) => "control_requested",
             Self::ControlResolved(_) => "control_resolved",
             Self::TurnFinished(_) => "turn_finished",
@@ -357,6 +386,7 @@ impl HarnessEventPayloadV1 {
             Self::Usage(value) => serde_json::to_value(value),
             Self::Warning(value) => serde_json::to_value(value),
             Self::Error(value) => serde_json::to_value(value),
+            Self::Compaction(value) => serde_json::to_value(value),
             Self::ControlRequested(value) => serde_json::to_value(value),
             Self::ControlResolved(value) => serde_json::to_value(value),
             Self::TurnFinished(value) => serde_json::to_value(value),
@@ -387,6 +417,7 @@ impl HarnessEventPayloadV1 {
             "usage" => decode!(Usage, UsageEvent),
             "warning" => decode!(Warning, DiagnosticEvent),
             "error" => decode!(Error, DiagnosticEvent),
+            "compaction" => decode!(Compaction, CompactionEvent),
             "control_requested" => decode!(ControlRequested, ControlRequestEnvelope),
             "control_resolved" => decode!(ControlResolved, ControlResolution),
             "turn_finished" => decode!(TurnFinished, TurnOutcome),

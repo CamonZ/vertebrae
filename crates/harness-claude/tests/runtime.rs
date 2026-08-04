@@ -19,11 +19,12 @@ use async_trait::async_trait;
 use tempfile::TempDir;
 use vertebrae_harness_claude::{ClaudeProviderConfig, ClaudeRuntime};
 use vertebrae_harness_core::{
-    CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope, ControlResolution,
-    ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1, HarnessEventV1,
-    HarnessProjection, HarnessRuntime, ProviderThreadRef, QuestionAnswer, RequestConfig,
-    ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId, StartSessionRequest, StreamId,
-    ThreadKind, ToolStatus, TurnId, TurnInputProvenance, UpdateSemantics,
+    CompactionState, CompletionStatus, ControlDecision, ControlRequest, ControlRequestEnvelope,
+    ControlResolution, ControlSink, EventSink, GrantScope, HarnessError, HarnessEventPayloadV1,
+    HarnessEventV1, HarnessProjection, HarnessRuntime, ProviderThreadRef, QuestionAnswer,
+    RequestConfig, ResolutionSource, RunId, RunRequest, SendTurnRequest, SessionId,
+    StartSessionRequest, StreamId, ThreadKind, ToolStatus, TurnId, TurnInputProvenance,
+    UpdateSemantics,
 };
 
 use lifecycle::{LifecycleProbeSink, assert_balanced_turn};
@@ -336,8 +337,10 @@ async fn one_shot_clean_exit_without_result_is_completed_without_output_or_metri
         "clean-exit",
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-session"}'
+printf '%s\n' 'informational diagnostic' >&2
 "#,
     );
+    let sink = Arc::new(CollectSink::default());
     let handle = runtime(executable)
         .run_once(
             RunRequest {
@@ -346,7 +349,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-sessio
                 prompt: "finish quietly".into(),
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
@@ -359,6 +362,12 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"clean-exit-sessio
     assert_eq!(outcome.usage, None);
     assert_eq!(outcome.metrics, Default::default());
     assert_eq!(outcome.error, None);
+    assert!(sink.0.lock().unwrap().iter().any(|event| matches!(
+        &event.payload,
+        HarnessEventPayloadV1::Warning(warning)
+            if warning.code.as_deref() == Some("claude_stderr")
+                && warning.message == "informational diagnostic"
+    )));
 }
 
 #[tokio::test]
@@ -587,6 +596,7 @@ async fn persistent_session_survives_compact_skill_records() {
         "persistent-compact",
         r#"#!/bin/sh
 initialized=0
+compacted=0
 while IFS= read -r line; do
   if [ "$initialized" -eq 0 ]; then
     printf '%s\n' '{"type":"system","subtype":"init","session_id":"compact-session"}'
@@ -594,7 +604,11 @@ while IFS= read -r line; do
   fi
   case "$line" in
     *compact*)
-      printf '%s\n' '{"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}'
+      if [ "$compacted" -eq 0 ]; then
+        printf '%s\n' '{"type":"system","subtype":"status","status":"compacting"}'
+        printf '%s\n' '{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":2048},"content":"Conversation compacted"}'
+        compacted=1
+      fi
       printf '%s\n' '{"type":"user","isCompactSummary":true,"message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context."}}'
       printf '%s\n' '{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"}}'
       ;;
@@ -608,6 +622,7 @@ while IFS= read -r line; do
 done
 "#,
     );
+    let sink = Arc::new(CollectSink::default());
     let session = runtime(executable)
         .start_session(
             StartSessionRequest {
@@ -616,7 +631,7 @@ done
                 resume_id: None,
                 config: RequestConfig::default(),
             },
-            Arc::new(CollectSink::default()),
+            sink.clone(),
             Arc::new(ResolvingControls::default()),
         )
         .await
@@ -646,6 +661,20 @@ done
         session.close().await.unwrap().status,
         vertebrae_harness_core::SessionCloseStatus::Closed
     );
+    let events = sink.0.lock().unwrap();
+    let compactions = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            HarnessEventPayloadV1::Compaction(value) => Some((event, value)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(compactions.len(), 2);
+    assert_eq!(compactions[0].1.state, CompactionState::Active);
+    assert_eq!(compactions[1].1.state, CompactionState::Completed);
+    assert_eq!(compactions[1].1.trigger.as_deref(), Some("manual"));
+    assert_eq!(compactions[1].1.pre_tokens, Some(2048));
+    assert!(compactions[0].0.provider_sequence < compactions[1].0.provider_sequence);
 }
 
 #[tokio::test]

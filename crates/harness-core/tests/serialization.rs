@@ -204,6 +204,21 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             message: "error".into(),
             code: Some("E1".into()),
         }),
+        HarnessEventPayloadV1::Compaction(CompactionEvent {
+            state: CompactionState::Active,
+            trigger: Some("manual".into()),
+            pre_tokens: None,
+        }),
+        HarnessEventPayloadV1::Compaction(CompactionEvent {
+            state: CompactionState::Completed,
+            trigger: Some("auto".into()),
+            pre_tokens: Some(123_456),
+        }),
+        HarnessEventPayloadV1::Compaction(CompactionEvent {
+            state: CompactionState::Cleared,
+            trigger: None,
+            pre_tokens: None,
+        }),
         HarnessEventPayloadV1::ControlRequested(request.clone()),
         HarnessEventPayloadV1::ControlResolved(ControlResolution {
             request_id: request.request_id,

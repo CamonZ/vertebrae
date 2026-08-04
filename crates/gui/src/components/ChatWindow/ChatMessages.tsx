@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import type { ChatMessage } from "../../stores/chatStore";
+import type {
+  ChatCompactionSummary,
+  ChatMessage,
+} from "../../stores/chatStore";
 import { EventLog, Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { chatMessagesToThread } from "./chatMessagesToThread";
@@ -86,6 +89,7 @@ interface ChatMessagesProps {
   isActive: boolean;
   isWaiting: boolean;
   activityLabel?: string | null;
+  compactionSummary?: ChatCompactionSummary | null;
   streamingAssistant: unknown;
 }
 
@@ -97,6 +101,7 @@ export function ChatMessages({
   isActive,
   isWaiting,
   activityLabel,
+  compactionSummary,
   streamingAssistant,
 }: ChatMessagesProps) {
   const resolveUserQuestion = useChatStore(
@@ -222,6 +227,24 @@ export function ChatMessages({
           )
         )}
         {isWaiting && <ThinkingIndicator label={activityLabel ?? undefined} />}
+        {!isWaiting && compactionSummary && (
+          <div
+            className="flex justify-start"
+            data-testid="chat-compaction-summary"
+            role="status"
+            aria-live="polite"
+          >
+            <span className="text-xs text-[var(--color-fg-mute)]">
+              Conversation compacted
+              {compactionSummary.trigger
+                ? ` (${compactionSummary.trigger})`
+                : ""}
+              {compactionSummary.preTokens !== null
+                ? ` · ${compactionSummary.preTokens.toLocaleString()} tokens before compaction`
+                : ""}
+            </span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
     </div>

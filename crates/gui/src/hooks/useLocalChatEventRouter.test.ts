@@ -6,12 +6,14 @@ import {
   type LocalChatTextEvent,
   type LocalChatToolCallEvent,
   type LocalChatTurnStartedEvent,
+  type LocalChatCompactionEvent,
 } from "../bindings";
 import { useChatStore, type ChatSession } from "../stores/chatStore";
 import translationSequence from "../test/fixtures/localChatTurnTranslation.json";
 import {
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionErrorEvent,
+  routeLocalChatCompactionEvent,
   routeLocalChatTextEvent,
   routeLocalChatToolCallEvent,
   routeLocalChatToolResultEvent,
@@ -61,6 +63,7 @@ vi.mock("../bindings", () => {
       localChatSessionEndEvent: { listen },
       localChatSessionErrorEvent: { listen },
       localChatSessionWarningEvent: { listen },
+      localChatCompactionEvent: { listen },
     },
   };
 });
@@ -129,9 +132,9 @@ describe("useLocalChatEventRouter route functions", () => {
     const second = renderHook(() => useLocalChatEventRouter());
 
     await waitFor(() => {
-      expect(listen).toHaveBeenCalledTimes(10);
+      expect(listen).toHaveBeenCalledTimes(11);
     });
-    expect(unlisteners).toHaveLength(10);
+    expect(unlisteners).toHaveLength(11);
 
     first.unmount();
     for (const unlisten of unlisteners) {
@@ -249,6 +252,138 @@ describe("useLocalChatEventRouter route functions", () => {
         isPartial: false,
       }),
     ]);
+  });
+
+  it("routes compaction state to only the matching session and clears at the boundary", () => {
+    resetChatStore({
+      left: makeSession({
+        id: "left",
+        backendSessionId: "backend-left",
+        lifecycle: "streaming",
+      }),
+      right: makeSession({
+        id: "right",
+        backendSessionId: "backend-right",
+        lifecycle: "streaming",
+      }),
+    });
+    startTurn("backend-left", "turn-left");
+
+    const event = (
+      state: LocalChatCompactionEvent["state"]
+    ): LocalChatCompactionEvent => ({
+      backend_session_id: "backend-left",
+      harness: "claude",
+      turn_id: "turn-left",
+      thread_id: "thread-left",
+      is_root: true,
+      state,
+      trigger: state === "completed" ? "manual" : null,
+      pre_tokens: state === "completed" ? 42_000 : null,
+    });
+
+    expect(routeLocalChatCompactionEvent(event("active"))).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionActive).toBe(true);
+    expect(useChatStore.getState().sessions.right.compactionActive).not.toBe(
+      true
+    );
+    expect(useChatStore.getState().sessions.left.messages).toEqual([]);
+
+    expect(routeLocalChatCompactionEvent(event("completed"))).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionActive).toBe(false);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toEqual({
+      trigger: "manual",
+      preTokens: 42_000,
+    });
+
+    expect(routeLocalChatCompactionEvent(event("active"))).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toBeNull();
+    expect(routeLocalChatCompactionEvent(event("completed"))).toBe(true);
+
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-left",
+        harness: "claude",
+        turn_id: "turn-left",
+        thread_id: "thread-left",
+        is_root: true,
+        duration_ms: 100,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 42_000,
+        context_window: 200_000,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toEqual({
+      trigger: "manual",
+      preTokens: 42_000,
+    });
+  });
+
+  it("clears compaction on session error and cancellation cleanup", () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        compactionActive: true,
+      }),
+    });
+    startTurn("backend-local", "turn-error");
+
+    expect(
+      routeLocalChatSessionErrorEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-error",
+        thread_id: "thread-local",
+        is_root: true,
+        error: "failed",
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.compactionActive).toBe(false);
+
+    useChatStore.setState({
+      sessions: {
+        local: makeSession({
+          id: "local",
+          backendSessionId: "backend-local",
+          lifecycle: "streaming",
+          compactionActive: true,
+        }),
+      },
+    });
+    useChatStore.getState().setSessionLifecycle("local", "closing");
+    expect(useChatStore.getState().sessions.local.compactionActive).toBe(false);
+
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        compactionActive: true,
+      }),
+    });
+    startTurn("backend-local", "turn-end");
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "turn-end",
+        thread_id: "thread-local",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 0,
+        context_window: 200_000,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.local.compactionActive).toBe(false);
   });
 
   it("keeps a turn active through snapshot text and later tool activity", () => {

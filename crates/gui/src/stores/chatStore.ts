@@ -346,6 +346,11 @@ export interface ActiveChatTurn {
   phase: ActiveChatTurnPhase;
 }
 
+export interface ChatCompactionSummary {
+  trigger: string | null;
+  preTokens: number | null;
+}
+
 export type ChatTitleStatus =
   | "pending"
   | "low_confidence"
@@ -407,6 +412,10 @@ export interface ChatSession {
   lifecycleError?: string | null;
   /** Runtime-only state for the current root turn, separate from the backend. */
   activeTurn?: ActiveChatTurn | null;
+  /** Runtime-only indeterminate provider compaction state. */
+  compactionActive?: boolean;
+  /** Runtime-only metadata from the most recent completed compaction. */
+  compactionSummary?: ChatCompactionSummary | null;
   /** Ephemeral assistant text currently streaming; not durable transcript state */
   streamingAssistant?: StreamingAssistantMessage | null;
   /** Runtime-only user messages queued while a local turn is still active */
@@ -512,6 +521,13 @@ interface ChatStoreActions {
   bindActiveTurn: (sessionId: string, turnId: string) => boolean;
   /** Move the current root turn into stopping exactly once. */
   markActiveTurnStopping: (sessionId: string) => boolean;
+  /** Set or clear the ephemeral provider compaction indicator. */
+  setSessionCompaction: (sessionId: string, active: boolean) => void;
+  /** Retain or clear the latest compaction completion metadata. */
+  setCompactionSummary: (
+    sessionId: string,
+    summary: ChatCompactionSummary | null
+  ) => void;
   /** Restore a failed stop request for the same local turn. */
   restoreActiveTurn: (sessionId: string, localId: string) => boolean;
   /** Settle only the current root turn with the matching harness identity. */
@@ -1830,9 +1846,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
             lifecycle === "error"
               ? (errorMessage ?? "Claude session failed")
               : null;
+          const clearsCompaction = [
+            "starting",
+            "resuming",
+            "sending",
+            "closing",
+            "closed",
+            "error",
+          ].includes(lifecycle);
           if (
             getLocalChatLifecycle(session) === lifecycle &&
-            (session.lifecycleError ?? null) === normalizedError
+            (session.lifecycleError ?? null) === normalizedError &&
+            (!clearsCompaction || !session.compactionActive)
           ) {
             return session;
           }
@@ -1840,6 +1865,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ...session,
             lifecycle,
             lifecycleError: normalizedError,
+            ...(clearsCompaction
+              ? { compactionActive: false, compactionSummary: null }
+              : {}),
           };
         },
         { persist: false }
@@ -1913,6 +1941,28 @@ export const useChatStore = create<ChatStore>((set, get) => {
         { persist: false }
       );
       return marked;
+    },
+
+    setSessionCompaction: (sessionId, active) => {
+      updateSession(
+        sessionId,
+        (session) =>
+          session.compactionActive === active
+            ? session
+            : { ...session, compactionActive: active },
+        { persist: false }
+      );
+    },
+
+    setCompactionSummary: (sessionId, summary) => {
+      updateSession(
+        sessionId,
+        (session) =>
+          session.compactionSummary === summary
+            ? session
+            : { ...session, compactionSummary: summary },
+        { persist: false }
+      );
     },
 
     restoreActiveTurn: (sessionId, localId) => {
@@ -2208,6 +2258,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         backendSessionId: null,
         lifecycle: "closed" as const,
         lifecycleError: null,
+        compactionActive: false,
+        compactionSummary: null,
         activeTurn: null,
         streamingAssistant: null,
         queuedMessages: undefined,

@@ -105,6 +105,16 @@ fn local_chat_event_names_match_public_contract() {
             is_root: true,
             warning: "careful".to_string(),
         }),
+        LocalChatEvent::Compaction(LocalChatCompactionEvent {
+            backend_session_id: "session-1".to_string(),
+            harness: LocalChatHarnessKind::Claude,
+            turn_id: Some("turn-1".to_string()),
+            thread_id: Some("thread-1".to_string()),
+            is_root: true,
+            state: "active".to_string(),
+            trigger: None,
+            pre_tokens: None,
+        }),
     ];
 
     let names: Vec<_> = events
@@ -124,6 +134,7 @@ fn local_chat_event_names_match_public_contract() {
             "local-chat-session-end-event",
             "local-chat-session-error-event",
             "local-chat-session-warning-event",
+            "local-chat-compaction-event",
         ]
     );
 }

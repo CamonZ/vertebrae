@@ -179,6 +179,28 @@ pub struct LocalChatSessionWarningEvent {
     pub warning: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatCompactionEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub is_root: bool,
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub trigger: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub pre_tokens: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalChatEvent {
     Init(LocalChatSessionInitEvent),
@@ -191,6 +213,7 @@ pub(crate) enum LocalChatEvent {
     End(LocalChatSessionEndEvent),
     Error(LocalChatSessionErrorEvent),
     Warning(LocalChatSessionWarningEvent),
+    Compaction(LocalChatCompactionEvent),
 }
 
 impl LocalChatEvent {
@@ -207,6 +230,7 @@ impl LocalChatEvent {
             LocalChatEvent::End(_) => "local-chat-session-end-event",
             LocalChatEvent::Error(_) => "local-chat-session-error-event",
             LocalChatEvent::Warning(_) => "local-chat-session-warning-event",
+            LocalChatEvent::Compaction(_) => "local-chat-compaction-event",
         }
     }
 }
@@ -295,6 +319,7 @@ impl LocalChatEventSink {
             LocalChatEvent::End(payload) => payload.emit(app_handle),
             LocalChatEvent::Error(payload) => payload.emit(app_handle),
             LocalChatEvent::Warning(payload) => payload.emit(app_handle),
+            LocalChatEvent::Compaction(payload) => payload.emit(app_handle),
         };
         result.map_err(|error| error.to_string())
     }

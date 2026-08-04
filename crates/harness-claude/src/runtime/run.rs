@@ -52,6 +52,8 @@ pub(super) async fn run_one_shot_process_v2(
     let mut terminal: Option<RunOutcome> = None;
     let mut failure: Option<String> = None;
     let mut cancelled = false;
+    let mut stdout_closed = false;
+    let mut stderr_closed = false;
 
     'process: loop {
         tokio::select! {
@@ -137,8 +139,19 @@ pub(super) async fn run_one_shot_process_v2(
                     }
                 }
                 Some(ProcessOutput::ReadError(error)) => { failure = Some(error); break 'process; }
-                Some(ProcessOutput::StdoutClosed) | None => break 'process,
-                Some(ProcessOutput::StderrClosed) => {}
+                Some(ProcessOutput::StdoutClosed) => {
+                    stdout_closed = true;
+                    if stderr_closed {
+                        break 'process;
+                    }
+                }
+                Some(ProcessOutput::StderrClosed) => {
+                    stderr_closed = true;
+                    if stdout_closed {
+                        break 'process;
+                    }
+                }
+                None => break 'process,
             }
         }
     }

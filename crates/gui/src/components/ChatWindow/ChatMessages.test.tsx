@@ -224,6 +224,37 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Stopping...")).toBeInTheDocument();
   });
 
+  it("renders an accessible indeterminate compaction label in the activity area", () => {
+    render(
+      <ChatMessages
+        {...defaultProps({
+          isEmpty: false,
+          isWaiting: true,
+          activityLabel: "Compacting conversation…",
+        })}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Compacting conversation…"
+    );
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
+  it("shows completion metadata without adding a transcript message", () => {
+    render(
+      <ChatMessages
+        {...defaultProps({
+          isEmpty: true,
+          compactionSummary: { trigger: "auto", preTokens: 4096 },
+        })}
+      />
+    );
+    expect(screen.getByTestId("chat-compaction-summary")).toHaveTextContent(
+      "Conversation compacted (auto) · 4,096 tokens before compaction"
+    );
+    expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
+  });
+
   // --- Scroll-to-spawn event ---
 
   it("handles scroll-to-spawn events without crashing for non-existent spawn", () => {

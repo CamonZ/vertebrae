@@ -6,6 +6,7 @@ import type {
   LocalChatSessionInitEvent,
   LocalChatSessionUsageEvent,
   LocalChatSessionWarningEvent,
+  LocalChatCompactionEvent,
   LocalChatTextEvent,
   LocalChatToolCallEvent,
   LocalChatToolResultEvent,
@@ -33,6 +34,7 @@ import {
   handleFileChangeEvent,
   handleUsageEvent,
   handleWarningEvent,
+  handleCompactionEvent,
 } from "./useLocalChat";
 
 type Unlisten = () => void;
@@ -280,6 +282,7 @@ export function routeLocalChatSessionEndEvent(
   });
   const store = useChatStore.getState();
   store.settleActiveTurn(sessionId, payload.turn_id);
+  store.setSessionCompaction(sessionId, false);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
@@ -323,6 +326,8 @@ export function routeLocalChatSessionErrorEvent(
   // A root error with no turn id is session-fatal: clear whatever turn is
   // tracked. A correlated one only clears the turn it matched above.
   store.settleActiveTurn(sessionId, payload.turn_id ?? null);
+  store.setSessionCompaction(sessionId, false);
+  store.setCompactionSummary(sessionId, null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
@@ -352,6 +357,32 @@ export function routeLocalChatSessionWarningEvent(
     payload.backend_session_id,
     sessionId,
     useChatStore.getState().addMessage
+  );
+  return true;
+}
+
+export function routeLocalChatCompactionEvent(
+  payload: LocalChatCompactionEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId) return false;
+  if (
+    payload.turn_id &&
+    !shouldRouteContentEvent(
+      payload.backend_session_id,
+      sessionId,
+      payload,
+      true
+    )
+  ) {
+    return false;
+  }
+  handleCompactionEvent(
+    payload,
+    payload.backend_session_id,
+    sessionId,
+    useChatStore.getState().setSessionCompaction,
+    useChatStore.getState().setCompactionSummary
   );
   return true;
 }
@@ -501,6 +532,11 @@ function subscribeLocalChatEvents(): Unlisten {
   void register(
     events.localChatSessionWarningEvent.listen((event) => {
       routeLocalChatSessionWarningEvent(event.payload);
+    })
+  );
+  void register(
+    events.localChatCompactionEvent.listen((event) => {
+      routeLocalChatCompactionEvent(event.payload);
     })
   );
 

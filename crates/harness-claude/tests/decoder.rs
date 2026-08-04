@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use vertebrae_harness_claude::{ClaudeDecodeContext, ClaudeStreamDecoder};
 use vertebrae_harness_core::{
-    CompletionStatus, ControlDecision, ControlRequest, FileChangeKind, HarnessEventPayloadV1,
-    ProviderThreadRef, RunId, SessionId, StreamId, ThreadKind, ToolStatus, TurnInputProvenance,
-    UpdateSemantics,
+    CompactionState, CompletionStatus, ControlDecision, ControlRequest, FileChangeKind,
+    HarnessEventPayloadV1, ProviderThreadRef, RunId, SessionId, StreamId, ThreadKind, ToolStatus,
+    TurnInputProvenance, UpdateSemantics,
 };
 
 #[test]
@@ -210,6 +210,106 @@ fn slash_commands_and_compact_summaries_are_silent_user_records() {
             .iter()
             .any(|draft| matches!(draft.payload, HarnessEventPayloadV1::ToolOutput(_)))
     );
+}
+
+#[test]
+fn compaction_status_and_boundary_records_decode_once_in_provider_order() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("compaction-run"),
+        StreamId::from("compaction-stream"),
+    ));
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"compaction-session"}"#)
+        .unwrap();
+
+    let active = decoder
+        .decode_line(r#"{"type":"system","subtype":"status","status":"compacting"}"#)
+        .unwrap();
+    let active = active
+        .iter()
+        .find_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::Compaction(value) => Some((draft, value)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(active.1.state, CompactionState::Active);
+    assert_eq!(active.0.provider_sequence, Some(2));
+
+    let duplicate_active = decoder
+        .decode_line(r#"{"type":"system","subtype":"status","status":"compacting"}"#)
+        .unwrap();
+    assert!(duplicate_active.is_empty());
+
+    let completed = decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":9876}}"#,
+        )
+        .unwrap();
+    let completed = completed
+        .iter()
+        .find_map(|draft| match &draft.payload {
+            HarnessEventPayloadV1::Compaction(value) => Some((draft, value)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(completed.1.state, CompactionState::Completed);
+    assert_eq!(completed.1.trigger.as_deref(), Some("manual"));
+    assert_eq!(completed.1.pre_tokens, Some(9876));
+    assert_eq!(completed.0.provider_sequence, Some(4));
+    assert_eq!(
+        completed
+            .0
+            .correlation
+            .session_id
+            .as_ref()
+            .unwrap()
+            .as_str(),
+        "compaction-session"
+    );
+
+    assert!(
+        decoder
+            .decode_line(r#"{"type":"system","subtype":"compact_boundary"}"#)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        decoder
+            .decode_line(
+                r#"{"type":"user","isCompactSummary":true,"message":{"content":"continued"}}"#
+            )
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn compaction_status_clear_is_defensive_and_unrelated_status_is_ignored() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("compaction-clear-run"),
+        StreamId::from("compaction-clear-stream"),
+    ));
+    decoder
+        .decode_line(
+            r#"{"type":"system","subtype":"init","session_id":"compaction-clear-session"}"#,
+        )
+        .unwrap();
+    assert!(
+        decoder
+            .decode_line(r#"{"type":"system","subtype":"status","status":"working"}"#)
+            .unwrap()
+            .is_empty()
+    );
+    decoder
+        .decode_line(r#"{"type":"system","subtype":"status","status":"compacting"}"#)
+        .unwrap();
+    let cleared = decoder
+        .decode_line(r#"{"type":"system","subtype":"status","status":null}"#)
+        .unwrap();
+    assert!(cleared.iter().any(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::Compaction(value) if value.state == CompactionState::Cleared
+    )));
 }
 
 #[test]
