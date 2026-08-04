@@ -9,7 +9,11 @@ import Markdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import {
+  vs,
+  vscDarkPlus,
+} from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useIsLightTheme } from "../../hooks/useTheme";
 
 interface MarkdownContentProps {
   text: string;
@@ -17,19 +21,29 @@ interface MarkdownContentProps {
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
 
-const syntaxTheme = {
-  ...vscDarkPlus,
-  'pre[class*="language-"]': {
-    ...(vscDarkPlus['pre[class*="language-"]'] as React.CSSProperties),
-    background: "var(--color-bg)",
-    margin: 0,
-    borderRadius: "var(--radius-md)",
-  },
-  'code[class*="language-"]': {
-    ...(vscDarkPlus['code[class*="language-"]'] as React.CSSProperties),
-    background: "none",
-  },
-};
+function createSyntaxTheme(
+  baseTheme: { [key: string]: React.CSSProperties },
+  background: string
+) {
+  return {
+    ...baseTheme,
+    'pre[class*="language-"]': {
+      ...(baseTheme['pre[class*="language-"]'] as React.CSSProperties),
+      background,
+      backgroundColor: "transparent",
+      margin: 0,
+      borderRadius: "var(--radius-md)",
+    },
+    'code[class*="language-"]': {
+      ...(baseTheme['code[class*="language-"]'] as React.CSSProperties),
+      background: "none",
+      backgroundColor: "transparent",
+    },
+  };
+}
+
+const darkSyntaxTheme = createSyntaxTheme(vscDarkPlus, "var(--color-bg)");
+const lightSyntaxTheme = createSyntaxTheme(vs, "var(--color-bg-2)");
 
 type CodeProps = ComponentPropsWithoutRef<"code"> & {
   inline?: boolean;
@@ -63,6 +77,12 @@ function HighlightedCodeBlock({
   diagramError,
 }: HighlightedCodeBlockProps) {
   const hasLanguage = language !== "text";
+  const isLightTheme = useIsLightTheme();
+  const syntaxTheme = isLightTheme ? lightSyntaxTheme : darkSyntaxTheme;
+  const syntaxBlockStyle = {
+    ...codeBlockStyle,
+    background: isLightTheme ? "var(--color-bg-2)" : "var(--color-bg)",
+  };
 
   return (
     <div
@@ -89,7 +109,7 @@ function HighlightedCodeBlock({
         style={syntaxTheme as { [key: string]: React.CSSProperties }}
         language={language}
         PreTag="div"
-        customStyle={codeBlockStyle}
+        customStyle={syntaxBlockStyle}
         codeTagProps={codeTagStyle}
       >
         {source}

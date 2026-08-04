@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useUIStore } from "../stores/uiStore";
 
 /**
@@ -62,4 +62,32 @@ export function useTheme() {
       mediaQuery.removeEventListener("change", handleChange);
     };
   }, [theme]);
+}
+
+/**
+ * Return the effective light-mode state for components with inline theme data.
+ * The root theme hook owns the DOM class; this hook follows the same store and
+ * system preference so inline renderer styles update without DOM observers.
+ */
+export function useIsLightTheme() {
+  const theme = useUIStore((state) => state.theme);
+  const [isLight, setIsLight] = useState(() =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    !window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+
+  useEffect(() => {
+    if (theme !== "system") return;
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setIsLight(!mediaQuery.matches);
+
+    update();
+    mediaQuery.addEventListener("change", update);
+
+    return () => mediaQuery.removeEventListener("change", update);
+  }, [theme]);
+
+  return theme === "light" || (theme === "system" && isLight);
 }

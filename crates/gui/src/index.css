@@ -485,14 +485,14 @@ body {
   }
 }
 
-/* Selection styling — muted copper in dark mode, paper-toned in light mode. */
+/* Selection styling — muted copper in both themes, with readable foreground. */
 ::selection {
   background-color: var(--color-accent-mute);
   color: var(--color-fg);
 }
 
 html.light ::selection {
-  background-color: var(--color-accent-wash);
+  background-color: var(--color-accent-mute);
   color: var(--color-fg);
 }
 
@@ -3401,51 +3401,49 @@ html.light ::selection {
 }
 
 /* ── Light-theme glass ──────────────────────────────────────────────────────
-   The floating-glass surfaces (detail panels + chat) lean on `brightness(1.4)`
-   in the backdrop filter to lift the dark desktop behind them into a glow. In
-   light mode the backdrop is already bright, so that multiplier clamps it to
-   pure white and the panel reads as a flat opaque slab — "not glass at all".
-   Here we drop the brightness boost (so real content blurs through), warm the
-   frost with a touch of saturation, raise the translucent fill to a legible
-   light tint, and swap the dark inset highlight / drop shadow for light-mode
-   elevation. */
+   Light surfaces need a visible tinted glass layer and edge highlight to
+   separate them from the paper-colored page beneath. Use the darker light
+   theme surfaces at low alpha so content and color can soften through the
+   panel, while the highlight and warm shadow provide depth. */
 .light .detail.detail-float {
   background: linear-gradient(
     205deg,
-    color-mix(in oklch, var(--bg) 50%, transparent),
-    color-mix(in oklch, var(--bg-1) 44%, transparent)
+    color-mix(in oklch, var(--bg-3) 24%, transparent),
+    color-mix(in oklch, var(--bg-2) 18%, transparent)
   );
-  -webkit-backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
-  backdrop-filter: blur(30px) saturate(1.25) brightness(1.02);
-  border: 1px solid color-mix(in oklch, var(--fg) 14%, transparent);
+  -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  border: 1px solid color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-3),
-    -18px 0 44px rgba(20, 20, 20, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    -18px 0 44px rgba(68, 52, 31, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .light .hc-panel {
   background: linear-gradient(
     155deg,
-    color-mix(in oklch, var(--bg) 46%, transparent),
-    color-mix(in oklch, var(--bg-1) 40%, transparent)
+    color-mix(in oklch, var(--bg-3) 24%, transparent),
+    color-mix(in oklch, var(--bg-2) 18%, transparent)
   );
-  -webkit-backdrop-filter: blur(30px) saturate(1.3) brightness(1.02);
-  backdrop-filter: blur(30px) saturate(1.3) brightness(1.02);
+  -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-3),
-    -18px 0 44px rgba(20, 20, 20, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    -18px 0 44px rgba(68, 52, 31, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 .light .hc-launch {
-  background: color-mix(in oklch, var(--bg) 70%, transparent);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3) brightness(1.02);
-  backdrop-filter: blur(20px) saturate(1.3) brightness(1.02);
+  background: color-mix(in oklch, var(--bg-2) 34%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(20px) saturate(1.35) brightness(1.03);
+  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-2),
     0 0 18px var(--accent-glow),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 
 /* Left-edge drag handle for horizontal resize. Sits inside the panel (the

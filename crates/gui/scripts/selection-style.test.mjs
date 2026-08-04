@@ -28,12 +28,25 @@ test("dark selection uses the muted copper accent with readable text", () => {
   assert.match(darkSelection, /color:\s*var\(--color-fg\);/);
 });
 
-test("light selection preserves the paper wash with readable foreground text", () => {
+test("light selection uses the muted copper accent with readable foreground text", () => {
   const lightSelection = ruleFor("html.light ::selection");
 
   assert.match(
     lightSelection,
-    /background-color:\s*var\(--color-accent-wash\);/
+    /background-color:\s*var\(--color-accent-mute\);/
   );
   assert.match(lightSelection, /color:\s*var\(--color-fg\);/);
+});
+
+test("light chat panels retain a frosted surface treatment", () => {
+  const lightPanel = ruleFor(".light .hc-panel");
+
+  assert.match(lightPanel, /background:\s*linear-gradient/);
+  assert.match(lightPanel, /,\s*transparent\)/);
+  assert.match(lightPanel, /var\(--bg-3\) 24%/);
+  assert.match(lightPanel, /backdrop-filter:\s*blur\(30px\)/);
+  assert.match(
+    lightPanel,
+    /border-color:\s*color-mix\(in oklch, var\(--fg\) 18%, transparent\);/
+  );
 });
