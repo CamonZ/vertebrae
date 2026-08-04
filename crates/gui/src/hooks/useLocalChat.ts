@@ -11,6 +11,7 @@ import type {
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
   LocalChatSessionWarningEvent,
+  LocalChatCompactionEvent,
 } from "../bindings";
 import {
   getLocalChatLifecycle,
@@ -372,6 +373,16 @@ export function handleWarningEvent(
     message: payload.warning,
     timestamp: new Date().toISOString(),
   });
+}
+
+export function handleCompactionEvent(
+  payload: LocalChatCompactionEvent,
+  backendSessionId: string | null,
+  sessionId: string,
+  setSessionCompaction: (sessionId: string, active: boolean) => void
+) {
+  if (payload.backend_session_id !== backendSessionId) return;
+  setSessionCompaction(sessionId, payload.state === "active");
 }
 
 // --- Extracted session lifecycle functions ---

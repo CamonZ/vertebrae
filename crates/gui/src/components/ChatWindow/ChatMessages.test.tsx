@@ -224,6 +224,22 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Stopping...")).toBeInTheDocument();
   });
 
+  it("renders an accessible indeterminate compaction label in the activity area", () => {
+    render(
+      <ChatMessages
+        {...defaultProps({
+          isEmpty: false,
+          isWaiting: true,
+          activityLabel: "Compacting conversation…",
+        })}
+      />
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Compacting conversation…"
+    );
+    expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
+  });
+
   // --- Scroll-to-spawn event ---
 
   it("handles scroll-to-spawn events without crashing for non-existent spawn", () => {
