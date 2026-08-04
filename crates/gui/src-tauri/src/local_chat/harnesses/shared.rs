@@ -2,8 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use vertebrae_harness_core::{
-    CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink, EventSink,
-    FileChangeKind, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ToolStatus,
+    CompactionState, CompletionStatus, ControlRequestEnvelope, ControlResolution, ControlSink,
+    EventSink, FileChangeKind, HarnessError, HarnessEventPayloadV1, HarnessEventV1, ToolStatus,
     UpdateSemantics,
 };
 #[cfg(test)]
@@ -12,11 +12,11 @@ use vertebrae_harness_core::{
 };
 
 use crate::local_chat::{
-    LocalChatEvent, LocalChatEventSink, LocalChatFileChange, LocalChatFileChangeEvent,
-    LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
-    LocalChatSessionInitEvent, LocalChatSessionUsageEvent, LocalChatSessionWarningEvent,
-    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
-    LocalChatTurnStartedEvent,
+    LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
+    LocalChatFileChangeEvent, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
+    LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionUsageEvent,
+    LocalChatSessionWarningEvent, LocalChatTextEvent, LocalChatToolCallEvent,
+    LocalChatToolResultEvent, LocalChatTurnStartedEvent,
 };
 
 #[derive(Default)]
@@ -363,6 +363,20 @@ impl EventSink for LocalChatHarnessEventSink {
                     &outcome.metrics,
                 )?;
             }
+            HarnessEventPayloadV1::Compaction(value) => {
+                self.emit_local(LocalChatEvent::Compaction(LocalChatCompactionEvent {
+                    backend_session_id,
+                    harness,
+                    turn_id,
+                    thread_id,
+                    is_root: is_root_stream,
+                    state: compaction_state(value.state).into(),
+                    trigger: value.trigger,
+                    pre_tokens: value
+                        .pre_tokens
+                        .map(|tokens| tokens.min(u64::from(u32::MAX)) as u32),
+                }))?;
+            }
             HarnessEventPayloadV1::Warning(value) => {
                 self.emit_local(LocalChatEvent::Warning(LocalChatSessionWarningEvent {
                     backend_session_id,
@@ -398,6 +412,14 @@ fn file_change_status(status: ToolStatus) -> String {
         ToolStatus::Cancelled => "cancelled",
     }
     .into()
+}
+
+fn compaction_state(state: CompactionState) -> &'static str {
+    match state {
+        CompactionState::Active => "active",
+        CompactionState::Completed => "completed",
+        CompactionState::Cleared => "cleared",
+    }
 }
 
 fn file_change_kind(kind: FileChangeKind) -> String {
@@ -491,6 +513,66 @@ mod tests {
                     && event.tool_id == "file-1"
                     && event.status == "completed"
                     && event.changes[0].kind == "add"
+        ));
+    }
+
+    #[tokio::test]
+    async fn translates_compaction_events_with_session_correlation_and_metadata() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Claude,
+            event_sink,
+            Some("sonnet".into()),
+            1_000,
+            false,
+        );
+        let correlation = EventCorrelation {
+            thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+            turn_id: Some(vertebrae_harness_core::TurnId::new("root-turn")),
+            ..EventCorrelation::default()
+        };
+        for (sequence, state, trigger, pre_tokens) in [
+            (1, CompactionState::Active, None, None),
+            (2, CompactionState::Completed, Some("auto"), Some(4_096)),
+        ] {
+            sink.emit(HarnessEventV1 {
+                event_id: EventId::new(format!("compaction-{sequence}")),
+                stream_id: StreamId::new("local-chat:backend-1"),
+                sequence,
+                correlation: correlation.clone(),
+                timestamp: chrono::Utc::now(),
+                semantics: UpdateSemantics::Snapshot,
+                provider_sequence: Some(sequence),
+                payload: HarnessEventPayloadV1::Compaction(
+                    vertebrae_harness_core::CompactionEvent {
+                        state,
+                        trigger: trigger.map(str::to_owned),
+                        pre_tokens,
+                    },
+                ),
+            })
+            .await
+            .unwrap();
+        }
+
+        let captured = captured.lock().unwrap();
+        assert!(matches!(
+            captured.as_slice(),
+            [
+                LocalChatEvent::Compaction(active),
+                LocalChatEvent::Compaction(completed)
+            ] if active.backend_session_id == "backend-1"
+                && active.harness == LocalChatHarnessKind::Claude
+                && active.turn_id.as_deref() == Some("root-turn")
+                && active.thread_id.as_deref() == Some("root-thread")
+                && active.is_root
+                && active.state == "active"
+                && active.trigger.is_none()
+                && active.pre_tokens.is_none()
+                && completed.state == "completed"
+                && completed.trigger.as_deref() == Some("auto")
+                && completed.pre_tokens == Some(4_096)
         ));
     }
 

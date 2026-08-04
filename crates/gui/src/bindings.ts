@@ -1289,6 +1289,7 @@ export const commands = {
 
 export const events = __makeEvents__<{
   artifactChangedEvent: ArtifactChangedEvent;
+  localChatCompactionEvent: LocalChatCompactionEvent;
   localChatFileChangeEvent: LocalChatFileChangeEvent;
   localChatSessionEndEvent: LocalChatSessionEndEvent;
   localChatSessionErrorEvent: LocalChatSessionErrorEvent;
@@ -1314,6 +1315,7 @@ export const events = __makeEvents__<{
   workflowTransitionChangedEvent: WorkflowTransitionChangedEvent;
 }>({
   artifactChangedEvent: "artifact-changed-event",
+  localChatCompactionEvent: "local-chat-compaction-event",
   localChatFileChangeEvent: "local-chat-file-change-event",
   localChatSessionEndEvent: "local-chat-session-end-event",
   localChatSessionErrorEvent: "local-chat-session-error-event",
@@ -1598,6 +1600,16 @@ export type LoadLocalChatSessionReplayOutput = {
    * Each entry is one serialized, normalized HarnessEventV1 JSON object.
    */
   events: string[];
+};
+export type LocalChatCompactionEvent = {
+  backend_session_id: string;
+  harness: LocalChatHarnessKind;
+  turn_id?: string | null;
+  thread_id?: string | null;
+  is_root?: boolean;
+  state: string;
+  trigger?: string | null;
+  pre_tokens?: number | null;
 };
 export type LocalChatFileChange = {
   path: string;
