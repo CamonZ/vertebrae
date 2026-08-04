@@ -1,5 +1,5 @@
-import { beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { MarkdownContent } from "./MarkdownContent";
 
 const mermaidMock = vi.hoisted(() => ({
@@ -24,6 +24,11 @@ describe("MarkdownContent", () => {
     mermaidMock.render.mockResolvedValue({
       svg: '<svg viewBox="0 0 100 40" style="max-width: 50px;" onload="alert(1)"><text>A --&gt; B</text><script>alert("x")</script></svg>',
     });
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.documentElement.classList.remove("light");
   });
 
   describe("plain text rendering", () => {
@@ -176,6 +181,20 @@ describe("MarkdownContent", () => {
       expect(codeEl).not.toBeNull();
       expect(codeEl!.textContent).toContain("const");
       expect(codeEl!.textContent).toContain("42");
+    });
+
+    it("uses a readable light syntax palette and code surface", () => {
+      document.documentElement.classList.add("light");
+      const { container } = render(
+        <MarkdownContent text={"```typescript\nconst x = 42;\n```"} />
+      );
+
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl).toHaveStyle({ color: "rgb(57, 58, 52)" });
+      expect(codeEl?.parentElement).toHaveStyle({
+        background: "var(--color-bg-2)",
+      });
     });
 
     it("renders fenced code blocks without language and no language label", () => {

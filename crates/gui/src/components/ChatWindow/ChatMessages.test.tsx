@@ -65,6 +65,45 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Hello world")).toBeInTheDocument();
   });
 
+  it("wraps local chat threads in the bare event-log surface", () => {
+    const messages: ChatMessage[] = [
+      {
+        kind: "user",
+        text: "Please use `vtb ready`",
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+      {
+        kind: "assistant",
+        text: "I will check it.",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+      {
+        kind: "tool_call",
+        toolName: "Bash",
+        toolId: "tool-1",
+        input: '{"command":"vtb ready"}',
+        timestamp: "2024-01-01T12:00:02Z",
+      },
+    ];
+    const { container } = render(
+      <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+    );
+
+    const eventLog = container.querySelector(".evlog.evlog--bare");
+    expect(eventLog).toBeInTheDocument();
+    const userRow = eventLog?.querySelector(".evrow--user");
+    expect(userRow).toBeInTheDocument();
+    expect(
+      eventLog?.querySelector(
+        ".evlog--bare .evrow--user:not(.is-prompt):not(.is-system)"
+      )
+    ).toBe(userRow);
+    expect(userRow?.querySelector(".evbody")).toBeInTheDocument();
+    expect(userRow).toHaveTextContent("You");
+    expect(eventLog?.querySelector(".evrow--agent")).toBeInTheDocument();
+    expect(eventLog?.querySelector(".evrow--tool")).toBeInTheDocument();
+  });
+
   it("renders assistant messages", () => {
     const messages: ChatMessage[] = [
       {
