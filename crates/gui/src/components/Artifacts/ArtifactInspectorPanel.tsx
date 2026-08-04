@@ -67,7 +67,7 @@ export function ArtifactInspectorPanel({
             </IconButton>
           }
         />
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="artifact-inspector-body min-h-0 flex-1 overflow-y-auto p-4">
           {artifact && <ArtifactPreviewBody artifact={artifact} />}
         </div>
       </div>

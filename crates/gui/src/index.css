@@ -3350,6 +3350,17 @@ html.light ::selection {
   border-left-color: var(--line);
 }
 
+/* Artifact Markdown previews should use the same compact body scale as the
+   task-detail panel. Keep this scoped here because the shared MarkdownContent
+   renderer is also used by chat and other surfaces with intentionally larger
+   prose. */
+.artifact-inspector-body .markdown-content p,
+.artifact-inspector-body .markdown-content ul,
+.artifact-inspector-body .markdown-content ol,
+.artifact-inspector-body .markdown-content blockquote {
+  font-size: var(--text-sm);
+}
+
 /* Detail panel — floating glass overlay. Ported from docs/design/tasks-v2.html
    (`.detail`, lines 67-77): a fixed, full-height translucent surface that
    floats over the full-width list so the rows blur through it. Mirrors the

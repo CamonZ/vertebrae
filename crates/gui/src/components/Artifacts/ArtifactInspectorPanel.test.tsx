@@ -37,5 +37,10 @@ describe("ArtifactInspectorPanel", () => {
     expect(screen.getByTestId("artifact-inspector-content")).not.toHaveClass(
       "bg-bg"
     );
+    expect(
+      screen
+        .getByTestId("artifact-inspector-content")
+        .querySelector(".artifact-inspector-body")
+    ).toBeInTheDocument();
   });
 });
