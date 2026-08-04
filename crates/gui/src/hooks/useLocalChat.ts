@@ -396,6 +396,7 @@ export function handleCompactionEvent(
     return;
   }
   setSessionCompaction(sessionId, payload.state === "active");
+  if (payload.state === "active") setCompactionSummary(sessionId, null);
   if (payload.state === "cleared") setCompactionSummary(sessionId, null);
 }
 

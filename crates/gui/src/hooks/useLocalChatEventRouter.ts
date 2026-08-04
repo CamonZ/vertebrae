@@ -283,7 +283,6 @@ export function routeLocalChatSessionEndEvent(
   const store = useChatStore.getState();
   store.settleActiveTurn(sessionId, payload.turn_id);
   store.setSessionCompaction(sessionId, false);
-  store.setCompactionSummary(sessionId, null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,

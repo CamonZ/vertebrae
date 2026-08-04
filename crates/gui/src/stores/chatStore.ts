@@ -1852,7 +1852,6 @@ export const useChatStore = create<ChatStore>((set, get) => {
             "sending",
             "closing",
             "closed",
-            "idle",
             "error",
           ].includes(lifecycle);
           if (

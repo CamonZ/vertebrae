@@ -295,6 +295,31 @@ describe("useLocalChatEventRouter route functions", () => {
       trigger: "manual",
       preTokens: 42_000,
     });
+
+    expect(routeLocalChatCompactionEvent(event("active"))).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toBeNull();
+    expect(routeLocalChatCompactionEvent(event("completed"))).toBe(true);
+
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-left",
+        harness: "claude",
+        turn_id: "turn-left",
+        thread_id: "thread-left",
+        is_root: true,
+        duration_ms: 100,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "done",
+        is_error: false,
+        context_tokens: 42_000,
+        context_window: 200_000,
+      })
+    ).toBe(true);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toEqual({
+      trigger: "manual",
+      preTokens: 42_000,
+    });
   });
 
   it("clears compaction on session error and cancellation cleanup", () => {
