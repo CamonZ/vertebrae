@@ -187,6 +187,52 @@ fn usage_deltas_sum_while_session_snapshots_replace() {
 }
 
 #[test]
+fn compaction_lifecycle_is_projected_in_stream_order() {
+    let mut projection = HarnessProjection::new(2);
+    let active = event(
+        "compact-active",
+        "s",
+        1,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::Compaction(CompactionEvent {
+            state: CompactionState::Active,
+            trigger: Some("manual".into()),
+            pre_tokens: None,
+        }),
+    );
+    let completed = event(
+        "compact-completed",
+        "s",
+        2,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::Compaction(CompactionEvent {
+            state: CompactionState::Completed,
+            trigger: Some("manual".into()),
+            pre_tokens: Some(42_000),
+        }),
+    );
+
+    projection.ingest(active).unwrap();
+    assert_eq!(
+        projection.stream(&StreamId::from("s")).unwrap().compaction,
+        Some(CompactionEvent {
+            state: CompactionState::Active,
+            trigger: Some("manual".into()),
+            pre_tokens: None,
+        })
+    );
+    projection.ingest(completed).unwrap();
+    assert_eq!(
+        projection.stream(&StreamId::from("s")).unwrap().compaction,
+        Some(CompactionEvent {
+            state: CompactionState::Completed,
+            trigger: Some("manual".into()),
+            pre_tokens: Some(42_000),
+        })
+    );
+}
+
+#[test]
 fn tool_deltas_and_terminal_snapshots_reduce_deterministically() {
     let mut projection = HarnessProjection::new(2);
     projection
