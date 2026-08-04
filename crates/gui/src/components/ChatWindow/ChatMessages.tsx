@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { ChatMessage } from "../../stores/chatStore";
-import { Thread } from "../thread";
+import { EventLog, Thread } from "../thread";
 import type { ThreadModel } from "../thread";
 import { chatMessagesToThread } from "./chatMessagesToThread";
 import { PermissionRequestTurn } from "./PermissionRequestTurn";
@@ -188,22 +188,23 @@ export function ChatMessages({
       <div className="flex flex-col gap-3">
         {renderItems.map((item) =>
           item.kind === "thread" ? (
-            <Thread
-              key={item.key}
-              thread={item.thread}
-              depth={0}
-              mode="bare"
-              reveal="shallow"
-              showHead={false}
-              interactive
-              registerRef={(id, element) => {
-                if (element) {
-                  messageRefs.current.set(id, element);
-                } else {
-                  messageRefs.current.delete(id);
-                }
-              }}
-            />
+            <EventLog key={item.key} mode="bare">
+              <Thread
+                thread={item.thread}
+                depth={0}
+                mode="bare"
+                reveal="shallow"
+                showHead={false}
+                interactive
+                registerRef={(id, element) => {
+                  if (element) {
+                    messageRefs.current.set(id, element);
+                  } else {
+                    messageRefs.current.delete(id);
+                  }
+                }}
+              />
+            </EventLog>
           ) : item.kind === "permission" ? (
             <PermissionRequestTurn key={item.key} message={item.message} />
           ) : (

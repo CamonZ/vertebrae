@@ -114,14 +114,24 @@
    System/interpolated rows are excluded — machine input stays left. */
 .evlog--bare .evrow--user:not(.is-prompt):not(.is-system) { justify-items: end; }
 .evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .evbody {
-  max-width: 86%;
-  border-left-width: 1px;
+  max-width: 78%;
+  background: color-mix(in oklch, var(--bg-2) 90%, var(--accent) 10%);
+  border: 1px solid color-mix(in oklch, var(--line) 78%, var(--accent) 22%);
   border-bottom-right-radius: var(--r-xs);
   border-top-right-radius: var(--r-lg);
   border-top-left-radius: var(--r-lg);
   border-bottom-left-radius: var(--r-lg);
 }
-.evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .ev-promptline { display: none; }
+.evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .ev-promptline {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--s-1);
+}
+.evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .ev-you {
+  color: var(--fg-mute);
+  opacity: 1;
+}
+.evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .ev-expand { display: none; }
 .evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .ev-text { margin-top: 0; }
 
 /* user · interpolated prompt — quiet, machine input, collapsible (trace only) */
