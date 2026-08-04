@@ -125,6 +125,7 @@ impl ClaudeTranscriptReplay {
                 .map_err(|error| HarnessError::Operation(error.to_string()))?;
             if value.get("type").and_then(Value::as_str) == Some("user")
                 && value.get("isMeta").and_then(Value::as_bool) != Some(true)
+                && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true)
                 && let Some(text) = user_text(&value)
             {
                 // Claude's live runtime emits the human input before the
@@ -235,8 +236,8 @@ mod tests {
 
     use tempfile::tempdir;
     use vertebrae_harness_core::{
-        HarnessEventPayloadV1, HarnessProjection, ProviderResumeId, StreamId, ToolCallId,
-        ToolStatus, TranscriptReplayRequest, UpdateSemantics,
+        CompactionState, HarnessEventPayloadV1, HarnessProjection, ProviderResumeId, StreamId,
+        ToolCallId, ToolStatus, TranscriptReplayRequest, UpdateSemantics,
     };
 
     use super::*;
@@ -365,6 +366,57 @@ mod tests {
         assert_eq!(
             tool.output_snapshot.as_ref().unwrap().status,
             ToolStatus::Completed
+        );
+    }
+
+    #[test]
+    fn replays_compaction_lifecycle_through_the_shared_decoder() {
+        let home = tempdir().unwrap();
+        let project = PathBuf::from("/workspace/compaction");
+        let directory = home
+            .path()
+            .join(".claude/projects")
+            .join(claude_project_dir_name(&project));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("session-compaction.jsonl"),
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"session-compaction\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
+                "{\"type\":\"system\",\"subtype\":\"status\",\"status\":\"compacting\",\"timestamp\":\"2026-01-01T00:00:01Z\"}\n",
+                "{\"type\":\"system\",\"subtype\":\"compact_boundary\",\"compact_metadata\":{\"trigger\":\"auto\",\"pre_tokens\":4096},\"timestamp\":\"2026-01-01T00:00:02Z\"}\n",
+                "{\"type\":\"user\",\"isCompactSummary\":true,\"message\":{\"content\":\"continued\"},\"timestamp\":\"2026-01-01T00:00:03Z\"}\n"
+            ),
+        )
+        .unwrap();
+
+        let replay = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()))
+            .replay(&TranscriptReplayRequest {
+                provider_resume_id: ProviderResumeId::new("session-compaction"),
+                stream_id: StreamId::new("replay/compaction"),
+                project_path: Some(project),
+                created_at: None,
+            })
+            .unwrap()
+            .unwrap();
+        let compactions = replay
+            .events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                HarnessEventPayloadV1::Compaction(value) => Some((event, value)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(compactions.len(), 2);
+        assert_eq!(compactions[0].1.state, CompactionState::Active);
+        assert_eq!(compactions[1].1.state, CompactionState::Completed);
+        assert_eq!(compactions[1].1.trigger.as_deref(), Some("auto"));
+        assert_eq!(compactions[1].1.pre_tokens, Some(4096));
+        assert!(compactions[0].0.sequence < compactions[1].0.sequence);
+        assert!(
+            replay
+                .events
+                .iter()
+                .all(|event| { !matches!(event.payload, HarnessEventPayloadV1::TurnInput(_)) })
         );
     }
 }

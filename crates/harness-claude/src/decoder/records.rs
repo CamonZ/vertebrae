@@ -1,9 +1,10 @@
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
-    ControlDecision, ControlResolution, DiagnosticEvent, HarnessEventDraftV1,
-    HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId, ResolutionSource, SessionId,
-    SessionStarted, StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallId,
-    ToolOutputEvent, ToolStatus, TurnInput, TurnInputProvenance, UpdateSemantics,
+    CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
+    HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent, ProviderResumeId,
+    ResolutionSource, SessionId, SessionStarted, StreamId, TextEvent, ThreadDeclared, ThreadId,
+    ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnInput, TurnInputProvenance,
+    UpdateSemantics,
 };
 
 use super::controls::decode_control_request;
@@ -209,6 +210,40 @@ impl ClaudeStreamDecoder {
                     ));
                 }
             }
+            "system" if string(object, "subtype") == Some("status") => {
+                self.decode_compaction_status(
+                    object,
+                    &stream_id,
+                    &thread_id,
+                    parent_tool_call,
+                    &mut drafts,
+                );
+            }
+            "system" if string(object, "subtype") == Some("compact_boundary") => {
+                if !self.compaction_boundary_emitted {
+                    let compact_metadata =
+                        object.get("compact_metadata").and_then(Value::as_object);
+                    drafts.push(
+                        self.draft(
+                            stream_id,
+                            &thread_id,
+                            parent_tool_call,
+                            UpdateSemantics::Snapshot,
+                            HarnessEventPayloadV1::Compaction(CompactionEvent {
+                                state: CompactionState::Completed,
+                                trigger: compact_metadata
+                                    .and_then(|metadata| string(metadata, "trigger"))
+                                    .map(str::to_owned),
+                                pre_tokens: compact_metadata
+                                    .and_then(|metadata| metadata.get("pre_tokens"))
+                                    .and_then(Value::as_u64),
+                            }),
+                        ),
+                    );
+                    self.compaction_active = false;
+                    self.compaction_boundary_emitted = true;
+                }
+            }
             // Claude emits several system telemetry/status records during a
             // normal turn. They are provider protocol, not user-facing
             // diagnostics; only the explicitly modeled init/task progress
@@ -241,6 +276,48 @@ impl ClaudeStreamDecoder {
             )),
         }
         Ok(drafts)
+    }
+
+    fn decode_compaction_status(
+        &mut self,
+        object: &Map<String, Value>,
+        stream_id: &StreamId,
+        thread_id: &ThreadId,
+        parent: Option<ToolCallId>,
+        drafts: &mut Vec<HarnessEventDraftV1>,
+    ) {
+        if string(object, "status") == Some("compacting") {
+            if self.compaction_active {
+                return;
+            }
+            self.compaction_active = true;
+            self.compaction_boundary_emitted = false;
+            drafts.push(self.draft(
+                stream_id.clone(),
+                thread_id,
+                parent,
+                UpdateSemantics::Snapshot,
+                HarnessEventPayloadV1::Compaction(CompactionEvent {
+                    state: CompactionState::Active,
+                    trigger: None,
+                    pre_tokens: None,
+                }),
+            ));
+        } else if self.compaction_active {
+            self.compaction_active = false;
+            self.compaction_boundary_emitted = false;
+            drafts.push(self.draft(
+                stream_id.clone(),
+                thread_id,
+                parent,
+                UpdateSemantics::Snapshot,
+                HarnessEventPayloadV1::Compaction(CompactionEvent {
+                    state: CompactionState::Cleared,
+                    trigger: None,
+                    pre_tokens: None,
+                }),
+            ));
+        }
     }
 
     fn decode_tool_progress(

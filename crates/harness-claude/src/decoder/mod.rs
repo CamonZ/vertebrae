@@ -106,6 +106,8 @@ pub struct ClaudeStreamDecoder {
     agent_spawn_tools: HashMap<String, ToolCallId>,
     provider_control_inputs: HashMap<ControlRequestId, Value>,
     pending_file_changes: HashMap<ToolCallId, Vec<FileChange>>,
+    compaction_active: bool,
+    compaction_boundary_emitted: bool,
     event_timestamp: Option<DateTime<Utc>>,
 }
 
@@ -134,6 +136,8 @@ impl ClaudeStreamDecoder {
             agent_spawn_tools: HashMap::new(),
             provider_control_inputs: HashMap::new(),
             pending_file_changes: HashMap::new(),
+            compaction_active: false,
+            compaction_boundary_emitted: false,
             event_timestamp: None,
         }
     }
