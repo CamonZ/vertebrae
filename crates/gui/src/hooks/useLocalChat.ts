@@ -22,6 +22,7 @@ import type {
   ChatSession,
   ChatMessage,
   ChatTitleCandidate,
+  ChatCompactionSummary,
   LocalChatLifecycle,
 } from "../stores/chatStore";
 import { DEFAULT_LOCAL_CHAT_HARNESS } from "../utils/localChatPersistence";
@@ -379,10 +380,23 @@ export function handleCompactionEvent(
   payload: LocalChatCompactionEvent,
   backendSessionId: string | null,
   sessionId: string,
-  setSessionCompaction: (sessionId: string, active: boolean) => void
+  setSessionCompaction: (sessionId: string, active: boolean) => void,
+  setCompactionSummary: (
+    sessionId: string,
+    summary: ChatCompactionSummary | null
+  ) => void
 ) {
   if (payload.backend_session_id !== backendSessionId) return;
+  if (payload.state === "completed") {
+    setSessionCompaction(sessionId, false);
+    setCompactionSummary(sessionId, {
+      trigger: payload.trigger ?? null,
+      preTokens: payload.pre_tokens ?? null,
+    });
+    return;
+  }
   setSessionCompaction(sessionId, payload.state === "active");
+  if (payload.state === "cleared") setCompactionSummary(sessionId, null);
 }
 
 // --- Extracted session lifecycle functions ---

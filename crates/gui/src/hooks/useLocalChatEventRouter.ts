@@ -283,6 +283,7 @@ export function routeLocalChatSessionEndEvent(
   const store = useChatStore.getState();
   store.settleActiveTurn(sessionId, payload.turn_id);
   store.setSessionCompaction(sessionId, false);
+  store.setCompactionSummary(sessionId, null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleEndEvent(
     payload,
@@ -327,6 +328,7 @@ export function routeLocalChatSessionErrorEvent(
   // tracked. A correlated one only clears the turn it matched above.
   store.settleActiveTurn(sessionId, payload.turn_id ?? null);
   store.setSessionCompaction(sessionId, false);
+  store.setCompactionSummary(sessionId, null);
   store.markPendingUserQuestionsUnavailable(sessionId);
   handleErrorEvent(
     payload,
@@ -380,7 +382,8 @@ export function routeLocalChatCompactionEvent(
     payload,
     payload.backend_session_id,
     sessionId,
-    useChatStore.getState().setSessionCompaction
+    useChatStore.getState().setSessionCompaction,
+    useChatStore.getState().setCompactionSummary
   );
   return true;
 }

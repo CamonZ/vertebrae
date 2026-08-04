@@ -106,6 +106,23 @@ Live chat and trace replay share one normalized stream:
   discovered/parsed by the provider harness crate; the frontend receives only
   serialized `HarnessEventV1` records.
 
+### Claude compaction lifecycle
+
+Claude context compaction is exposed as lifecycle state, not as transcript
+content. A `status=compacting` record starts a session-scoped indeterminate
+indicator labeled **“Compacting conversation…”**. The UI does not display a
+percentage because Claude supplies status boundaries rather than reliable
+progress measurements.
+
+The `compact_boundary` event ends the indicator and retains its optional
+metadata in the ephemeral session summary: the trigger (`manual` or `auto`)
+and the pre-compaction token count. Local chat displays that summary as, for
+example, “Conversation compacted (auto) · 4,096 tokens before compaction”.
+The next provider usage event supplies the refreshed context-meter value.
+Malformed or unrelated system records are ignored, and compact-summary user
+records remain excluded from the transcript. Session end, cancellation, and
+error paths clear both the active indicator and its completion summary.
+
 ## First-Run Installer
 
 On first launch the GUI offers to install Vertebrae's command-line tools so

@@ -291,6 +291,10 @@ describe("useLocalChatEventRouter route functions", () => {
 
     expect(routeLocalChatCompactionEvent(event("completed"))).toBe(true);
     expect(useChatStore.getState().sessions.left.compactionActive).toBe(false);
+    expect(useChatStore.getState().sessions.left.compactionSummary).toEqual({
+      trigger: "manual",
+      preTokens: 42_000,
+    });
   });
 
   it("clears compaction on session error and cancellation cleanup", () => {

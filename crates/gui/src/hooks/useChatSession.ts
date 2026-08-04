@@ -417,6 +417,7 @@ export function useChatSession(sessionId: string) {
     canStopGeneration,
     isWaiting,
     activityLabel,
+    compactionSummary: session?.compactionSummary ?? null,
     hasPendingUserQuestion,
 
     // harness catalog
