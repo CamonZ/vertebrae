@@ -122,4 +122,26 @@ describe("notificationStore", () => {
     expect(useNotificationStore.getState().notifications).toEqual([]);
     expect(useNotificationStore.getState().isPanelOpen).toBe(true);
   });
+
+  it("does not read or write notification history through browser storage", () => {
+    localStorage.setItem(
+      "notifications",
+      JSON.stringify([{ message: "stale history" }])
+    );
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+
+    useNotificationStore.getState().addNotification(input("Live activity"));
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+
+    expect(getItem).not.toHaveBeenCalled();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({ message: "Live activity", read: false }),
+    ]);
+
+    getItem.mockRestore();
+    setItem.mockRestore();
+    localStorage.removeItem("notifications");
+  });
 });
