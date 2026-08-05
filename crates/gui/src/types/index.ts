@@ -57,7 +57,6 @@ export type {
   NotificationEntity,
   NotificationInput,
   NotificationMessage,
-  ToastMessage,
   ToastType,
   TaskTreeNode,
 } from "./ui";

@@ -57,5 +57,4 @@ export type { PipelineSegment } from "../shared/HearthPrimitives";
 
 // Existing project molecules that already match Hearth — re-export for one-stop import.
 export { IdentityBadge } from "../shared/EntityId";
-export { ToastContainer } from "../Toast";
 export { FormField } from "../forms";

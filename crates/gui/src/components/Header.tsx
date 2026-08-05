@@ -1,5 +1,6 @@
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
+import { NotificationsTrigger } from "./Notifications";
 
 /**
  * On macOS the window uses an overlay title bar (tauri.conf.json
@@ -113,6 +114,7 @@ export function Header() {
         className="titlebar-button ml-auto flex items-center gap-3"
       >
         {headerActions}
+        <NotificationsTrigger />
       </div>
     </header>
   );

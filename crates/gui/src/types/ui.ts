@@ -117,18 +117,6 @@ export interface NotificationMessage {
   read: boolean;
 }
 
-/** @deprecated Use NotificationMessage for new UI state. */
-export interface ToastMessage {
-  /** Unique identifier for the toast */
-  id: string;
-  /** Message to display */
-  message: string;
-  /** Type of toast (affects styling) */
-  type: ToastType;
-  /** Optional duration in milliseconds (default: 5000) */
-  duration?: number;
-}
-
 /**
  * Frontend-only type for task tree nodes.
  * Used to build hierarchical task trees from flat task lists.
