@@ -11,7 +11,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
-import { useToastStore } from "../stores/toastStore";
+import { useNotificationStore } from "../stores";
 import { queryClient, queryKeys } from "../query";
 import { createMockTask } from "../test/test-utils";
 
@@ -127,11 +127,47 @@ describe("useTaskChangeListener realtime list membership", () => {
     taskStepChangedHandler = null;
     taskRunStepChangedHandler = null;
     resetProjectScopedStores();
-    useToastStore.getState().clearToasts();
+    useNotificationStore.getState().clearNotifications();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("appends a task notification while reconciling the task cache", async () => {
+    const task = createMockTask({
+      id: "task-notification",
+      title: "Notification task",
+      workflow_id: "workflow-1",
+      current_step_id: "step-todo",
+      step_name: "todo",
+    });
+    seedTaskList([]);
+
+    renderHook(() => useTaskChangeListener());
+    await waitFor(() => {
+      expect(taskChangedListen).toHaveBeenCalledTimes(1);
+    });
+
+    emitTaskChanged({
+      task_id: task.id,
+      change_type: "Created",
+      task,
+      current_step_id: task.current_step_id,
+      workflow_id: task.workflow_id,
+      level: task.level,
+      archived: false,
+    });
+
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        message: "Task task-n created",
+        type: "success",
+        entity: "task",
+        entityId: "task-notification",
+        read: false,
+      }),
+    ]);
   });
 
   it("updates task row projection after a manual taskStepChangedEvent", async () => {

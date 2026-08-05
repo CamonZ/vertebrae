@@ -5,7 +5,7 @@ import {
   type StepChangedEvent,
   type StepChangeType,
 } from "../bindings";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import { removeStepFromQueryCache, upsertStepInQueryCache } from "../query";
 import {
   getProjectScopeGeneration,
@@ -54,7 +54,9 @@ export function useStepChangeListener(
   options: UseStepChangeListenerOptions = {}
 ) {
   const { enabled = true, onCreated, onUpdated, onDeleted } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepChanged = useCallback(
@@ -73,7 +75,12 @@ export function useStepChangeListener(
           : change_type === "Deleted"
             ? "error"
             : "info";
-      addToast(getStepChangeMessage(change_type, step_id), toastType);
+      addNotification({
+        message: getStepChangeMessage(change_type, step_id),
+        type: toastType,
+        entity: "step",
+        entityId: step_id,
+      });
 
       if (change_type === "Deleted") {
         removeStepFromQueryCache(step_id, projectScopeGeneration);
@@ -87,7 +94,7 @@ export function useStepChangeListener(
         }
       }
     },
-    [addToast, onCreated, onUpdated, onDeleted, projectScopeGeneration]
+    [addNotification, onCreated, onUpdated, onDeleted, projectScopeGeneration]
   );
 
   useEffect(() => {

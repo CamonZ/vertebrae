@@ -6,7 +6,7 @@ import {
   type TaskRunStepChangedEvent,
   type TaskStepChangedEvent,
 } from "../bindings";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -51,7 +51,9 @@ export function useTaskChangeListener(
   options: UseTaskChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleTaskChanged = useCallback(
@@ -70,7 +72,12 @@ export function useTaskChangeListener(
           : change_type === "Deleted"
             ? "error"
             : "info";
-      addToast(getTaskChangeMessage(change_type, task_id), toastType);
+      addNotification({
+        message: getTaskChangeMessage(change_type, task_id),
+        type: toastType,
+        entity: "task",
+        entityId: task_id,
+      });
 
       if (change_type === "Deleted" || archived) {
         removeTaskFromQueryCache(task_id, projectScopeGeneration);
@@ -82,7 +89,7 @@ export function useTaskChangeListener(
         );
       }
     },
-    [addToast, projectScopeGeneration]
+    [addNotification, projectScopeGeneration]
   );
 
   const handleTaskStepChanged = useCallback(

@@ -5,7 +5,7 @@ import {
   type SectionChangeType,
 } from "../bindings";
 import { updateTaskSectionsInQueryCache } from "../query";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -47,7 +47,9 @@ export function useSectionChangeListener(
   options: UseSectionChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
   const fetchAndReconcileTask =
     useRefreshTaskForRealtimeChange("SectionChangeListener");
@@ -68,7 +70,12 @@ export function useSectionChangeListener(
           : change_type === "Deleted"
             ? "error"
             : "info";
-      addToast(getSectionChangeMessage(change_type, task_id), toastType);
+      addNotification({
+        message: getSectionChangeMessage(change_type, task_id),
+        type: toastType,
+        entity: "task",
+        entityId: task_id,
+      });
 
       if (section) {
         updateTaskSectionsInQueryCache(
@@ -81,7 +88,7 @@ export function useSectionChangeListener(
 
       void fetchAndReconcileTask(task_id);
     },
-    [addToast, fetchAndReconcileTask, projectScopeGeneration]
+    [addNotification, fetchAndReconcileTask, projectScopeGeneration]
   );
 
   useEffect(() => {

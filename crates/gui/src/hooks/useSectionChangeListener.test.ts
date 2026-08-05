@@ -6,7 +6,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
-import { useToastStore } from "../stores/toastStore";
+import { useNotificationStore } from "../stores";
 import { createMockTask } from "../test/test-utils";
 
 const mockGetTask = vi.fn();
@@ -57,7 +57,7 @@ describe("useSectionChangeListener", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     sectionChangedHandler = null;
     resetProjectScopedStores();
-    useToastStore.getState().clearToasts();
+    useNotificationStore.getState().clearNotifications();
   });
 
   afterEach(() => {

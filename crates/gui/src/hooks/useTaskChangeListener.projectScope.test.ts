@@ -5,7 +5,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
-import { useToastStore } from "../stores/toastStore";
+import { useNotificationStore } from "../stores";
 import { queryClient, queryKeys } from "../query";
 import { createMockTask } from "../test/test-utils";
 
@@ -35,7 +35,7 @@ describe("useTaskChangeListener project scope hygiene", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "debug").mockImplementation(() => {});
     resetProjectScopedStores();
-    useToastStore.getState().clearToasts();
+    useNotificationStore.getState().clearNotifications();
     mockListen.mockImplementation(async () => vi.fn());
   });
 

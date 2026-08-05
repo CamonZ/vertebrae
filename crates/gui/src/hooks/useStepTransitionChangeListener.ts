@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { events, type StepTransitionChangedEvent, type StepTransitionChangeType } from "../bindings";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -36,7 +36,9 @@ export function useStepTransitionChangeListener(
   options: UseStepTransitionChangeListenerOptions = {}
 ) {
   const { onStepTransitionChange, enabled = true } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleStepTransitionChanged = useCallback(
@@ -50,13 +52,18 @@ export function useStepTransitionChangeListener(
       );
 
       const toastType = change_type === "Created" ? "success" : "error";
-      addToast(getTransitionChangeMessage(change_type, transition_id), toastType);
+      addNotification({
+        message: getTransitionChangeMessage(change_type, transition_id),
+        type: toastType,
+        entity: "step",
+        entityId: transition_id,
+      });
 
       if (onStepTransitionChange) {
         onStepTransitionChange(event.payload);
       }
     },
-    [addToast, onStepTransitionChange, projectScopeGeneration]
+    [addNotification, onStepTransitionChange, projectScopeGeneration]
   );
 
   useEffect(() => {

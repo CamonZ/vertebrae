@@ -7,7 +7,7 @@ import {
   type StepExecutionChangeType,
 } from "../bindings";
 import { upsertStepExecutionInQueryCache } from "../query";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -48,7 +48,9 @@ export function useStepExecutionChangeListener(
   options: UseStepExecutionChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleExecutionChanged = useCallback(
@@ -75,10 +77,12 @@ export function useStepExecutionChangeListener(
           : status === "Failed"
             ? "error"
             : "info";
-      addToast(
-        getExecutionChangeMessage(change_type, step_name, status),
-        toastType
-      );
+      addNotification({
+        message: getExecutionChangeMessage(change_type, step_name, status),
+        type: toastType,
+        entity: "step",
+        entityId: execution_id,
+      });
 
       if (execution) {
         upsertStepExecutionInQueryCache(execution, {
@@ -105,7 +109,7 @@ export function useStepExecutionChangeListener(
         })
         .catch(() => {});
     },
-    [addToast, projectScopeGeneration]
+    [addNotification, projectScopeGeneration]
   );
 
   useEffect(() => {

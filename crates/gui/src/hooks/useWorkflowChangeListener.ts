@@ -4,7 +4,7 @@ import {
   type WorkflowChangedEvent,
   type WorkflowChangeType,
 } from "../bindings";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -51,7 +51,9 @@ export function useWorkflowChangeListener(
   options: UseWorkflowChangeListenerOptions = {}
 ) {
   const { enabled = true } = options;
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const projectScopeGeneration = useProjectScopeGeneration();
 
   const handleWorkflowChanged = useCallback(
@@ -70,7 +72,12 @@ export function useWorkflowChangeListener(
           : change_type === "Deleted"
             ? "error"
             : "info";
-      addToast(getWorkflowChangeMessage(change_type, workflow_id), toastType);
+      addNotification({
+        message: getWorkflowChangeMessage(change_type, workflow_id),
+        type: toastType,
+        entity: "task",
+        entityId: workflow_id,
+      });
 
       if (change_type === "Deleted") {
         removeWorkflowFromQueryCache(workflow_id, projectScopeGeneration);
@@ -78,7 +85,7 @@ export function useWorkflowChangeListener(
         upsertWorkflowInQueryCache(workflow, projectScopeGeneration);
       }
     },
-    [addToast, projectScopeGeneration]
+    [addNotification, projectScopeGeneration]
   );
 
   useEffect(() => {

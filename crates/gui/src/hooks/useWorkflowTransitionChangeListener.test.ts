@@ -7,6 +7,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
+import { useNotificationStore } from "../stores";
 
 const listen = vi.fn();
 let handlers: Array<
@@ -33,6 +34,7 @@ describe("useWorkflowTransitionChangeListener", () => {
   beforeEach(() => {
     resetProjectScopedStores();
     queryClient.clear();
+    useNotificationStore.getState().clearNotifications();
     handlers = [];
     listen.mockClear();
   });
