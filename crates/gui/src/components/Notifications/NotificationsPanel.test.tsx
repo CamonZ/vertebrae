@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, render, screen } from "../../test/test-utils";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
-import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import type { NotificationInput } from "../../types";
 import {
   NotificationsPanel,
@@ -29,7 +28,6 @@ describe("NotificationsPanel", () => {
         notifications: [],
         isPanelOpen: true,
       });
-      usePanelLayoutStore.getState().reset();
     });
   });
 
@@ -39,7 +37,6 @@ describe("NotificationsPanel", () => {
         notifications: [],
         isPanelOpen: false,
       });
-      usePanelLayoutStore.getState().reset();
     });
   });
 
@@ -67,7 +64,8 @@ describe("NotificationsPanel", () => {
 
     const list = screen.getByTestId("notification-list");
     expect(screen.getByTestId("notifications-panel")).toHaveClass(
-      "detail-float"
+      "detail-float",
+      "notifications-panel"
     );
     expect(list.textContent?.indexOf("Step def456 completed")).toBeLessThan(
       list.textContent?.indexOf("Task abc123 created") ?? -1
@@ -98,56 +96,6 @@ describe("NotificationsPanel", () => {
       getUnreadNotificationCount(useNotificationStore.getState().notifications)
     ).toBe(0);
     expect(screen.queryAllByLabelText("Unread")).toHaveLength(0);
-  });
-
-  it("renders left of the leftmost open panel", () => {
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 2200,
-    });
-    act(() => {
-      usePanelLayoutStore.getState().setPanelLayout("chat", {
-        isPresent: true,
-        renderedWidth: 384,
-        rightOffset: 0,
-      });
-      usePanelLayoutStore.getState().setPanelLayout("task-detail", {
-        isPresent: true,
-        renderedWidth: 420,
-        rightOffset: 396,
-      });
-      usePanelLayoutStore.getState().setPanelLayout("artifact-inspector", {
-        isPresent: true,
-        renderedWidth: 486,
-        rightOffset: 828,
-      });
-    });
-    render(<NotificationsPanel />);
-
-    const panel = screen.getByTestId("notifications-panel");
-    expect(panel).toHaveAttribute("data-placement", "left-of-leftmost");
-    expect(panel.style.getPropertyValue("--detail-panel-right-offset")).toBe(
-      "1326px"
-    );
-  });
-
-  it("uses the maximized-chat overlay placement when chat is expanded", () => {
-    act(() => {
-      usePanelLayoutStore.getState().setPanelLayout("chat", {
-        isPresent: true,
-        renderedWidth: 1128,
-        rightOffset: 0,
-        isMaximized: true,
-        leftOffset: 60,
-      });
-    });
-    render(<NotificationsPanel />);
-
-    const panel = screen.getByTestId("notifications-panel");
-    expect(panel).toHaveAttribute("data-placement", "maximized-chat");
-    expect(panel.style.getPropertyValue("--detail-panel-left-offset")).toBe(
-      "60px"
-    );
   });
 
   it("dismisses one item from the session feed", () => {

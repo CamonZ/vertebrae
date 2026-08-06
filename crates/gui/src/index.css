@@ -3371,9 +3371,7 @@ html.light ::selection {
 .detail.detail-float {
   position: fixed;
   top: calc(38px + var(--s-3));
-  /* Normal chat reserves its live width plus one gap while both surfaces fit.
-     Wide chat and constrained layouts publish a zero offset so chat overlays
-     this surface at its higher z-index. */
+  /* Normal chat reserves its live width plus one gap while both surfaces fit. */
   right: calc(var(--s-3) + var(--detail-panel-right-offset, 0px));
   bottom: var(--s-3);
   height: auto;
@@ -3411,20 +3409,19 @@ html.light ::selection {
   animation: panel-drill-right var(--t-slow) var(--ease);
 }
 
-/* Maximized chat is the one intentional exception to the side-panel stack:
-   notifications sit over its left edge so the activity surface remains
-   reachable even when chat owns nearly the whole viewport. */
-.detail.detail-float[data-placement="maximized-chat"] {
-  left: var(--detail-panel-left-offset, var(--s-3));
+/* Notifications are deliberately independent of the side-panel stack: keep
+   the activity surface at the upper-left and above chat, task, artifact, and
+   other floating surfaces even when chat is maximized. */
+.detail.detail-float.notifications-panel {
+  left: var(--s-3);
   right: auto;
-  max-width: max(
-    0px,
-    min(
-      92vw,
-      calc(100vw - var(--detail-panel-left-offset, var(--s-3)) - var(--s-3))
-    )
-  );
+  z-index: 1000;
+  max-width: max(0px, min(92vw, calc(100vw - var(--s-3) - var(--s-3))));
   animation-name: panel-drill-left;
+}
+
+.detail.detail-float.notifications-panel.is-closing {
+  animation-name: panel-drill-left-out;
 }
 
 @keyframes panel-drill-left {
@@ -3435,6 +3432,17 @@ html.light ::selection {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@keyframes panel-drill-left-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
   }
 }
 

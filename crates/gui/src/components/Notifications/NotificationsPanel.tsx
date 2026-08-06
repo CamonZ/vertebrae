@@ -1,10 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
 import type { NotificationMessage, ToastType } from "../../types";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
-import {
-  getNotificationPanelPlacement,
-  usePanelLayoutStore,
-} from "../../stores/panelLayoutStore";
 import { CloseIcon, FloatingDetailPanel, IconButton } from "../panels";
 
 const notificationTypeConfig: Record<
@@ -46,25 +41,8 @@ export function NotificationsPanel() {
   const removeNotification = useNotificationStore(
     (state) => state.removeNotification
   );
-  const panelLayouts = usePanelLayoutStore((state) => state.panels);
-  const [viewportWidth, setViewportWidth] = useState(() =>
-    typeof window === "undefined" ? 1280 : window.innerWidth
-  );
   const unreadCount = getUnreadNotificationCount(notifications);
-  const orderedNotifications = useMemo(
-    () => [...notifications].reverse(),
-    [notifications]
-  );
-  const placement = useMemo(
-    () => getNotificationPanelPlacement(panelLayouts, viewportWidth, 486),
-    [panelLayouts, viewportWidth]
-  );
-
-  useEffect(() => {
-    const onResize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
+  const orderedNotifications = [...notifications].reverse();
 
   if (!isPanelOpen) return null;
 
@@ -77,13 +55,6 @@ export function NotificationsPanel() {
       defaultWidth={486}
       onClose={() => setPanelOpen(false)}
       isOpen={isPanelOpen}
-      rightOffset={
-        placement.mode === "maximized-chat" ? undefined : placement.rightOffset
-      }
-      leftOffset={
-        placement.mode === "maximized-chat" ? placement.leftOffset : undefined
-      }
-      placementMode={placement.mode}
       className="notifications-panel"
       testId="notifications-panel"
     >
