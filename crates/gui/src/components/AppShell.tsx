@@ -2,8 +2,8 @@ import type { ReactNode } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
-import { ToastContainer } from "./Toast";
 import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
+import { NotificationsPanel } from "./Notifications";
 
 interface AppShellProps {
   children: ReactNode;
@@ -21,7 +21,7 @@ export function AppShell({ children }: AppShellProps) {
       </div>
       <ChatWindowManager />
       <FloatingChatLauncher />
-      <ToastContainer />
+      <NotificationsPanel />
     </div>
   );
 }

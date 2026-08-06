@@ -84,23 +84,37 @@ export interface ModalProps {
   children?: ReactNode;
 }
 
-/**
- * Toast notification message type.
- */
+/** Notification styling type shared by live task and step activity. */
 export type ToastType = "success" | "error" | "warning" | "info";
 
-/**
- * Toast notification message configuration.
- */
-export interface ToastMessage {
-  /** Unique identifier for the toast */
+/** Entities currently represented by the notifications panel. */
+export type NotificationEntity = "task" | "step";
+
+/** Input used when appending an ephemeral notification. */
+export interface NotificationInput {
+  message: string;
+  type: ToastType;
+  entity: NotificationEntity;
+  entityId: string;
+  timestamp?: number;
+}
+
+/** Ephemeral notification retained for the current application session. */
+export interface NotificationMessage {
+  /** Unique identifier for the notification */
   id: string;
   /** Message to display */
   message: string;
-  /** Type of toast (affects styling) */
+  /** Type of notification (affects styling) */
   type: ToastType;
-  /** Optional duration in milliseconds (default: 5000) */
-  duration?: number;
+  /** Entity family represented by the notification */
+  entity: NotificationEntity;
+  /** Source task or step identifier */
+  entityId: string;
+  /** Time at which the notification was received */
+  timestamp: number;
+  /** Whether the user has marked this notification as read */
+  read: boolean;
 }
 
 /**

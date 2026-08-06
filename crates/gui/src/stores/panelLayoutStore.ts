@@ -41,7 +41,7 @@ const EMPTY_DETAIL_LAYOUT: DetailPanelLayout = {
 /**
  * Shares geometry between the globally mounted chat and page-local detail
  * panels. Focus order intentionally stays in panelFocusStore; this store only
- * describes the space occupied by the chat surface.
+ * describes the space occupied by the chat and task detail surfaces.
  */
 export const usePanelLayoutStore = create<PanelLayoutState>((set) => ({
   chat: EMPTY_CHAT_LAYOUT,

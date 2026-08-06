@@ -54,7 +54,9 @@ export type {
   LoadingState,
   SelectOption,
   ModalProps,
-  ToastMessage,
+  NotificationEntity,
+  NotificationInput,
+  NotificationMessage,
   ToastType,
   TaskTreeNode,
 } from "./ui";

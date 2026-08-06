@@ -6,6 +6,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
+import { useNotificationStore } from "../stores";
 import { createMockStepExecution } from "../test/test-utils";
 
 const mockGetTaskExecutions = vi.fn();
@@ -47,6 +48,7 @@ describe("useStepExecutionChangeListener", () => {
     vi.clearAllMocks();
     vi.spyOn(console, "debug").mockImplementation(() => {});
     resetProjectScopedStores();
+    useNotificationStore.getState().clearNotifications();
   });
 
   it("upserts execution payloads directly", async () => {

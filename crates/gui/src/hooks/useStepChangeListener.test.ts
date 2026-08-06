@@ -7,6 +7,7 @@ import {
   getProjectScopeGeneration,
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
+import { useNotificationStore } from "../stores";
 
 let handler: ((event: { payload: StepChangedEvent }) => void) | null = null;
 const { listen } = vi.hoisted(() => ({ listen: vi.fn() }));
@@ -21,6 +22,7 @@ describe("useStepChangeListener", () => {
   beforeEach(() => {
     resetProjectScopedStores();
     queryClient.clear();
+    useNotificationStore.getState().clearNotifications();
     handler = null;
     listen.mockClear();
     listen.mockImplementation(
@@ -50,6 +52,15 @@ describe("useStepChangeListener", () => {
     expect(
       queryClient.getQueryData(queryKeys.steps.byId(generation, step.id!))
     ).toEqual(step);
+    expect(useNotificationStore.getState().notifications).toEqual([
+      expect.objectContaining({
+        message: "Step step-1 updated",
+        entity: "step",
+        entityId: "step-1",
+        type: "info",
+        read: false,
+      }),
+    ]);
 
     act(() => {
       handler?.({

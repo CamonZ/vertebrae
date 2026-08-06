@@ -37,8 +37,7 @@ vi.mock("../bindings", () => ({
 }));
 
 import { useSessionLogChangeListener } from "./useSessionLogChangeListener";
-import { useSessionLogStore } from "../stores";
-import { useToastStore } from "../stores";
+import { useNotificationStore, useSessionLogStore } from "../stores";
 
 describe("useSessionLogChangeListener", () => {
   beforeEach(() => {
@@ -48,7 +47,7 @@ describe("useSessionLogChangeListener", () => {
     });
     // Reset stores between tests
     useSessionLogStore.setState({ logsByExecutionId: {} });
-    useToastStore.getState().clearToasts();
+    useNotificationStore.getState().clearNotifications();
   });
 
   it("calls appendLog when a created event has session_log", async () => {
@@ -274,8 +273,8 @@ describe("useSessionLogChangeListener", () => {
       });
     });
 
-    const toasts = useToastStore.getState().toasts;
-    expect(toasts).toHaveLength(0);
+    const notifications = useNotificationStore.getState().notifications;
+    expect(notifications).toHaveLength(0);
   });
 
   it("cleans up listener on unmount", async () => {

@@ -5,8 +5,13 @@ export type { WorkflowSelectionState } from "./workflowSelectionStore";
 export { useUIStore } from "./uiStore";
 export type { UIStore } from "./uiStore";
 
-export { useToastStore } from "./toastStore";
-export type { ToastStore } from "./toastStore";
+export {
+  createNotificationInput,
+  getUnreadNotificationCount,
+  MAX_NOTIFICATIONS,
+  useNotificationStore,
+} from "./notificationStore";
+export type { NotificationStore } from "./notificationStore";
 
 export { useDebugStore } from "./debugStore";
 export type { DebugStore } from "./debugStore";

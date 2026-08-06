@@ -10,7 +10,7 @@ import {
   removeWorkflowTransitionFromQueryCache,
   upsertWorkflowTransitionInQueryCache,
 } from "../query";
-import { useToastStore } from "../stores";
+import { useNotificationStore } from "../stores";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -47,7 +47,9 @@ function transitionFromEvent(
 export function useWorkflowTransitionChangeListener({
   enabled = true,
 }: { enabled?: boolean } = {}) {
-  const addToast = useToastStore((state) => state.addToast);
+  const addNotification = useNotificationStore(
+    (state) => state.addNotification
+  );
   const generation = useProjectScopeGeneration();
 
   const handleChanged = useCallback(
@@ -56,12 +58,15 @@ export function useWorkflowTransitionChangeListener({
       // delayed event from the previous project must not touch the new cache.
       if (generation !== getProjectScopeGeneration()) return;
       const payload = event.payload;
-      addToast(
-        payload.change_type === "Created"
-          ? `Workflow transition ${payload.transition_id.slice(0, 6)} created`
-          : `Workflow transition ${payload.transition_id.slice(0, 6)} deleted`,
-        payload.change_type === "Created" ? "success" : "error"
-      );
+      addNotification({
+        message:
+          payload.change_type === "Created"
+            ? `Workflow transition ${payload.transition_id.slice(0, 6)} created`
+            : `Workflow transition ${payload.transition_id.slice(0, 6)} deleted`,
+        type: payload.change_type === "Created" ? "success" : "error",
+        entity: "task",
+        entityId: payload.transition_id,
+      });
 
       if (payload.change_type === "Deleted") {
         removeWorkflowTransitionFromQueryCache(
@@ -74,7 +79,7 @@ export function useWorkflowTransitionChangeListener({
       if (transition)
         upsertWorkflowTransitionInQueryCache(transition, generation);
     },
-    [addToast, generation]
+    [addNotification, generation]
   );
 
   useEffect(() => {

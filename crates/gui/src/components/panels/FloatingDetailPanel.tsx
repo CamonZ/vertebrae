@@ -110,6 +110,13 @@ export function FloatingDetailPanel({
     position === "left-of-task" && taskDetailLayout.isPresent
       ? `calc(${chatLayout.renderedWidth}px + var(--s-3) + ${taskDetailLayout.renderedWidth}px + var(--s-3))`
       : chatOffset;
+  const chatOffsetPx = isChatAdjacent
+    ? chatLayout.renderedWidth + SIDE_PANEL_GAP_PX
+    : 0;
+  const taskOffsetPx =
+    position === "left-of-task" && taskDetailLayout.isPresent
+      ? chatOffsetPx + taskDetailLayout.renderedWidth + SIDE_PANEL_GAP_PX
+      : chatOffsetPx;
 
   useEffect(() => {
     if (panelId !== "task-detail") return;
@@ -176,6 +183,7 @@ export function FloatingDetailPanel({
         {
           width: `${panelWidth}px`,
           "--detail-panel-chat-offset": taskOffset,
+          "--detail-panel-right-offset": `${taskOffsetPx}px`,
         } as CSSProperties
       }
       data-testid={testId}

@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StepTransitionChangedEvent } from "../bindings";
 import { resetProjectScopedStores } from "../stores/projectScopedStores";
-import { useToastStore } from "../stores/toastStore";
+import { useNotificationStore } from "../stores";
 
 const { handlers, listen } = vi.hoisted(() => ({
   handlers: [] as Array<
@@ -30,7 +30,7 @@ import { useStepTransitionChangeListener } from "./useStepTransitionChangeListen
 describe("useStepTransitionChangeListener", () => {
   beforeEach(() => {
     resetProjectScopedStores();
-    useToastStore.getState().clearToasts();
+    useNotificationStore.getState().clearNotifications();
     handlers.length = 0;
     listen.mockClear();
   });
@@ -60,6 +60,6 @@ describe("useStepTransitionChangeListener", () => {
     });
 
     expect(onChange).not.toHaveBeenCalled();
-    expect(useToastStore.getState().toasts).toHaveLength(0);
+    expect(useNotificationStore.getState().notifications).toHaveLength(0);
   });
 });

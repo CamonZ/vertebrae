@@ -3371,10 +3371,8 @@ html.light ::selection {
 .detail.detail-float {
   position: fixed;
   top: calc(38px + var(--s-3));
-  /* Normal chat reserves its live width plus one gap while both surfaces fit.
-     Wide chat and constrained layouts publish a zero offset so chat overlays
-     this surface at its higher z-index. */
-  right: calc(var(--s-3) + var(--detail-panel-chat-offset, 0px));
+  /* Normal chat reserves its live width plus one gap while both surfaces fit. */
+  right: calc(var(--s-3) + var(--detail-panel-right-offset, 0px));
   bottom: var(--s-3);
   height: auto;
   /* The component only reserves adjacent chat space while at least its minimum
@@ -3385,7 +3383,7 @@ html.light ::selection {
     min(
       92vw,
       calc(
-        100vw - var(--s-3) - var(--s-3) - var(--detail-panel-chat-offset, 0px)
+        100vw - var(--s-3) - var(--s-3) - var(--detail-panel-right-offset, 0px)
       )
     )
   );
@@ -3409,6 +3407,17 @@ html.light ::selection {
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   /* Drill open: slide in from the right edge toward center (right-anchored). */
   animation: panel-drill-right var(--t-slow) var(--ease);
+}
+
+/* Notifications are deliberately independent of the side-panel stack: keep
+   the activity surface at the upper-right and above chat, task, artifact, and
+   other floating surfaces even when chat is maximized. */
+.detail.detail-float.notifications-panel {
+  left: auto;
+  right: var(--s-3);
+  z-index: 1000;
+  max-width: max(0px, min(92vw, calc(100vw - var(--s-3) - var(--s-3))));
+  animation-name: panel-drill-right;
 }
 
 /* ── Light-theme glass ──────────────────────────────────────────────────────
