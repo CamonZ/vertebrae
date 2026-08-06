@@ -30,6 +30,14 @@ pub struct LocalChatReasoningEffortOption {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
+pub struct LocalChatPermissionModeOption {
+    pub id: PermissionMode,
+    pub label: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
 pub struct LocalChatHarnessInfo {
     pub harness: LocalChatHarnessKind,
     pub label: String,
@@ -39,6 +47,9 @@ pub struct LocalChatHarnessInfo {
     pub models: Vec<LocalChatModelOption>,
     pub default_reasoning_effort: Option<String>,
     pub reasoning_efforts: Vec<LocalChatReasoningEffortOption>,
+    #[serde(default)]
+    #[specta(optional)]
+    pub permission_modes: Option<Vec<LocalChatPermissionModeOption>>,
     pub supports_resume: bool,
 }
 

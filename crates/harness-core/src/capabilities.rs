@@ -13,6 +13,19 @@ pub struct ModelCapability {
     pub reasoning_efforts: BTreeSet<String>,
 }
 
+/// A permission policy exposed by a provider during capability discovery.
+///
+/// The id is intentionally opaque to the provider-neutral contract. Surface
+/// crates can map it to their local input type while still rendering the
+/// provider's live catalog and preserving unknown values safely.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PermissionModeCapability {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub is_default: bool,
+}
+
 /// User-question features supported by a provider adapter.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QuestionCapabilities {
@@ -35,6 +48,10 @@ pub struct HarnessCapabilities {
     pub default_model: Option<String>,
     #[serde(default)]
     pub models: Vec<ModelCapability>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_permission_mode: Option<String>,
+    #[serde(default)]
+    pub permission_modes: Vec<PermissionModeCapability>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub approval_categories: BTreeSet<ApprovalCategory>,
     pub questions: QuestionCapabilities,

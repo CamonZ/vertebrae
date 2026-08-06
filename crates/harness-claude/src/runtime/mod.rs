@@ -4,9 +4,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot, watch};
 use vertebrae_harness_core::{
-    HarnessCapabilities, HarnessError, HarnessRuntime, ModelCapability, ProviderResumeId,
-    QuestionCapabilities, RunHandle, RunRequest, SendTurnRequest, SessionCloseOutcome,
-    SessionHandle, SessionId, StartSessionRequest, TurnId, TurnOutcome,
+    HarnessCapabilities, HarnessError, HarnessRuntime, ModelCapability, PermissionModeCapability,
+    ProviderResumeId, QuestionCapabilities, RunHandle, RunRequest, SendTurnRequest,
+    SessionCloseOutcome, SessionHandle, SessionId, StartSessionRequest, TurnId, TurnOutcome,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS};
@@ -38,6 +38,24 @@ impl ClaudeRuntime {
     pub fn config(&self) -> &ClaudeProviderConfig {
         &self.config
     }
+}
+
+fn claude_permission_modes() -> Vec<PermissionModeCapability> {
+    [
+        ("default", "Ask before edits", true),
+        ("accept_edits", "Edit automatically", false),
+        ("plan", "Plan mode", false),
+        ("auto", "Auto mode", false),
+        ("dont_ask", "Don't ask", false),
+        ("bypass_permissions", "Bypass permissions", false),
+    ]
+    .into_iter()
+    .map(|(id, label, is_default)| PermissionModeCapability {
+        id: id.into(),
+        label: label.into(),
+        is_default,
+    })
+    .collect()
 }
 
 enum SessionCommand {
@@ -83,6 +101,8 @@ impl HarnessRuntime for ClaudeRuntime {
                         reasoning_efforts: BTreeSet::new(),
                     })
                     .collect(),
+                default_permission_mode: Some("default".into()),
+                permission_modes: claude_permission_modes(),
                 approval_categories: BTreeSet::new(),
                 questions: QuestionCapabilities {
                     multiple_selection: true,
@@ -99,6 +119,8 @@ impl HarnessRuntime for ClaudeRuntime {
                 session_resumption: true,
                 default_model: Some("sonnet".into()),
                 models: Vec::new(),
+                default_permission_mode: Some("default".into()),
+                permission_modes: claude_permission_modes(),
                 approval_categories: BTreeSet::new(),
                 questions: QuestionCapabilities::default(),
             }),

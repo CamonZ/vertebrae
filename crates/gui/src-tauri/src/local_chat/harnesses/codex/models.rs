@@ -4,8 +4,9 @@ use vertebrae_harness_core::HarnessCapabilities;
 
 use crate::local_chat::{
     LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
-    LocalChatReasoningEffortOption,
+    LocalChatPermissionModeOption, LocalChatReasoningEffortOption,
 };
+use crate::types::PermissionMode;
 
 pub(super) const CODEX_DEFAULT_MODEL_ID: &str = "default";
 pub(super) const CODEX_DEFAULT_REASONING_EFFORT: &str = "default";
@@ -46,6 +47,18 @@ pub(super) fn local_chat_harness_info_from_capabilities(
         })
         .collect();
 
+    let permission_modes = capabilities
+        .permission_modes
+        .into_iter()
+        .filter_map(|mode| {
+            Some(LocalChatPermissionModeOption {
+                id: permission_mode_from_id(&mode.id)?,
+                label: mode.label,
+                is_default: mode.is_default,
+            })
+        })
+        .collect::<Vec<_>>();
+
     LocalChatHarnessInfo {
         harness: LocalChatHarnessKind::Codex,
         label: "Codex".into(),
@@ -63,7 +76,20 @@ pub(super) fn local_chat_harness_info_from_capabilities(
                 id,
             })
             .collect(),
+        permission_modes: Some(permission_modes),
         supports_resume: capabilities.session_resumption,
+    }
+}
+
+fn permission_mode_from_id(id: &str) -> Option<PermissionMode> {
+    match id {
+        "accept_edits" => Some(PermissionMode::AcceptEdits),
+        "auto" => Some(PermissionMode::Auto),
+        "bypass_permissions" => Some(PermissionMode::BypassPermissions),
+        "default" => Some(PermissionMode::Default),
+        "dont_ask" => Some(PermissionMode::DontAsk),
+        "plan" => Some(PermissionMode::Plan),
+        _ => None,
     }
 }
 
@@ -110,6 +136,19 @@ mod tests {
                     reasoning_efforts: BTreeSet::from(["ultra".into()]),
                 },
             ],
+            default_permission_mode: Some("default".into()),
+            permission_modes: vec![
+                vertebrae_harness_core::PermissionModeCapability {
+                    id: "default".into(),
+                    label: "Ask for approval".into(),
+                    is_default: true,
+                },
+                vertebrae_harness_core::PermissionModeCapability {
+                    id: "auto".into(),
+                    label: "Approve for me".into(),
+                    is_default: false,
+                },
+            ],
             approval_categories: BTreeSet::new(),
             questions: QuestionCapabilities::default(),
         });
@@ -132,6 +171,21 @@ mod tests {
                 label: "Ultra".into(),
             }]
         );
+        assert_eq!(
+            info.permission_modes,
+            Some(vec![
+                LocalChatPermissionModeOption {
+                    id: PermissionMode::Default,
+                    label: "Ask for approval".into(),
+                    is_default: true,
+                },
+                LocalChatPermissionModeOption {
+                    id: PermissionMode::Auto,
+                    label: "Approve for me".into(),
+                    is_default: false,
+                },
+            ])
+        );
         assert!(!info.models.iter().any(|model| model.id == "gpt-5.5"));
     }
 
@@ -146,6 +200,8 @@ mod tests {
             session_resumption: true,
             default_model: None,
             models: Vec::new(),
+            default_permission_mode: None,
+            permission_modes: Vec::new(),
             approval_categories: BTreeSet::new(),
             questions: QuestionCapabilities::default(),
         });

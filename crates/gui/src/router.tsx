@@ -15,6 +15,7 @@ import {
   BoardPage,
   TracesPage,
   ArtifactsPage,
+  SettingsPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
@@ -220,6 +221,14 @@ const appRoutes: RouteObject[] = [
         element: (
           <GuardedRoute>
             <TracesPage />
+          </GuardedRoute>
+        ),
+      },
+      {
+        path: "settings",
+        element: (
+          <GuardedRoute>
+            <SettingsPage />
           </GuardedRoute>
         ),
       },

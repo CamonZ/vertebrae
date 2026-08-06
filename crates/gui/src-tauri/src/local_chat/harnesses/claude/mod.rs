@@ -5,8 +5,9 @@ pub(crate) mod session;
 
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatHarness, LocalChatHarnessInfo, LocalChatHarnessKind,
-    LocalChatModelOption, LocalChatRuntime, LocalChatSessionError,
+    LocalChatModelOption, LocalChatPermissionModeOption, LocalChatRuntime, LocalChatSessionError,
 };
+use crate::types::PermissionMode;
 
 pub(crate) use session::{ClaudeSessionRuntime, ClaudeStartupCapabilities};
 
@@ -68,6 +69,38 @@ fn claude_local_chat_harness_info_from_resolution(
             .collect(),
         default_reasoning_effort: None,
         reasoning_efforts: Vec::new(),
+        permission_modes: Some(vec![
+            LocalChatPermissionModeOption {
+                id: PermissionMode::Default,
+                label: "Ask before edits".to_string(),
+                is_default: true,
+            },
+            LocalChatPermissionModeOption {
+                id: PermissionMode::AcceptEdits,
+                label: "Edit automatically".to_string(),
+                is_default: false,
+            },
+            LocalChatPermissionModeOption {
+                id: PermissionMode::Plan,
+                label: "Plan mode".to_string(),
+                is_default: false,
+            },
+            LocalChatPermissionModeOption {
+                id: PermissionMode::Auto,
+                label: "Auto mode".to_string(),
+                is_default: false,
+            },
+            LocalChatPermissionModeOption {
+                id: PermissionMode::DontAsk,
+                label: "Don't ask".to_string(),
+                is_default: false,
+            },
+            LocalChatPermissionModeOption {
+                id: PermissionMode::BypassPermissions,
+                label: "Bypass permissions".to_string(),
+                is_default: false,
+            },
+        ]),
         supports_resume: true,
     }
 }

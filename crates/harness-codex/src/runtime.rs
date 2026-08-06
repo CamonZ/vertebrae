@@ -1446,6 +1446,8 @@ impl HarnessRuntime for CodexRuntime {
                 session_resumption: true,
                 default_model: None,
                 models: Vec::new(),
+                default_permission_mode: None,
+                permission_modes: Vec::new(),
                 approval_categories: [
                     ApprovalCategory::CommandExecution,
                     ApprovalCategory::FileChange,

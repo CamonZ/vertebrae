@@ -1640,6 +1640,7 @@ export type LocalChatHarnessInfo = {
   models: LocalChatModelOption[];
   default_reasoning_effort: string | null;
   reasoning_efforts: LocalChatReasoningEffortOption[];
+  permission_modes?: LocalChatPermissionModeOption[] | null;
   supports_resume: boolean;
 };
 export type LocalChatHarnessKind = "claude" | "codex";
@@ -1647,6 +1648,11 @@ export type LocalChatModelOption = {
   id: string;
   label: string;
   supported_reasoning_effort_ids?: string[] | null;
+};
+export type LocalChatPermissionModeOption = {
+  id: PermissionMode;
+  label: string;
+  is_default?: boolean;
 };
 export type LocalChatReasoningEffortOption = { id: string; label: string };
 export type LocalChatSessionEndEvent = {

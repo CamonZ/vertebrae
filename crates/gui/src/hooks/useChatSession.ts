@@ -18,6 +18,12 @@ import {
   loadLastUsedLocalChatModelId,
 } from "../utils/localChatPersistence";
 import {
+  hasStaleModelDefault,
+  hasStaleReasoningEffort,
+  resolvePermissionDefault,
+  useLocalChatDefaultsStore,
+} from "../utils/localChatDefaults";
+import {
   harnessDisplayName,
   lifecycleLabel,
   isSessionHarnessLocked,
@@ -52,6 +58,7 @@ export function useChatSession(sessionId: string) {
   const setSessionPermissionMode = useChatStore(
     (s) => s.setSessionPermissionMode
   );
+  const localChatDefaults = useLocalChatDefaultsStore((s) => s.defaults);
 
   // --- Harness catalog fetch ---
   useEffect(() => {
@@ -73,6 +80,7 @@ export function useChatSession(sessionId: string) {
 
   // --- Derived harness state ---
   const selectedHarness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
+  const savedHarnessDefaults = localChatDefaults[selectedHarness];
   const lockedHarness = session ? isSessionHarnessLocked(session) : false;
   const selectedHarnessInfo = useMemo(
     () =>
@@ -192,10 +200,84 @@ export function useChatSession(sessionId: string) {
 
   // --- Persistence / sync effects ---
   useEffect(() => {
+    if (!hasSession || !visibleHarness || lockedHarness || hasConversation) {
+      return;
+    }
+    if (messageCount > 0) return;
+
+    // A saved setting is only an initial value. A user choice already made in
+    // this empty session must win over a later settings-page update.
+    if (
+      selectedModelId === undefined &&
+      savedHarnessDefaults?.modelId &&
+      !hasStaleModelDefault(visibleHarness, savedHarnessDefaults.modelId)
+    ) {
+      setSessionSelectedModel(sessionId, savedHarnessDefaults.modelId);
+    }
+
+    if (
+      session?.permissionMode === "default" &&
+      savedHarnessDefaults?.permissionMode
+    ) {
+      const resolvedPermission = resolvePermissionDefault(
+        visibleHarness,
+        savedHarnessDefaults.permissionMode
+      );
+      if (
+        resolvedPermission === savedHarnessDefaults.permissionMode &&
+        resolvedPermission !== session.permissionMode
+      ) {
+        setSessionPermissionMode(sessionId, resolvedPermission);
+      }
+    }
+
+    if (
+      selectedReasoningEffort === undefined &&
+      savedHarnessDefaults?.reasoningEffort &&
+      !hasStaleReasoningEffort(
+        visibleHarness,
+        savedHarnessDefaults.reasoningEffort,
+        selectedModelId
+      ) &&
+      supportedReasoningEffortIds.has(savedHarnessDefaults.reasoningEffort)
+    ) {
+      setSessionReasoningEffort(
+        sessionId,
+        savedHarnessDefaults.reasoningEffort
+      );
+    }
+  }, [
+    hasConversation,
+    hasSession,
+    lockedHarness,
+    messageCount,
+    savedHarnessDefaults,
+    selectedModelId,
+    selectedReasoningEffort,
+    session?.permissionMode,
+    sessionId,
+    setSessionPermissionMode,
+    setSessionReasoningEffort,
+    setSessionSelectedModel,
+    supportedReasoningEffortIds,
+    visibleHarness,
+  ]);
+
+  useEffect(() => {
     if (!hasSession || !visibleHarness) return;
     if (isLocalChatSessionCleared(sessionId)) return;
     if (selectedModelId !== undefined) return;
     if (hasConversation || messageCount > 0) return;
+
+    // Prefer the explicit per-harness setting over the legacy last-used model
+    // preference. Invalid stored settings intentionally fall through so the
+    // existing behavior remains safe and unchanged.
+    if (
+      savedHarnessDefaults?.modelId &&
+      !hasStaleModelDefault(visibleHarness, savedHarnessDefaults.modelId)
+    ) {
+      return;
+    }
 
     const lastUsed = loadLastUsedLocalChatModelId();
     if (lastUsed && supportedModelIds.has(lastUsed)) {
@@ -206,6 +288,7 @@ export function useChatSession(sessionId: string) {
     hasConversation,
     hasSession,
     messageCount,
+    savedHarnessDefaults,
     selectedModelId,
     sessionId,
     setSessionSelectedModel,
@@ -378,12 +461,12 @@ export function useChatSession(sessionId: string) {
     : canQueueMessage
       ? "Type a message to queue..."
       : isBusy
-      ? `${lifecycleLabel(lifecycle)}...`
-      : canSendMessage
-        ? "Type a message..."
-        : hasResume || lifecycle === "closed" || lifecycle === "error"
-          ? "Type a message to resume..."
-          : "Type a message to start...";
+        ? `${lifecycleLabel(lifecycle)}...`
+        : canSendMessage
+          ? "Type a message..."
+          : hasResume || lifecycle === "closed" || lifecycle === "error"
+            ? "Type a message to resume..."
+            : "Type a message to start...";
 
   // --- Context utilization ---
   const usage = session?.tokenUsage ?? null;
