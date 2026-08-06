@@ -3410,40 +3410,14 @@ html.light ::selection {
 }
 
 /* Notifications are deliberately independent of the side-panel stack: keep
-   the activity surface at the upper-left and above chat, task, artifact, and
+   the activity surface at the upper-right and above chat, task, artifact, and
    other floating surfaces even when chat is maximized. */
 .detail.detail-float.notifications-panel {
-  left: var(--s-3);
-  right: auto;
+  left: auto;
+  right: var(--s-3);
   z-index: 1000;
   max-width: max(0px, min(92vw, calc(100vw - var(--s-3) - var(--s-3))));
-  animation-name: panel-drill-left;
-}
-
-.detail.detail-float.notifications-panel.is-closing {
-  animation-name: panel-drill-left-out;
-}
-
-@keyframes panel-drill-left {
-  from {
-    opacity: 0;
-    transform: translateX(-100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-@keyframes panel-drill-left-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateX(-100%);
-  }
+  animation-name: panel-drill-right;
 }
 
 /* ── Light-theme glass ──────────────────────────────────────────────────────
