@@ -329,6 +329,8 @@ impl HarnessRuntime for MockRuntime {
             session_resumption: true,
             default_model: None,
             models: Vec::new(),
+            default_permission_mode: None,
+            permission_modes: Vec::new(),
             approval_categories: Default::default(),
             questions: QuestionCapabilities::default(),
         })

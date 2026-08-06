@@ -34,10 +34,14 @@ describe("NotificationsTrigger", () => {
     render(<NotificationsTrigger />);
 
     const trigger = screen.getByTestId("notifications-trigger");
+    expect(screen.getByTestId("notifications-trigger-icon")).toBeVisible();
     expect(screen.getByTestId("notifications-trigger-count")).toHaveTextContent(
       "1 new"
     );
-    expect(trigger).toHaveAttribute("aria-label", "Open notifications, 1 unread");
+    expect(trigger).toHaveAttribute(
+      "aria-label",
+      "Open notifications, 1 unread"
+    );
     expect(trigger).toHaveAttribute("aria-expanded", "false");
 
     await userEvent.click(trigger);

@@ -15,7 +15,8 @@ pub(crate) use events::{
 pub(crate) use harness::{
     CreateLocalChatSessionInput, HarnessCreateSessionInput, LocalChatHarness,
     LocalChatHarnessCatalog, LocalChatHarnessInfo, LocalChatHarnessKind, LocalChatModelOption,
-    LocalChatReasoningEffortOption, LocalChatRuntime, LocalChatSessionError,
+    LocalChatPermissionModeOption, LocalChatReasoningEffortOption, LocalChatRuntime,
+    LocalChatSessionError,
 };
 pub(crate) use harnesses::claude::ClaudeStartupCapabilities;
 pub(crate) use manager::LocalChatSessionManager;

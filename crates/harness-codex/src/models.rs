@@ -3,7 +3,8 @@ use std::{collections::BTreeSet, process::Stdio};
 use serde::Deserialize;
 use tokio::process::Command;
 use vertebrae_harness_core::{
-    ApprovalCategory, HarnessCapabilities, HarnessError, ModelCapability, QuestionCapabilities,
+    ApprovalCategory, HarnessCapabilities, HarnessError, ModelCapability, PermissionModeCapability,
+    QuestionCapabilities,
 };
 
 use crate::CodexProviderConfig;
@@ -116,6 +117,24 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
         session_resumption: true,
         default_model: Some(CODEX_DEFAULT_MODEL_ID.into()),
         models,
+        default_permission_mode: Some("default".into()),
+        permission_modes: vec![
+            PermissionModeCapability {
+                id: "default".into(),
+                label: "Ask for approval".into(),
+                is_default: true,
+            },
+            PermissionModeCapability {
+                id: "auto".into(),
+                label: "Approve for me".into(),
+                is_default: false,
+            },
+            PermissionModeCapability {
+                id: "bypass_permissions".into(),
+                label: "Full access".into(),
+                is_default: false,
+            },
+        ],
         approval_categories: [
             ApprovalCategory::CommandExecution,
             ApprovalCategory::FileChange,

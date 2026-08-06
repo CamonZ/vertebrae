@@ -79,6 +79,12 @@ describe("Sidebar Traces nav", () => {
       expect(svg?.getAttribute("width")).toBe("14");
       expect(svg?.getAttribute("height")).toBe("14");
     }
+
+    const settingsLink = screen.getByTestId("sidebar-nav-settings");
+    expect(screen.getByTestId("sidebar-settings-utility")).toContainElement(
+      settingsLink
+    );
+    expect(settingsLink.querySelector("svg")).not.toBeNull();
   });
 
   it("renders a Traces nav link pointing at /traces", () => {

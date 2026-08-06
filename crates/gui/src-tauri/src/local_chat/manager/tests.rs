@@ -73,6 +73,7 @@ impl LocalChatHarness for MockHarness {
             }],
             default_reasoning_effort: None,
             reasoning_efforts: Vec::new(),
+            permission_modes: None,
             supports_resume: true,
         }
     }

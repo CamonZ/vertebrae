@@ -31,7 +31,18 @@ const CODEX_PERMISSION_MODE_OPTIONS: PermissionModeOption[] = [
   { value: "bypass_permissions", label: "Full access" },
 ];
 
-function permissionModeOptions(harness: ChatSession["harness"]) {
+function permissionModeOptions(
+  harness: ChatSession["harness"],
+  catalogOptions?: LocalChatHarnessInfo["permission_modes"]
+) {
+  // New catalogs always report the provider-owned options. Keep the legacy
+  // fallback for older cached/test catalogs that predate permission_modes.
+  if (catalogOptions) {
+    return catalogOptions.map((mode) => ({
+      value: mode.id,
+      label: mode.label,
+    }));
+  }
   return harness === "codex"
     ? CODEX_PERMISSION_MODE_OPTIONS
     : CLAUDE_PERMISSION_MODE_OPTIONS;
@@ -171,6 +182,10 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const availableReasoningEfforts =
     reasoningEfforts ?? visibleHarness?.reasoning_efforts ?? [];
+  const availablePermissionModes = permissionModeOptions(
+    session.harness,
+    visibleHarness?.permission_modes
+  );
   const picker = useHarnessPickerState(
     visibleHarness,
     session,
@@ -238,7 +253,7 @@ export function ChatComposer({
                   onChange={onPermissionModeChange}
                   disabled={isBusy || isActive}
                 >
-                  {permissionModeOptions(session.harness).map((mode) => (
+                  {availablePermissionModes.map((mode) => (
                     <option key={mode.value} value={mode.value}>
                       {mode.label}
                     </option>

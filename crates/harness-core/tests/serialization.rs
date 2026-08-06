@@ -400,6 +400,12 @@ fn capabilities_and_all_control_decisions_are_serializable() {
             label: "Model".into(),
             reasoning_efforts: BTreeSet::from(["high".into()]),
         }],
+        default_permission_mode: Some("default".into()),
+        permission_modes: vec![PermissionModeCapability {
+            id: "default".into(),
+            label: "Default".into(),
+            is_default: true,
+        }],
         approval_categories: BTreeSet::from([
             ApprovalCategory::CommandExecution,
             ApprovalCategory::FileChange,

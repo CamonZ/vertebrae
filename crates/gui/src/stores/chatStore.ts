@@ -27,6 +27,7 @@ import type {
   UserQuestion,
 } from "../bindings";
 import { commands } from "../bindings";
+import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
 
 /**
  * Message types for the Claude chat
@@ -654,7 +655,9 @@ function createLocalSession(
     titleUserMessageCount: 0,
     messages: [],
     status: "open",
-    harness: DEFAULT_LOCAL_CHAT_HARNESS,
+    harness:
+      useLocalChatDefaultsStore.getState().defaultHarness ??
+      DEFAULT_LOCAL_CHAT_HARNESS,
     backendSessionId: null,
     providerResumeId: null,
     projectPath,
