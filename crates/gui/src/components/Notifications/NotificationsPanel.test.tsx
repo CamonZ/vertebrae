@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { act, render, screen } from "../../test/test-utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen } from "../../test/test-utils";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
 import type { NotificationInput } from "../../types";
 import {
@@ -96,6 +96,29 @@ describe("NotificationsPanel", () => {
       getUnreadNotificationCount(useNotificationStore.getState().notifications)
     ).toBe(0);
     expect(screen.queryAllByLabelText("Unread")).toHaveLength(0);
+  });
+
+  it("copies the full entity ID from the shared notification ID chip", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const fullId = "task-abc123-full-id";
+    addNotification({ entityId: fullId });
+    render(<NotificationsPanel />);
+
+    expect(screen.getByTestId(/notification-id-/)).toHaveTextContent(
+      fullId.slice(0, 8)
+    );
+
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Copy full task ID" })
+      );
+    });
+
+    expect(writeText).toHaveBeenCalledWith(fullId);
   });
 
   it("dismisses one item from the session feed", () => {

@@ -1,6 +1,7 @@
 import type { NotificationMessage, ToastType } from "../../types";
 import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
 import { CloseIcon, FloatingDetailPanel, IconButton } from "../panels";
+import { IdChip } from "../shared/HearthPrimitives";
 
 const notificationTypeConfig: Record<
   ToastType,
@@ -171,9 +172,12 @@ function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
             {notification.message}
           </p>
           <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="truncate font-mono text-2xs text-[var(--color-fg-mute)]">
-              {notification.entityId.slice(0, 8)}
-            </span>
+            <IdChip
+              id={notification.entityId}
+              kind={notification.entity}
+              testId={`notification-id-${notification.id}`}
+              className="min-w-0 max-w-full"
+            />
             <button
               type="button"
               onClick={onDismiss}
