@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act, render, screen } from "../../test/test-utils";
-import {
-  getUnreadNotificationCount,
-  useNotificationStore,
-} from "../../stores";
+import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
+import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import type { NotificationInput } from "../../types";
-import { NotificationsPanel, formatNotificationAge } from "./NotificationsPanel";
+import {
+  NotificationsPanel,
+  formatNotificationAge,
+} from "./NotificationsPanel";
 
 const NOW = 1_700_000_000_000;
 
@@ -28,6 +29,7 @@ describe("NotificationsPanel", () => {
         notifications: [],
         isPanelOpen: true,
       });
+      usePanelLayoutStore.getState().reset();
     });
   });
 
@@ -37,6 +39,7 @@ describe("NotificationsPanel", () => {
         notifications: [],
         isPanelOpen: false,
       });
+      usePanelLayoutStore.getState().reset();
     });
   });
 
@@ -48,7 +51,10 @@ describe("NotificationsPanel", () => {
   });
 
   it("renders newest activity first in a glass side panel", () => {
-    addNotification({ message: "Task abc123 created", timestamp: NOW - 60_000 });
+    addNotification({
+      message: "Task abc123 created",
+      timestamp: NOW - 60_000,
+    });
     addNotification({
       message: "Step def456 completed",
       type: "success",
@@ -60,7 +66,9 @@ describe("NotificationsPanel", () => {
     render(<NotificationsPanel />);
 
     const list = screen.getByTestId("notification-list");
-    expect(screen.getByTestId("notifications-panel")).toHaveClass("detail-float");
+    expect(screen.getByTestId("notifications-panel")).toHaveClass(
+      "detail-float"
+    );
     expect(list.textContent?.indexOf("Step def456 completed")).toBeLessThan(
       list.textContent?.indexOf("Task abc123 created") ?? -1
     );
@@ -68,20 +76,78 @@ describe("NotificationsPanel", () => {
     expect(screen.getByText("2 notices")).toBeInTheDocument();
     expect(screen.queryByText("All")).not.toBeInTheDocument();
     expect(screen.queryByText(/days?/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/notification settings/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/notification settings/i)
+    ).not.toBeInTheDocument();
   });
 
   it("marks all items read without removing ephemeral activity", () => {
     addNotification();
-    addNotification({ message: "Step def456 failed", type: "error", entity: "step" });
+    addNotification({
+      message: "Step def456 failed",
+      type: "error",
+      entity: "step",
+    });
     render(<NotificationsPanel />);
 
     act(() => useNotificationStore.getState().markAllRead());
 
     expect(screen.getByText("0 unread")).toBeInTheDocument();
     expect(screen.getByText("2 notices")).toBeInTheDocument();
-    expect(getUnreadNotificationCount(useNotificationStore.getState().notifications)).toBe(0);
+    expect(
+      getUnreadNotificationCount(useNotificationStore.getState().notifications)
+    ).toBe(0);
     expect(screen.queryAllByLabelText("Unread")).toHaveLength(0);
+  });
+
+  it("renders left of the leftmost open panel", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 2200,
+    });
+    act(() => {
+      usePanelLayoutStore.getState().setPanelLayout("chat", {
+        isPresent: true,
+        renderedWidth: 384,
+        rightOffset: 0,
+      });
+      usePanelLayoutStore.getState().setPanelLayout("task-detail", {
+        isPresent: true,
+        renderedWidth: 420,
+        rightOffset: 396,
+      });
+      usePanelLayoutStore.getState().setPanelLayout("artifact-inspector", {
+        isPresent: true,
+        renderedWidth: 486,
+        rightOffset: 828,
+      });
+    });
+    render(<NotificationsPanel />);
+
+    const panel = screen.getByTestId("notifications-panel");
+    expect(panel).toHaveAttribute("data-placement", "left-of-leftmost");
+    expect(panel.style.getPropertyValue("--detail-panel-right-offset")).toBe(
+      "1326px"
+    );
+  });
+
+  it("uses the maximized-chat overlay placement when chat is expanded", () => {
+    act(() => {
+      usePanelLayoutStore.getState().setPanelLayout("chat", {
+        isPresent: true,
+        renderedWidth: 1128,
+        rightOffset: 0,
+        isMaximized: true,
+        leftOffset: 60,
+      });
+    });
+    render(<NotificationsPanel />);
+
+    const panel = screen.getByTestId("notifications-panel");
+    expect(panel).toHaveAttribute("data-placement", "maximized-chat");
+    expect(panel.style.getPropertyValue("--detail-panel-left-offset")).toBe(
+      "60px"
+    );
   });
 
   it("dismisses one item from the session feed", () => {

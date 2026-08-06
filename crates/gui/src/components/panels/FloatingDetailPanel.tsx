@@ -1,4 +1,5 @@
 import {
+  useLayoutEffect,
   useEffect,
   useRef,
   useState,
@@ -42,6 +43,12 @@ interface FloatingDetailPanelProps {
   /** Test id for the float root. */
   testId?: string;
   position?: "right" | "left-of-task";
+  /** Override the computed right-stack offset for coordinated overlays. */
+  rightOffset?: number;
+  /** Pin the panel to a left inset for an intentional overlay placement. */
+  leftOffset?: number;
+  /** Placement mode exposed for shared panel CSS and test assertions. */
+  placementMode?: string;
   children: ReactNode;
 }
 
@@ -71,6 +78,9 @@ export function FloatingDetailPanel({
   className = "",
   testId,
   position = "right",
+  rightOffset,
+  leftOffset,
+  placementMode,
   children,
 }: FloatingDetailPanelProps) {
   // Right-anchored: a drag on the left edge widens the panel as the cursor moves
@@ -90,10 +100,8 @@ export function FloatingDetailPanel({
   );
   const chatLayout = usePanelLayoutStore((s) => s.chat);
   const taskDetailLayout = usePanelLayoutStore((s) => s.taskDetail);
-  const setTaskDetailLayout = usePanelLayoutStore((s) => s.setTaskDetailLayout);
-  const clearTaskDetailLayout = usePanelLayoutStore(
-    (s) => s.clearTaskDetailLayout
-  );
+  const setPanelLayout = usePanelLayoutStore((s) => s.setPanelLayout);
+  const clearPanelLayout = usePanelLayoutStore((s) => s.clearPanelLayout);
   const availableAdjacentWidth =
     viewportWidth -
     chatLayout.renderedWidth -
@@ -110,17 +118,36 @@ export function FloatingDetailPanel({
     position === "left-of-task" && taskDetailLayout.isPresent
       ? `calc(${chatLayout.renderedWidth}px + var(--s-3) + ${taskDetailLayout.renderedWidth}px + var(--s-3))`
       : chatOffset;
+  const chatOffsetPx = isChatAdjacent
+    ? chatLayout.renderedWidth + SIDE_PANEL_GAP_PX
+    : 0;
+  const taskOffsetPx =
+    position === "left-of-task" && taskDetailLayout.isPresent
+      ? chatOffsetPx + taskDetailLayout.renderedWidth + SIDE_PANEL_GAP_PX
+      : chatOffsetPx;
+  const panelIsOpen = isOpen ?? !closing;
 
-  useEffect(() => {
-    if (panelId !== "task-detail") return;
-    setTaskDetailLayout({ isPresent: !closing, renderedWidth: panelWidth });
-    return () => clearTaskDetailLayout();
+  useLayoutEffect(() => {
+    if (!panelIsOpen) {
+      clearPanelLayout(panelId);
+      return;
+    }
+
+    setPanelLayout(panelId, {
+      isPresent: true,
+      renderedWidth: panelWidth,
+      rightOffset: rightOffset ?? taskOffsetPx,
+      isMaximized: false,
+    });
+    return () => clearPanelLayout(panelId);
   }, [
-    clearTaskDetailLayout,
-    closing,
+    clearPanelLayout,
     panelId,
+    panelIsOpen,
     panelWidth,
-    setTaskDetailLayout,
+    rightOffset,
+    setPanelLayout,
+    taskOffsetPx,
   ]);
 
   useEffect(() => {
@@ -176,9 +203,13 @@ export function FloatingDetailPanel({
         {
           width: `${panelWidth}px`,
           "--detail-panel-chat-offset": taskOffset,
+          "--detail-panel-right-offset": `${rightOffset ?? taskOffsetPx}px`,
+          "--detail-panel-left-offset":
+            leftOffset == null ? undefined : `${leftOffset}px`,
         } as CSSProperties
       }
       data-testid={testId}
+      data-placement={placementMode}
       data-focused={isFocused || undefined}
       data-closing={closing || undefined}
       data-chat-adjacent={isChatAdjacent || undefined}

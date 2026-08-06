@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { SIDE_PANEL_INSET_PX } from "../stores/panelLayoutStore";
+import {
+  SIDE_PANEL_INSET_PX,
+  SIDE_PANEL_MAXIMIZED_LEFT_INSET_PX,
+} from "../stores/panelLayoutStore";
 
 /** Floating chat-panel width: persistence key and clamp bounds (px). Mirrors
  * the task-detail panel's horizontal resize (TaskDetailPanel.tsx). */
@@ -7,7 +10,7 @@ export const WIDTH_STORAGE_KEY = "chat-window-manager-width";
 export const MIN_PANEL_WIDTH = 320;
 export const MAX_PANEL_WIDTH = 760;
 export const DEFAULT_PANEL_WIDTH = 384;
-export const DEFAULT_PANEL_LEFT_INSET = 60;
+export const DEFAULT_PANEL_LEFT_INSET = SIDE_PANEL_MAXIMIZED_LEFT_INSET_PX;
 export const DEFAULT_PANEL_RIGHT_INSET = SIDE_PANEL_INSET_PX;
 /** Keyboard resize step (px) for the drag handle. */
 export const RESIZE_STEP = 16;

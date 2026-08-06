@@ -3374,7 +3374,7 @@ html.light ::selection {
   /* Normal chat reserves its live width plus one gap while both surfaces fit.
      Wide chat and constrained layouts publish a zero offset so chat overlays
      this surface at its higher z-index. */
-  right: calc(var(--s-3) + var(--detail-panel-chat-offset, 0px));
+  right: calc(var(--s-3) + var(--detail-panel-right-offset, 0px));
   bottom: var(--s-3);
   height: auto;
   /* The component only reserves adjacent chat space while at least its minimum
@@ -3385,7 +3385,7 @@ html.light ::selection {
     min(
       92vw,
       calc(
-        100vw - var(--s-3) - var(--s-3) - var(--detail-panel-chat-offset, 0px)
+        100vw - var(--s-3) - var(--s-3) - var(--detail-panel-right-offset, 0px)
       )
     )
   );
@@ -3409,6 +3409,33 @@ html.light ::selection {
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   /* Drill open: slide in from the right edge toward center (right-anchored). */
   animation: panel-drill-right var(--t-slow) var(--ease);
+}
+
+/* Maximized chat is the one intentional exception to the side-panel stack:
+   notifications sit over its left edge so the activity surface remains
+   reachable even when chat owns nearly the whole viewport. */
+.detail.detail-float[data-placement="maximized-chat"] {
+  left: var(--detail-panel-left-offset, var(--s-3));
+  right: auto;
+  max-width: max(
+    0px,
+    min(
+      92vw,
+      calc(100vw - var(--detail-panel-left-offset, var(--s-3)) - var(--s-3))
+    )
+  );
+  animation-name: panel-drill-left;
+}
+
+@keyframes panel-drill-left {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* ── Light-theme glass ──────────────────────────────────────────────────────

@@ -1,14 +1,11 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { NotificationMessage, ToastType } from "../../types";
+import { getUnreadNotificationCount, useNotificationStore } from "../../stores";
 import {
-  getUnreadNotificationCount,
-  useNotificationStore,
-} from "../../stores";
-import {
-  CloseIcon,
-  FloatingDetailPanel,
-  IconButton,
-} from "../panels";
+  getNotificationPanelPlacement,
+  usePanelLayoutStore,
+} from "../../stores/panelLayoutStore";
+import { CloseIcon, FloatingDetailPanel, IconButton } from "../panels";
 
 const notificationTypeConfig: Record<
   ToastType,
@@ -49,11 +46,25 @@ export function NotificationsPanel() {
   const removeNotification = useNotificationStore(
     (state) => state.removeNotification
   );
+  const panelLayouts = usePanelLayoutStore((state) => state.panels);
+  const [viewportWidth, setViewportWidth] = useState(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth
+  );
   const unreadCount = getUnreadNotificationCount(notifications);
   const orderedNotifications = useMemo(
     () => [...notifications].reverse(),
     [notifications]
   );
+  const placement = useMemo(
+    () => getNotificationPanelPlacement(panelLayouts, viewportWidth, 486),
+    [panelLayouts, viewportWidth]
+  );
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   if (!isPanelOpen) return null;
 
@@ -66,6 +77,13 @@ export function NotificationsPanel() {
       defaultWidth={486}
       onClose={() => setPanelOpen(false)}
       isOpen={isPanelOpen}
+      rightOffset={
+        placement.mode === "maximized-chat" ? undefined : placement.rightOffset
+      }
+      leftOffset={
+        placement.mode === "maximized-chat" ? placement.leftOffset : undefined
+      }
+      placementMode={placement.mode}
       className="notifications-panel"
       testId="notifications-panel"
     >
@@ -106,7 +124,10 @@ export function NotificationsPanel() {
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto" data-testid="notification-list">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto"
+          data-testid="notification-list"
+        >
           {orderedNotifications.length === 0 ? (
             <p className="px-4 py-10 text-center font-mono text-xs text-[var(--color-fg-mute)]">
               No activity yet.
@@ -125,7 +146,8 @@ export function NotificationsPanel() {
         </div>
 
         <footer className="flex shrink-0 items-center border-t border-[var(--color-line)] px-4 py-3 font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]">
-          {notifications.length} {notifications.length === 1 ? "notice" : "notices"}
+          {notifications.length}{" "}
+          {notifications.length === 1 ? "notice" : "notices"}
         </footer>
       </div>
     </FloatingDetailPanel>
