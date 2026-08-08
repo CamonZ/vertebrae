@@ -13,7 +13,8 @@ export type EntityIdKind =
   | "workflow"
   | "step execution"
   | "task run"
-  | "chat session";
+  | "chat session"
+  | "application";
 
 interface BaseEntityIdProps {
   id: string | null | undefined;

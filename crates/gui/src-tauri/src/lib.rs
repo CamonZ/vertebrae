@@ -186,6 +186,7 @@ pub fn run() {
     let tauri_app_builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -212,11 +213,6 @@ pub fn run() {
                 ),
                 Err(error) => log::warn!("[STARTUP] Failed to stage managed skills: {error}"),
             }
-
-            // Bring managed binary installs up to date with the sidecars
-            // bundled in this build. Off the main thread so disk I/O never
-            // delays window creation.
-            tauri::async_runtime::spawn_blocking(install::refresh_stale_managed_binaries);
 
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");

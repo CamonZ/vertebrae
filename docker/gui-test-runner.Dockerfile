@@ -32,4 +32,9 @@ RUN cargo install tauri-driver
 # Prepare the global GUI config directory
 RUN mkdir -p /root/.config/vertebrae
 
+# The GUI acceptance image models a normal user install: the managed links for
+# vtb, vtb-daemon, and vtb-gate live here and are discoverable by GUI child
+# processes as well as the acceptance harness.
+ENV PATH="/root/.local/bin:${PATH}"
+
 WORKDIR /app

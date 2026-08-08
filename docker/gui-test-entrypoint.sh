@@ -64,6 +64,34 @@ echo "==> Building Tauri app, mock-claude binaries..."
 VERTEBRAE_BUNDLE_SIDECARS=1 cargo build -p gui --bin gui --quiet
 cargo build -p daemon-acceptance --bin mock-claude --quiet
 
+# Install the component binaries that the GUI expects to find on a normal
+# machine. The files in data_bin are the managed install; ~/.local/bin contains
+# only the user-facing symlinks. This keeps the acceptance precondition aligned
+# with installer::installed_at_symlink_path instead of using marker files.
+echo "==> Installing prebuilt GUI component binaries..."
+GUI_DATA_BIN="/root/.local/share/vertebrae/bin"
+GUI_LINK_BIN="/root/.local/bin"
+mkdir -p "$GUI_DATA_BIN" "$GUI_LINK_BIN"
+export PATH="$GUI_LINK_BIN:$PATH"
+for component in vtb vtb-daemon vtb-gate; do
+    source_binary="/app/target/debug/$component"
+    if [ ! -x "$source_binary" ]; then
+        echo "ERROR: expected GUI component binary at $source_binary"
+        exit 1
+    fi
+    install -m 0755 "$source_binary" "$GUI_DATA_BIN/$component"
+    rm -f "$GUI_LINK_BIN/$component"
+    ln -s "$GUI_DATA_BIN/$component" "$GUI_LINK_BIN/$component"
+done
+
+for component in vtb vtb-daemon vtb-gate; do
+    test -L "$GUI_LINK_BIN/$component"
+    test "$(readlink "$GUI_LINK_BIN/$component")" = "$GUI_DATA_BIN/$component"
+    test -x "$GUI_LINK_BIN/$component"
+    command -v "$component" >/dev/null
+done
+echo "==> GUI component prerequisites installed in $GUI_DATA_BIN"
+
 # Install mock-claude where the daemon expects it.
 ln -sf /app/target/debug/mock-claude /usr/local/bin/mock-claude
 export CLAUDE_CODE_PATH=/usr/local/bin/mock-claude

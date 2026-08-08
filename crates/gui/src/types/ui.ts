@@ -88,7 +88,7 @@ export interface ModalProps {
 export type ToastType = "success" | "error" | "warning" | "info";
 
 /** Entities currently represented by the notifications panel. */
-export type NotificationEntity = "task" | "step";
+export type NotificationEntity = "task" | "step" | "application";
 
 /** Input used when appending an ephemeral notification. */
 export interface NotificationInput {

@@ -7,7 +7,7 @@ use crate::GuiWorld;
 
 /// Paths of the managed `~/.local/bin` symlinks the `InstallationGuard`
 /// probes (`installed_at_symlink`). MUST match `vertebrae_installer::symlink_path`.
-fn installed_marker_paths() -> Vec<PathBuf> {
+fn installed_link_paths() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").expect("HOME must be set");
     let bin = PathBuf::from(home).join(".local").join("bin");
     vec![
@@ -17,25 +17,55 @@ fn installed_marker_paths() -> Vec<PathBuf> {
     ]
 }
 
-/// Seed dummy installer-managed files at the managed symlink path so the
-/// `InstallationGuard` sees the components as installed and renders guarded
-/// routes instead of redirecting to `/welcome`. Every non-`@first_run`
-/// scenario relies on this — without it the clean container (vtb not
-/// installed, not on PATH) would be redirected to the welcome screen and
-/// every existing scenario would fail.
-fn seed_installed_markers() {
-    for path in installed_marker_paths() {
+/// Restore the installer-managed symlinks to the binaries preinstalled by the
+/// GUI acceptance runner. Every non-`@first_run` scenario relies on this —
+/// without it the clean container would be redirected to `/welcome`.
+fn restore_installed_links() {
+    let home = std::env::var_os("HOME").expect("HOME must be set");
+    let data_bin = PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("vertebrae")
+        .join("bin");
+
+    for path in installed_link_paths() {
+        let name = path
+            .file_name()
+            .expect("managed component path must have a file name");
+        let staged = data_bin.join(name);
+        assert!(
+            staged.is_file(),
+            "GUI acceptance image must preinstall the managed component at {}",
+            staged.display()
+        );
+
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("failed to create ~/.local/bin");
         }
-        std::fs::write(&path, b"#!/bin/sh\n").expect("failed to seed installed marker binary");
+
+        if let Ok(metadata) = std::fs::symlink_metadata(&path) {
+            assert!(
+                metadata.file_type().is_symlink(),
+                "managed component path is not a symlink: {}",
+                path.display()
+            );
+            std::fs::remove_file(&path).expect("failed to replace managed component symlink");
+        }
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&staged, &path).unwrap_or_else(|error| {
+            panic!("failed to seed managed symlink {}: {error}", path.display())
+        });
+
+        #[cfg(not(unix))]
+        panic!("GUI acceptance requires Unix symlink support");
     }
 }
 
-/// Remove the dummy marker files so a `@first_run` scenario sees the genuine
+/// Remove the managed symlinks so a `@first_run` scenario sees the genuine
 /// first-run state (nothing installed) and the guard redirects to `/welcome`.
-fn clear_installed_markers() {
-    for path in installed_marker_paths() {
+fn clear_installed_links() {
+    for path in installed_link_paths() {
         let _ = std::fs::remove_file(&path);
     }
 }
@@ -83,10 +113,11 @@ async fn create_and_register_project(base_url: &str, api_token: &str) -> (String
 /// navigate the GUI to /setup, select the project, and wait for redirect.
 ///
 /// `first_run` is `true` for scenarios tagged `@first_run`. For those we
-/// REMOVE the installed markers (so the welcome screen appears) and do NOT
+/// REMOVE the managed symlinks (so the welcome screen appears) and do NOT
 /// drive the project-selection flow — the first-run scenarios assert on the
-/// welcome screen itself. For every other scenario we SEED the installed
-/// markers and run the usual project selection.
+/// welcome screen itself. For every other scenario we RESTORE the managed
+/// symlinks to the binaries preinstalled by the runner and run the usual
+/// project selection.
 ///
 /// `multi_project` is `true` for scenarios tagged `@multi_project`. After the
 /// usual single-project selection completes, a SECOND project is provisioned
@@ -106,15 +137,15 @@ pub async fn before_scenario(
         // routes to /welcome. The scenario steps navigate and assert from
         // there, so we still need the shared WebDriver session — just not the
         // project flow.
-        clear_installed_markers();
+        clear_installed_links();
         let wd = gui_acceptance::webdriver().await;
         world.webdriver = Some(wd);
         return;
     }
 
-    // Default for all other scenarios: pretend the components are already
-    // installed so guarded routes render normally.
-    seed_installed_markers();
+    // Default for all other scenarios: restore the preinstalled components so
+    // guarded routes render normally.
+    restore_installed_links();
 
     let api_token =
         std::env::var("VTB_TOKEN").expect("VTB_TOKEN must be set for GUI acceptance tests");
@@ -214,10 +245,9 @@ pub async fn before_scenario(
 }
 
 /// After-hook: unregister the project from config.toml and clean up the temp
-/// directory. Always remove the `~/.local/bin` markers (seeded for non-first-run
-/// scenarios, or staged by the real install flow in a `@first_run` scenario) so
-/// they never leak into a later scenario. For `@first_run` scenarios also remove
-/// the staged binaries the install flow drops into the data dir's `bin/` subdir.
+/// directory. First-run scenarios remove their temporary managed links; the
+/// normal GUI scenarios leave the image's preinstalled links in place. The
+/// binaries in the shared data bin remain the GUI runner's component image.
 pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
     // Unregister from config.toml
     if let Some(slug) = &world.project_slug {
@@ -239,23 +269,7 @@ pub async fn after_scenario(world: &mut GuiWorld, first_run: bool) {
         let _ = std::fs::remove_dir_all(path);
     }
 
-    clear_installed_markers();
-
     if first_run {
-        // The install flow stages binaries into `data_dir()/bin`
-        // (vertebrae_installer::data_bin_dir(), here `~/.local/share/vertebrae/bin`).
-        // Remove ONLY that subdir — NOT the whole `~/.local/share/vertebrae`
-        // data dir, which is shared with the long-lived GUI process's
-        // `app-state.json`. Wiping the data dir out from under the running GUI
-        // makes its next app-state write fail (the parent dir vanishes), which
-        // breaks project selection for every subsequent scenario.
-        if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
-            let _ = std::fs::remove_dir_all(
-                home.join(".local")
-                    .join("share")
-                    .join("vertebrae")
-                    .join("bin"),
-            );
-        }
+        clear_installed_links();
     }
 }

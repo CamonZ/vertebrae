@@ -26,8 +26,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/CamonZ/vertebrae/releases/download/channel-release/gui-latest.json"
+      ],
+      "pubkey": "KNJ74Hpuj6F8E2sh/JTsLP1Pgc4PXlo8yaIcdsI8onc="
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
