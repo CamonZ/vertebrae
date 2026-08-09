@@ -7,6 +7,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROFILE="${SIDECAR_PROFILE:-release}"
 RUN_AFTER_BUILD=0
 BUNDLES="${TAURI_BUNDLES:-}"
+LOCAL_TAURI_CONFIG="src-tauri/tauri.local.conf.json"
 
 if [ -z "$BUNDLES" ] && [ "$(uname -s)" = "Darwin" ]; then
   BUNDLES="app"
@@ -18,6 +19,9 @@ Usage: scripts/build-package.sh [--debug|--release] [--bundles <list>] [--run]
 
 Builds vtb, vtb-daemon, and vtb-gate, stages them through
 crates/gui/scripts/prepare-sidecars.mjs, then builds the Tauri GUI bundle.
+
+Local bundles do not create signed updater artifacts or use platform signing.
+Release artifacts are signed by the release workflow.
 
 Options:
   --debug     Build debug sidecars and a debug GUI bundle
@@ -171,12 +175,17 @@ echo "==> Preparing $PROFILE Tauri sidecars..."
 
 echo "==> Building $PROFILE Tauri bundle..."
 TAURI_BUILD_ARGS=()
+TAURI_BUILD_ARGS+=(--config "$LOCAL_TAURI_CONFIG")
 if [ "$PROFILE" = "debug" ]; then
   TAURI_BUILD_ARGS+=(--debug)
 fi
 if [ -n "$BUNDLES" ]; then
   TAURI_BUILD_ARGS+=(--bundles "$BUNDLES")
 fi
+if [ "$(uname -s)" = "Darwin" ]; then
+  TAURI_BUILD_ARGS+=(--no-sign)
+fi
+echo "    Local bundle: updater artifacts disabled; platform signing disabled"
 set +e
 (cd "$REPO_ROOT/crates/gui" && npm run tauri:build -- "${TAURI_BUILD_ARGS[@]}")
 TAURI_BUILD_STATUS=$?
