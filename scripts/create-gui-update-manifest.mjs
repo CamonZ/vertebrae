@@ -21,7 +21,7 @@ if (!version || !baseUrl || !output || !baseUrl.startsWith("https://")) {
 }
 
 const platforms = {};
-for (const platform of ["darwin-aarch64", "darwin-x86_64", "linux-x86_64"]) {
+for (const platform of ["darwin-aarch64", "linux-x86_64"]) {
   const artifact = args.get(`${platform}-artifact`);
   const signature = args.get(`${platform}-signature`);
   if (!artifact || !signature) continue;

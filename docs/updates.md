@@ -32,6 +32,10 @@ Artifact names include the component, version, build, and target. Stable
 versions come from the source tag. Preview versions use the workflow run
 number and the source commit's short SHA as the build identity.
 
+Release artifacts currently target macOS ARM64 (`aarch64-apple-darwin`) on the
+`macos-26` runner, plus Linux ARM64 and x86_64. Intel macOS artifacts are not
+published.
+
 ## GUI update check
 
 The GUI uses `tauri-plugin-updater` and the signed `gui-latest.json` manifest.
@@ -71,7 +75,8 @@ The metadata and GUI configuration scripts can be tested locally with:
 
 ```bash
 node --test scripts/resolve-release-metadata.test.mjs \
-  scripts/configure-gui-release.test.mjs
+  scripts/configure-gui-release.test.mjs \
+  scripts/create-gui-update-manifest.test.mjs
 ```
 
 Do not move or reuse an immutable version/build tag. Channel pointers may move,
