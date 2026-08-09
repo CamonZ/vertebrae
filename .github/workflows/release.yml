@@ -44,20 +44,36 @@ jobs:
   binaries:
     needs: metadata
     name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     env:
       UPDATE_CHANNEL: ${{ needs.metadata.outputs.channel }}
       UPDATE_VERSION: ${{ needs.metadata.outputs.version }}
       UPDATE_BUILD: ${{ needs.metadata.outputs.build }}
       UPDATE_SHA: ${{ needs.metadata.outputs.source_sha }}
+      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
     strategy:
       fail-fast: false
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu]
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-13
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.metadata.outputs.source_sha }}
+      - name: Install Linux ARM64 cross compiler
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
       - uses: dtolnay/rust-toolchain@1.97.0
         with:
           targets: ${{ matrix.target }}
@@ -93,6 +109,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Install Ubuntu GUI dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - run: npm ci
         working-directory: crates/gui
       - uses: dtolnay/rust-toolchain@1.97.0
