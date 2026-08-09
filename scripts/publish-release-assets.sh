@@ -40,14 +40,22 @@ copy_gui_asset() {
   local pattern="$3"
   local key="${platform//-/_}"
   local artifact
-  artifact="$(find "release-input/$input_dir" -type f -name "$pattern" | head -1)"
+  artifact="$(find "release-input/$input_dir" -type f -name "$pattern" ! -name '*.sig' | head -1)"
   if [[ -z "$artifact" || ! -f "$artifact.sig" ]]; then
     echo "Missing signed GUI artifact for $platform" >&2
     exit 1
   fi
 
   local suffix
-  suffix="$(basename "$artifact" | sed 's/^.*\(\.app\.tar\.gz\|\.AppImage\.tar\.gz\)$/\1/')"
+  case "$(basename "$artifact")" in
+    *.app.tar.gz) suffix='.app.tar.gz' ;;
+    *.AppImage) suffix='.AppImage' ;;
+    *.AppImage.tar.gz) suffix='.AppImage.tar.gz' ;;
+    *)
+      echo "Unsupported GUI artifact format for $platform: $(basename "$artifact")" >&2
+      exit 1
+      ;;
+  esac
   local asset="vertebrae-gui-$platform$suffix"
   cp "$artifact" "gui-assets/$asset"
   cp "$artifact.sig" "gui-assets/$asset.sig"
@@ -59,7 +67,7 @@ copy_gui_asset() {
 
 : > gui-assets/paths.env
 copy_gui_asset darwin-aarch64 gui-macos-26 '*.app.tar.gz'
-copy_gui_asset linux-x86_64 gui-ubuntu-22.04 '*.AppImage.tar.gz'
+copy_gui_asset linux-x86_64 gui-ubuntu-22.04 '*.AppImage*'
 source gui-assets/paths.env
 
 node scripts/create-gui-update-manifest.mjs \
