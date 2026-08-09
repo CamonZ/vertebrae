@@ -32,6 +32,10 @@ Artifact names include the component, version, build, and target. Stable
 versions come from the source tag. Preview versions use the workflow run
 number and the source commit's short SHA as the build identity.
 
+Immutable release titles use `Vertebrae [edge] <version> (<build>)` for
+`master` builds and `Vertebrae [stable] <version> (<build>)` for tagged builds.
+The immutable tag itself remains targetable by automation.
+
 Release artifacts currently target macOS ARM64 (`aarch64-apple-darwin`) on the
 `macos-26` runner, plus Linux ARM64 and x86_64. Intel macOS artifacts are not
 published.

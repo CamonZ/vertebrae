@@ -13,10 +13,19 @@ set -euo pipefail
 : "${UPDATE_BUILD:?UPDATE_BUILD is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
+case "$UPDATE_CHANNEL" in
+  master) release_label=edge ;;
+  release) release_label=stable ;;
+  *)
+    echo "Unsupported update channel: $UPDATE_CHANNEL" >&2
+    exit 1
+    ;;
+esac
+
 gh release create "$IMMUTABLE_RELEASE_TAG" \
   --target "$UPDATE_SHA" \
-  --title "$UPDATE_CHANNEL components $UPDATE_VERSION ($UPDATE_BUILD)" \
-  --notes "Signed immutable component artifacts for the $UPDATE_CHANNEL channel."
+  --title "Vertebrae [$release_label] $UPDATE_VERSION ($UPDATE_BUILD)" \
+  --notes "Signed immutable component artifacts for the $release_label channel."
 
 for target_dir in release-input/binaries-*; do
   for artifact in "$target_dir"/*; do
