@@ -49,8 +49,7 @@ copy_gui_asset() {
 }
 
 : > gui-assets/paths.env
-copy_gui_asset darwin-aarch64 gui-macos-14 '*.app.tar.gz'
-copy_gui_asset darwin-x86_64 gui-macos-13 '*.app.tar.gz'
+copy_gui_asset darwin-aarch64 gui-macos-26 '*.app.tar.gz'
 copy_gui_asset linux-x86_64 gui-ubuntu-22.04 '*.AppImage.tar.gz'
 source gui-assets/paths.env
 
@@ -59,8 +58,6 @@ node scripts/create-gui-update-manifest.mjs \
   --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG" \
   --darwin-aarch64-artifact "$darwin_aarch64_artifact" \
   --darwin-aarch64-signature "$darwin_aarch64_signature" \
-  --darwin-x86_64-artifact "$darwin_x86_64_artifact" \
-  --darwin-x86_64-signature "$darwin_x86_64_signature" \
   --linux-x86_64-artifact "$linux_x86_64_artifact" \
   --linux-x86_64-signature "$linux_x86_64_signature" \
   --output gui-assets/gui-latest.json
@@ -76,7 +73,6 @@ gh release upload "$CHANNEL_TAG" gui-assets/gui-latest.json --clobber
 mkdir -p manifests
 for target in \
   aarch64-apple-darwin \
-  x86_64-apple-darwin \
   aarch64-unknown-linux-gnu \
   x86_64-unknown-linux-gnu; do
   node scripts/create-release-manifest.mjs \
