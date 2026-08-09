@@ -32,7 +32,7 @@
       "endpoints": [
         "https://github.com/CamonZ/vertebrae/releases/download/channel-release/gui-latest.json"
       ],
-      "pubkey": "KNJ74Hpuj6F8E2sh/JTsLP1Pgc4PXlo8yaIcdsI8onc="
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDQTU0NTA5RjQyRUExRTgKUldUb29TNzBDVVdsakovVlVLUFBDR1dCejRrMVdHTG5DSm1nS0lQdDU1K2dFd1BnK0RSbmRaZDgK"
     }
   },
   "bundle": {
