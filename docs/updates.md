@@ -75,6 +75,27 @@ release implementation lives in versioned scripts:
 - `scripts/publish-release-assets.sh` uploads artifacts and publishes signed
   GUI and component manifests.
 
+## macOS signing and notarization secrets
+
+The `master` and `release` GitHub environments must each contain these secrets
+for the macOS GUI job:
+
+- `APPLE_CERTIFICATE`: base64-encoded PKCS#12 export containing the Developer ID
+  Application certificate and its private key.
+- `APPLE_CERTIFICATE_PASSWORD`: password used when exporting that PKCS#12 file.
+- `APPLE_SIGNING_IDENTITY`: exact certificate name, such as `Developer ID
+  Application: Example, Inc. (TEAMID)`.
+- `APPLE_API_KEY`: App Store Connect API key ID.
+- `APPLE_API_ISSUER`: App Store Connect issuer UUID.
+- `APPLE_KEY_P8`: raw multiline contents of the downloaded `AuthKey_*.p8` file,
+  including its `BEGIN PRIVATE KEY` and `END PRIVATE KEY` lines.
+
+The workflow writes `APPLE_KEY_P8` to a permission-restricted temporary file
+and passes its path to Tauri as `APPLE_API_KEY_PATH`. These credentials are used
+only by the macOS release build for Developer ID signing and notarization.
+The Tauri updater signing secrets remain separate, and local packaging does not
+use any of these release credentials.
+
 The metadata and GUI configuration scripts can be tested locally with:
 
 ```bash
