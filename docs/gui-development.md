@@ -249,21 +249,13 @@ fails, the guard intentionally falls through to its children rather than
 blocking an already-working install. `InstallationGuard` sits above
 `ProjectGuard`, so the welcome screen comes before `/setup`.
 
-### Silent refresh of managed installs
+### GUI update availability
 
-Stale GUI-managed binaries never route through the welcome screen. At startup
-(release builds only), `refresh_stale_managed_binaries` in
-`src-tauri/src/install.rs` compares each managed staged binary against the
-bundled sidecar and silently rewrites it when the bytes differ, keeping the
-managed symlink pointed at the staged path. If the daemon binary was
-refreshed and its service is registered, the service is reloaded so the
-running daemon picks up the new bytes.
-
-Only installer-managed artifacts are touched: PATH-only installs and
-unrelated files at the symlink path are never rewritten, and missing
-components remain a welcome-screen consent decision. Failures are logged and
-never block startup. Debug builds skip the refresh entirely — in dev the
-"sidecars" next to the executable are just sibling `target/debug` binaries.
+The GUI checks its signed Tauri updater manifest once during startup. When a
+new GUI version is available, it adds a notification to the application panel.
+The check does not download, install, relaunch, or restart anything. Component
+installation remains the explicit first-run sidecar flow described above; the
+CLI, daemon, and gate do not update themselves.
 
 ### Install Locations
 

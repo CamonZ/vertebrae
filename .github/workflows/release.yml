@@ -1,0 +1,138 @@
+name: Publish component updates
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build (master or a vX.Y.Z tag)
+        required: true
+        default: master
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  metadata:
+    name: Resolve release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.resolve.outputs.channel }}
+      channel_tag: ${{ steps.resolve.outputs.channel_tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      build: ${{ steps.resolve.outputs.build }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      immutable_tag: ${{ steps.resolve.outputs.immutable_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+      - name: Resolve channel, version, and immutable release tag
+        id: resolve
+        env:
+          REQUESTED_REF: ${{ inputs.ref || github.ref }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: node scripts/resolve-release-metadata.mjs >> "$GITHUB_OUTPUT"
+
+  binaries:
+    needs: metadata
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    env:
+      UPDATE_CHANNEL: ${{ needs.metadata.outputs.channel }}
+      UPDATE_VERSION: ${{ needs.metadata.outputs.version }}
+      UPDATE_BUILD: ${{ needs.metadata.outputs.build }}
+      UPDATE_SHA: ${{ needs.metadata.outputs.source_sha }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin, aarch64-unknown-linux-gnu, x86_64-unknown-linux-gnu]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.source_sha }}
+      - uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build immutable component artifacts
+        env:
+          TARGET: ${{ matrix.target }}
+        run: scripts/build-release-binaries.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: release-assets/
+          retention-days: 7
+
+  gui:
+    needs: metadata
+    name: Build GUI ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    environment:
+      name: ${{ needs.metadata.outputs.channel }}
+    env:
+      UPDATE_CHANNEL: ${{ needs.metadata.outputs.channel }}
+      UPDATE_CHANNEL_TAG: ${{ needs.metadata.outputs.channel_tag }}
+      UPDATE_VERSION: ${{ needs.metadata.outputs.version }}
+      UPDATE_BUILD: ${{ needs.metadata.outputs.build }}
+      UPDATE_SHA: ${{ needs.metadata.outputs.source_sha }}
+    strategy:
+      matrix:
+        os: [macos-14, macos-13, ubuntu-22.04]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.source_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+        working-directory: crates/gui
+      - uses: dtolnay/rust-toolchain@1.97.0
+      - name: Set GUI bundle version
+        run: node ../../scripts/configure-gui-release.mjs src-tauri/tauri.conf.json
+        working-directory: crates/gui
+      - name: Build GUI bundle
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri:build
+        working-directory: crates/gui
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-${{ matrix.os }}
+          path: target/release/bundle/
+          retention-days: 7
+
+  publish:
+    needs: [metadata, binaries, gui]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.metadata.outputs.channel }}
+    env:
+      UPDATE_CHANNEL: ${{ needs.metadata.outputs.channel }}
+      CHANNEL_TAG: ${{ needs.metadata.outputs.channel_tag }}
+      UPDATE_VERSION: ${{ needs.metadata.outputs.version }}
+      UPDATE_BUILD: ${{ needs.metadata.outputs.build }}
+      UPDATE_SHA: ${{ needs.metadata.outputs.source_sha }}
+      IMMUTABLE_RELEASE_TAG: ${{ needs.metadata.outputs.immutable_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.metadata.outputs.source_sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-input
+      - name: Sign artifacts and publish channel metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VTB_UPDATE_PRIVATE_KEY: ${{ secrets.VTB_UPDATE_PRIVATE_KEY }}
+          VTB_UPDATE_PUBLIC_KEY: ${{ vars.VTB_UPDATE_PUBLIC_KEY }}
+        run: scripts/publish-release-assets.sh

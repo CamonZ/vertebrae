@@ -152,7 +152,12 @@ fn capabilities_from_catalog(mut catalog: CodexModelCatalog) -> HarnessCapabilit
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+    use std::{
+        fs,
+        io::Write,
+        os::unix::fs::PermissionsExt,
+        path::{Path, PathBuf},
+    };
 
     use tempfile::tempdir;
     use vertebrae_harness_core::HarnessRuntime;
@@ -190,6 +195,22 @@ mod tests {
         }"#
     }
 
+    /// Publish test executables only after their contents and permissions are
+    /// complete. Some CI filesystems return ETXTBSY when a freshly-written
+    /// executable is launched before the writer's handle is fully closed.
+    fn write_executable(path: &Path, contents: &str) {
+        let parent = path.parent().expect("executable parent");
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).unwrap();
+        temporary.write_all(contents.as_bytes()).unwrap();
+        temporary.as_file().sync_all().unwrap();
+        let temporary = temporary.into_temp_path();
+
+        let mut permissions = fs::metadata(&temporary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&temporary, permissions).unwrap();
+        fs::rename(&temporary, path).unwrap();
+    }
+
     #[test]
     fn catalog_maps_visible_models_by_priority_and_preserves_efforts() {
         let catalog: CodexModelCatalog = serde_json::from_str(catalog_json()).unwrap();
@@ -223,12 +244,10 @@ mod tests {
     async fn discovery_uses_the_codex_command_output() {
         let directory = tempdir().unwrap();
         let executable = directory.path().join("codex");
-        fs::write(
+        write_executable(
             &executable,
-            format!("#!/bin/sh\nprintf '%s' '{}'\n", catalog_json()),
-        )
-        .unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\nprintf '%s' '{}'\n", catalog_json()),
+        );
 
         let capabilities = discover_capabilities(&CodexProviderConfig {
             executable: Some(PathBuf::from(&executable)),
@@ -250,8 +269,7 @@ mod tests {
     async fn runtime_reports_discovery_failure_without_a_static_catalog() {
         let directory = tempdir().unwrap();
         let executable = directory.path().join("codex");
-        fs::write(&executable, "#!/bin/sh\nexit 1\n").unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(&executable, "#!/bin/sh\nexit 1\n");
 
         let runtime = crate::CodexRuntime::new(CodexProviderConfig {
             executable: Some(executable),

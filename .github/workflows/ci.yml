@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main]
+    branches: [master]
   pull_request:
-    branches: [master, main]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,9 +47,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --check
 
-      # The gui crate declares vtb/vtb-daemon/vtb-gate as Tauri externalBin sidecars, and
-      # Tauri's build script fails if those files are missing for the host triple.
-      # Stage them before any cargo command that compiles the gui crate (clippy).
+      # The GUI declares vtb/vtb-daemon/vtb-gate as Tauri externalBin
+      # sidecars. Stage them before compiling the GUI crate.
       - name: Stage Tauri sidecars
         run: cd crates/gui && SIDECAR_PROFILE=debug npm run tauri:prepare-sidecars
 

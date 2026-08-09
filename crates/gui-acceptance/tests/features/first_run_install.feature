@@ -1,10 +1,11 @@
 @first_run
 Feature: First-run installer welcome flow
-  On a clean machine (vtb not installed, not on PATH) the app redirects to a
+  On a clean machine (managed component links are absent and components are
+  not on PATH) the app redirects to a
   welcome/consent screen that requires installing the vtb CLI, vtb-daemon,
   and vtb-gate before continuing. These scenarios are tagged @first_run so the
-  harness REMOVES the installed markers before each scenario (all other
-  scenarios seed them).
+  harness REMOVES the managed symlinks before each scenario (all other
+  scenarios restore the preinstalled component links).
 
   Scenario: First launch shows the welcome/consent screen
     Given the GUI is on the welcome install screen
