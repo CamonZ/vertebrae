@@ -10,11 +10,12 @@ import { commands } from "./bindings";
 import { useDebugLogger } from "./hooks/useDebugLogger";
 import { useDebugStore } from "./stores/debugStore";
 import { queryClient } from "./query/queryClient";
-import { checkGuiUpdate, notifyGuiUpdateAvailable } from "./update";
+import { createGuiUpdateScheduler } from "./update";
 
 function App() {
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");
+  const [updateScheduler] = useState(() => createGuiUpdateScheduler());
 
   // Subscribe to Rust backend logs for the debug console
   useDebugLogger();
@@ -32,10 +33,13 @@ function App() {
   }, []);
 
   useEffect(() => {
+    updateScheduler.start();
+    return () => updateScheduler.stop();
+  }, [updateScheduler]);
+
+  useEffect(() => {
     async function bootstrap() {
       try {
-        const guiUpdate = await checkGuiUpdate();
-        if (guiUpdate) notifyGuiUpdateAvailable(guiUpdate);
         setStatus("Loading configuration...");
         await commands.getProjects();
         setStatus("Connecting to backend...");

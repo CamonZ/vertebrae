@@ -25,3 +25,15 @@ export type { ChatStore, ChatSession, ChatMessage } from "./chatStore";
 export { resetProjectScopedStores } from "./projectScopedStores";
 
 export { useShellStore } from "./shellStore";
+
+export {
+  GUI_UPDATE_CHANNEL,
+  initialGuiUpdateState,
+  resetGuiUpdateState,
+  useGuiUpdateStore,
+} from "./guiUpdateStore";
+export type {
+  GuiUpdateInfo,
+  GuiUpdateState,
+  GuiUpdateStatus,
+} from "./guiUpdateStore";

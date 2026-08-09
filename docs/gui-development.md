@@ -257,11 +257,15 @@ blocking an already-working install. `InstallationGuard` sits above
 
 ### GUI update availability
 
-The GUI checks its signed Tauri updater manifest once during startup. When a
-new GUI version is available, it adds a notification to the application panel.
-The check does not download, install, relaunch, or restart anything. Component
-installation remains the explicit first-run sidecar flow described above; the
-CLI, daemon, and gate do not update themselves.
+The GUI checks its signed Tauri updater manifest immediately after startup and
+then every 15 minutes while the GUI is running. Checks are single-flight and
+read-only; a transient failure leaves the last successful availability result
+and Settings badge intact. A newer GUI version adds one application-panel
+notification per channel/release identity. Cleanup stops the timer and ignores
+callbacks from an in-flight request. The check does not download, install,
+relaunch, or restart anything. Component installation remains the explicit
+first-run sidecar flow described above; the CLI, daemon, and gate do not update
+themselves.
 
 ### Install Locations
 

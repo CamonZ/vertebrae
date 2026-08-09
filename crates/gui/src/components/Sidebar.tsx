@@ -13,6 +13,7 @@ import {
   useWebSocketStatus,
   type WebSocketStatus,
 } from "../hooks/useWebSocketStatus";
+import { useGuiUpdateStore } from "../stores/guiUpdateStore";
 
 interface NavItemProps {
   to: string;
@@ -60,6 +61,7 @@ function NavItem({ to, id, label, icon, withDot }: NavItemProps) {
               {withDot && (
                 <span
                   aria-hidden
+                  data-testid={`sidebar-nav-${id}-badge`}
                   className="absolute -right-1 -top-1 h-1.5 w-1.5 rounded-full bg-[var(--color-err)] shadow-[0_0_4px_var(--color-err)]"
                 />
               )}
@@ -474,6 +476,9 @@ const SETTINGS_NAV_ITEM = {
 export function Sidebar() {
   const project = useCurrentProject();
   const navigate = useNavigate();
+  const hasAvailableGuiUpdate = useGuiUpdateStore(
+    (state) => state.available !== null
+  );
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [addProjectState, setAddProjectState] = useState<AddProjectState>({
     status: "idle",
@@ -609,7 +614,7 @@ export function Sidebar() {
         className="flex flex-col items-center gap-1 pb-1"
         data-testid="sidebar-settings-utility"
       >
-        <NavItem {...SETTINGS_NAV_ITEM} />
+        <NavItem {...SETTINGS_NAV_ITEM} withDot={hasAvailableGuiUpdate} />
       </div>
       <RailConnectionStatus />
     </aside>
