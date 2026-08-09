@@ -3,6 +3,10 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import { Sidebar } from "./Sidebar";
+import {
+  resetGuiUpdateState,
+  useGuiUpdateStore,
+} from "../stores/guiUpdateStore";
 
 const mockGetCurrentProject = vi.fn();
 const mockGetProjects = vi.fn();
@@ -50,6 +54,7 @@ describe("Sidebar Traces nav", () => {
     mockGetCurrentProject.mockResolvedValue({ status: "ok", data: null });
     mockGetProjects.mockResolvedValue({ status: "ok", data: [] });
     mockSetCurrentProject.mockResolvedValue({ status: "ok", data: null });
+    resetGuiUpdateState();
   });
 
   it("renders the primary nav in design-rail order with 14px icons", () => {
@@ -112,6 +117,28 @@ describe("Sidebar Traces nav", () => {
     await waitFor(() => {
       expect(screen.getByTestId("loc")).toHaveTextContent("/traces");
     });
+  });
+
+  it("shows the Settings badge when a GUI update is available", () => {
+    useGuiUpdateStore.setState({
+      ...useGuiUpdateStore.getState(),
+      available: {
+        channel: "release",
+        currentVersion: "0.1.0",
+        version: "0.2.0",
+      },
+      status: "available",
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/tasks"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    expect(
+      screen.getByTestId("sidebar-nav-settings-badge")
+    ).toBeInTheDocument();
   });
 });
 

@@ -43,8 +43,16 @@ published.
 ## GUI update check
 
 The GUI uses `tauri-plugin-updater` and the signed `gui-latest.json` manifest.
-It checks once during startup and adds a notification when a newer GUI version
-is available. A failed optional check does not block startup.
+It performs one read-only check as the GUI starts and repeats it every 15
+minutes while the GUI is running. A slow check is single-flight, so the
+interval never starts an overlapping request. When a newer GUI version is
+available, the Settings rail keeps a notification badge and the application
+panel receives one notification for that channel/release identity.
+
+Transient failures are observable to the Settings surface but do not block
+startup or clear the last successful availability result. Polling stops when
+the GUI lifecycle ends, and callbacks from an in-flight request are ignored
+after cleanup.
 
 The check is read-only: it does not download, install, relaunch, or force a
 restart. Applying an update remains an explicit GUI action to be added later.
