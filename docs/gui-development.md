@@ -199,6 +199,12 @@ direct `npm run tauri:dev` and `npm run tauri:build` commands continue to work:
 "beforeBuildCommand": "npm run tauri:prepare-sidecars && npm run build"
 ```
 
+The wrapper's local bundle build uses `src-tauri/tauri.local.conf.json` to skip
+updater artifact generation and, on macOS, passes Tauri's `--no-sign` option.
+This keeps local packaging independent of release signing credentials. The
+release workflow invokes Tauri directly with the production configuration and
+continues to create signed updater artifacts.
+
 `prepare-sidecars.mjs` (run via `npm run tauri:prepare-sidecars`):
 
 1. Detects the build target triple (honoring `TAURI_ENV_TARGET_TRIPLE`, else
