@@ -99,6 +99,7 @@ jobs:
       UPDATE_VERSION: ${{ needs.metadata.outputs.version }}
       UPDATE_BUILD: ${{ needs.metadata.outputs.build }}
       UPDATE_SHA: ${{ needs.metadata.outputs.source_sha }}
+      TAURI_UPDATE_PUBLIC_KEY: ${{ vars.TAURI_UPDATE_PUBLIC_KEY }}
     strategy:
       matrix:
         os: [macos-14, macos-13, ubuntu-22.04]
