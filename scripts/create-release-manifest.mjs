@@ -28,8 +28,6 @@ if (!version || !build || !target || !output || !baseUrl || !privateKey || !publ
   throw new Error("--version, --build, --target, --base-url, --output, VTB_UPDATE_PRIVATE_KEY, and VTB_UPDATE_PUBLIC_KEY are required");
 }
 
-const artifactNames = { cli: "vtb", daemon: "vtb-daemon", gate: "vtb-gate", gui: "gui" };
-
 const components = {};
 for (const [name, path] of [
   ["gui", args.get("gui")],
@@ -43,7 +41,7 @@ for (const [name, path] of [
     version,
     build,
     target,
-    url: `${baseUrl.replace(/\/$/, "")}/${artifactNames[name]}-${version}-${build}-${target}`,
+    url: `${baseUrl.replace(/\/$/, "")}/${path.split(/[\\/]/).pop()}`,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     size: statSync(path).size,
     signature: "",

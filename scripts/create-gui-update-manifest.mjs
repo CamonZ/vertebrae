@@ -14,6 +14,7 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 
 const version = args.get("version");
+const build = args.get("build");
 const baseUrl = args.get("base-url")?.replace(/\/$/, "");
 const output = args.get("output");
 if (!version || !baseUrl || !output || !baseUrl.startsWith("https://")) {
@@ -39,6 +40,7 @@ writeFileSync(
   output,
   `${JSON.stringify({
     version,
+    ...(build ? { build } : {}),
     notes: `Vertebrae ${version}`,
     pub_date: new Date().toISOString(),
     platforms,

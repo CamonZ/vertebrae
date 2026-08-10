@@ -8,6 +8,7 @@ import {
 import {
   GUI_UPDATE_CHANNEL,
   GUI_UPDATE_INTERVAL_MS,
+  applyApprovedGuiUpdate,
   checkGuiUpdate,
   checkGuiUpdateChannels,
   createGuiUpdateScheduler,
@@ -127,6 +128,75 @@ describe("GUI update checker", () => {
     checkMock.mockRejectedValue(new Error("network unavailable"));
 
     await expect(checkGuiUpdate()).resolves.toBeNull();
+  });
+
+  it("starts the native transaction only for explicit approval and exposes completion", async () => {
+    const result = {
+      transaction_id: null,
+      state: "deferred_relaunch",
+      channel: "release",
+      version: "0.2.0",
+      build: "abc1234",
+      progress: [
+        { component: "cli", state: "health_checked", message: "ready" },
+        { component: "daemon", state: "health_checked", message: "ready" },
+        { component: "gate", state: "health_checked", message: "ready" },
+        {
+          component: "gui",
+          state: "pending_relaunch",
+          message: "deferred",
+        },
+      ],
+      compatibility: "compatible",
+      signature: "verified",
+      hash: "verified",
+      disk: "sufficient",
+      component_readiness: "ready",
+      daemon_service: "running; no restart forced",
+      recovery_action: "Relaunch later",
+      restart_forced: false,
+    } as const;
+    invokeMock.mockResolvedValue(result);
+
+    await expect(
+      applyApprovedGuiUpdate({
+        channel: "release",
+        currentVersion: "0.1.0",
+        version: "0.2.0",
+        build: "abc1234",
+      })
+    ).resolves.toEqual(result);
+
+    expect(invokeMock).toHaveBeenCalledWith("apply_approved_component_update", {
+      approved: true,
+      channel: "release",
+      version: "0.2.0",
+      build: "abc1234",
+    });
+    expect(useGuiUpdateStore.getState().apply).toEqual({
+      status: "success",
+      result,
+    });
+  });
+
+  it("keeps failed apply results retryable and visible", async () => {
+    const result = {
+      state: "retryable_failure",
+      progress: [],
+      recovery_action: "Previous components remain active",
+    };
+    invokeMock.mockResolvedValue(result);
+
+    await applyApprovedGuiUpdate({
+      channel: "release",
+      currentVersion: "0.1.0",
+      version: "0.2.0",
+    });
+
+    expect(useGuiUpdateStore.getState().apply).toEqual({
+      status: "retryable_failure",
+      result,
+    });
   });
 
   it("keeps valid and unavailable channel results separate", async () => {

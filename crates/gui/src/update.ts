@@ -8,12 +8,58 @@ import {
   type GuiUpdateChannel,
   type GuiUpdateChannelState,
   type GuiUpdateInfo,
+  type GuiUpdateTransactionResult,
 } from "./stores/guiUpdateStore";
 
 export { GUI_UPDATE_CHANNEL } from "./stores/guiUpdateStore";
 export type { GuiUpdateInfo } from "./stores/guiUpdateStore";
+export type { GuiUpdateTransactionResult } from "./stores/guiUpdateStore";
 
 export const GUI_UPDATE_INTERVAL_MS = 15 * 60 * 1000;
+
+function applyStateForResult(result: GuiUpdateTransactionResult) {
+  if (result.state === "retryable_failure") return "retryable_failure" as const;
+  if (result.state === "partial_failure") return "partial_failure" as const;
+  return "success" as const;
+}
+
+export async function applyApprovedGuiUpdate(
+  update: GuiUpdateInfo
+): Promise<GuiUpdateTransactionResult | null> {
+  useGuiUpdateStore.setState((state) => ({
+    ...state,
+    apply: { status: "applying", result: null },
+  }));
+
+  try {
+    const result = await invoke<GuiUpdateTransactionResult>(
+      "apply_approved_component_update",
+      {
+        approved: true,
+        channel: update.channel ?? GUI_UPDATE_CHANNEL,
+        version: update.version,
+        build: update.build ?? null,
+      }
+    );
+    const status = applyStateForResult(result);
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      apply: { status, result },
+    }));
+    return result;
+  } catch (reason) {
+    const message = updateCheckErrorMessage(reason);
+    useGuiUpdateStore.setState((state) => ({
+      ...state,
+      apply: { status: "error", message },
+    }));
+    return null;
+  }
+}
+
+export async function relaunchGuiApplication(): Promise<void> {
+  await invoke("relaunch_application");
+}
 
 /**
  * Check the signed GUI update manifest without downloading, installing, or

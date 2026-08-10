@@ -43,6 +43,10 @@ pub enum InstallerError {
         reason: String,
     },
 
+    /// The GUI-managed path contains an installation owned by another tool.
+    #[error("Refusing to replace unmanaged installation at {path}")]
+    UnmanagedInstall { path: PathBuf },
+
     /// Failed to remove a file (binary, symlink, plist, unit file).
     #[error("Failed to remove {path}: {reason}")]
     Remove { path: PathBuf, reason: String },

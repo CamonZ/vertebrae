@@ -72,6 +72,7 @@ source gui-assets/paths.env
 
 node scripts/create-gui-update-manifest.mjs \
   --version "$UPDATE_VERSION" \
+  --build "$UPDATE_BUILD" \
   --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG" \
   --darwin-aarch64-artifact "$darwin_aarch64_artifact" \
   --darwin-aarch64-signature "$darwin_aarch64_signature" \
@@ -92,16 +93,24 @@ for target in \
   aarch64-apple-darwin \
   aarch64-unknown-linux-gnu \
   x86_64-unknown-linux-gnu; do
-  node scripts/create-release-manifest.mjs \
-    --channel "$UPDATE_CHANNEL" \
-    --version "$UPDATE_VERSION" \
-    --build "$UPDATE_BUILD" \
-    --target "$target" \
-    --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG" \
+  manifest_args=(
+    --channel "$UPDATE_CHANNEL"
+    --version "$UPDATE_VERSION"
+    --build "$UPDATE_BUILD"
+    --target "$target"
+    --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG"
+  )
+  case "$target" in
+    aarch64-apple-darwin) manifest_args+=(--gui "$darwin_aarch64_artifact") ;;
+    x86_64-unknown-linux-gnu) manifest_args+=(--gui "$linux_x86_64_artifact") ;;
+  esac
+  manifest_args+=(
     --cli "$(find "release-input/binaries-$target" -name "vtb-$UPDATE_VERSION-*" -type f | head -1)" \
     --daemon "$(find "release-input/binaries-$target" -name 'vtb-daemon-*' -type f | head -1)" \
     --gate "$(find "release-input/binaries-$target" -name 'vtb-gate-*' -type f | head -1)" \
     --output "manifests/latest-$target.json"
+  )
+  node scripts/create-release-manifest.mjs "${manifest_args[@]}"
 done
 
 gh release upload "$IMMUTABLE_RELEASE_TAG" manifests/latest-*.json --clobber=false

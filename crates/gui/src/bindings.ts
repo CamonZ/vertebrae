@@ -1231,6 +1231,39 @@ export const commands = {
     }
   },
   /**
+   * Check the signed GUI release metadata for every supported channel.
+   *
+   * The updater plugin normally reads the single endpoint configured for the
+   * current bundle. Channel selection needs independent availability, so each
+   * endpoint is checked through a separate native updater builder. This keeps
+   * signature and platform validation identical to the normal updater path.
+   */
+  async checkGuiUpdateChannels(): Promise<GuiUpdateChannelStatus[]> {
+    return await TAURI_INVOKE("check_gui_update_channels");
+  },
+  /**
+   * Record useful native diagnostics after the updater plugin reports a failed
+   * check. The plugin currently logs only that the endpoint returned a
+   * non-success status, so this follow-up request captures the configured URL,
+   * HTTP status, content type, and a bounded response preview in the app log.
+   *
+   * This command is diagnostic-only: it never downloads, installs, or relaunches
+   * the application. It is called only after the signed updater check fails.
+   */
+  async diagnoseGuiUpdateCheck(
+    reason: string
+  ): Promise<Result<null, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("diagnose_gui_update_check", { reason }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
    * Probe the current install state without making any changes.
    *
    * Safe to call on every app launch — performs only filesystem lookups and a
@@ -1278,6 +1311,38 @@ export const commands = {
           installGate,
         }),
       };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * The approval gate runs before any network or filesystem work.
+   */
+  async applyApprovedComponentUpdate(
+    approved: boolean,
+    channel: string,
+    version: string,
+    build: string | null
+  ): Promise<Result<UpdateTransactionResult, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("apply_approved_component_update", {
+          approved,
+          channel,
+          version,
+          build,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  async relaunchApplication(): Promise<Result<null, CommandError>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("relaunch_application") };
     } catch (e) {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as any };
@@ -1536,6 +1601,21 @@ export type CreateStepOptions = {
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed";
+export type GuiUpdateChannelRelease = {
+  currentVersion: string;
+  version: string;
+  date: string | null;
+  body: string | null;
+  rawJson: JsonValue;
+  isUpdate: boolean;
+};
+export type GuiUpdateChannelStatus = {
+  channel: string;
+  endpoint: string;
+  available: boolean;
+  release: GuiUpdateChannelRelease | null;
+  error: string | null;
+};
 export type InferLocalChatSessionTitleInput = {
   harness: LocalChatHarnessKind;
   initial_prompts: string[];
@@ -2644,6 +2724,21 @@ export type TaskStepChangedEvent = {
   workflow_id: string;
   level: TaskLevel;
 };
+export type UpdateComponentResult = {
+  component: string;
+  state: UpdateComponentState;
+  message: string;
+};
+export type UpdateComponentState =
+  | "pending"
+  | "downloaded"
+  | "verified"
+  | "staged"
+  | "activated"
+  | "health_checked"
+  | "pending_relaunch"
+  | "rolled_back"
+  | "failed";
 /**
  * Options for updating a workflow step.
  * Only fields that are Some will be updated.
@@ -2698,6 +2793,32 @@ export type UpdateTaskOptions = {
    */
   worktree: string | null;
 };
+export type UpdateTransactionResult = {
+  transaction_id: string | null;
+  state: UpdateTransactionState;
+  channel: string;
+  version: string;
+  build: string;
+  progress: UpdateComponentResult[];
+  compatibility: string;
+  signature: string;
+  hash: string;
+  disk: string;
+  component_readiness: string;
+  daemon_service: string;
+  recovery_action: string | null;
+  restart_forced: boolean;
+};
+export type UpdateTransactionState =
+  | "preflight"
+  | "downloading"
+  | "verifying"
+  | "activating"
+  | "health_checked"
+  | "deferred_relaunch"
+  | "success"
+  | "partial_failure"
+  | "retryable_failure";
 /**
  * Options for updating a workflow from the GUI.
  *

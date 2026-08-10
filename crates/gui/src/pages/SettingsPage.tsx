@@ -21,8 +21,10 @@ import {
   type GuiUpdateComponentInfo,
   type GuiUpdateComponentKey,
   type GuiUpdateInfo,
+  type GuiUpdateApplyState,
   type GuiUpdateState,
 } from "../stores/guiUpdateStore";
+import { applyApprovedGuiUpdate, relaunchGuiApplication } from "../update";
 import { useUIStore } from "../stores/uiStore";
 import {
   hasStaleModelDefault,
@@ -526,6 +528,90 @@ function UpdateStateMessage({
   );
 }
 
+function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
+  if (apply.status === "idle") return null;
+  if (apply.status === "applying") {
+    return (
+      <UpdateStateMessage intent="status" testId="settings-update-applying">
+        Applying the approved signed release. Components are being downloaded,
+        verified, and activated in order…
+      </UpdateStateMessage>
+    );
+  }
+  if (apply.status === "error") {
+    return (
+      <UpdateStateMessage intent="alert" testId="settings-update-apply-error">
+        The update could not be applied: {apply.message}
+      </UpdateStateMessage>
+    );
+  }
+
+  const result = apply.result;
+  if (!result) return null;
+  const failed =
+    apply.status === "partial_failure" || apply.status === "retryable_failure";
+  const relaunchAvailable =
+    !failed && result.state === "deferred_relaunch" && !result.restart_forced;
+
+  return (
+    <section
+      className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] p-5"
+      data-testid={
+        failed
+          ? apply.status === "retryable_failure"
+            ? "settings-update-retry"
+            : "settings-update-partial-failure"
+          : "settings-update-result"
+      }
+      role={failed ? "alert" : "status"}
+    >
+      <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+        {failed ? "Update needs attention" : "Update complete"}
+      </p>
+      <p className="mt-2 text-sm leading-6 text-[var(--color-fg-soft)]">
+        {failed
+          ? (result.recovery_action ??
+            "The previous active components were preserved. You can retry after correcting the release.")
+          : "The approved release was applied without forcing a restart."}
+      </p>
+      <ul
+        className="mt-4 divide-y divide-[var(--color-line)] rounded-[var(--radius-sm)] border border-[var(--color-line)]"
+        data-testid="settings-update-progress"
+      >
+        {result.progress.map((component) => (
+          <li
+            className="flex items-center justify-between gap-3 px-3 py-2 text-xs"
+            key={component.component}
+          >
+            <span className="font-mono text-[var(--color-fg)]">
+              {component.component}
+            </span>
+            <span className="text-right text-[var(--color-fg-mute)]">
+              {component.state.replace(/_/g, " ")} — {component.message}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {relaunchAvailable && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line)] pt-4">
+          <span className="text-xs text-[var(--color-fg-mute)]">
+            The new GUI will take effect after a relaunch.
+          </span>
+          <Button
+            variant="secondary"
+            data-testid="settings-update-relaunch"
+            onClick={() => {
+              void relaunchGuiApplication();
+            }}
+          >
+            Relaunch GUI
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function UpdateComponents({ update }: { update: GuiUpdateInfo }) {
   return (
     <section
@@ -723,6 +809,11 @@ function UpdatesSection({
 }) {
   const update = state.available;
   const showRelease = update !== null && hasAvailableUpdate(state);
+  const apply = state.apply ?? { status: "idle" as const };
+
+  if (apply.status !== "idle") {
+    return <UpdateApplyStatus apply={apply} />;
+  }
 
   if (!showRelease) {
     if (state.checking || state.status === "checking") {
@@ -852,7 +943,7 @@ function UpdatesSection({
 type SettingsSection = "chat" | "appearance" | "updates";
 
 export interface SettingsPageProps {
-  /** Review-only hook for the future apply flow; this page never installs. */
+  /** Optional test/integration hook; the default action applies the approved release. */
   onApproveUpdate?: (update: GuiUpdateInfo) => void;
 }
 
@@ -884,6 +975,9 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
     ? resolveDefaultHarness(catalog, defaultHarness)
     : null;
   const updateIsAvailable = hasAvailableUpdate(updateState);
+  const approveUpdate =
+    onApproveUpdate ??
+    ((update: GuiUpdateInfo) => void applyApprovedGuiUpdate(update));
 
   useEffect(() => {
     if (!savedFeedback) return;
@@ -1134,7 +1228,7 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
             stale={
               updateState.status === "error" || updateState.status === "stale"
             }
-            onApprove={onApproveUpdate}
+            onApprove={approveUpdate}
             onClose={() => setReviewOpen(false)}
           />
         )}
