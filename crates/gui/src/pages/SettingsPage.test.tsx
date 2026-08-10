@@ -199,6 +199,66 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("renders ordered apply progress and offers only a deferred relaunch", async () => {
+    const user = userEvent.setup();
+    const result = {
+      transaction_id: null,
+      state: "deferred_relaunch" as const,
+      channel: "release",
+      version: "0.2.0",
+      build: "abc1234",
+      progress: [
+        {
+          component: "cli",
+          state: "health_checked" as const,
+          message: "ready",
+        },
+        {
+          component: "daemon",
+          state: "health_checked" as const,
+          message: "ready",
+        },
+        {
+          component: "gate",
+          state: "health_checked" as const,
+          message: "ready",
+        },
+        {
+          component: "gui",
+          state: "pending_relaunch" as const,
+          message: "deferred",
+        },
+      ],
+      compatibility: "compatible",
+      signature: "verified",
+      hash: "verified",
+      disk: "sufficient",
+      component_readiness: "ready",
+      daemon_service: "running; no restart forced",
+      recovery_action: "Relaunch later",
+      restart_forced: false,
+    };
+    useGuiUpdateStore.setState({
+      ...initialGuiUpdateState,
+      apply: { status: "success", result },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    await user.click(screen.getByTestId("settings-nav-updates"));
+    expect(screen.getByTestId("settings-update-result")).toHaveTextContent(
+      "Update complete"
+    );
+    expect(screen.getByTestId("settings-update-progress")).toHaveTextContent(
+      "daemon"
+    );
+    expect(screen.getByTestId("settings-update-relaunch")).toBeVisible();
+  });
+
   it("supports missing notes and safe current or failed states", async () => {
     const user = userEvent.setup();
     useGuiUpdateStore.setState({

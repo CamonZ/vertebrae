@@ -36,7 +36,7 @@ pub mod linux;
 #[cfg(any(target_os = "macos", test))]
 pub mod macos;
 
-pub use binary::{install_binary, uninstall_binary};
+pub use binary::{BinaryTransaction, install_binary, uninstall_binary};
 pub use claude_plugin_dir::{ClaudePluginDirResolution, resolve_claude_plugin_dir};
 pub use error::InstallerError;
 pub use paths::{

@@ -7,6 +7,7 @@ pub mod install;
 pub(crate) mod local_chat;
 pub mod project_config;
 pub mod types;
+pub mod update;
 pub mod websocket_client;
 
 #[cfg(test)]
@@ -151,6 +152,8 @@ fn create_builder() -> Builder {
             // Installer flow commands (first-run welcome screen)
             install::installation_status,
             install::install_components,
+            update::apply_approved_component_update,
+            update::relaunch_application,
         ])
         .events(collect_events![
             ArtifactChangedEvent,

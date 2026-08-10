@@ -47,6 +47,148 @@ pub fn install_binary(name: &str, source_path: &Path) -> Result<PathBuf, Install
     Ok(staged)
 }
 
+/// An all-or-nothing activation of GUI-managed binaries.
+///
+/// The individual copy and symlink operations are already atomic, but a
+/// release updates more than one component. This transaction keeps a memory
+/// snapshot of every active component and restores it if a later component
+/// cannot be activated. Callers should call [`BinaryTransaction::commit`] once
+/// any related work (for example, a GUI updater install) has completed.
+#[derive(Debug)]
+pub struct BinaryTransaction {
+    snapshots: Vec<BinarySnapshot>,
+}
+
+#[derive(Debug)]
+struct BinarySnapshot {
+    staged: PathBuf,
+    staged_bytes: Option<Vec<u8>>,
+    link: PathBuf,
+    link_target: Option<PathBuf>,
+}
+
+impl BinaryTransaction {
+    /// Activate all `components` in the supplied order.
+    ///
+    /// The caller owns the ordering contract. The function refuses to replace
+    /// an unmanaged regular file or symlink, which prevents a PATH-only
+    /// installation from being overwritten by the GUI updater.
+    pub fn activate(components: &[(&str, &Path)]) -> Result<Self, InstallerError> {
+        let mut snapshots = Vec::with_capacity(components.len());
+        for (name, source) in components {
+            if !source.is_file() {
+                return Err(InstallerError::SourceNotFound {
+                    path: source.to_path_buf(),
+                });
+            }
+
+            let staged = data_bin_dir()?.join(name);
+            let link = symlink_path(name)?;
+            if !is_safe_managed_target(&link, &staged) {
+                return Err(InstallerError::UnmanagedInstall { path: link });
+            }
+
+            snapshots.push(BinarySnapshot {
+                staged_bytes: fs::read(&staged).ok(),
+                staged,
+                link_target: managed_link_target(&link),
+                link,
+            });
+        }
+
+        for (name, source) in components {
+            if let Err(error) = install_binary(name, source) {
+                let transaction = Self { snapshots };
+                let _ = transaction.rollback();
+                return Err(error);
+            }
+        }
+
+        Ok(Self { snapshots })
+    }
+
+    pub fn rollback(&self) -> Result<(), InstallerError> {
+        let mut first_error = None;
+        for snapshot in &self.snapshots {
+            if let Err(error) = restore_snapshot(snapshot) {
+                first_error.get_or_insert(error);
+            }
+        }
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    pub fn commit(self) {}
+}
+
+fn is_safe_managed_target(link: &Path, staged: &Path) -> bool {
+    match fs::symlink_metadata(link) {
+        Err(_) => true,
+        Ok(meta) if meta.file_type().is_symlink() => {
+            managed_link_target(link).as_deref() == Some(staged)
+        }
+        // A regular file at the managed path may be a PATH-only install. It
+        // is never safe for the GUI updater to replace it implicitly.
+        Ok(_) => false,
+    }
+}
+
+fn managed_link_target(link: &Path) -> Option<PathBuf> {
+    let metadata = fs::symlink_metadata(link).ok()?;
+    if !metadata.file_type().is_symlink() {
+        return None;
+    }
+    let target = fs::read_link(link).ok()?;
+    Some(if target.is_absolute() {
+        target
+    } else {
+        link.parent().unwrap_or_else(|| Path::new(".")).join(target)
+    })
+}
+
+fn restore_snapshot(snapshot: &BinarySnapshot) -> Result<(), InstallerError> {
+    if let Some(bytes) = &snapshot.staged_bytes {
+        let parent = snapshot.staged.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(parent).map_err(|error| InstallerError::CreateDir {
+            path: parent.to_path_buf(),
+            reason: error.to_string(),
+        })?;
+        let restore = temp_sibling_path(&snapshot.staged, "rollback");
+        remove_stale_temp_file(&restore)?;
+        fs::write(&restore, bytes).map_err(|error| InstallerError::CopyBinary {
+            from: snapshot.staged.clone(),
+            to: snapshot.staged.clone(),
+            reason: error.to_string(),
+        })?;
+        set_executable(&restore)?;
+        fs::rename(&restore, &snapshot.staged).map_err(|error| InstallerError::CopyBinary {
+            from: snapshot.staged.clone(),
+            to: snapshot.staged.clone(),
+            reason: error.to_string(),
+        })?;
+    } else if fs::symlink_metadata(&snapshot.staged).is_ok() {
+        fs::remove_file(&snapshot.staged).map_err(|error| InstallerError::Remove {
+            path: snapshot.staged.clone(),
+            reason: error.to_string(),
+        })?;
+    }
+
+    match &snapshot.link_target {
+        Some(target) => replace_symlink(&snapshot.link, target),
+        None => {
+            if fs::symlink_metadata(&snapshot.link).is_ok() {
+                fs::remove_file(&snapshot.link).map_err(|error| InstallerError::Remove {
+                    path: snapshot.link.clone(),
+                    reason: error.to_string(),
+                })?;
+            }
+            Ok(())
+        }
+    }
+}
+
 fn copy_binary_to_staged_path(source_path: &Path, staged: &Path) -> Result<(), InstallerError> {
     let temp = temp_sibling_path(staged, "copy");
     remove_stale_temp_file(&temp)?;
@@ -320,6 +462,66 @@ mod tests {
             staged,
             "failed refresh must preserve the previous managed symlink"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn binary_transaction_rolls_back_every_component() {
+        let _home = HomeGuard::new();
+        let old_dir = tempfile::tempdir().unwrap();
+        let new_dir = tempfile::tempdir().unwrap();
+        let names = ["vtb", "vtb-daemon", "vtb-gate"];
+
+        for name in names {
+            let old = write_dummy_binary(old_dir.path(), name, format!("old-{name}").as_bytes());
+            install_binary(name, &old).expect("install old component");
+        }
+
+        let new_sources: Vec<_> = names
+            .iter()
+            .map(|name| write_dummy_binary(new_dir.path(), name, format!("new-{name}").as_bytes()))
+            .collect();
+        let activation: Vec<_> = names
+            .iter()
+            .zip(new_sources.iter())
+            .map(|(name, source)| (*name, source.as_path()))
+            .collect();
+
+        let transaction = BinaryTransaction::activate(&activation).expect("activate update");
+        for (name, source) in names.iter().zip(new_sources.iter()) {
+            assert_eq!(
+                fs::read(data_bin_dir().unwrap().join(name)).unwrap(),
+                fs::read(source).unwrap()
+            );
+        }
+
+        transaction.rollback().expect("rollback update");
+        for name in names {
+            assert_eq!(
+                fs::read(data_bin_dir().unwrap().join(name)).unwrap(),
+                format!("old-{name}").as_bytes()
+            );
+            assert_eq!(
+                fs::read_link(symlink_path(name).unwrap()).unwrap(),
+                data_bin_dir().unwrap().join(name)
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn binary_transaction_refuses_unmanaged_path_only_file() {
+        let _home = HomeGuard::new();
+        let source_dir = tempfile::tempdir().unwrap();
+        let source = write_dummy_binary(source_dir.path(), "vtb", b"update");
+        let link = symlink_path("vtb").unwrap();
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        fs::write(&link, b"path-only").unwrap();
+
+        let error = BinaryTransaction::activate(&[("vtb", source.as_path())])
+            .expect_err("path-only installation must not be replaced");
+        assert!(matches!(error, InstallerError::UnmanagedInstall { .. }));
+        assert_eq!(fs::read(link).unwrap(), b"path-only");
     }
 
     #[test]

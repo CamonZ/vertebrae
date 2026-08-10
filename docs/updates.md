@@ -64,8 +64,18 @@ misconfigured or unavailable channel releases diagnosable without exposing
 those transport details in the Settings UI.
 
 The check is read-only: it does not download, install, relaunch, or force a
-restart. Applying an update remains an explicit GUI action to be added later.
-The CLI, daemon, and gate are update targets, not update clients.
+restart. Applying an update is a separate, explicit GUI action. Approval
+starts a preflight that verifies the selected channel manifest, component
+identity, target, version, build, signatures, hashes, disk space, and managed
+installation paths. The GUI then downloads and verifies all four artifacts,
+stages the CLI, daemon, and gate, atomically activates those managed binaries,
+checks their symlinks and daemon status, and finally applies the signed GUI
+artifact. A failed verification or activation preserves the prior managed
+components. Successful application reports per-component progress and offers
+the GUI relaunch as a deferred user action; it never forces a restart or
+silently reloads the daemon. Release notes are informational and are not
+required for verification or installation. The CLI, daemon, and gate are
+update targets, not update clients.
 
 The first-run component installer remains an explicit install of the binaries
 bundled with the GUI. It is separate from the channel check and does not run

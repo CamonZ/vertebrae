@@ -59,6 +59,59 @@ export interface GuiUpdateInfo {
   verification?: GuiUpdateVerificationInfo;
 }
 
+export type GuiUpdateComponentState =
+  | "pending"
+  | "downloaded"
+  | "verified"
+  | "staged"
+  | "activated"
+  | "health_checked"
+  | "pending_relaunch"
+  | "rolled_back"
+  | "failed";
+
+export interface GuiUpdateComponentResult {
+  component: GuiUpdateComponentKey | string;
+  state: GuiUpdateComponentState;
+  message: string;
+}
+
+export type GuiUpdateTransactionState =
+  | "preflight"
+  | "downloading"
+  | "verifying"
+  | "activating"
+  | "health_checked"
+  | "deferred_relaunch"
+  | "success"
+  | "partial_failure"
+  | "retryable_failure";
+
+export interface GuiUpdateTransactionResult {
+  transaction_id: string | null;
+  state: GuiUpdateTransactionState;
+  channel: string;
+  version: string;
+  build: string;
+  progress: GuiUpdateComponentResult[];
+  compatibility: string;
+  signature: string;
+  hash: string;
+  disk: string;
+  component_readiness: string;
+  daemon_service: string;
+  recovery_action: string | null;
+  restart_forced: boolean;
+}
+
+export type GuiUpdateApplyState =
+  | { status: "idle" }
+  | { status: "applying"; result: GuiUpdateTransactionResult | null }
+  | { status: "success"; result: GuiUpdateTransactionResult }
+  | { status: "partial_failure"; result: GuiUpdateTransactionResult }
+  | { status: "retryable_failure"; result: GuiUpdateTransactionResult }
+  | { status: "error"; message: string };
+
 /** Signed metadata availability for one selectable update channel. */
 export interface GuiUpdateChannelState {
   available: boolean;
@@ -91,6 +144,7 @@ export interface GuiUpdateState {
   channels: Record<GuiUpdateChannel, GuiUpdateChannelState>;
   /** Channel currently shown by Settings > Updates. */
   selectedChannel: GuiUpdateChannel;
+  apply: GuiUpdateApplyState;
 }
 
 function initialChannelState(): GuiUpdateChannelState {
@@ -121,6 +175,7 @@ export const initialGuiUpdateState: GuiUpdateState = {
   status: "idle",
   channels: initialChannelStates(),
   selectedChannel: GUI_UPDATE_CHANNEL,
+  apply: { status: "idle" },
 };
 
 export const useGuiUpdateStore = create<GuiUpdateState>()(() => ({
