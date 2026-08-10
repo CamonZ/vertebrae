@@ -1,8 +1,12 @@
 import { check } from "@tauri-apps/plugin-updater";
+import { invoke } from "@tauri-apps/api/core";
 import { useNotificationStore } from "./stores/notificationStore";
 import {
+  GUI_UPDATE_CHANNELS,
   GUI_UPDATE_CHANNEL,
   useGuiUpdateStore,
+  type GuiUpdateChannel,
+  type GuiUpdateChannelState,
   type GuiUpdateInfo,
 } from "./stores/guiUpdateStore";
 
@@ -19,11 +23,140 @@ async function readGuiUpdate(): Promise<GuiUpdateInfo | null> {
   const update = await check();
   if (!update) return null;
 
+  // Tauri exposes `body` and `date` from the updater manifest. Keep the
+  // adapter tolerant of the optional release metadata added to newer
+  // manifests while preserving the small legacy result used by the checker
+  // tests and existing callers.
+  const metadata = update as unknown as {
+    body?: unknown;
+    build?: unknown;
+    channel?: unknown;
+    components?: GuiUpdateInfo["components"];
+    date?: unknown;
+    notes?: unknown;
+    preflight?: GuiUpdateInfo["verification"];
+    pub_date?: unknown;
+    releaseNotes?: unknown;
+    verification?: GuiUpdateInfo["verification"];
+  };
+  const releaseNotes = [
+    metadata.releaseNotes,
+    metadata.body,
+    metadata.notes,
+  ].find(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+  const publicationDate = [metadata.date, metadata.pub_date].find(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+  const build =
+    typeof metadata.build === "string" && metadata.build.length > 0
+      ? metadata.build
+      : undefined;
+  const channel =
+    typeof metadata.channel === "string" && metadata.channel.length > 0
+      ? metadata.channel
+      : GUI_UPDATE_CHANNEL;
+
   return {
-    channel: GUI_UPDATE_CHANNEL,
+    channel,
     currentVersion: update.currentVersion,
     version: update.version,
+    ...(build ? { build } : {}),
+    ...(publicationDate
+      ? { date: publicationDate, publishedAt: publicationDate }
+      : {}),
+    ...(releaseNotes ? { releaseNotes } : {}),
+    ...(metadata.components ? { components: metadata.components } : {}),
+    ...(metadata.verification
+      ? { verification: metadata.verification }
+      : metadata.preflight
+        ? { verification: metadata.preflight }
+        : {}),
   };
+}
+
+export interface GuiUpdateChannelCheck extends GuiUpdateChannelState {
+  channel: GuiUpdateChannel;
+  endpoint: string;
+}
+
+interface NativeGuiUpdateChannelStatus {
+  channel: GuiUpdateChannel;
+  endpoint: string;
+  available: boolean;
+  release: {
+    currentVersion: string;
+    version: string;
+    date: string | null;
+    body: string | null;
+    rawJson: Record<string, unknown>;
+    isUpdate: boolean;
+  } | null;
+  error: string | null;
+}
+
+function updateFromChannelRelease(
+  status: NativeGuiUpdateChannelStatus
+): GuiUpdateInfo | null {
+  const release = status.release;
+  if (!status.available || !release || !release.isUpdate) return null;
+
+  const metadata = release.rawJson;
+  const releaseNotes = [
+    metadata.releaseNotes,
+    metadata.body,
+    metadata.notes,
+    release.body,
+  ].find(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+  const publicationDate = [
+    metadata.date,
+    metadata.pub_date,
+    metadata.pubDate,
+    release.date,
+  ].find(
+    (value): value is string => typeof value === "string" && value.length > 0
+  );
+
+  return {
+    channel: status.channel,
+    currentVersion: release.currentVersion,
+    version: release.version,
+    ...(typeof metadata.build === "string" && metadata.build.length > 0
+      ? { build: metadata.build }
+      : {}),
+    ...(publicationDate
+      ? { date: publicationDate, publishedAt: publicationDate }
+      : {}),
+    ...(releaseNotes ? { releaseNotes } : {}),
+    ...(metadata.components ? { components: metadata.components } : {}),
+    ...(metadata.verification
+      ? { verification: metadata.verification }
+      : metadata.preflight
+        ? { verification: metadata.preflight }
+        : {}),
+  };
+}
+
+/** Check both signed release channels without downloading or installing. */
+export async function checkGuiUpdateChannels(): Promise<
+  GuiUpdateChannelCheck[]
+> {
+  const statuses = await invoke<NativeGuiUpdateChannelStatus[]>(
+    "check_gui_update_channels"
+  );
+
+  return statuses.map((status) => ({
+    channel: status.channel,
+    endpoint: status.endpoint,
+    available: status.available,
+    currentVersion: status.release?.currentVersion ?? null,
+    latestVersion: status.release?.version ?? null,
+    update: updateFromChannelRelease(status),
+    error: status.error,
+  }));
 }
 
 /**
@@ -46,8 +179,10 @@ export interface GuiUpdateSchedulerTimers {
 
 export interface GuiUpdateSchedulerOptions {
   check?: () => Promise<GuiUpdateInfo | null>;
+  checkChannels?: () => Promise<GuiUpdateChannelCheck[]>;
   intervalMs?: number;
   timers?: GuiUpdateSchedulerTimers;
+  reportFailure?: (message: string) => Promise<unknown>;
 }
 
 export interface GuiUpdateScheduler {
@@ -56,6 +191,19 @@ export interface GuiUpdateScheduler {
 }
 
 const notifiedGuiUpdateIds = new Set<string>();
+
+function updateCheckErrorMessage(reason: unknown): string {
+  if (reason instanceof Error && reason.message) return reason.message;
+  if (typeof reason === "string" && reason.length > 0) return reason;
+  if (reason && typeof reason === "object") {
+    try {
+      return JSON.stringify(reason);
+    } catch {
+      // Fall through to the generic message for non-serializable errors.
+    }
+  }
+  return "Update check failed";
+}
 
 const browserTimers: GuiUpdateSchedulerTimers = {
   setInterval: (callback, delay) => window.setInterval(callback, delay),
@@ -73,8 +221,13 @@ export function createGuiUpdateScheduler(
   options: GuiUpdateSchedulerOptions = {}
 ): GuiUpdateScheduler {
   const checkUpdate = options.check ?? readGuiUpdate;
+  const checkChannels = options.checkChannels;
   const intervalMs = options.intervalMs ?? GUI_UPDATE_INTERVAL_MS;
   const timers = options.timers ?? browserTimers;
+  const reportFailure =
+    options.reportFailure ??
+    ((message: string) =>
+      invoke("diagnose_gui_update_check", { reason: message }));
 
   let started = false;
   let lifecycleGeneration = 0;
@@ -100,6 +253,54 @@ export function createGuiUpdateScheduler(
     }));
 
     try {
+      if (checkChannels) {
+        const channelChecks = await checkChannels();
+        if (!isCurrentLifecycle(generation)) return;
+
+        const currentState = useGuiUpdateStore.getState();
+        const checkedChannels = GUI_UPDATE_CHANNELS.reduce(
+          (channels, channel) => {
+            const checked = channelChecks.find(
+              (result) => result.channel === channel
+            );
+            channels[channel] = checked ?? {
+              available: false,
+              currentVersion: null,
+              latestVersion: null,
+              update: null,
+              error: "No signed channel result was returned.",
+            };
+            return channels;
+          },
+          {} as typeof currentState.channels
+        );
+        const selectedChannel = checkedChannels[currentState.selectedChannel]
+          ?.available
+          ? currentState.selectedChannel
+          : (GUI_UPDATE_CHANNELS.find(
+              (channel) => checkedChannels[channel].available
+            ) ?? currentState.selectedChannel);
+        const selected = checkedChannels[selectedChannel];
+        const status = selected.available
+          ? selected.update
+            ? "available"
+            : "current"
+          : "unavailable";
+
+        useGuiUpdateStore.setState((state) => ({
+          ...state,
+          available: selected.update,
+          channels: checkedChannels,
+          checking: false,
+          currentVersion: selected.currentVersion,
+          error: selected.error,
+          selectedChannel,
+          status,
+        }));
+        if (selected.update) notifyGuiUpdateAvailable(selected.update);
+        return;
+      }
+
       const update = await checkUpdate();
       if (!isCurrentLifecycle(generation)) return;
 
@@ -125,12 +326,22 @@ export function createGuiUpdateScheduler(
     } catch (reason) {
       if (!isCurrentLifecycle(generation)) return;
 
+      const message = updateCheckErrorMessage(reason);
+      console.warn("[GUI updater] Signed update check failed", {
+        message,
+        reason,
+        retryInMs: intervalMs,
+      });
+      void Promise.resolve()
+        .then(() => reportFailure(message))
+        .catch(() => undefined);
+
       useGuiUpdateStore.setState((state) => ({
         ...state,
         checking: false,
         // Keep `available` and `currentVersion`: a network failure is not
         // evidence that the previously observed release disappeared.
-        error: reason instanceof Error ? reason.message : "Update check failed",
+        error: message,
         status: "error",
       }));
     } finally {

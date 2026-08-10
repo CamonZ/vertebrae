@@ -43,16 +43,25 @@ published.
 ## GUI update check
 
 The GUI uses `tauri-plugin-updater` and the signed `gui-latest.json` manifest.
-It performs one read-only check as the GUI starts and repeats it every 15
-minutes while the GUI is running. A slow check is single-flight, so the
-interval never starts an overlapping request. When a newer GUI version is
-available, the Settings rail keeps a notification badge and the application
-panel receives one notification for that channel/release identity.
+It performs one read-only check of both the `master` and `release` channels as
+the GUI starts and repeats them every 15 minutes while the GUI is running. A
+slow check is single-flight, so the interval never starts overlapping checks.
+Settings exposes the two channels and disables a channel when its signed
+metadata cannot be fetched or verified. When a newer GUI version is available,
+the Settings rail keeps a notification badge and the application panel
+receives one notification for that channel/release identity.
 
 Transient failures are observable to the Settings surface but do not block
 startup or clear the last successful availability result. Polling stops when
 the GUI lifecycle ends, and callbacks from an in-flight request are ignored
 after cleanup.
+
+When a check fails, the Settings surface keeps the user-facing message concise
+(`The update check failed.`). The native app log records the failure reason and
+then probes each configured updater endpoint once, including its URL, HTTP
+status, response content type, and a bounded response preview. This makes
+misconfigured or unavailable channel releases diagnosable without exposing
+those transport details in the Settings UI.
 
 The check is read-only: it does not download, install, relaunch, or force a
 restart. Applying an update remains an explicit GUI action to be added later.

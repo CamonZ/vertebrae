@@ -145,6 +145,9 @@ fn create_builder() -> Builder {
             commands::get_websocket_status,
             // Application lifecycle
             commands::quit_application,
+            // Update diagnostics
+            commands::check_gui_update_channels,
+            commands::diagnose_gui_update_check,
             // Installer flow commands (first-run welcome screen)
             install::installation_status,
             install::install_components,
