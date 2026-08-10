@@ -2276,6 +2276,7 @@ dependencies = [
  "futures",
  "log",
  "portable-pty",
+ "reqwest",
  "serde",
  "serde_json",
  "serial_test",

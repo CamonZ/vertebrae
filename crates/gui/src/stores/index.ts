@@ -33,7 +33,12 @@ export {
   useGuiUpdateStore,
 } from "./guiUpdateStore";
 export type {
+  GuiUpdateComponentInfo,
+  GuiUpdateComponentKey,
+  GuiUpdateComponentStatus,
+  GuiUpdateComponents,
   GuiUpdateInfo,
   GuiUpdateState,
   GuiUpdateStatus,
+  GuiUpdateVerificationInfo,
 } from "./guiUpdateStore";
