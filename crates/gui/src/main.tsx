@@ -11,6 +11,7 @@ import { useDebugLogger } from "./hooks/useDebugLogger";
 import { useDebugStore } from "./stores/debugStore";
 import { queryClient } from "./query/queryClient";
 import { checkGuiUpdateChannels, createGuiUpdateScheduler } from "./update";
+import { isDebugConsoleShortcut } from "./utils/debugShortcut";
 
 function App() {
   const [booting, setBooting] = useState(true);
@@ -25,13 +26,13 @@ function App() {
   // Global Cmd+Shift+D to toggle debug console
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.metaKey && e.shiftKey && e.code === "KeyD") {
+      if (isDebugConsoleShortcut(e)) {
         e.preventDefault();
         useDebugStore.getState().toggleDebugPanel();
       }
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, []);
 
   useEffect(() => {

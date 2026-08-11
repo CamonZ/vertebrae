@@ -44,7 +44,44 @@ fn raw_traffic_logging_enabled() -> bool {
     )
 }
 
+fn trace(
+    session_id: Option<&str>,
+    kind: &str,
+    direction: &str,
+    turn_id: Option<&str>,
+    state: &str,
+    detail: Option<&str>,
+    payload: Option<&str>,
+) {
+    let record = json!({
+        "timestamp_ms": Utc::now().timestamp_millis(),
+        "source": "codex",
+        "kind": kind,
+        "direction": direction,
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "state": state,
+        "detail": detail,
+        "payload": payload,
+    });
+    log::info!("[LOCAL_CHAT_TRACE] {record}");
+}
+
 fn log_raw_traffic(direction: &str, payload: &str) {
+    let (kind, trace_direction) = match direction {
+        "send" => ("wire.send", "harness_to_provider"),
+        "recv" => ("wire.recv", "provider_to_harness"),
+        _ => ("wire", "internal"),
+    };
+    trace(
+        None,
+        kind,
+        trace_direction,
+        None,
+        "transport",
+        None,
+        Some(payload),
+    );
     if raw_traffic_logging_enabled() {
         log::info!("[Codex][raw][{direction}] {payload}");
     }
@@ -962,6 +999,16 @@ impl SessionState {
         provenance: TurnInputProvenance,
         mut cancel_rx: watch::Receiver<bool>,
     ) -> Result<TurnOutcome, HarnessError> {
+        let content_len = content.len();
+        trace(
+            Some(self.root_session_id.as_str()),
+            "turn.requested",
+            "internal",
+            Some(turn_id.as_str()),
+            "starting",
+            Some(&format!("content_len={content_len}")),
+            Some(&content),
+        );
         let mut notifications = self.connection.notifications.subscribe();
         let mut connection_closed = self.connection.closed.subscribe();
         let correlation = self.root_correlation(Some(turn_id.clone()), run_id.clone());
@@ -1016,6 +1063,15 @@ impl SessionState {
             log::info!(
                 "[Codex] turn/start accepted requested_turn_id={} provider_turn_id={provider_turn}",
                 turn_id
+            );
+            trace(
+                Some(self.root_session_id.as_str()),
+                "turn.accepted",
+                "provider_to_harness",
+                Some(turn_id.as_str()),
+                "awaiting_provider",
+                Some(&format!("provider_turn_id={provider_turn}")),
+                None,
             );
             let mut accumulator = TurnAccumulator::default();
             if let Some(error) = connection_closed.borrow().clone() {
@@ -1098,6 +1154,18 @@ impl SessionState {
             turn_id,
             result.status,
             result.result_text.as_deref().map_or(0, str::len)
+        );
+        trace(
+            Some(self.root_session_id.as_str()),
+            "turn.finished",
+            "provider_to_harness",
+            Some(turn_id.as_str()),
+            "idle",
+            Some(&format!(
+                "status={:?}; error={:?}",
+                result.status, result.error
+            )),
+            result.result_text.as_deref(),
         );
         Ok(result)
     }
@@ -1183,6 +1251,18 @@ impl SessionState {
         let mut process = self.process.lock().await;
         cleanup_process(&mut process, self.config.cleanup_timeout).await;
         let outcome = SessionCloseOutcome { status, error };
+        trace(
+            Some(self.root_session_id.as_str()),
+            "process.closed",
+            "internal",
+            None,
+            "closed",
+            Some(&format!(
+                "status={:?}; error={:?}",
+                outcome.status, outcome.error
+            )),
+            None,
+        );
         let _ = self
             .emit(
                 self.root_stream_id.clone(),
@@ -1578,6 +1658,19 @@ async fn setup_session(
         .clone()
         .unwrap_or_else(|| Arc::new(ProcessCodexAppServerLauncher::new(Arc::new(launch_config))));
     let mut launched = launcher.launch().await?;
+    trace(
+        None,
+        "process.started",
+        "internal",
+        None,
+        "running",
+        Some(&format!(
+            "pid={:?}; stream_id={}",
+            launched.process.as_ref().and_then(|process| process.id()),
+            stream_id
+        )),
+        None,
+    );
     let connection =
         match CodexConnection::connect(&launched.ws_url, Arc::clone(&control_sink)).await {
             Ok(connection) => connection,

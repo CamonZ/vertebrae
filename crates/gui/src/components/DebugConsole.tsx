@@ -1,5 +1,16 @@
-import { useEffect, useRef } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useDebugStore } from "../stores/debugStore";
+import type { DebugTraceEntry, LogEntry } from "../stores/debugStore";
+import { formatDebugLogMessage } from "../utils/debugLog";
+
+const MAX_RENDERED_LOGS = 200;
+const MAX_RENDERED_TRACES = 200;
 
 const levelColors: Record<string, string> = {
   ERROR: "text-red-400",
@@ -18,22 +29,301 @@ function formatTime(ts: number): string {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
-export function DebugConsole() {
-  const { logs, debugPanelOpen, clearLogs, toggleDebugPanel } = useDebugStore();
-  const bottomRef = useRef<HTMLDivElement>(null);
+function useAutoScroll(itemCount: number) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const firstRender = useRef(true);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    const element = scrollRef.current;
+    if (!element) return;
 
-  if (!debugPanelOpen) return null;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    if (firstRender.current || distanceFromBottom <= 80) {
+      element.scrollTop = element.scrollHeight;
+    }
+    firstRender.current = false;
+  }, [itemCount]);
+
+  return scrollRef;
+}
+
+const LogRow = memo(function LogRow({ entry }: { entry: LogEntry }) {
+  return (
+    <div className="flex gap-2 leading-5">
+      <span className="shrink-0 text-gray-500">{formatTime(entry.timestamp)}</span>
+      <span
+        className={`w-12 shrink-0 text-right ${levelColors[entry.level] ?? "text-gray-400"}`}
+      >
+        {entry.level}
+      </span>
+      <span className="shrink-0 text-cyan-300">[{entry.crateName}]</span>
+      <span className="min-w-0 break-all">
+        {formatDebugLogMessage(entry.message)}
+      </span>
+    </div>
+  );
+});
+
+const TraceRow = memo(function TraceRow({ entry }: { entry: DebugTraceEntry }) {
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 flex h-72 flex-col border-t border-gray-700 bg-gray-950 font-mono text-xs text-gray-300">
-      {/* Header */}
+    <div className="border-b border-gray-900 py-1 last:border-0">
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full cursor-pointer gap-2 text-left leading-5"
+      >
+        <span className="shrink-0 text-gray-600">{formatTime(entry.timestamp)}</span>
+        <span className="shrink-0 text-cyan-300">{entry.source}</span>
+        <span className="shrink-0 text-blue-300">{entry.kind}</span>
+        <span className="shrink-0 text-amber-300">
+          {entry.direction ?? "internal"}
+        </span>
+        <span className="min-w-0 truncate text-gray-500">
+          {entry.backendSessionId ?? entry.sessionId ?? ""}
+          {entry.turnId ? ` · ${entry.turnId}` : ""}
+          {entry.state ? ` · ${entry.state}` : ""}
+        </span>
+      </button>
+      {expanded && entry.detail && (
+        <div className="pl-2 text-yellow-300">{entry.detail}</div>
+      )}
+      {expanded && entry.payload && (
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all pl-2 text-gray-400">
+          {entry.payload}
+        </pre>
+      )}
+    </div>
+  );
+});
+
+const LogsPanel = memo(function LogsPanel() {
+  const logs = useDebugStore((state) => state.logs);
+  const [logFilter, setLogFilter] = useState("");
+  const [logCrateFilter, setLogCrateFilter] = useState("all");
+  const scrollRef = useAutoScroll(logs.length);
+
+  const logCrates = useMemo(
+    () => [...new Set(logs.map((entry) => entry.crateName))].sort(),
+    [logs]
+  );
+
+  const filteredLogs = useMemo(() => {
+    const filter = logFilter.trim().toLowerCase();
+    return logs.filter((entry) => {
+      if (logCrateFilter !== "all" && entry.crateName !== logCrateFilter) {
+        return false;
+      }
+      return (
+        !filter ||
+        `${entry.crateName} ${entry.target ?? ""} ${entry.level} ${entry.message}`
+          .toLowerCase()
+          .includes(filter)
+      );
+    });
+  }, [logCrateFilter, logFilter, logs]);
+
+  const visibleLogs = filteredLogs.slice(-MAX_RENDERED_LOGS);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center gap-2 border-b border-gray-800 px-3 py-1.5">
+        <select
+          value={logCrateFilter}
+          onChange={(event) => setLogCrateFilter(event.target.value)}
+          className="rounded border border-gray-800 bg-gray-900 px-2 py-1 text-gray-300 outline-none"
+          aria-label="Filter logs by crate"
+        >
+          <option value="all">All crates</option>
+          {logCrates.map((crateName) => (
+            <option key={crateName} value={crateName}>
+              {crateName}
+            </option>
+          ))}
+        </select>
+        <input
+          value={logFilter}
+          onChange={(event) => setLogFilter(event.target.value)}
+          placeholder="Filter logs"
+          className="min-w-0 flex-1 rounded border border-gray-800 bg-gray-900 px-2 py-1 text-gray-300 outline-none placeholder:text-gray-600"
+          aria-label="Filter logs"
+        />
+        <span className="shrink-0 text-gray-600">
+          {filteredLogs.length}/{logs.length}
+        </span>
+      </div>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 py-1">
+        {filteredLogs.length > visibleLogs.length && (
+          <div className="py-1 text-gray-600">
+            Showing the newest {MAX_RENDERED_LOGS} matching logs.
+          </div>
+        )}
+        {visibleLogs.map((entry, index) => (
+          <LogRow key={`${entry.timestamp}-${index}`} entry={entry} />
+        ))}
+      </div>
+    </div>
+  );
+});
+
+const HarnessPanel = memo(function HarnessPanel() {
+  const traces = useDebugStore((state) => state.traces);
+  const [traceFilter, setTraceFilter] = useState("");
+  const scrollRef = useAutoScroll(traces.length);
+
+  const filteredTraces = useMemo(() => {
+    const filter = traceFilter.trim().toLowerCase();
+    if (!filter) return traces;
+    return traces.filter((entry) =>
+      [
+        entry.source,
+        entry.kind,
+        entry.direction,
+        entry.sessionId,
+        entry.backendSessionId,
+        entry.turnId,
+        entry.state,
+        entry.detail,
+        entry.payload,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(filter)
+    );
+  }, [traceFilter, traces]);
+
+  const harnessStates = useMemo(() => {
+    const states = new Map<
+      string,
+      { id: string; state: string; last: DebugTraceEntry }
+    >();
+    for (const trace of traces) {
+      const id = trace.backendSessionId ?? trace.sessionId;
+      if (!id) continue;
+      const existing = states.get(id);
+      states.set(id, {
+        id,
+        state: trace.state ?? existing?.state ?? "observed",
+        last: trace,
+      });
+    }
+    return [...states.values()].reverse();
+  }, [traces]);
+
+  const visibleTraces = filteredTraces.slice(-MAX_RENDERED_TRACES);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
+      <div className="flex shrink-0 items-center gap-2 text-[10px] text-gray-500">
+        <span className="rounded border border-amber-900/60 px-2 py-1 text-amber-300">
+          In-memory diagnostic trace; raw payloads may contain prompt data.
+        </span>
+        <input
+          value={traceFilter}
+          onChange={(event) => setTraceFilter(event.target.value)}
+          placeholder="Filter session, turn, event, or payload"
+          className="min-w-0 flex-1 rounded border border-gray-800 bg-gray-900 px-2 py-1 text-gray-300 outline-none placeholder:text-gray-600"
+        />
+      </div>
+
+      <div className="flex shrink-0 gap-2 overflow-x-auto">
+        {harnessStates.length === 0 ? (
+          <span className="text-gray-600">No local harness activity yet.</span>
+        ) : (
+          harnessStates.map(({ id, state, last }) => (
+            <div
+              key={id}
+              className="min-w-56 rounded border border-gray-800 bg-gray-900 px-2 py-1"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-gray-200">{id}</span>
+                <span className="text-cyan-300">{state}</span>
+              </div>
+              <div className="truncate text-[10px] text-gray-500">
+                {last.source} · {last.kind} · {last.direction ?? "internal"}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto rounded border border-gray-800 bg-gray-925 px-2 py-1"
+      >
+        {filteredTraces.length > visibleTraces.length && (
+          <div className="py-1 text-gray-600">
+            Showing the newest {MAX_RENDERED_TRACES} matching traces.
+          </div>
+        )}
+        {visibleTraces.map((entry) => (
+          <TraceRow key={entry.id} entry={entry} />
+        ))}
+      </div>
+    </div>
+  );
+});
+
+function exportDebugData() {
+  const { logs, traces } = useDebugStore.getState();
+  const exportData = {
+    schema_version: 1,
+    exported_at: new Date().toISOString(),
+    logs,
+    traces,
+  };
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+    type: "application/json",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `vertebrae-debug-${new Date()
+    .toISOString()
+    .replace(/[:.]/g, "-")}.json`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function DebugConsolePanel() {
+  const logsCount = useDebugStore((state) => state.logs.length);
+  const tracesCount = useDebugStore((state) => state.traces.length);
+  const clearLogs = useDebugStore((state) => state.clearLogs);
+  const toggleDebugPanel = useDebugStore((state) => state.toggleDebugPanel);
+  const [tab, setTab] = useState<"logs" | "harness">("logs");
+
+  return (
+    <div className="fixed inset-x-0 bottom-0 z-50 flex h-[28rem] flex-col border-t border-gray-700 bg-gray-950 font-mono text-xs text-gray-300">
       <div className="flex shrink-0 items-center justify-between border-b border-gray-800 px-3 py-1.5">
-        <span className="font-semibold text-gray-100">Debug Console</span>
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-gray-100">Debug Console</span>
+          <button
+            onClick={() => setTab("logs")}
+            className={`rounded px-2 py-0.5 ${tab === "logs" ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+          >
+            Logs ({logsCount})
+          </button>
+          <button
+            onClick={() => setTab("harness")}
+            className={`rounded px-2 py-0.5 ${tab === "harness" ? "bg-gray-700 text-gray-100" : "text-gray-500 hover:text-gray-300"}`}
+          >
+            Local harness ({tracesCount})
+          </button>
+        </div>
         <div className="flex gap-2">
+          <button
+            onClick={exportDebugData}
+            className="rounded px-2 py-0.5 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
+            title="Export retained logs and local harness traces as JSON"
+          >
+            Export JSON
+          </button>
           <button
             onClick={clearLogs}
             className="rounded px-2 py-0.5 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
@@ -49,23 +339,13 @@ export function DebugConsole() {
         </div>
       </div>
 
-      {/* Log output */}
-      <div className="flex-1 overflow-y-auto px-3 py-1">
-        {logs.map((entry, i) => (
-          <div key={i} className="flex gap-2 leading-5">
-            <span className="shrink-0 text-gray-500">
-              {formatTime(entry.timestamp)}
-            </span>
-            <span
-              className={`w-12 shrink-0 text-right ${levelColors[entry.level] ?? "text-gray-400"}`}
-            >
-              {entry.level}
-            </span>
-            <span className="min-w-0 break-all">{entry.message}</span>
-          </div>
-        ))}
-        <div ref={bottomRef} />
-      </div>
+      {tab === "logs" ? <LogsPanel /> : <HarnessPanel />}
     </div>
   );
+}
+
+export function DebugConsole() {
+  const debugPanelOpen = useDebugStore((state) => state.debugPanelOpen);
+  if (!debugPanelOpen) return null;
+  return <DebugConsolePanel />;
 }

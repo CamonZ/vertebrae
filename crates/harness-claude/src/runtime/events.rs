@@ -8,6 +8,32 @@ use vertebrae_harness_core::{
 
 use super::ClaudeDecodeContext;
 
+/// Emit a structured, debug-console-only trace record. The GUI logger parses
+/// this prefix into its in-memory local-harness inspector; it is deliberately
+/// not part of the provider-neutral harness event stream or chat persistence.
+pub(super) fn trace(
+    session_id: &str,
+    kind: &str,
+    direction: &str,
+    turn_id: Option<&str>,
+    state: &str,
+    detail: Option<&str>,
+    payload: Option<&str>,
+) {
+    let record = serde_json::json!({
+        "timestamp_ms": chrono::Utc::now().timestamp_millis(),
+        "source": "claude",
+        "kind": kind,
+        "direction": direction,
+        "session_id": session_id,
+        "turn_id": turn_id,
+        "state": state,
+        "detail": detail,
+        "payload": payload,
+    });
+    log::info!("[LOCAL_CHAT_TRACE] {record}");
+}
+
 pub(super) fn canonical_diagnostic_correlation(
     context: &ClaudeDecodeContext,
     root_declared: bool,
