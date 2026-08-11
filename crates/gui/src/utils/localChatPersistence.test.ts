@@ -1,6 +1,7 @@
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../stores/chatStore";
+import { useDebugStore } from "../stores/debugStore";
 import {
   clearLastUsedLocalChatModelId,
   clearPersistedLocalChatSessions,
@@ -43,6 +44,7 @@ describe("localChatPersistence", () => {
   beforeEach(() => {
     localStorage.clear();
     clearPersistedLocalChatSessions();
+    useDebugStore.getState().clearLogs();
   });
 
   afterEach(() => {
@@ -83,6 +85,14 @@ describe("localChatPersistence", () => {
       streamingAssistant: null,
     });
     expect(loaded?.messages).toEqual([]);
+    const traces = useDebugStore.getState().traces;
+    const trace = traces[traces.length - 1];
+    expect(trace).toMatchObject({
+      kind: "persistence.write",
+      sessionId: "s-1",
+      state: "unknown",
+    });
+    expect(trace?.detail).toContain("serialized_messages=0");
   });
 
   it("ignores old browser localStorage session records", () => {

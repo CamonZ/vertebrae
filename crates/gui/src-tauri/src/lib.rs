@@ -199,7 +199,9 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .targets([
                     Target::new(TargetKind::Stdout),
-                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::Webview).format(|out, message, record| {
+                        out.finish(format_args!("[{}] {}", record.target(), message));
+                    }),
                 ])
                 .build(),
         );

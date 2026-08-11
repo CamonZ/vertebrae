@@ -22,7 +22,7 @@ use super::{
     },
     events::{
         canonical_diagnostic_correlation, correlation, emit_diagnostic, emit_runtime_event,
-        encode_user_message, write_line,
+        encode_user_message, trace, write_line,
     },
     process::{ProcessOutput, reap, spawn_output_readers, wait_then_reap},
 };
@@ -64,6 +64,16 @@ pub(super) async fn run_persistent_process_v2(
     let mut stdout_closed = false;
     let mut stderr_closed = false;
 
+    trace(
+        decoder.context().root_thread_id.as_str(),
+        "process.started",
+        "internal",
+        None,
+        "running",
+        Some(&format!("pid={:?}", child.id())),
+        None,
+    );
+
     'process: loop {
         tokio::select! {
             _ = &mut initialization_timer, if initialization_timer_armed && !initialized => {
@@ -76,7 +86,18 @@ pub(super) async fn run_persistent_process_v2(
             }
             command = commands.recv() => match command {
                 Some(SessionCommand::Send { request, outcome_tx, response }) => {
+                    let request_turn_id = request.turn_id.to_string();
+                    let request_content = request.content.clone();
                     if pending_turn.is_some() {
+                        trace(
+                            decoder.context().root_thread_id.as_str(),
+                            "message.rejected",
+                            "internal",
+                            Some(&request_turn_id),
+                            "pending_turn",
+                            Some("Claude accepts only one active turn per session"),
+                            Some(&request_content),
+                        );
                         let _ = response.send(Err("Claude accepts only one active turn per session".into()));
                         continue;
                     }
@@ -97,6 +118,15 @@ pub(super) async fn run_persistent_process_v2(
                             }
                             let initialized_before_send = turn.input_emitted;
                             pending_turn = Some(turn);
+                            trace(
+                                decoder.context().root_thread_id.as_str(),
+                                "message.accepted",
+                                "internal",
+                                Some(&request_turn_id),
+                                "awaiting_provider",
+                                None,
+                                Some(&request_content),
+                            );
                             if initialized_before_send
                                 && let Some(turn) = pending_turn.as_mut()
                                 && let Some(response) = turn.response.take()
@@ -182,6 +212,19 @@ pub(super) async fn run_persistent_process_v2(
                             &resolution,
                         ) {
                             Ok(line) => {
+                                trace(
+                                    decoder.context().root_thread_id.as_str(),
+                                    "control.response",
+                                    "harness_to_provider",
+                                    pending_control
+                                        .request
+                                        .turn_id
+                                        .as_ref()
+                                        .map(|id| id.as_str()),
+                                    "writing",
+                                    Some(&pending_control.request.request_id.to_string()),
+                                    Some(&line),
+                                );
                                 if let Err(error) = write_line(&mut stdin, &line).await {
                                     close_status = SessionCloseStatus::Failed;
                                     close_error = Some(format!("failed to write Claude control response: {error}"));
@@ -219,8 +262,18 @@ pub(super) async fn run_persistent_process_v2(
                 }
             }
             message = output.recv() => match message {
-                Some(ProcessOutput::Stdout(line)) => match decoder.decode_line(&line) {
-                    Ok(drafts) => {
+                Some(ProcessOutput::Stdout(line)) => {
+                    trace(
+                        decoder.context().root_thread_id.as_str(),
+                        "stdout",
+                        "provider_to_harness",
+                        decoder.context().turn_id.as_ref().map(|id| id.as_str()),
+                        "running",
+                        None,
+                        Some(&line),
+                    );
+                    match decoder.decode_line(&line) {
+                            Ok(drafts) => {
                         let mut saw_root_declaration = false;
                         for draft in drafts {
                             saw_root_declaration |= matches!(&draft.payload, HarnessEventPayloadV1::ThreadDeclared(declaration) if declaration.kind == ThreadKind::Root);
@@ -267,6 +320,16 @@ pub(super) async fn run_persistent_process_v2(
                             if let Some(outcome) = terminal
                                 && let Some(mut turn) = pending_turn.take()
                             {
+                                let settled_turn_id = turn.id.to_string();
+                                trace(
+                                    decoder.context().root_thread_id.as_str(),
+                                    "turn.terminal",
+                                    "provider_to_harness",
+                                    Some(turn.id.as_str()),
+                                    "settling",
+                                    Some(&format!("status={:?}", outcome.status)),
+                                    None,
+                                );
                                 if let Some(response) = turn.response.take() {
                                     let _ = response.send(Ok(()));
                                 }
@@ -278,6 +341,15 @@ pub(super) async fn run_persistent_process_v2(
                                 )
                                 .await;
                                 decoder.context_mut().turn_id = None;
+                                trace(
+                                    decoder.context().root_thread_id.as_str(),
+                                    "turn.settled",
+                                    "internal",
+                                    Some(settled_turn_id.as_str()),
+                                    "idle",
+                                    None,
+                                    None,
+                                );
                                 if let Err(error) = settle_pending_controls(
                                     &sequenced,
                                     &mut controls,
@@ -308,8 +380,18 @@ pub(super) async fn run_persistent_process_v2(
                         close_status = SessionCloseStatus::Failed;
                         break 'process;
                     }
+                    }
                 },
                 Some(ProcessOutput::Stderr(line)) => {
+                    trace(
+                        decoder.context().root_thread_id.as_str(),
+                        "stderr",
+                        "provider_to_harness",
+                        decoder.context().turn_id.as_ref().map(|id| id.as_str()),
+                        "running",
+                        None,
+                        Some(&line),
+                    );
                     if emit_diagnostic(&sequenced, stream_id.clone(), canonical_diagnostic_correlation(decoder.context(), decoder.root_declared()), line, "claude_stderr", false).await.is_err() {
                         close_status = SessionCloseStatus::Failed;
                         close_error = Some("event sink failed while reporting Claude stderr".into());
@@ -317,17 +399,44 @@ pub(super) async fn run_persistent_process_v2(
                     }
                 }
                 Some(ProcessOutput::ReadError(error)) => {
+                    trace(
+                        decoder.context().root_thread_id.as_str(),
+                        "process.read_error",
+                        "provider_to_harness",
+                        decoder.context().turn_id.as_ref().map(|id| id.as_str()),
+                        "failed",
+                        Some(&error),
+                        None,
+                    );
                     close_status = SessionCloseStatus::Failed;
                     close_error = Some(error);
                     break 'process;
                 }
                 Some(ProcessOutput::StdoutClosed) => {
+                    trace(
+                        decoder.context().root_thread_id.as_str(),
+                        "stdout.closed",
+                        "provider_to_harness",
+                        decoder.context().turn_id.as_ref().map(|id| id.as_str()),
+                        "closed",
+                        None,
+                        None,
+                    );
                     stdout_closed = true;
                     if stderr_closed {
                         break 'process;
                     }
                 }
                 Some(ProcessOutput::StderrClosed) => {
+                    trace(
+                        decoder.context().root_thread_id.as_str(),
+                        "stderr.closed",
+                        "provider_to_harness",
+                        decoder.context().turn_id.as_ref().map(|id| id.as_str()),
+                        "closed",
+                        None,
+                        None,
+                    );
                     stderr_closed = true;
                     if stdout_closed {
                         break 'process;
@@ -430,6 +539,18 @@ pub(super) async fn run_persistent_process_v2(
         HarnessEventPayloadV1::SessionClosed(outcome.clone()),
     )
     .await;
+    trace(
+        decoder.context().root_thread_id.as_str(),
+        "process.closed",
+        "internal",
+        None,
+        "closed",
+        Some(&format!(
+            "status={:?}; error={:?}",
+            outcome.status, outcome.error
+        )),
+        None,
+    );
     let _ = close_tx.send(OutcomeState::Ready(outcome.clone()));
     if let Some(response) = close_response {
         let _ = response.send(Ok(outcome));
@@ -484,7 +605,26 @@ pub(super) async fn begin_persistent_turn(
     }
     let context = decoder.context().clone();
     let encoded = encode_user_message(context.session_id.as_ref(), &request.content);
+    let request_turn_id = request.turn_id.to_string();
+    trace(
+        context.root_thread_id.as_str(),
+        "stdin",
+        "harness_to_provider",
+        Some(&request_turn_id),
+        "writing",
+        None,
+        Some(&encoded),
+    );
     if let Err(error) = write_line(stdin, &encoded).await {
+        trace(
+            context.root_thread_id.as_str(),
+            "stdin.write_failed",
+            "harness_to_provider",
+            Some(&request_turn_id),
+            "failed",
+            Some(&error.to_string()),
+            None,
+        );
         let error = format!("failed to write Claude stdin: {error}");
         let _ = outcome_tx.send(OutcomeState::Failed(error.clone()));
         let _ = response.send(Err(error.clone()));

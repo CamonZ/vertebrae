@@ -28,6 +28,7 @@ import {
   lifecycleLabel,
   isSessionHarnessLocked,
 } from "../components/ChatWindow/chatHelpers";
+import { recordLocalChatTrace } from "../utils/localChatDebug";
 
 // ---------------------------------------------------------------------------
 // useChatSession
@@ -393,16 +394,47 @@ export function useChatSession(sessionId: string) {
   // --- Action callbacks ---
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
-    if (!trimmed || !canSendMessage) return;
+    if (!trimmed) return;
+    if (!canSendMessage) {
+      recordLocalChatTrace({
+        source: "gui",
+        kind: "composer.submit.dropped",
+        sessionId,
+        backendSessionId: session?.backendSessionId,
+        state: lifecycle,
+        detail: `can_send=false; active=${isActive}; queue=${canQueueMessage}; busy=${isBusy}; pending_question=${hasPendingUserQuestion}`,
+        payload: trimmed,
+      });
+      return;
+    }
     void sendMessage(trimmed);
     setInputValue("");
-  }, [canSendMessage, inputValue, sendMessage]);
+  }, [
+    canQueueMessage,
+    canSendMessage,
+    hasPendingUserQuestion,
+    inputValue,
+    isActive,
+    isBusy,
+    lifecycle,
+    sendMessage,
+    session?.backendSessionId,
+    sessionId,
+  ]);
 
   const handleStartSession = useCallback(() => {
     const initialPrompt = inputValue.trim();
+    recordLocalChatTrace({
+      source: "gui",
+      kind: "composer.start.submitted",
+      sessionId,
+      backendSessionId: session?.backendSessionId,
+      state: lifecycle,
+      payload: initialPrompt || undefined,
+    });
     void startSession(initialPrompt || undefined);
     setInputValue("");
-  }, [inputValue, startSession]);
+  }, [inputValue, lifecycle, session?.backendSessionId, sessionId, startSession]);
 
   const handleClearMessages = useCallback(async () => {
     if (session?.backendSessionId) {

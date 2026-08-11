@@ -217,7 +217,6 @@ pub(crate) enum LocalChatEvent {
 }
 
 impl LocalChatEvent {
-    #[cfg(test)]
     pub(crate) fn tauri_event_name(&self) -> &'static str {
         match self {
             LocalChatEvent::Init(_) => "local-chat-session-init-event",
@@ -291,6 +290,17 @@ impl LocalChatEventSink {
     }
 
     pub(crate) fn try_emit(&self, event: LocalChatEvent) -> Result<(), String> {
+        let record = serde_json::json!({
+            "timestamp_ms": chrono::Utc::now().timestamp_millis(),
+            "source": "tauri",
+            "kind": "local_chat.event",
+            "direction": "tauri_to_gui",
+            "state": "emitting",
+            "detail": event.tauri_event_name(),
+            "payload": format!("{event:?}"),
+        });
+        log::info!("[LOCAL_CHAT_TRACE] {record}");
+
         #[cfg(test)]
         if let Some(captured_events) = &self.captured_events {
             captured_events
