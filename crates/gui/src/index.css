@@ -2434,6 +2434,7 @@ html.light ::selection {
 .hc-panel[data-maximized] .hc-chat-panes {
   border-left: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
   overflow-x: auto;
+  overflow-y: hidden;
 }
 .hc-panel[data-maximized] .hc-chat-pane {
   flex-basis: 360px;
