@@ -14,6 +14,7 @@ import { useShellStore } from "../stores/shellStore";
 import type { Task, TaskFilterOptions } from "../bindings";
 import { queryClient, queryKeys } from "../query";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 
 function seedTaskRuns(tasks: Task[]) {
   for (const task of tasks) {
@@ -67,7 +68,22 @@ describe("TasksPage", () => {
   beforeEach(() => {
     mockTasks = [];
     lastFilters = undefined;
+    useEntityPanelStore.getState().reset();
     window.history.pushState({}, "", "/tasks");
+  });
+
+  it("opens a task linked through the URL fallback", async () => {
+    const taskId = "03111754-4769-47c1-a64c-078d73554af8";
+    window.history.pushState({}, "", `/tasks?taskId=${taskId}`);
+
+    render(<TasksPageWithHeader />);
+
+    await waitFor(() =>
+      expect(useEntityPanelStore.getState().selection).toEqual({
+        type: "task",
+        taskId,
+      })
+    );
   });
 
   it("filters the live list by active scope while retaining ancestors", async () => {

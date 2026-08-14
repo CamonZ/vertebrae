@@ -12,6 +12,7 @@ use vertebrae_harness_core::{
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatHarness, LocalChatHarnessInfo,
     LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
+    CHAT_REFERENCE_INSTRUCTIONS,
 };
 
 use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
@@ -124,6 +125,7 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 working_directory: input.working_dir.map(PathBuf::from),
                 model,
                 reasoning_effort,
+                developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..Default::default()
             },
         };

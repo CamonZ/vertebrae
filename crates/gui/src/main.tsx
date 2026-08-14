@@ -11,6 +11,8 @@ import { useDebugLogger } from "./hooks/useDebugLogger";
 import { useDebugStore } from "./stores/debugStore";
 import { queryClient } from "./query/queryClient";
 import { checkGuiUpdateChannels, createGuiUpdateScheduler } from "./update";
+import { installActionableReferenceClickDiagnostics } from "./utils/actionableReferenceClickDiagnostics";
+import { installActionableReferenceClickRecovery } from "./utils/actionableReferenceClickRecovery";
 import { isDebugConsoleShortcut } from "./utils/debugShortcut";
 
 function App() {
@@ -22,6 +24,15 @@ function App() {
 
   // Subscribe to Rust backend logs for the debug console
   useDebugLogger();
+
+  useEffect(() => {
+    const uninstallDiagnostics = installActionableReferenceClickDiagnostics();
+    const uninstallRecovery = installActionableReferenceClickRecovery();
+    return () => {
+      uninstallRecovery();
+      uninstallDiagnostics();
+    };
+  }, []);
 
   // Global Cmd+Shift+D to toggle debug console
   useEffect(() => {

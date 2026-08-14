@@ -1,8 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { CodeRef } from "../../bindings";
+import { useCurrentProject } from "../../hooks/useCurrentProject";
+import { LocalFileReferenceLink } from "../shared/LocalFileReferenceLink";
+import { parseLocalFileReference } from "../shared/localFileReference";
 
 interface CodeRefsSummaryProps {
   codeRefs: CodeRef[];
+  /** Task worktrees take precedence over the globally selected project root. */
+  projectRoot?: string | null;
 }
 
 function formatLineRange(
@@ -19,9 +24,24 @@ function formatFullPath(codeRef: CodeRef): string {
   return lineRange ? `${codeRef.path}:${lineRange}` : codeRef.path;
 }
 
-function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
+function CodeRefItem({
+  codeRef,
+  projectRoot,
+}: {
+  codeRef: CodeRef;
+  projectRoot: string | null;
+}) {
   const [copied, setCopied] = useState(false);
   const lineRange = formatLineRange(codeRef.line_start, codeRef.line_end);
+  const parsedReference = projectRoot
+    ? parseLocalFileReference(codeRef.path, projectRoot)
+    : null;
+  const fileReference = parsedReference
+    ? {
+        ...parsedReference,
+        line: codeRef.line_start ?? parsedReference.line,
+      }
+    : null;
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
@@ -62,13 +82,31 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
             d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
           />
         </svg>
-        <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
-          {codeRef.path.split("/").pop() ?? codeRef.path}
-        </code>
-        {lineRange && (
-          <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
-            {lineRange}
-          </span>
+        {fileReference && projectRoot ? (
+          <LocalFileReferenceLink
+            reference={fileReference}
+            projectRoot={projectRoot}
+          >
+            <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
+              {codeRef.path.split("/").pop() ?? codeRef.path}
+            </code>
+            {lineRange && (
+              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
+                {lineRange}
+              </span>
+            )}
+          </LocalFileReferenceLink>
+        ) : (
+          <>
+            <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
+              {codeRef.path.split("/").pop() ?? codeRef.path}
+            </code>
+            {lineRange && (
+              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
+                {lineRange}
+              </span>
+            )}
+          </>
         )}
         {codeRef.name && (
           <span className="truncate text-xs text-[var(--color-fg-mute)]">
@@ -117,7 +155,10 @@ function CodeRefItem({ codeRef }: { codeRef: CodeRef }) {
   );
 }
 
-export function CodeRefsSummary({ codeRefs }: CodeRefsSummaryProps) {
+export function CodeRefsSummary({ codeRefs, projectRoot }: CodeRefsSummaryProps) {
+  const { path: currentProjectRoot } = useCurrentProject();
+  const fileRoot = projectRoot ?? currentProjectRoot;
+
   if (codeRefs.length === 0) {
     return (
       <div className="px-4 py-3">
@@ -131,7 +172,11 @@ export function CodeRefsSummary({ codeRefs }: CodeRefsSummaryProps) {
   return (
     <div className="space-y-1.5 px-4 py-3" data-testid="code-refs-summary">
       {codeRefs.map((ref, index) => (
-        <CodeRefItem key={`${ref.path}-${index}`} codeRef={ref} />
+        <CodeRefItem
+          key={`${ref.path}-${index}`}
+          codeRef={ref}
+          projectRoot={fileRoot}
+        />
       ))}
     </div>
   );

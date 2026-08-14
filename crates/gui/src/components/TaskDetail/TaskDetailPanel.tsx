@@ -1055,7 +1055,10 @@ export function TaskDetailPanel({
             ariaLabel="Toggle Code section"
             count={taskData.code_refs?.length ?? 0}
           >
-            <CodeRefsSummary codeRefs={taskData.code_refs ?? []} />
+            <CodeRefsSummary
+              codeRefs={taskData.code_refs ?? []}
+              projectRoot={taskData.worktree}
+            />
           </SectionGroup>
 
           <SectionGroup

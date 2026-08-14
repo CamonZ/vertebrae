@@ -25,6 +25,7 @@ import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
+import { useEntityPanelStore } from "../stores/entityPanelStore";
 
 type TaskScope =
   | "all"
@@ -177,6 +178,7 @@ function ScopeChip({
 
 export function TasksPage() {
   const [searchParams] = useSearchParams();
+  const openLinkedTask = useEntityPanelStore((state) => state.openTask);
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [scope, setScope] = useState<TaskScope>("all");
@@ -221,6 +223,11 @@ export function TasksPage() {
       );
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    const taskId = searchParams.get("taskId")?.trim();
+    if (taskId) openLinkedTask(taskId);
+  }, [openLinkedTask, searchParams]);
 
   const { tasks, isLoading, error } = useTasks(filters);
   const { activeRunsByTaskId } = useActiveTaskRunsForTasks(

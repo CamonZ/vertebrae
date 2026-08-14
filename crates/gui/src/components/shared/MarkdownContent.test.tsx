@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MarkdownContent } from "./MarkdownContent";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 const mermaidMock = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -17,6 +19,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 describe("MarkdownContent", () => {
   beforeEach(() => {
+    useEntityPanelStore.getState().reset();
     mermaidMock.initialize.mockClear();
     mermaidMock.parse.mockReset();
     mermaidMock.render.mockReset();
@@ -28,6 +31,7 @@ describe("MarkdownContent", () => {
 
   afterEach(() => {
     cleanup();
+    useEntityPanelStore.getState().reset();
     document.documentElement.classList.remove("light");
   });
 
@@ -132,6 +136,51 @@ describe("MarkdownContent", () => {
   });
 
   describe("links", () => {
+    it("renders typed Vertebrae entity links as actionable links", () => {
+      render(
+        <MarkdownContent
+          text="Open [ticket](vtb://ticket/03111754-4769-47c1-a64c-078d73554af8)"
+        />
+      );
+      const link = screen.getByTestId("vtb-entity-link");
+      expect(link).toHaveAttribute("data-vtb-entity-type", "ticket");
+      expect(link).toHaveAttribute(
+        "data-vtb-entity-id",
+        "03111754-4769-47c1-a64c-078d73554af8"
+      );
+      expect(link).toHaveAttribute(
+        "data-vtb-route",
+        "/tasks?taskId=03111754-4769-47c1-a64c-078d73554af8"
+      );
+    });
+
+    it("opens a task panel when a rendered entity link is clicked", async () => {
+      const user = userEvent.setup();
+      const taskId = "03111754-4769-47c1-a64c-078d73554af8";
+      render(<MarkdownContent text={`Open [task](vtb://task/${taskId})`} />);
+
+      await user.click(screen.getByTestId("vtb-entity-link"));
+
+      expect(useEntityPanelStore.getState().selection).toEqual({
+        type: "task",
+        taskId,
+      });
+    });
+
+    it("renders valid inline file references and leaves traversal paths inert", () => {
+      render(
+        <MarkdownContent
+          projectPath="/repo"
+          text="See `src/main.rs:12:4` or `../private.rs`."
+        />
+      );
+      const link = screen.getByTestId("local-file-reference-link");
+      expect(link).toHaveAttribute("data-file-path", "src/main.rs");
+      expect(link).toHaveAttribute("data-file-line", "12");
+      expect(link).toHaveAttribute("data-file-column", "4");
+      expect(screen.getByText("../private.rs").tagName).toBe("CODE");
+    });
+
     it.each([
       ["HTTPS", "https://example.com/path?q=value"],
       ["HTTP", "http://example.com/path"],

@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
 import { NotificationsPanel } from "./Notifications";
+import { GlobalEntityPanelHost } from "./GlobalEntityPanelHost";
 
 interface AppShellProps {
   children: ReactNode;
@@ -22,6 +23,7 @@ export function AppShell({ children }: AppShellProps) {
       <ChatWindowManager />
       <FloatingChatLauncher />
       <NotificationsPanel />
+      <GlobalEntityPanelHost />
     </div>
   );
 }

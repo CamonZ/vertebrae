@@ -7,6 +7,7 @@ describe("uiStore", () => {
     useUIStore.setState({
       theme: "system",
       density: "auto",
+      externalEditor: "",
     });
   });
 
@@ -19,6 +20,11 @@ describe("uiStore", () => {
     it("has auto density by default", () => {
       const state = useUIStore.getState();
       expect(state.density).toBe("auto");
+    });
+
+    it("uses the operating system default editor by default", () => {
+      const state = useUIStore.getState();
+      expect(state.externalEditor).toBe("");
     });
   });
 
@@ -74,6 +80,16 @@ describe("uiStore", () => {
     });
   });
 
+  describe("setExternalEditor", () => {
+    it("stores the configured application name or path", () => {
+      useUIStore.getState().setExternalEditor("app:/Applications/Visual Studio Code.app");
+
+      expect(useUIStore.getState().externalEditor).toBe(
+        "app:/Applications/Visual Studio Code.app"
+      );
+    });
+  });
+
   describe("persistence", () => {
     it("partializes theme into persisted state", () => {
       const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
@@ -85,7 +101,11 @@ describe("uiStore", () => {
       );
       expect(persistCall).toBeDefined();
       const persisted = JSON.parse(persistCall![1]);
-      expect(persisted.state).toEqual({ theme: "dark", density: "auto" });
+      expect(persisted.state).toEqual({
+        theme: "dark",
+        density: "auto",
+        externalEditor: "",
+      });
 
       setItemSpy.mockRestore();
     });

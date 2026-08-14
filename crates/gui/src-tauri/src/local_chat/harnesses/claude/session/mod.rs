@@ -26,7 +26,7 @@ use crate::local_chat::harnesses::claude::args::resolve_requested_claude_model;
 use crate::local_chat::{
     HarnessCreateSessionInput, LocalChatEvent, LocalChatEventSink, LocalChatHarnessKind,
     LocalChatRuntime, LocalChatSessionError, LocalChatSessionErrorEvent,
-    LocalChatSessionWarningEvent,
+    LocalChatSessionWarningEvent, CHAT_REFERENCE_INSTRUCTIONS,
 };
 use crate::types::PermissionMode;
 use vertebrae_installer::{resolve_claude_plugin_dir, ClaudePluginDirResolution};
@@ -695,6 +695,7 @@ impl ClaudeSessionRuntime {
                 working_directory: Some(working_dir),
                 model,
                 reasoning_effort: input.reasoning_effort,
+                developer_instructions: Some(CHAT_REFERENCE_INSTRUCTIONS.to_string()),
                 ..RequestConfig::default()
             },
         };

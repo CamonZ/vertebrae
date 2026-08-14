@@ -2,10 +2,143 @@ use super::*;
 use crate::local_chat::LocalChatHarnessKind;
 use crate::types::PermissionMode;
 use std::fs;
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 use vertebrae_core::Provider;
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
 use vertebrae_harness_core::{ProviderResumeId, StreamId, TranscriptReplayRequest};
+
+/// Open a validated local-chat file reference with the operating system's
+/// external file handler. The frontend supplies the captured project root and
+/// the raw reference path; canonicalization here closes symlink and traversal
+/// gaps before invoking the opener plugin.
+#[tauri::command]
+#[specta::specta]
+pub fn open_local_file(
+    app_handle: tauri::AppHandle,
+    project_root: String,
+    path: String,
+    line: Option<u32>,
+    column: Option<u32>,
+    editor: Option<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "[LOCAL_FILE] open request root={} path={} line={:?} column={:?} editor={:?}",
+        project_root,
+        path,
+        line,
+        column,
+        editor
+    );
+    let file = match resolve_local_file(&project_root, &path) {
+        Ok(file) => file,
+        Err(error) => {
+            log::error!("[LOCAL_FILE] file resolution failed: {}", error.message);
+            return Err(error);
+        }
+    };
+    log::info!("[LOCAL_FILE] resolved file={}", file.display());
+    let editor = editor.and_then(|editor| {
+        let editor = editor.trim();
+        (!editor.is_empty()).then(|| editor.to_string())
+    });
+
+    let result =
+        super::open_local_file_with_editor(&app_handle, &file, line, column, editor.as_deref());
+    if let Err(error) = &result {
+        log::error!("[LOCAL_FILE] launch failed: {}", error.message);
+    } else {
+        log::info!("[LOCAL_FILE] launch request accepted");
+    }
+    result
+}
+
+/// Return the canonical project and Git worktree roots that local-chat file
+/// references may target.
+#[tauri::command]
+#[specta::specta]
+pub fn get_local_file_roots(project_root: String) -> Result<Vec<String>, CommandError> {
+    let root = fs::canonicalize(project_root).map_err(|error| CommandError {
+        message: format!("Could not resolve project root: {error}"),
+    })?;
+    if !root.is_dir() {
+        return Err(CommandError {
+            message: "The captured project root is not a directory".to_string(),
+        });
+    }
+
+    Ok(local_file_roots(&root)
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect())
+}
+
+fn resolve_local_file(project_root: &str, path: &str) -> Result<PathBuf, CommandError> {
+    let root = fs::canonicalize(project_root).map_err(|error| CommandError {
+        message: format!("Could not resolve project root: {error}"),
+    })?;
+    if !root.is_dir() {
+        return Err(CommandError {
+            message: "The captured project root is not a directory".to_string(),
+        });
+    }
+
+    let requested = PathBuf::from(path);
+    let candidate = if requested.is_absolute() {
+        requested
+    } else {
+        root.join(requested)
+    };
+    let file = fs::canonicalize(&candidate).map_err(|error| CommandError {
+        message: format!("Could not resolve local file reference: {error}"),
+    })?;
+    let allowed_roots = local_file_roots(&root);
+    if !allowed_roots
+        .iter()
+        .any(|allowed_root| file.starts_with(allowed_root))
+        || !file.is_file()
+    {
+        return Err(CommandError {
+            message: "Local file reference is outside the captured project or its Git worktrees"
+                .to_string(),
+        });
+    }
+    Ok(file)
+}
+
+fn local_file_roots(project_root: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![project_root.to_path_buf()];
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &project_root.to_string_lossy(),
+            "worktree",
+            "list",
+            "--porcelain",
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return roots;
+    };
+    if !output.status.success() {
+        return roots;
+    }
+
+    for worktree in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+    {
+        if let Ok(worktree) = fs::canonicalize(worktree) {
+            if worktree.is_dir() && !roots.contains(&worktree) {
+                roots.push(worktree);
+            }
+        }
+    }
+    roots
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -429,6 +562,7 @@ fn permission_resolution_error(error: PermissionBridgeError) -> ResolvePermissio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn permission_resolution_errors_have_stable_kinds() {
@@ -469,5 +603,24 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.kind, ResolvePermissionRequestErrorKind::Invalid);
+    }
+
+    #[test]
+    fn local_file_resolution_requires_a_canonical_file_under_the_project_root() {
+        let root = tempdir().expect("temporary root");
+        let inside = root.path().join("src").join("main.rs");
+        fs::create_dir_all(inside.parent().expect("parent")).expect("source directory");
+        fs::write(&inside, "fn main() {}\n").expect("source file");
+
+        let resolved = resolve_local_file(root.path().to_str().unwrap(), "src/main.rs")
+            .expect("contained source file");
+        assert_eq!(resolved, fs::canonicalize(inside).unwrap());
+
+        let outside = root.path().parent().unwrap().join("outside.rs");
+        fs::write(&outside, "fn outside() {}\n").expect("outside file");
+        let error = resolve_local_file(root.path().to_str().unwrap(), outside.to_str().unwrap())
+            .expect_err("outside file must be rejected");
+        assert!(error.message.contains("outside the captured project"));
+        let _ = fs::remove_file(outside);
     }
 }

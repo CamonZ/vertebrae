@@ -5,6 +5,7 @@ import {
   type LocalChatHarnessCatalog,
   type LocalChatHarnessInfo,
   type LocalChatHarnessKind,
+  type LocalFileEditor,
   type PermissionMode,
 } from "../bindings";
 import { Icon } from "../components/atoms/Icon";
@@ -949,6 +950,9 @@ export interface SettingsPageProps {
 
 export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   const [catalog, setCatalog] = useState<LocalChatHarnessCatalog | null>(null);
+  const [externalEditors, setExternalEditors] = useState<LocalFileEditor[]>(
+    []
+  );
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -966,6 +970,8 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
+  const externalEditor = useUIStore((state) => state.externalEditor);
+  const setExternalEditor = useUIStore((state) => state.setExternalEditor);
   const harnesses = useMemo(() => catalog?.harnesses ?? [], [catalog]);
   const availableHarnesses = useMemo(
     () => harnesses.filter((info) => info.available),
@@ -1015,6 +1021,29 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== "appearance") return;
+
+    let cancelled = false;
+    void commands
+      .getLocalFileEditors()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.status === "ok") {
+          setExternalEditors(result.data);
+        } else {
+          setExternalEditors([]);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setExternalEditors([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection]);
 
   return (
     <main
@@ -1130,6 +1159,27 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
                     { value: "system", label: "System" },
                     { value: "light", label: "Light" },
                     { value: "dark", label: "Dark" },
+                  ]}
+                />
+              </SettingRow>
+              <SettingRow
+                label="Open files with"
+                description="Choose an installed app or editor command. This applies to every chat file link and ticket code reference."
+              >
+                <Select
+                  aria-label="Open files with"
+                  data-testid="settings-external-editor"
+                  value={externalEditor}
+                  onChange={(event) => {
+                    setExternalEditor(event.target.value);
+                    setSavedFeedback(true);
+                  }}
+                  options={[
+                    { value: "", label: "System default" },
+                    ...externalEditors.map((editor) => ({
+                      value: editor.id,
+                      label: editor.name,
+                    })),
                   ]}
                 />
               </SettingRow>

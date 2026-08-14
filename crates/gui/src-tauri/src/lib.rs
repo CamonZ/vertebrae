@@ -134,6 +134,9 @@ fn create_builder() -> Builder {
             commands::stop_orchestrator,
             // Provider-neutral local chat commands
             commands::get_supported_local_chat_harnesses,
+            commands::get_local_file_editors,
+            commands::get_local_file_roots,
+            commands::open_local_file,
             commands::create_local_chat_session,
             commands::send_local_chat_message,
             commands::close_local_chat_session,

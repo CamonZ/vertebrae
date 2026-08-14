@@ -17,6 +17,8 @@ interface UIState {
   theme: Theme;
   /** Current density preference */
   density: DensityPreference;
+  /** Application name or path used to open local file references. */
+  externalEditor: string;
 }
 
 interface UIActions {
@@ -24,6 +26,8 @@ interface UIActions {
   setTheme: (theme: Theme) => void;
   /** Set the density preference */
   setDensity: (density: DensityPreference) => void;
+  /** Set the application used to open local file references. */
+  setExternalEditor: (externalEditor: string) => void;
 }
 
 export type UIStore = UIState & UIActions;
@@ -35,6 +39,8 @@ export const useUIStore = create<UIStore>()(
       setTheme: (theme) => set({ theme }),
       density: "auto",
       setDensity: (density) => set({ density }),
+      externalEditor: "",
+      setExternalEditor: (externalEditor) => set({ externalEditor }),
     }),
     {
       name: "vertebrae-ui-storage",
@@ -42,6 +48,7 @@ export const useUIStore = create<UIStore>()(
       partialize: (state) => ({
         theme: state.theme,
         density: state.density,
+        externalEditor: state.externalEditor,
       }),
     }
   )

@@ -44,6 +44,10 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: "/test/project",
     }),
+    getLocalFileRoots: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: ["/test/project"],
+    }),
     getProjects: vi.fn().mockResolvedValue({
       status: "ok",
       data: savedProjects,

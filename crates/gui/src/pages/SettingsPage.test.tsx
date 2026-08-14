@@ -18,6 +18,16 @@ vi.mock("../bindings", () => ({
   commands: {
     getSupportedLocalChatHarnesses: (...args: unknown[]) =>
       mockGetSupportedLocalChatHarnesses(...args),
+    getLocalFileEditors: vi.fn().mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          id: "app:/Applications/Visual Studio Code.app",
+          name: "Visual Studio Code",
+          path: "/Applications/Visual Studio Code.app",
+        },
+      ],
+    }),
   },
 }));
 
@@ -108,7 +118,7 @@ describe("SettingsPage", () => {
       defaultHarness: null,
       storageWarning: null,
     });
-    useUIStore.setState({ theme: "system" });
+    useUIStore.setState({ theme: "system", externalEditor: "" });
     mockGetSupportedLocalChatHarnesses.mockResolvedValue({
       status: "ok",
       data: catalog,
@@ -442,6 +452,10 @@ describe("SettingsPage", () => {
     await user.click(screen.getByTestId("settings-nav-appearance"));
     expect(screen.getByTestId("settings-theme")).toHaveValue("system");
     await user.selectOptions(screen.getByTestId("settings-theme"), "dark");
+    await user.selectOptions(
+      screen.getByTestId("settings-external-editor"),
+      "app:/Applications/Visual Studio Code.app"
+    );
     await user.click(screen.getByTestId("settings-nav-chat"));
     await user.selectOptions(
       screen.getByTestId("codex-default-reasoning-effort"),
@@ -455,6 +469,9 @@ describe("SettingsPage", () => {
       });
       expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
       expect(useUIStore.getState().theme).toBe("dark");
+      expect(useUIStore.getState().externalEditor).toBe(
+        "app:/Applications/Visual Studio Code.app"
+      );
     });
     expect(
       JSON.parse(
