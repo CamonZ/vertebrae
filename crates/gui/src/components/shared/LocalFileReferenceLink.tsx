@@ -57,6 +57,7 @@ export function LocalFileReferenceLink({
       type="button"
       className="inline cursor-pointer rounded-sm bg-bg/80 px-1.5 py-0.5 font-mono text-13 text-accent underline decoration-accent/30 hover:decoration-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       data-testid="local-file-reference-link"
+      data-actionable-reference="file"
       data-file-path={reference.path}
       data-file-line={reference.line ?? undefined}
       data-file-column={reference.column ?? undefined}

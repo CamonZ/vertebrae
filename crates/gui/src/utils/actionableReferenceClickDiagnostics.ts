@@ -1,9 +1,6 @@
 import { addDebugLog } from "./debugLog";
 
-const ACTIONABLE_REFERENCE_SELECTOR = [
-  '[data-testid="local-file-reference-link"]',
-  '[data-testid="vtb-entity-link"]',
-].join(",");
+const ACTIONABLE_REFERENCE_SELECTOR = "[data-actionable-reference]";
 
 const EVENT_TYPES = [
   "pointerdown",
@@ -57,11 +54,14 @@ function describeElement(element: Element): string {
 
 function describeReference(element: Element): string {
   const html = element as HTMLElement;
-  if (html.dataset.testid === "local-file-reference-link") {
+  if (html.dataset.actionableReference === "file") {
     const location = [html.dataset.fileLine, html.dataset.fileColumn]
       .filter(Boolean)
       .join(":");
     return `file:${html.dataset.filePath ?? "?"}${location ? `:${location}` : ""}`;
+  }
+  if (html.dataset.actionableReference === "external-url") {
+    return `external-url:${html.dataset.externalUrl ?? "?"}`;
   }
   return `entity:${html.dataset.vtbEntityType ?? "?"}:${html.dataset.vtbEntityId ?? "?"}`;
 }

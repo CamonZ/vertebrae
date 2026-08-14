@@ -71,6 +71,7 @@ export function VtbEntityLink({
       title={`Open ${label}`}
       aria-label={`Open ${target.type} ${target.id}`}
       data-testid="vtb-entity-link"
+      data-actionable-reference="entity"
       data-vtb-entity-type={target.type}
       data-vtb-entity-id={target.id}
       data-full-id={target.id}

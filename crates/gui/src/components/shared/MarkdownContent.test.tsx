@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MarkdownContent } from "./MarkdownContent";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
@@ -10,9 +16,15 @@ const mermaidMock = vi.hoisted(() => ({
   render: vi.fn(),
 }));
 
+const openerMock = vi.hoisted(() => ({
+  openUrl: vi.fn(),
+}));
+
 vi.mock("mermaid", () => ({
   default: mermaidMock,
 }));
+
+vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -20,6 +32,8 @@ Element.prototype.scrollIntoView = vi.fn();
 describe("MarkdownContent", () => {
   beforeEach(() => {
     useEntityPanelStore.getState().reset();
+    openerMock.openUrl.mockReset();
+    openerMock.openUrl.mockResolvedValue(undefined);
     mermaidMock.initialize.mockClear();
     mermaidMock.parse.mockReset();
     mermaidMock.render.mockReset();
@@ -138,9 +152,7 @@ describe("MarkdownContent", () => {
   describe("links", () => {
     it("renders typed Vertebrae entity links as actionable links", () => {
       render(
-        <MarkdownContent
-          text="Open [ticket](vtb://ticket/03111754-4769-47c1-a64c-078d73554af8)"
-        />
+        <MarkdownContent text="Open [ticket](vtb://ticket/03111754-4769-47c1-a64c-078d73554af8)" />
       );
       const link = screen.getByTestId("vtb-entity-link");
       expect(link).toHaveAttribute("data-vtb-entity-type", "ticket");
@@ -191,6 +203,30 @@ describe("MarkdownContent", () => {
       expect(link).toHaveAttribute("href", href);
       expect(link).toHaveAttribute("target", "_blank");
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
+      expect(link).toHaveAttribute("data-actionable-reference", "external-url");
+    });
+
+    it("opens an absolute website link through the operating system browser", async () => {
+      const user = userEvent.setup();
+      const href = "https://example.com/docs";
+      render(<MarkdownContent text={`Visit [documentation](${href})`} />);
+
+      await user.click(screen.getByTestId("external-url-link"));
+
+      expect(openerMock.openUrl).toHaveBeenCalledOnce();
+      expect(openerMock.openUrl).toHaveBeenCalledWith(href);
+    });
+
+    it("uses the system browser for a modified primary website click", () => {
+      const href = "https://example.com/docs";
+      render(<MarkdownContent text={`Visit [documentation](${href})`} />);
+
+      fireEvent.click(screen.getByTestId("external-url-link"), {
+        button: 0,
+        metaKey: true,
+      });
+
+      expect(openerMock.openUrl).toHaveBeenCalledWith(href);
     });
 
     it.each([

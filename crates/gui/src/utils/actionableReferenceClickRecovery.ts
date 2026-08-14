@@ -1,9 +1,6 @@
 import { addDebugLog } from "./debugLog";
 
-const ACTIONABLE_REFERENCE_SELECTOR = [
-  '[data-testid="local-file-reference-link"]',
-  '[data-testid="vtb-entity-link"]',
-].join(",");
+const ACTIONABLE_REFERENCE_SELECTOR = "[data-actionable-reference]";
 
 const MAX_CLICK_MOVEMENT_PX = 6;
 
@@ -40,13 +37,17 @@ function referenceFromEvent(event: MouseEvent): HTMLElement | null {
 }
 
 function referenceKey(reference: HTMLElement): string {
-  if (reference.dataset.testid === "local-file-reference-link") {
+  if (reference.dataset.actionableReference === "file") {
     return [
       "file",
       reference.dataset.filePath ?? "",
       reference.dataset.fileLine ?? "",
       reference.dataset.fileColumn ?? "",
     ].join(":");
+  }
+
+  if (reference.dataset.actionableReference === "external-url") {
+    return `external-url:${reference.dataset.externalUrl ?? ""}`;
   }
 
   return [
@@ -143,6 +144,10 @@ export function installActionableReferenceClickRecovery(): () => void {
       : "none";
     const canRecover =
       event.button === 0 &&
+      !event.metaKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
       !press.dragged &&
       press.maxMovement <= MAX_CLICK_MOVEMENT_PX &&
       releasedKey === press.referenceKey;

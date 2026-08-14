@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -590,11 +591,33 @@ function createMarkdownComponents(
 
       return (
         <a
-          className="text-accent underline decoration-accent/30 hover:decoration-accent"
+          className={`text-accent underline decoration-accent/30 hover:decoration-accent${
+            canOpenExternally ? " cursor-pointer" : ""
+          }`}
           {...props}
           href={canOpenExternally ? href : undefined}
           target={canOpenExternally ? "_blank" : undefined}
           rel={canOpenExternally ? "noopener noreferrer" : undefined}
+          data-testid={canOpenExternally ? "external-url-link" : undefined}
+          data-actionable-reference={
+            canOpenExternally ? "external-url" : undefined
+          }
+          data-external-url={canOpenExternally ? href : undefined}
+          onClick={
+            canOpenExternally
+              ? (event) => {
+                  if (event.defaultPrevented || event.button !== 0) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void openUrl(href).catch((error) => {
+                    console.error("Could not open external URL:", error);
+                  });
+                }
+              : undefined
+          }
         >
           {children}
         </a>
@@ -644,8 +667,7 @@ function createMarkdownComponents(
     code: ({ inline, className, children, node, ...props }: CodeProps) => {
       const language = normalizeCodeLanguage(className);
       let codeString = String(children).replace(/\n$/, "");
-      const isInlineCode =
-        inline ?? !(className || codeString.includes("\n"));
+      const isInlineCode = inline ?? !(className || codeString.includes("\n"));
 
       if (language === "json") {
         codeString = prettyPrintJsonIfPossible(codeString);
