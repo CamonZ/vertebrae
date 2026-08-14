@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { commands } from "../../bindings";
 import { useUIStore } from "../../stores/uiStore";
-import { addDebugLog } from "../../utils/debugLog";
 import type { LocalFileReference } from "./localFileReference";
 
 interface LocalFileReferenceLinkProps {
@@ -19,16 +18,8 @@ export function LocalFileReferenceLink({
   const externalEditor = useUIStore((state) => state.externalEditor);
 
   const openFile = async () => {
-    if (opening) {
-      addDebugLog(
-        `[LOCAL_FILE] Ignoring duplicate open click path=${reference.path}`
-      );
-      return;
-    }
+    if (opening) return;
     const selectedEditor = externalEditor.trim() || null;
-    addDebugLog(
-      `[LOCAL_FILE] click root=${projectRoot} path=${reference.path} line=${reference.line ?? "-"} column=${reference.column ?? "-"} editor=${selectedEditor ?? "system-default"}`
-    );
     setOpening(true);
     try {
       const result = await commands.openLocalFile(
@@ -38,15 +29,11 @@ export function LocalFileReferenceLink({
         reference.column,
         selectedEditor
       );
-      addDebugLog(
-        `[LOCAL_FILE] command result=${result.status}`,
-        result.status === "error" ? "ERROR" : "INFO"
-      );
       if (result.status === "error") {
-        addDebugLog(`[LOCAL_FILE] command error=${result.error}`, "ERROR");
+        console.error("Could not open local file:", result.error);
       }
     } catch (error) {
-      addDebugLog(`[LOCAL_FILE] command exception=${String(error)}`, "ERROR");
+      console.error("Could not open local file:", error);
     } finally {
       setOpening(false);
     }

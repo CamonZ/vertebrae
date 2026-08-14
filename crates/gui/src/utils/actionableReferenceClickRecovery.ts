@@ -1,5 +1,3 @@
-import { addDebugLog } from "./debugLog";
-
 const ACTIONABLE_REFERENCE_SELECTOR = "[data-actionable-reference]";
 
 const MAX_CLICK_MOVEMENT_PX = 6;
@@ -124,9 +122,6 @@ export function installActionableReferenceClickRecovery(): () => void {
 
   const onPointerCancel = (event: PointerEvent) => {
     if (!pendingPress || event.pointerId !== pendingPress.pointerId) return;
-    addDebugLog(
-      `[CLICK_RECOVERY] cancelled ref=${pendingPress.referenceKey} reason=pointercancel`
-    );
     clearPendingPress();
   };
 
@@ -152,10 +147,6 @@ export function installActionableReferenceClickRecovery(): () => void {
       press.maxMovement <= MAX_CLICK_MOVEMENT_PX &&
       releasedKey === press.referenceKey;
 
-    addDebugLog(
-      `[CLICK_RECOVERY] pointerup ref=${press.referenceKey} released=${releasedKey} movement=${press.maxMovement.toFixed(2)} dragged=${press.dragged} originalConnected=${press.reference.isConnected} recoverable=${canRecover}`
-    );
-
     if (!canRecover) {
       clearPendingPress();
       return;
@@ -166,15 +157,7 @@ export function installActionableReferenceClickRecovery(): () => void {
       if (pendingPress !== press) return;
       pendingPress = null;
       press.recoveryTimer = null;
-      if (!recoveryTarget.isConnected) {
-        addDebugLog(
-          `[CLICK_RECOVERY] skipped ref=${press.referenceKey} reason=disconnected`
-        );
-        return;
-      }
-      addDebugLog(
-        `[CLICK_RECOVERY] synthesizing missing click ref=${press.referenceKey}`
-      );
+      if (!recoveryTarget.isConnected) return;
       recoveryTarget.click();
     }, 0);
   };
@@ -189,9 +172,6 @@ export function installActionableReferenceClickRecovery(): () => void {
     ) {
       return;
     }
-    addDebugLog(
-      `[CLICK_RECOVERY] click observed ref=${press.referenceKey} trusted=${event.isTrusted}; recovery not needed`
-    );
     clearPendingPress();
   };
 

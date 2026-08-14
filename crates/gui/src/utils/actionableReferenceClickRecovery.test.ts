@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installActionableReferenceClickRecovery } from "./actionableReferenceClickRecovery";
 
-vi.mock("./debugLog", () => ({ addDebugLog: vi.fn() }));
-
 function pointerEvent(
   type: "pointerdown" | "pointerup" | "pointermove",
   x = 20,

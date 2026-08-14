@@ -6,7 +6,6 @@ import {
 } from "react";
 import { useInRouterContext, useNavigate } from "react-router-dom";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
-import { addDebugLog } from "../../utils/debugLog";
 import { LevelMark } from "./LevelMark";
 import type { VtbEntityTarget } from "./vtbEntityLinkTarget";
 
@@ -37,9 +36,6 @@ export function VtbEntityLink({
   const hasLabel = hasRenderableChildren(children);
 
   const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
-    addDebugLog(
-      `[ENTITY_LINK] click received type=${target.type} id=${target.id} button=${event.button} defaultPrevented=${event.defaultPrevented} modifiers=${event.metaKey || event.altKey || event.ctrlKey || event.shiftKey}`
-    );
     if (
       event.defaultPrevented ||
       event.button !== 0 ||
@@ -53,7 +49,6 @@ export function VtbEntityLink({
 
     event.preventDefault();
     event.stopPropagation();
-    addDebugLog(`[ENTITY_LINK] opening route=${target.route}`);
     onOpen(target);
   };
 
@@ -101,18 +96,14 @@ function openTargetPanel(target: VtbEntityTarget): boolean {
     case "ticket":
     case "task":
       store.openTask(target.id);
-      addDebugLog(`[ENTITY_LINK] opened task panel id=${target.id}`);
       return true;
     case "workflow":
       store.openWorkflow(target.id);
-      addDebugLog(`[ENTITY_LINK] opened workflow panel id=${target.id}`);
       return true;
     case "step":
       store.openStep(target.id);
-      addDebugLog(`[ENTITY_LINK] opened step panel id=${target.id}`);
       return true;
     case "project":
-      addDebugLog(`[ENTITY_LINK] navigating project route=${target.route}`);
       return false;
   }
 }

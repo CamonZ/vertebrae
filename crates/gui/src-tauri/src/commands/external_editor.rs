@@ -35,13 +35,6 @@ pub fn get_local_file_editors() -> Result<Vec<LocalFileEditor>, CommandError> {
             .cmp(&right.name.to_ascii_lowercase())
             .then_with(|| left.path.cmp(&right.path))
     });
-    log::info!(
-        "[LOCAL_FILE] discovered editors={:?}",
-        editors
-            .iter()
-            .map(|editor| (&editor.name, &editor.id))
-            .collect::<Vec<_>>()
-    );
     Ok(editors)
 }
 
@@ -84,16 +77,8 @@ pub fn open_local_file_with_editor(
     column: Option<u32>,
     editor: Option<&str>,
 ) -> Result<(), CommandError> {
-    log::info!(
-        "[LOCAL_FILE] selecting editor={:?} file={} line={:?} column={:?}",
-        editor,
-        file.display(),
-        line,
-        column
-    );
     if let Some(editor) = editor.filter(|editor| !editor.is_empty()) {
         if let Some(command_path) = editor.strip_prefix(COMMAND_EDITOR_PREFIX) {
-            log::info!("[LOCAL_FILE] route=command path={command_path}");
             return spawn_editor_command(command_path, file, line, column);
         }
 
@@ -101,14 +86,8 @@ pub fn open_local_file_with_editor(
             .strip_prefix(APPLICATION_EDITOR_PREFIX)
             .unwrap_or(editor);
         if let Some(emacs_command) = emacs_command_for_application(application_path) {
-            log::info!(
-                "[LOCAL_FILE] route=emacs-application app={} executable={}",
-                application_path,
-                emacs_command.display()
-            );
             return spawn_editor_command(&emacs_command.to_string_lossy(), file, line, column);
         }
-        log::info!("[LOCAL_FILE] route=application app={application_path}");
         return tauri_plugin_opener::OpenerExt::opener(app_handle)
             .open_path(
                 file.to_string_lossy().to_string(),
@@ -119,7 +98,6 @@ pub fn open_local_file_with_editor(
             });
     }
 
-    log::info!("[LOCAL_FILE] route=system-default");
     tauri_plugin_opener::OpenerExt::opener(app_handle)
         .open_path(file.to_string_lossy().to_string(), None::<String>)
         .map_err(|error| CommandError {
@@ -148,24 +126,15 @@ fn spawn_editor_command(
     let is_emacs = is_emacs_client || command_name.eq_ignore_ascii_case("emacs");
 
     let mut command = Command::new(command_path);
-    let mut arguments = Vec::new();
     if is_emacs_client {
-        arguments.push("--no-wait".to_string());
         command.arg("--no-wait");
     }
     if is_emacs {
         if let Some(location) = emacs_location_argument(line, column) {
-            arguments.push(location.clone());
             command.arg(location);
         }
     }
-    arguments.push(file.to_string_lossy().into_owned());
     command.arg(file);
-    log::info!(
-        "[LOCAL_FILE] spawning command={} args={:?}",
-        command_path.display(),
-        arguments
-    );
     command.spawn().map(|_| ()).map_err(|error| CommandError {
         message: format!("Could not launch editor command {command_path:?}: {error}"),
     })

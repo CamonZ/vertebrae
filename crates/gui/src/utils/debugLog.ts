@@ -1,5 +1,3 @@
-import { useDebugStore } from "../stores/debugStore";
-
 const KNOWN_CRATE_ROOTS = new Set([
   "gui",
   "gui_lib",
@@ -13,20 +11,6 @@ const KNOWN_CRATE_ROOTS = new Set([
 export interface DebugLogLocation {
   target?: string;
   message: string;
-}
-
-/** Add a renderer-side diagnostic to the in-app Debug Console. */
-export function addDebugLog(
-  message: string,
-  level: "INFO" | "WARN" | "ERROR" = "INFO"
-): void {
-  useDebugStore.getState().addLog({
-    timestamp: Date.now(),
-    level,
-    crateName: "gui",
-    target: "gui::renderer",
-    message,
-  });
 }
 
 /** Split the target prefix added by the Tauri Webview log formatter. */

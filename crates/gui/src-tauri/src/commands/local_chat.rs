@@ -24,14 +24,6 @@ pub fn open_local_file(
     column: Option<u32>,
     editor: Option<String>,
 ) -> Result<(), CommandError> {
-    log::info!(
-        "[LOCAL_FILE] open request root={} path={} line={:?} column={:?} editor={:?}",
-        project_root,
-        path,
-        line,
-        column,
-        editor
-    );
     let file = match resolve_local_file(&project_root, &path) {
         Ok(file) => file,
         Err(error) => {
@@ -39,7 +31,6 @@ pub fn open_local_file(
             return Err(error);
         }
     };
-    log::info!("[LOCAL_FILE] resolved file={}", file.display());
     let editor = editor.and_then(|editor| {
         let editor = editor.trim();
         (!editor.is_empty()).then(|| editor.to_string())
@@ -49,8 +40,6 @@ pub fn open_local_file(
         super::open_local_file_with_editor(&app_handle, &file, line, column, editor.as_deref());
     if let Err(error) = &result {
         log::error!("[LOCAL_FILE] launch failed: {}", error.message);
-    } else {
-        log::info!("[LOCAL_FILE] launch request accepted");
     }
     result
 }
