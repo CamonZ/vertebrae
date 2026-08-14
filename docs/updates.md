@@ -12,8 +12,7 @@ There are two channels:
 - `release` is stable and is built from an immutable `vX.Y.Z` tag.
 - `master` is the preview channel and follows the `master` branch.
 
-Each channel has a mutable GitHub Release pointer, separate from source and
-immutable build tags:
+The channels use fixed GitHub Release pointers:
 
 - `channel-release`
 - `channel-master`
@@ -24,17 +23,19 @@ Component metadata is published at:
 https://github.com/CamonZ/vertebrae/releases/download/channel-<channel>/latest-<target>.json
 ```
 
-Artifact URLs point to immutable releases. `VTB_UPDATE_PRIVATE_KEY` signs
-component entries and the complete manifest; `VTB_UPDATE_PUBLIC_KEY` is the
-repository variable used to publish the matching public key in the metadata.
+Stable artifact URLs point to immutable `vX.Y.Z` releases. Master preview
+artifacts are stored in the existing `channel-master` release with
+version/build-qualified asset names that are never overwritten. `VTB_UPDATE_PRIVATE_KEY`
+signs component entries and the complete manifest; `VTB_UPDATE_PUBLIC_KEY` is
+the repository variable used to publish the matching public key in the metadata.
 
 Artifact names include the component, version, build, and target. Stable
 versions come from the source tag. Preview versions use the workflow run
 number and the source commit's short SHA as the build identity.
 
-Immutable release titles use `Vertebrae [edge] <version> (<build>)` for
-`master` builds and `Vertebrae [stable] <version> (<build>)` for tagged builds.
-The immutable tag itself remains targetable by automation.
+The master release is titled `master channel`; stable release titles use
+`Vertebrae [stable] <version> (<build>)`. Stable release tags remain targetable
+by automation.
 
 Release artifacts currently target macOS ARM64 (`aarch64-apple-darwin`) on the
 `macos-26` runner, plus Linux ARM64 and x86_64. Intel macOS artifacts are not
@@ -88,8 +89,8 @@ at startup.
 2. Build the component binaries and GUI bundles for their supported targets.
 3. Sign the artifacts and generate target-specific component manifests plus
    the GUI updater manifest.
-4. Upload artifacts to the immutable release before updating the channel
-   pointer release.
+4. Upload stable artifacts to their immutable release, or upload master
+   artifacts to `channel-master`, before updating the channel manifests.
 
 The workflow keeps orchestration in `.github/workflows/release.yml`; the
 release implementation lives in versioned scripts:
@@ -131,5 +132,5 @@ node --test scripts/resolve-release-metadata.test.mjs \
   scripts/create-gui-update-manifest.test.mjs
 ```
 
-Do not move or reuse an immutable version/build tag. Channel pointers may move,
-but their signed metadata must continue to reference immutable assets.
+Do not move or reuse an immutable stable version tag. Master channel metadata
+may move, but it must continue to reference uniquely named, signed assets.

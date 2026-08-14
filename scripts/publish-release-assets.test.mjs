@@ -52,7 +52,7 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
         GH_TOKEN: "test-token",
         VTB_UPDATE_PRIVATE_KEY: privateKey,
         VTB_UPDATE_PUBLIC_KEY: "test-public-key",
-        IMMUTABLE_RELEASE_TAG: "components-master-abcdef12",
+        ARTIFACT_TAG: "channel-master",
         UPDATE_SHA: "abcdef1234567890abcdef1234567890abcdef12",
         UPDATE_CHANNEL: "master",
         CHANNEL_TAG: "channel-master",
@@ -64,24 +64,66 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
     });
 
     assert.equal(
-      await readFile(join(directory, "gui-assets/vertebrae-gui-linux-x86_64.AppImage"), "utf8"),
+      await readFile(join(directory, "gui-assets/vertebrae-gui-linux-x86_64-1.2.3-build.AppImage"), "utf8"),
       "linux app",
     );
     assert.equal(
-      await readFile(join(directory, "gui-assets/vertebrae-gui-linux-x86_64.AppImage.sig"), "utf8"),
+      await readFile(join(directory, "gui-assets/vertebrae-gui-linux-x86_64-1.2.3-build.AppImage.sig"), "utf8"),
       "linux signature\n",
     );
     assert.equal(
-      await readFile(join(directory, "gui-assets/vertebrae-gui-darwin-aarch64.app.tar.gz"), "utf8"),
+      await readFile(join(directory, "gui-assets/vertebrae-gui-darwin-aarch64-1.2.3-build.app.tar.gz"), "utf8"),
       "mac app",
     );
 
     const manifest = JSON.parse(await readFile(join(directory, "gui-assets/gui-latest.json"), "utf8"));
     assert.equal(
       manifest.platforms["linux-x86_64"].url,
-      "https://github.com/CamonZ/vertebrae/releases/download/components-master-abcdef12/vertebrae-gui-linux-x86_64.AppImage",
+      "https://github.com/CamonZ/vertebrae/releases/download/channel-master/vertebrae-gui-linux-x86_64-1.2.3-build.AppImage",
     );
     assert.equal(manifest.platforms["linux-x86_64"].signature, "linux signature");
+    const componentManifest = JSON.parse(
+      await readFile(
+        join(directory, "manifests/latest-x86_64-unknown-linux-gnu.json"),
+        "utf8",
+      ),
+    );
+    assert.equal(
+      componentManifest.components.cli.url,
+      "https://github.com/CamonZ/vertebrae/releases/download/channel-master/vtb-1.2.3-build-x86_64-unknown-linux-gnu",
+    );
+
+    const masterGhLog = await readFile(logPath, "utf8");
+    assert.match(masterGhLog, /release create channel-master/);
+
+    await runPublisher({
+      cwd: directory,
+      env: {
+        GH_LOG: logPath,
+        GH_TOKEN: "test-token",
+        VTB_UPDATE_PRIVATE_KEY: privateKey,
+        VTB_UPDATE_PUBLIC_KEY: "test-public-key",
+        ARTIFACT_TAG: "v1.2.3",
+        UPDATE_SHA: "abcdef1234567890abcdef1234567890abcdef12",
+        UPDATE_CHANNEL: "release",
+        CHANNEL_TAG: "channel-release",
+        UPDATE_VERSION: "1.2.3",
+        UPDATE_BUILD: "build",
+        GITHUB_REPOSITORY: "CamonZ/vertebrae",
+        PATH: `${binDirectory}:${process.env.PATH}`,
+      },
+    });
+
+    const stableManifest = JSON.parse(
+      await readFile(join(directory, "gui-assets/gui-latest.json"), "utf8"),
+    );
+    assert.equal(
+      stableManifest.platforms["linux-x86_64"].url,
+      "https://github.com/CamonZ/vertebrae/releases/download/v1.2.3/vertebrae-gui-linux-x86_64-1.2.3-build.AppImage",
+    );
+    const stableGhLog = await readFile(logPath, "utf8");
+    assert.match(stableGhLog, /release create v1.2.3/);
+    assert.match(stableGhLog, /release create channel-release/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

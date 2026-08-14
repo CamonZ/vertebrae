@@ -5,7 +5,7 @@ set -euo pipefail
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${VTB_UPDATE_PRIVATE_KEY:?VTB_UPDATE_PRIVATE_KEY is required}"
 : "${VTB_UPDATE_PUBLIC_KEY:?VTB_UPDATE_PUBLIC_KEY is required}"
-: "${IMMUTABLE_RELEASE_TAG:?IMMUTABLE_RELEASE_TAG is required}"
+: "${ARTIFACT_TAG:?ARTIFACT_TAG is required}"
 : "${UPDATE_SHA:?UPDATE_SHA is required}"
 : "${UPDATE_CHANNEL:?UPDATE_CHANNEL is required}"
 : "${CHANNEL_TAG:?CHANNEL_TAG is required}"
@@ -22,14 +22,55 @@ case "$UPDATE_CHANNEL" in
     ;;
 esac
 
-gh release create "$IMMUTABLE_RELEASE_TAG" \
-  --target "$UPDATE_SHA" \
-  --title "Vertebrae [$release_label] $UPDATE_VERSION ($UPDATE_BUILD)" \
-  --notes "Signed immutable component artifacts for the $release_label channel."
+ensure_release() {
+  local release_tag="$1"
+  shift
+
+  # A fixed channel release is expected to exist on reruns. Keep failures
+  # visible: only accept release creation errors when the release is present.
+  gh release create "$release_tag" "$@" \
+    || gh release view "$release_tag" >/dev/null
+}
+
+if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  # The preview channel is both the moving pointer and the artifact store.
+  # Asset names include the build identity, so old previews remain available
+  # without creating a Git tag/release for every master commit.
+  ensure_release "$ARTIFACT_TAG" \
+    --target "$UPDATE_SHA" \
+    --title "$UPDATE_CHANNEL channel" \
+    --notes "Signed preview component artifacts"
+else
+  gh release create "$ARTIFACT_TAG" \
+    --target "$UPDATE_SHA" \
+    --title "Vertebrae [$release_label] $UPDATE_VERSION ($UPDATE_BUILD)" \
+    --notes "Signed immutable component artifacts for the $release_label channel."
+fi
+
+existing_assets=""
+if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  existing_assets="$(gh release view "$ARTIFACT_TAG" --json assets --jq '.assets[].name')"
+fi
+
+upload_unique_asset() {
+  local artifact="$1"
+  local asset_name="${2:-$(basename "$artifact")}"
+
+  # Re-running a master build for the same SHA should not replace an existing
+  # signed asset. Stable releases intentionally fail if an asset already exists.
+  if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]] \
+    && grep -Fxq "$asset_name" <<<"$existing_assets"; then
+    return
+  fi
+  gh release upload "$ARTIFACT_TAG" "$artifact#$asset_name" --clobber=false
+  if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+    existing_assets+=$'\n'"$asset_name"
+  fi
+}
 
 for target_dir in release-input/binaries-*; do
   for artifact in "$target_dir"/*; do
-    gh release upload "$IMMUTABLE_RELEASE_TAG" "$artifact#$(basename "$artifact")" --clobber=false
+    upload_unique_asset "$artifact"
   done
 done
 
@@ -56,13 +97,13 @@ copy_gui_asset() {
       exit 1
       ;;
   esac
-  local asset="vertebrae-gui-$platform$suffix"
+  local asset="vertebrae-gui-$platform-$UPDATE_VERSION-$UPDATE_BUILD$suffix"
   cp "$artifact" "gui-assets/$asset"
   cp "$artifact.sig" "gui-assets/$asset.sig"
   printf '%s_artifact=gui-assets/%s\n' "$key" "$asset" >> gui-assets/paths.env
   printf '%s_signature=gui-assets/%s.sig\n' "$key" "$asset" >> gui-assets/paths.env
-  gh release upload "$IMMUTABLE_RELEASE_TAG" \
-    "gui-assets/$asset" "gui-assets/$asset.sig" --clobber=false
+  upload_unique_asset "gui-assets/$asset"
+  upload_unique_asset "gui-assets/$asset.sig"
 }
 
 : > gui-assets/paths.env
@@ -73,19 +114,21 @@ source gui-assets/paths.env
 node scripts/create-gui-update-manifest.mjs \
   --version "$UPDATE_VERSION" \
   --build "$UPDATE_BUILD" \
-  --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG" \
+  --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$ARTIFACT_TAG" \
   --darwin-aarch64-artifact "$darwin_aarch64_artifact" \
   --darwin-aarch64-signature "$darwin_aarch64_signature" \
   --linux-x86_64-artifact "$linux_x86_64_artifact" \
   --linux-x86_64-signature "$linux_x86_64_signature" \
   --output gui-assets/gui-latest.json
 
-# The channel release is a mutable pointer to signed metadata. Creation is
-# intentionally idempotent because it may already exist from an earlier run.
-gh release create "$CHANNEL_TAG" \
-  --target "$UPDATE_SHA" \
-  --title "$UPDATE_CHANNEL channel" \
-  --notes "Signed channel metadata" || true
+# The channel release is a mutable pointer to signed metadata. For master it
+# is also the artifact release; for stable it remains a separate pointer.
+if [[ "$ARTIFACT_TAG" != "$CHANNEL_TAG" ]]; then
+  ensure_release "$CHANNEL_TAG" \
+    --target "$UPDATE_SHA" \
+    --title "$UPDATE_CHANNEL channel" \
+    --notes "Signed channel metadata"
+fi
 gh release upload "$CHANNEL_TAG" gui-assets/gui-latest.json --clobber
 
 mkdir -p manifests
@@ -98,7 +141,7 @@ for target in \
     --version "$UPDATE_VERSION"
     --build "$UPDATE_BUILD"
     --target "$target"
-    --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$IMMUTABLE_RELEASE_TAG"
+    --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$ARTIFACT_TAG"
   )
   case "$target" in
     aarch64-apple-darwin) manifest_args+=(--gui "$darwin_aarch64_artifact") ;;
@@ -113,5 +156,9 @@ for target in \
   node scripts/create-release-manifest.mjs "${manifest_args[@]}"
 done
 
-gh release upload "$IMMUTABLE_RELEASE_TAG" manifests/latest-*.json --clobber=false
-gh release upload "$CHANNEL_TAG" manifests/latest-*.json --clobber
+if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  gh release upload "$CHANNEL_TAG" manifests/latest-*.json --clobber
+else
+  gh release upload "$ARTIFACT_TAG" manifests/latest-*.json --clobber=false
+  gh release upload "$CHANNEL_TAG" manifests/latest-*.json --clobber
+fi

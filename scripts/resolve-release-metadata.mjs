@@ -23,7 +23,7 @@ export function resolveReleaseMetadata({ requestedRef, runNumber, sourceSha }) {
       version: `0.1.${runNumber}`,
       build,
       source_sha: resolvedSha,
-      immutable_tag: `components-master-${build}`,
+      artifact_tag: "channel-master",
     };
   }
 
@@ -37,7 +37,7 @@ export function resolveReleaseMetadata({ requestedRef, runNumber, sourceSha }) {
       version: tag.slice(1),
       build,
       source_sha: resolvedSha,
-      immutable_tag: tag,
+      artifact_tag: tag,
     };
   }
 
