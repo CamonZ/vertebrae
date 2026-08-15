@@ -193,6 +193,22 @@ describe("MarkdownContent", () => {
       expect(screen.getByText("../private.rs").tagName).toBe("CODE");
     });
 
+    it("renders ranged inline file references as actionable links", () => {
+      render(
+        <MarkdownContent
+          projectPath="/repo"
+          text="See `src/main.rs:8-12` and `src/lib.rs:L20-24`."
+        />
+      );
+
+      const links = screen.getAllByTestId("local-file-reference-link");
+      expect(links).toHaveLength(2);
+      expect(links[0]).toHaveAttribute("data-file-path", "src/main.rs");
+      expect(links[0]).toHaveAttribute("data-file-line", "8");
+      expect(links[1]).toHaveAttribute("data-file-path", "src/lib.rs");
+      expect(links[1]).toHaveAttribute("data-file-line", "20");
+    });
+
     it.each([
       ["HTTPS", "https://example.com/path?q=value"],
       ["HTTP", "http://example.com/path"],

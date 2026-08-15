@@ -4,7 +4,8 @@ export interface LocalFileReference {
   column: number | null;
 }
 
-const LOCATION_RE = /^(.*?)(?::(\d+)(?::(\d+))?|#L(\d+)(?:C(\d+))?)$/;
+const LOCATION_RE =
+  /^(.*?)(?::L?(\d+)(?:-\d+)?(?::(\d+))?|#L(\d+)(?:-L?\d+)?(?:C(\d+))?)$/;
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, "/").replace(/\/+/g, "/");

@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { parseLocalFileReference } from "./localFileReference";
 
 describe("parseLocalFileReference", () => {
+  it("accepts line ranges and preserves their starting line", () => {
+    expect(parseLocalFileReference("src/main.rs:8-12", "/repo")).toEqual({
+      path: "src/main.rs",
+      line: 8,
+      column: null,
+    });
+    expect(parseLocalFileReference("src/main.rs:L8-12", "/repo")).toEqual({
+      path: "src/main.rs",
+      line: 8,
+      column: null,
+    });
+    expect(parseLocalFileReference("src/main.rs#L8-L12", "/repo")).toEqual({
+      path: "src/main.rs",
+      line: 8,
+      column: null,
+    });
+  });
+
   it("accepts repository-relative paths with line and column locations", () => {
     expect(parseLocalFileReference("src/main.rs:12:4", "/repo")).toEqual({
       path: "src/main.rs",
