@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { commands } from "../../bindings";
 import type {
   ChatCompactionSummary,
   ChatMessage,
@@ -10,6 +11,7 @@ import { PermissionRequestTurn } from "./PermissionRequestTurn";
 import { UserQuestionTurn } from "./UserQuestionTurn";
 import { useChatStore } from "../../stores/chatStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { MarkdownProjectRootProvider } from "../shared/MarkdownContent";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
@@ -83,6 +85,7 @@ function buildChatRenderItems(
 
 interface ChatMessagesProps {
   sessionId: string;
+  projectPath?: string | null;
   messages: readonly ChatMessage[];
   assistantLabel: string;
   isEmpty: boolean;
@@ -95,6 +98,7 @@ interface ChatMessagesProps {
 
 export function ChatMessages({
   sessionId,
+  projectPath,
   messages,
   assistantLabel,
   isEmpty,
@@ -114,6 +118,29 @@ export function ChatMessages({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const keepAtBottomRef = useRef(true);
+  const [projectRoots, setProjectRoots] = useState<readonly string[]>(
+    projectPath ? [projectPath] : []
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setProjectRoots(projectPath ? [projectPath] : []);
+    if (!projectPath) return () => undefined;
+
+    void commands.getLocalFileRoots(projectPath).then((result) => {
+      if (!cancelled && result.status === "ok") {
+        setProjectRoots(result.data);
+      }
+    }).catch((error) => {
+      if (!cancelled) {
+        console.warn("Could not resolve local chat worktree roots:", error);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectPath]);
 
   const renderItems = useMemo(
     () => buildChatRenderItems(messages, assistantLabel),
@@ -155,15 +182,19 @@ export function ChatMessages({
   }, [sessionId]);
 
   return (
-    <div
-      ref={messagesContainerRef}
-      className="min-h-0 flex-1 overflow-y-auto p-4"
-      data-testid="chat-messages-scroll"
-      onScroll={() => {
-        const container = messagesContainerRef.current;
-        if (container) keepAtBottomRef.current = isNearBottom(container);
-      }}
+    <MarkdownProjectRootProvider
+      projectPath={projectPath}
+      projectRoots={projectRoots}
     >
+      <div
+        ref={messagesContainerRef}
+        className="min-h-0 flex-1 overflow-y-auto p-4"
+        data-testid="chat-messages-scroll"
+        onScroll={() => {
+          const container = messagesContainerRef.current;
+          if (container) keepAtBottomRef.current = isNearBottom(container);
+        }}
+      >
       {isEmpty && !isActive && (
         <div className="flex h-full flex-col items-center justify-center text-center">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--color-accent)]/10">
@@ -247,6 +278,7 @@ export function ChatMessages({
         )}
         <div ref={messagesEndRef} />
       </div>
-    </div>
+      </div>
+    </MarkdownProjectRootProvider>
   );
 }

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 Element.prototype.scrollIntoView = vi.fn();
 
@@ -22,6 +24,7 @@ function defaultProps(overrides: Record<string, unknown> = {}) {
 describe("ChatMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useEntityPanelStore.getState().reset();
   });
 
   // --- Empty state ---
@@ -114,6 +117,27 @@ describe("ChatMessages", () => {
     ];
     render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
     expect(screen.getByText("Hi there")).toBeInTheDocument();
+  });
+
+  it("opens a task panel from an entity link in an assistant chat row", async () => {
+    const user = userEvent.setup();
+    const taskId = "03111754-4769-47c1-a64c-078d73554af8";
+    const messages: ChatMessage[] = [
+      {
+        kind: "assistant",
+        text: `See [the task](vtb://task/${taskId})`,
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+    ];
+
+    render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
+
+    await user.click(screen.getByTestId("vtb-entity-link"));
+
+    expect(useEntityPanelStore.getState().selection).toEqual({
+      type: "task",
+      taskId,
+    });
   });
 
   it("renders the flat agent spawn marker without child-agent transcript prose", () => {

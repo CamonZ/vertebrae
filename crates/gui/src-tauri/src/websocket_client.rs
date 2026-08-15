@@ -772,7 +772,6 @@ impl SacrumSocket {
                 msg = connection.read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
-                            log::info!("[WebSocket] Received message ({} bytes)", text.len());
                             log::debug!("[WebSocket] Raw message: {}", text);
 
                             if let Err(e) = Self::handle_phoenix_message_for_topic(
@@ -850,11 +849,13 @@ impl SacrumSocket {
                 return Ok(());
             }
 
-            log::info!(
-                "[WebSocket] Dispatching event '{}' on topic '{}'",
-                event,
-                topic
-            );
+            if event != "phx_reply" {
+                log::info!(
+                    "[WebSocket] Dispatching event '{}' on topic '{}'",
+                    event,
+                    topic
+                );
+            }
             Self::trace_event(&format!("RECV event='{}' topic='{}'", event, topic));
 
             match event {
@@ -901,9 +902,10 @@ impl SacrumSocket {
                 "permission_request" => {
                     Self::handle_permission_request_event(payload, app_handle)?;
                 }
-                "phx_reply" | "phx_error" => {
-                    log::info!(
-                        "[WebSocket] Phoenix reply/error on topic '{}': payload={}",
+                "phx_reply" => {}
+                "phx_error" => {
+                    log::warn!(
+                        "[WebSocket] Phoenix error on topic '{}': payload={}",
                         topic,
                         payload
                     );

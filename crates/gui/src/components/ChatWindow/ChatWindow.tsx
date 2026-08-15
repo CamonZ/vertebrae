@@ -79,6 +79,7 @@ export function ChatWindow({
       />
       <ChatMessages
         sessionId={sessionId}
+        projectPath={chat.session.projectPath}
         messages={chat.messages}
         assistantLabel={chat.assistantLabel}
         isEmpty={isEmpty}

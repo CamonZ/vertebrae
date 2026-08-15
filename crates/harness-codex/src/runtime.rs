@@ -1752,6 +1752,7 @@ async fn setup_session(
     if let Some(provider) = &config.model_provider {
         params["modelProvider"] = json!(provider);
     }
+    add_developer_instructions(&mut params, &request_config);
     config.permission.apply_to_params(&mut params);
     let method = if resume_id.is_some() {
         "thread/resume"
@@ -1840,6 +1841,20 @@ async fn setup_session(
         return Err(error);
     }
     Ok(state)
+}
+
+fn add_developer_instructions(
+    params: &mut Value,
+    request_config: &vertebrae_harness_core::RequestConfig,
+) {
+    if let Some(instructions) = request_config
+        .developer_instructions
+        .as_deref()
+        .map(str::trim)
+        .filter(|instructions| !instructions.is_empty())
+    {
+        params["developerInstructions"] = json!(instructions);
+    }
 }
 
 async fn emit_direct(
@@ -2088,9 +2103,23 @@ mod tests {
 
     use super::{
         ControlDisposition, FileChangeKind, RootTurnIdentity, SessionState, ToolStatus,
-        control_request, file_change_event, parse_usage, tool_call, tool_output,
+        add_developer_instructions, control_request, file_change_event, parse_usage, tool_call,
+        tool_output,
     };
     use vertebrae_harness_core::{SessionId, ThreadId, ToolCallId, TurnId};
+
+    #[test]
+    fn maps_additive_instructions_to_codex_developer_layer() {
+        let mut params = json!({"serviceName": "vertebrae"});
+        add_developer_instructions(
+            &mut params,
+            &vertebrae_harness_core::RequestConfig {
+                developer_instructions: Some("reference contract".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(params["developerInstructions"], "reference contract");
+    }
 
     #[test]
     fn child_correlation_preserves_parent_tool_call() {

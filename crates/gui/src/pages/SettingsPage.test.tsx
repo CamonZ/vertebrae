@@ -13,11 +13,14 @@ import {
 } from "../stores/guiUpdateStore";
 
 const mockGetSupportedLocalChatHarnesses = vi.fn();
+const mockGetLocalFileEditors = vi.fn();
 
 vi.mock("../bindings", () => ({
   commands: {
     getSupportedLocalChatHarnesses: (...args: unknown[]) =>
       mockGetSupportedLocalChatHarnesses(...args),
+    getLocalFileEditors: (...args: unknown[]) =>
+      mockGetLocalFileEditors(...args),
   },
 }));
 
@@ -108,11 +111,65 @@ describe("SettingsPage", () => {
       defaultHarness: null,
       storageWarning: null,
     });
-    useUIStore.setState({ theme: "system" });
+    useUIStore.setState({ theme: "system", externalEditor: "" });
     mockGetSupportedLocalChatHarnesses.mockResolvedValue({
       status: "ok",
       data: catalog,
     });
+    mockGetLocalFileEditors.mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          id: "app:/Applications/Visual Studio Code.app",
+          name: "Visual Studio Code",
+          path: "/Applications/Visual Studio Code.app",
+        },
+      ],
+    });
+  });
+
+  it("keeps file-link settings available when harness discovery fails", async () => {
+    mockGetSupportedLocalChatHarnesses.mockResolvedValue({
+      status: "error",
+      error: { message: "Harness discovery failed" },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByTestId("settings-error")).toHaveTextContent(
+      "Harness discovery failed"
+    );
+    expect(screen.getByTestId("settings-external-editor")).toBeInTheDocument();
+  });
+
+  it("preserves and explains a configured editor when discovery fails", async () => {
+    useUIStore.setState({
+      externalEditor: "app:/Applications/Visual Studio Code.app",
+    });
+    mockGetLocalFileEditors.mockResolvedValue({
+      status: "error",
+      error: { message: "Editor discovery failed" },
+    });
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+
+    expect(
+      await screen.findByTestId("settings-external-editor-error")
+    ).toHaveTextContent("Editor discovery failed");
+    expect(screen.getByTestId("settings-external-editor")).toHaveValue(
+      "app:/Applications/Visual Studio Code.app"
+    );
+    expect(
+      screen.getByRole("option", { name: "Configured editor (unavailable)" })
+    ).toBeInTheDocument();
   });
 
   it("renders an available release and lets the user review it", async () => {
@@ -429,6 +486,7 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
     await screen.findByTestId("harness-defaults-claude");
+    await screen.findByRole("option", { name: "Visual Studio Code" });
 
     await user.selectOptions(
       screen.getByTestId("claude-default-model"),
@@ -439,8 +497,15 @@ describe("SettingsPage", () => {
       "plan"
     );
     await user.selectOptions(screen.getByTestId("default-harness"), "codex");
+    await user.selectOptions(
+      screen.getByTestId("settings-external-editor"),
+      "app:/Applications/Visual Studio Code.app"
+    );
     await user.click(screen.getByTestId("settings-nav-appearance"));
     expect(screen.getByTestId("settings-theme")).toHaveValue("system");
+    expect(
+      screen.queryByTestId("settings-external-editor")
+    ).not.toBeInTheDocument();
     await user.selectOptions(screen.getByTestId("settings-theme"), "dark");
     await user.click(screen.getByTestId("settings-nav-chat"));
     await user.selectOptions(
@@ -455,6 +520,9 @@ describe("SettingsPage", () => {
       });
       expect(useLocalChatDefaultsStore.getState().defaultHarness).toBe("codex");
       expect(useUIStore.getState().theme).toBe("dark");
+      expect(useUIStore.getState().externalEditor).toBe(
+        "app:/Applications/Visual Studio Code.app"
+      );
     });
     expect(
       JSON.parse(

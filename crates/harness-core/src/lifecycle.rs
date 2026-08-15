@@ -25,6 +25,11 @@ pub struct RequestConfig {
     pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
+    /// Additive instructions for the provider's developer/system layer.
+    /// Adapters preserve their built-in instructions and merge this value
+    /// through their native provider mechanism.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub developer_instructions: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub environment: BTreeMap<String, String>,
 }

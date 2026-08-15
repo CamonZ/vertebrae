@@ -5,6 +5,7 @@ import {
   type LocalChatHarnessCatalog,
   type LocalChatHarnessInfo,
   type LocalChatHarnessKind,
+  type LocalFileEditor,
   type PermissionMode,
 } from "../bindings";
 import { Icon } from "../components/atoms/Icon";
@@ -949,6 +950,11 @@ export interface SettingsPageProps {
 
 export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   const [catalog, setCatalog] = useState<LocalChatHarnessCatalog | null>(null);
+  const [externalEditors, setExternalEditors] = useState<LocalFileEditor[]>([]);
+  const [externalEditorsLoading, setExternalEditorsLoading] = useState(false);
+  const [externalEditorsError, setExternalEditorsError] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -966,6 +972,8 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
+  const externalEditor = useUIStore((state) => state.externalEditor);
+  const setExternalEditor = useUIStore((state) => state.setExternalEditor);
   const harnesses = useMemo(() => catalog?.harnesses ?? [], [catalog]);
   const availableHarnesses = useMemo(
     () => harnesses.filter((info) => info.available),
@@ -974,6 +982,28 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
   const effectiveDefaultHarness = catalog
     ? resolveDefaultHarness(catalog, defaultHarness)
     : null;
+  const externalEditorOptions = useMemo(() => {
+    const configuredEditorIsMissing =
+      externalEditor.length > 0 &&
+      !externalEditors.some((editor) => editor.id === externalEditor);
+    return [
+      { value: "", label: "System default" },
+      ...(configuredEditorIsMissing
+        ? [
+            {
+              value: externalEditor,
+              label: externalEditorsLoading
+                ? "Configured editor"
+                : "Configured editor (unavailable)",
+            },
+          ]
+        : []),
+      ...externalEditors.map((editor) => ({
+        value: editor.id,
+        label: editor.name,
+      })),
+    ];
+  }, [externalEditor, externalEditors, externalEditorsLoading]);
   const updateIsAvailable = hasAvailableUpdate(updateState);
   const approveUpdate =
     onApproveUpdate ??
@@ -1015,6 +1045,74 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (activeSection !== "chat") return;
+
+    let cancelled = false;
+    setExternalEditorsLoading(true);
+    setExternalEditorsError(null);
+    void commands
+      .getLocalFileEditors()
+      .then((result) => {
+        if (cancelled) return;
+        if (result.status === "ok") {
+          setExternalEditors(result.data);
+          setExternalEditorsError(null);
+        } else {
+          setExternalEditors([]);
+          setExternalEditorsError(result.error.message);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setExternalEditors([]);
+          setExternalEditorsError("Could not load installed applications.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setExternalEditorsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSection]);
+
+  const fileLinkSettings = (
+    <div className="mt-8 border-t border-[var(--color-line)]">
+      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+        File links
+      </p>
+      <SettingRow
+        label="Open files with"
+        description="Choose an installed app or editor command. This applies to every chat file link and ticket code reference."
+      >
+        <div>
+          <Select
+            aria-label="Open files with"
+            data-testid="settings-external-editor"
+            value={externalEditor}
+            onChange={(event) => {
+              setExternalEditor(event.target.value);
+              setSavedFeedback(true);
+            }}
+            disabled={externalEditorsLoading}
+            options={externalEditorOptions}
+          />
+          {externalEditorsError && (
+            <p
+              className="mt-2 text-xs text-[var(--color-warn)]"
+              role="status"
+              data-testid="settings-external-editor-error"
+            >
+              {externalEditorsError}
+            </p>
+          )}
+        </div>
+      </SettingRow>
+    </div>
+  );
 
   return (
     <main
@@ -1149,74 +1247,79 @@ export function SettingsPage({ onApproveUpdate }: SettingsPageProps = {}) {
                 }}
               />
             </>
-          ) : isLoading ? (
-            <div
-              className="mt-8 text-sm text-[var(--color-fg-mute)]"
-              role="status"
-            >
-              Loading harness capabilities…
-            </div>
-          ) : error ? (
-            <div
-              className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] p-4 text-sm text-[var(--color-err)]"
-              role="alert"
-              data-testid="settings-error"
-            >
-              {error}
-            </div>
-          ) : harnesses.length === 0 ? (
-            <div className="mt-8 rounded-[var(--radius-md)] border border-dashed border-[var(--color-line-strong)] p-6 text-sm text-[var(--color-fg-mute)]">
-              No local chat harnesses are available.
-            </div>
           ) : (
-            <div className="mt-8">
-              <div className="border-t border-[var(--color-line)]">
-                <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
-                  New sessions
-                </p>
-                <SettingRow
-                  label="Default harness"
-                  description="The harness used for every new chat session."
+            <>
+              {fileLinkSettings}
+              {isLoading ? (
+                <div
+                  className="mt-8 text-sm text-[var(--color-fg-mute)]"
+                  role="status"
                 >
-                  <Select
-                    aria-label="Default harness"
-                    data-testid="default-harness"
-                    value={effectiveDefaultHarness ?? ""}
-                    onChange={(event) => {
-                      setDefaultHarness(
-                        (event.target.value ||
-                          null) as LocalChatHarnessKind | null
-                      );
-                      setSavedFeedback(true);
-                    }}
-                    disabled={availableHarnesses.length === 0}
-                    options={availableHarnesses.map((info) => ({
-                      value: info.harness,
-                      label: `${info.label}${
-                        info.harness === catalog?.default_harness
-                          ? " (provider default)"
-                          : ""
-                      }`,
-                    }))}
-                  />
-                </SettingRow>
-              </div>
-
-              <div className="mt-5">
-                <p className="mb-2 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
-                  Harness defaults
-                </p>
-                <div className="space-y-7">
-                  {harnesses.map((info) => (
-                    <HarnessDefaultsSection
-                      info={info}
-                      key={info.harness}
-                      onSaved={() => setSavedFeedback(true)}
-                    />
-                  ))}
+                  Loading harness capabilities…
                 </div>
-              </div>
-            </div>
+              ) : error ? (
+                <div
+                  className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] p-4 text-sm text-[var(--color-err)]"
+                  role="alert"
+                  data-testid="settings-error"
+                >
+                  {error}
+                </div>
+              ) : harnesses.length === 0 ? (
+                <div className="mt-8 rounded-[var(--radius-md)] border border-dashed border-[var(--color-line-strong)] p-6 text-sm text-[var(--color-fg-mute)]">
+                  No local chat harnesses are available.
+                </div>
+              ) : (
+                <div className="mt-8">
+                  <div className="border-t border-[var(--color-line)]">
+                    <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                      New sessions
+                    </p>
+                    <SettingRow
+                      label="Default harness"
+                      description="The harness used for every new chat session."
+                    >
+                      <Select
+                        aria-label="Default harness"
+                        data-testid="default-harness"
+                        value={effectiveDefaultHarness ?? ""}
+                        onChange={(event) => {
+                          setDefaultHarness(
+                            (event.target.value ||
+                              null) as LocalChatHarnessKind | null
+                          );
+                          setSavedFeedback(true);
+                        }}
+                        disabled={availableHarnesses.length === 0}
+                        options={availableHarnesses.map((info) => ({
+                          value: info.harness,
+                          label: `${info.label}${
+                            info.harness === catalog?.default_harness
+                              ? " (provider default)"
+                              : ""
+                          }`,
+                        }))}
+                      />
+                    </SettingRow>
+                  </div>
+
+                  <div className="mt-5">
+                    <p className="mb-2 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                      Harness defaults
+                    </p>
+                    <div className="space-y-7">
+                      {harnesses.map((info) => (
+                        <HarnessDefaultsSection
+                          info={info}
+                          key={info.harness}
+                          onSaved={() => setSavedFeedback(true)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </section>

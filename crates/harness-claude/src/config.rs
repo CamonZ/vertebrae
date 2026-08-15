@@ -259,6 +259,15 @@ impl ClaudeProviderConfig {
             args.push("--json-schema".into());
             args.push(schema.to_string());
         }
+        if let Some(instructions) = request
+            .developer_instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|instructions| !instructions.is_empty())
+        {
+            args.push("--append-system-prompt".into());
+            args.push(instructions.into());
+        }
         match mode {
             ClaudeLaunchMode::Persistent { resume_id } => {
                 if let Some(resume_id) = resume_id {
@@ -310,4 +319,41 @@ fn executable_name() -> &'static str {
 #[cfg(not(windows))]
 fn executable_name() -> &'static str {
     "claude"
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs::File;
+
+    use tempfile::tempdir;
+    use vertebrae_harness_core::RequestConfig;
+
+    use super::{ClaudeLaunchMode, ClaudeProviderConfig};
+
+    #[test]
+    fn appends_developer_instructions_without_replacing_provider_defaults() {
+        let directory = tempdir().expect("temporary directory");
+        let executable = directory.path().join("claude");
+        File::create(&executable).expect("placeholder executable");
+        let config = ClaudeProviderConfig {
+            executable: Some(executable),
+            ..Default::default()
+        };
+        let request = RequestConfig {
+            developer_instructions: Some("reference contract".into()),
+            ..Default::default()
+        };
+
+        let spec = config
+            .command_spec(ClaudeLaunchMode::Persistent { resume_id: None }, &request)
+            .expect("command spec");
+
+        let flag = spec
+            .args
+            .iter()
+            .position(|arg| arg == "--append-system-prompt")
+            .expect("append-system-prompt flag");
+        assert_eq!(spec.args[flag + 1], "reference contract");
+        assert!(spec.args.iter().any(|arg| arg == "--output-format"));
+    }
 }

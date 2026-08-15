@@ -1069,6 +1069,64 @@ export const commands = {
     }
   },
   /**
+   * Return applications registered by the operating system for local source/text files.
+   */
+  async getLocalFileEditors(): Promise<
+    Result<LocalFileEditor[], CommandError>
+  > {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("get_local_file_editors"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * Open a validated local-chat file reference with the external file handler.
+   */
+  async openLocalFile(
+    projectRoot: string,
+    path: string,
+    line: number | null,
+    column: number | null,
+    editor: string | null
+  ): Promise<Result<null, CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("open_local_file", {
+          projectRoot,
+          path,
+          line,
+          column,
+          editor,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
+   * Return the project and Git worktree roots authorized for local file links.
+   */
+  async getLocalFileRoots(
+    projectRoot: string
+  ): Promise<Result<string[], CommandError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("get_local_file_roots", { projectRoot }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+  /**
    * Create a provider-neutral local chat session.
    */
   async createLocalChatSession(
@@ -1710,6 +1768,11 @@ export type LocalChatFileChangeEvent = {
 export type LocalChatHarnessCatalog = {
   default_harness: LocalChatHarnessKind;
   harnesses: LocalChatHarnessInfo[];
+};
+export type LocalFileEditor = {
+  id: string;
+  name: string;
+  path: string;
 };
 export type LocalChatHarnessInfo = {
   harness: LocalChatHarnessKind;

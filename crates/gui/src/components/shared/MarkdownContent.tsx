@@ -1,11 +1,15 @@
 import {
+  createContext,
   memo,
+  useContext,
   useEffect,
   useId,
   useState,
   type ComponentPropsWithoutRef,
+  type ReactNode,
 } from "react";
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -14,9 +18,38 @@ import {
   vscDarkPlus,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { useIsLightTheme } from "../../hooks/useTheme";
+import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
+import { parseLocalFileReference } from "./localFileReference";
+import { VtbEntityMarkdownLink } from "./VtbEntityLink";
+import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
 interface MarkdownContentProps {
   text: string;
+  projectPath?: string | null;
+}
+
+const MarkdownProjectRootContext = createContext<string | null>(null);
+const MarkdownProjectRootsContext = createContext<readonly string[]>([]);
+
+export function MarkdownProjectRootProvider({
+  projectPath,
+  projectRoots,
+  children,
+}: {
+  projectPath?: string | null;
+  projectRoots?: readonly string[];
+  children: ReactNode;
+}) {
+  const roots = Array.from(
+    new Set([projectPath, ...(projectRoots ?? [])].filter(Boolean) as string[])
+  );
+  return (
+    <MarkdownProjectRootContext.Provider value={projectPath ?? null}>
+      <MarkdownProjectRootsContext.Provider value={roots}>
+        {children}
+      </MarkdownProjectRootsContext.Provider>
+    </MarkdownProjectRootContext.Provider>
+  );
 }
 
 const remarkPlugins = [remarkGfm, remarkBreaks];
@@ -460,7 +493,16 @@ function isAbsoluteHttpUrl(href: string | undefined): href is string {
   }
 }
 
-function createMarkdownComponents(completedDiagramSources: Set<string>) {
+function markdownUrlTransform(value: string): string {
+  if (value.toLowerCase().startsWith("vtb://")) return value;
+  return defaultUrlTransform(value);
+}
+
+function createMarkdownComponents(
+  completedDiagramSources: Set<string>,
+  projectPath: string | null,
+  projectRoots: readonly string[]
+) {
   return {
     p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
       <p
@@ -532,15 +574,50 @@ function createMarkdownComponents(completedDiagramSources: Set<string>) {
       </blockquote>
     ),
     a: ({ children, href, ...props }: ComponentPropsWithoutRef<"a">) => {
+      const vtbTarget = parseVtbEntityHref(href);
+      if (href?.toLowerCase().startsWith("vtb://")) {
+        return vtbTarget ? (
+          <VtbEntityMarkdownLink target={vtbTarget}>
+            {children}
+          </VtbEntityMarkdownLink>
+        ) : (
+          <span data-testid="vtb-entity-link-fallback" className="text-fg">
+            {children ?? href}
+          </span>
+        );
+      }
+
       const canOpenExternally = isAbsoluteHttpUrl(href);
 
       return (
         <a
-          className="text-accent underline decoration-accent/30 hover:decoration-accent"
+          className={`text-accent underline decoration-accent/30 hover:decoration-accent${
+            canOpenExternally ? " cursor-pointer" : ""
+          }`}
           {...props}
           href={canOpenExternally ? href : undefined}
           target={canOpenExternally ? "_blank" : undefined}
           rel={canOpenExternally ? "noopener noreferrer" : undefined}
+          data-testid={canOpenExternally ? "external-url-link" : undefined}
+          data-actionable-reference={
+            canOpenExternally ? "external-url" : undefined
+          }
+          data-external-url={canOpenExternally ? href : undefined}
+          onClick={
+            canOpenExternally
+              ? (event) => {
+                  if (event.defaultPrevented || event.button !== 0) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void openUrl(href).catch((error) => {
+                    console.error("Could not open external URL:", error);
+                  });
+                }
+              : undefined
+          }
         >
           {children}
         </a>
@@ -590,6 +667,7 @@ function createMarkdownComponents(completedDiagramSources: Set<string>) {
     code: ({ inline, className, children, node, ...props }: CodeProps) => {
       const language = normalizeCodeLanguage(className);
       let codeString = String(children).replace(/\n$/, "");
+      const isInlineCode = inline ?? !(className || codeString.includes("\n"));
 
       if (language === "json") {
         codeString = prettyPrintJsonIfPossible(codeString);
@@ -608,6 +686,20 @@ function createMarkdownComponents(completedDiagramSources: Set<string>) {
         }
 
         return <HighlightedCodeBlock language={language} source={codeString} />;
+      }
+
+      const fileReference =
+        isInlineCode &&
+        parseLocalFileReference(codeString, projectPath, projectRoots);
+      if (fileReference && projectPath) {
+        return (
+          <LocalFileReferenceLink
+            reference={fileReference}
+            projectRoot={projectPath}
+          >
+            {children}
+          </LocalFileReferenceLink>
+        );
       }
 
       return (
@@ -832,13 +924,28 @@ function formatInlineJsonBlocks(text: string): string {
 
 export const MarkdownContent = memo(function MarkdownContent({
   text,
+  projectPath,
 }: MarkdownContentProps) {
+  const inheritedProjectPath = useContext(MarkdownProjectRootContext);
+  const inheritedProjectRoots = useContext(MarkdownProjectRootsContext);
+  const effectiveProjectPath = projectPath ?? inheritedProjectPath;
+  const effectiveProjectRoots = projectPath
+    ? [projectPath]
+    : inheritedProjectRoots;
   const prepared = formatInlineJsonBlocks(maybeWrapBareJson(text));
   const completedDiagrams = completedDiagramBlocks(prepared);
-  const components = createMarkdownComponents(completedDiagrams);
+  const components = createMarkdownComponents(
+    completedDiagrams,
+    effectiveProjectPath,
+    effectiveProjectRoots
+  );
   return (
     <div className="markdown-content" data-testid="markdown-content">
-      <Markdown remarkPlugins={remarkPlugins} components={components}>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        components={components}
+        urlTransform={markdownUrlTransform}
+      >
         {prepared}
       </Markdown>
     </div>
