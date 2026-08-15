@@ -41,7 +41,7 @@ jobs:
       - name: Read current master channel version
         id: current_master
         run: |
-          if current_version="$(curl --fail --silent --show-error \
+          if current_version="$(curl --fail --location --silent --show-error \
             "https://github.com/${{ github.repository }}/releases/download/channel-master/latest-x86_64-unknown-linux-gnu.json" \
             | jq -r '.components.gui.version // empty')"; then
             printf 'version=%s\n' "$current_version" >> "$GITHUB_OUTPUT"
