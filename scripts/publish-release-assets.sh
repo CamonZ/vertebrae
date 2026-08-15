@@ -26,10 +26,13 @@ ensure_release() {
   local release_tag="$1"
   shift
 
-  # A fixed channel release is expected to exist on reruns. Keep failures
-  # visible: only accept release creation errors when the release is present.
-  gh release create "$release_tag" "$@" \
-    || gh release view "$release_tag" >/dev/null
+  # A fixed channel release is expected to exist on reruns. Check first so
+  # expected reuse does not emit a release-creation conflict. A missing
+  # release is the normal first-publish case; creation failures remain visible.
+  if gh release view "$release_tag" >/dev/null 2>&1; then
+    return 0
+  fi
+  gh release create "$release_tag" "$@"
 }
 
 if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then

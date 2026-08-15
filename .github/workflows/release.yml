@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -34,11 +38,21 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
+      - name: Read current master channel version
+        id: current_master
+        run: |
+          if current_version="$(curl --fail --silent --show-error \
+            "https://github.com/${{ github.repository }}/releases/download/channel-master/latest-x86_64-unknown-linux-gnu.json" \
+            | jq -r '.components.gui.version // empty')"; then
+            printf 'version=%s\n' "$current_version" >> "$GITHUB_OUTPUT"
+          else
+            printf 'version=\n' >> "$GITHUB_OUTPUT"
+          fi
       - name: Resolve channel, version, and artifact release tag
         id: resolve
         env:
           REQUESTED_REF: ${{ inputs.ref || github.ref }}
-          RUN_NUMBER: ${{ github.run_number }}
+          PREVIOUS_MASTER_VERSION: ${{ steps.current_master.outputs.version }}
         run: node scripts/resolve-release-metadata.mjs >> "$GITHUB_OUTPUT"
 
   binaries:

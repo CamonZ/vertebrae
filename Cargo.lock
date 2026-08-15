@@ -2368,6 +2368,7 @@ dependencies = [
  "log",
  "portable-pty",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "serial_test",

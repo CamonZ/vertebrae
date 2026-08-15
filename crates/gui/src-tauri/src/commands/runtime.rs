@@ -108,6 +108,7 @@ async fn check_gui_update_channel(
 
     let is_update = Arc::new(AtomicBool::new(false));
     let comparator_state = Arc::clone(&is_update);
+    let is_master = channel == "master";
     let result = async {
         let endpoint_url = Url::parse(endpoint)?;
         let updater = app_handle
@@ -116,7 +117,12 @@ async fn check_gui_update_channel(
             // Ask the updater to return valid metadata even when the channel
             // is current; the flag records whether it is actually newer.
             .version_comparator(move |current, release| {
-                comparator_state.store(release.version > current, Ordering::Relaxed);
+                let is_newer = if is_master {
+                    is_newer_master_version(&current, &release.version)
+                } else {
+                    release.version > current
+                };
+                comparator_state.store(is_newer, Ordering::Relaxed);
                 true
             })
             .timeout(Duration::from_secs(10))
@@ -164,6 +170,29 @@ async fn check_gui_update_channel(
             unavailable_channel_status(channel, endpoint, error.to_string())
         }
     }
+}
+
+fn is_newer_master_version(current: &semver::Version, release: &semver::Version) -> bool {
+    match (master_version_key(current), master_version_key(release)) {
+        (Some(current), Some(release)) => release > current,
+        _ => release > current,
+    }
+}
+
+fn master_version_key(version: &semver::Version) -> Option<(u64, u64, u64, u64)> {
+    if version.pre.is_empty() {
+        return Some((version.major, version.minor, 0, version.patch));
+    }
+
+    let mut identifiers = version.pre.as_str().split('.');
+    if identifiers.next()? != "build" {
+        return None;
+    }
+    let build = identifiers.next()?.parse().ok()?;
+    if identifiers.next().is_some() {
+        return None;
+    }
+    Some((version.major, version.minor, version.patch, build))
 }
 
 async fn preflight_gui_update_channel(
@@ -360,5 +389,17 @@ mod tests {
         let preview = compact_log_value(&long_value);
         assert_eq!(preview.chars().count(), UPDATE_RESPONSE_PREVIEW_LIMIT + 1);
         assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn master_build_versions_are_compared_by_base_version_and_build_number() {
+        let legacy = semver::Version::parse("0.1.18").unwrap();
+        let first_build = semver::Version::parse("0.1.0-build.19").unwrap();
+        let next_build = semver::Version::parse("0.1.0-build.20").unwrap();
+        let next_base = semver::Version::parse("0.1.1-build.1").unwrap();
+
+        assert!(is_newer_master_version(&legacy, &first_build));
+        assert!(is_newer_master_version(&first_build, &next_build));
+        assert!(is_newer_master_version(&next_build, &next_base));
     }
 }

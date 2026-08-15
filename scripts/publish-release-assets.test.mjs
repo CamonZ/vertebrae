@@ -20,30 +20,8 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
   try {
     await mkdir(binDirectory, { recursive: true });
     await mkdir(join(directory, "scripts"), { recursive: true });
-    await mkdir(join(releaseInput, "gui-macos-26"), { recursive: true });
-    await mkdir(join(releaseInput, "gui-ubuntu-22.04"), { recursive: true });
-    await writeFile(
-      join(binDirectory, "gh"),
-      "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$GH_LOG\"\n",
-    );
-    await chmod(join(binDirectory, "gh"), 0o755);
-
-    await writeFile(join(releaseInput, "gui-macos-26", "Vertebrae_1.2.3_arm64.app.tar.gz"), "mac app");
-    await writeFile(join(releaseInput, "gui-macos-26", "Vertebrae_1.2.3_arm64.app.tar.gz.sig"), "mac signature\n");
-    await writeFile(join(releaseInput, "gui-ubuntu-22.04", "Vertebrae_1.2.3_amd64.AppImage"), "linux app");
-    await writeFile(join(releaseInput, "gui-ubuntu-22.04", "Vertebrae_1.2.3_amd64.AppImage.sig"), "linux signature\n");
-
-    for (const target of [
-      "aarch64-apple-darwin",
-      "aarch64-unknown-linux-gnu",
-      "x86_64-unknown-linux-gnu",
-    ]) {
-      const targetDirectory = join(releaseInput, `binaries-${target}`);
-      await mkdir(targetDirectory, { recursive: true });
-      await writeFile(join(targetDirectory, `vtb-1.2.3-build-${target}`), "cli");
-      await writeFile(join(targetDirectory, `vtb-daemon-1.2.3-build-${target}`), "daemon");
-      await writeFile(join(targetDirectory, `vtb-gate-1.2.3-build-${target}`), "gate");
-    }
+    await writeFakeGh(binDirectory);
+    await writeReleaseInputs(releaseInput);
 
     await runPublisher({
       cwd: directory,
@@ -128,6 +106,83 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("publishes when the channel release already exists", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "vertebrae-release-assets-"));
+  const binDirectory = join(directory, "bin");
+  const releaseInput = join(directory, "release-input");
+  const logPath = join(directory, "gh.log");
+  const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey
+    .export({ type: "pkcs8", format: "pem" });
+
+  try {
+    await mkdir(binDirectory, { recursive: true });
+    await mkdir(join(directory, "scripts"), { recursive: true });
+    await writeFakeGh(binDirectory);
+    await writeReleaseInputs(releaseInput);
+
+    await runPublisher({
+      cwd: directory,
+      env: {
+        GH_LOG: logPath,
+        GH_EXISTING_RELEASE: "channel-master",
+        GH_TOKEN: "test-token",
+        VTB_UPDATE_PRIVATE_KEY: privateKey,
+        VTB_UPDATE_PUBLIC_KEY: "test-public-key",
+        ARTIFACT_TAG: "channel-master",
+        UPDATE_SHA: "abcdef1234567890abcdef1234567890abcdef12",
+        UPDATE_CHANNEL: "master",
+        CHANNEL_TAG: "channel-master",
+        UPDATE_VERSION: "1.2.3",
+        UPDATE_BUILD: "build",
+        GITHUB_REPOSITORY: "CamonZ/vertebrae",
+        PATH: `${binDirectory}:${process.env.PATH}`,
+      },
+    });
+
+    const ghCommands = (await readFile(logPath, "utf8")).trim().split("\n");
+    assert.equal(ghCommands[0], "release view channel-master");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+async function writeFakeGh(binDirectory) {
+  await writeFile(
+    join(binDirectory, "gh"),
+    [
+      "#!/usr/bin/env bash",
+      "printf '%s\\n' \"$*\" >> \"$GH_LOG\"",
+      'if [[ "$1" == "release" && "$2" == "view" && "$*" != *"--json assets"* ]]; then',
+      '  [[ "${GH_EXISTING_RELEASE:-}" == "$3" ]] || exit 1',
+      "fi",
+      "",
+    ].join("\n"),
+  );
+  await chmod(join(binDirectory, "gh"), 0o755);
+}
+
+async function writeReleaseInputs(releaseInput) {
+  await mkdir(join(releaseInput, "gui-macos-26"), { recursive: true });
+  await mkdir(join(releaseInput, "gui-ubuntu-22.04"), { recursive: true });
+
+  await writeFile(join(releaseInput, "gui-macos-26", "Vertebrae_1.2.3_arm64.app.tar.gz"), "mac app");
+  await writeFile(join(releaseInput, "gui-macos-26", "Vertebrae_1.2.3_arm64.app.tar.gz.sig"), "mac signature\n");
+  await writeFile(join(releaseInput, "gui-ubuntu-22.04", "Vertebrae_1.2.3_amd64.AppImage"), "linux app");
+  await writeFile(join(releaseInput, "gui-ubuntu-22.04", "Vertebrae_1.2.3_amd64.AppImage.sig"), "linux signature\n");
+
+  for (const target of [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+  ]) {
+    const targetDirectory = join(releaseInput, `binaries-${target}`);
+    await mkdir(targetDirectory, { recursive: true });
+    await writeFile(join(targetDirectory, `vtb-1.2.3-build-${target}`), "cli");
+    await writeFile(join(targetDirectory, `vtb-daemon-1.2.3-build-${target}`), "daemon");
+    await writeFile(join(targetDirectory, `vtb-gate-1.2.3-build-${target}`), "gate");
+  }
+}
 
 async function runPublisher({ cwd, env }) {
   await Promise.all([
