@@ -691,7 +691,6 @@ mod tests {
             sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
                 url: "https://custom.example.test".to_string(),
                 token: None,
-                ..Default::default()
             },
             projects: BTreeMap::new(),
         })
@@ -712,152 +711,6 @@ mod tests {
         let config = vertebrae_sacrum_client::load_config_file().unwrap();
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_valid-token"));
         assert_eq!(config.sacrum.url, "https://custom.example.test");
-        assert_eq!(config.sacrum.mode, None);
-        assert_eq!(config.sacrum.local, None);
-        let effective =
-            vertebrae_sacrum_client::EffectiveSacrumConnection::from_persisted(&config.sacrum);
-        assert_eq!(
-            vertebrae_sacrum_client::backend_startup_decision(&config.sacrum, &effective, None),
-            vertebrae_sacrum_client::BackendStartupDecision::SetupRequired(
-                vertebrae_sacrum_client::BackendSetupIssue::MissingMode
-            )
-        );
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn saving_token_in_mode_less_config_does_not_infer_backend_ownership() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::new(temp_home.path());
-
-        save_sacrum_settings("sac_remote-looking-token".to_string())
-            .await
-            .unwrap();
-        let reloaded = vertebrae_sacrum_client::load_config_file().unwrap();
-
-        assert_eq!(reloaded.sacrum.mode, None);
-        assert_eq!(reloaded.sacrum.local, None);
-        assert_eq!(
-            reloaded.sacrum.token.as_deref(),
-            Some("sac_remote-looking-token")
-        );
-        let effective =
-            vertebrae_sacrum_client::EffectiveSacrumConnection::from_persisted(&reloaded.sacrum);
-        assert_eq!(
-            vertebrae_sacrum_client::backend_startup_decision(&reloaded.sacrum, &effective, None),
-            vertebrae_sacrum_client::BackendStartupDecision::SetupRequired(
-                vertebrae_sacrum_client::BackendSetupIssue::MissingMode
-            )
-        );
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn saving_token_preserves_unknown_future_lifecycle_values() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::new(temp_home.path());
-        let future_runtime_fields = BTreeMap::from([
-            (
-                "service".to_string(),
-                toml::Value::String("vertebrae".to_string()),
-            ),
-            ("revision".to_string(), toml::Value::Integer(2)),
-        ]);
-        let local = vertebrae_sacrum_client::LocalBackendSection {
-            compose_project: "future-project".to_string(),
-            database_volume: "future-volume".to_string(),
-            channel: Some(vertebrae_sacrum_client::BackendReleaseChannel::Unsupported(
-                "canary".to_string(),
-            )),
-            image_ref: format!("ghcr.io/camonz/sacrum@sha256:{}", "a".repeat(64)),
-            provisioning_state: Some(
-                vertebrae_sacrum_client::LocalProvisioningState::Unsupported("paused".to_string()),
-            ),
-            runtime_secrets: Some(vertebrae_sacrum_client::RuntimeSecretsSource::Unsupported {
-                kind: Some("keychain".to_string()),
-                fields: future_runtime_fields,
-            }),
-        };
-        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
-            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
-                mode: Some(vertebrae_sacrum_client::BackendMode::Unsupported(
-                    "federated".to_string(),
-                )),
-                url: "https://future.example.test".to_string(),
-                token: Some("sac_old-token".to_string()),
-                local: Some(local.clone()),
-            },
-            projects: BTreeMap::new(),
-        })
-        .unwrap();
-
-        save_sacrum_settings("sac_new-token".to_string())
-            .await
-            .unwrap();
-        let reloaded = vertebrae_sacrum_client::load_config_file().unwrap();
-
-        assert_eq!(
-            reloaded.sacrum.mode,
-            Some(vertebrae_sacrum_client::BackendMode::Unsupported(
-                "federated".to_string()
-            ))
-        );
-        assert_eq!(reloaded.sacrum.local, Some(local));
-        assert_eq!(reloaded.sacrum.token.as_deref(), Some("sac_new-token"));
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn saving_token_for_local_backend_preserves_local_startup_decision() {
-        let temp_home = tempfile::tempdir().unwrap();
-        let _env = EnvGuard::new(temp_home.path());
-        let local = vertebrae_sacrum_client::LocalBackendSection {
-            compose_project: "vertebrae-local".to_string(),
-            database_volume: "vertebrae-local_pgdata".to_string(),
-            channel: Some(vertebrae_sacrum_client::BackendReleaseChannel::Release),
-            image_ref: format!("ghcr.io/camonz/sacrum@sha256:{}", "a".repeat(64)),
-            provisioning_state: Some(vertebrae_sacrum_client::LocalProvisioningState::InProgress),
-            runtime_secrets: Some(vertebrae_sacrum_client::RuntimeSecretsSource::ManagedFile {
-                path: temp_home.path().join("local-backend.env"),
-            }),
-        };
-        vertebrae_sacrum_client::save_config_file(&vertebrae_sacrum_client::VertebraeConfigFile {
-            sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
-                mode: Some(vertebrae_sacrum_client::BackendMode::Local),
-                url: "http://localhost:4400".to_string(),
-                token: None,
-                local: Some(local.clone()),
-            },
-            projects: BTreeMap::new(),
-        })
-        .unwrap();
-
-        save_sacrum_settings("sac_generated-token".to_string())
-            .await
-            .unwrap();
-        let reloaded = vertebrae_sacrum_client::load_config_file().unwrap();
-
-        assert_eq!(
-            reloaded.sacrum.mode,
-            Some(vertebrae_sacrum_client::BackendMode::Local)
-        );
-        assert_eq!(reloaded.sacrum.local, Some(local));
-        assert_eq!(
-            reloaded.sacrum.token.as_deref(),
-            Some("sac_generated-token")
-        );
-        assert_eq!(
-            vertebrae_sacrum_client::backend_startup_decision(
-                &reloaded.sacrum,
-                &vertebrae_sacrum_client::EffectiveSacrumConnection::from_persisted(
-                    &reloaded.sacrum
-                ),
-                None
-            ),
-            vertebrae_sacrum_client::BackendStartupDecision::EnsureLocal {
-                provisioning_state: vertebrae_sacrum_client::LocalProvisioningState::InProgress
-            }
-        );
     }
 
     #[tokio::test]
@@ -875,7 +728,6 @@ mod tests {
             sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
                 url: "http://127.0.0.1:1".to_string(),
                 token: Some("sac_valid-token".to_string()),
-                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "duplicate".to_string(),
@@ -919,7 +771,6 @@ mod tests {
             sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
                 url: server.url.clone(),
                 token: Some("sac_valid-token".to_string()),
-                ..Default::default()
             },
             projects: BTreeMap::new(),
         })
@@ -972,7 +823,6 @@ mod tests {
             sacrum: vertebrae_sacrum_client::GlobalSacrumSection {
                 url: server.url.clone(),
                 token: Some("sac_valid-token".to_string()),
-                ..Default::default()
             },
             projects: BTreeMap::new(),
         })
