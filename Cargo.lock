@@ -2425,6 +2425,7 @@ dependencies = [
  "ed25519-dalek",
  "fs2",
  "futures",
+ "getrandom 0.2.17",
  "log",
  "objc2-app-kit",
  "objc2-foundation",

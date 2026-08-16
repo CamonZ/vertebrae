@@ -69,6 +69,7 @@ portable-pty = "0.8"
 base64 = "0.22"
 ed25519-dalek = "2"
 fs2 = "0.4"
+getrandom = "0.2"
 sha2 = "0.10"
 
 # WebSocket support for Phoenix channels

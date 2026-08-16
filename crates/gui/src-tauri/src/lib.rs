@@ -4,6 +4,8 @@ pub mod commands;
 pub mod events;
 pub mod helpers;
 pub mod install;
+#[allow(dead_code)]
+pub(crate) mod local_backend;
 pub(crate) mod local_chat;
 pub mod project_config;
 pub mod types;
