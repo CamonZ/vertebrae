@@ -84,6 +84,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "https://sacrum.example.com".to_string(),
                 token: Some("my-token".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([
                 (
@@ -110,11 +111,48 @@ mod tests {
     }
 
     #[test]
+    fn unknown_future_lifecycle_values_roundtrip_without_blocking_daemon_config() {
+        let source = r#"
+[sacrum]
+mode = "federated"
+url = "https://future.example.test"
+token = "sac_future-token"
+
+[sacrum.local]
+compose_project = "future-project"
+database_volume = "future-volume"
+channel = "canary"
+image_ref = "ghcr.io/camonz/sacrum@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+provisioning_state = "paused"
+
+[sacrum.local.runtime_secrets]
+kind = "keychain"
+service = "vertebrae"
+
+[projects.future]
+id = "future-project-id"
+path = "/code/future"
+"#;
+        let config: VertebraeConfigFile = toml::from_str(source).unwrap();
+        let resolved = ResolvedConfig::from_config_file(&config).unwrap();
+
+        assert_eq!(resolved.sacrum_url, "https://future.example.test");
+        assert_eq!(resolved.api_token, "sac_future-token");
+        assert_eq!(resolved.projects.len(), 1);
+        assert_eq!(resolved.projects[0].project_id, "future-project-id");
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+        assert_eq!(reloaded, config);
+    }
+
+    #[test]
     fn errors_when_no_token() {
         let config = VertebraeConfigFile {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: None,
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -135,6 +173,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("tok".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -149,6 +188,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("tok".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -163,6 +203,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("tok".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "myproject".to_string(),
@@ -223,6 +264,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some(secret.to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -235,6 +277,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: None,
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };

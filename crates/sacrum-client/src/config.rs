@@ -8,7 +8,8 @@
 //! - `[projects.<name>]` entries matched by CWD longest-prefix (CLI) or by name (GUI)
 
 use crate::error::{SacrumClientError, SacrumClientResult};
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -23,8 +24,35 @@ pub struct SacrumConfig {
     pub project_id: String,
 }
 
+/// URL and token after caller-selected configuration precedence has been applied.
+///
+/// Backend ownership is intentionally absent: environment overrides may change
+/// connection values, but never the persisted local/remote mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveSacrumConnection {
+    /// Effective Sacrum base URL.
+    pub url: String,
+    /// Effective API token, when available.
+    pub token: Option<String>,
+}
+
+impl EffectiveSacrumConnection {
+    /// Construct explicitly resolved connection values.
+    pub fn new(url: impl Into<String>, token: Option<String>) -> Self {
+        Self {
+            url: url.into(),
+            token,
+        }
+    }
+
+    /// Use persisted URL/token values without reading the process environment.
+    pub fn from_persisted(sacrum: &GlobalSacrumSection) -> Self {
+        Self::new(sacrum.url.clone(), sacrum.token.clone())
+    }
+}
+
 /// Top-level config file structure for ~/.config/vertebrae/config.toml
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VertebraeConfigFile {
     /// Global sacrum defaults
     #[serde(default)]
@@ -35,27 +63,227 @@ pub struct VertebraeConfigFile {
 }
 
 /// Global sacrum settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlobalSacrumSection {
+    /// Whether Vertebrae connects to a user-managed backend or manages a local stack.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<BackendMode>,
     /// Default Sacrum API URL
     #[serde(default = "default_url")]
     pub url: String,
     /// API token for authentication
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// Docker metadata required when `mode = "local"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local: Option<LocalBackendSection>,
 }
 
 impl Default for GlobalSacrumSection {
     fn default() -> Self {
         Self {
+            mode: None,
             url: default_url(),
             token: None,
+            local: None,
+        }
+    }
+}
+
+/// Ownership mode for the configured Sacrum backend.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendMode {
+    /// Connect to an existing backend without invoking Docker.
+    Remote,
+    /// Ensure a Docker stack owned by the local Docker daemon.
+    Local,
+    /// A future mode retained so older clients can preserve the configuration.
+    Unsupported(String),
+}
+
+/// Persisted metadata identifying a GUI-managed local backend.
+///
+/// Fields use defaults so a partially written configuration can be loaded and
+/// diagnosed by the startup policy instead of failing TOML deserialization.
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocalBackendSection {
+    /// Docker Compose project name.
+    #[serde(default)]
+    pub compose_project: String,
+    /// Docker volume that owns the PostgreSQL data.
+    #[serde(default)]
+    pub database_volume: String,
+    /// Selected backend image channel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<BackendReleaseChannel>,
+    /// Current image reference pinned by SHA-256 digest.
+    #[serde(default)]
+    pub image_ref: String,
+    /// Progress of first-run provisioning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provisioning_state: Option<LocalProvisioningState>,
+    /// Identity of the separately persisted runtime secrets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_secrets: Option<RuntimeSecretsSource>,
+}
+
+/// First-run state for a local Sacrum installation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalProvisioningState {
+    /// The stack has not yet been seeded with the selected local account.
+    Pending,
+    /// Provisioning is currently being attempted and may be resumed.
+    InProgress,
+    /// The local account and API token have been created successfully.
+    Ready,
+    /// Provisioning failed and can be retried with the same persisted secrets.
+    Failed,
+    /// A future state retained for forward-compatible configuration loading.
+    Unsupported(String),
+}
+
+/// Valid local backend image channels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendReleaseChannel {
+    /// Development builds published through the `backend-master` metadata channel.
+    Master,
+    /// Stable builds published through the `backend-release` metadata channel.
+    Release,
+    /// A future channel retained for forward-compatible configuration loading.
+    Unsupported(String),
+}
+
+impl BackendReleaseChannel {
+    /// Component metadata name used to resolve this channel.
+    pub fn metadata_name(&self) -> Option<&'static str> {
+        match self {
+            Self::Master => Some("backend-master"),
+            Self::Release => Some("backend-release"),
+            Self::Unsupported(_) => None,
+        }
+    }
+}
+
+/// Where Docker runtime secrets are stored.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeSecretsSource {
+    /// GUI-managed secrets stored outside `config.toml` with owner-only permissions.
+    ManagedFile { path: PathBuf },
+    /// Secrets embedded in the existing development Compose definition.
+    LegacyDevCompose,
+    /// A future kind and all of its fields, retained verbatim.
+    Unsupported {
+        kind: Option<String>,
+        fields: BTreeMap<String, toml::Value>,
+    },
+}
+
+macro_rules! impl_string_lifecycle_serde {
+    ($type:ty, $( $variant:path => $value:literal ),+ $(,)?) => {
+        impl Serialize for $type {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                match self {
+                    $( $variant => serializer.serialize_str($value), )+
+                    Self::Unsupported(value) => serializer.serialize_str(value),
+                }
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $type {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Ok(match value.as_str() {
+                    $( $value => $variant, )+
+                    _ => Self::Unsupported(value),
+                })
+            }
+        }
+    };
+}
+
+impl_string_lifecycle_serde!(
+    BackendMode,
+    BackendMode::Remote => "remote",
+    BackendMode::Local => "local",
+);
+impl_string_lifecycle_serde!(
+    LocalProvisioningState,
+    LocalProvisioningState::Pending => "pending",
+    LocalProvisioningState::InProgress => "in_progress",
+    LocalProvisioningState::Ready => "ready",
+    LocalProvisioningState::Failed => "failed",
+);
+impl_string_lifecycle_serde!(
+    BackendReleaseChannel,
+    BackendReleaseChannel::Master => "master",
+    BackendReleaseChannel::Release => "release",
+);
+
+impl Serialize for RuntimeSecretsSource {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        match self {
+            Self::ManagedFile { path } => {
+                map.serialize_entry("kind", "managed_file")?;
+                map.serialize_entry("path", path)?;
+            }
+            Self::LegacyDevCompose => {
+                map.serialize_entry("kind", "legacy_dev_compose")?;
+            }
+            Self::Unsupported { kind, fields } => {
+                if let Some(kind) = kind {
+                    map.serialize_entry("kind", kind)?;
+                }
+                for (key, value) in fields {
+                    map.serialize_entry(key, value)?;
+                }
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for RuntimeSecretsSource {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let mut fields = BTreeMap::<String, toml::Value>::deserialize(deserializer)?;
+        let kind = match fields.remove("kind") {
+            Some(toml::Value::String(kind)) => Some(kind),
+            Some(value) => {
+                fields.insert("kind".to_string(), value);
+                None
+            }
+            None => None,
+        };
+
+        match kind.as_deref() {
+            Some("managed_file") if fields.len() == 1 => {
+                let Some(toml::Value::String(path)) = fields.get("path") else {
+                    return Ok(Self::Unsupported { kind, fields });
+                };
+                Ok(Self::ManagedFile {
+                    path: PathBuf::from(path.clone()),
+                })
+            }
+            Some("legacy_dev_compose") if fields.is_empty() => Ok(Self::LegacyDevCompose),
+            _ => Ok(Self::Unsupported { kind, fields }),
         }
     }
 }
 
 /// Per-project configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectSection {
     /// Sacrum project ID (UUID)
     #[serde(alias = "project_id")]
@@ -89,13 +317,10 @@ impl SacrumConfig {
     /// - `VTB_TOKEN` overrides `[sacrum].token`
     /// - `VTB_PROJECT_ID` overrides CWD-based project resolution entirely
     fn load_from_config(config: VertebraeConfigFile) -> SacrumClientResult<Self> {
-        let base_url = resolve_base_url(&config.sacrum.url);
+        let effective = resolve_effective_connection(&config.sacrum);
+        let base_url = effective.url;
 
-        let api_token = std::env::var("VTB_TOKEN")
-            .ok()
-            .filter(|v| !v.is_empty())
-            .or_else(|| config.sacrum.token.clone())
-            .ok_or_else(|| {
+        let api_token = effective.token.ok_or_else(|| {
                 SacrumClientError::ConfigError(
                     "No API token found. Set VTB_TOKEN env var or [sacrum].token in ~/.config/vertebrae/config.toml"
                         .to_string(),
@@ -256,6 +481,20 @@ fn resolve_base_url(config_url: &str) -> String {
         .unwrap_or_else(|| config_url.to_string())
 }
 
+/// Resolve URL/token client values using `VTB_URL` and `VTB_TOKEN` precedence.
+///
+/// `VTB_PROJECT_ID` remains part of project resolution and is deliberately not
+/// represented here. This function never changes backend ownership mode.
+pub fn resolve_effective_connection(sacrum: &GlobalSacrumSection) -> EffectiveSacrumConnection {
+    EffectiveSacrumConnection {
+        url: resolve_base_url(&sacrum.url),
+        token: std::env::var("VTB_TOKEN")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .or_else(|| sacrum.token.clone()),
+    }
+}
+
 fn resolve_project_root() -> SacrumClientResult<PathBuf> {
     let cwd = std::env::current_dir().map_err(|e| {
         SacrumClientError::ConfigError(format!("Failed to get current directory: {}", e))
@@ -386,7 +625,16 @@ pub fn unregister_project(name: &str) -> SacrumClientResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::{
+        BackendConfigField, BackendConfigProblem, BackendSetupIssue, BackendStartupDecision,
+        LEGACY_DEV_COMPOSE_PROJECT, LEGACY_DEV_DATABASE_VOLUME, VerifiedLegacyDevStack,
+        adopt_legacy_dev_stack, backend_startup_decision,
+    };
     use serial_test::serial;
+
+    fn test_digest_image() -> String {
+        format!("ghcr.io/camonz/sacrum@sha256:{}", "a".repeat(64))
+    }
 
     #[test]
     fn test_config_creation() {
@@ -461,6 +709,7 @@ mod tests {
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("test".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([
                 (
@@ -574,6 +823,7 @@ path = "/Users/test/vertebrae"
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("sac_test123".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "vertebrae".to_string(),
@@ -593,6 +843,297 @@ path = "/Users/test/vertebrae"
         let project = deserialized.projects.get("vertebrae").unwrap();
         assert_eq!(project.id, "bb747fd8-5395-486f-bc8b-24ccd1615e18");
         assert_eq!(project.path, "/Users/test/code/vertebrae");
+    }
+
+    #[test]
+    fn explicit_remote_configuration_roundtrip_preserves_projects_and_decision() {
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                mode: Some(BackendMode::Remote),
+                url: "https://sacrum.example.test".to_string(),
+                token: Some("sac_remote-token".to_string()),
+                local: None,
+            },
+            projects: BTreeMap::from([(
+                "vertebrae".to_string(),
+                ProjectSection {
+                    id: "project-id".to_string(),
+                    path: "/code/vertebrae".to_string(),
+                },
+            )]),
+        };
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(reloaded, config);
+        let effective = EffectiveSacrumConnection::from_persisted(&reloaded.sacrum);
+        assert_eq!(
+            backend_startup_decision(&reloaded.sacrum, &effective, None),
+            BackendStartupDecision::ConnectRemote
+        );
+    }
+
+    #[test]
+    fn explicit_local_configuration_roundtrip_excludes_runtime_secret_values() {
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                mode: Some(BackendMode::Local),
+                url: "http://localhost:4400".to_string(),
+                token: Some("sac_generated-api-token".to_string()),
+                local: Some(LocalBackendSection {
+                    compose_project: "vertebrae-local".to_string(),
+                    database_volume: "vertebrae-local_pgdata".to_string(),
+                    channel: Some(BackendReleaseChannel::Release),
+                    image_ref: test_digest_image(),
+                    provisioning_state: Some(LocalProvisioningState::Ready),
+                    runtime_secrets: Some(RuntimeSecretsSource::ManagedFile {
+                        path: PathBuf::from("/config/vertebrae/local-backend.env"),
+                    }),
+                }),
+            },
+            projects: BTreeMap::from([(
+                "existing".to_string(),
+                ProjectSection {
+                    id: "existing-project-id".to_string(),
+                    path: "/code/existing".to_string(),
+                },
+            )]),
+        };
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(reloaded, config);
+        let effective = EffectiveSacrumConnection::from_persisted(&reloaded.sacrum);
+        assert_eq!(
+            backend_startup_decision(&reloaded.sacrum, &effective, None),
+            BackendStartupDecision::EnsureLocal {
+                provisioning_state: LocalProvisioningState::Ready
+            }
+        );
+        let value: toml::Value = toml::from_str(&serialized).unwrap();
+        let sacrum = value.get("sacrum").unwrap().as_table().unwrap();
+        assert_eq!(
+            sacrum.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["local", "mode", "token", "url"]
+        );
+        let local = sacrum.get("local").unwrap().as_table().unwrap();
+        assert_eq!(
+            local.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "channel",
+                "compose_project",
+                "database_volume",
+                "image_ref",
+                "provisioning_state",
+                "runtime_secrets",
+            ]
+        );
+        let runtime_secrets = local.get("runtime_secrets").unwrap().as_table().unwrap();
+        assert_eq!(
+            runtime_secrets
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["kind", "path"]
+        );
+    }
+
+    #[test]
+    fn partial_local_toml_loads_and_reports_missing_runtime_metadata() {
+        let config: VertebraeConfigFile = toml::from_str(
+            r#"
+[sacrum]
+mode = "local"
+url = "http://localhost:4400"
+token = "sac_token"
+
+[sacrum.local]
+compose_project = "vertebrae-local"
+database_volume = "vertebrae-local_pgdata"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            backend_startup_decision(
+                &config.sacrum,
+                &EffectiveSacrumConnection::from_persisted(&config.sacrum),
+                None
+            ),
+            BackendStartupDecision::SetupRequired(BackendSetupIssue::InvalidConfiguration {
+                mode: BackendMode::Local,
+                problems: vec![
+                    BackendConfigProblem::Missing(BackendConfigField::Channel),
+                    BackendConfigProblem::Missing(BackendConfigField::ImageReference),
+                    BackendConfigProblem::Missing(BackendConfigField::ProvisioningState),
+                    BackendConfigProblem::Missing(BackendConfigField::RuntimeSecrets),
+                ],
+            })
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn future_lifecycle_values_roundtrip_without_blocking_client_connection_loading() {
+        clear_vtb_env_vars();
+        let source = format!(
+            r#"
+[sacrum]
+mode = "federated"
+url = "https://future.example.test"
+token = "sac_future-token"
+
+[sacrum.local]
+compose_project = "future-project"
+database_volume = "future-volume"
+channel = "canary"
+image_ref = "{}"
+provisioning_state = "paused"
+
+[sacrum.local.runtime_secrets]
+kind = "keychain"
+service = "vertebrae"
+revision = 2
+
+[projects.future]
+id = "future-project-id"
+path = "/code/future"
+"#,
+            test_digest_image()
+        );
+        let config: VertebraeConfigFile = toml::from_str(&source).unwrap();
+
+        assert_eq!(
+            config.sacrum.mode,
+            Some(BackendMode::Unsupported("federated".to_string()))
+        );
+        let local = config.sacrum.local.as_ref().unwrap();
+        assert_eq!(
+            local.channel,
+            Some(BackendReleaseChannel::Unsupported("canary".to_string()))
+        );
+        assert_eq!(
+            local.provisioning_state,
+            Some(LocalProvisioningState::Unsupported("paused".to_string()))
+        );
+        assert!(matches!(
+            local.runtime_secrets,
+            Some(RuntimeSecretsSource::Unsupported {
+                kind: Some(ref kind),
+                ref fields,
+            }) if kind == "keychain"
+                && fields.get("service") == Some(&toml::Value::String("vertebrae".to_string()))
+                && fields.get("revision") == Some(&toml::Value::Integer(2))
+        ));
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+        assert_eq!(reloaded, config);
+        let client =
+            SacrumConfig::load_for_project_from_config(reloaded.clone(), "future").unwrap();
+        assert_eq!(client.base_url, "https://future.example.test");
+        assert_eq!(client.api_token, "sac_future-token");
+        assert_eq!(client.project_id, "future-project-id");
+        assert!(matches!(
+            backend_startup_decision(
+                &reloaded.sacrum,
+                &EffectiveSacrumConnection::from_persisted(&reloaded.sacrum),
+                None
+            ),
+            BackendStartupDecision::SetupRequired(
+                BackendSetupIssue::UnsupportedConfiguration { .. }
+            )
+        ));
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    fn env_only_legacy_adoption_rejection_survives_config_roundtrip() {
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                mode: None,
+                url: "http://localhost:4400".to_string(),
+                token: None,
+                local: None,
+            },
+            projects: BTreeMap::new(),
+        };
+        let evidence = VerifiedLegacyDevStack::from_authenticated_probe(
+            LEGACY_DEV_COMPOSE_PROJECT,
+            LEGACY_DEV_DATABASE_VOLUME,
+            "http://localhost:4400",
+            &test_digest_image(),
+            "sac_env-token",
+        )
+        .unwrap();
+        let effective = EffectiveSacrumConnection::new(
+            "http://localhost:4400",
+            Some("sac_env-token".to_string()),
+        );
+
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+        assert_eq!(reloaded, config);
+        assert_eq!(
+            backend_startup_decision(&reloaded.sacrum, &effective, Some(&evidence)),
+            BackendStartupDecision::SetupRequired(BackendSetupIssue::LegacyAdoptionUnavailable {
+                problems: vec![BackendConfigProblem::Missing(BackendConfigField::Token)]
+            })
+        );
+        assert_eq!(reloaded.sacrum.mode, None);
+        assert_eq!(reloaded.sacrum.local, None);
+    }
+
+    #[test]
+    fn confirmed_legacy_adoption_roundtrip_preserves_connection_stack_and_projects() {
+        let mut config: VertebraeConfigFile = toml::from_str(
+            r#"
+[sacrum]
+url = "http://localhost:4400"
+token = "sac_existing-token"
+
+[projects.existing]
+id = "existing-project-id"
+path = "/code/existing"
+"#,
+        )
+        .unwrap();
+        let evidence = VerifiedLegacyDevStack::from_authenticated_probe(
+            LEGACY_DEV_COMPOSE_PROJECT,
+            LEGACY_DEV_DATABASE_VOLUME,
+            "http://localhost:4400",
+            &test_digest_image(),
+            "sac_existing-token",
+        )
+        .unwrap();
+
+        let effective = EffectiveSacrumConnection::from_persisted(&config.sacrum);
+        adopt_legacy_dev_stack(&mut config.sacrum, &effective, &evidence, true).unwrap();
+        let serialized = toml::to_string_pretty(&config).unwrap();
+        let reloaded: VertebraeConfigFile = toml::from_str(&serialized).unwrap();
+
+        assert_eq!(reloaded, config);
+        assert_eq!(reloaded.sacrum.url, "http://localhost:4400");
+        assert_eq!(reloaded.sacrum.token.as_deref(), Some("sac_existing-token"));
+        assert_eq!(
+            reloaded.projects.get("existing"),
+            Some(&ProjectSection {
+                id: "existing-project-id".to_string(),
+                path: "/code/existing".to_string(),
+            })
+        );
+        let local = reloaded.sacrum.local.as_ref().unwrap();
+        assert_eq!(local.compose_project, LEGACY_DEV_COMPOSE_PROJECT);
+        assert_eq!(local.database_volume, LEGACY_DEV_DATABASE_VOLUME);
+        let effective = EffectiveSacrumConnection::from_persisted(&reloaded.sacrum);
+        assert_eq!(
+            backend_startup_decision(&reloaded.sacrum, &effective, None),
+            BackendStartupDecision::EnsureLocal {
+                provisioning_state: LocalProvisioningState::Ready
+            }
+        );
     }
 
     #[test]
@@ -645,6 +1186,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://file-url:4000".to_string(),
                 token: Some("file-token".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "testproject".to_string(),
@@ -737,6 +1279,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: Some("some-token".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -760,6 +1303,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: None,
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };
@@ -785,6 +1329,48 @@ path = "/Users/test/other"
         assert_eq!(result.base_url, "http://env-url:8080");
         assert_eq!(result.api_token, "env-token-all");
         assert_eq!(result.project_id, "env-project-all");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn env_overrides_client_connection_without_changing_backend_ownership_policy() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "http://127.0.0.1:4400");
+            std::env::set_var("VTB_TOKEN", "env-token");
+            std::env::set_var("VTB_PROJECT_ID", "env-project-id");
+        }
+        let mut config = config_with_cwd_project();
+        config.sacrum.mode = Some(BackendMode::Local);
+        config.sacrum.token = None;
+        config.sacrum.local = Some(LocalBackendSection {
+            compose_project: "vertebrae-local".to_string(),
+            database_volume: "vertebrae-local_pgdata".to_string(),
+            channel: Some(BackendReleaseChannel::Release),
+            image_ref: test_digest_image(),
+            provisioning_state: Some(LocalProvisioningState::Ready),
+            runtime_secrets: Some(RuntimeSecretsSource::ManagedFile {
+                path: PathBuf::from("/config/vertebrae/local-backend.env"),
+            }),
+        });
+
+        let effective = resolve_effective_connection(&config.sacrum);
+        assert_eq!(effective.url, "http://127.0.0.1:4400");
+        assert_eq!(effective.token.as_deref(), Some("env-token"));
+        assert_eq!(
+            backend_startup_decision(&config.sacrum, &effective, None),
+            BackendStartupDecision::EnsureLocal {
+                provisioning_state: LocalProvisioningState::Ready
+            }
+        );
+        assert_eq!(config.sacrum.mode, Some(BackendMode::Local));
+        assert!(config.sacrum.token.is_none());
+        let client = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(client.base_url, "http://127.0.0.1:4400");
+        assert_eq!(client.api_token, "env-token");
+        assert_eq!(client.project_id, "env-project-id");
         clear_vtb_env_vars();
     }
 
@@ -1041,6 +1627,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://file-url:4000".to_string(),
                 token: Some("file-token".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "jj-project".to_string(),
@@ -1068,6 +1655,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://file-url:4000".to_string(),
                 token: Some("file-token".to_string()),
+                ..Default::default()
             },
             projects: BTreeMap::from([(
                 "myproject".to_string(),
@@ -1134,6 +1722,7 @@ path = "/Users/test/other"
             sacrum: GlobalSacrumSection {
                 url: "http://localhost:4000".to_string(),
                 token: None,
+                ..Default::default()
             },
             projects: BTreeMap::new(),
         };

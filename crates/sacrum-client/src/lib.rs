@@ -17,6 +17,7 @@
 //!
 //! ```toml
 //! [sacrum]
+//! mode = "remote"
 //! token = "sac_your_token_here"
 //! url = "https://vertebrae.dev"
 //!
@@ -47,6 +48,7 @@
 
 pub mod api_types;
 pub mod artifact_service;
+pub mod backend;
 pub mod client;
 pub mod config;
 pub mod error;
@@ -65,10 +67,17 @@ pub use api_types::{
     WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use artifact_service::SacrumArtifactService;
+pub use backend::{
+    BackendConfigField, BackendConfigProblem, BackendSetupIssue, BackendStartupDecision,
+    LegacyDevStackAdoptionError, LegacyDevStackEvidenceError, SACRUM_IMAGE_REPOSITORY,
+    VerifiedLegacyDevStack, adopt_legacy_dev_stack, backend_startup_decision,
+};
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
-    GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
-    load_config_file, register_project, save_config_file, unregister_project,
+    BackendMode, BackendReleaseChannel, EffectiveSacrumConnection, GlobalSacrumSection,
+    LocalBackendSection, LocalProvisioningState, ProjectSection, RuntimeSecretsSource,
+    SacrumConfig, VertebraeConfigFile, config_path, load_config_file, register_project,
+    resolve_effective_connection, save_config_file, unregister_project,
 };
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;
