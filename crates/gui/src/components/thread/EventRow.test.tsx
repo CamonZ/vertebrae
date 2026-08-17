@@ -55,9 +55,50 @@ describe("ToolRow", () => {
     expect(screen.queryByText("first result")).not.toBeInTheDocument();
   });
 
+  it("mounts and unmounts a controlled body only after its owner updates", () => {
+    const onToggle = vi.fn();
+    const onMount = vi.fn();
+    const body = <ExpensiveBody onMount={onMount} />;
+    const { rerender } = render(
+      <ToolRow
+        name="Read"
+        status="done"
+        collapsed
+        onToggle={onToggle}
+        body={body}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Read/ }));
+    expect(onToggle).toHaveBeenCalledOnce();
+    expect(onMount).not.toHaveBeenCalled();
+
+    rerender(
+      <ToolRow
+        name="Read"
+        status="done"
+        collapsed={false}
+        onToggle={onToggle}
+        body={body}
+      />
+    );
+    expect(onMount).toHaveBeenCalledOnce();
+
+    rerender(
+      <ToolRow
+        name="Read"
+        status="done"
+        collapsed
+        onToggle={onToggle}
+        body={body}
+      />
+    );
+    expect(screen.queryByText("expensive body")).not.toBeInTheDocument();
+  });
+
   it("bounds a large expanded tool result and retains access to all output", () => {
-    const tail = "LAST-RESULT-LINE";
-    const body = `${"result line\n".repeat(1_100)}${tail}`;
+    const tail = "+LAST-DIFF-LINE";
+    const body = `${" context\n-old\n+new\n".repeat(400)}${tail}`;
     render(<ToolRow name="Read" status="done" body={body} />);
 
     expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
@@ -66,5 +107,20 @@ describe("ToolRow", () => {
     fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
 
     expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
+  });
+
+  it("pretty-prints a complete large JSON result after expansion", () => {
+    const body = JSON.stringify({
+      rows: Array.from({ length: 900 }, (_, index) => ({ index })),
+      tail: "PRESERVED-JSON-TAIL",
+    });
+    render(<ToolRow name="Query" status="done" body={body} />);
+
+    expect(screen.queryByText(/PRESERVED-JSON-TAIL/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
+
+    expect(
+      screen.getByText((text) => text.includes('"tail": "PRESERVED-JSON-TAIL"'))
+    ).toBeInTheDocument();
   });
 });
