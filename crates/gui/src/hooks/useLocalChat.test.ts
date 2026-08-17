@@ -751,6 +751,25 @@ describe("handleEndEvent", () => {
       useChatStore.getState().setSessionLifecycle,
       useChatStore.getState().clearStreamingAssistant
     );
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
+        duration_ms: 1000,
+        cost_usd: 0.01,
+        num_turns: 1,
+        result: "Partial answer",
+        is_error: false,
+        context_tokens: 1000,
+        context_window: 200000,
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      useChatStore.getState().setSessionLifecycle,
+      useChatStore.getState().clearStreamingAssistant
+    );
 
     expect(useChatStore.getState().sessions[id]).toMatchObject({
       lifecycle: "idle",

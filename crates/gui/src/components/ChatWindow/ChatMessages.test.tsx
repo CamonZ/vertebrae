@@ -1,9 +1,27 @@
+import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+
+const { markdownRenderSpy } = vi.hoisted(() => ({
+  markdownRenderSpy: vi.fn(),
+}));
+
+vi.mock("react-markdown", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-markdown")>("react-markdown");
+  const Markdown = actual.default;
+  return {
+    ...actual,
+    default: (props: ComponentProps<typeof Markdown>) => {
+      markdownRenderSpy(props.children);
+      return <Markdown {...props} />;
+    },
+  };
+});
 
 Element.prototype.scrollIntoView = vi.fn();
 
@@ -357,6 +375,7 @@ describe("ChatMessages", () => {
     expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
       "First draft"
     );
+    markdownRenderSpy.mockClear();
 
     rerender(
       <ChatMessages
@@ -375,6 +394,11 @@ describe("ChatMessages", () => {
       historicalRow
     );
     expect(screen.getAllByText("Finalized history")).toHaveLength(1);
+    expect(
+      markdownRenderSpy.mock.calls.filter(
+        ([text]) => text === "Finalized history"
+      )
+    ).toHaveLength(0);
     expect(screen.queryByText("First draft")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
       "Second draft"

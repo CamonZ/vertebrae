@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
@@ -40,8 +41,14 @@ export function MarkdownProjectRootProvider({
   projectRoots?: readonly string[];
   children: ReactNode;
 }) {
-  const roots = Array.from(
-    new Set([projectPath, ...(projectRoots ?? [])].filter(Boolean) as string[])
+  const roots = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [projectPath, ...(projectRoots ?? [])].filter(Boolean) as string[]
+        )
+      ),
+    [projectPath, projectRoots]
   );
   return (
     <MarkdownProjectRootContext.Provider value={projectPath ?? null}>

@@ -170,7 +170,6 @@ export function ChatMessages({
     (state) => state.markUserQuestionUnavailable
   );
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const keepAtBottomRef = useRef(true);
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
@@ -356,7 +355,6 @@ export function ChatMessages({
               </span>
             </div>
           )}
-          <div ref={messagesEndRef} />
         </div>
       </div>
     </MarkdownProjectRootProvider>
