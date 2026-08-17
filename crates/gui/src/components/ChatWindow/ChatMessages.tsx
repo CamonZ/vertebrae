@@ -3,6 +3,7 @@ import { commands } from "../../bindings";
 import type {
   ChatCompactionSummary,
   ChatMessage,
+  StreamingAssistantMessage,
 } from "../../stores/chatStore";
 import { EventLog, Thread } from "../thread";
 import type { ThreadModel } from "../thread";
@@ -93,7 +94,7 @@ interface ChatMessagesProps {
   isWaiting: boolean;
   activityLabel?: string | null;
   compactionSummary?: ChatCompactionSummary | null;
-  streamingAssistant: unknown;
+  streamingAssistant: StreamingAssistantMessage | null;
 }
 
 export function ChatMessages({
@@ -142,9 +143,30 @@ export function ChatMessages({
     };
   }, [projectPath]);
 
+  const displayMessages = useMemo(() => {
+    if (!streamingAssistant) return messages;
+    const last = messages[messages.length - 1];
+    if (
+      last?.kind === "assistant" &&
+      last.isPartial &&
+      !last.parentToolUseId &&
+      last.text === streamingAssistant.text
+    ) {
+      return messages;
+    }
+    return [
+      ...messages,
+      {
+        kind: "assistant" as const,
+        text: streamingAssistant.text,
+        timestamp: streamingAssistant.timestamp,
+        isPartial: true,
+      },
+    ];
+  }, [messages, streamingAssistant]);
   const renderItems = useMemo(
-    () => buildChatRenderItems(messages, assistantLabel),
-    [assistantLabel, messages]
+    () => buildChatRenderItems(displayMessages, assistantLabel),
+    [assistantLabel, displayMessages]
   );
 
   // Keep streaming updates inside this scroll container. Calling

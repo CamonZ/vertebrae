@@ -329,31 +329,10 @@ export function useChatSession(sessionId: string) {
     visibleHarness,
   ]);
 
-  // --- Display messages (with streaming overlay) ---
-  const sessionMessages = session?.messages;
-  const streamingAssistant = session?.streamingAssistant;
-  const messages = useMemo(() => {
-    if (!sessionMessages) return [];
-    if (!streamingAssistant) return sessionMessages;
-    const last = sessionMessages[sessionMessages.length - 1];
-    if (
-      last?.kind === "assistant" &&
-      last.isPartial &&
-      !last.parentToolUseId &&
-      last.text === streamingAssistant.text
-    ) {
-      return sessionMessages;
-    }
-    return [
-      ...sessionMessages,
-      {
-        kind: "assistant" as const,
-        text: streamingAssistant.text,
-        timestamp: streamingAssistant.timestamp,
-        isPartial: true,
-      },
-    ];
-  }, [sessionMessages, streamingAssistant]);
+  // Durable history and the ephemeral streaming response stay separate so a
+  // streaming delta does not change the historical messages array identity.
+  const messages = session?.messages ?? [];
+  const streamingAssistant = session?.streamingAssistant ?? null;
 
   const activeTurn = session?.activeTurn ?? null;
   const isWaiting = activeTurn !== null || session?.compactionActive === true;
@@ -549,6 +528,7 @@ export function useChatSession(sessionId: string) {
 
     // messages
     messages,
+    streamingAssistant,
     assistantLabel,
 
     // context utilization
