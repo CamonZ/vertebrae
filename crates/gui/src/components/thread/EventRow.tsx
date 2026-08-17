@@ -19,10 +19,7 @@
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { IdChip } from "../shared/HearthPrimitives";
-import {
-  MarkdownContent,
-  prettyPrintJsonIfPossible,
-} from "../shared/MarkdownContent";
+import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
 
 import type {
   ActivityMessage,
@@ -142,9 +139,11 @@ export function ToolRow(props: ToolRowProps): ReactNode {
       </div>
       {hasBody && !collapsed ? (
         <div className="evtool-bd" id={bodyId}>
-          {typeof props.body === "string"
-            ? prettyPrintJsonIfPossible(props.body)
-            : props.body}
+          {typeof props.body === "string" ? (
+            <BoundedTextContent text={props.body} />
+          ) : (
+            props.body
+          )}
         </div>
       ) : null}
     </div>

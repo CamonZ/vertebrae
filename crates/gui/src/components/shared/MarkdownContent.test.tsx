@@ -273,6 +273,26 @@ describe("MarkdownContent", () => {
   });
 
   describe("code blocks", () => {
+    it("defers parsing and highlighting very large content until requested", () => {
+      const source = `\`\`\`typescript\n${"const value = 1;\n".repeat(800)}\`\`\``;
+      const { container } = render(<MarkdownContent text={source} />);
+
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expect(container.querySelector("code")).toBeNull();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(container.querySelector("code")?.textContent).toContain(
+        "const value = 1;"
+      );
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      );
+    });
+
     it("renders fenced code blocks with language label", () => {
       const markdown = "```typescript\nconst x = 42;\n```";
       const { container } = render(<MarkdownContent text={markdown} />);

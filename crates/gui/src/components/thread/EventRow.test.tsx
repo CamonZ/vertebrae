@@ -54,4 +54,17 @@ describe("ToolRow", () => {
     expect(screen.getByText("updated result")).toBeInTheDocument();
     expect(screen.queryByText("first result")).not.toBeInTheDocument();
   });
+
+  it("bounds a large expanded tool result and retains access to all output", () => {
+    const tail = "LAST-RESULT-LINE";
+    const body = `${"result line\n".repeat(1_100)}${tail}`;
+    render(<ToolRow name="Read" status="done" body={body} />);
+
+    expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+    expect(screen.queryByText(tail)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
+
+    expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
+  });
 });
