@@ -63,7 +63,71 @@ pub enum InstallerError {
     #[error("systemctl --user {action} failed: {reason}")]
     Systemctl { action: String, reason: String },
 
+    /// A registered daemon did not reach the running state after relaunch.
+    #[error("Daemon service did not become healthy after relaunch: {reason}")]
+    ServiceHealth { reason: String },
+
     /// The operation is not supported on this OS (e.g. Windows).
     #[error("Installer is not supported on this platform")]
     UnsupportedPlatform,
+}
+
+impl InstallerError {
+    /// Whether a service-manager status query failed because the manager is
+    /// unavailable in the current environment (for example, a GUI test
+    /// container without a systemd user bus).
+    pub(crate) fn is_service_manager_unavailable(&self) -> bool {
+        let reason = match self {
+            Self::Launchctl { reason, .. } | Self::Systemctl { reason, .. } => reason,
+            _ => return false,
+        };
+
+        let reason = reason.to_ascii_lowercase();
+        [
+            "failed to connect to bus",
+            "failed to connect to user scope bus",
+            "system has not been booted with systemd",
+            "systemd is not running",
+            "dbus_session_bus_address",
+            "xdg_runtime_dir",
+            "no such file or directory",
+        ]
+        .iter()
+        .any(|marker| reason.contains(marker))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_unavailable_systemd_user_bus() {
+        let error = InstallerError::Systemctl {
+            action: "show".to_string(),
+            reason: "Failed to connect to bus: No medium found".to_string(),
+        };
+
+        assert!(error.is_service_manager_unavailable());
+    }
+
+    #[test]
+    fn recognizes_missing_user_bus_environment() {
+        let error = InstallerError::Systemctl {
+            action: "show".to_string(),
+            reason: "Failed to connect to user scope bus via local transport: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not defined".to_string(),
+        };
+
+        assert!(error.is_service_manager_unavailable());
+    }
+
+    #[test]
+    fn does_not_downgrade_unrelated_service_manager_errors() {
+        let error = InstallerError::Systemctl {
+            action: "show".to_string(),
+            reason: "Access denied".to_string(),
+        };
+
+        assert!(!error.is_service_manager_unavailable());
+    }
 }
