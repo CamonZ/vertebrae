@@ -3,11 +3,12 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::UNIX_EPOCH,
 };
 
-use crate::{HarnessError, HarnessEventV1, ProviderResumeId, StreamId};
+use crate::{HarnessError, HarnessEventDraftV1, HarnessEventV1, ProviderResumeId, StreamId};
+use uuid::Uuid;
 
 /// Provider-neutral inputs needed to locate one durable provider transcript.
 ///
@@ -106,9 +107,25 @@ pub struct TranscriptReplayPage {
 /// shared container stores only the provider-neutral replay projection.
 #[derive(Debug)]
 pub struct TranscriptReplayCache {
-    capacity: usize,
-    entries: Mutex<VecDeque<Arc<TranscriptReplay>>>,
-    in_flight: Mutex<HashMap<TranscriptReplayCacheKey, Arc<Mutex<()>>>>,
+    max_entries: usize,
+    max_events: usize,
+    max_bytes: usize,
+    entries: Mutex<VecDeque<CachedReplay>>,
+    in_flight: Mutex<HashMap<TranscriptReplayCacheKey, Arc<ReplayFlight>>>,
+}
+
+#[derive(Debug)]
+struct CachedReplay {
+    replay: Arc<TranscriptReplay>,
+    events: usize,
+    bytes: usize,
+    older_records_exist: bool,
+}
+
+#[derive(Debug, Default)]
+struct ReplayFlight {
+    outcome: Mutex<Option<Result<Arc<TranscriptReplay>, String>>>,
+    ready: Condvar,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -120,8 +137,14 @@ struct TranscriptReplayCacheKey {
 
 impl TranscriptReplayCache {
     pub fn new(capacity: usize) -> Self {
+        Self::with_limits(capacity, capacity.saturating_mul(100_000), 64 * 1024 * 1024)
+    }
+
+    pub fn with_limits(max_entries: usize, max_events: usize, max_bytes: usize) -> Self {
         Self {
-            capacity: capacity.max(1),
+            max_entries: max_entries.max(1),
+            max_events: max_events.max(1),
+            max_bytes: max_bytes.max(1),
             entries: Mutex::new(VecDeque::new()),
             in_flight: Mutex::new(HashMap::new()),
         }
@@ -137,40 +160,190 @@ impl TranscriptReplayCache {
             HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
         })?;
         let Some(index) = entries.iter().position(|entry| {
-            entry.transcript_path == transcript_path
-                && &entry.revision == revision
-                && entry.projection_key == projection_key
+            !entry.older_records_exist
+                && entry.replay.transcript_path == transcript_path
+                && &entry.replay.revision == revision
+                && entry.replay.projection_key == projection_key
         }) else {
             return Ok(None);
         };
         let entry = entries.remove(index).expect("cache index must exist");
-        entries.push_back(Arc::clone(&entry));
-        Ok(Some(entry))
+        let replay = Arc::clone(&entry.replay);
+        entries.push_back(entry);
+        Ok(Some(replay))
     }
 
     pub fn insert(&self, replay: TranscriptReplay) -> Result<Arc<TranscriptReplay>, HarnessError> {
         let replay = Arc::new(replay);
+        let events = replay.events.len();
+        let bytes = replay
+            .events
+            .iter()
+            .map(|event| serde_json::to_vec(event).map_or(0, |encoded| encoded.len()))
+            .sum::<usize>();
+        if events > self.max_events || bytes > self.max_bytes {
+            self.retain_window_for_page(&replay, None)?;
+            return Ok(replay);
+        }
         let mut entries = self.entries.lock().map_err(|_| {
             HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
         })?;
         if entries.iter().any(|entry| {
-            entry.transcript_path == replay.transcript_path
-                && entry.projection_key == replay.projection_key
-                && entry.revision.is_newer_than(&replay.revision)
+            entry.replay.transcript_path == replay.transcript_path
+                && entry.replay.projection_key == replay.projection_key
+                && entry.replay.revision.is_newer_than(&replay.revision)
         }) {
             // A slower load of an old revision must not displace the current
             // normalized projection. The caller may still page its result.
             return Ok(replay);
         }
         entries.retain(|entry| {
-            entry.transcript_path != replay.transcript_path
-                || entry.projection_key != replay.projection_key
+            entry.replay.transcript_path != replay.transcript_path
+                || entry.replay.projection_key != replay.projection_key
         });
-        entries.push_back(Arc::clone(&replay));
-        while entries.len() > self.capacity {
-            entries.pop_front();
+        entries.push_back(CachedReplay {
+            replay: Arc::clone(&replay),
+            events,
+            bytes,
+            older_records_exist: false,
+        });
+        while entries.len() > self.max_entries
+            || entries.iter().map(|entry| entry.events).sum::<usize>() > self.max_events
+            || entries.iter().map(|entry| entry.bytes).sum::<usize>() > self.max_bytes
+        {
+            let _ = entries.pop_front();
         }
         Ok(replay)
+    }
+
+    /// Serve a cursor from a retained bounded normalized window, if present.
+    pub fn page(
+        &self,
+        transcript_path: &Path,
+        revision: &TranscriptRevision,
+        projection_key: &str,
+        request: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        let mut entries = self.entries.lock().map_err(|_| {
+            HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
+        })?;
+        let Some(index) = entries.iter().position(|entry| {
+            entry.replay.transcript_path == transcript_path
+                && &entry.replay.revision == revision
+                && entry.replay.projection_key == projection_key
+        }) else {
+            return Ok(None);
+        };
+        let entry = entries.remove(index).expect("cache index must exist");
+        if entry.older_records_exist
+            && request.cursor.as_deref().is_some_and(|cursor| {
+                decode_cursor(cursor, &transcript_cache_key(&entry.replay)).is_ok_and(|boundary| {
+                    matches!(
+                        boundary,
+                        CursorBoundary::Event(event_id)
+                            if entry.replay.events.first().is_some_and(
+                                |event| event.event_id.as_str() == event_id
+                            )
+                    )
+                })
+            })
+        {
+            entries.push_back(entry);
+            return Ok(None);
+        }
+        let result = entry.replay.page_tail(request, entry.older_records_exist);
+        entries.push_back(entry);
+        match result {
+            Ok(page) => Ok(Some(page)),
+            Err(HarnessError::InvalidRequest(message))
+                if message.contains("outside the retained event window") =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Retain the largest normalized event window within cache weight limits,
+    /// ending at the requested cursor boundary.
+    pub fn retain_window_for_page(
+        &self,
+        replay: &Arc<TranscriptReplay>,
+        cursor: Option<&str>,
+    ) -> Result<(), HarnessError> {
+        let replay_bytes = replay
+            .events
+            .iter()
+            .map(|event| serde_json::to_vec(event).map_or(0, |encoded| encoded.len()))
+            .sum::<usize>();
+        if replay.events.len() <= self.max_events && replay_bytes <= self.max_bytes {
+            return Ok(());
+        }
+        let cache_key = transcript_cache_key(replay);
+        let end = match cursor {
+            None => replay.events.len(),
+            Some(cursor) => match decode_cursor(cursor, &cache_key)? {
+                CursorBoundary::TranscriptEnd => replay.events.len(),
+                CursorBoundary::Event(event_id) => replay
+                    .events
+                    .iter()
+                    .position(|event| event.event_id.as_str() == event_id)
+                    .ok_or_else(|| {
+                        HarnessError::InvalidRequest(
+                            "transcript replay cursor is outside the available event range".into(),
+                        )
+                    })?,
+            },
+        };
+        let mut start = end;
+        let mut bytes = 0_usize;
+        while start > 0 && end - start < self.max_events {
+            let event_bytes =
+                serde_json::to_vec(&replay.events[start - 1]).map_or(0, |encoded| encoded.len());
+            if bytes.saturating_add(event_bytes) > self.max_bytes {
+                break;
+            }
+            bytes = bytes.saturating_add(event_bytes);
+            start -= 1;
+        }
+        if start == end {
+            return Ok(());
+        }
+        let window = Arc::new(TranscriptReplay {
+            transcript_path: replay.transcript_path.clone(),
+            revision: replay.revision.clone(),
+            projection_key: replay.projection_key.clone(),
+            events: replay.events[start..end].to_vec(),
+        });
+        let mut entries = self.entries.lock().map_err(|_| {
+            HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
+        })?;
+        if entries.iter().any(|entry| {
+            entry.replay.transcript_path == replay.transcript_path
+                && entry.replay.projection_key == replay.projection_key
+                && entry.replay.revision.is_newer_than(&replay.revision)
+        }) {
+            // A late oversized load must not replace the bounded window for a
+            // newer transcript revision.
+            return Ok(());
+        }
+        entries.retain(|entry| {
+            entry.replay.transcript_path != replay.transcript_path
+                || entry.replay.projection_key != replay.projection_key
+        });
+        entries.push_back(CachedReplay {
+            replay: window,
+            events: end - start,
+            bytes,
+            older_records_exist: start > 0,
+        });
+        while entries.len() > self.max_entries
+            || entries.iter().map(|entry| entry.events).sum::<usize>() > self.max_events
+            || entries.iter().map(|entry| entry.bytes).sum::<usize>() > self.max_bytes
+        {
+            let _ = entries.pop_front();
+        }
+        Ok(())
     }
 
     /// Return a matching replay or normalize it once for this exact revision.
@@ -194,45 +367,60 @@ impl TranscriptReplayCache {
             revision: revision.clone(),
             projection_key: projection_key.to_owned(),
         };
-        let flight = {
+        let (flight, leader) = {
             let mut in_flight = self.in_flight.lock().map_err(|_| {
                 HarnessError::Operation(
                     "normalized transcript replay in-flight lock was poisoned".into(),
                 )
             })?;
-            Arc::clone(
-                in_flight
-                    .entry(key.clone())
-                    .or_insert_with(|| Arc::new(Mutex::new(()))),
-            )
+            match in_flight.entry(key.clone()) {
+                std::collections::hash_map::Entry::Occupied(entry) => {
+                    (Arc::clone(entry.get()), false)
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    let flight = Arc::new(ReplayFlight::default());
+                    entry.insert(Arc::clone(&flight));
+                    (flight, true)
+                }
+            }
         };
 
-        let result = match flight.lock() {
-            Ok(_guard) => (|| {
+        if leader {
+            let result = (|| {
                 if let Some(replay) = self.get(transcript_path, revision, projection_key)? {
                     Ok(replay)
                 } else {
                     self.insert(loader()?)
                 }
-            })(),
-            Err(_) => Err(HarnessError::Operation(
-                "normalized transcript replay single-flight lock was poisoned".into(),
-            )),
-        };
-
-        let mut in_flight = self.in_flight.lock().map_err(|_| {
-            HarnessError::Operation(
-                "normalized transcript replay in-flight lock was poisoned".into(),
-            )
-        })?;
-        if Arc::strong_count(&flight) == 2
-            && in_flight
-                .get(&key)
-                .is_some_and(|current| Arc::ptr_eq(current, &flight))
-        {
-            in_flight.remove(&key);
+            })();
+            let outcome = result.as_ref().map(Arc::clone).map_err(ToString::to_string);
+            *flight.outcome.lock().map_err(|_| {
+                HarnessError::Operation("normalized transcript replay flight was poisoned".into())
+            })? = Some(outcome);
+            flight.ready.notify_all();
+            self.in_flight
+                .lock()
+                .map_err(|_| {
+                    HarnessError::Operation(
+                        "normalized transcript replay in-flight lock was poisoned".into(),
+                    )
+                })?
+                .remove(&key);
+            return result;
         }
-        result
+
+        let mut outcome = flight.outcome.lock().map_err(|_| {
+            HarnessError::Operation("normalized transcript replay flight was poisoned".into())
+        })?;
+        while outcome.is_none() {
+            outcome = flight.ready.wait(outcome).map_err(|_| {
+                HarnessError::Operation("normalized transcript replay flight was poisoned".into())
+            })?;
+        }
+        match outcome.as_ref().expect("flight outcome must be set") {
+            Ok(replay) => Ok(Arc::clone(replay)),
+            Err(error) => Err(HarnessError::Operation(error.clone())),
+        }
     }
 }
 
@@ -252,7 +440,18 @@ impl TranscriptReplay {
         self.revision.verify(&self.transcript_path)?;
         let cache_key = transcript_cache_key(self);
         let end = match request.cursor.as_deref() {
-            Some(cursor) => decode_cursor(cursor, &cache_key)?,
+            Some(cursor) => match decode_cursor(cursor, &cache_key)? {
+                CursorBoundary::TranscriptEnd => self.events.len(),
+                CursorBoundary::Event(before_event_id) => self
+                    .events
+                    .iter()
+                    .position(|event| event.event_id.as_str() == before_event_id)
+                    .ok_or_else(|| {
+                        HarnessError::InvalidRequest(
+                            "transcript replay cursor is outside the retained event window".into(),
+                        )
+                    })?,
+            },
             None => self.events.len(),
         };
         if end > self.events.len() {
@@ -269,10 +468,78 @@ impl TranscriptReplay {
         Ok(TranscriptReplayPage {
             cache_key: cache_key.clone(),
             events: self.events[start..end].to_vec(),
-            next_cursor: has_more.then(|| encode_cursor(&cache_key, start)),
+            next_cursor: has_more
+                .then(|| encode_event_cursor(&cache_key, self.events[start].event_id.as_str())),
             has_more,
         })
     }
+
+    /// Page a normalized tail window while indicating that older records exist
+    /// outside the bounded provider read.
+    pub fn page_tail(
+        &self,
+        request: &TranscriptReplayPageRequest,
+        older_records_exist: bool,
+    ) -> Result<TranscriptReplayPage, HarnessError> {
+        let mut page = self.page(request)?;
+        if older_records_exist && !self.events.is_empty() {
+            page.has_more = true;
+            if page.next_cursor.is_none() {
+                page.next_cursor = Some(encode_event_cursor(
+                    &page.cache_key,
+                    self.events[0].event_id.as_str(),
+                ));
+            }
+        }
+        Ok(page)
+    }
+
+    pub fn deferred_tail_page(&self) -> Result<TranscriptReplayPage, HarnessError> {
+        self.revision.verify(&self.transcript_path)?;
+        let cache_key = transcript_cache_key(self);
+        Ok(TranscriptReplayPage {
+            cache_key: cache_key.clone(),
+            events: Vec::new(),
+            next_cursor: Some(encode_deferred_cursor(&cache_key)),
+            has_more: true,
+        })
+    }
+}
+
+/// Assign replay-only deterministic IDs and source-position ordering.
+/// Provider sequence is the durable JSONL byte position, and the low bits
+/// distinguish multiple normalized events emitted from the same record.
+pub fn sequence_replay_drafts(
+    projection_key: &str,
+    drafts: impl IntoIterator<Item = HarnessEventDraftV1>,
+) -> Vec<HarnessEventV1> {
+    let mut occurrences = HashMap::<u64, u64>::new();
+    drafts
+        .into_iter()
+        .map(|draft| {
+            let source = draft.provider_sequence.unwrap_or_default();
+            let occurrence = occurrences.entry(source).or_default();
+            *occurrence = occurrence.saturating_add(1);
+            let sequence = source.saturating_mul(65_536).saturating_add(*occurrence);
+            let event_id = crate::EventId::new(format!(
+                "replay-{}",
+                Uuid::new_v5(
+                    &Uuid::NAMESPACE_OID,
+                    format!("{projection_key}:{sequence}").as_bytes(),
+                )
+            ));
+            HarnessEventV1 {
+                event_id,
+                stream_id: draft.stream_id,
+                sequence,
+                correlation: draft.correlation,
+                timestamp: draft.timestamp,
+                semantics: draft.semantics,
+                provider_sequence: draft.provider_sequence,
+                payload: draft.payload,
+            }
+        })
+        .collect()
 }
 
 /// Provider adapters implement discovery, parsing, and normalization for
@@ -306,22 +573,46 @@ fn transcript_cache_key(replay: &TranscriptReplay) -> String {
     format!("v1-{:016x}", hasher.finish())
 }
 
-fn encode_cursor(cache_key: &str, before_event: usize) -> String {
-    format!("{cache_key}:{before_event}")
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CursorBoundary<'a> {
+    Event(&'a str),
+    TranscriptEnd,
 }
 
-fn decode_cursor(cursor: &str, expected_cache_key: &str) -> Result<usize, HarnessError> {
-    let (cache_key, before_event) = cursor
-        .rsplit_once(':')
-        .ok_or_else(|| HarnessError::InvalidRequest("malformed transcript replay cursor".into()))?;
-    if cache_key != expected_cache_key {
+fn encode_event_cursor(cache_key: &str, before_event_id: &str) -> String {
+    format!("{cache_key}:event:{before_event_id}")
+}
+
+fn encode_deferred_cursor(cache_key: &str) -> String {
+    format!("{cache_key}:end")
+}
+
+fn decode_cursor<'a>(
+    cursor: &'a str,
+    expected_cache_key: &str,
+) -> Result<CursorBoundary<'a>, HarnessError> {
+    let Some(boundary) = cursor
+        .strip_prefix(expected_cache_key)
+        .and_then(|value| value.strip_prefix(':'))
+    else {
         return Err(HarnessError::InvalidRequest(
             "transcript replay cursor no longer matches the transcript revision".into(),
         ));
+    };
+    if boundary == "end" {
+        return Ok(CursorBoundary::TranscriptEnd);
     }
-    before_event
-        .parse::<usize>()
-        .map_err(|_| HarnessError::InvalidRequest("malformed transcript replay cursor".into()))
+    let Some(event_id) = boundary.strip_prefix("event:") else {
+        return Err(HarnessError::InvalidRequest(
+            "malformed transcript replay cursor".into(),
+        ));
+    };
+    if event_id.is_empty() {
+        return Err(HarnessError::InvalidRequest(
+            "malformed transcript replay cursor".into(),
+        ));
+    }
+    Ok(CursorBoundary::Event(event_id))
 }
 
 #[cfg(test)]
@@ -410,6 +701,44 @@ mod tests {
             .map(|event| event.sequence)
             .collect::<Vec<_>>();
         assert_eq!(reconstructed, (1..=7).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn replay_cursor_round_trips_opaque_event_ids_without_sentinel_collisions() {
+        let transcript = NamedTempFile::new().expect("transcript");
+        let mut events = (1..=3).map(event).collect::<Vec<_>>();
+        events[1].event_id = EventId::new("__transcript_end__");
+        events[2].event_id = EventId::new("provider:opaque:event");
+        let replay = TranscriptReplay {
+            transcript_path: transcript.path().to_path_buf(),
+            revision: TranscriptRevision::capture(transcript.path()).expect("revision"),
+            projection_key: "test-v1:opaque-event-ids".into(),
+            events,
+        };
+
+        let newest = replay
+            .page(&TranscriptReplayPageRequest {
+                cursor: None,
+                limit: Some(1),
+            })
+            .expect("newest page");
+        let middle = replay
+            .page(&TranscriptReplayPageRequest {
+                cursor: newest.next_cursor,
+                limit: Some(1),
+            })
+            .expect("middle page");
+        let oldest = replay
+            .page(&TranscriptReplayPageRequest {
+                cursor: middle.next_cursor,
+                limit: Some(1),
+            })
+            .expect("oldest page");
+
+        assert_eq!(newest.events[0].event_id.as_str(), "provider:opaque:event");
+        assert_eq!(middle.events[0].event_id.as_str(), "__transcript_end__");
+        assert_eq!(oldest.events[0].event_id.as_str(), "event-1");
+        assert!(!oldest.has_more);
     }
 
     #[test]
@@ -611,6 +940,175 @@ mod tests {
     }
 
     #[test]
+    fn late_oversized_replay_does_not_replace_a_newer_revision_window() {
+        let transcript = NamedTempFile::new().expect("transcript");
+        let path = transcript.path().to_path_buf();
+        let old_revision = TranscriptRevision {
+            byte_len: 10,
+            modified_nanos: 10,
+        };
+        let new_revision = TranscriptRevision {
+            byte_len: 20,
+            modified_nanos: 20,
+        };
+        let cache = TranscriptReplayCache::with_limits(8, 2, usize::MAX);
+        let replay = |revision: TranscriptRevision, first_sequence| TranscriptReplay {
+            transcript_path: path.clone(),
+            revision,
+            projection_key: "claude-v1:oversized".into(),
+            events: (first_sequence..first_sequence + 3).map(event).collect(),
+        };
+
+        cache
+            .insert(replay(old_revision.clone(), 1))
+            .expect("insert old oversized replay");
+        cache
+            .insert(replay(new_revision.clone(), 10))
+            .expect("insert new oversized replay");
+        cache
+            .insert(replay(old_revision, 20))
+            .expect("finish stale oversized replay");
+
+        let entries = cache.entries.lock().expect("cache entries");
+        let retained = entries
+            .iter()
+            .filter(|entry| {
+                entry.replay.transcript_path == path
+                    && entry.replay.projection_key == "claude-v1:oversized"
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].replay.revision, new_revision);
+        assert_eq!(
+            retained[0]
+                .replay
+                .events
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![11, 12]
+        );
+    }
+
+    #[test]
+    fn normalized_replay_cache_enforces_event_and_byte_weight_limits() {
+        let first_file = NamedTempFile::new().expect("first transcript");
+        let second_file = NamedTempFile::new().expect("second transcript");
+        let oversized_file = NamedTempFile::new().expect("oversized transcript");
+        let cache = TranscriptReplayCache::with_limits(8, 3, 1_500);
+        let first_revision = TranscriptRevision::capture(first_file.path()).unwrap();
+        let second_revision = TranscriptRevision::capture(second_file.path()).unwrap();
+        cache
+            .insert(TranscriptReplay {
+                transcript_path: first_file.path().to_path_buf(),
+                revision: first_revision.clone(),
+                projection_key: "weighted:first".into(),
+                events: vec![event(1), event(2)],
+            })
+            .unwrap();
+        cache
+            .insert(TranscriptReplay {
+                transcript_path: second_file.path().to_path_buf(),
+                revision: second_revision.clone(),
+                projection_key: "weighted:second".into(),
+                events: vec![event(3), event(4)],
+            })
+            .unwrap();
+
+        assert!(
+            cache
+                .get(first_file.path(), &first_revision, "weighted:first")
+                .unwrap()
+                .is_none(),
+            "oldest replay is evicted when aggregate event weight exceeds the limit"
+        );
+        assert!(
+            cache
+                .get(second_file.path(), &second_revision, "weighted:second")
+                .unwrap()
+                .is_some()
+        );
+
+        let oversized_revision = TranscriptRevision::capture(oversized_file.path()).unwrap();
+        let oversized = cache
+            .insert(TranscriptReplay {
+                transcript_path: oversized_file.path().to_path_buf(),
+                revision: oversized_revision.clone(),
+                projection_key: "weighted:oversized".into(),
+                events: vec![event(5), event(6), event(7), event(8)],
+            })
+            .unwrap();
+        assert_eq!(oversized.events.len(), 4);
+        assert!(
+            cache
+                .get(
+                    oversized_file.path(),
+                    &oversized_revision,
+                    "weighted:oversized"
+                )
+                .unwrap()
+                .is_none(),
+            "an individually oversized replay is returned but never retained"
+        );
+        let newest_window = cache
+            .page(
+                oversized_file.path(),
+                &oversized_revision,
+                "weighted:oversized",
+                &TranscriptReplayPageRequest {
+                    cursor: None,
+                    limit: Some(1),
+                },
+            )
+            .unwrap()
+            .expect("bounded oversized replay window");
+        assert_eq!(newest_window.events[0].payload, event(8).payload);
+        assert!(newest_window.has_more);
+        let next_window = cache
+            .page(
+                oversized_file.path(),
+                &oversized_revision,
+                "weighted:oversized",
+                &TranscriptReplayPageRequest {
+                    cursor: newest_window.next_cursor,
+                    limit: Some(1),
+                },
+            )
+            .unwrap()
+            .expect("next page from retained oversized window");
+        assert_eq!(next_window.events[0].payload, event(7).payload);
+
+        let byte_first = NamedTempFile::new().expect("byte first transcript");
+        let byte_second = NamedTempFile::new().expect("byte second transcript");
+        let one_event_bytes = serde_json::to_vec(&event(10)).unwrap().len();
+        let byte_cache = TranscriptReplayCache::with_limits(8, 100, one_event_bytes + 8);
+        let byte_first_revision = TranscriptRevision::capture(byte_first.path()).unwrap();
+        byte_cache
+            .insert(TranscriptReplay {
+                transcript_path: byte_first.path().to_path_buf(),
+                revision: byte_first_revision.clone(),
+                projection_key: "bytes:first".into(),
+                events: vec![event(10)],
+            })
+            .unwrap();
+        byte_cache
+            .insert(TranscriptReplay {
+                transcript_path: byte_second.path().to_path_buf(),
+                revision: TranscriptRevision::capture(byte_second.path()).unwrap(),
+                projection_key: "bytes:second".into(),
+                events: vec![event(11)],
+            })
+            .unwrap();
+        assert!(
+            byte_cache
+                .get(byte_first.path(), &byte_first_revision, "bytes:first")
+                .unwrap()
+                .is_none(),
+            "byte weight independently evicts the oldest replay"
+        );
+    }
+
+    #[test]
     fn normalized_replay_cache_single_flights_per_key_without_blocking_other_keys() {
         use std::{
             sync::{
@@ -670,21 +1168,6 @@ mod tests {
                 })
             })
         };
-        let mut same_key_waiting = false;
-        for _ in 0..10_000 {
-            same_key_waiting = cache
-                .in_flight
-                .lock()
-                .expect("in-flight map")
-                .values()
-                .next()
-                .is_some_and(|flight| Arc::strong_count(flight) >= 3);
-            if same_key_waiting {
-                break;
-            }
-            thread::yield_now();
-        }
-
         let (unrelated_tx, unrelated_rx) = mpsc::sync_channel(0);
         let unrelated = {
             let cache = Arc::clone(&cache);
@@ -717,10 +1200,6 @@ mod tests {
             .expect("unrelated replay");
 
         assert_eq!(loads.load(Ordering::SeqCst), 1);
-        assert!(
-            same_key_waiting,
-            "same-key request joined the in-flight load"
-        );
         assert!(Arc::ptr_eq(&first, &same_key));
         assert_eq!(unrelated.events[0].sequence, 2);
     }

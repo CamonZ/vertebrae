@@ -155,6 +155,17 @@ impl ClaudeStreamDecoder {
         &self.context
     }
 
+    /// Seed the canonical root identity for a bounded durable tail. The init
+    /// record is necessarily outside that window, but replay requests already
+    /// carry its durable session identity and validated transcript locator.
+    pub fn prepare_bounded_replay_tail(&mut self, locator: ProviderThreadRef) {
+        self.root_init_seen = true;
+        self.root_declared = true;
+        self.root_locator = Some(locator);
+        self.declared_threads
+            .insert(self.context.root_thread_id.clone());
+    }
+
     pub fn root_declared(&self) -> bool {
         self.root_declared
     }
@@ -203,7 +214,20 @@ impl ClaudeStreamDecoder {
     ) -> Result<Vec<HarnessEventDraftV1>, ClaudeDecodeError> {
         let value: Value = serde_json::from_str(line)
             .map_err(|error| ClaudeDecodeError::Malformed(error.to_string()))?;
-        self.provider_sequence = self.provider_sequence.saturating_add(1);
+        let provider_sequence = self.provider_sequence.saturating_add(1);
+        self.decode_value_at_sequence(value, timestamp, provider_sequence)
+    }
+
+    /// Decode a pre-parsed durable record with a caller-supplied stable source
+    /// position. Replay uses byte offsets so tail pages and full reads produce
+    /// identical ordering without parsing each JSON line twice.
+    pub fn decode_value_at_sequence(
+        &mut self,
+        value: Value,
+        timestamp: DateTime<Utc>,
+        provider_sequence: u64,
+    ) -> Result<Vec<HarnessEventDraftV1>, ClaudeDecodeError> {
+        self.provider_sequence = provider_sequence;
         self.event_timestamp = Some(timestamp);
         let result = self.decode_value(value, self.provider_sequence);
         self.event_timestamp = None;

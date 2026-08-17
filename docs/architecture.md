@@ -174,8 +174,12 @@ next older page. The cursor binds its event boundary to a transcript revision
 replay stream, so a changed transcript or projection invalidates an outstanding
 cursor instead of combining events from different revisions.
 Prepending pages reconstructs the same ordered normalized event stream as full
-replay. Provider adapters may populate revision-keyed normalized caches or
-indexes, but provider paths, JSONL formats, and decoding remain adapter-owned.
+replay. Cold newest-page requests read a bounded JSONL tail in the provider
+adapter; stable source-position sequences and deterministic replay event IDs
+make that page identical to a later full normalization. Older-page requests
+may populate a revision-keyed normalized cache that is bounded by entries,
+events, and serialized bytes. Provider paths, JSONL formats, indexing, and
+decoding remain adapter-owned.
 
 ### Adding a provider
 

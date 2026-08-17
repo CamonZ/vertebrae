@@ -291,6 +291,7 @@ describe("chatStore", () => {
         },
       ]);
       expect(useChatStore.getState().sessions[id].providerReplay).toEqual({
+        generation: expect.any(Number),
         lines: expect.any(Array),
         cacheKey: "revision-1",
         nextCursor: null,
@@ -397,6 +398,164 @@ describe("chatStore", () => {
           error: "transcript changed",
         }
       );
+    });
+
+    it("keeps replay overlap in replay order and preserves duplicate occurrences", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Overlap Replay", "/repo/overlap");
+      useChatStore.getState().setProviderResumeId(id, "conv-overlap");
+      useChatStore.setState({ sessions: {}, activeSessionId: null });
+      const event = (
+        sequence: number,
+        type: "turn_input" | "text",
+        text: string
+      ) =>
+        JSON.stringify({
+          version: 1,
+          event_id: `overlap-${sequence}`,
+          stream_id: "local-replay/overlap",
+          sequence,
+          correlation: {
+            session_id: "conv-overlap",
+            thread_id: "conv-overlap",
+          },
+          timestamp: `2026-01-01T00:00:0${sequence}Z`,
+          semantics: "snapshot",
+          type,
+          data:
+            type === "turn_input"
+              ? {
+                  thread_id: "conv-overlap",
+                  content: text,
+                  provenance: "human",
+                }
+              : { text },
+        });
+      let resolveReplay:
+        | ((
+            value: Awaited<
+              ReturnType<typeof commands.loadLocalChatSessionReplay>
+            >
+          ) => void)
+        | undefined;
+      vi.spyOn(commands, "loadLocalChatSessionReplay").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolveReplay = resolve;
+          })
+      );
+
+      useChatStore.getState().openSession("Overlap Replay", "/repo/overlap");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "same",
+        timestamp: "2026-01-01T00:00:10Z",
+      });
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "reply",
+        timestamp: "2026-01-01T00:00:11Z",
+      });
+      resolveReplay?.({
+        status: "ok",
+        data: {
+          events: [
+            event(1, "turn_input", "same"),
+            event(2, "text", "reply"),
+            event(3, "turn_input", "same"),
+            event(4, "text", "reply"),
+          ],
+          cache_key: "overlap-revision",
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+      await vi.waitFor(() =>
+        expect(
+          useChatStore
+            .getState()
+            .sessions[
+              id
+            ].messages.map((message) => (message.kind === "user" || message.kind === "assistant" ? `${message.kind}:${message.text}` : message.kind))
+        ).toEqual([
+          "user:same",
+          "assistant:reply",
+          "user:same",
+          "assistant:reply",
+        ])
+      );
+      expect(useChatStore.getState().sessions[id].messages[2]).toMatchObject({
+        timestamp: "2026-01-01T00:00:10Z",
+      });
+      expect(useChatStore.getState().sessions[id].messages[3]).toMatchObject({
+        timestamp: "2026-01-01T00:00:11Z",
+      });
+    });
+
+    it("ignores an earlier hydration after the same session is closed and reopened", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Hydration Generation", "/repo/generation");
+      useChatStore.getState().setProviderResumeId(id, "conv-generation");
+      useChatStore.setState({ sessions: {}, activeSessionId: null });
+      const resolutions: Array<
+        (
+          value: Awaited<ReturnType<typeof commands.loadLocalChatSessionReplay>>
+        ) => void
+      > = [];
+      vi.spyOn(commands, "loadLocalChatSessionReplay").mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            resolutions.push(resolve);
+          })
+      );
+      const output = (text: string, revision: string) => ({
+        status: "ok" as const,
+        data: {
+          events: [
+            JSON.stringify({
+              version: 1,
+              event_id: `${revision}-event`,
+              stream_id: "local-replay/generation",
+              sequence: 1,
+              correlation: { session_id: "conv-generation" },
+              timestamp: "2026-01-01T00:00:01Z",
+              semantics: "snapshot",
+              type: "text",
+              data: { text },
+            }),
+          ],
+          cache_key: revision,
+          next_cursor: null,
+          has_more: false,
+        },
+      });
+
+      useChatStore
+        .getState()
+        .openSession("Hydration Generation", "/repo/generation");
+      await vi.waitFor(() => expect(resolutions).toHaveLength(1));
+      useChatStore.getState().closeSession(id);
+      useChatStore
+        .getState()
+        .openSession("Hydration Generation", "/repo/generation");
+      await vi.waitFor(() => expect(resolutions).toHaveLength(2));
+      resolutions[1](output("new request", "revision-new"));
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].messages).toMatchObject([
+          { kind: "assistant", text: "new request" },
+        ])
+      );
+      resolutions[0](output("stale request", "revision-old"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(useChatStore.getState().sessions[id].messages).toMatchObject([
+        { kind: "assistant", text: "new request" },
+      ]);
+      expect(
+        useChatStore.getState().sessions[id].providerReplay?.cacheKey
+      ).toBe("revision-new");
     });
 
     it("reprojects prepended pages without splitting text deltas or tool pairs", async () => {
@@ -528,6 +687,71 @@ describe("chatStore", () => {
       expect(
         useChatStore.getState().sessions[id].providerReplay?.installedMessages
       ).toHaveLength(4);
+    });
+
+    it("does not collapse identical replay and live occurrences while prepending", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Duplicate Replay", "/repo/duplicates");
+      useChatStore.getState().setProviderResumeId(id, "conv-duplicates");
+      useChatStore.setState({ sessions: {}, activeSessionId: null });
+      const event = (sequence: number) =>
+        JSON.stringify({
+          version: 1,
+          event_id: `duplicate-${sequence}`,
+          stream_id: "local-replay/duplicates",
+          sequence,
+          correlation: { session_id: "conv-duplicates" },
+          timestamp: `2026-01-01T00:00:0${sequence}Z`,
+          semantics: "snapshot",
+          type: "text",
+          data: { text: "identical" },
+        });
+      vi.spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            events: [event(2), event(3)],
+            cache_key: "duplicate-revision",
+            next_cursor: "duplicate-revision:2",
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            events: [event(1)],
+            cache_key: "duplicate-revision",
+            next_cursor: null,
+            has_more: false,
+          },
+        });
+
+      useChatStore
+        .getState()
+        .openSession("Duplicate Replay", "/repo/duplicates");
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].messages).toHaveLength(2)
+      );
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "identical",
+        timestamp: "2026-01-01T00:00:04Z",
+      });
+
+      await expect(
+        useChatStore.getState().loadOlderReplayMessages(id)
+      ).resolves.toBe(true);
+      expect(
+        useChatStore
+          .getState()
+          .sessions[id].messages.map((message) => message.timestamp)
+      ).toEqual([
+        "2026-01-01T00:00:01Z",
+        "2026-01-01T00:00:02Z",
+        "2026-01-01T00:00:03Z",
+        "2026-01-01T00:00:04Z",
+      ]);
     });
 
     it("retains live tool and question enrichments when replay history is prepended", async () => {
@@ -665,6 +889,7 @@ describe("chatStore", () => {
             ...state.sessions[id],
             messages: [newestMessage],
             providerReplay: {
+              generation: 1,
               lines: ["newest-line"],
               cacheKey: "revision-before",
               nextCursor: "revision-before:1",

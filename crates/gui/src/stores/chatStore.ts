@@ -387,6 +387,8 @@ export interface StreamingAssistantMessage {
 }
 
 export interface ProviderReplayState {
+  /** Unique hydration generation; stale requests from a prior reopen are ignored. */
+  generation: number;
   /** Runtime-only normalized event lines loaded so far, oldest first. */
   lines: string[];
   /** Opaque provider transcript revision shared by every loaded page. */
@@ -894,19 +896,12 @@ function replayLinesToChatMessages(
   session: ChatSession
 ): ChatMessage[] {
   const logs = lines.map((content, index) => {
-    let createdAt = session.createdAt ?? "";
-    try {
-      const raw = JSON.parse(content) as { timestamp?: unknown };
-      if (typeof raw.timestamp === "string") createdAt = raw.timestamp;
-    } catch {
-      // The backend already validated event JSON; retain the session fallback.
-    }
     return {
       id: `local-replay-${session.id}-${index}`,
       step_execution_id: session.id,
       content,
       format: "harness",
-      created_at: createdAt,
+      created_at: session.createdAt ?? "",
     };
   });
   return sanitizeSessionMessages(
@@ -915,6 +910,39 @@ function replayLinesToChatMessages(
       .filter((message): message is ChatMessage => message !== null),
     session.providerResumeId
   );
+}
+
+function occurrenceKeys(
+  messages: readonly ChatMessage[],
+  direction: "forward" | "reverse" = "forward"
+): string[] {
+  const counts = new Map<string, number>();
+  const keys = new Array<string>(messages.length);
+  const indexes =
+    direction === "forward"
+      ? messages.map((_, index) => index)
+      : messages.map((_, index) => messages.length - index - 1);
+  for (const index of indexes) {
+    const base = chatMessageKey(messages[index]);
+    const occurrence = (counts.get(base) ?? 0) + 1;
+    counts.set(base, occurrence);
+    keys[index] = `${base}\u0000${occurrence}`;
+  }
+  return keys;
+}
+
+function mergeHydratedMatch(
+  replayed: ChatMessage,
+  current: ChatMessage
+): ChatMessage {
+  if (replayed.kind !== "file_edit" || current.kind !== "file_edit") {
+    return current;
+  }
+  return {
+    ...current,
+    status: replayed.status,
+    changes: replayed.changes.length > 0 ? replayed.changes : current.changes,
+  };
 }
 
 function chatMessageKey(message: ChatMessage): string {
@@ -948,37 +976,23 @@ function mergeHydratedMessages(
   current: ChatMessage[]
 ): ChatMessage[] {
   if (current.length === 0) return hydrated;
-  const currentKeys = new Set(current.map(chatMessageKey));
-  const hydratedByKey = new Map(
-    hydrated.map((message) => [chatMessageKey(message), message])
+  const currentKeys = occurrenceKeys(current, "reverse");
+  const hydratedKeys = occurrenceKeys(hydrated, "reverse");
+  const currentByOccurrence = new Map(
+    currentKeys.map((key, index) => [key, current[index]])
   );
-  let enriched = false;
-  const mergedCurrent = current.map((currentMessage) => {
-    const hydratedMessage = hydratedByKey.get(chatMessageKey(currentMessage));
-    if (
-      currentMessage.kind !== "file_edit" ||
-      hydratedMessage?.kind !== "file_edit"
-    ) {
-      return currentMessage;
-    }
-    const changes =
-      hydratedMessage.changes.length > 0
-        ? hydratedMessage.changes
-        : currentMessage.changes;
-    if (
-      hydratedMessage.status !== currentMessage.status ||
-      JSON.stringify(changes) !== JSON.stringify(currentMessage.changes)
-    ) {
-      enriched = true;
-      return { ...currentMessage, status: hydratedMessage.status, changes };
-    }
-    return currentMessage;
+  const consumed = new Set<string>();
+  const merged = hydrated.map((replayed, index) => {
+    const key = hydratedKeys[index];
+    const live = currentByOccurrence.get(key);
+    if (!live) return replayed;
+    consumed.add(key);
+    return mergeHydratedMatch(replayed, live);
   });
-  const missing = hydrated.filter(
-    (message) => !currentKeys.has(chatMessageKey(message))
-  );
-  if (missing.length > 0) return [...missing, ...mergedCurrent];
-  return enriched ? mergedCurrent : current;
+  currentKeys.forEach((key, index) => {
+    if (!consumed.has(key)) merged.push(current[index]);
+  });
+  return merged;
 }
 
 function mergeReplayMessages(
@@ -988,13 +1002,9 @@ function mergeReplayMessages(
   if (current.length === 0) {
     return { messages: replayed, installedMessageCount: replayed.length };
   }
-  const currentKeys = new Set(current.map(chatMessageKey));
-  const installedMessageCount = replayed.filter(
-    (message) => !currentKeys.has(chatMessageKey(message))
-  ).length;
   return {
     messages: mergeHydratedMessages(replayed, current),
-    installedMessageCount,
+    installedMessageCount: replayed.length,
   };
 }
 
@@ -1003,11 +1013,14 @@ function reconcileReplayMessages(
   previousInstalled: ChatMessage[],
   currentPrefix: ChatMessage[]
 ): ChatMessage[] {
+  const previousKeys = occurrenceKeys(previousInstalled, "reverse");
+  const currentKeys = occurrenceKeys(currentPrefix, "reverse");
+  const replayedKeys = occurrenceKeys(replayed, "reverse");
   const previousByKey = new Map(
-    previousInstalled.map((message) => [chatMessageKey(message), message])
+    previousKeys.map((key, index) => [key, previousInstalled[index]])
   );
   const currentByKey = new Map(
-    currentPrefix.map((message) => [chatMessageKey(message), message])
+    currentKeys.map((key, index) => [key, currentPrefix[index]])
   );
   const removedKeys = new Set(
     [...previousByKey.keys()].filter((key) => !currentByKey.has(key))
@@ -1018,11 +1031,20 @@ function reconcileReplayMessages(
       return previous && JSON.stringify(previous) !== JSON.stringify(current);
     })
   );
-  return replayed.flatMap((message) => {
-    const key = chatMessageKey(message);
+  return replayed.flatMap((message, index) => {
+    const key = replayedKeys[index];
     if (removedKeys.has(key)) return [];
     return [liveOverrides.get(key) ?? message];
   });
+}
+
+function unmatchedMessages(
+  baseline: readonly ChatMessage[],
+  current: readonly ChatMessage[]
+): ChatMessage[] {
+  const baselineKeys = new Set(occurrenceKeys(baseline));
+  const currentKeys = occurrenceKeys(current);
+  return current.filter((_, index) => !baselineKeys.has(currentKeys[index]));
 }
 
 function providerReplayErrorMessage(error: unknown): string {
@@ -1032,6 +1054,14 @@ function providerReplayErrorMessage(error: unknown): string {
     if (typeof message === "string" && message.trim()) return message;
   }
   return "Provider transcript history is temporarily unavailable.";
+}
+
+let nextProviderReplayGeneration = 1;
+
+function providerReplayGeneration(): number {
+  const generation = nextProviderReplayGeneration;
+  nextProviderReplayGeneration += 1;
+  return generation;
 }
 
 function isValidReplayPage(
@@ -1508,6 +1538,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     if (!session.providerResumeId) return;
     const currentReplay = get().sessions[sessionId]?.providerReplay;
     if (currentReplay?.loaded || currentReplay?.loading) return;
+    const generation = providerReplayGeneration();
     set((state) => {
       const current = state.sessions[sessionId];
       if (!current || current.providerResumeId !== session.providerResumeId) {
@@ -1520,6 +1551,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ...current,
             providerMessagesHydrating: true,
             providerReplay: {
+              generation,
               lines: [],
               cacheKey: null,
               nextCursor: null,
@@ -1541,7 +1573,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         if (
           !current ||
           current.providerResumeId !== session.providerResumeId ||
-          current.providerReplay?.loading !== "initial"
+          current.providerReplay?.loading !== "initial" ||
+          current.providerReplay.generation !== generation
         ) {
           return state;
         }
@@ -1554,6 +1587,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 providerMessagesHydrating: false,
                 providerReplay: {
                   ...(current.providerReplay ?? {
+                    generation,
                     lines: [],
                     cacheKey: null,
                     nextCursor: null,
@@ -1589,6 +1623,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 merged.messages.some((message) => message.kind === "user"),
               providerMessagesHydrating: false,
               providerReplay: {
+                generation,
                 lines,
                 cacheKey: result.page.cache_key,
                 nextCursor: result.page.next_cursor,
@@ -1967,11 +2002,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
       const requestedCursor = replay.nextCursor;
       const expectedCacheKey = replay.cacheKey;
+      const expectedGeneration = replay.generation;
       set((state) => {
         const current = state.sessions[sessionId];
         if (
           current?.providerReplay?.nextCursor !== requestedCursor ||
-          current.providerReplay.loading !== null
+          current.providerReplay.loading !== null ||
+          current.providerReplay.generation !== expectedGeneration
         ) {
           return state;
         }
@@ -1999,6 +2036,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           !current ||
           current.providerResumeId !== session.providerResumeId ||
           currentReplay?.loading !== "older" ||
+          currentReplay.generation !== expectedGeneration ||
           currentReplay.nextCursor !== requestedCursor ||
           currentReplay.cacheKey !== expectedCacheKey
         ) {
@@ -2074,18 +2112,16 @@ export const useChatStore = create<ChatStore>((set, get) => {
           currentReplay.installedMessages,
           currentPrefix
         );
-        const previousInstalledKeys = new Set(
-          currentReplay.installedMessages.map(chatMessageKey)
-        );
         const liveMessages = [
-          ...currentPrefix.filter(
-            (message) => !previousInstalledKeys.has(chatMessageKey(message))
-          ),
+          ...unmatchedMessages(currentReplay.installedMessages, currentPrefix),
           ...current.messages.slice(
             Math.min(installedMessageCount, current.messages.length)
           ),
         ];
-        const merged = mergeReplayMessages(reconciled, liveMessages);
+        const merged = {
+          messages: [...reconciled, ...liveMessages],
+          installedMessageCount: reconciled.length,
+        };
         applied = true;
         return {
           sessions: {
