@@ -27,6 +27,8 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
       cwd: directory,
       env: {
         GH_LOG: logPath,
+        GH_ASSETS:
+          "stale-master-asset\ngui-latest.json\nlatest-x86_64-unknown-linux-gnu.json\nvtb-1.2.3-build-x86_64-unknown-linux-gnu",
         GH_TOKEN: "test-token",
         VTB_UPDATE_PRIVATE_KEY: privateKey,
         VTB_UPDATE_PUBLIC_KEY: "test-public-key",
@@ -73,6 +75,16 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
 
     const masterGhLog = await readFile(logPath, "utf8");
     assert.match(masterGhLog, /release create channel-master/);
+    assert.match(masterGhLog, /release delete-asset channel-master stale-master-asset --yes/);
+    assert.doesNotMatch(
+      masterGhLog,
+      /release delete-asset channel-master vtb-1\.2\.3-build-x86_64-unknown-linux-gnu --yes/,
+    );
+    assert.doesNotMatch(masterGhLog, /release delete-asset channel-master gui-latest\.json --yes/);
+    assert.doesNotMatch(
+      masterGhLog,
+      /release delete-asset channel-master latest-x86_64-unknown-linux-gnu\.json --yes/,
+    );
 
     await runPublisher({
       cwd: directory,
@@ -102,6 +114,7 @@ test("publishes a Tauri Linux AppImage and keeps the GUI manifest compatible", a
     const stableGhLog = await readFile(logPath, "utf8");
     assert.match(stableGhLog, /release create v1.2.3/);
     assert.match(stableGhLog, /release create channel-release/);
+    assert.doesNotMatch(stableGhLog.slice(masterGhLog.length), /release delete-asset/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -153,6 +166,9 @@ async function writeFakeGh(binDirectory) {
     [
       "#!/usr/bin/env bash",
       "printf '%s\\n' \"$*\" >> \"$GH_LOG\"",
+      'if [[ "$1" == "release" && "$2" == "view" && "$*" == *"--json assets"* ]]; then',
+      '  printf "%s\\n" "${GH_ASSETS:-}"',
+      "fi",
       'if [[ "$1" == "release" && "$2" == "view" && "$*" != *"--json assets"* ]]; then',
       '  [[ "${GH_EXISTING_RELEASE:-}" == "$3" ]] || exit 1',
       "fi",

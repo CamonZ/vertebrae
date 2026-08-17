@@ -25,7 +25,8 @@ https://github.com/CamonZ/vertebrae/releases/download/channel-<channel>/latest-<
 
 Stable artifact URLs point to immutable `vX.Y.Z` releases. Master preview
 artifacts are stored in the existing `channel-master` release with
-version/build-qualified asset names that are never overwritten. `VTB_UPDATE_PRIVATE_KEY`
+version/build-qualified asset names. After a successful master publish, stale
+assets are removed so the channel contains only the latest run. `VTB_UPDATE_PRIVATE_KEY`
 signs component entries and the complete manifest; `VTB_UPDATE_PUBLIC_KEY` is
 the repository variable used to publish the matching public key in the metadata.
 
@@ -94,7 +95,8 @@ at startup.
 3. Sign the artifacts and generate target-specific component manifests plus
    the GUI updater manifest.
 4. Upload stable artifacts to their immutable release, or upload master
-   artifacts to `channel-master`, before updating the channel manifests.
+   artifacts to `channel-master`, before updating the channel manifests and
+   pruning stale master assets.
 
 The workflow keeps orchestration in `.github/workflows/release.yml`; the
 release implementation lives in versioned scripts:
