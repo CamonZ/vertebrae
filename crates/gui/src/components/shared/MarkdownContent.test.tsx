@@ -273,6 +273,63 @@ describe("MarkdownContent", () => {
   });
 
   describe("code blocks", () => {
+    it("defers parsing and highlighting very large content until requested", () => {
+      const source = `\`\`\`typescript\n${"const value = 1;\n".repeat(800)}\`\`\``;
+      const { container } = render(<MarkdownContent text={source} />);
+
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expect(container.querySelector("code")).toBeNull();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(container.querySelector("code")?.textContent).toContain(
+        "const value = 1;"
+      );
+      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+      expect(container.querySelector("code")).toBeNull();
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+    });
+
+    it("restores syntax highlighting and actionable links for full large markdown", () => {
+      const prefix = "preview line\n".repeat(250);
+      const source = `${prefix}\n\`src/main.rs:42\`\n\n[docs](https://example.com/docs)\n\n\`\`\`rust\nfn recovered() {}\n\`\`\``;
+      const { container } = render(
+        <MarkdownContent projectPath="/repo" text={source} />
+      );
+
+      expect(screen.queryByTestId("local-file-reference-link")).toBeNull();
+      expect(screen.queryByTestId("external-url-link")).toBeNull();
+      expect(container.querySelector("code")).toBeNull();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(screen.getByTestId("local-file-reference-link")).toHaveAttribute(
+        "data-file-path",
+        "src/main.rs"
+      );
+      expect(screen.getByTestId("local-file-reference-link")).toHaveAttribute(
+        "data-file-line",
+        "42"
+      );
+      expect(screen.getByTestId("external-url-link")).toHaveAttribute(
+        "rel",
+        "noopener noreferrer"
+      );
+      expect(container.querySelector("code")?.textContent).toContain(
+        "fn recovered() {}"
+      );
+      expect(screen.getByText("rust")).toBeInTheDocument();
+    });
+
     it("renders fenced code blocks with language label", () => {
       const markdown = "```typescript\nconst x = 42;\n```";
       const { container } = render(<MarkdownContent text={markdown} />);
@@ -347,6 +404,26 @@ describe("MarkdownContent", () => {
       expect(screen.queryByTestId("diagram-fallback")).toBeNull();
     });
 
+    it("does not process a large diagram before expansion and renders its full source", async () => {
+      const diagram = `graph TD\n${"  A --> B\n".repeat(250)}  TAIL --> END`;
+      render(<MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />);
+
+      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expect(mermaidMock.parse).not.toHaveBeenCalled();
+      expect(mermaidMock.render).not.toHaveBeenCalled();
+
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(await screen.findByTitle("Mermaid diagram")).toBeInTheDocument();
+      expect(mermaidMock.parse).toHaveBeenCalledWith(diagram);
+      expect(mermaidMock.render).toHaveBeenCalledWith(
+        expect.stringMatching(/^diagram-/),
+        diagram
+      );
+    });
+
     it("falls back to highlighted source with an error for invalid Mermaid", async () => {
       mermaidMock.parse.mockRejectedValueOnce(new Error("Parse error"));
       const markdown = "```mermaid\ngraph TD\n  A -- B\n```";
@@ -360,6 +437,27 @@ describe("MarkdownContent", () => {
       const codeEl = container.querySelector("code");
       expect(codeEl).not.toBeNull();
       expect(codeEl!.textContent).toBe("graph TD\n  A -- B");
+    });
+
+    it("safely falls back with the complete source for a malformed large diagram", async () => {
+      mermaidMock.parse.mockRejectedValueOnce(new Error("Large parse error"));
+      const diagram = `graph TD\n${"  A -- B\n".repeat(250)}  BROKEN TAIL`;
+      const { container } = render(
+        <MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />
+      );
+
+      expect(mermaidMock.parse).not.toHaveBeenCalled();
+      fireEvent.click(
+        screen.getByRole("button", { name: /Show full content/ })
+      );
+
+      expect(
+        await screen.findByText(
+          "Unable to render Mermaid diagram: Large parse error"
+        )
+      ).toBeInTheDocument();
+      expect(screen.getByTestId("diagram-fallback")).toBeInTheDocument();
+      expect(container.querySelector("code")?.textContent).toBe(diagram);
     });
 
     it("falls back to highlighted source with an error for unsupported diagram languages", async () => {

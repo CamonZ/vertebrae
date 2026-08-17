@@ -60,6 +60,16 @@ export interface ChatThreadOptions {
    */
   collapsed?: Set<string>;
   /**
+   * Optional set of tool ids whose bodies are currently EXPANDED. This takes
+   * precedence over `collapsed` and lets callers preserve state across row
+   * unmounts without discovering every new tool id in advance.
+   */
+  expanded?: ReadonlySet<string>;
+  /** Tool ids whose bounded bodies currently show the complete content. */
+  fullContent?: ReadonlySet<string>;
+  /** Toggle a tool body's bounded full-content rendering. */
+  onToggleFullContent?: (toolId: string) => void;
+  /**
    * Whether the chat is awaiting a response. Carried for parity with the caller;
    * not consumed here (the ThinkingIndicator is a sibling of <Thread>).
    */
@@ -84,7 +94,14 @@ export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
-  const { onToggleTool, collapsed, assistantLabel } = opts;
+  const {
+    onToggleTool,
+    collapsed,
+    expanded,
+    fullContent,
+    onToggleFullContent,
+    assistantLabel,
+  } = opts;
 
   // ── Pass 1: bucket messages into turn drafts ──────────────────────────
   // Correlation state is SESSION-wide, not per turn: a tool_result can land
@@ -231,7 +248,10 @@ export function chatMessagesToThread(
     }
     const grouped = chatTurnEventsToMessages(draft.events, {
       collapsed,
+      expanded,
       onToggleTool,
+      fullContent,
+      onToggleFullContent,
       assistantLabel,
       resultById,
     });

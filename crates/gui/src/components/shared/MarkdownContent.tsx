@@ -27,6 +27,99 @@ import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 interface MarkdownContentProps {
   text: string;
   projectPath?: string | null;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+const LARGE_CONTENT_CHARACTER_LIMIT = 12_000;
+const LARGE_CONTENT_LINE_LIMIT = 240;
+const CONTENT_PREVIEW_CHARACTER_LIMIT = 4_000;
+const CONTENT_PREVIEW_LINE_LIMIT = 120;
+
+function exceedsLineLimit(text: string, limit: number): boolean {
+  let lines = 1;
+  for (let index = 0; index < text.length; index++) {
+    if (text.charCodeAt(index) === 10 && ++lines > limit) return true;
+  }
+  return false;
+}
+
+function isLargeContent(text: string): boolean {
+  return (
+    text.length > LARGE_CONTENT_CHARACTER_LIMIT ||
+    exceedsLineLimit(text, LARGE_CONTENT_LINE_LIMIT)
+  );
+}
+
+function contentPreview(text: string): string {
+  const characterEnd = Math.min(text.length, CONTENT_PREVIEW_CHARACTER_LIMIT);
+  let lineCount = 1;
+  let end = characterEnd;
+
+  for (let index = 0; index < characterEnd; index++) {
+    if (text.charCodeAt(index) !== 10) continue;
+    lineCount++;
+    if (lineCount > CONTENT_PREVIEW_LINE_LIMIT) {
+      end = index;
+      break;
+    }
+  }
+
+  return text.slice(0, end).trimEnd();
+}
+
+function BoundedContent({
+  text,
+  children,
+  expanded,
+  onExpandedChange,
+}: {
+  text: string;
+  children: (fullText: string) => ReactNode;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const contentId = useId();
+  const isLarge = isLargeContent(text);
+  const controlled = expanded !== undefined && onExpandedChange !== undefined;
+  const showFull = controlled ? expanded : localExpanded;
+
+  if (!isLarge) return children(text);
+
+  return (
+    <div data-testid="bounded-content" data-content-length={text.length}>
+      <button
+        type="button"
+        className="mb-2 rounded border border-border/60 px-2 py-1 font-mono text-eyebrow text-accent hover:border-accent/50"
+        aria-controls={contentId}
+        aria-expanded={showFull}
+        onClick={(event) => {
+          event.stopPropagation();
+          const next = !showFull;
+          if (controlled) onExpandedChange(next);
+          else setLocalExpanded(next);
+        }}
+      >
+        {showFull
+          ? "Show less"
+          : `Show full content (${text.length.toLocaleString()} characters)`}
+      </button>
+      <div id={contentId}>
+        {showFull ? (
+          children(text)
+        ) : (
+          <pre
+            className="m-0 max-h-48 overflow-auto whitespace-pre-wrap break-words font-inherit text-inherit"
+            data-testid="bounded-content-preview"
+          >
+            {contentPreview(text)}
+            {"\n…"}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
 }
 
 const MarkdownProjectRootContext = createContext<string | null>(null);
@@ -795,6 +888,30 @@ export function prettyPrintJsonIfPossible(source: string): string {
   }
 }
 
+/**
+ * Plain tool output uses the same deferred size policy as markdown, but keeps
+ * its existing JSON pretty-printing once the user requests the complete body.
+ */
+export const BoundedTextContent = memo(function BoundedTextContent({
+  text,
+  expanded,
+  onExpandedChange,
+}: {
+  text: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}) {
+  return (
+    <BoundedContent
+      text={text}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    >
+      {(fullText) => prettyPrintJsonIfPossible(fullText)}
+    </BoundedContent>
+  );
+});
+
 function maybeWrapBareJson(text: string): string {
   const trimmed = text.trim();
   if (!trimmed || !looksLikeJsonOrMap(trimmed)) return text;
@@ -929,10 +1046,7 @@ function formatInlineJsonBlocks(text: string): string {
   return result;
 }
 
-export const MarkdownContent = memo(function MarkdownContent({
-  text,
-  projectPath,
-}: MarkdownContentProps) {
+function RenderedMarkdownContent({ text, projectPath }: MarkdownContentProps) {
   const inheritedProjectPath = useContext(MarkdownProjectRootContext);
   const inheritedProjectRoots = useContext(MarkdownProjectRootsContext);
   const effectiveProjectPath = projectPath ?? inheritedProjectPath;
@@ -947,14 +1061,33 @@ export const MarkdownContent = memo(function MarkdownContent({
     effectiveProjectRoots
   );
   return (
+    <Markdown
+      remarkPlugins={remarkPlugins}
+      components={components}
+      urlTransform={markdownUrlTransform}
+    >
+      {prepared}
+    </Markdown>
+  );
+}
+
+export const MarkdownContent = memo(function MarkdownContent(
+  props: MarkdownContentProps
+) {
+  return (
     <div className="markdown-content" data-testid="markdown-content">
-      <Markdown
-        remarkPlugins={remarkPlugins}
-        components={components}
-        urlTransform={markdownUrlTransform}
+      <BoundedContent
+        text={props.text}
+        expanded={props.expanded}
+        onExpandedChange={props.onExpandedChange}
       >
-        {prepared}
-      </Markdown>
+        {(fullText) => (
+          <RenderedMarkdownContent
+            text={fullText}
+            projectPath={props.projectPath}
+          />
+        )}
+      </BoundedContent>
     </div>
   );
 });

@@ -16,13 +16,10 @@
  * (evlog--timed / evlog--bare), not per-row.
  */
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import { IdChip } from "../shared/HearthPrimitives";
-import {
-  MarkdownContent,
-  prettyPrintJsonIfPossible,
-} from "../shared/MarkdownContent";
+import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
 
 import type {
   ActivityMessage,
@@ -74,6 +71,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
   // state so the result body can still be expanded and collapsed.
   const controlled = props.onToggle != null;
   const [localCollapsed, setLocalCollapsed] = useState(!!props.collapsed);
+  const bodyId = useId();
   const status: "err" | "pending" | "ok" = props.error
     ? "err"
     : props.status === "pending"
@@ -106,31 +104,52 @@ export function ToolRow(props: ToolRowProps): ReactNode {
     (status === "err" ? " err" : pending ? " pending" : "") +
     (hasBody ? " has-body" : "") +
     (hasBody && collapsed ? " collapsed" : "");
+  const headerContent = (
+    <>
+      {pending ? (
+        <span className="evtool-spin" />
+      ) : (
+        <span className="evtool-dot" />
+      )}
+      {isShell ? <span className="evtool-prompt">$</span> : null}
+      <span className="evtool-name">{name}</span>
+      {args ? <span className="evtool-args">{args}</span> : null}
+      {props.summary ? (
+        <span className="evtool-sum">
+          {pending ? "running…" : props.summary}
+        </span>
+      ) : null}
+      {props.dur ? <span className="evtool-dur">{props.dur}</span> : null}
+      {hasBody ? <span className="evtool-chev">▾</span> : null}
+    </>
+  );
 
   return (
     <div className={cls}>
-      <div className="evtool-hd" onClick={hasBody ? toggle : undefined}>
-        {pending ? (
-          <span className="evtool-spin" />
-        ) : (
-          <span className="evtool-dot" />
-        )}
-        {isShell ? <span className="evtool-prompt">$</span> : null}
-        <span className="evtool-name">{name}</span>
-        {args ? <span className="evtool-args">{args}</span> : null}
-        {props.summary ? (
-          <span className="evtool-sum">
-            {pending ? "running…" : props.summary}
-          </span>
-        ) : null}
-        {props.dur ? <span className="evtool-dur">{props.dur}</span> : null}
-        {hasBody ? <span className="evtool-chev">▾</span> : null}
-      </div>
       {hasBody ? (
-        <div className="evtool-bd">
-          {typeof props.body === "string"
-            ? prettyPrintJsonIfPossible(props.body)
-            : props.body}
+        <button
+          type="button"
+          className="evtool-hd"
+          onClick={toggle}
+          aria-controls={collapsed ? undefined : bodyId}
+          aria-expanded={!collapsed}
+        >
+          {headerContent}
+        </button>
+      ) : (
+        <div className="evtool-hd">{headerContent}</div>
+      )}
+      {hasBody && !collapsed ? (
+        <div className="evtool-bd" id={bodyId}>
+          {typeof props.body === "string" ? (
+            <BoundedTextContent
+              text={props.body}
+              expanded={props.showFullContent}
+              onExpandedChange={props.onToggleFullContent}
+            />
+          ) : (
+            props.body
+          )}
         </div>
       ) : null}
     </div>

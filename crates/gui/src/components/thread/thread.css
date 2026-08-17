@@ -189,7 +189,7 @@
 /* tool — bare shell line by default; bordered card only when it has output */
 .evtool { border-radius: var(--r-sm); width: 100%; }
 .evtool.has-body { border: 1px solid var(--line); background: var(--bg-2); overflow: hidden; }
-.evtool-hd { display: flex; align-items: center; gap: var(--s-1h); padding: var(--s-1) var(--s-1h); font-family: var(--mono); font-size: var(--text-11); color: var(--fg-soft); min-width: 0; }
+.evtool-hd { display: flex; align-items: center; gap: var(--s-1h); width: 100%; padding: var(--s-1) var(--s-1h); border: 0; background: transparent; font-family: var(--mono); font-size: var(--text-11); color: var(--fg-soft); text-align: left; min-width: 0; }
 .evtool.has-body .evtool-hd { padding: var(--s-1h) var(--s-2); cursor: pointer; }
 .evtool.has-body .evtool-hd:hover { background: var(--bg-3); }
 .evtool-dot  { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
@@ -207,7 +207,6 @@
 .evtool-bd { padding: var(--s-2) var(--s-2h); background: var(--bg); border-top: 1px solid var(--line); font-family: var(--mono); font-size: var(--text-11); line-height: var(--leading-relaxed); color: var(--fg-mute); white-space: pre-wrap; max-height: 168px; overflow-y: auto; }
 .evtool-bd::-webkit-scrollbar { width: 4px; }
 .evtool-bd::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: var(--r-xs); }
-.evtool.collapsed .evtool-bd { display: none; }
 .evtool.pending.has-body { border-color: color-mix(in oklch, var(--accent) 32%, transparent); }
 .evtool.pending .evtool-name { color: var(--accent); }
 .evtool.err.has-body { border-color: color-mix(in oklch, var(--err) 36%, transparent); }

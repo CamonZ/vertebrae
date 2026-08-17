@@ -47,7 +47,11 @@ type ChatRenderItem =
 
 function buildChatRenderItems(
   messages: readonly ChatMessage[],
-  assistantLabel: string
+  assistantLabel: string,
+  expandedToolIds: ReadonlySet<string>,
+  onToggleTool: (toolId: string) => void,
+  fullContentToolIds: ReadonlySet<string>,
+  onToggleFullContent: (toolId: string) => void
 ): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
   let segment: ChatMessage[] = [];
@@ -60,6 +64,10 @@ function buildChatRenderItems(
       key: `thread-${segmentSeq++}`,
       thread: chatMessagesToThread(segment, {
         assistantLabel,
+        expanded: expandedToolIds,
+        onToggleTool,
+        fullContent: fullContentToolIds,
+        onToggleFullContent,
       }),
     });
     segment = [];
@@ -175,6 +183,30 @@ export function ChatMessages({
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
     projectPath ? [projectPath] : []
   );
+  // This state lives above individual rows so future virtualization can
+  // unmount/remount them without discarding the user's expansion choices.
+  const [expandedToolIds, setExpandedToolIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const [fullContentToolIds, setFullContentToolIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const toggleTool = useCallback((toolId: string) => {
+    setExpandedToolIds((current) => {
+      const next = new Set(current);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
+  }, []);
+  const toggleFullContent = useCallback((toolId: string) => {
+    setFullContentToolIds((current) => {
+      const next = new Set(current);
+      if (next.has(toolId)) next.delete(toolId);
+      else next.add(toolId);
+      return next;
+    });
+  }, []);
   const registerMessageRef = useCallback(
     (id: string, element: HTMLElement | null) => {
       if (element) {
@@ -210,8 +242,23 @@ export function ChatMessages({
   }, [projectPath]);
 
   const renderItems = useMemo(
-    () => buildChatRenderItems(messages, assistantLabel),
-    [assistantLabel, messages]
+    () =>
+      buildChatRenderItems(
+        messages,
+        assistantLabel,
+        expandedToolIds,
+        toggleTool,
+        fullContentToolIds,
+        toggleFullContent
+      ),
+    [
+      assistantLabel,
+      expandedToolIds,
+      fullContentToolIds,
+      messages,
+      toggleFullContent,
+      toggleTool,
+    ]
   );
   const streamingTail = useMemo(() => {
     if (!streamingAssistant) return null;
