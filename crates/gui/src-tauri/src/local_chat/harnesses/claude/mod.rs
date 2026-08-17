@@ -135,6 +135,10 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         self.runtime.close_session(backend_session_id).await
     }
 
+    async fn shutdown(&self) {
+        self.runtime.shutdown().await;
+    }
+
     async fn has_session(&self, backend_session_id: &str) -> bool {
         self.runtime.has_session(backend_session_id).await
     }
