@@ -282,11 +282,20 @@ async function exportDebugData(): Promise<string | null> {
     .replace(/[:.]/g, "-")}.json`;
 
   try {
-    const path = await save({
-      defaultPath: filename,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-      title: "Export diagnostic console JSON",
-    });
+    const acceptancePath = import.meta.env.DEV
+      ? (
+          window as Window & {
+            __VERTEBRAE_ACCEPTANCE_EXPORT_PATH__?: string;
+          }
+        ).__VERTEBRAE_ACCEPTANCE_EXPORT_PATH__
+      : undefined;
+    const path =
+      acceptancePath ??
+      (await save({
+        defaultPath: filename,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+        title: "Export diagnostic console JSON",
+      }));
     if (!path) return null;
 
     const result = await commands.writeDebugExport(path, contents);

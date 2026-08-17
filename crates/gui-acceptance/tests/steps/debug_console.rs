@@ -49,30 +49,13 @@ async fn export_diagnostic_console_json(world: &mut GuiWorld) {
         .clone();
     let client = wd.lock().await;
 
-    let path_arg = serde_json::json!(path.to_string_lossy().to_string());
     client
         .execute(
-            r#"
-                const path = arguments[0];
-                const internals = window.__TAURI_INTERNALS__;
-                if (!internals || typeof internals.invoke !== 'function') {
-                    throw new Error('Tauri IPC internals are unavailable');
-                }
-                if (!internals.__vertebraeAcceptanceOriginalInvoke) {
-                    internals.__vertebraeAcceptanceOriginalInvoke = internals.invoke;
-                }
-                const original = internals.__vertebraeAcceptanceOriginalInvoke;
-                internals.invoke = (command, args, options) => {
-                    if (command === 'plugin:dialog|save') {
-                        return Promise.resolve(path);
-                    }
-                    return original.call(internals, command, args, options);
-                };
-            "#,
-            vec![path_arg],
+            "window.__VERTEBRAE_ACCEPTANCE_EXPORT_PATH__ = arguments[0];",
+            vec![serde_json::json!(path.to_string_lossy().to_string())],
         )
         .await
-        .expect("failed to stub the native save dialog path");
+        .expect("failed to configure the diagnostic export test path");
 
     client
         .find(Locator::Css("[data-testid='debug-console-export']"))
