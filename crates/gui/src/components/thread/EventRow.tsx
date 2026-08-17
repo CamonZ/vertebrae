@@ -16,7 +16,7 @@
  * (evlog--timed / evlog--bare), not per-row.
  */
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { IdChip } from "../shared/HearthPrimitives";
 import {
@@ -74,6 +74,7 @@ export function ToolRow(props: ToolRowProps): ReactNode {
   // state so the result body can still be expanded and collapsed.
   const controlled = props.onToggle != null;
   const [localCollapsed, setLocalCollapsed] = useState(!!props.collapsed);
+  const bodyId = useId();
   const status: "err" | "pending" | "ok" = props.error
     ? "err"
     : props.status === "pending"
@@ -101,6 +102,11 @@ export function ToolRow(props: ToolRowProps): ReactNode {
   const toggle = controlled
     ? props.onToggle
     : () => setLocalCollapsed((c) => !c);
+  const handleHeaderKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!hasBody || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    toggle?.();
+  };
   const cls =
     "evtool" +
     (status === "err" ? " err" : pending ? " pending" : "") +
@@ -109,7 +115,15 @@ export function ToolRow(props: ToolRowProps): ReactNode {
 
   return (
     <div className={cls}>
-      <div className="evtool-hd" onClick={hasBody ? toggle : undefined}>
+      <div
+        className="evtool-hd"
+        onClick={hasBody ? toggle : undefined}
+        onKeyDown={hasBody ? handleHeaderKeyDown : undefined}
+        role={hasBody ? "button" : undefined}
+        tabIndex={hasBody ? 0 : undefined}
+        aria-controls={hasBody ? bodyId : undefined}
+        aria-expanded={hasBody ? !collapsed : undefined}
+      >
         {pending ? (
           <span className="evtool-spin" />
         ) : (
@@ -126,8 +140,8 @@ export function ToolRow(props: ToolRowProps): ReactNode {
         {props.dur ? <span className="evtool-dur">{props.dur}</span> : null}
         {hasBody ? <span className="evtool-chev">▾</span> : null}
       </div>
-      {hasBody ? (
-        <div className="evtool-bd">
+      {hasBody && !collapsed ? (
+        <div className="evtool-bd" id={bodyId}>
           {typeof props.body === "string"
             ? prettyPrintJsonIfPossible(props.body)
             : props.body}

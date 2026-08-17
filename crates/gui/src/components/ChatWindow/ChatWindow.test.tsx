@@ -2726,8 +2726,8 @@ describe("ChatWindow", () => {
     // One tool row carrying the result body (a "has-body" card).
     expect(screen.getByText("Read")).toBeInTheDocument();
     expect(document.querySelector(".evtool.has-body")).toBeInTheDocument();
-    // Body is visible by default (not collapsed).
-    expect(screen.getByText("RESULT BODY")).toBeInTheDocument();
+    // Collapsed tool bodies are not mounted until requested.
+    expect(screen.queryByText("RESULT BODY")).not.toBeInTheDocument();
   });
 
   it("toggles a tool body when its header is clicked (collapsed by default)", async () => {
