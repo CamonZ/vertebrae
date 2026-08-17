@@ -137,6 +137,27 @@ pub fn service_status() -> Result<ServiceStatus, InstallerError> {
     }
 }
 
+/// Query the daemon service for the installer UI.
+///
+/// The first-run installer can run in environments without a service manager,
+/// such as a container used for GUI acceptance tests. In that case the
+/// service is unavailable rather than registered, so report [`NotLoaded`].
+/// Other errors remain strict so callers do not silently ignore a broken
+/// service-manager query. The updater uses [`service_status`] directly because
+/// it must not skip a required daemon relaunch after an ambiguous query.
+pub fn service_status_for_installation() -> Result<ServiceStatus, InstallerError> {
+    soften_unavailable_service_status(service_status())
+}
+
+fn soften_unavailable_service_status(
+    result: Result<ServiceStatus, InstallerError>,
+) -> Result<ServiceStatus, InstallerError> {
+    match result {
+        Err(error) if error.is_service_manager_unavailable() => Ok(ServiceStatus::NotLoaded),
+        result => result,
+    }
+}
+
 /// Relaunch the daemon only when it is already registered with the OS service
 /// manager, then wait for it to report a healthy running process.
 ///
@@ -331,6 +352,31 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "Daemon service did not become healthy after relaunch: expected a running process after 20 checks, got loaded but not running (last exit status: 78)"
+        );
+    }
+
+    #[test]
+    fn installation_status_treats_unavailable_service_manager_as_not_loaded() {
+        let status = soften_unavailable_service_status(Err(InstallerError::Systemctl {
+            action: "show".to_string(),
+            reason: "Failed to connect to bus: No medium found".to_string(),
+        }))
+        .unwrap();
+
+        assert_eq!(status, ServiceStatus::NotLoaded);
+    }
+
+    #[test]
+    fn installation_status_preserves_other_service_manager_errors() {
+        let error = soften_unavailable_service_status(Err(InstallerError::Systemctl {
+            action: "show".to_string(),
+            reason: "Access denied".to_string(),
+        }))
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "systemctl --user show failed: Access denied"
         );
     }
 }

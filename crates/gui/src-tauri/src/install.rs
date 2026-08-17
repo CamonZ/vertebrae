@@ -28,8 +28,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use vertebrae_installer::{
-    data_bin_dir, install_binary, install_service, service_status, symlink_path, InstallerError,
-    ServiceStatus,
+    data_bin_dir, install_binary, install_service, service_status_for_installation, symlink_path,
+    InstallerError, ServiceStatus,
 };
 
 use crate::commands::CommandError;
@@ -175,7 +175,9 @@ fn compute_status() -> Result<InstallationStatus, CommandError> {
     let cli = component_status(CLI_BIN)?;
     let daemon = component_status(DAEMON_BIN)?;
     let gate = component_status(GATE_BIN)?;
-    let service = service_status().map_err(installer_error)?.into();
+    let service = service_status_for_installation()
+        .map_err(installer_error)?
+        .into();
     Ok(InstallationStatus {
         cli,
         daemon,
