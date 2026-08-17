@@ -1,9 +1,27 @@
+import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+
+const { markdownRenderSpy } = vi.hoisted(() => ({
+  markdownRenderSpy: vi.fn(),
+}));
+
+vi.mock("react-markdown", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-markdown")>("react-markdown");
+  const Markdown = actual.default;
+  return {
+    ...actual,
+    default: (props: ComponentProps<typeof Markdown>) => {
+      markdownRenderSpy(props.children);
+      return <Markdown {...props} />;
+    },
+  };
+});
 
 Element.prototype.scrollIntoView = vi.fn();
 
@@ -329,6 +347,108 @@ describe("ChatMessages", () => {
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("keeps historical rows mounted while repeated streaming deltas replace only the tail", () => {
+    const messages: ChatMessage[] = [
+      {
+        kind: "assistant",
+        text: "Finalized history",
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "First draft",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+    const historicalRow = screen
+      .getByText("Finalized history")
+      .closest(".evrow--agent");
+
+    expect(historicalRow).toBeInTheDocument();
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "First draft"
+    );
+    markdownRenderSpy.mockClear();
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "Second draft",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText("Finalized history").closest(".evrow--agent")).toBe(
+      historicalRow
+    );
+    expect(screen.getAllByText("Finalized history")).toHaveLength(1);
+    expect(
+      markdownRenderSpy.mock.calls.filter(
+        ([text]) => text === "Finalized history"
+      )
+    ).toHaveLength(0);
+    expect(screen.queryByText("First draft")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "Second draft"
+    );
+  });
+
+  it("replaces the streaming tail with exactly one finalized assistant row", () => {
+    const history: ChatMessage[] = [
+      { kind: "user", text: "Question", timestamp: "2024-01-01T12:00:00Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages: history,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "Complete answer",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "Complete answer"
+    );
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            ...history,
+            {
+              kind: "assistant",
+              text: "Complete answer",
+              timestamp: "2024-01-01T12:00:01Z",
+              isPartial: false,
+            },
+          ],
+          isEmpty: false,
+          streamingAssistant: null,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId("chat-streaming-tail")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Complete answer")).toHaveLength(1);
+    expect(document.querySelector(".ev-cursor")).not.toBeInTheDocument();
+  });
+
   it("scrolls the message container instead of scrolling ancestors for streaming updates", () => {
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
@@ -357,6 +477,22 @@ describe("ChatMessages", () => {
 
     expect(container.scrollTop).toBe(400);
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 500,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: { text: "streaming more", timestamp: "now" },
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(500);
   });
 
   it("does not steal the user's position when they scroll away from the bottom", () => {
