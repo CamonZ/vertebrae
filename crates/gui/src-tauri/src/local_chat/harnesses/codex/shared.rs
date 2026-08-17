@@ -1,12 +1,12 @@
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
-use tokio::sync::{OnceCell, RwLock};
+use tokio::sync::{Mutex, OnceCell, RwLock};
 use vertebrae_core::{AgentConfig, PermissionMode as CorePermissionMode, Provider};
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory, HarnessRuntimeOptions};
 use vertebrae_harness_core::{
     EventSink, HarnessError, SendTurnRequest, SessionHandle, SessionId, StartSessionRequest,
-    StreamId, TurnId,
+    StreamId, TurnHandle, TurnId,
 };
 
 use crate::local_chat::{
@@ -16,6 +16,7 @@ use crate::local_chat::{
 };
 
 use crate::local_chat::harnesses::shared::{LocalChatControlSink, LocalChatHarnessEventSink};
+use crate::local_chat::permissions::PermissionBridge;
 
 use super::models::{
     local_chat_harness_info_from_capabilities, requested_model_override, requested_reasoning_effort,
@@ -165,7 +166,12 @@ impl LocalChatHarness for CodexLocalChatHarness {
                 emit_error(&runtime, &backend_session_id, error.clone());
                 LocalChatSessionError::StartFailed(error)
             })?;
-        let session = Arc::new(CodexLocalChatSession { adapter, session });
+        let session = Arc::new(CodexLocalChatSession {
+            adapter,
+            session,
+            permission_bridge: runtime.permission_bridge(),
+            active_turn: Arc::new(Mutex::new(None)),
+        });
         let mut sessions = self.sessions.write().await;
         if sessions.contains_key(&backend_session_id) {
             return Err(LocalChatSessionError::SessionExists(backend_session_id));
@@ -210,12 +216,23 @@ impl LocalChatHarness for CodexLocalChatHarness {
             .await
             .remove(backend_session_id)
             .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.into()))?;
-        session
-            .session
-            .close()
-            .await
-            .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))?;
+        session.close().await?;
         Ok(())
+    }
+
+    async fn shutdown(&self) {
+        let sessions = {
+            let mut sessions = self.sessions.write().await;
+            std::mem::take(&mut *sessions)
+                .into_values()
+                .collect::<Vec<_>>()
+        };
+
+        for session in sessions {
+            if let Err(error) = session.close().await {
+                log::warn!("Failed to close Codex local-chat session during GUI shutdown: {error}");
+            }
+        }
     }
 
     async fn has_session(&self, backend_session_id: &str) -> bool {
@@ -253,6 +270,8 @@ fn unavailable_codex_info(reason: String) -> LocalChatHarnessInfo {
 struct CodexLocalChatSession {
     adapter: Arc<LocalChatHarnessEventSink>,
     session: Arc<dyn SessionHandle>,
+    permission_bridge: PermissionBridge,
+    active_turn: Arc<Mutex<Option<Arc<dyn TurnHandle>>>>,
 }
 
 impl CodexLocalChatSession {
@@ -266,7 +285,32 @@ impl CodexLocalChatSession {
                 output_schema: None,
             })
             .await?;
-        turn.await_outcome().await.map(|_| ())
+        let turn_id = turn.turn_id().clone();
+        self.active_turn.lock().await.replace(turn.clone());
+        let result = turn.await_outcome().await.map(|_| ());
+        let mut active_turn = self.active_turn.lock().await;
+        if active_turn
+            .as_ref()
+            .is_some_and(|candidate| candidate.turn_id() == &turn_id)
+        {
+            active_turn.take();
+        }
+        result
+    }
+
+    async fn close(&self) -> Result<(), LocalChatSessionError> {
+        self.permission_bridge.fail_pending_permissions_for_session(
+            &self.adapter.backend_session_id,
+            "Codex session ended before the permission request was resolved",
+        );
+        if let Some(turn) = self.active_turn.lock().await.take() {
+            let _ = turn.interrupt().await;
+        }
+        self.session
+            .close()
+            .await
+            .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))?;
+        Ok(())
     }
 }
 

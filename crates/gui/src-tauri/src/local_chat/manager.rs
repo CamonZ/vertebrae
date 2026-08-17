@@ -1,5 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 
@@ -17,7 +21,10 @@ pub struct LocalChatSessionManager {
     harnesses: HashMap<LocalChatHarnessKind, Arc<dyn LocalChatHarness>>,
     session_registry: RwLock<HashMap<String, LocalChatHarnessKind>>,
     permission_bridge: PermissionBridge,
+    shutdown_started: AtomicBool,
 }
+
+const LOCAL_CHAT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl LocalChatSessionManager {
     pub fn new() -> Self {
@@ -66,6 +73,7 @@ impl LocalChatSessionManager {
             harnesses,
             session_registry: RwLock::new(HashMap::new()),
             permission_bridge,
+            shutdown_started: AtomicBool::new(false),
         }
     }
 
@@ -171,6 +179,52 @@ impl LocalChatSessionManager {
             return false;
         };
         harness.has_session(backend_session_id).await
+    }
+
+    /// Gracefully close all provider sessions before the Tauri process exits.
+    ///
+    /// Tauri can deliver more than one exit-related event while a shutdown is
+    /// in progress, so this operation is intentionally idempotent. Provider
+    /// shutdowns run concurrently and share one bounded deadline.
+    pub async fn shutdown(&self) {
+        if self.shutdown_started.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let session_ids = self
+            .session_registry
+            .read()
+            .await
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            self.permission_bridge.fail_pending_permissions_for_session(
+                &session_id,
+                "Local chat session ended because the GUI application is shutting down",
+            );
+        }
+
+        let deadline = Instant::now() + LOCAL_CHAT_SHUTDOWN_TIMEOUT;
+        let shutdowns = self
+            .harnesses
+            .values()
+            .cloned()
+            .map(|harness| tokio::spawn(async move { harness.shutdown().await }))
+            .collect::<Vec<_>>();
+
+        for shutdown in shutdowns {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                log::warn!("[LOCAL_CHAT] Shutdown deadline reached before all harnesses closed");
+                break;
+            }
+            if tokio::time::timeout(remaining, shutdown).await.is_err() {
+                log::warn!("[LOCAL_CHAT] Harness shutdown exceeded the application exit deadline");
+            }
+        }
+
+        self.session_registry.write().await.clear();
     }
 
     /// Resolve a permission request through the neutral permission bridge.

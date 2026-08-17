@@ -886,6 +886,27 @@ impl ClaudeSessionRuntime {
         result
     }
 
+    pub(crate) async fn shutdown(&self) {
+        let session_ids = self
+            .sessions
+            .read()
+            .await
+            .active
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for session_id in session_ids {
+            if let Err(error) = self.close_session(&session_id).await {
+                log::warn!(
+                    "Failed to close Claude local-chat session {} during GUI shutdown: {}",
+                    session_id,
+                    error
+                );
+            }
+        }
+    }
+
     pub(crate) async fn has_session(&self, session_id: &str) -> bool {
         self.sessions.read().await.active.contains_key(session_id)
     }

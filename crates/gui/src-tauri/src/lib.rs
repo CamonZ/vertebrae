@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
@@ -325,8 +325,15 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building Tauri application")
+        .run(|app_handle, event| {
+            if matches!(event, RunEvent::ExitRequested { .. }) {
+                log::info!("[SHUTDOWN] Closing active local chat harness sessions");
+                let local_chat_manager = app_handle.state::<LocalChatSessionManager>();
+                tauri::async_runtime::block_on(local_chat_manager.shutdown());
+            }
+        })
 }
 
 fn provision_managed_skills() -> Result<(PathBuf, usize), String> {

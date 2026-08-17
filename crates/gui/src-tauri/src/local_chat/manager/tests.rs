@@ -15,6 +15,7 @@ enum MockCall {
     Close {
         backend_session_id: String,
     },
+    Shutdown,
 }
 
 #[derive(Clone)]
@@ -116,6 +117,13 @@ impl LocalChatHarness for MockHarness {
                 backend_session_id: backend_session_id.to_string(),
             });
         Ok(())
+    }
+
+    async fn shutdown(&self) {
+        self.calls
+            .lock()
+            .expect("mock calls lock poisoned")
+            .push(MockCall::Shutdown);
     }
 
     async fn has_session(&self, _backend_session_id: &str) -> bool {
@@ -275,6 +283,22 @@ async fn manager_routes_create_send_and_close_through_registry() {
             },
         ]
     );
+}
+
+#[tokio::test]
+async fn shutdown_closes_each_registered_harness_once_and_is_idempotent() {
+    let claude = MockHarness::new(LocalChatHarnessKind::Claude);
+    let codex = MockHarness::new(LocalChatHarnessKind::Codex);
+    let manager = LocalChatSessionManager::with_harnesses_for_tests(vec![
+        Arc::new(claude.clone()),
+        Arc::new(codex.clone()),
+    ]);
+
+    manager.shutdown().await;
+    manager.shutdown().await;
+
+    assert_eq!(claude.calls(), vec![MockCall::Shutdown]);
+    assert_eq!(codex.calls(), vec![MockCall::Shutdown]);
 }
 
 #[tokio::test]
