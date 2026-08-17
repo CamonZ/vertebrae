@@ -34,7 +34,8 @@ pub struct TranscriptReplay {
     pub events: Vec<HarnessEventV1>,
 }
 
-/// Provider-neutral file revision used to prevent mixing transcript pages.
+/// Captured before provider decoding and verified afterward so pages from
+/// different transcript states cannot be mixed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TranscriptRevision {
     byte_len: u64,
@@ -42,7 +43,6 @@ pub struct TranscriptRevision {
 }
 
 impl TranscriptRevision {
-    /// Capture the metadata revision immediately before provider decoding.
     pub fn capture(path: &Path) -> Result<Self, HarnessError> {
         let metadata = fs::metadata(path).map_err(|error| {
             HarnessError::Operation(format!(
@@ -62,7 +62,6 @@ impl TranscriptRevision {
         })
     }
 
-    /// Ensure decoding finished against the same provider transcript revision.
     pub fn verify(&self, path: &Path) -> Result<(), HarnessError> {
         if &Self::capture(path)? == self {
             return Ok(());
@@ -73,10 +72,8 @@ impl TranscriptRevision {
     }
 }
 
-/// Default number of normalized events returned for one replay page.
 pub const DEFAULT_TRANSCRIPT_REPLAY_PAGE_SIZE: usize = 200;
 
-/// Upper bound applied to surface-provided replay page sizes.
 pub const MAX_TRANSCRIPT_REPLAY_PAGE_SIZE: usize = 1_000;
 
 /// Provider-neutral page request for a durable transcript replay.
@@ -90,13 +87,11 @@ pub struct TranscriptReplayPageRequest {
     pub limit: Option<usize>,
 }
 
-/// One chronological page from a normalized durable transcript.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TranscriptReplayPage {
     /// Opaque identity for the provider transcript revision used by this page.
     pub cache_key: String,
     pub events: Vec<HarnessEventV1>,
-    /// Cursor for the next older page, when one exists.
     pub next_cursor: Option<String>,
     pub has_more: bool,
 }
@@ -216,7 +211,6 @@ impl TranscriptReplayCache {
         Ok(replay)
     }
 
-    /// Serve a cursor from a retained bounded normalized window, if present.
     pub fn page(
         &self,
         transcript_path: &Path,
@@ -264,8 +258,6 @@ impl TranscriptReplayCache {
         }
     }
 
-    /// Retain the largest normalized event window within cache weight limits,
-    /// ending at the requested cursor boundary.
     pub fn retain_window_for_page(
         &self,
         replay: &Arc<TranscriptReplay>,
@@ -346,8 +338,8 @@ impl TranscriptReplayCache {
         Ok(())
     }
 
-    /// Return a matching replay or normalize it once for this exact revision.
-    /// Unrelated transcripts remain available while a provider decoder runs.
+    /// Coordinates per-revision single-flight loading without holding the cache
+    /// lock during provider decoding.
     pub fn get_or_try_insert_with<F>(
         &self,
         transcript_path: &Path,
@@ -431,8 +423,6 @@ impl TranscriptRevision {
 }
 
 impl TranscriptReplay {
-    /// Page an already-normalized replay from newest to oldest without changing
-    /// the chronological ordering inside each returned page.
     pub fn page(
         &self,
         request: &TranscriptReplayPageRequest,
@@ -474,8 +464,6 @@ impl TranscriptReplay {
         })
     }
 
-    /// Page a normalized tail window while indicating that older records exist
-    /// outside the bounded provider read.
     pub fn page_tail(
         &self,
         request: &TranscriptReplayPageRequest,

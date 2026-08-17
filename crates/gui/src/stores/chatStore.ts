@@ -393,17 +393,14 @@ export interface ProviderReplayState {
   lines: string[];
   /** Opaque provider transcript revision shared by every loaded page. */
   cacheKey: string | null;
-  /** Cursor for the next older page. */
   nextCursor: string | null;
   hasMore: boolean;
-  /** Distinguishes initial history hydration from an older-page prepend. */
   loading: "initial" | "older" | null;
   /** Whether at least one valid page (including an empty transcript) loaded. */
   loaded: boolean;
   error: string | null;
   /** Last replay-projected prefix, used to retain later live enrichments. */
   installedMessages: ChatMessage[];
-  /** Cursors already requested for this transcript revision. */
   seenCursors: string[];
 }
 
@@ -534,7 +531,6 @@ interface ChatStoreActions {
     sessionId: string,
     preferredPaneId?: string
   ) => Promise<boolean>;
-  /** Prepend the next older normalized provider transcript page. */
   loadOlderReplayMessages: (sessionId: string) => Promise<boolean>;
   /** Hydrate and focus a provider child thread as its own local chat session */
   selectProviderThreadSession: (input: {
@@ -1641,8 +1637,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
               },
             },
           },
-        },
-      };
+        };
+      });
     });
   };
 
