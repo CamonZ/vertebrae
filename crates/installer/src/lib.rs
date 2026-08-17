@@ -44,6 +44,6 @@ pub use paths::{
     symlink_path,
 };
 pub use service::{
-    LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, ServiceInstallReport, ServiceStatus, install_service,
-    service_status, uninstall_service,
+    LAUNCHD_LABEL, SYSTEMD_UNIT_NAME, ServiceInstallReport, ServiceRelaunch, ServiceStatus,
+    install_service, relaunch_service_if_registered, service_status, uninstall_service,
 };

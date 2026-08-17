@@ -16,6 +16,10 @@ use crate::paths::log_dir;
 #[cfg(target_os = "macos")]
 use crate::service::ServiceInstallReport;
 use crate::service::{LAUNCHD_LABEL, ServiceStatus};
+#[cfg(target_os = "macos")]
+use crate::service::{
+    SERVICE_HEALTH_POLL_INTERVAL, ServiceRelaunch, relaunch_registered_service_with,
+};
 
 /// Return the user LaunchAgents plist path for the daemon.
 ///
@@ -176,11 +180,120 @@ pub(crate) fn service_status() -> Result<ServiceStatus, InstallerError> {
         })?;
 
     if !output.status.success() {
-        return Ok(ServiceStatus::NotLoaded);
+        return launchctl_list_failure(
+            &output.status.to_string(),
+            &String::from_utf8_lossy(&output.stderr),
+        );
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(parse_launchctl_list_output(&stdout))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn relaunch_service_if_registered() -> Result<ServiceRelaunch, InstallerError> {
+    relaunch_registered_service_with(service_status, kickstart_service, || {
+        std::thread::sleep(SERVICE_HEALTH_POLL_INTERVAL)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn kickstart_service() -> Result<(), InstallerError> {
+    use std::process::Command;
+
+    let uid_output =
+        Command::new("id")
+            .arg("-u")
+            .output()
+            .map_err(|error| InstallerError::Launchctl {
+                action: "resolve user domain".to_string(),
+                reason: error.to_string(),
+            })?;
+    if !uid_output.status.success() {
+        return Err(InstallerError::Launchctl {
+            action: "resolve user domain".to_string(),
+            reason: String::from_utf8_lossy(&uid_output.stderr)
+                .trim()
+                .to_string(),
+        });
+    }
+    let uid_output = String::from_utf8_lossy(&uid_output.stdout);
+    let uid = parse_user_id(&uid_output)?;
+    run_kickstart_with(uid, |arguments| {
+        Command::new("launchctl").args(arguments).output()
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn run_kickstart_with<Run>(uid: &str, run: Run) -> Result<(), InstallerError>
+where
+    Run: FnOnce(&[String]) -> std::io::Result<std::process::Output>,
+{
+    let arguments = kickstart_arguments(uid);
+    let action = arguments.join(" ");
+    let output = run(&arguments).map_err(|error| InstallerError::Launchctl {
+        action: action.clone(),
+        reason: error.to_string(),
+    })?;
+    if !output.status.success() {
+        return Err(InstallerError::Launchctl {
+            action,
+            reason: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn parse_user_id(output: &str) -> Result<&str, InstallerError> {
+    let uid = output.trim();
+    if uid.is_empty() || !uid.chars().all(|character| character.is_ascii_digit()) {
+        return Err(InstallerError::Launchctl {
+            action: "resolve user domain".to_string(),
+            reason: format!("unexpected user id '{uid}'"),
+        });
+    }
+    Ok(uid)
+}
+
+/// launchd service target used to relaunch the registered per-user agent.
+pub fn kickstart_target(uid: &str) -> String {
+    format!("gui/{uid}/{LAUNCHD_LABEL}")
+}
+
+/// Arguments used to relaunch an already-loaded launchd user agent.
+pub fn kickstart_arguments(uid: &str) -> [String; 3] {
+    [
+        "kickstart".to_string(),
+        "-k".to_string(),
+        kickstart_target(uid),
+    ]
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn launchctl_service_is_missing(stderr: &str) -> bool {
+    stderr.contains("Could not find specified service")
+        || stderr.contains("Could not find service")
+        || stderr.contains("service not found")
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn launchctl_list_failure(
+    exit_status: &str,
+    stderr: &str,
+) -> Result<ServiceStatus, InstallerError> {
+    let stderr = stderr.trim();
+    if launchctl_service_is_missing(stderr) {
+        return Ok(ServiceStatus::NotLoaded);
+    }
+    Err(InstallerError::Launchctl {
+        action: "list".to_string(),
+        reason: if stderr.is_empty() {
+            format!("command exited with {exit_status}")
+        } else {
+            stderr.to_string()
+        },
+    })
 }
 
 /// Parse the output of `launchctl list <label>`.
@@ -257,6 +370,8 @@ fn try_parse_detailed(output: &str) -> Option<ServiceStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{ExitStatus, Output};
 
     const SAMPLE_BINARY: &str = "/usr/local/bin/vtb-daemon";
 
@@ -283,6 +398,66 @@ mod tests {
         let plist = generate_plist(SAMPLE_BINARY);
         assert!(plist.contains("<key>RunAtLoad</key>"));
         assert!(plist.contains("<key>KeepAlive</key>"));
+    }
+
+    #[test]
+    fn registered_service_relaunch_targets_existing_launchd_user_agent() {
+        assert_eq!(kickstart_target("501"), "gui/501/com.vertebrae.daemon");
+        assert_eq!(
+            kickstart_arguments("501"),
+            [
+                "kickstart".to_string(),
+                "-k".to_string(),
+                "gui/501/com.vertebrae.daemon".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn launchd_user_domain_requires_numeric_user_id() {
+        assert_eq!(parse_user_id("501\n").unwrap(), "501");
+        assert!(parse_user_id("").is_err());
+        assert!(parse_user_id("$(whoami)").is_err());
+    }
+
+    #[test]
+    fn launchd_kickstart_nonzero_exit_is_returned_with_exact_action() {
+        let error = run_kickstart_with("501", |arguments| {
+            assert_eq!(arguments, &kickstart_arguments("501"));
+            Ok(Output {
+                status: ExitStatus::from_raw(1),
+                stdout: Vec::new(),
+                stderr: b"Not privileged".to_vec(),
+            })
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "launchctl kickstart -k gui/501/com.vertebrae.daemon failed: Not privileged"
+        );
+    }
+
+    #[test]
+    fn launchd_only_treats_explicit_not_found_as_not_loaded() {
+        assert!(launchctl_service_is_missing(
+            "Could not find service com.vertebrae.daemon in domain for user gui: 501"
+        ));
+        assert!(launchctl_service_is_missing(
+            "Could not find specified service"
+        ));
+        assert!(!launchctl_service_is_missing("Operation not permitted"));
+
+        let error =
+            launchctl_list_failure("exit status: 1", "Operation not permitted").unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "launchctl list failed: Operation not permitted"
+        );
+        assert_eq!(
+            launchctl_list_failure("exit status: 1", "Could not find specified service").unwrap(),
+            ServiceStatus::NotLoaded
+        );
     }
 
     #[test]

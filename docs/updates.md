@@ -70,13 +70,17 @@ starts a preflight that verifies the selected channel manifest, component
 identity, target, version, build, signatures, hashes, disk space, and managed
 installation paths. The GUI then downloads and verifies all four artifacts,
 stages the CLI, daemon, and gate, atomically activates those managed binaries,
-checks their symlinks and daemon status, and finally applies the signed GUI
-artifact. A failed verification or activation preserves the prior managed
-components. Successful application reports per-component progress and offers
-the GUI relaunch as a deferred user action; it never forces a restart or
-silently reloads the daemon. Release notes are informational and are not
-required for verification or installation. The CLI, daemon, and gate are
-update targets, not update clients.
+checks their symlinks, and finally applies the signed GUI artifact. When the
+managed daemon bytes changed and its launchd/systemd user service was already
+registered, activation relaunches that service and verifies that it is
+running. An unchanged daemon is not restarted, and an unregistered service is
+never installed or started. A failed verification, activation, service
+relaunch, health check, or GUI install restores the prior managed components;
+when necessary, the restored daemon service is relaunched too. Successful
+application reports per-component progress and offers the GUI relaunch as a
+deferred user action; it never forces a GUI restart. Release notes are
+informational and are not required for verification or installation. The CLI,
+daemon, and gate are update targets, not update clients.
 
 The first-run component installer remains an explicit install of the binaries
 bundled with the GUI. It is separate from the channel check and does not run

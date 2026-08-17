@@ -13,6 +13,10 @@ use crate::error::InstallerError;
 use crate::paths::log_dir;
 #[cfg(target_os = "linux")]
 use crate::service::ServiceInstallReport;
+#[cfg(target_os = "linux")]
+use crate::service::{
+    SERVICE_HEALTH_POLL_INTERVAL, ServiceRelaunch, relaunch_registered_service_with,
+};
 use crate::service::{SYSTEMD_UNIT_NAME, ServiceStatus};
 
 /// Return the path of the systemd `--user` unit file we manage.
@@ -132,12 +136,26 @@ pub(crate) fn service_status() -> Result<ServiceStatus, InstallerError> {
             reason: e.to_string(),
         })?;
 
-    if !output.status.success() {
-        return Ok(ServiceStatus::NotLoaded);
-    }
+    systemctl_show_result(
+        output.status.success(),
+        &output.status.to_string(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(parse_systemctl_show_output(&stdout))
+#[cfg(target_os = "linux")]
+pub(crate) fn relaunch_service_if_registered() -> Result<ServiceRelaunch, InstallerError> {
+    relaunch_registered_service_with(
+        service_status,
+        || run_systemctl(restart_arguments()),
+        || std::thread::sleep(SERVICE_HEALTH_POLL_INTERVAL),
+    )
+}
+
+/// Arguments used to relaunch an already-registered systemd user service.
+pub fn restart_arguments() -> [&'static str; 2] {
+    ["restart", SYSTEMD_UNIT_NAME]
 }
 
 #[cfg(target_os = "linux")]
@@ -146,25 +164,31 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<std::ffi::OsStr>,
 {
-    use std::process::Command;
-
     let args: Vec<std::ffi::OsString> = args
         .into_iter()
         .map(|a| a.as_ref().to_os_string())
         .collect();
+    run_systemctl_with(&args, |arguments| {
+        use std::process::Command;
+
+        Command::new("systemctl")
+            .arg("--user")
+            .args(arguments)
+            .output()
+    })
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn run_systemctl_with<Run>(args: &[std::ffi::OsString], run: Run) -> Result<(), InstallerError>
+where
+    Run: FnOnce(&[std::ffi::OsString]) -> std::io::Result<std::process::Output>,
+{
     let action = args
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join(" ");
-
-    let mut cmd = Command::new("systemctl");
-    cmd.arg("--user");
-    for a in &args {
-        cmd.arg(a);
-    }
-
-    let output = cmd.output().map_err(|e| InstallerError::Systemctl {
+    let output = run(args).map_err(|e| InstallerError::Systemctl {
         action: action.clone(),
         reason: e.to_string(),
     })?;
@@ -213,9 +237,38 @@ pub fn parse_systemctl_show_output(output: &str) -> ServiceStatus {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn systemctl_show_result(
+    success: bool,
+    exit_status: &str,
+    stdout: &str,
+    stderr: &str,
+) -> Result<ServiceStatus, InstallerError> {
+    let parsed = parse_systemctl_show_output(stdout);
+    if parsed == ServiceStatus::NotLoaded && stdout.contains("LoadState=not-found") {
+        return Ok(parsed);
+    }
+    if success && parsed != ServiceStatus::NotLoaded {
+        return Ok(parsed);
+    }
+
+    let stderr = stderr.trim();
+    Err(InstallerError::Systemctl {
+        action: "show".to_string(),
+        reason: if stderr.is_empty() {
+            format!("command exited with {exit_status}")
+        } else {
+            stderr.to_string()
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{ExitStatus, Output};
 
     const SAMPLE_BINARY: &str = "/home/me/.local/bin/vtb-daemon";
     const SAMPLE_LOGS: &str = "/home/me/.local/state/vertebrae/logs";
@@ -243,6 +296,31 @@ mod tests {
         let unit = generate_unit(SAMPLE_BINARY, SAMPLE_LOGS);
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("RestartSec=5"));
+    }
+
+    #[test]
+    fn registered_service_relaunch_uses_systemd_restart_without_enable() {
+        assert_eq!(restart_arguments(), ["restart", "vertebrae-daemon"]);
+        assert!(!restart_arguments().contains(&"enable"));
+    }
+
+    #[test]
+    fn systemd_restart_nonzero_exit_is_returned_with_exact_action() {
+        let arguments = restart_arguments().map(OsString::from);
+        let error = run_systemctl_with(&arguments, |received| {
+            assert_eq!(received, arguments.as_slice());
+            Ok(Output {
+                status: ExitStatus::from_raw(1),
+                stdout: Vec::new(),
+                stderr: b"restart job failed".to_vec(),
+            })
+        })
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "systemctl --user restart vertebrae-daemon failed: restart job failed"
+        );
     }
 
     #[test]
@@ -329,6 +407,31 @@ mod tests {
             ServiceStatus::Loaded {
                 last_exit_status: 0
             }
+        );
+    }
+
+    #[test]
+    fn failed_systemd_query_is_not_misclassified_as_unregistered() {
+        let error = systemctl_show_result(false, "exit status: 1", "", "Failed to connect to bus")
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "systemctl --user show failed: Failed to connect to bus"
+        );
+
+        let missing = systemctl_show_result(
+            false,
+            "exit status: 1",
+            "LoadState=not-found\nActiveState=inactive\n",
+            "Unit not found",
+        )
+        .unwrap();
+        assert_eq!(missing, ServiceStatus::NotLoaded);
+
+        let malformed = systemctl_show_result(true, "exit status: 0", "", "").unwrap_err();
+        assert_eq!(
+            malformed.to_string(),
+            "systemctl --user show failed: command exited with exit status: 0"
         );
     }
 }

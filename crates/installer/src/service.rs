@@ -5,6 +5,7 @@
 //! [`crate::macos`] or [`crate::linux`].
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::InstallerError;
 
@@ -46,6 +47,19 @@ pub enum ServiceStatus {
     /// Service is not registered with the service manager.
     NotLoaded,
 }
+
+/// Outcome of asking the OS service manager to relaunch the daemon without
+/// registering it as a new service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceRelaunch {
+    /// The daemon was not registered, so no start or install command ran.
+    NotRegistered,
+    /// The registered service was relaunched and reached the running state.
+    Restarted { pid: u32 },
+}
+
+pub(crate) const SERVICE_HEALTH_ATTEMPTS: usize = 20;
+pub(crate) const SERVICE_HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 impl std::fmt::Display for ServiceStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -123,9 +137,65 @@ pub fn service_status() -> Result<ServiceStatus, InstallerError> {
     }
 }
 
+/// Relaunch the daemon only when it is already registered with the OS service
+/// manager, then wait for it to report a healthy running process.
+///
+/// This function never writes a service definition, enables a unit, or loads
+/// an unregistered service. Callers can therefore use it after replacing the
+/// managed daemon binary without changing the user's registration choice.
+pub fn relaunch_service_if_registered() -> Result<ServiceRelaunch, InstallerError> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::relaunch_service_if_registered()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux::relaunch_service_if_registered()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        Err(InstallerError::UnsupportedPlatform)
+    }
+}
+
+pub(crate) fn relaunch_registered_service_with<Status, Relaunch, Wait>(
+    mut status: Status,
+    mut relaunch: Relaunch,
+    mut wait: Wait,
+) -> Result<ServiceRelaunch, InstallerError>
+where
+    Status: FnMut() -> Result<ServiceStatus, InstallerError>,
+    Relaunch: FnMut() -> Result<(), InstallerError>,
+    Wait: FnMut(),
+{
+    let before = status()?;
+    if before == ServiceStatus::NotLoaded {
+        return Ok(ServiceRelaunch::NotRegistered);
+    }
+    relaunch()?;
+
+    let mut last_status = before;
+    for attempt in 0..SERVICE_HEALTH_ATTEMPTS {
+        if attempt > 0 {
+            wait();
+        }
+        last_status = status()?;
+        if let ServiceStatus::Running { pid } = last_status {
+            return Ok(ServiceRelaunch::Restarted { pid });
+        }
+    }
+
+    Err(InstallerError::ServiceHealth {
+        reason: format!(
+            "expected a running process after {SERVICE_HEALTH_ATTEMPTS} checks, got {last_status}"
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
 
     #[test]
     fn service_status_display_running() {
@@ -161,5 +231,106 @@ mod tests {
     #[test]
     fn systemd_unit_name_is_stable() {
         assert_eq!(SYSTEMD_UNIT_NAME, "vertebrae-daemon");
+    }
+
+    #[test]
+    fn relaunch_skips_unregistered_service_without_running_restart_command() {
+        let restart_called = Cell::new(false);
+
+        let outcome = relaunch_registered_service_with(
+            || Ok(ServiceStatus::NotLoaded),
+            || {
+                restart_called.set(true);
+                Ok(())
+            },
+            || {},
+        )
+        .unwrap();
+
+        assert_eq!(outcome, ServiceRelaunch::NotRegistered);
+        assert!(!restart_called.get());
+    }
+
+    #[test]
+    fn relaunch_registered_service_accepts_a_healthy_reused_pid() {
+        let checks = Cell::new(0);
+        let restart_calls = Cell::new(0);
+        let waits = Cell::new(0);
+
+        let outcome = relaunch_registered_service_with(
+            || {
+                let check = checks.get();
+                checks.set(check + 1);
+                Ok(match check {
+                    0 => ServiceStatus::Running { pid: 10 },
+                    1 => ServiceStatus::Loaded {
+                        last_exit_status: 0,
+                    },
+                    _ => ServiceStatus::Running { pid: 10 },
+                })
+            },
+            || {
+                restart_calls.set(restart_calls.get() + 1);
+                Ok(())
+            },
+            || waits.set(waits.get() + 1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome, ServiceRelaunch::Restarted { pid: 10 });
+        assert_eq!(restart_calls.get(), 1);
+        assert_eq!(checks.get(), 3);
+        assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn relaunch_command_failure_is_returned_without_health_polling() {
+        let checks = Cell::new(0);
+        let error = relaunch_registered_service_with(
+            || {
+                checks.set(checks.get() + 1);
+                Ok(ServiceStatus::Loaded {
+                    last_exit_status: 1,
+                })
+            },
+            || {
+                Err(InstallerError::Systemctl {
+                    action: "restart vertebrae-daemon".to_string(),
+                    reason: "job failed".to_string(),
+                })
+            },
+            || {},
+        )
+        .unwrap_err();
+
+        assert_eq!(checks.get(), 1);
+        assert_eq!(
+            error.to_string(),
+            "systemctl --user restart vertebrae-daemon failed: job failed"
+        );
+    }
+
+    #[test]
+    fn relaunch_reports_last_unhealthy_status_after_bounded_checks() {
+        let checks = Cell::new(0);
+        let waits = Cell::new(0);
+        let error = relaunch_registered_service_with(
+            || {
+                checks.set(checks.get() + 1);
+                Ok(ServiceStatus::Loaded {
+                    last_exit_status: 78,
+                })
+            },
+            || Ok(()),
+            || waits.set(waits.get() + 1),
+        )
+        .unwrap_err();
+
+        assert_eq!(checks.get(), SERVICE_HEALTH_ATTEMPTS + 1);
+        assert_eq!(waits.get(), SERVICE_HEALTH_ATTEMPTS - 1);
+        assert_eq!(
+            error.to_string(),
+            "Daemon service did not become healthy after relaunch: expected a running process after 20 checks, got loaded but not running (last exit status: 78)"
+        );
     }
 }

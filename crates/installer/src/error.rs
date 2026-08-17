@@ -63,6 +63,10 @@ pub enum InstallerError {
     #[error("systemctl --user {action} failed: {reason}")]
     Systemctl { action: String, reason: String },
 
+    /// A registered daemon did not reach the running state after relaunch.
+    #[error("Daemon service did not become healthy after relaunch: {reason}")]
+    ServiceHealth { reason: String },
+
     /// The operation is not supported on this OS (e.g. Windows).
     #[error("Installer is not supported on this platform")]
     UnsupportedPlatform,

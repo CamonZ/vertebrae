@@ -17,7 +17,8 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 use vertebrae_installer::{
-    data_bin_dir, data_dir, service_status, symlink_path, BinaryTransaction, ServiceStatus,
+    data_bin_dir, data_dir, relaunch_service_if_registered, service_status, symlink_path,
+    BinaryTransaction, InstallerError, ServiceRelaunch, ServiceStatus,
 };
 
 use crate::commands::CommandError;
@@ -210,6 +211,31 @@ pub async fn apply_approved_component_update(
         .zip(sources.iter())
         .map(|(spec, path)| (spec.binary_name, path.as_path()))
         .collect();
+    let daemon_changed = match managed_daemon_artifact_changed(&sources[1]) {
+        Ok(changed) => changed,
+        Err(error) => {
+            remove_staging_dir(&staging_dir);
+            return Ok(failed_result(result, error, true));
+        }
+    };
+    let daemon_was_registered = if daemon_changed {
+        match service_status() {
+            Ok(ServiceStatus::NotLoaded) => false,
+            Ok(ServiceStatus::Running { .. } | ServiceStatus::Loaded { .. }) => true,
+            Err(error) => {
+                remove_staging_dir(&staging_dir);
+                return Ok(failed_result(
+                    result,
+                    update_error(format!(
+                        "Could not inspect daemon service registration before activation: {error}"
+                    )),
+                    true,
+                ));
+            }
+        }
+    } else {
+        false
+    };
     let transaction = match BinaryTransaction::activate(&activation_sources) {
         Ok(transaction) => transaction,
         Err(error) => {
@@ -229,32 +255,46 @@ pub async fn apply_approved_component_update(
     }
     emit_progress(&app_handle, &result);
 
-    result.daemon_service = match post_install_health_check() {
-        Ok(status) => status,
+    if let Err(error) = verify_managed_component_links() {
+        let error = rollback_failure(&transaction, error, false);
+        remove_staging_dir(&staging_dir);
+        return Ok(failed_result(result, error, false));
+    }
+
+    let daemon_lifecycle = match reconcile_daemon_service(
+        daemon_changed,
+        daemon_was_registered,
+        relaunch_service_if_registered,
+        service_status,
+    ) {
+        Ok(outcome) => outcome,
         Err(error) => {
-            let _ = transaction.rollback();
+            let error =
+                rollback_failure(&transaction, error, daemon_changed && daemon_was_registered);
             remove_staging_dir(&staging_dir);
             return Ok(failed_result(result, error, false));
         }
     };
+    result.daemon_service = daemon_lifecycle.message.clone();
     result.state = UpdateTransactionState::HealthChecked;
     for index in 0..COMPONENT_ORDER.len() {
         result.progress[index].state = UpdateComponentState::HealthChecked;
-        result.progress[index].message = "Managed symlink and daemon status verified".to_string();
+        result.progress[index].message = "Managed symlink verified".to_string();
     }
+    result.progress[1].message = daemon_lifecycle.message.clone();
     emit_progress(&app_handle, &result);
 
     // The Tauri updater has already verified the GUI archive before install.
     // Its platform-specific install is atomic and does not relaunch on the
     // supported macOS/Linux targets. Sidecars are rolled back if it fails.
     if let Err(error) = gui_update.install(gui_bytes) {
-        let _ = transaction.rollback();
-        remove_staging_dir(&staging_dir);
-        return Ok(failed_result(
-            result,
+        let error = rollback_failure(
+            &transaction,
             update_error(error.to_string()),
-            false,
-        ));
+            daemon_lifecycle.restarted,
+        );
+        remove_staging_dir(&staging_dir);
+        return Ok(failed_result(result, error, false));
     }
     transaction.commit();
     remove_staging_dir(&staging_dir);
@@ -630,25 +670,161 @@ fn is_managed_or_absent(component: &str) -> Result<bool, CommandError> {
     }
 }
 
-fn post_install_health_check() -> Result<String, CommandError> {
+fn verify_managed_component_links() -> Result<(), CommandError> {
     for spec in COMPONENT_ORDER {
-        if !is_managed_or_absent(spec.binary_name)? {
+        if !is_managed_component_active(spec.binary_name)? {
             return Err(update_error(format!(
                 "Managed symlink check failed for {}",
                 spec.manifest_key
             )));
         }
     }
-    let status = service_status().map_err(|error| update_error(error.to_string()))?;
-    Ok(match status {
-        ServiceStatus::Running { pid } => format!("Running (PID {pid}); no restart forced"),
-        ServiceStatus::Loaded { last_exit_status } => {
-            format!(
-                "Loaded but not running (last exit status: {last_exit_status}); no restart forced"
-            )
-        }
-        ServiceStatus::NotLoaded => "Not loaded; no service lifecycle change requested".to_string(),
+    Ok(())
+}
+
+fn is_managed_component_active(component: &str) -> Result<bool, CommandError> {
+    let link = symlink_path(component).map_err(|error| update_error(error.to_string()))?;
+    let staged = data_bin_dir()
+        .map_err(|error| update_error(error.to_string()))?
+        .join(component);
+    let metadata = match fs::symlink_metadata(&link) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(update_error(error.to_string())),
+    };
+    if !metadata.file_type().is_symlink() || !staged.is_file() {
+        return Ok(false);
+    }
+    let target = fs::read_link(&link).map_err(|error| update_error(error.to_string()))?;
+    let target = if target.is_absolute() {
+        target
+    } else {
+        link.parent().unwrap_or_else(|| Path::new(".")).join(target)
+    };
+    Ok(target == staged)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DaemonLifecycleOutcome {
+    message: String,
+    restarted: bool,
+}
+
+fn reconcile_daemon_service<Relaunch, Status>(
+    daemon_changed: bool,
+    daemon_was_registered: bool,
+    mut relaunch: Relaunch,
+    mut status: Status,
+) -> Result<DaemonLifecycleOutcome, CommandError>
+where
+    Relaunch: FnMut() -> Result<ServiceRelaunch, InstallerError>,
+    Status: FnMut() -> Result<ServiceStatus, InstallerError>,
+{
+    if daemon_changed && daemon_was_registered {
+        return match relaunch().map_err(|error| {
+            update_error(format!(
+                "Updated daemon service could not be relaunched: {error}"
+            ))
+        })? {
+            ServiceRelaunch::Restarted { pid } => Ok(DaemonLifecycleOutcome {
+                message: format!(
+                    "Managed daemon changed; registered service relaunched and healthy (PID {pid})"
+                ),
+                restarted: true,
+            }),
+            ServiceRelaunch::NotRegistered => Err(update_error(
+                "Daemon service registration disappeared before relaunch; no unregistered service was started",
+            )),
+        };
+    }
+
+    if daemon_changed {
+        return Ok(DaemonLifecycleOutcome {
+            message: "Managed daemon changed; service is not registered, so no service was started"
+                .to_string(),
+            restarted: false,
+        });
+    }
+
+    let status = status().map_err(|error| update_error(error.to_string()))?;
+    Ok(DaemonLifecycleOutcome {
+        message: match status {
+            ServiceStatus::Running { pid } => {
+                format!("Running (PID {pid}); daemon artifact unchanged, so no restart was needed")
+            }
+            ServiceStatus::Loaded { last_exit_status } => format!(
+                "Loaded but not running (last exit status: {last_exit_status}); daemon artifact unchanged, so no restart was needed"
+            ),
+            ServiceStatus::NotLoaded => {
+                "Not loaded; daemon artifact unchanged and no service lifecycle change requested"
+                    .to_string()
+            }
+        },
+        restarted: false,
     })
+}
+
+fn managed_daemon_artifact_changed(candidate: &Path) -> Result<bool, CommandError> {
+    let managed = data_bin_dir()
+        .map_err(|error| update_error(error.to_string()))?
+        .join("vtb-daemon");
+    let candidate_bytes = fs::read(candidate).map_err(|error| {
+        update_error(format!(
+            "Could not read staged daemon artifact before activation: {error}"
+        ))
+    })?;
+    let managed_bytes = match fs::read(&managed) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(update_error(format!(
+                "Could not read managed daemon artifact before activation: {error}"
+            )));
+        }
+    };
+    Ok(artifact_bytes_changed(
+        managed_bytes.as_deref(),
+        &candidate_bytes,
+    ))
+}
+
+fn artifact_bytes_changed(previous: Option<&[u8]>, candidate: &[u8]) -> bool {
+    previous != Some(candidate)
+}
+
+fn rollback_failure(
+    transaction: &BinaryTransaction,
+    original: CommandError,
+    restore_registered_daemon: bool,
+) -> CommandError {
+    if let Err(error) = transaction.rollback() {
+        return update_error(format!(
+            "{}; managed component rollback also failed: {error}",
+            original.message
+        ));
+    }
+
+    if restore_registered_daemon {
+        if let Err(error) = restore_daemon_after_rollback(relaunch_service_if_registered) {
+            return update_error(format!(
+                "{}; previous binaries were restored, but the daemon service could not be restored: {}",
+                original.message, error.message
+            ));
+        }
+    }
+    original
+}
+
+fn restore_daemon_after_rollback<Relaunch>(mut relaunch: Relaunch) -> Result<(), CommandError>
+where
+    Relaunch: FnMut() -> Result<ServiceRelaunch, InstallerError>,
+{
+    match relaunch().map_err(|error| update_error(error.to_string()))? {
+        ServiceRelaunch::Restarted { .. } => Ok(()),
+        ServiceRelaunch::NotRegistered => Err(update_error(
+            "the previously registered daemon service is no longer registered",
+        )),
+    }
 }
 
 async fn load_component_manifest(channel: &str) -> Result<ReleaseManifest, CommandError> {
@@ -809,6 +985,7 @@ fn update_error(message: impl Into<String>) -> CommandError {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+    use std::cell::Cell;
 
     fn fixture_manifest(signing_key: &SigningKey) -> ReleaseManifest {
         let public_key = base64::engine::general_purpose::STANDARD
@@ -920,6 +1097,148 @@ mod tests {
                 ("daemon", "vtb-daemon"),
                 ("gate", "vtb-gate")
             ]
+        );
+    }
+
+    #[test]
+    fn daemon_change_detection_compares_actual_artifact_bytes() {
+        assert!(!artifact_bytes_changed(Some(b"same"), b"same"));
+        assert!(artifact_bytes_changed(Some(b"old"), b"new"));
+        assert!(artifact_bytes_changed(None, b"first-managed-install"));
+    }
+
+    #[test]
+    fn unchanged_daemon_reports_status_without_relaunching_service() {
+        let relaunch_calls = Cell::new(0);
+        let status_calls = Cell::new(0);
+
+        let outcome = reconcile_daemon_service(
+            false,
+            true,
+            || {
+                relaunch_calls.set(relaunch_calls.get() + 1);
+                Ok(ServiceRelaunch::Restarted { pid: 99 })
+            },
+            || {
+                status_calls.set(status_calls.get() + 1);
+                Ok(ServiceStatus::Running { pid: 42 })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(relaunch_calls.get(), 0);
+        assert_eq!(status_calls.get(), 1);
+        assert_eq!(
+            outcome,
+            DaemonLifecycleOutcome {
+                message: "Running (PID 42); daemon artifact unchanged, so no restart was needed"
+                    .to_string(),
+                restarted: false,
+            }
+        );
+    }
+
+    #[test]
+    fn changed_daemon_does_not_start_or_install_unregistered_service() {
+        let relaunch_calls = Cell::new(0);
+        let status_calls = Cell::new(0);
+
+        let outcome = reconcile_daemon_service(
+            true,
+            false,
+            || {
+                relaunch_calls.set(relaunch_calls.get() + 1);
+                Ok(ServiceRelaunch::Restarted { pid: 99 })
+            },
+            || {
+                status_calls.set(status_calls.get() + 1);
+                Ok(ServiceStatus::Running { pid: 42 })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(relaunch_calls.get(), 0);
+        assert_eq!(status_calls.get(), 0);
+        assert_eq!(
+            outcome.message,
+            "Managed daemon changed; service is not registered, so no service was started"
+        );
+        assert!(!outcome.restarted);
+    }
+
+    #[test]
+    fn changed_daemon_relaunches_registered_service_and_reports_healthy_pid() {
+        let relaunch_calls = Cell::new(0);
+
+        let outcome = reconcile_daemon_service(
+            true,
+            true,
+            || {
+                relaunch_calls.set(relaunch_calls.get() + 1);
+                Ok(ServiceRelaunch::Restarted { pid: 73 })
+            },
+            || Ok(ServiceStatus::NotLoaded),
+        )
+        .unwrap();
+
+        assert_eq!(relaunch_calls.get(), 1);
+        assert_eq!(
+            outcome,
+            DaemonLifecycleOutcome {
+                message:
+                    "Managed daemon changed; registered service relaunched and healthy (PID 73)"
+                        .to_string(),
+                restarted: true,
+            }
+        );
+    }
+
+    #[test]
+    fn registered_service_disappearing_during_update_is_a_transaction_failure() {
+        let error = reconcile_daemon_service(
+            true,
+            true,
+            || Ok(ServiceRelaunch::NotRegistered),
+            || Ok(ServiceStatus::NotLoaded),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.message,
+            "Daemon service registration disappeared before relaunch; no unregistered service was started"
+        );
+    }
+
+    #[test]
+    fn daemon_relaunch_failure_is_exposed_to_update_transaction() {
+        let error = reconcile_daemon_service(
+            true,
+            true,
+            || {
+                Err(InstallerError::ServiceHealth {
+                    reason: "still inactive".to_string(),
+                })
+            },
+            || Ok(ServiceStatus::NotLoaded),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.message,
+            "Updated daemon service could not be relaunched: Daemon service did not become healthy after relaunch: still inactive"
+        );
+    }
+
+    #[test]
+    fn rollback_relaunch_requires_previously_registered_service_to_return() {
+        assert!(
+            restore_daemon_after_rollback(|| Ok(ServiceRelaunch::Restarted { pid: 7 })).is_ok()
+        );
+        let error =
+            restore_daemon_after_rollback(|| Ok(ServiceRelaunch::NotRegistered)).unwrap_err();
+        assert_eq!(
+            error.message,
+            "the previously registered daemon service is no longer registered"
         );
     }
 }
