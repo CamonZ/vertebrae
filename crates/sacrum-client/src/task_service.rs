@@ -408,6 +408,9 @@ impl TaskService for SacrumTaskService {
         if let Some(ref workflow_id) = options.workflow_id {
             variables["workflow_id"] = json!(workflow_id);
         }
+        if let Some(ref worktree) = options.worktree {
+            variables["worktree"] = json!(worktree);
+        }
 
         #[derive(serde::Deserialize)]
         struct IdResponse {
@@ -1692,6 +1695,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(id, "task-new");
+        let variables = captured_variables(&server).await;
+        assert!(!variables.as_object().unwrap().contains_key("worktree"));
+    }
+
+    #[tokio::test]
+    async fn test_create_task_forwards_worktree_variable() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_task": { "id": "task-worktree" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        service
+            .create_task(CreateTaskOptions::new("Task").with_worktree("/tmp/worktree"))
+            .await
+            .unwrap();
+
+        let variables = captured_variables(&server).await;
+        assert_eq!(variables["worktree"], "/tmp/worktree");
     }
 
     #[tokio::test]

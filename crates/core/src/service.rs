@@ -49,6 +49,8 @@ pub struct CreateTaskOptions {
     pub parent_id: Option<String>,
     /// Workflow ID to assign at creation time (skips the project default)
     pub workflow_id: Option<String>,
+    /// Worktree path to associate with the task
+    pub worktree: Option<String>,
     /// IDs of tasks this task depends on
     pub depends_on: Vec<String>,
     /// Optional custom ID (for testing) - if not provided, ID is auto-generated
@@ -97,6 +99,12 @@ impl CreateTaskOptions {
     /// Set the workflow ID to assign at creation time
     pub fn with_workflow(mut self, workflow_id: impl Into<String>) -> Self {
         self.workflow_id = Some(workflow_id.into());
+        self
+    }
+
+    /// Set the worktree path
+    pub fn with_worktree(mut self, worktree: impl Into<String>) -> Self {
+        self.worktree = Some(worktree.into());
         self
     }
 
@@ -655,5 +663,17 @@ mod tests {
     fn update_task_options_has_updates_includes_worktree() {
         let opts = UpdateTaskOptions::new().with_worktree("/path");
         assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn create_task_options_with_worktree() {
+        let opts = CreateTaskOptions::new("Task").with_worktree("/path/to/worktree");
+        assert_eq!(opts.worktree.as_deref(), Some("/path/to/worktree"));
+    }
+
+    #[test]
+    fn create_task_options_worktree_defaults_to_none() {
+        let opts = CreateTaskOptions::new("Task");
+        assert!(opts.worktree.is_none());
     }
 }

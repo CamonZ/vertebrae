@@ -26,6 +26,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = cmd.execute(&services).await.unwrap();
         assert!(!id.is_empty());
@@ -47,6 +48,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         });
 
         let result = command.execute_json(&services).await.unwrap();
@@ -78,6 +80,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         });
 
         let result = command.execute(&services).await.unwrap();
@@ -99,6 +102,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let task_id = add.execute(&services).await.unwrap();
 
@@ -155,6 +159,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = cmd.execute(&services).await.unwrap();
 
@@ -179,6 +184,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
 
@@ -192,6 +198,7 @@ mod lifecycle_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
 
@@ -215,6 +222,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let result = cmd.execute(&services).await;
         assert!(result.is_err());
@@ -234,6 +242,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 
@@ -291,6 +300,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 
@@ -321,6 +331,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let parent_id = parent.execute(&services).await.unwrap();
 
@@ -334,6 +345,7 @@ mod lifecycle_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let child_id = child.execute(&services).await.unwrap();
 
@@ -386,6 +398,7 @@ mod query_tests {
                 parent: None,
                 depends_on: vec![],
                 workflow: None,
+                worktree: None,
             };
             cmd.execute(&services).await.unwrap();
         }
@@ -423,6 +436,7 @@ mod query_tests {
                 parent: None,
                 depends_on: vec![],
                 workflow: None,
+                worktree: None,
             };
             ids.push(cmd.execute(&services).await.unwrap());
         }
@@ -504,6 +518,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 
@@ -541,6 +556,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let parent_id = parent_add.execute(&services).await.unwrap();
 
@@ -554,6 +570,7 @@ mod query_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let child_id = child_add.execute(&services).await.unwrap();
 
@@ -588,6 +605,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let a_id = a.execute(&services).await.unwrap();
 
@@ -600,6 +618,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![a_id.clone()],
             workflow: None,
+            worktree: None,
         };
         let _b_id = b.execute(&services).await.unwrap();
 
@@ -630,6 +649,7 @@ mod relationship_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         cmd.execute(services).await.unwrap()
     }
@@ -837,6 +857,7 @@ mod section_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         cmd.execute(services).await.unwrap()
     }
@@ -1027,6 +1048,7 @@ mod workflow_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         cmd.execute(services).await.unwrap()
     }
@@ -1138,6 +1160,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         });
         let result = cmd.execute(&services).await.unwrap();
         let output = format!("{}", result);
@@ -1158,6 +1181,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 
@@ -1181,6 +1205,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 
@@ -1207,6 +1232,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let id = add.execute(&services).await.unwrap();
 

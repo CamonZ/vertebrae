@@ -1188,6 +1188,8 @@ mod tests {
             "a1b2c3d4-0000-4000-8000-000000000005",
             "--description",
             "Full description",
+            "--worktree",
+            "/tmp/vertebrae-worktree",
         ]);
         assert!(cli.is_ok());
         let cmd = match cli.unwrap().command {
@@ -1204,6 +1206,7 @@ mod tests {
         );
         assert_eq!(cmd.depends_on, vec!["a1b2c3d4-0000-4000-8000-000000000005"]);
         assert_eq!(cmd.description, Some("Full description".to_string()));
+        assert_eq!(cmd.worktree, Some("/tmp/vertebrae-worktree".to_string()));
     }
 
     #[test]

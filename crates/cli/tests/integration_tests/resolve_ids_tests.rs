@@ -30,6 +30,7 @@ async fn seed_task(services: &vertebrae_core::VertebraeServices, id: &str, title
             tags: vec![],
             parent_id: None,
             workflow_id: None,
+            worktree: None,
             depends_on: vec![],
         })
         .await

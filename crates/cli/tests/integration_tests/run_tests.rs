@@ -25,6 +25,7 @@ async fn create_task_with_workflow(
         parent: None,
         depends_on: vec![],
         workflow: None,
+        worktree: None,
     };
     let task_id = task_cmd.execute(services).await.unwrap();
 
@@ -89,6 +90,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
 
@@ -125,6 +127,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
 
@@ -206,6 +209,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
 
@@ -239,6 +243,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let epic_id = epic_cmd.execute(&services).await.unwrap();
 
@@ -309,6 +314,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let blocker_id = blocker_cmd.execute(&services).await.unwrap();
 
@@ -321,6 +327,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![blocker_id],
             workflow: None,
+            worktree: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
 
@@ -362,6 +369,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
 
@@ -374,6 +382,7 @@ mod run_command_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             workflow: None,
+            worktree: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
 

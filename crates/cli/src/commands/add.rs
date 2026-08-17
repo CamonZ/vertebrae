@@ -48,6 +48,10 @@ pub struct AddCommand {
     /// Accepts a full UUID or an 8-character short ID prefix.
     #[arg(long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
+
+    /// Worktree path to associate with the task.
+    #[arg(long)]
+    pub worktree: Option<String>,
 }
 
 /// Parse a level string into a Level enum
@@ -142,6 +146,10 @@ impl AddCommand {
         // initial step and emits a single task_created broadcast.
         if let Some(workflow_id) = &self.workflow {
             options = options.with_workflow(workflow_id);
+        }
+
+        if let Some(worktree) = &self.worktree {
+            options = options.with_worktree(worktree);
         }
 
         let id = services.tasks().create_task(options).await?;
