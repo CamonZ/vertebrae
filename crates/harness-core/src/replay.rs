@@ -1,8 +1,9 @@
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::UNIX_EPOCH,
 };
 
@@ -97,6 +98,148 @@ pub struct TranscriptReplayPage {
     /// Cursor for the next older page, when one exists.
     pub next_cursor: Option<String>,
     pub has_more: bool,
+}
+
+/// Bounded LRU cache for provider-normalized transcript revisions.
+///
+/// Providers own cache instances and all transcript discovery/decoding. This
+/// shared container stores only the provider-neutral replay projection.
+#[derive(Debug)]
+pub struct TranscriptReplayCache {
+    capacity: usize,
+    entries: Mutex<VecDeque<Arc<TranscriptReplay>>>,
+    in_flight: Mutex<HashMap<TranscriptReplayCacheKey, Arc<Mutex<()>>>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TranscriptReplayCacheKey {
+    transcript_path: PathBuf,
+    revision: TranscriptRevision,
+    projection_key: String,
+}
+
+impl TranscriptReplayCache {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            entries: Mutex::new(VecDeque::new()),
+            in_flight: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn get(
+        &self,
+        transcript_path: &Path,
+        revision: &TranscriptRevision,
+        projection_key: &str,
+    ) -> Result<Option<Arc<TranscriptReplay>>, HarnessError> {
+        let mut entries = self.entries.lock().map_err(|_| {
+            HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
+        })?;
+        let Some(index) = entries.iter().position(|entry| {
+            entry.transcript_path == transcript_path
+                && &entry.revision == revision
+                && entry.projection_key == projection_key
+        }) else {
+            return Ok(None);
+        };
+        let entry = entries.remove(index).expect("cache index must exist");
+        entries.push_back(Arc::clone(&entry));
+        Ok(Some(entry))
+    }
+
+    pub fn insert(&self, replay: TranscriptReplay) -> Result<Arc<TranscriptReplay>, HarnessError> {
+        let replay = Arc::new(replay);
+        let mut entries = self.entries.lock().map_err(|_| {
+            HarnessError::Operation("normalized transcript replay cache lock was poisoned".into())
+        })?;
+        if entries.iter().any(|entry| {
+            entry.transcript_path == replay.transcript_path
+                && entry.projection_key == replay.projection_key
+                && entry.revision.is_newer_than(&replay.revision)
+        }) {
+            // A slower load of an old revision must not displace the current
+            // normalized projection. The caller may still page its result.
+            return Ok(replay);
+        }
+        entries.retain(|entry| {
+            entry.transcript_path != replay.transcript_path
+                || entry.projection_key != replay.projection_key
+        });
+        entries.push_back(Arc::clone(&replay));
+        while entries.len() > self.capacity {
+            entries.pop_front();
+        }
+        Ok(replay)
+    }
+
+    /// Return a matching replay or normalize it once for this exact revision.
+    /// Unrelated transcripts remain available while a provider decoder runs.
+    pub fn get_or_try_insert_with<F>(
+        &self,
+        transcript_path: &Path,
+        revision: &TranscriptRevision,
+        projection_key: &str,
+        loader: F,
+    ) -> Result<Arc<TranscriptReplay>, HarnessError>
+    where
+        F: FnOnce() -> Result<TranscriptReplay, HarnessError>,
+    {
+        if let Some(replay) = self.get(transcript_path, revision, projection_key)? {
+            return Ok(replay);
+        }
+
+        let key = TranscriptReplayCacheKey {
+            transcript_path: transcript_path.to_path_buf(),
+            revision: revision.clone(),
+            projection_key: projection_key.to_owned(),
+        };
+        let flight = {
+            let mut in_flight = self.in_flight.lock().map_err(|_| {
+                HarnessError::Operation(
+                    "normalized transcript replay in-flight lock was poisoned".into(),
+                )
+            })?;
+            Arc::clone(
+                in_flight
+                    .entry(key.clone())
+                    .or_insert_with(|| Arc::new(Mutex::new(()))),
+            )
+        };
+
+        let result = match flight.lock() {
+            Ok(_guard) => (|| {
+                if let Some(replay) = self.get(transcript_path, revision, projection_key)? {
+                    Ok(replay)
+                } else {
+                    self.insert(loader()?)
+                }
+            })(),
+            Err(_) => Err(HarnessError::Operation(
+                "normalized transcript replay single-flight lock was poisoned".into(),
+            )),
+        };
+
+        let mut in_flight = self.in_flight.lock().map_err(|_| {
+            HarnessError::Operation(
+                "normalized transcript replay in-flight lock was poisoned".into(),
+            )
+        })?;
+        if Arc::strong_count(&flight) == 2
+            && in_flight
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &flight))
+        {
+            in_flight.remove(&key);
+        }
+        result
+    }
+}
+
+impl TranscriptRevision {
+    fn is_newer_than(&self, other: &Self) -> bool {
+        (self.modified_nanos, self.byte_len) > (other.modified_nanos, other.byte_len)
+    }
 }
 
 impl TranscriptReplay {
@@ -332,5 +475,253 @@ mod tests {
             })
             .expect_err("foreign projection cursor");
         assert!(error.to_string().contains("no longer matches"));
+    }
+
+    #[test]
+    fn normalized_replay_cache_reuses_matching_revisions_and_evicts_lru_entries() {
+        let first_file = NamedTempFile::new().expect("first transcript");
+        let second_file = NamedTempFile::new().expect("second transcript");
+        let first = TranscriptReplay {
+            transcript_path: first_file.path().to_path_buf(),
+            revision: TranscriptRevision::capture(first_file.path()).expect("first revision"),
+            projection_key: "claude-v1:stream".into(),
+            events: vec![event(1)],
+        };
+        let first_revision = first.revision.clone();
+        let cache = TranscriptReplayCache::new(1);
+        let inserted = cache.insert(first).expect("insert first replay");
+        let reused = cache
+            .get(first_file.path(), &first_revision, "claude-v1:stream")
+            .expect("cache lookup")
+            .expect("cached first replay");
+        assert!(Arc::ptr_eq(&inserted, &reused));
+        assert_eq!(reused.events[0].sequence, 1);
+
+        cache
+            .insert(TranscriptReplay {
+                transcript_path: second_file.path().to_path_buf(),
+                revision: TranscriptRevision::capture(second_file.path()).expect("second revision"),
+                projection_key: "codex-v1:stream".into(),
+                events: vec![event(2)],
+            })
+            .expect("insert second replay");
+        assert!(
+            cache
+                .get(first_file.path(), &first_revision, "claude-v1:stream")
+                .expect("eviction lookup")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn normalized_replay_cache_loads_each_projection_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let transcript = NamedTempFile::new().expect("transcript");
+        let path = transcript.path().to_path_buf();
+        let revision = TranscriptRevision::capture(&path).expect("revision");
+        let loads = AtomicUsize::new(0);
+        let cache = TranscriptReplayCache::new(2);
+        let load = || {
+            loads.fetch_add(1, Ordering::SeqCst);
+            Ok(TranscriptReplay {
+                transcript_path: path.clone(),
+                revision: revision.clone(),
+                projection_key: "claude-v1:stream".into(),
+                events: vec![event(1)],
+            })
+        };
+        let first = cache
+            .get_or_try_insert_with(&path, &revision, "claude-v1:stream", load)
+            .expect("initial cache load");
+        let second = cache
+            .get_or_try_insert_with(&path, &revision, "claude-v1:stream", load)
+            .expect("cached replay");
+
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn normalized_replay_cache_replaces_superseded_revisions() {
+        let transcript = NamedTempFile::new().expect("transcript");
+        let path = transcript.path().to_path_buf();
+        let old_revision = TranscriptRevision {
+            byte_len: 10,
+            modified_nanos: 10,
+        };
+        let new_revision = TranscriptRevision {
+            byte_len: 20,
+            modified_nanos: 20,
+        };
+        let cache = TranscriptReplayCache::new(8);
+        cache
+            .insert(TranscriptReplay {
+                transcript_path: path.clone(),
+                revision: old_revision.clone(),
+                projection_key: "claude-v1:stream".into(),
+                events: vec![event(1)],
+            })
+            .expect("insert old revision");
+        let current = cache
+            .insert(TranscriptReplay {
+                transcript_path: path.clone(),
+                revision: new_revision.clone(),
+                projection_key: "claude-v1:stream".into(),
+                events: vec![event(2)],
+            })
+            .expect("insert current revision");
+
+        assert!(
+            cache
+                .get(&path, &old_revision, "claude-v1:stream")
+                .expect("old revision lookup")
+                .is_none()
+        );
+        assert!(Arc::ptr_eq(
+            &current,
+            &cache
+                .get(&path, &new_revision, "claude-v1:stream")
+                .expect("current revision lookup")
+                .expect("current revision")
+        ));
+
+        let late_old = cache
+            .insert(TranscriptReplay {
+                transcript_path: path.clone(),
+                revision: old_revision.clone(),
+                projection_key: "claude-v1:stream".into(),
+                events: vec![event(3)],
+            })
+            .expect("finish stale load");
+        assert_eq!(late_old.events[0].sequence, 3);
+        assert!(
+            cache
+                .get(&path, &old_revision, "claude-v1:stream")
+                .expect("late old revision lookup")
+                .is_none()
+        );
+        assert!(Arc::ptr_eq(
+            &current,
+            &cache
+                .get(&path, &new_revision, "claude-v1:stream")
+                .expect("retained current revision lookup")
+                .expect("retained current revision")
+        ));
+    }
+
+    #[test]
+    fn normalized_replay_cache_single_flights_per_key_without_blocking_other_keys() {
+        use std::{
+            sync::{
+                atomic::{AtomicUsize, Ordering},
+                mpsc,
+            },
+            thread,
+            time::Duration,
+        };
+
+        let first_file = NamedTempFile::new().expect("first transcript");
+        let second_file = NamedTempFile::new().expect("second transcript");
+        let first_path = first_file.path().to_path_buf();
+        let second_path = second_file.path().to_path_buf();
+        let first_revision = TranscriptRevision::capture(&first_path).expect("first revision");
+        let second_revision = TranscriptRevision::capture(&second_path).expect("second revision");
+        let cache = Arc::new(TranscriptReplayCache::new(8));
+        let loads = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+
+        let first = {
+            let cache = Arc::clone(&cache);
+            let loads = Arc::clone(&loads);
+            let path = first_path.clone();
+            let revision = first_revision.clone();
+            thread::spawn(move || {
+                cache.get_or_try_insert_with(&path, &revision, "claude-v1:stream", || {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    started_tx.send(()).expect("signal loader start");
+                    release_rx.recv().expect("release loader");
+                    Ok(TranscriptReplay {
+                        transcript_path: path.clone(),
+                        revision: revision.clone(),
+                        projection_key: "claude-v1:stream".into(),
+                        events: vec![event(1)],
+                    })
+                })
+            })
+        };
+        started_rx.recv().expect("loader started");
+
+        let same_key = {
+            let cache = Arc::clone(&cache);
+            let loads = Arc::clone(&loads);
+            let path = first_path.clone();
+            let revision = first_revision.clone();
+            thread::spawn(move || {
+                cache.get_or_try_insert_with(&path, &revision, "claude-v1:stream", || {
+                    loads.fetch_add(1, Ordering::SeqCst);
+                    Ok(TranscriptReplay {
+                        transcript_path: path.clone(),
+                        revision: revision.clone(),
+                        projection_key: "claude-v1:stream".into(),
+                        events: vec![event(99)],
+                    })
+                })
+            })
+        };
+        let mut same_key_waiting = false;
+        for _ in 0..10_000 {
+            same_key_waiting = cache
+                .in_flight
+                .lock()
+                .expect("in-flight map")
+                .values()
+                .next()
+                .is_some_and(|flight| Arc::strong_count(flight) >= 3);
+            if same_key_waiting {
+                break;
+            }
+            thread::yield_now();
+        }
+
+        let (unrelated_tx, unrelated_rx) = mpsc::sync_channel(0);
+        let unrelated = {
+            let cache = Arc::clone(&cache);
+            let path = second_path.clone();
+            let revision = second_revision.clone();
+            thread::spawn(move || {
+                let result =
+                    cache.get_or_try_insert_with(&path, &revision, "codex-v1:other-stream", || {
+                        Ok(TranscriptReplay {
+                            transcript_path: path.clone(),
+                            revision: revision.clone(),
+                            projection_key: "codex-v1:other-stream".into(),
+                            events: vec![event(2)],
+                        })
+                    });
+                unrelated_tx.send(result).expect("send unrelated result");
+            })
+        };
+        let unrelated_result = unrelated_rx.recv_timeout(Duration::from_secs(1));
+        release_tx.send(()).expect("release first loader");
+
+        let first = first.join().expect("first thread").expect("first replay");
+        let same_key = same_key
+            .join()
+            .expect("same-key thread")
+            .expect("same-key replay");
+        unrelated.join().expect("unrelated thread");
+        let unrelated = unrelated_result
+            .expect("unrelated key must not wait for first loader")
+            .expect("unrelated replay");
+
+        assert_eq!(loads.load(Ordering::SeqCst), 1);
+        assert!(
+            same_key_waiting,
+            "same-key request joined the in-flight load"
+        );
+        assert!(Arc::ptr_eq(&first, &same_key));
+        assert_eq!(unrelated.events[0].sequence, 2);
     }
 }

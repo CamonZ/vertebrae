@@ -2,13 +2,15 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Component, Path, PathBuf},
+    sync::OnceLock,
 };
 
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
     EventSequencer, HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TranscriptRevision,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
+    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -35,15 +37,45 @@ impl ClaudeTranscriptReplay {
             return Ok(None);
         };
         let revision = TranscriptRevision::capture(&path)?;
+        Ok(Some(self.normalize(path, revision, request)?))
+    }
+
+    pub fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(None);
+        };
+        let revision = TranscriptRevision::capture(&path)?;
+        let projection_key = claude_projection_key(request);
+        let normalized_path = path.clone();
+        let normalized_revision = revision.clone();
+        let replay = claude_replay_cache().get_or_try_insert_with(
+            &path,
+            &revision,
+            &projection_key,
+            || self.normalize(normalized_path, normalized_revision, request),
+        )?;
+        replay.page(page).map(Some)
+    }
+
+    fn normalize(
+        &self,
+        path: PathBuf,
+        revision: TranscriptRevision,
+        request: &TranscriptReplayRequest,
+    ) -> Result<TranscriptReplay, HarnessError> {
         let drafts = self.read_drafts(&path, request)?;
         revision.verify(&path)?;
         let sequencer = EventSequencer::default();
-        Ok(Some(TranscriptReplay {
+        Ok(TranscriptReplay {
             transcript_path: path,
             revision,
-            projection_key: format!("claude-v1:{}", request.stream_id),
+            projection_key: claude_projection_key(request),
             events: sequencer.sequence_drafts(drafts),
-        }))
+        })
     }
 
     pub fn discover(
@@ -152,6 +184,25 @@ impl TranscriptReplayAdapter for ClaudeTranscriptReplay {
     ) -> Result<Option<TranscriptReplay>, HarnessError> {
         self.replay(request)
     }
+
+    fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        self.replay_page(request, page)
+    }
+}
+
+const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
+
+fn claude_replay_cache() -> &'static TranscriptReplayCache {
+    static CACHE: OnceLock<TranscriptReplayCache> = OnceLock::new();
+    CACHE.get_or_init(|| TranscriptReplayCache::new(NORMALIZED_REPLAY_CACHE_CAPACITY))
+}
+
+fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
+    format!("claude-v1:{}", request.stream_id)
 }
 
 fn record_timestamp(value: &Value) -> DateTime<Utc> {
@@ -160,7 +211,7 @@ fn record_timestamp(value: &Value) -> DateTime<Utc> {
         .and_then(Value::as_str)
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now)
+        .unwrap_or(DateTime::UNIX_EPOCH)
 }
 
 fn user_text(value: &Value) -> Option<String> {
@@ -240,11 +291,25 @@ mod tests {
 
     use tempfile::tempdir;
     use vertebrae_harness_core::{
-        CompactionState, HarnessEventPayloadV1, HarnessProjection, ProviderResumeId, StreamId,
-        ToolCallId, ToolStatus, TranscriptReplayRequest, UpdateSemantics,
+        CompactionState, HarnessEventPayloadV1, HarnessEventV1, HarnessProjection,
+        ProviderResumeId, StreamId, ToolCallId, ToolStatus, TranscriptReplayRequest,
+        UpdateSemantics,
     };
 
     use super::*;
+
+    fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.stream_id, expected.stream_id);
+            assert_eq!(actual.sequence, expected.sequence);
+            assert_eq!(actual.correlation, expected.correlation);
+            assert_eq!(actual.timestamp, expected.timestamp);
+            assert_eq!(actual.semantics, expected.semantics);
+            assert_eq!(actual.provider_sequence, expected.provider_sequence);
+            assert_eq!(actual.payload, expected.payload);
+        }
+    }
 
     #[test]
     fn discovers_project_transcript_and_replays_human_and_assistant_events() {
@@ -261,20 +326,19 @@ mod tests {
             concat!(
                 "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"session-1\",\"model\":\"sonnet\",\"timestamp\":\"2026-01-01T00:00:00Z\"}\n",
                 "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]},\"timestamp\":\"2026-01-01T00:00:01Z\"}\n",
-                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"timestamp\":\"2026-01-01T00:00:02Z\"}\n"
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]},\"timestamp\":\"invalid\"}\n"
             ),
         )
         .unwrap();
 
-        let replay = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()))
-            .replay(&TranscriptReplayRequest {
-                provider_resume_id: ProviderResumeId::new("session-1"),
-                stream_id: StreamId::new("replay/session-1"),
-                project_path: Some(project),
-                created_at: None,
-            })
-            .unwrap()
-            .unwrap();
+        let adapter = ClaudeTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("session-1"),
+            stream_id: StreamId::new("replay/session-1"),
+            project_path: Some(project),
+            created_at: None,
+        };
+        let replay = adapter.replay(&request).unwrap().unwrap();
 
         assert_eq!(
             replay.transcript_path,
@@ -288,6 +352,31 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+        assert!(replay.events.iter().any(|event| {
+            matches!(event.payload, HarnessEventPayloadV1::Text(ref text) if text.text == "hi")
+                && event.timestamp == DateTime::UNIX_EPOCH
+        }));
+
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(2),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        assert_stable_events_equal(&paged, &replay.events);
     }
 
     #[test]

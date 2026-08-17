@@ -3,6 +3,7 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader},
     path::{Component, Path, PathBuf},
+    sync::OnceLock,
 };
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -12,8 +13,9 @@ use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent,
     ProviderResumeId, ProviderThreadRef, SessionId, SessionStarted, StreamId, TextEvent,
     ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TranscriptRevision,
-    TurnInput, TurnInputProvenance, UpdateSemantics,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
+    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision, TurnInput,
+    TurnInputProvenance, UpdateSemantics,
 };
 
 /// Reader for Codex rollout JSONL files in `~/.codex/sessions` and
@@ -36,15 +38,45 @@ impl CodexTranscriptReplay {
             return Ok(None);
         };
         let revision = TranscriptRevision::capture(&path)?;
+        Ok(Some(self.normalize(path, revision, request)?))
+    }
+
+    pub fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        let Some(path) = self.discover(request)? else {
+            return Ok(None);
+        };
+        let revision = TranscriptRevision::capture(&path)?;
+        let projection_key = codex_projection_key(request);
+        let normalized_path = path.clone();
+        let normalized_revision = revision.clone();
+        let replay = codex_replay_cache().get_or_try_insert_with(
+            &path,
+            &revision,
+            &projection_key,
+            || self.normalize(normalized_path, normalized_revision, request),
+        )?;
+        replay.page(page).map(Some)
+    }
+
+    fn normalize(
+        &self,
+        path: PathBuf,
+        revision: TranscriptRevision,
+        request: &TranscriptReplayRequest,
+    ) -> Result<TranscriptReplay, HarnessError> {
         let drafts = read_rollout(&path, request)?;
         revision.verify(&path)?;
         let sequencer = EventSequencer::default();
-        Ok(Some(TranscriptReplay {
+        Ok(TranscriptReplay {
             transcript_path: path,
             revision,
-            projection_key: format!("codex-v1:{}", request.stream_id),
+            projection_key: codex_projection_key(request),
             events: sequencer.sequence_drafts(drafts),
-        }))
+        })
     }
 
     pub fn discover(
@@ -113,6 +145,25 @@ impl TranscriptReplayAdapter for CodexTranscriptReplay {
     ) -> Result<Option<TranscriptReplay>, HarnessError> {
         self.replay(request)
     }
+
+    fn replay_page(
+        &self,
+        request: &TranscriptReplayRequest,
+        page: &TranscriptReplayPageRequest,
+    ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        self.replay_page(request, page)
+    }
+}
+
+const NORMALIZED_REPLAY_CACHE_CAPACITY: usize = 8;
+
+fn codex_replay_cache() -> &'static TranscriptReplayCache {
+    static CACHE: OnceLock<TranscriptReplayCache> = OnceLock::new();
+    CACHE.get_or_init(|| TranscriptReplayCache::new(NORMALIZED_REPLAY_CACHE_CAPACITY))
+}
+
+fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
+    format!("codex-v1:{}", request.stream_id)
 }
 
 #[derive(Debug)]
@@ -254,7 +305,7 @@ fn read_rollout(
     if !state.emitted_session_start_ids.is_empty() {
         return Ok(drafts);
     }
-    let timestamp = first_timestamp.unwrap_or_else(Utc::now);
+    let timestamp = first_timestamp.unwrap_or(DateTime::UNIX_EPOCH);
     let mut prefix = state.start_events(timestamp, 0, None, path);
     prefix.extend(drafts);
     Ok(prefix)
@@ -827,7 +878,7 @@ fn record_timestamp(value: &Value) -> DateTime<Utc> {
         .and_then(Value::as_str)
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
-        .unwrap_or_else(Utc::now)
+        .unwrap_or(DateTime::UNIX_EPOCH)
 }
 
 fn parse_date_prefix(value: &str) -> Option<NaiveDate> {
@@ -883,9 +934,22 @@ mod tests {
     use std::fs;
 
     use tempfile::tempdir;
-    use vertebrae_harness_core::{HarnessEventPayloadV1, TranscriptReplayRequest};
+    use vertebrae_harness_core::{HarnessEventPayloadV1, HarnessEventV1, TranscriptReplayRequest};
 
     use super::*;
+
+    fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_eq!(actual.stream_id, expected.stream_id);
+            assert_eq!(actual.sequence, expected.sequence);
+            assert_eq!(actual.correlation, expected.correlation);
+            assert_eq!(actual.timestamp, expected.timestamp);
+            assert_eq!(actual.semantics, expected.semantics);
+            assert_eq!(actual.provider_sequence, expected.provider_sequence);
+            assert_eq!(actual.payload, expected.payload);
+        }
+    }
 
     #[test]
     fn discovers_date_partitioned_rollout_and_replays_core_events() {
@@ -898,19 +962,18 @@ mod tests {
             concat!(
                 "{\"timestamp\":\"2026-01-01T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"session-1\"}}\n",
                 "{\"timestamp\":\"2026-01-01T00:00:01Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello\"}]}}\n",
-                "{\"timestamp\":\"2026-01-01T00:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n"
+                "{\"timestamp\":\"invalid\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi\"}]}}\n"
             ),
         )
         .unwrap();
-        let replay = CodexTranscriptReplay::new(Some(home.path().to_path_buf()))
-            .replay(&TranscriptReplayRequest {
-                provider_resume_id: ProviderResumeId::new("session-1"),
-                stream_id: StreamId::new("replay/session-1"),
-                project_path: None,
-                created_at: Some("2026-01-01T00:00:00Z".into()),
-            })
-            .unwrap()
-            .unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("session-1"),
+            stream_id: StreamId::new("replay/session-1"),
+            project_path: None,
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        };
+        let replay = adapter.replay(&request).unwrap().unwrap();
         assert_eq!(
             replay.transcript_path,
             fs::canonicalize(transcript).unwrap()
@@ -923,6 +986,76 @@ mod tests {
             event.payload,
             HarnessEventPayloadV1::Text(ref text) if text.text == "hi"
         )));
+        assert!(replay.events.iter().any(|event| {
+            matches!(event.payload, HarnessEventPayloadV1::Text(ref text) if text.text == "hi")
+                && event.timestamp == DateTime::UNIX_EPOCH
+        }));
+
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(2),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+        assert_stable_events_equal(&paged, &replay.events);
+    }
+
+    #[test]
+    fn empty_transcript_pages_match_full_replay_with_a_stable_timestamp() {
+        let home = tempdir().unwrap();
+        let directory = home.path().join(".codex/sessions/2026/01/01");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("rollout-empty-session.jsonl"), "").unwrap();
+        let adapter = CodexTranscriptReplay::new(Some(home.path().to_path_buf()));
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("empty-session"),
+            stream_id: StreamId::new("replay/empty-session"),
+            project_path: None,
+            created_at: Some("2026-01-01T00:00:00Z".into()),
+        };
+
+        let replay = adapter.replay(&request).unwrap().unwrap();
+        let mut cursor = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = adapter
+                .replay_page(
+                    &request,
+                    &TranscriptReplayPageRequest {
+                        cursor,
+                        limit: Some(1),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+            paged.splice(0..0, page.events);
+            if !page.has_more {
+                break;
+            }
+            cursor = page.next_cursor;
+        }
+
+        assert_eq!(replay.events.len(), 2);
+        assert!(
+            replay
+                .events
+                .iter()
+                .all(|event| event.timestamp == DateTime::UNIX_EPOCH)
+        );
+        assert_stable_events_equal(&paged, &replay.events);
     }
 
     #[test]

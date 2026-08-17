@@ -24,8 +24,7 @@ use vertebrae_harness_codex::{
 };
 use vertebrae_harness_core::{
     HarnessError, HarnessRuntime, ProviderThreadRef, RequestConfig, SessionId, TranscriptReplay,
-    TranscriptReplayAdapter, TranscriptReplayPage, TranscriptReplayPageRequest,
-    TranscriptReplayRequest,
+    TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest,
 };
 
 /// Construction inputs owned by the surface or deployment environment.

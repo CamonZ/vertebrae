@@ -472,11 +472,20 @@ pub async fn load_local_chat_session_replay(
         cursor: input.cursor,
         limit: input.limit.map(|limit| limit as usize),
     };
-    let replay = HarnessRuntimeFactory::new(HarnessFactoryConfig::default())
-        .replay_transcript_page(provider, &request, &page_request)
-        .map_err(|error| CommandError {
-            message: format!("Failed to replay local chat transcript: {error}"),
-        })?;
+    let replay = tauri::async_runtime::spawn_blocking(move || {
+        HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).replay_transcript_page(
+            provider,
+            &request,
+            &page_request,
+        )
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: format!("Failed to join local chat replay loader: {error}"),
+    })?
+    .map_err(|error| CommandError {
+        message: format!("Failed to replay local chat transcript: {error}"),
+    })?;
     let events = replay
         .as_ref()
         .map(|page| {
