@@ -1,5 +1,3 @@
-name: "${COMPOSE_PROJECT_NAME}"
-
 services:
   postgres:
     image: "${POSTGRES_IMAGE_REF:-postgres:18-alpine}"
@@ -40,7 +38,7 @@ services:
       - "${SACRUM_BIND_PREFIX}${SACRUM_HOST_PORT:?}:4000"
     entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/migrate && exec /app/bin/server"]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/healthz"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:4000/healthz"]
       interval: 5s
       timeout: 3s
       start_period: 30s
@@ -67,3 +65,4 @@ services:
 volumes:
   pgdata:
     name: "${POSTGRES_VOLUME:?}"
+    external: ${POSTGRES_VOLUME_EXTERNAL:?}

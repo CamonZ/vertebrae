@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+#[cfg(unix)]
+use std::fs::File;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, TcpListener};
@@ -8,8 +10,6 @@ use uuid::Uuid;
 
 const COMPOSE_ASSET: &str = include_str!("assets/compose.yaml");
 const SEED_ASSET: &str = include_str!("assets/seed.exs");
-const MANAGED_PROJECT: &str = "vertebrae-local";
-const MANAGED_VOLUME: &str = "vertebrae-local_pgdata";
 pub(crate) const LEGACY_PROJECT: &str = "vertebrae-dev";
 pub(crate) const LEGACY_VOLUME: &str = "vertebrae-dev_pgdata";
 pub(crate) const FRESH_POSTGRES_IMAGE: &str = "postgres:18-alpine";
@@ -30,10 +30,29 @@ pub enum LocalBackendError {
     InvalidState(String),
     #[error("Could not generate local backend secrets: {0}")]
     SecretGeneration(String),
-    #[error("Docker is unavailable: {0}")]
-    DockerUnavailable(String),
+    #[error("Docker CLI was not found; searched {searched}")]
+    DockerCliNotFound { searched: String },
+    #[error("Docker daemon is unreachable: {0}")]
+    DockerDaemonUnreachable(String),
+    #[error("Permission to access the Docker daemon was denied: {0}")]
+    DockerDaemonPermissionDenied(String),
+    #[error("Docker context '{name}' uses unsupported endpoint '{endpoint}'")]
+    UnsupportedDockerContext { name: String, endpoint: String },
+    #[error("Docker context changed from '{expected_name}' ({expected_endpoint}) to '{actual_name}' ({actual_endpoint})")]
+    DockerContextChanged {
+        expected_name: String,
+        expected_endpoint: String,
+        actual_name: String,
+        actual_endpoint: String,
+    },
     #[error("Docker Compose is unavailable: {0}")]
     ComposeUnavailable(String),
+    #[error("Docker Engine {found} cannot safely publish a loopback-only port; version {minimum}+ is required")]
+    UnsupportedEngineVersion { found: String, minimum: u64 },
+    #[error("Persistent database volume '{volume}' is unavailable: {reason}")]
+    PersistentVolumeUnavailable { volume: String, reason: String },
+    #[error("Local backend port {port} is unavailable: {output}")]
+    PortUnavailable { port: u16, output: String },
     #[error("Docker command '{action}' failed with status {status}: {output}")]
     CommandFailed {
         action: String,
@@ -74,15 +93,6 @@ pub enum BackendImageChannel {
     BackendRelease,
 }
 
-impl BackendImageChannel {
-    pub fn manifest_name(self) -> &'static str {
-        match self {
-            Self::BackendMaster => "backend-master",
-            Self::BackendRelease => "backend-release",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProvisioningState {
@@ -94,15 +104,65 @@ pub enum ProvisioningState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DockerTarget {
+    pub name: String,
+    pub endpoint: String,
+}
+
+impl DockerTarget {
+    pub fn new(
+        name: impl Into<String>,
+        endpoint: impl Into<String>,
+    ) -> Result<Self, LocalBackendError> {
+        let target = Self {
+            name: name.into(),
+            endpoint: endpoint.into(),
+        };
+        target.validate()?;
+        Ok(target)
+    }
+
+    pub fn validate(&self) -> Result<(), LocalBackendError> {
+        if self.name.trim().is_empty() || self.endpoint.trim().is_empty() {
+            return Err(LocalBackendError::InvalidState(
+                "Docker context name and endpoint must not be empty".to_string(),
+            ));
+        }
+        if !approved_local_endpoint(&self.endpoint) {
+            return Err(LocalBackendError::UnsupportedDockerContext {
+                name: self.name.clone(),
+                endpoint: self.endpoint.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(unix)]
+fn approved_local_endpoint(endpoint: &str) -> bool {
+    endpoint.starts_with("unix://")
+}
+
+#[cfg(windows)]
+fn approved_local_endpoint(endpoint: &str) -> bool {
+    endpoint.starts_with("npipe://")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn approved_local_endpoint(_endpoint: &str) -> bool {
+    false
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedStackState {
     pub schema_version: u32,
     pub kind: StackKind,
-    pub project_name: String,
-    pub postgres_volume: String,
-    pub postgres_image_ref: String,
+    pub installation_id: Uuid,
+    pub docker_target: DockerTarget,
     pub sacrum_image_ref: String,
     pub image_channel: BackendImageChannel,
     pub provisioning_state: ProvisioningState,
+    pub postgres_volume_initialized: bool,
     pub host_port: u16,
     pub sacrum_bind_host: String,
 }
@@ -112,16 +172,17 @@ impl ManagedStackState {
         sacrum_image_ref: impl Into<String>,
         host_port: u16,
         image_channel: BackendImageChannel,
+        docker_target: DockerTarget,
     ) -> Result<Self, LocalBackendError> {
         Self::validated(Self {
             schema_version: 1,
             kind: StackKind::Managed,
-            project_name: MANAGED_PROJECT.to_string(),
-            postgres_volume: MANAGED_VOLUME.to_string(),
-            postgres_image_ref: FRESH_POSTGRES_IMAGE.to_string(),
+            installation_id: Uuid::new_v4(),
+            docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
             image_channel,
             provisioning_state: ProvisioningState::Pending,
+            postgres_volume_initialized: false,
             host_port,
             sacrum_bind_host: "127.0.0.1".to_string(),
         })
@@ -132,40 +193,19 @@ impl ManagedStackState {
         host_port: u16,
         sacrum_bind_host: impl Into<String>,
         image_channel: BackendImageChannel,
+        docker_target: DockerTarget,
     ) -> Result<Self, LocalBackendError> {
         Self::validated(Self {
             schema_version: 1,
             kind: StackKind::AdoptedLegacy,
-            project_name: LEGACY_PROJECT.to_string(),
-            postgres_volume: LEGACY_VOLUME.to_string(),
-            postgres_image_ref: LEGACY_POSTGRES_IMAGE.to_string(),
+            installation_id: Uuid::new_v4(),
+            docker_target,
             sacrum_image_ref: sacrum_image_ref.into(),
             image_channel,
             provisioning_state: ProvisioningState::Unverified,
+            postgres_volume_initialized: true,
             host_port,
             sacrum_bind_host: sacrum_bind_host.into(),
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn isolated_test_stack(
-        sacrum_image_ref: impl Into<String>,
-        host_port: u16,
-        suffix: &str,
-    ) -> Result<Self, LocalBackendError> {
-        let project_name = format!("vertebrae-local-test-{suffix}");
-        let postgres_volume = format!("{project_name}_pgdata");
-        Self::validated(Self {
-            schema_version: 1,
-            kind: StackKind::Managed,
-            project_name,
-            postgres_volume,
-            postgres_image_ref: FRESH_POSTGRES_IMAGE.to_string(),
-            sacrum_image_ref: sacrum_image_ref.into(),
-            image_channel: BackendImageChannel::BackendRelease,
-            provisioning_state: ProvisioningState::Pending,
-            host_port,
-            sacrum_bind_host: "127.0.0.1".to_string(),
         })
     }
 
@@ -175,7 +215,7 @@ impl ManagedStackState {
     }
 
     pub fn backend_url(&self) -> String {
-        format!("http://localhost:{}", self.host_port)
+        format!("http://127.0.0.1:{}", self.host_port)
     }
 
     pub fn postgres_data_path(&self) -> &'static str {
@@ -183,6 +223,31 @@ impl ManagedStackState {
             StackKind::Managed => "/var/lib/postgresql",
             StackKind::AdoptedLegacy => "/var/lib/postgresql/data",
         }
+    }
+
+    pub fn project_name(&self) -> String {
+        match self.kind {
+            StackKind::Managed => format!("vertebrae-local-{}", self.installation_id.simple()),
+            StackKind::AdoptedLegacy => LEGACY_PROJECT.to_string(),
+        }
+    }
+
+    pub fn postgres_volume(&self) -> String {
+        match self.kind {
+            StackKind::Managed => format!("{}_pgdata", self.project_name()),
+            StackKind::AdoptedLegacy => LEGACY_VOLUME.to_string(),
+        }
+    }
+
+    pub fn postgres_image_ref(&self) -> &'static str {
+        match self.kind {
+            StackKind::Managed => FRESH_POSTGRES_IMAGE,
+            StackKind::AdoptedLegacy => LEGACY_POSTGRES_IMAGE,
+        }
+    }
+
+    pub fn postgres_volume_is_external(&self) -> bool {
+        self.postgres_volume_initialized
     }
 
     pub fn sacrum_bind_prefix(&self) -> String {
@@ -200,27 +265,17 @@ impl ManagedStackState {
                 self.schema_version
             )));
         }
-        let expected = match self.kind {
-            StackKind::Managed => (MANAGED_PROJECT, MANAGED_VOLUME, FRESH_POSTGRES_IMAGE),
-            StackKind::AdoptedLegacy => (LEGACY_PROJECT, LEGACY_VOLUME, LEGACY_POSTGRES_IMAGE),
-        };
-        let identity = (
-            self.project_name.as_str(),
-            self.postgres_volume.as_str(),
-            self.postgres_image_ref.as_str(),
-        );
-        #[cfg(test)]
-        let isolated_test_identity = self.kind == StackKind::Managed
-            && self.project_name.starts_with("vertebrae-local-test-")
-            && self.postgres_volume == format!("{}_pgdata", self.project_name)
-            && self.postgres_image_ref == FRESH_POSTGRES_IMAGE;
-        #[cfg(not(test))]
-        let isolated_test_identity = false;
-        if identity != expected && !isolated_test_identity {
+        if self.installation_id.is_nil() {
             return Err(LocalBackendError::InvalidState(
-                "project, volume, or PostgreSQL image does not match the stack kind".to_string(),
+                "installation ID must not be nil".to_string(),
             ));
         }
+        if self.kind == StackKind::AdoptedLegacy && !self.postgres_volume_initialized {
+            return Err(LocalBackendError::InvalidState(
+                "adopted legacy database volume must be initialized".to_string(),
+            ));
+        }
+        self.docker_target.validate()?;
         if self.host_port == 0 {
             return Err(LocalBackendError::InvalidState(
                 "host port must be between 1 and 65535".to_string(),
@@ -301,7 +356,12 @@ impl RuntimeSecrets {
     }
 
     pub(crate) fn redact(&self, text: &str) -> String {
-        [&self.postgres_password, &self.secret_key_base]
+        let mut values = [
+            self.postgres_password.as_str(),
+            self.secret_key_base.as_str(),
+        ];
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values
             .into_iter()
             .fold(text.to_string(), |redacted, value| {
                 redacted.replace(value, "[redacted]")
@@ -448,6 +508,7 @@ impl ManagedStackPaths {
         match fs::hard_link(&temp, &self.secrets_file) {
             Ok(()) => {
                 remove_temp(&temp);
+                sync_parent(&self.secrets_file)?;
                 Ok(proposed.clone())
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -530,7 +591,8 @@ fn atomic_replace(path: &Path, content: &[u8], mode: u32) -> Result<(), LocalBac
     fs::rename(&temp, path).map_err(|source| {
         remove_temp(&temp);
         file_error("replace", path, source)
-    })
+    })?;
+    sync_parent(path)
 }
 
 fn write_temp_file(path: &Path, content: &[u8], mode: u32) -> Result<PathBuf, LocalBackendError> {
@@ -581,6 +643,21 @@ fn remove_temp(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
+#[cfg(unix)]
+fn sync_parent(path: &Path) -> Result<(), LocalBackendError> {
+    let parent = path.parent().ok_or_else(|| {
+        LocalBackendError::InvalidState(format!("{} has no parent directory", path.display()))
+    })?;
+    File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| file_error("sync directory containing", path, source))
+}
+
+#[cfg(not(unix))]
+fn sync_parent(_path: &Path) -> Result<(), LocalBackendError> {
+    Ok(())
+}
+
 fn to_hex(bytes: &[u8]) -> String {
     use fmt::Write as _;
 
@@ -616,6 +693,10 @@ mod tests {
         .expect("valid secrets")
     }
 
+    fn docker_target() -> DockerTarget {
+        DockerTarget::new("desktop-linux", "unix:///tmp/docker.sock").expect("local target")
+    }
+
     #[test]
     fn managed_assets_define_the_required_stack() {
         let temp = tempfile::tempdir().expect("temp dir");
@@ -633,8 +714,9 @@ mod tests {
             "${SACRUM_IMAGE_REF:?}",
             "${SACRUM_BIND_PREFIX}",
             "/app/bin/migrate",
-            "http://localhost:4000/healthz",
+            "http://127.0.0.1:4000/healthz",
             "${POSTGRES_VOLUME:?}",
+            "external: ${POSTGRES_VOLUME_EXTERNAL:?}",
             "${POSTGRES_DATA_PATH:?}",
         ] {
             assert!(compose.contains(required), "compose is missing {required}");
@@ -643,6 +725,7 @@ mod tests {
             compose.matches("image: \"${SACRUM_IMAGE_REF:?}\"").count(),
             2
         );
+        assert!(!compose.starts_with("name:"));
         assert!(seed.contains("System.fetch_env!(\"SEED_TOKEN\")"));
         assert!(!seed.contains("dev_password_123"));
         assert!(!seed.contains("sac_dev-local-token"));
@@ -650,26 +733,75 @@ mod tests {
 
     #[test]
     fn managed_state_requires_an_official_digest_pinned_image() {
-        let state =
-            ManagedStackState::fresh(DIGEST_IMAGE, 4400, BackendImageChannel::BackendRelease)
-                .expect("valid managed state");
-        assert_eq!(state.project_name, "vertebrae-local");
-        assert_eq!(state.postgres_volume, "vertebrae-local_pgdata");
-        assert_eq!(state.postgres_image_ref, "postgres:18-alpine");
+        let state = ManagedStackState::fresh(
+            DIGEST_IMAGE,
+            4400,
+            BackendImageChannel::BackendRelease,
+            docker_target(),
+        )
+        .expect("valid managed state");
+        let project_name = format!("vertebrae-local-{}", state.installation_id.simple());
+        assert_eq!(state.project_name(), project_name);
+        assert_eq!(state.postgres_volume(), format!("{project_name}_pgdata"));
+        assert_eq!(state.postgres_image_ref(), "postgres:18-alpine");
         assert_eq!(state.postgres_data_path(), "/var/lib/postgresql");
-        assert_eq!(state.backend_url(), "http://localhost:4400");
+        assert_eq!(state.backend_url(), "http://127.0.0.1:4400");
         assert_eq!(state.sacrum_bind_host, "127.0.0.1");
         assert_eq!(state.sacrum_bind_prefix(), "127.0.0.1:");
         assert_eq!(state.provisioning_state, ProvisioningState::Pending);
-        assert_eq!(state.image_channel.manifest_name(), "backend-release");
+        assert_eq!(state.image_channel, BackendImageChannel::BackendRelease);
+        assert!(!state.installation_id.is_nil());
+        assert!(!state.postgres_volume_initialized);
+        assert!(!state.postgres_volume_is_external());
+
+        for provisioning_state in [
+            ProvisioningState::InProgress,
+            ProvisioningState::Ready,
+            ProvisioningState::Failed,
+        ] {
+            let mut not_created = state.clone();
+            not_created.provisioning_state = provisioning_state;
+            assert!(!not_created.postgres_volume_is_external());
+        }
+
+        let mut previously_created = state.clone();
+        previously_created.postgres_volume_initialized = true;
+        assert!(previously_created.postgres_volume_is_external());
 
         let error = ManagedStackState::fresh(
             "ghcr.io/camonz/sacrum:latest",
             4400,
             BackendImageChannel::BackendMaster,
+            docker_target(),
         )
         .expect_err("mutable image must be rejected");
         assert!(error.to_string().contains("digest-pinned"));
+    }
+
+    #[test]
+    fn fresh_states_have_distinct_installation_ids_and_reject_remote_contexts() {
+        let first = ManagedStackState::fresh(
+            DIGEST_IMAGE,
+            4400,
+            BackendImageChannel::BackendRelease,
+            docker_target(),
+        )
+        .expect("first state");
+        let second = ManagedStackState::fresh(
+            DIGEST_IMAGE,
+            4400,
+            BackendImageChannel::BackendRelease,
+            docker_target(),
+        )
+        .expect("second state");
+
+        assert_ne!(first.installation_id, second.installation_id);
+        assert_ne!(first.project_name(), second.project_name());
+        assert_ne!(first.postgres_volume(), second.postgres_volume());
+        assert!(matches!(
+            DockerTarget::new("remote", "tcp://docker.example:2376"),
+            Err(LocalBackendError::UnsupportedDockerContext { .. })
+        ));
     }
 
     #[test]
@@ -679,19 +811,18 @@ mod tests {
             4400,
             "",
             BackendImageChannel::BackendRelease,
+            docker_target(),
         )
         .expect("valid adopted state");
-        assert_eq!(adopted.postgres_image_ref, "postgres:17-alpine");
-        assert_eq!(adopted.postgres_volume, "vertebrae-dev_pgdata");
+        assert_eq!(adopted.postgres_image_ref(), "postgres:17-alpine");
+        assert_eq!(adopted.postgres_volume(), "vertebrae-dev_pgdata");
         assert_eq!(adopted.postgres_data_path(), "/var/lib/postgresql/data");
+        assert_eq!(adopted.backend_url(), "http://127.0.0.1:4400");
         assert_eq!(adopted.provisioning_state, ProvisioningState::Unverified);
+        assert!(adopted.postgres_volume_initialized);
+        assert!(adopted.postgres_volume_is_external());
 
-        let mut unsafe_state = adopted;
-        unsafe_state.postgres_image_ref = "postgres:18-alpine".to_string();
-        let error = unsafe_state
-            .validate()
-            .expect_err("legacy volume and postgres 18 must be rejected");
-        assert!(error.to_string().contains("does not match the stack kind"));
+        assert_ne!(adopted.postgres_image_ref(), FRESH_POSTGRES_IMAGE);
     }
 
     #[test]
@@ -761,12 +892,29 @@ mod tests {
     }
 
     #[test]
+    fn redaction_replaces_overlapping_secrets_longest_first() {
+        let shorter = "a".repeat(32);
+        let longer = format!("{}{}", shorter, "b".repeat(32));
+        let secrets = RuntimeSecrets::new(&shorter, &longer).expect("valid overlapping secrets");
+
+        let redacted = secrets.redact(&format!("{longer} {shorter}"));
+
+        assert_eq!(redacted, "[redacted] [redacted]");
+        assert!(!redacted.contains(&shorter));
+        assert!(!redacted.contains(&longer));
+    }
+
+    #[test]
     fn state_round_trips_without_secrets() {
         let temp = tempfile::tempdir().expect("temp dir");
         let paths = ManagedStackPaths::from_data_dir(temp.path());
-        let state =
-            ManagedStackState::fresh(DIGEST_IMAGE, 4400, BackendImageChannel::BackendMaster)
-                .expect("valid state");
+        let state = ManagedStackState::fresh(
+            DIGEST_IMAGE,
+            4400,
+            BackendImageChannel::BackendMaster,
+            docker_target(),
+        )
+        .expect("valid state");
 
         paths.save_state(&state).expect("save state");
 
@@ -776,6 +924,44 @@ mod tests {
         assert!(!json.contains("SECRET_KEY_BASE"));
         assert!(json.contains(r#""image_channel": "backend-master""#));
         assert!(json.contains(r#""provisioning_state": "pending""#));
+        assert!(json.contains(r#""postgres_volume_initialized": false"#));
+        assert!(json.contains(r#""name": "desktop-linux""#));
+        assert!(json.contains(r#""endpoint": "unix:///tmp/docker.sock""#));
+    }
+
+    #[test]
+    fn atomic_persistence_leaves_only_complete_directory_entries() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let paths = ManagedStackPaths::from_data_dir(temp.path());
+        let state = ManagedStackState::fresh(
+            DIGEST_IMAGE,
+            4400,
+            BackendImageChannel::BackendRelease,
+            docker_target(),
+        )
+        .expect("valid state");
+
+        paths.install_assets().expect("install assets");
+        paths
+            .ensure_runtime_secrets(&secrets("durable"), state.kind)
+            .expect("persist secrets");
+        paths.save_state(&state).expect("persist state");
+
+        let mut names: Vec<_> = fs::read_dir(&paths.root)
+            .expect("read managed directory")
+            .map(|entry| {
+                entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            ["compose.yaml", "runtime.env", "seed.exs", "state.json"]
+        );
     }
 
     #[test]

@@ -1,5 +1,8 @@
-use std::ffi::OsString;
+use std::env;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -17,8 +20,10 @@ pub(crate) struct CommandRequest {
     pub(super) program: OsString,
     pub(super) args: Vec<OsString>,
     pub(super) env: Vec<(OsString, OsString)>,
+    pub(super) env_remove: Vec<OsString>,
     pub(super) timeout: Duration,
     pub(super) max_capture_bytes: usize,
+    pub(super) sensitive_output: bool,
 }
 
 impl CommandRequest {
@@ -33,9 +38,24 @@ impl CommandRequest {
             program: program.into(),
             args: args.into_iter().map(Into::into).collect(),
             env: Vec::new(),
+            env_remove: Vec::new(),
             timeout,
             max_capture_bytes: DEFAULT_CAPTURE_BYTES,
+            sensitive_output: false,
         }
+    }
+
+    pub fn with_env_removed(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<OsString>>,
+    ) -> Self {
+        self.env_remove.extend(names.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn with_sensitive_output(mut self) -> Self {
+        self.sensitive_output = true;
+        self
     }
 
     pub fn with_env(
@@ -69,6 +89,11 @@ impl CommandRequest {
             .find(|(candidate, _)| candidate == name)
             .map(|(_, value)| value.as_os_str())
     }
+
+    #[cfg(test)]
+    pub fn removes_env(&self, name: &str) -> bool {
+        self.env_remove.iter().any(|candidate| candidate == name)
+    }
 }
 
 impl fmt::Debug for CommandRequest {
@@ -87,18 +112,21 @@ impl fmt::Debug for CommandRequest {
                     .collect::<Vec<_>>(),
             )
             .field("timeout", &self.timeout)
+            .field("env_remove", &self.env_remove)
             .field("max_capture_bytes", &self.max_capture_bytes)
+            .field("sensitive_output", &self.sensitive_output)
             .finish()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct CommandOutput {
     pub(super) success: bool,
     pub(super) exit_code: Option<i32>,
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) truncated: bool,
+    sensitive: bool,
 }
 
 impl CommandOutput {
@@ -110,6 +138,7 @@ impl CommandOutput {
             stdout: stdout.into(),
             stderr: String::new(),
             truncated: false,
+            sensitive: false,
         }
     }
 
@@ -121,10 +150,14 @@ impl CommandOutput {
             stdout: String::new(),
             stderr: stderr.into(),
             truncated: false,
+            sensitive: false,
         }
     }
 
     pub fn summary(&self) -> String {
+        if self.sensitive {
+            return "[sensitive output omitted]".to_string();
+        }
         let stdout = self.stdout.trim();
         let stderr = self.stderr.trim();
         let mut summary = match (stdout.is_empty(), stderr.is_empty()) {
@@ -137,6 +170,27 @@ impl CommandOutput {
             summary.push_str("\n[output truncated]");
         }
         summary
+    }
+}
+
+impl fmt::Debug for CommandOutput {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = formatter.debug_struct("CommandOutput");
+        debug
+            .field("success", &self.success)
+            .field("exit_code", &self.exit_code)
+            .field("truncated", &self.truncated)
+            .field("sensitive", &self.sensitive);
+        if self.sensitive {
+            debug
+                .field("stdout", &"[sensitive output omitted]")
+                .field("stderr", &"[sensitive output omitted]");
+        } else {
+            debug
+                .field("stdout", &self.stdout)
+                .field("stderr", &self.stderr);
+        }
+        debug.finish()
     }
 }
 
@@ -159,6 +213,15 @@ impl ProcessRunner for SystemProcessRunner {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        for name in &request.env_remove {
+            command.env_remove(name);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.as_std_mut().process_group(0);
+        }
 
         let mut child = command
             .spawn()
@@ -179,14 +242,22 @@ impl ProcessRunner for SystemProcessRunner {
                 output: error.to_string(),
             })?,
             Err(_) => {
-                let _ = child.kill().await;
+                terminate_process_group(&mut child).await;
                 let _ = child.wait().await;
-                stdout_task.abort();
-                stderr_task.abort();
+                let stdout = stdout_task.await.unwrap_or_default();
+                let stderr = stderr_task.await.unwrap_or_default();
+                let output = CommandOutput {
+                    success: false,
+                    exit_code: None,
+                    stdout: stdout.text,
+                    stderr: stderr.text,
+                    truncated: stdout.truncated || stderr.truncated,
+                    sensitive: request.sensitive_output,
+                };
                 return Err(LocalBackendError::CommandTimedOut {
                     action: request.action,
                     timeout_seconds: request.timeout.as_secs(),
-                    output: "command terminated after reaching its time limit".to_string(),
+                    output: output.summary(),
                 });
             }
         };
@@ -198,6 +269,7 @@ impl ProcessRunner for SystemProcessRunner {
             stdout: stdout.text,
             stderr: stderr.text,
             truncated: stdout.truncated || stderr.truncated,
+            sensitive: request.sensitive_output,
         })
     }
 }
@@ -217,16 +289,119 @@ async fn read_bounded(mut reader: impl AsyncRead + Unpin, limit: usize) -> Bound
             Ok(0) | Err(_) => break,
             Ok(count) => count,
         };
-        let remaining = limit.saturating_sub(captured.len());
-        if remaining > 0 {
-            captured.extend_from_slice(&buffer[..count.min(remaining)]);
+        captured.extend_from_slice(&buffer[..count]);
+        if captured.len() > limit {
+            let overflow = captured.len() - limit;
+            captured.drain(..overflow);
+            truncated = true;
         }
-        truncated |= count > remaining;
     }
     BoundedRead {
         text: String::from_utf8_lossy(&captured).into_owned(),
         truncated,
     }
+}
+
+#[cfg(unix)]
+async fn terminate_process_group(child: &mut tokio::process::Child) {
+    if let Some(id) = child.id() {
+        // The child is created as its own process-group leader, so the negative PID
+        // targets only that command tree and cannot signal the GUI's process group.
+        let result = unsafe { libc::kill(-(id as i32), libc::SIGKILL) };
+        if result != 0 {
+            let _ = child.kill().await;
+        }
+    } else {
+        let _ = child.kill().await;
+    }
+}
+
+#[cfg(not(unix))]
+async fn terminate_process_group(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+}
+
+pub(crate) fn discover_docker_cli() -> Result<PathBuf, LocalBackendError> {
+    let path = env::var_os("PATH");
+    let home = dirs::home_dir();
+    let candidates = standard_docker_candidates();
+    resolve_docker_cli(path.as_deref(), home.as_deref(), &candidates)
+}
+
+fn resolve_docker_cli(
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    fallback_candidates: &[PathBuf],
+) -> Result<PathBuf, LocalBackendError> {
+    let executable_name = if cfg!(windows) {
+        "docker.exe"
+    } else {
+        "docker"
+    };
+    let path_candidates = path
+        .into_iter()
+        .flat_map(env::split_paths)
+        .map(|directory| directory.join(executable_name));
+    let home_candidates = home.into_iter().flat_map(|directory| {
+        [
+            directory.join(".docker/bin").join(executable_name),
+            directory.join(".rd/bin").join(executable_name),
+            directory.join(".orbstack/bin").join(executable_name),
+        ]
+    });
+    let mut searched = Vec::new();
+    for candidate in path_candidates
+        .chain(home_candidates)
+        .chain(fallback_candidates.iter().cloned())
+    {
+        searched.push(candidate.display().to_string());
+        if is_executable_file(&candidate) {
+            return if candidate.is_absolute() {
+                Ok(candidate)
+            } else {
+                env::current_dir()
+                    .map(|directory| directory.join(candidate))
+                    .map_err(|source| LocalBackendError::FileSystem {
+                        action: "resolve Docker CLI from",
+                        path: PathBuf::from("."),
+                        source,
+                    })
+            };
+        }
+    }
+    Err(LocalBackendError::DockerCliNotFound {
+        searched: searched.join(", "),
+    })
+}
+
+fn standard_docker_candidates() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    let candidates = [
+        "/usr/local/bin/docker",
+        "/opt/homebrew/bin/docker",
+        "/Applications/Docker.app/Contents/Resources/bin/docker",
+    ];
+    #[cfg(target_os = "linux")]
+    let candidates = [
+        "/usr/bin/docker",
+        "/usr/local/bin/docker",
+        "/snap/bin/docker",
+    ];
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let candidates: [&str; 0] = [];
+    candidates.into_iter().map(PathBuf::from).collect()
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 #[cfg(test)]
@@ -240,7 +415,7 @@ mod tests {
             "/bin/sh",
             [
                 "-c",
-                "i=0; while [ \"$i\" -lt 20000 ]; do printf x; i=$((i + 1)); done",
+                "i=0; while [ \"$i\" -lt 20000 ]; do printf x; i=$((i + 1)); done; printf FINAL",
             ],
             Duration::from_secs(2),
         );
@@ -250,6 +425,7 @@ mod tests {
         assert!(output.success);
         assert_eq!(output.stdout.len(), DEFAULT_CAPTURE_BYTES);
         assert!(output.truncated);
+        assert!(output.stdout.ends_with("FINAL"));
         assert!(output.summary().ends_with("[output truncated]"));
     }
 
@@ -269,8 +445,141 @@ mod tests {
 
         assert!(matches!(
             error,
-            LocalBackendError::CommandTimedOut { action, output, .. }
-                if action == "slow command" && output.contains("terminated")
+            LocalBackendError::CommandTimedOut { action, .. } if action == "slow command"
         ));
+    }
+
+    #[tokio::test]
+    async fn sensitive_output_is_omitted_from_errors_and_debug_output() {
+        let secret = "POSTGRES_PASSWORD=must-not-escape";
+        let request = CommandRequest::new(
+            "sensitive command",
+            "/bin/sh",
+            ["-c", &format!("printf '{secret}' >&2; exit 1")],
+            Duration::from_secs(2),
+        )
+        .with_sensitive_output();
+
+        let output = SystemProcessRunner.run(request).await.expect("run command");
+
+        assert!(!output.success);
+        assert!(output.stderr.contains(secret));
+        assert_eq!(output.summary(), "[sensitive output omitted]");
+        assert!(!format!("{output:?}").contains(secret));
+    }
+
+    #[test]
+    fn environment_removals_accumulate() {
+        let request = CommandRequest::new(
+            "test environment",
+            "/bin/true",
+            std::iter::empty::<&str>(),
+            Duration::from_secs(1),
+        )
+        .with_env_removed(["DOCKER_HOST"])
+        .with_env_removed(["POSTGRES_PASSWORD"]);
+
+        assert!(request.removes_env("DOCKER_HOST"));
+        assert!(request.removes_env("POSTGRES_PASSWORD"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timeout_terminates_descendant_processes() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let marker = temp.path().join("survived");
+        let script = format!(
+            "(/bin/sleep 0.2; printf survived > '{}') & while :; do :; done",
+            marker.display()
+        );
+        let request = CommandRequest::new(
+            "spawn descendant",
+            "/bin/sh",
+            [OsString::from("-c"), OsString::from(script)],
+            Duration::from_millis(20),
+        );
+
+        SystemProcessRunner
+            .run(request)
+            .await
+            .expect_err("command should time out");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_cli_resolution_prefers_path_then_user_and_standard_candidates() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path_dir = temp.path().join("path");
+        let home = temp.path().join("home");
+        let standard = temp.path().join("standard/docker");
+        fs::create_dir_all(&path_dir).expect("create PATH directory");
+        fs::create_dir_all(home.join(".docker/bin")).expect("create user Docker directory");
+        fs::create_dir_all(standard.parent().expect("standard parent"))
+            .expect("create standard directory");
+        for executable in [
+            path_dir.join("docker"),
+            home.join(".docker/bin/docker"),
+            standard.clone(),
+        ] {
+            fs::write(&executable, "#!/bin/sh\n").expect("write executable");
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+                .expect("make executable");
+        }
+        let path = env::join_paths([&path_dir]).expect("join PATH");
+
+        assert_eq!(
+            resolve_docker_cli(Some(&path), Some(&home), std::slice::from_ref(&standard))
+                .expect("resolve PATH Docker"),
+            path_dir.join("docker")
+        );
+        assert_eq!(
+            resolve_docker_cli(None, Some(&home), std::slice::from_ref(&standard))
+                .expect("resolve user Docker"),
+            home.join(".docker/bin/docker")
+        );
+        fs::remove_file(home.join(".docker/bin/docker")).expect("remove user Docker");
+        assert_eq!(
+            resolve_docker_cli(None, Some(&home), std::slice::from_ref(&standard))
+                .expect("resolve standard Docker"),
+            standard
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_cli_resolution_preserves_the_final_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let temp = tempfile::tempdir().expect("temp dir");
+        let target = temp.path().join("docker-real");
+        let shim = temp.path().join("docker");
+        fs::write(&target, "#!/bin/sh\n").expect("write target");
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o700))
+            .expect("make target executable");
+        symlink(&target, &shim).expect("create Docker shim");
+
+        let resolved = resolve_docker_cli(Some(temp.path().as_os_str()), None, &[])
+            .expect("resolve Docker shim");
+
+        assert_eq!(resolved, shim);
+        assert!(fs::symlink_metadata(resolved)
+            .expect("shim metadata")
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn missing_docker_cli_is_classified() {
+        let temp = tempfile::tempdir().expect("temp dir");
+
+        let error = resolve_docker_cli(Some(temp.path().as_os_str()), None, &[])
+            .expect_err("Docker must be missing");
+
+        assert!(matches!(error, LocalBackendError::DockerCliNotFound { .. }));
     }
 }
