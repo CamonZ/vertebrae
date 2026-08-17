@@ -12,8 +12,8 @@ use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, PlanEntry, PlanEvent,
     ProviderResumeId, ProviderThreadRef, SessionId, SessionStarted, StreamId, TextEvent,
     ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent, ToolStatus,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TurnInput,
-    TurnInputProvenance, UpdateSemantics,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TranscriptRevision,
+    TurnInput, TurnInputProvenance, UpdateSemantics,
 };
 
 /// Reader for Codex rollout JSONL files in `~/.codex/sessions` and
@@ -35,10 +35,14 @@ impl CodexTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+        let revision = TranscriptRevision::capture(&path)?;
         let drafts = read_rollout(&path, request)?;
+        revision.verify(&path)?;
         let sequencer = EventSequencer::default();
         Ok(Some(TranscriptReplay {
             transcript_path: path,
+            revision,
+            projection_key: format!("codex-v1:{}", request.stream_id),
             events: sequencer.sequence_drafts(drafts),
         }))
     }

@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use vertebrae_harness_core::{
     EventSequencer, HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest,
+    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayRequest, TranscriptRevision,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -34,10 +34,14 @@ impl ClaudeTranscriptReplay {
         let Some(path) = self.discover(request)? else {
             return Ok(None);
         };
+        let revision = TranscriptRevision::capture(&path)?;
         let drafts = self.read_drafts(&path, request)?;
+        revision.verify(&path)?;
         let sequencer = EventSequencer::default();
         Ok(Some(TranscriptReplay {
             transcript_path: path,
+            revision,
+            projection_key: format!("claude-v1:{}", request.stream_id),
             events: sequencer.sequence_drafts(drafts),
         }))
     }

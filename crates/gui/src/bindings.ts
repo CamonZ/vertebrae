@@ -1867,12 +1867,23 @@ export type LoadLocalChatSessionReplayInput = {
   provider_resume_id: string | null;
   project_path: string | null;
   created_at: string | null;
+  /**
+   * Opaque cursor returned by the previous (newer) replay page.
+   */
+  cursor: string | null;
+  /**
+   * Requested normalized event count; the harness applies a safe maximum.
+   */
+  limit: number | null;
 };
 export type LoadLocalChatSessionReplayOutput = {
   /**
    * Each entry is one serialized, normalized HarnessEventV1 JSON object.
    */
   events: string[];
+  cache_key: string | null;
+  next_cursor: string | null;
+  has_more: boolean;
 };
 export type LocalBackendProgressEvent = {
   stage: LocalBackendProgressStage;

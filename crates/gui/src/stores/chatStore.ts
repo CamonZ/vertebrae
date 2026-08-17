@@ -1357,34 +1357,51 @@ export const useChatStore = create<ChatStore>((set, get) => {
   ): Promise<ChatMessage[]> => {
     if (!session.providerResumeId) return [];
     if (typeof commands.loadLocalChatSessionReplay !== "function") return [];
-    try {
-      const result = await commands.loadLocalChatSessionReplay({
-        session_id: session.id,
-        harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
-        provider_resume_id: session.providerResumeId,
-        project_path: session.projectPath ?? null,
-        created_at: session.createdAt ?? null,
-      });
-      if (!result || result.status !== "ok") {
-        if (result?.status === "error") {
-          console.warn(
-            "Failed to replay local chat provider transcript",
-            result.error
-          );
+    const lines: string[] = [];
+    const seenCursors = new Set<string>();
+    let cursor: string | null = null;
+    let complete = false;
+    do {
+      try {
+        const result = await commands.loadLocalChatSessionReplay({
+          session_id: session.id,
+          harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
+          provider_resume_id: session.providerResumeId,
+          project_path: session.projectPath ?? null,
+          created_at: session.createdAt ?? null,
+          cursor,
+          limit: 1_000,
+        });
+        if (!result || result.status !== "ok") {
+          if (result?.status === "error") {
+            console.warn(
+              "Failed to replay local chat provider transcript",
+              result.error
+            );
+          }
+          return [];
         }
-        return [];
-      }
-      const lines =
-        result.data && Array.isArray(result.data.events)
+        const pageLines = Array.isArray(result.data?.events)
           ? result.data.events.filter(
               (line): line is string => typeof line === "string"
             )
           : [];
-      return replayLinesToChatMessages(lines, session);
-    } catch (error) {
-      console.warn("Failed to replay local chat provider transcript", error);
-      return [];
-    }
+        lines.unshift(...pageLines);
+        const nextCursor = result.data?.next_cursor;
+        if (result.data?.has_more !== true) {
+          complete = true;
+          break;
+        }
+        if (typeof nextCursor !== "string" || seenCursors.has(nextCursor))
+          return [];
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      } catch (error) {
+        console.warn("Failed to replay local chat provider transcript", error);
+        return [];
+      }
+    } while (cursor);
+    return complete ? replayLinesToChatMessages(lines, session) : [];
   };
 
   const hydrateProviderMessagesInPlace = async (

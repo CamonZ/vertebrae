@@ -8,7 +8,9 @@ use std::{
 };
 use vertebrae_core::Provider;
 use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
-use vertebrae_harness_core::{ProviderResumeId, StreamId, TranscriptReplayRequest};
+use vertebrae_harness_core::{
+    ProviderResumeId, StreamId, TranscriptReplayPageRequest, TranscriptReplayRequest,
+};
 
 /// Open a validated local-chat file reference with the operating system's
 /// external file handler. The frontend supplies the captured project root and
@@ -167,12 +169,19 @@ pub struct LoadLocalChatSessionReplayInput {
     pub provider_resume_id: Option<String>,
     pub project_path: Option<String>,
     pub created_at: Option<String>,
+    /// Opaque cursor returned by the previous (newer) replay page.
+    pub cursor: Option<String>,
+    /// Requested normalized event count; the harness applies a safe maximum.
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct LoadLocalChatSessionReplayOutput {
     /// Each entry is one serialized, normalized HarnessEventV1 JSON object.
     pub events: Vec<String>,
+    pub cache_key: Option<String>,
+    pub next_cursor: Option<String>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,7 +451,12 @@ pub async fn load_local_chat_session_replay(
         .provider_resume_id
         .filter(|value| !value.trim().is_empty())
     else {
-        return Ok(LoadLocalChatSessionReplayOutput { events: Vec::new() });
+        return Ok(LoadLocalChatSessionReplayOutput {
+            events: Vec::new(),
+            cache_key: None,
+            next_cursor: None,
+            has_more: false,
+        });
     };
     let provider = match input.harness {
         LocalChatHarnessKind::Claude => Provider::Anthropic,
@@ -454,15 +468,19 @@ pub async fn load_local_chat_session_replay(
         project_path: input.project_path.map(PathBuf::from),
         created_at: input.created_at,
     };
+    let page_request = TranscriptReplayPageRequest {
+        cursor: input.cursor,
+        limit: input.limit.map(|limit| limit as usize),
+    };
     let replay = HarnessRuntimeFactory::new(HarnessFactoryConfig::default())
-        .replay_transcript(provider, &request)
+        .replay_transcript_page(provider, &request, &page_request)
         .map_err(|error| CommandError {
             message: format!("Failed to replay local chat transcript: {error}"),
         })?;
     let events = replay
-        .map(|replay| {
-            replay
-                .events
+        .as_ref()
+        .map(|page| {
+            page.events
                 .iter()
                 .map(serde_json::to_string)
                 .collect::<Result<Vec<_>, _>>()
@@ -472,7 +490,12 @@ pub async fn load_local_chat_session_replay(
             message: format!("Failed to serialize local chat replay: {error}"),
         })?
         .unwrap_or_default();
-    Ok(LoadLocalChatSessionReplayOutput { events })
+    Ok(LoadLocalChatSessionReplayOutput {
+        events,
+        cache_key: replay.as_ref().map(|page| page.cache_key.clone()),
+        next_cursor: replay.as_ref().and_then(|page| page.next_cursor.clone()),
+        has_more: replay.as_ref().is_some_and(|page| page.has_more),
+    })
 }
 
 /// Resolve a local chat permission request shown in the GUI.

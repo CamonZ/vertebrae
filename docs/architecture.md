@@ -167,6 +167,16 @@ Provider transcript files are discovered and parsed only by their individual
 harness crates; the GUI receives normalized V1 events through
 `HarnessRuntimeFactory`.
 
+Durable replay is paged newest-first at the provider-neutral boundary. Each
+page retains chronological event order and returns an opaque cursor for the
+next older page. The cursor binds its event boundary to a transcript revision
+(path, byte length, and modification time), adapter normalizer version, and
+replay stream, so a changed transcript or projection invalidates an outstanding
+cursor instead of combining events from different revisions.
+Prepending pages reconstructs the same ordered normalized event stream as full
+replay. Provider adapters may populate revision-keyed normalized caches or
+indexes, but provider paths, JSONL formats, and decoding remain adapter-owned.
+
 ### Adding a provider
 
 1. Add the variant to `Provider` in `crates/core/src/model_catalog.rs` and its

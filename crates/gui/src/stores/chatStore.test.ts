@@ -188,7 +188,9 @@ describe("chatStore", () => {
     });
 
     it("replays normalized provider events when reopening a persisted session", async () => {
-      const id = useChatStore.getState().openSession("Task Replay", "/repo/root");
+      const id = useChatStore
+        .getState()
+        .openSession("Task Replay", "/repo/root");
       useChatStore.getState().setProviderResumeId(id, "conv-replay");
       useChatStore.setState({
         sessions: {},
@@ -222,7 +224,10 @@ describe("chatStore", () => {
                 event_id: "event-2",
                 stream_id: "local-replay/session",
                 sequence: 2,
-                correlation: { session_id: "conv-replay", thread_id: "conv-replay" },
+                correlation: {
+                  session_id: "conv-replay",
+                  thread_id: "conv-replay",
+                },
                 timestamp: "2026-01-01T00:00:01Z",
                 semantics: "snapshot",
                 type: "turn_input",
@@ -237,13 +242,19 @@ describe("chatStore", () => {
                 event_id: "event-3",
                 stream_id: "local-replay/session",
                 sequence: 3,
-                correlation: { session_id: "conv-replay", thread_id: "conv-replay" },
+                correlation: {
+                  session_id: "conv-replay",
+                  thread_id: "conv-replay",
+                },
                 timestamp: "2026-01-01T00:00:02Z",
                 semantics: "snapshot",
                 type: "text",
                 data: { text: "welcome back" },
               }),
             ],
+            cache_key: "revision-1",
+            next_cursor: null,
+            has_more: false,
           },
         });
 
@@ -259,6 +270,8 @@ describe("chatStore", () => {
         provider_resume_id: "conv-replay",
         project_path: "/repo/root",
         created_at: expect.any(String),
+        cursor: null,
+        limit: 1_000,
       });
       expect(useChatStore.getState().sessions[id].messages).toEqual([
         {
@@ -277,6 +290,53 @@ describe("chatStore", () => {
           timestamp: "2026-01-01T00:00:02Z",
         },
       ]);
+    });
+
+    it("discards replay pages when loading older history fails", async () => {
+      const id = useChatStore
+        .getState()
+        .openSession("Incomplete Replay", "/repo/root");
+      useChatStore.getState().setProviderResumeId(id, "conv-incomplete");
+      useChatStore.setState({
+        sessions: {},
+        activeSessionId: null,
+        panelOpen: false,
+      });
+      const replay = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            events: [
+              JSON.stringify({
+                version: 1,
+                event_id: "event-newest",
+                stream_id: "local-replay/session",
+                sequence: 2,
+                correlation: { session_id: "conv-incomplete" },
+                timestamp: "2026-01-01T00:00:01Z",
+                semantics: "snapshot",
+                type: "text",
+                data: { text: "must not be installed alone" },
+              }),
+            ],
+            cache_key: "revision-1",
+            next_cursor: "revision-1:1",
+            has_more: true,
+          },
+        })
+        .mockResolvedValueOnce({
+          status: "error",
+          error: { message: "transcript changed" },
+        });
+
+      const reopened = useChatStore
+        .getState()
+        .openSession("Replacement Label", "/repo/root");
+      expect(reopened).toBe(id);
+      await vi.waitFor(() => expect(replay).toHaveBeenCalledTimes(2));
+
+      expect(useChatStore.getState().sessions[id].messages).toEqual([]);
     });
 
     it("persists selected model and records it as the last used model", () => {
@@ -1740,9 +1800,9 @@ describe("chatStore", () => {
         "root-turn-2"
       );
 
-      expect(
-        useChatStore.getState().settleActiveTurn(id, "root-turn-2")
-      ).toBe(true);
+      expect(useChatStore.getState().settleActiveTurn(id, "root-turn-2")).toBe(
+        true
+      );
       expect(useChatStore.getState().sessions[id].activeTurn).toBeNull();
     });
 
