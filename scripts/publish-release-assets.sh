@@ -37,8 +37,8 @@ ensure_release() {
 
 if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
   # The preview channel is both the moving pointer and the artifact store.
-  # Asset names include the build identity, so old previews remain available
-  # without creating a Git tag/release for every master commit.
+  # Asset names include the build identity, so uploads are collision-free while
+  # stale assets are pruned after the publish completes.
   ensure_release "$ARTIFACT_TAG" \
     --target "$UPDATE_SHA" \
     --title "$UPDATE_CHANNEL channel" \
@@ -55,6 +55,12 @@ if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
   existing_assets="$(gh release view "$ARTIFACT_TAG" --json assets --jq '.assets[].name')"
 fi
 
+keep_assets=()
+record_kept_asset() {
+  local asset_name="$1"
+  keep_assets+=("$asset_name")
+}
+
 upload_unique_asset() {
   local artifact="$1"
   local asset_name="${2:-$(basename "$artifact")}"
@@ -63,9 +69,11 @@ upload_unique_asset() {
   # signed asset. Stable releases intentionally fail if an asset already exists.
   if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]] \
     && grep -Fxq "$asset_name" <<<"$existing_assets"; then
+    record_kept_asset "$asset_name"
     return
   fi
   gh release upload "$ARTIFACT_TAG" "$artifact#$asset_name" --clobber=false
+  record_kept_asset "$asset_name"
   if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
     existing_assets+=$'\n'"$asset_name"
   fi
@@ -133,6 +141,9 @@ if [[ "$ARTIFACT_TAG" != "$CHANNEL_TAG" ]]; then
     --notes "Signed channel metadata"
 fi
 gh release upload "$CHANNEL_TAG" gui-assets/gui-latest.json --clobber
+if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  record_kept_asset "gui-latest.json"
+fi
 
 mkdir -p manifests
 for target in \
@@ -164,4 +175,26 @@ if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
 else
   gh release upload "$ARTIFACT_TAG" manifests/latest-*.json --clobber=false
   gh release upload "$CHANNEL_TAG" manifests/latest-*.json --clobber
+fi
+if [[ "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  for manifest in manifests/latest-*.json; do
+    record_kept_asset "$(basename "$manifest")"
+  done
+fi
+
+if [[ "$UPDATE_CHANNEL" == "master" && "$ARTIFACT_TAG" == "$CHANNEL_TAG" ]]; then
+  current_assets="$(gh release view "$ARTIFACT_TAG" --json assets --jq '.assets[].name')"
+  while IFS= read -r asset_name; do
+    [ -n "$asset_name" ] || continue
+    keep=0
+    for kept_asset in "${keep_assets[@]}"; do
+      if [[ "$asset_name" == "$kept_asset" ]]; then
+        keep=1
+        break
+      fi
+    done
+    if [ "$keep" -eq 0 ]; then
+      gh release delete-asset "$ARTIFACT_TAG" "$asset_name" --yes
+    fi
+  done <<< "$current_assets"
 fi
