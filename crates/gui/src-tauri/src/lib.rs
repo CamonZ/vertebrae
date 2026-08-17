@@ -63,6 +63,7 @@ fn create_builder() -> Builder {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             greet,
+            commands::write_debug_export,
             // Project management commands
             commands::get_projects,
             commands::sacrum_config_status,

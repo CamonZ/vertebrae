@@ -1,10 +1,6 @@
-import {
-  memo,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { commands } from "../bindings";
 import { useDebugStore } from "../stores/debugStore";
 import type { DebugTraceEntry, LogEntry } from "../stores/debugStore";
 import { formatDebugLogMessage } from "../utils/debugLog";
@@ -51,7 +47,9 @@ function useAutoScroll(itemCount: number) {
 const LogRow = memo(function LogRow({ entry }: { entry: LogEntry }) {
   return (
     <div className="flex gap-2 leading-5">
-      <span className="shrink-0 text-gray-500">{formatTime(entry.timestamp)}</span>
+      <span className="shrink-0 text-gray-500">
+        {formatTime(entry.timestamp)}
+      </span>
       <span
         className={`w-12 shrink-0 text-right ${levelColors[entry.level] ?? "text-gray-400"}`}
       >
@@ -76,7 +74,9 @@ const TraceRow = memo(function TraceRow({ entry }: { entry: DebugTraceEntry }) {
         onClick={() => setExpanded((value) => !value)}
         className="flex w-full cursor-pointer gap-2 text-left leading-5"
       >
-        <span className="shrink-0 text-gray-600">{formatTime(entry.timestamp)}</span>
+        <span className="shrink-0 text-gray-600">
+          {formatTime(entry.timestamp)}
+        </span>
         <span className="shrink-0 text-cyan-300">{entry.source}</span>
         <span className="shrink-0 text-blue-300">{entry.kind}</span>
         <span className="shrink-0 text-amber-300">
@@ -268,7 +268,7 @@ const HarnessPanel = memo(function HarnessPanel() {
   );
 });
 
-function exportDebugData() {
+async function exportDebugData(): Promise<string | null> {
   const { logs, traces } = useDebugStore.getState();
   const exportData = {
     schema_version: 1,
@@ -276,19 +276,24 @@ function exportDebugData() {
     logs,
     traces,
   };
-  const blob = new Blob([JSON.stringify(exportData, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `vertebrae-debug-${new Date()
+  const contents = JSON.stringify(exportData, null, 2);
+  const filename = `vertebrae-debug-${new Date()
     .toISOString()
     .replace(/[:.]/g, "-")}.json`;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  try {
+    const path = await save({
+      defaultPath: filename,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      title: "Export diagnostic console JSON",
+    });
+    if (!path) return null;
+
+    const result = await commands.writeDebugExport(path, contents);
+    return result.status === "error" ? result.error.message : null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 function DebugConsolePanel() {
@@ -297,6 +302,16 @@ function DebugConsolePanel() {
   const clearLogs = useDebugStore((state) => state.clearLogs);
   const toggleDebugPanel = useDebugStore((state) => state.toggleDebugPanel);
   const [tab, setTab] = useState<"logs" | "harness">("logs");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = async () => {
+    setIsExporting(true);
+    setExportError(null);
+    const error = await exportDebugData();
+    setExportError(error);
+    setIsExporting(false);
+  };
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 flex h-[28rem] flex-col border-t border-gray-700 bg-gray-950 font-mono text-xs text-gray-300">
@@ -318,11 +333,13 @@ function DebugConsolePanel() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={exportDebugData}
+            onClick={() => void handleExport()}
+            disabled={isExporting}
+            data-testid="debug-console-export"
             className="rounded px-2 py-0.5 text-gray-400 hover:bg-gray-800 hover:text-gray-200"
             title="Export retained logs and local harness traces as JSON"
           >
-            Export JSON
+            {isExporting ? "Exporting…" : "Export JSON"}
           </button>
           <button
             onClick={clearLogs}
@@ -338,6 +355,15 @@ function DebugConsolePanel() {
           </button>
         </div>
       </div>
+
+      {exportError && (
+        <div
+          role="alert"
+          className="shrink-0 border-b border-red-900 px-3 py-1 text-red-300"
+        >
+          Export failed: {exportError}
+        </div>
+      )}
 
       {tab === "logs" ? <LogsPanel /> : <HarnessPanel />}
     </div>
