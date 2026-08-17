@@ -3,6 +3,7 @@
 //! Integration tests using mock implementations of service traits, providing
 //! basic coverage without requiring a live Sacrum backend.
 
+mod add_tests;
 mod artifact_tests;
 mod basic_tests;
 mod check_item_tests;

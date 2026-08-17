@@ -230,6 +230,7 @@ pub const CREATE_TASK: &str = r#"
         $tags: [String!],
         $parent_id: Uuid4,
         $workflow_id: Uuid4,
+        $worktree: String,
         $sections: [TaskSectionCreateInput!]
     ) {
         create_task(
@@ -241,6 +242,7 @@ pub const CREATE_TASK: &str = r#"
             tags: $tags,
             parent_id: $parent_id,
             workflow_id: $workflow_id,
+            worktree: $worktree,
             sections: $sections
         ) {
             id
@@ -538,6 +540,14 @@ mod tests {
         let query = compact_graphql(CREATE_TASK);
 
         assert!(query.contains("$sections: [TaskSectionCreateInput!]"));
+    }
+
+    #[test]
+    fn create_task_includes_worktree_input() {
+        let query = compact_graphql(CREATE_TASK);
+
+        assert!(query.contains("$worktree: String"));
+        assert!(query.contains("worktree: $worktree"));
     }
 
     #[test]

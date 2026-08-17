@@ -98,7 +98,7 @@ without Finder window customization if that AppleScript step fails.
 
 | Crate/Package | Version | Purpose |
 |---------------|---------|---------|
-| `tauri` | v2.9 | Desktop application framework |
+| `tauri` | v2.11 | Desktop application framework |
 | `specta` / `tauri-specta` | v2 | Type-safe Rust-to-TypeScript bindings |
 | React | v19 | Frontend UI library |
 | Zustand | v5 | State management |

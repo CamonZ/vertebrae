@@ -89,7 +89,7 @@ impl TaskService for MockTaskService {
             dependents: vec![],
             children: vec![],
             archived: false,
-            worktree: None,
+            worktree: options.worktree.clone(),
             rejection_reason: None,
             workflow_id: options.workflow_id.clone(),
             current_step_id: None,
