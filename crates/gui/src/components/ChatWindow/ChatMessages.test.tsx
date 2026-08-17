@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatEmptyState, ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
@@ -635,5 +635,240 @@ describe("ChatMessages", () => {
     );
 
     expect(container.scrollTop).toBe(200);
+  });
+
+  it("shows explicit initial and older-history loading states", () => {
+    const onLoadOlderMessages = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          isLoadingInitialHistory: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    expect(screen.getByText("Loading conversation history…")).toHaveAttribute(
+      "role",
+      "status"
+    );
+    expect(
+      screen.queryByText("Create, edit, and delete tasks, steps, and workflows")
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          hasOlderMessages: true,
+          isLoadingOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "Loading older messages…" })
+    ).toBeDisabled();
+  });
+
+  it("preserves the visible scroll anchor when older messages are prepended", async () => {
+    let resolveLoad: ((applied: boolean) => void) | undefined;
+    const onLoadOlderMessages = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        })
+    );
+    const newest: ChatMessage[] = [
+      { kind: "assistant", text: "Newest", timestamp: "2024-01-01T00:00:02Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages: newest,
+          isEmpty: false,
+          hasOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+    });
+    container.scrollTop = 150;
+    fireEvent.scroll(container);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load older messages" })
+    );
+    expect(onLoadOlderMessages).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 650,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            { kind: "user", text: "Older", timestamp: "2024-01-01T00:00:01Z" },
+            ...newest,
+          ],
+          isEmpty: false,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(400);
+    await act(async () => resolveLoad?.(true));
+  });
+
+  it("keeps the prepend anchor through an intervening live message", async () => {
+    let resolveLoad: ((applied: boolean) => void) | undefined;
+    const onLoadOlderMessages = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        })
+    );
+    const newest: ChatMessage = {
+      kind: "assistant",
+      text: "Newest",
+      timestamp: "2024-01-01T00:00:02Z",
+    };
+    const live: ChatMessage = {
+      kind: "assistant",
+      text: "Arrived live",
+      timestamp: "2024-01-01T00:00:03Z",
+    };
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages: [newest],
+          isEmpty: false,
+          hasOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+    });
+    container.scrollTop = 150;
+    fireEvent.scroll(container);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load older messages" })
+    );
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 450,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [newest, live],
+          isEmpty: false,
+          hasOlderMessages: true,
+          isLoadingOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    expect(container.scrollTop).toBe(150);
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 650,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            {
+              kind: "user",
+              text: "Older",
+              timestamp: "2024-01-01T00:00:01Z",
+            },
+            newest,
+            live,
+          ],
+          isEmpty: false,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(350);
+    await act(async () => resolveLoad?.(true));
+  });
+
+  it("anchors a prepend to manual scrolling while the page is loading", async () => {
+    let resolveLoad: ((applied: boolean) => void) | undefined;
+    const onLoadOlderMessages = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        })
+    );
+    const newest: ChatMessage[] = [
+      { kind: "assistant", text: "Newest", timestamp: "2024-01-01T00:00:02Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages: newest,
+          isEmpty: false,
+          hasOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 400 },
+    });
+    container.scrollTop = 150;
+    fireEvent.scroll(container);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load older messages" })
+    );
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: newest,
+          isEmpty: false,
+          hasOlderMessages: true,
+          isLoadingOlderMessages: true,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+    container.scrollTop = 220;
+    fireEvent.scroll(container);
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 600,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            { kind: "user", text: "Older", timestamp: "2024-01-01T00:00:01Z" },
+            ...newest,
+          ],
+          isEmpty: false,
+          onLoadOlderMessages,
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(420);
+    await act(async () => resolveLoad?.(true));
   });
 });

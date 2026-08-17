@@ -235,6 +235,11 @@ interface ChatMessagesProps {
   activityLabel?: string | null;
   compactionSummary?: ChatCompactionSummary | null;
   streamingAssistant: StreamingAssistantMessage | null;
+  isLoadingInitialHistory?: boolean;
+  hasOlderMessages?: boolean;
+  isLoadingOlderMessages?: boolean;
+  replayError?: string | null;
+  onLoadOlderMessages?: () => Promise<boolean>;
 }
 
 export function ChatMessages({
@@ -249,6 +254,11 @@ export function ChatMessages({
   activityLabel,
   compactionSummary,
   streamingAssistant,
+  isLoadingInitialHistory = false,
+  hasOlderMessages = false,
+  isLoadingOlderMessages = false,
+  replayError = null,
+  onLoadOlderMessages,
 }: ChatMessagesProps) {
   const resolveUserQuestion = useChatStore(
     (state) => state.resolveUserQuestion
@@ -260,6 +270,13 @@ export function ChatMessages({
     (state) => state.thinkingIndicatorStyle
   );
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const latestMessagesRef = useRef(messages);
+  latestMessagesRef.current = messages;
+  const prependAnchorRef = useRef<{
+    messages: readonly ChatMessage[];
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const keepAtBottomRef = useRef(true);
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
@@ -299,6 +316,35 @@ export function ChatMessages({
     },
     []
   );
+  const handleLoadOlderMessages = useCallback(() => {
+    const container = messagesContainerRef.current;
+    if (
+      !container ||
+      !onLoadOlderMessages ||
+      !hasOlderMessages ||
+      isLoadingOlderMessages
+    ) {
+      return;
+    }
+    prependAnchorRef.current = {
+      messages,
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+    };
+    keepAtBottomRef.current = false;
+    void onLoadOlderMessages().then((applied) => {
+      if (!applied) {
+        prependAnchorRef.current = null;
+        return;
+      }
+      requestAnimationFrame(() => {
+        const anchor = prependAnchorRef.current;
+        if (anchor?.messages === latestMessagesRef.current) {
+          prependAnchorRef.current = null;
+        }
+      });
+    });
+  }, [hasOlderMessages, isLoadingOlderMessages, messages, onLoadOlderMessages]);
 
   useEffect(() => {
     let cancelled = false;
@@ -372,9 +418,26 @@ export function ChatMessages({
   // upward while the provider is responding.
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
-    if (!container || !keepAtBottomRef.current) return;
+    if (!container) return;
+    const anchor = prependAnchorRef.current;
+    if (anchor && anchor.messages !== messages) {
+      if (isLoadingOlderMessages) {
+        // Live messages may arrive while the page request is in flight. Move
+        // the baseline forward without consuming the prepend anchor so only
+        // the eventual height inserted above the viewport is compensated.
+        anchor.messages = messages;
+        anchor.scrollHeight = container.scrollHeight;
+        anchor.scrollTop = container.scrollTop;
+        return;
+      }
+      container.scrollTop =
+        anchor.scrollTop + (container.scrollHeight - anchor.scrollHeight);
+      prependAnchorRef.current = null;
+      return;
+    }
+    if (!keepAtBottomRef.current) return;
     container.scrollTop = container.scrollHeight;
-  }, [isWaiting, messages, streamingAssistant]);
+  }, [isLoadingOlderMessages, isWaiting, messages, streamingAssistant]);
 
   useEffect(() => {
     const handleScrollToSpawn = (event: Event) => {
@@ -411,11 +474,50 @@ export function ChatMessages({
         data-testid="chat-messages-scroll"
         onScroll={() => {
           const container = messagesContainerRef.current;
-          if (container) keepAtBottomRef.current = isNearBottom(container);
+          if (container) {
+            keepAtBottomRef.current = isNearBottom(container);
+            const anchor = prependAnchorRef.current;
+            if (anchor) {
+              anchor.scrollHeight = container.scrollHeight;
+              anchor.scrollTop = container.scrollTop;
+            }
+          }
         }}
       >
-        {isEmpty && !isActive && <ChatEmptyState notice={notice} />}
+        {isEmpty && !isActive && !isLoadingInitialHistory && (
+          <ChatEmptyState notice={notice} />
+        )}
         <div className="flex flex-col gap-3">
+          {isLoadingInitialHistory && (
+            <div
+              className="text-center text-xs text-[var(--color-fg-mute)]"
+              role="status"
+            >
+              Loading conversation history…
+            </div>
+          )}
+          {(hasOlderMessages || isLoadingOlderMessages) && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] disabled:cursor-wait disabled:opacity-60"
+                disabled={isLoadingOlderMessages}
+                onClick={handleLoadOlderMessages}
+              >
+                {isLoadingOlderMessages
+                  ? "Loading older messages…"
+                  : "Load older messages"}
+              </button>
+            </div>
+          )}
+          {replayError && (
+            <div
+              className="text-center text-xs text-[var(--color-warn)]"
+              role="status"
+            >
+              {replayError}
+            </div>
+          )}
           <HistoricalChatItems
             items={renderItems}
             sessionId={sessionId}
