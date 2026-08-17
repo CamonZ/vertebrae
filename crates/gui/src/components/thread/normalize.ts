@@ -1263,6 +1263,12 @@ export interface ChatTurnOptions {
   onToggleTool?: (toolId: string) => void;
   /** Tool ids currently COLLAPSED; when omitted tools start collapsed. */
   collapsed?: Set<string>;
+  /** Tool ids currently EXPANDED; takes precedence over `collapsed`. */
+  expanded?: ReadonlySet<string>;
+  /** Tool ids whose bounded bodies currently show the complete content. */
+  fullContent?: ReadonlySet<string>;
+  /** Toggle a tool body's bounded full-content rendering. */
+  onToggleFullContent?: (toolId: string) => void;
   /** Provider label shown on assistant prose rows. */
   assistantLabel?: string;
   /**
@@ -1403,10 +1409,18 @@ function wireChatToolCollapse(msgs: Message[], opts: ChatTurnOptions): void {
   for (const m of msgs) {
     if (m.type === "tool") {
       const id = m.evt;
-      m.collapsed = opts.collapsed ? opts.collapsed.has(id) : true;
+      m.collapsed = opts.expanded
+        ? !opts.expanded.has(id)
+        : opts.collapsed
+          ? opts.collapsed.has(id)
+          : true;
       m.onToggle = opts.onToggleTool
         ? () => opts.onToggleTool!(id)
         : m.onToggle;
+      m.showFullContent = opts.fullContent?.has(id);
+      m.onToggleFullContent = opts.onToggleFullContent
+        ? () => opts.onToggleFullContent!(id)
+        : m.onToggleFullContent;
     } else if (m.type === "agent" && m.tools) {
       wireChatToolCollapse(m.tools, opts);
     } else if (m.type === "spawn") {

@@ -236,6 +236,10 @@ export interface ToolMessage extends BaseMessage {
   collapsed?: boolean;
   /** Toggle handler for the body (interactive surfaces only). */
   onToggle?: () => void;
+  /** Whether bounded large content is showing its complete rendering. */
+  showFullContent?: boolean;
+  /** Toggle handler for bounded large content. */
+  onToggleFullContent?: () => void;
 }
 
 /**

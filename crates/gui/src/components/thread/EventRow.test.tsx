@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -37,14 +38,14 @@ describe("ToolRow", () => {
     );
   });
 
-  it("keeps local expansion state across parent rerenders", () => {
+  it("keeps local expansion state across parent rerenders", async () => {
+    const user = userEvent.setup();
     const { rerender } = render(
       <ToolRow name="Read" status="done" collapsed body="first result" />
     );
 
-    fireEvent.keyDown(screen.getByRole("button", { name: /Read/ }), {
-      key: "Enter",
-    });
+    screen.getByRole("button", { name: /Read/ }).focus();
+    await user.keyboard("{Enter}");
     expect(screen.getByText("first result")).toBeInTheDocument();
 
     rerender(

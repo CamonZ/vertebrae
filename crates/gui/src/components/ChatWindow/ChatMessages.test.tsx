@@ -198,6 +198,69 @@ describe("ChatMessages", () => {
     expect(screen.getByText("Permission required")).toBeInTheDocument();
   });
 
+  it("preserves tool expansion when conversation segmentation remounts the row", () => {
+    const tail = "PRESERVED-AFTER-REMOUNT";
+    const largeResult = `${"large output line\n".repeat(800)}${tail}`;
+    const toolMessages: ChatMessage[] = [
+      {
+        kind: "tool_call",
+        toolName: "Read",
+        toolId: "tool-stable",
+        input: "{}",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+      {
+        kind: "tool_result",
+        toolId: "tool-stable",
+        result: largeResult,
+        isError: false,
+        timestamp: "2024-01-01T12:00:02Z",
+      },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({ messages: toolMessages, isEmpty: false })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Read/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
+    expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            {
+              kind: "user",
+              text: "Before remount",
+              timestamp: "2024-01-01T12:00:00Z",
+            },
+            {
+              kind: "permission_request",
+              requestId: "req-remount",
+              toolName: "Bash",
+              message: "Allow command?",
+              input: undefined,
+              timestamp: "2024-01-01T12:00:00Z",
+            },
+            ...toolMessages,
+          ],
+          isEmpty: false,
+        })}
+      />
+    );
+
+    expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("bounded-content-preview")
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Read/ })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    );
+  });
+
   it("renders a structured user question exactly once", () => {
     const questions = [
       {

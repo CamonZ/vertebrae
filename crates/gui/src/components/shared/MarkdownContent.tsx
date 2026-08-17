@@ -27,6 +27,8 @@ import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 interface MarkdownContentProps {
   text: string;
   projectPath?: string | null;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }
 
 const LARGE_CONTENT_CHARACTER_LIMIT = 12_000;
@@ -69,18 +71,40 @@ function contentPreview(text: string): string {
 function BoundedContent({
   text,
   children,
+  expanded,
+  onExpandedChange,
 }: {
   text: string;
   children: (fullText: string) => ReactNode;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
-  const [showFull, setShowFull] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
   const contentId = useId();
   const isLarge = isLargeContent(text);
+  const controlled = expanded !== undefined && onExpandedChange !== undefined;
+  const showFull = controlled ? expanded : localExpanded;
 
   if (!isLarge) return children(text);
 
   return (
     <div data-testid="bounded-content" data-content-length={text.length}>
+      <button
+        type="button"
+        className="mb-2 rounded border border-border/60 px-2 py-1 font-mono text-eyebrow text-accent hover:border-accent/50"
+        aria-controls={contentId}
+        aria-expanded={showFull}
+        onClick={(event) => {
+          event.stopPropagation();
+          const next = !showFull;
+          if (controlled) onExpandedChange(next);
+          else setLocalExpanded(next);
+        }}
+      >
+        {showFull
+          ? "Show less"
+          : `Show full content (${text.length.toLocaleString()} characters)`}
+      </button>
       <div id={contentId}>
         {showFull ? (
           children(text)
@@ -94,20 +118,6 @@ function BoundedContent({
           </pre>
         )}
       </div>
-      <button
-        type="button"
-        className="mt-2 rounded border border-border/60 px-2 py-1 font-mono text-eyebrow text-accent hover:border-accent/50"
-        aria-controls={contentId}
-        aria-expanded={showFull}
-        onClick={(event) => {
-          event.stopPropagation();
-          setShowFull((current) => !current);
-        }}
-      >
-        {showFull
-          ? "Show less"
-          : `Show full content (${text.length.toLocaleString()} characters)`}
-      </button>
     </div>
   );
 }
@@ -884,11 +894,19 @@ export function prettyPrintJsonIfPossible(source: string): string {
  */
 export const BoundedTextContent = memo(function BoundedTextContent({
   text,
+  expanded,
+  onExpandedChange,
 }: {
   text: string;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
 }) {
   return (
-    <BoundedContent text={text}>
+    <BoundedContent
+      text={text}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    >
       {(fullText) => prettyPrintJsonIfPossible(fullText)}
     </BoundedContent>
   );
@@ -1058,8 +1076,17 @@ export const MarkdownContent = memo(function MarkdownContent(
 ) {
   return (
     <div className="markdown-content" data-testid="markdown-content">
-      <BoundedContent text={props.text}>
-        {(fullText) => <RenderedMarkdownContent {...props} text={fullText} />}
+      <BoundedContent
+        text={props.text}
+        expanded={props.expanded}
+        onExpandedChange={props.onExpandedChange}
+      >
+        {(fullText) => (
+          <RenderedMarkdownContent
+            text={fullText}
+            projectPath={props.projectPath}
+          />
+        )}
       </BoundedContent>
     </div>
   );
