@@ -1100,6 +1100,35 @@ describe("chatStore", () => {
       expect(session.messages).toEqual([]);
     });
 
+    it("preserves finalized history identity and contents across repeated partial deltas", () => {
+      const id = useChatStore.getState().openSession("T1");
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "Earlier finalized answer",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: false,
+      });
+      const durableMessages = useChatStore.getState().sessions[id].messages;
+
+      useChatStore.getState().updateLastAssistantMessage(id, "New");
+      useChatStore.getState().updateLastAssistantMessage(id, "New answer");
+      useChatStore.getState().updateLastAssistantMessage(id, "New answer!");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toBe(durableMessages);
+      expect(session.messages).toEqual([
+        {
+          kind: "assistant",
+          text: "Earlier finalized answer",
+          timestamp: "2024-01-01T00:00:00Z",
+          isPartial: false,
+        },
+      ]);
+      expect(session.streamingAssistant).toMatchObject({
+        text: "New answer!",
+      });
+    });
+
     it("keeps durable user messages separate from the streaming overlay", () => {
       const id = useChatStore.getState().openSession("T1");
 
@@ -1284,6 +1313,25 @@ describe("chatStore", () => {
       ]);
       expect(session.messages).toHaveLength(1);
       expect(loadPersistedLocalChatSession(id)?.messages).toEqual([]);
+    });
+
+    it("replaces repeated partial deltas with one durable final assistant message", () => {
+      const id = useChatStore.getState().openSession("T1");
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Final");
+      useChatStore.getState().updateLastAssistantMessage(id, "Final answer");
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Final answer");
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Final answer");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.streamingAssistant).toBeNull();
+      expect(session.messages).toEqual([
+        expect.objectContaining({
+          kind: "assistant",
+          text: "Final answer",
+          isPartial: false,
+        }),
+      ]);
     });
 
     it("keeps interim result, child-agent events, and later main answer distinct", () => {
@@ -1896,7 +1944,7 @@ describe("chatStore", () => {
   });
 
   describe("clearMessages", () => {
-    it("empties the messages array", () => {
+    it("empties durable messages and removes the streaming tail", () => {
       const id = useChatStore.getState().openSession("T1");
 
       useChatStore.getState().addMessage(id, {
@@ -1904,11 +1952,19 @@ describe("chatStore", () => {
         text: "Hello",
         timestamp: "2024-01-01T00:00:00Z",
       });
+      useChatStore.getState().updateLastAssistantMessage(id, "In progress");
 
       expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
+      expect(
+        useChatStore.getState().sessions[id].streamingAssistant
+      ).toMatchObject({ text: "In progress" });
 
       useChatStore.getState().clearMessages(id);
-      expect(useChatStore.getState().sessions[id].messages).toHaveLength(0);
+      expect(useChatStore.getState().sessions[id]).toMatchObject({
+        messages: [],
+        streamingAssistant: null,
+        lifecycle: "idle",
+      });
     });
 
     it("deletes durable resume state so cleared chats are not restored", () => {

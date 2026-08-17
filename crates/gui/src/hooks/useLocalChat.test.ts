@@ -726,6 +726,45 @@ describe("handleEndEvent", () => {
     );
   });
 
+  it("commits the streaming tail exactly once when the session ends", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("End cleanup");
+    useChatStore.getState().updateLastAssistantMessage(id, "Partial");
+    useChatStore.getState().updateLastAssistantMessage(id, "Partial answer");
+
+    handleEndEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        turn_id: "turn-1",
+        is_root: true,
+        duration_ms: 1000,
+        cost_usd: 0.01,
+        num_turns: 1,
+        result: "Partial answer",
+        is_error: false,
+        context_tokens: 1000,
+        context_window: 200000,
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      useChatStore.getState().setSessionLifecycle,
+      useChatStore.getState().clearStreamingAssistant
+    );
+
+    expect(useChatStore.getState().sessions[id]).toMatchObject({
+      lifecycle: "idle",
+      streamingAssistant: null,
+      messages: [
+        {
+          kind: "assistant",
+          text: "Partial answer",
+          isPartial: false,
+        },
+      ],
+    });
+  });
+
   it("keeps the live Claude backend id across a per-turn End", () => {
     const setLifecycle = vi.fn();
     const clearStreaming = vi.fn();
@@ -844,6 +883,41 @@ describe("handleErrorEvent", () => {
     expect(clearStreaming).not.toHaveBeenCalled();
     expect(setBackendSessionId).not.toHaveBeenCalled();
     expect(setBackendSessionIdRef).not.toHaveBeenCalled();
+  });
+
+  it("commits and removes the streaming tail before rendering an error", () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Error cleanup");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    useChatStore.getState().updateLastAssistantMessage(id, "Interrupted reply");
+
+    handleErrorEvent(
+      {
+        backend_session_id: CLAUDE_SESSION_ID,
+        harness: "claude",
+        error: "provider failed",
+      },
+      CLAUDE_SESSION_ID,
+      id,
+      useChatStore.getState().addMessage,
+      useChatStore.getState().setSessionLifecycle,
+      useChatStore.getState().clearStreamingAssistant,
+      useChatStore.getState().setBackendSessionId
+    );
+
+    const session = useChatStore.getState().sessions[id];
+    expect(session.streamingAssistant).toBeNull();
+    expect(session.backendSessionId).toBeNull();
+    expect(session.lifecycle).toBe("error");
+    expect(session.lifecycleError).toBe("provider failed");
+    expect(session.messages).toEqual([
+      expect.objectContaining({
+        kind: "assistant",
+        text: "Interrupted reply",
+        isPartial: false,
+      }),
+      expect.objectContaining({ kind: "error", message: "provider failed" }),
+    ]);
   });
 });
 
@@ -1838,6 +1912,7 @@ describe("doCloseSession", () => {
       setSessionLifecycle: vi.fn(),
       setBackendSessionId: vi.fn(),
       setBackendSessionIdRef: vi.fn(),
+      clearStreamingAssistant: vi.fn(),
       settleActiveTurn: vi.fn(),
     };
 
@@ -1852,9 +1927,39 @@ describe("doCloseSession", () => {
       "closing"
     );
     expect(deps.markSessionClosed).toHaveBeenCalledWith(SESSION_ID);
+    expect(deps.clearStreamingAssistant).toHaveBeenCalledWith(SESSION_ID, true);
     expect(deps.setBackendSessionId).toHaveBeenCalledWith(SESSION_ID, null);
     expect(deps.setBackendSessionIdRef).toHaveBeenCalledWith(null);
     expect(deps.settleActiveTurn).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("commits and removes the streaming tail after a successful stop", async () => {
+    useChatStore.getState().reset();
+    const id = useChatStore.getState().openSession("Stop cleanup");
+    useChatStore.getState().setBackendSessionId(id, CLAUDE_SESSION_ID);
+    useChatStore.getState().updateLastAssistantMessage(id, "Stopped reply");
+
+    const closed = await doCloseSession(CLAUDE_SESSION_ID, id, {
+      markSessionClosed: (sessionId) =>
+        useChatStore.getState().setSessionLifecycle(sessionId, "idle"),
+      setSessionLifecycle: useChatStore.getState().setSessionLifecycle,
+      setBackendSessionId: useChatStore.getState().setBackendSessionId,
+      clearStreamingAssistant: useChatStore.getState().clearStreamingAssistant,
+    });
+
+    expect(closed).toBe(true);
+    expect(useChatStore.getState().sessions[id]).toMatchObject({
+      backendSessionId: null,
+      lifecycle: "idle",
+      streamingAssistant: null,
+      messages: [
+        {
+          kind: "assistant",
+          text: "Stopped reply",
+          isPartial: false,
+        },
+      ],
+    });
   });
 
   it("does not call markSessionClosed when sessionId is null", async () => {

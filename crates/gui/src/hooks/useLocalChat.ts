@@ -705,6 +705,7 @@ export async function doCloseSession(
     ) => void;
     setBackendSessionId: (id: string, backendId: string | null) => void;
     setBackendSessionIdRef?: (backendId: string | null) => void;
+    clearStreamingAssistant?: (id: string, commitToMessages?: boolean) => void;
     clearQueuedMessages?: (id: string) => void;
     markPendingUserQuestionsUnavailable?: (id: string) => void;
     settleActiveTurn?: (id: string, turnId?: string | null) => boolean;
@@ -732,6 +733,7 @@ export async function doCloseSession(
       if (isSessionNotFoundError(result.error)) {
         if (completionIsStale()) return true;
         if (sessionId) {
+          deps.clearStreamingAssistant?.(sessionId, true);
           deps.markSessionClosed(sessionId);
           deps.setBackendSessionId(sessionId, null);
           deps.clearQueuedMessages?.(sessionId);
@@ -745,6 +747,7 @@ export async function doCloseSession(
     }
     if (sessionId) {
       if (completionIsStale()) return true;
+      deps.clearStreamingAssistant?.(sessionId, true);
       deps.markSessionClosed(sessionId);
       deps.setBackendSessionId(sessionId, null);
       deps.clearQueuedMessages?.(sessionId);
@@ -806,6 +809,9 @@ export function useLocalChat(sessionId: string | null) {
   const restoreActiveTurn = useChatStore((s) => s.restoreActiveTurn);
   const enqueueQueuedMessage = useChatStore((s) => s.enqueueQueuedMessage);
   const clearQueuedMessages = useChatStore((s) => s.clearQueuedMessages);
+  const clearStreamingAssistant = useChatStore(
+    (s) => s.clearStreamingAssistant
+  );
   const markPendingUserQuestionsUnavailable = useChatStore(
     (s) => s.markPendingUserQuestionsUnavailable
   );
@@ -946,6 +952,7 @@ export function useLocalChat(sessionId: string | null) {
             : markSessionClosed,
         setSessionLifecycle,
         setBackendSessionId,
+        clearStreamingAssistant,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
         settleActiveTurn,
@@ -957,6 +964,7 @@ export function useLocalChat(sessionId: string | null) {
       markSessionClosed,
       setSessionLifecycle,
       setBackendSessionId,
+      clearStreamingAssistant,
       clearQueuedMessages,
       markPendingUserQuestionsUnavailable,
       settleActiveTurn,
@@ -983,6 +991,7 @@ export function useLocalChat(sessionId: string | null) {
         markSessionClosed: (id) => setSessionLifecycle(id, "idle"),
         setSessionLifecycle,
         setBackendSessionId,
+        clearStreamingAssistant,
         clearQueuedMessages,
         markPendingUserQuestionsUnavailable,
         settleActiveTurn,
@@ -1004,6 +1013,7 @@ export function useLocalChat(sessionId: string | null) {
     restoreActiveTurn,
     setSessionLifecycle,
     setBackendSessionId,
+    clearStreamingAssistant,
     clearQueuedMessages,
     markPendingUserQuestionsUnavailable,
     settleActiveTurn,

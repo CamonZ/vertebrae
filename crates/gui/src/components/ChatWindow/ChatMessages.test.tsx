@@ -329,6 +329,102 @@ describe("ChatMessages", () => {
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("keeps historical rows mounted while repeated streaming deltas replace only the tail", () => {
+    const messages: ChatMessage[] = [
+      {
+        kind: "assistant",
+        text: "Finalized history",
+        timestamp: "2024-01-01T12:00:00Z",
+      },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "First draft",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+    const historicalRow = screen
+      .getByText("Finalized history")
+      .closest(".evrow--agent");
+
+    expect(historicalRow).toBeInTheDocument();
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "First draft"
+    );
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "Second draft",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByText("Finalized history").closest(".evrow--agent")).toBe(
+      historicalRow
+    );
+    expect(screen.getAllByText("Finalized history")).toHaveLength(1);
+    expect(screen.queryByText("First draft")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "Second draft"
+    );
+  });
+
+  it("replaces the streaming tail with exactly one finalized assistant row", () => {
+    const history: ChatMessage[] = [
+      { kind: "user", text: "Question", timestamp: "2024-01-01T12:00:00Z" },
+    ];
+    const { rerender } = render(
+      <ChatMessages
+        {...defaultProps({
+          messages: history,
+          isEmpty: false,
+          streamingAssistant: {
+            text: "Complete answer",
+            timestamp: "2024-01-01T12:00:01Z",
+          },
+        })}
+      />
+    );
+
+    expect(screen.getByTestId("chat-streaming-tail")).toHaveTextContent(
+      "Complete answer"
+    );
+
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages: [
+            ...history,
+            {
+              kind: "assistant",
+              text: "Complete answer",
+              timestamp: "2024-01-01T12:00:01Z",
+              isPartial: false,
+            },
+          ],
+          isEmpty: false,
+          streamingAssistant: null,
+        })}
+      />
+    );
+
+    expect(screen.queryByTestId("chat-streaming-tail")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Complete answer")).toHaveLength(1);
+    expect(document.querySelector(".ev-cursor")).not.toBeInTheDocument();
+  });
+
   it("scrolls the message container instead of scrolling ancestors for streaming updates", () => {
     const messages: ChatMessage[] = [
       { kind: "user", text: "Hello", timestamp: "2024-01-01T12:00:00Z" },
@@ -357,6 +453,22 @@ describe("ChatMessages", () => {
 
     expect(container.scrollTop).toBe(400);
     expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
+
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      value: 500,
+    });
+    rerender(
+      <ChatMessages
+        {...defaultProps({
+          messages,
+          isEmpty: false,
+          streamingAssistant: { text: "streaming more", timestamp: "now" },
+        })}
+      />
+    );
+
+    expect(container.scrollTop).toBe(500);
   });
 
   it("does not steal the user's position when they scroll away from the bottom", () => {
