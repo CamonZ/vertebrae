@@ -26,6 +26,50 @@ impl<R, H> DockerCompose<R, H>
 where
     R: ProcessRunner,
 {
+    /// Start a managed stack and wait for the image's migration entrypoint and
+    /// health check to finish. The database volume and runtime secrets are
+    /// deliberately left in place when this operation fails so callers can
+    /// retry without changing the database contract.
+    pub async fn start_and_wait_until_healthy(
+        &self,
+        paths: &ManagedStackPaths,
+        state: &mut ManagedStackState,
+    ) -> Result<Vec<ServiceStatus>, LocalBackendError>
+    where
+        H: super::health::HealthProbe,
+    {
+        if state.kind != StackKind::Managed {
+            return Err(LocalBackendError::InvalidState(
+                "fresh provisioning cannot start an adopted development stack".to_string(),
+            ));
+        }
+
+        state.provisioning_state = crate::local_backend::state::ProvisioningState::InProgress;
+        paths.save_state(state)?;
+
+        let result = async {
+            self.up_detached(paths, state).await?;
+            self.wait_until_healthy(paths, state).await?;
+            let secrets = self.validate_stack_files(paths, state)?;
+            self.status_without_prerequisite(paths, state, &secrets)
+                .await
+        }
+        .await;
+
+        match result {
+            Ok(status) => Ok(status),
+            Err(error) => {
+                state.provisioning_state = crate::local_backend::state::ProvisioningState::Failed;
+                if let Err(save_error) = paths.save_state(state) {
+                    return Err(LocalBackendError::InvalidState(format!(
+                        "{error}; additionally could not record failed provisioning state: {save_error}"
+                    )));
+                }
+                Err(error)
+            }
+        }
+    }
+
     pub async fn up_detached(
         &self,
         paths: &ManagedStackPaths,
@@ -226,6 +270,70 @@ mod tests {
     use super::*;
     use crate::local_backend::command::CommandOutput;
     use crate::local_backend::state::ProvisioningState;
+
+    #[tokio::test]
+    async fn start_and_wait_records_in_progress_and_keeps_it_until_seeding_finishes() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::Managed);
+        let volume = state.postgres_volume();
+        let status_json = format!(
+            r#"[{{"Name":"{volume}-postgres-1","Service":"postgres","State":"running","Health":"healthy","ExitCode":0}},{{"Name":"{volume}-sacrum-1","Service":"sacrum","State":"running","Health":"healthy","ExitCode":0}}]"#
+        );
+        let runner = MockRunner::after_prerequisites([
+            CommandOutput::success(""),
+            CommandOutput::success(""),
+            CommandOutput::success(""),
+            CommandOutput::success(format!("{volume}\n")),
+            CommandOutput::success(status_json.clone()),
+            CommandOutput::success("unix:///tmp/docker.sock"),
+            CommandOutput::success(status_json),
+        ]);
+        let controller = controller(runner, MockHealth::with_results([true]));
+
+        let status = controller
+            .start_and_wait_until_healthy(&paths, &mut state)
+            .await
+            .expect("managed stack should become healthy");
+
+        assert_eq!(state.provisioning_state, ProvisioningState::InProgress);
+        assert_eq!(paths.load_state().expect("load state"), Some(state));
+        assert_eq!(status.len(), 2);
+        assert!(status.iter().all(|service| {
+            service.state == "running" && service.health.as_deref() == Some("healthy")
+        }));
+    }
+
+    #[tokio::test]
+    async fn start_failure_is_recorded_without_tearing_down_the_stack() {
+        let (_temp, paths, mut state) = stack_fixture(StackKind::Managed);
+        let runner = MockRunner::after_prerequisites([CommandOutput::failure(
+            1,
+            "pull access denied for Sacrum image",
+        )]);
+        let controller = controller(runner.clone(), MockHealth::default());
+
+        let error = controller
+            .start_and_wait_until_healthy(&paths, &mut state)
+            .await
+            .expect_err("image pull failure should be reported");
+
+        assert!(error.to_string().contains("pull access denied"));
+        assert_eq!(state.provisioning_state, ProvisioningState::Failed);
+        assert_eq!(
+            paths
+                .load_state()
+                .expect("load failed state")
+                .expect("failed state")
+                .provisioning_state,
+            ProvisioningState::Failed
+        );
+        assert!(runner.requests().iter().all(|request| {
+            !request
+                .args_as_strings()
+                .iter()
+                .any(|argument| argument == "down")
+        }));
+    }
+
     #[tokio::test]
     async fn detached_up_uses_app_assets_and_returns_structured_status() {
         let (_temp, paths, mut state) = stack_fixture(StackKind::Managed);
